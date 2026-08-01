@@ -2,7 +2,7 @@
 
 <img src="assets/samtal-logo.png" alt="samtal logo" width="40%">
 
-# samtal 🗣️
+# samtal 💬
 
 **samtal** *(n.)* Swedish for *conversation*;<br>
 from *sam-* (together) + *tal* (speech). Speech, together — with your own hardware.
