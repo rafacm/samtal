@@ -14,11 +14,14 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 - Logo rebuilt as vector art: `assets/samtal-logo.svg` is now the source of
   truth, and `assets/samtal-logo.png` is rendered from it with a transparent
   background (fixes white edge pixels on dark pages).
-
 - README header now shows the project logo (`assets/samtal-logo.png`).
-
 - README rewritten in the style of clew.nvim: etymology header, early-development
   warning with 🚧 markers, feature bullets, hardware table.
+
+### Fixed
+
+- The first vector trace of the logo flattened the orange and blue gradient
+  waves; re-traced with finer settings so both are preserved.
 
 ### Added
 
