@@ -11,6 +11,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 - New logo: a person and the device sharing one waveform, echoing the
   etymology of samtal (together + speech).
+- Logo rebuilt as vector art: `assets/samtal-logo.svg` is now the source of
+  truth, and `assets/samtal-logo.png` is rendered from it with a transparent
+  background (fixes white edge pixels on dark pages).
 
 - README header now shows the project logo (`assets/samtal-logo.png`).
 
