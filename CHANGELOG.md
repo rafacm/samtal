@@ -20,8 +20,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Fixed
 
-- The first vector trace of the logo flattened the orange and blue gradient
-  waves; re-traced with finer settings so both are preserved.
+- The vector trace of the logo had flattened the original color gradations;
+  the SVG now uses real linear gradients on the orange and blue regions so it
+  matches the raster original on both light and dark backgrounds.
 
 ### Added
 
