@@ -9,6 +9,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- New logo: a person and the device sharing one waveform, echoing the
+  etymology of samtal (together + speech).
+
 - README header now shows the project logo (`assets/samtal-logo.png`).
 
 - README rewritten in the style of clew.nvim: etymology header, early-development
