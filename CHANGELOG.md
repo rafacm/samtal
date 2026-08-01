@@ -7,6 +7,11 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-08-01
 
+### Changed
+
+- README rewritten in the style of clew.nvim: etymology header, early-development
+  warning with 🚧 markers, feature bullets, hardware table.
+
 ### Added
 
 - Project scaffold: `samtal-esp32/` (device firmware) and `samtal-server/`
