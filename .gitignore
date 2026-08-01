@@ -1,0 +1,22 @@
+# Reference clones of upstream projects (see README)
+vendor/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Model weights (downloaded at deploy time)
+models/
+*.pt
+
+# ESP-IDF build artifacts
+build/
+sdkconfig.old
+dependencies.lock
+managed_components/
+
+# Logs and OS noise
+*.log
+nohup.out
+.DS_Store
