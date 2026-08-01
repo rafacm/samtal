@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/samtal-logo.png" alt="samtal logo" width="40%">
+
 # samtal 🗣️
 
 **samtal** *(n.)* Swedish for *conversation*;<br>

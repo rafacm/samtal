@@ -9,6 +9,8 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- README header now shows the project logo (`assets/samtal-logo.png`).
+
 - README rewritten in the style of clew.nvim: etymology header, early-development
   warning with 🚧 markers, feature bullets, hardware table.
 
