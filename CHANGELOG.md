@@ -19,7 +19,7 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 - Project scaffold: `samtal-esp32/` (device firmware) and `samtal-server/`
   (conversation server) subprojects.
 - `docs/xiaozhi-notes.md`: research notes on the upstream xiaozhi firmware and
-  server — architecture, device↔server protocol, configuration, and the
+  server, covering architecture, device↔server protocol, configuration, and the
   procedure used for the first working end-to-end demo on a Waveshare
   ESP32-S3-Touch-LCD-1.54.
 - MIT license and third-party license notices for the upstream projects

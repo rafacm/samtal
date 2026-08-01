@@ -5,10 +5,10 @@ The Samtal conversation server (Python), based on
 
 It implements the two endpoints a device needs:
 
-- **HTTP OTA/config endpoint** — the device POSTs its identity and receives
+- **HTTP OTA/config endpoint**: the device POSTs its identity and receives
   the WebSocket URL (and optionally firmware updates).
-- **WebSocket endpoint** — the conversation channel: Opus audio frames up,
-  JSON control messages both ways, Opus audio back.
+- **WebSocket endpoint**: the conversation channel, carrying Opus audio frames
+  up, JSON control messages both ways, and Opus audio back.
 
 Behind the WebSocket sits the pipeline: VAD → ASR → LLM (with MCP tools) →
 TTS. Every stage is a pluggable provider.
@@ -26,6 +26,6 @@ TTS. Every stage is a pluggable provider.
 
 ## Status
 
-Not started — the upstream server currently runs as our reference
+Not started. The upstream server currently runs as our reference
 implementation. Setup notes for the working local demo are in
 [`../docs/xiaozhi-notes.md`](../docs/xiaozhi-notes.md).

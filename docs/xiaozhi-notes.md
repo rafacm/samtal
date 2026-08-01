@@ -20,8 +20,8 @@ git clone --depth 1 https://github.com/xinnan-tech/xiaozhi-esp32-server.git vend
   `esptool.py --chip esp32s3 write_flash 0x0 merged-binary.bin`.
 - **The only tie to a backend is the OTA URL.** Priority: NVS namespace
   `wifi`, key `ota_url`, falling back to compile-time `CONFIG_OTA_URL`
-  (default `https://api.tenclass.net/xiaozhi/ota/`). Everything else —
-  WebSocket URL, token, protocol version, firmware updates — is delivered by
+  (default `https://api.tenclass.net/xiaozhi/ota/`). Everything else
+  (WebSocket URL, token, protocol version, firmware updates) is delivered by
   the OTA response and persisted to NVS.
 - The v2.4.0 captive portal (WiFi provisioning AP `Xiaozhi-XXXX`,
   `http://192.168.4.1`) has **no OTA-URL field**, but the URL can be written
@@ -67,7 +67,7 @@ git clone --depth 1 https://github.com/xinnan-tech/xiaozhi-esp32-server.git vend
 
 - Components: `xiaozhi-server` (Python 3.10, the conversation core) plus an
   optional Java/Vue management console. **Python-only mode needs no database
-  and has no login/activation** — devices just connect; that's our reference
+  and has no login/activation**: devices just connect; that's our reference
   mode, and the management layer is what samtal-server will reimplement in
   Python if needed.
 - Ports: WebSocket **8000** (`ws://host:8000/xiaozhi/v1/`), HTTP **8003**
@@ -86,7 +86,7 @@ git clone --depth 1 https://github.com/xinnan-tech/xiaozhi-esp32-server.git vend
   or the LLM answers in Chinese and an English-only TTS voice returns
   "No audio was received".
 - Runtime deps: Python 3.10, `libopus`, `ffmpeg`. The pinned `vosk` package
-  has no macOS arm64 wheel — safe to skip (it's an alternative ASR backend).
+  has no macOS arm64 wheel; safe to skip (it's an alternative ASR backend).
 - Working demo override (`data/.config.yaml`):
 
   ```yaml
@@ -122,11 +122,11 @@ git clone --depth 1 https://github.com/xinnan-tech/xiaozhi-esp32-server.git vend
 
 ## Licensing notes
 
-- Both upstream repos are MIT — reuse, modification, and redistribution are
+- Both upstream repos are MIT; reuse, modification, and redistribution are
   fine with attribution and preserved license notices
   (see `THIRD_PARTY_LICENSES.md`).
 - `edge-tts` (Python package) is GPL-3.0 and uses an unofficial Microsoft
-  endpoint — keep TTS engines as optional pluggable providers.
+  endpoint; keep TTS engines as optional pluggable providers.
 - ESP-SR wake-word models are Espressif-licensed (Espressif chips only);
   model weights (SenseVoice, Silero) are downloaded at deploy time, not
   redistributed.

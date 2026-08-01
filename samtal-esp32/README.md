@@ -30,5 +30,5 @@ idf.py build flash monitor
 ```
 
 Until our fork lands here, the fastest path is the upstream prebuilt merged
-binary flashed at offset `0x0`, with the OTA URL written to NVS — see
+binary flashed at offset `0x0`, with the OTA URL written to NVS; see
 [`../docs/xiaozhi-notes.md`](../docs/xiaozhi-notes.md).
