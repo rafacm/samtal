@@ -16,6 +16,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- `AGENTS.md` with project conventions for coding agents, and `CLAUDE.md`
+  referencing it.
+
 - Project scaffold: `samtal-esp32/` (device firmware) and `samtal-server/`
   (conversation server) subprojects.
 - `docs/xiaozhi-notes.md`: research notes on the upstream xiaozhi firmware and
