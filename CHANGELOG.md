@@ -9,6 +9,21 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- samtal-server conversation pipeline (M4), replacing the M3 echo: while
+  the device listens, decoded audio feeds a Silero VAD endpointer; the
+  finished utterance is transcribed (announced to the device in an `stt`
+  message), the LLM streams a reply that a sentence splitter cuts into
+  speakable pieces, and TTS speaks each sentence back as paced Opus frames
+  at 24 kHz, the rate the server hello now announces. Conversation history
+  accumulates per connection, `abort` still cancels a reply mid-stream,
+  and provider failures end the reply but never the session. Every stage
+  is a pluggable provider chosen per agent and built at server startup, so
+  configuration mistakes fail the boot: `silero` VAD (pysilero-vad, core),
+  `faster_whisper` ASR (extra), `anthropic` and `openai_compatible` LLM
+  (core), `piper` TTS (extra, GPL-3.0), and deterministic keyless `mock`
+  providers that let CI run the whole pipeline. Model weights and voices
+  download at startup, never ship in the package.
+
 - samtal-server device websocket endpoint (M3) at `/xiaozhi/v1/`: accepted
   upgrade, hello exchange with a 10 second timeout, and an audio loop that
   echoes each utterance back re-encoded (a full Opus decode/encode round
@@ -61,6 +76,11 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- samtal-server agents must now name a provider for all four pipeline
+  stages (`llm`, `asr`, `tts`, `vad`); the server refuses to start
+  otherwise. `config.example.yaml`'s placeholder `sensevoice` entry became
+  the real `faster_whisper` type, and its agent prompt now states the
+  reply language explicitly.
 - README header now shows project status badges for server CI, Python,
   FastAPI, ESP-IDF, and the MIT license.
 - Hardware tables (root and samtal-esp32 READMEs) now list the e-paper

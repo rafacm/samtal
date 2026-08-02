@@ -234,6 +234,74 @@ Resolution of plan open questions: Opus bindings (question 3) resolved to
 PyAV; the binary protocol version to advertise (question 4) resolved to 1.
 The ASR and TTS defaults (questions 1 and 2) remain open for M4.
 
+## M4 Conversation pipeline (PR #6)
+
+Deviations and additions relative to the plan:
+
+- **The local ASR default is faster-whisper** (open question 1). SenseVoice,
+  what upstream uses, covers zh/en/ja/ko/yue and would have ruled out most
+  European languages (Swedish is a wanted nice-to-have, not a requirement);
+  faster-whisper is MIT, multilingual, runs acceptably on CPU with int8
+  quantization, and ships CTranslate2 wheels for both x86_64 and aarch64.
+  Heavier engines surveyed (Parakeet TDT v3 via NeMo, sherpa-onnx runtimes,
+  Vosk) remain possible as future provider types behind the same interface.
+- **The keyless TTS default is Piper, but its premise shifted** (open
+  question 2). The plan weighed "Piper (local, permissive) vs edge-tts
+  (GPL-3.0, unofficial API)"; between plan and milestone the MIT
+  rhasspy/piper was archived (October 2025) and the maintained successor,
+  piper1-gpl (PyPI `piper-tts`), is GPL-3.0-or-later. Piper still won on
+  being local and officially packaged with wheels for every target, and it
+  now simply gets the extras-only treatment the licensing rules always
+  mandated for edge-tts, which stays unimplemented since nothing needs it.
+- **Silero rides pysilero-vad as a core dependency, not an extra.** The
+  official `silero-vad` package would have pulled torch and torchaudio into
+  every install; pysilero-vad compiles the model and an ONNX runtime into
+  one dependency-free abi3 wheel covering every deployment target. The
+  endpointer keeps M3's feed/reset shape and bookkeeping, with the
+  threshold and windows now provider options.
+- **Pipeline completeness is enforced at startup, not in the schema.** The
+  plan's "agents combine one provider per stage" became: the stage fields
+  stay optional in the config model (validation-only uses keep working, and
+  M5 may add per-agent defaulting), but `create_app` builds every
+  referenced provider at boot and refuses an agent missing any of the four
+  stages. Unknown types, bad or unknown options, missing extras, and an
+  `api_key_env` naming an unset variable all fail the boot with the
+  configuration entry named, instead of failing the first conversation.
+- **The energy endpointer lives on as the mock VAD.** Real Silero would
+  rightly refuse to call CI's synthetic tones speech, so the mock stage
+  keeps the M3 energy logic; the mock ASR can embed the utterance duration
+  in its transcript, which is how tests observe frame dropping now that no
+  echo comes back. CI runs the whole pipeline on mocks: no keys, no model
+  downloads, no network.
+- **TTS output is 24 kHz** (the rate the plan named and M3 deferred): the
+  server hello now announces it, and TTS output is resampled from the
+  engine's native rate (Piper's medium voices speak 22.05 kHz) on the same
+  PyAV that carries the codec.
+- **Both LLM providers landed in core.** The `anthropic` and `openai` SDKs
+  are light, unlike the ASR/TTS engines, so neither is an extra. The
+  `openai_compatible` type requires `base_url` because its point is local
+  and self-hosted endpoints (Ollama, LM Studio, gateways).
+- **The reply-language trap is answered in the prompt.** The example agent
+  prompt now states the reply language explicitly ("reply in the language
+  the user spoke"), the lesson of the upstream reference server defaulting
+  to Chinese; the ASR provider takes an optional `language` hint that pins
+  transcription instead of per-utterance detection.
+- **Deferred, deliberately**: OpenAI-compatible cloud ASR and TTS providers
+  (nothing in v1 needs them before M7) and the edge-tts extra. Realtime
+  mode is still treated as auto mode, unchanged from M3.
+- **The local lane was verified on the dev machine** before hardware: the
+  fully local pipeline (Silero + faster-whisper `small` + Ollama
+  `gemma4:e4b` + Piper) driven by the xiaozhi-sdk simulator speaking a
+  Piper-synthesized "What is the capital of Sweden?". The transcript came
+  back exact, the reply ("The capital of Sweden is Stockholm.") was spoken
+  back, and both engine downloads happened at server startup as designed.
+  ASR took about 1.8 s for a 2.3 s utterance on CPU int8.
+
+Resolution of plan open questions: the local ASR default (question 1)
+resolved to faster-whisper and the keyless TTS default (question 2) to
+Piper as a GPL extra, as above. All four of the plan's open questions are
+now closed.
+
 ### Device checkpoint
 
 Not required by the plan until M4, but run anyway with the board on the
