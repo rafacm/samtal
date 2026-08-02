@@ -232,3 +232,27 @@ async def test_a_tool_that_runs_long_is_cut_off_and_still_answered(serve, simula
 async def test_a_reserved_server_name_fails_the_boot(entry: str) -> None:
     with pytest.raises(Exception, match="not a usable entry name"):
         one_agent({"type": "mock"}, mcp_servers={entry: stdio_server()})
+
+
+async def test_a_server_tool_the_apis_would_refuse_is_still_reachable(
+    serve, simulate
+) -> None:
+    # The stdio server publishes "weather.today/v2", which is legal MCP
+    # and illegal in both LLM APIs' tool-name rule. It has to arrive
+    # sanitized and still route back to the name the server listed,
+    # otherwise it either breaks the request or cannot be called.
+    config = one_agent(
+        {
+            "type": "mock",
+            "reply": "The tool says {tool_result}.",
+            "tool_when": "secret",
+            "tool_name": "tools__weather_today_v2",
+        },
+        mcp_servers={"tools": stdio_server()},
+        agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
+        | {"mcp": ["tools"]},
+    )
+    async with serve(config) as port:
+        events, _ = await simulate(port, DEVICE_MAC)
+
+    assert spoken(events) == "The tool says dotted answer."
