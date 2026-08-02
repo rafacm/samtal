@@ -1,0 +1,39 @@
+name: samtal-server
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "samtal-server/**"
+      - ".github/workflows/samtal-server.yml"
+  pull_request:
+    paths:
+      - "samtal-server/**"
+      - ".github/workflows/samtal-server.yml"
+
+defaults:
+  run:
+    working-directory: samtal-server
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "samtal-server/uv.lock"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Unit tests
+        run: uv run pytest tests/unit -q
+
+      - name: Integration tests
+        run: uv run pytest tests/integration -q
