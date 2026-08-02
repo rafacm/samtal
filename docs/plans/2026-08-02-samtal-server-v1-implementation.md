@@ -78,7 +78,17 @@ Deviations and additions relative to the plan:
 - **One port, not two.** Upstream splits HTTP (8003) and WebSocket (8000);
   samtal-server is a single FastAPI app, so both endpoints share
   `server.port` (8003). The websocket URL handed to devices therefore names
-  the same port they just POSTed to.
+  the same port they just POSTed to. Not a one-way door: the advertised URL
+  is independent of the listening topology, so the two tiers can be split
+  later by routing alone, with no code change. The tradeoffs, including what
+  this means on Kubernetes, are documented in the samtal-server README.
+- **Behind a proxy the derived URL is wrong, and quietly.** Uvicorn only
+  trusts `X-Forwarded-Proto` from `--forwarded-allow-ips`, which defaults to
+  `127.0.0.1` and so never matches an ingress pod's IP; a TLS ingress
+  therefore still derives `ws://` rather than `wss://`. The README tells
+  proxied and Kubernetes deployments to set `server.websocket_url`
+  explicitly. Revisit in M7 when the container image lands: trusting proxy
+  headers by configuration would let the derivation work there too.
 - **The websocket URL is derived, not required.** `server.websocket_url` is
   optional; unset, the reply is built from the address the device reached
   the OTA endpoint on (`ws://{Host}/xiaozhi/v1/`, `wss` under HTTPS). A LAN
