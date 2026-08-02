@@ -350,3 +350,63 @@ VAD, faster-whisper `small` (CPU, int8), Ollama `gemma4:e4b` through the
   not what it replied, so the reply text could not be quoted from the
   server log. Fixed in the same change as this note: the reply is now
   logged when its sentences have been spoken.
+
+## M5 Agents and bindings (PR #7)
+
+Implemented from the dedicated
+[M5 plan](2026-08-02-m5-agents-and-bindings.md), whose nine commits are the
+nine commits of the PR. **No deviations from that plan**: `agent_defaults`
+carries the four stage fields and no prompt, a voice stays a TTS provider
+entry, device bindings became a list with the first entry active at
+connect, the session gained an explicit active agent, and the deferred
+items (realtime listening mode, OpenAI-compatible cloud ASR and TTS,
+memory) stayed deferred. The v1 plan's open questions were all closed in
+M4 and none reopened.
+
+Discoveries and decisions made while building it:
+
+- **Each configuration layer is validated where it is written.** The plan
+  asked for cross-reference validation on the effective view with errors
+  naming the layer the bad reference came from. Validating the effective
+  view literally would report a wrong `agent_defaults.llm` once per agent
+  inheriting it, so each layer's own references are checked once instead:
+  a wrong default is one error, a wrong override is one error, and both
+  quote the place that holds the mistake. `Config.provider_for_agent`
+  returns the effective provider together with that location, and is what
+  the boot-time completeness check reads.
+- **`AgentConfig` is `AgentDefaults` plus a prompt.** Subclassing keeps the
+  two in step by construction and makes "the same four stages, and a
+  prompt only an agent may have" the literal structure.
+- **A tone frequency was enough to make two mock voices distinguishable.**
+  The mock TTS gained `tone_hz` and the mock LLM a `{system}` placeholder,
+  which together let the mock lane assert the two halves of a persona:
+  the reply text derives from that agent's own prompt, and the audio
+  carries that agent's own voice. The unit lane measures the tone with a
+  single DFT bin (no numpy needed); the integration lane, which decodes
+  through the sdk's opuslib, takes the dominant frequency of an FFT.
+- **The local lane identifies voices rather than contrasting them.** The
+  plan asked the two-persona local test to assert "the voices are
+  distinct". Pitch turned out not to separate them: `en_US-lessac-medium`
+  and `en_US-amy-medium` measure about 180 Hz and 200 Hz, close enough
+  that any threshold would be either flaky or meaningless. The test
+  instead re-speaks each device's actual reply locally in both configured
+  voices and requires the received audio to resemble its own agent's,
+  comparing a long-term average log spectrum. Since the words are
+  identical in every comparison, the voice is the only difference left,
+  and on the desk the margin is about fourteenfold (0.014 against 0.199).
+  This is a stronger claim than the plan's: not "the two differ" but "each
+  device was answered in the voice its agent names".
+- **The 1008 rejection is asserted directly in the integration lane.** The
+  xiaozhi-sdk reports a server-side close only indirectly, so that one
+  case connects with a plain websockets client and reads the close code
+  and reason.
+- **The local lane's server runner and Piper synthesizer became fixtures**
+  (`serve` and `speak` in `tests/local/conftest.py`), now that two local
+  tests need them, which avoids cross-imports between test modules.
+
+Verified on the dev machine, not on hardware: the plan requires no device
+checkpoint for M5, and none was carried out. The local lane run had the
+poet answer "Sweden's pride is Stockholm's view." in the Piper lessac
+voice and the travel guide answer "The capital of Sweden is Stockholm."
+in the amy voice, from one server, over one shared whisper and one shared
+local model.
