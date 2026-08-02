@@ -49,6 +49,43 @@ git clone --depth 1 https://github.com/xinnan-tech/xiaozhi-esp32-server.git vend
   device exposes its own MCP tools (volume, brightness, etc.) to the server
   over the conversation channel.
 
+### Driving the board from a terminal session
+
+What a device checkpoint needs when `idf.py monitor` is unavailable (it
+wants an interactive terminal). The port is `/dev/cu.usbmodem101` at
+115200: the chip's native USB-serial-JTAG, not a UART bridge.
+
+- **Reset with esptool**, which prints the MAC as a bonus:
+
+  ```sh
+  esptool.py --chip esp32s3 --port /dev/cu.usbmodem101 \
+      --after hard_reset read_mac
+  ```
+
+  Toggling RTS from pyserial is the usual advice, since RTS drives EN, and
+  it did reset this board once. At the M5 checkpoint it did not: the board
+  kept running and its uptime kept climbing. Prefer esptool.
+- **Read the boot log** with pyserial from the ESP-IDF Python environment
+  (`~/.espressif/python_env/idf*/bin/python`), not the system `python3`,
+  which has no `serial` module. Reset and read in one process that holds
+  the port open; reopening it races the boot output away.
+- **Read and parse NVS** to prove what the device persisted from an OTA
+  reply (`nvs_tool.py` lives in
+  `components/nvs_flash/nvs_partition_tool/` in ESP-IDF):
+
+  ```sh
+  esptool.py --chip esp32s3 --port /dev/cu.usbmodem101 --baud 460800 \
+      read_flash 0x9000 0x4000 nvs.bin
+  nvs_tool.py -d written nvs.bin
+  ```
+
+  `-d written` matters: NVS is log-structured, so without it erased entries
+  are listed beside live ones and read as though both were current.
+- **A conversation still needs a human.** The board opens its websocket
+  only on a PWR press or the wake word, so that one step cannot be
+  scripted. Everything up to it can be: reset, boot log, the OTA exchange,
+  and the agent the server resolved the device to.
+
 ## Device ↔ server protocol
 
 - Device POSTs system info to the OTA URL (headers `Device-Id` = MAC,

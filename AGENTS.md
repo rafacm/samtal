@@ -122,5 +122,7 @@ the workflow file itself.
 Primary test device: Waveshare ESP32-S3-Touch-LCD-1.54 (ESP32-S3, 16 MB
 flash, 8 MB PSRAM). Flashing uses esptool with merged binaries at offset
 `0x0`; the device's backend URL lives in NVS (namespace `wifi`, key
-`ota_url`, partition at `0x9000`). Details and gotchas (including the
-reply-language configuration trap) are in `docs/xiaozhi-notes.md`.
+`ota_url`, partition at `0x9000`). Details and gotchas are in
+`docs/xiaozhi-notes.md`: the reply-language configuration trap, and how
+to reset the board, read its boot log, and dump its NVS over serial,
+which is what a device checkpoint runs on.
