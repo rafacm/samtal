@@ -17,4 +17,10 @@ router = APIRouter()
 @router.websocket(WEBSOCKET_PATH)
 async def conversation(websocket: WebSocket) -> None:
     state = websocket.app.state
-    await Session(websocket, state.config, state.agent_providers).run()
+    await Session(
+        websocket,
+        state.config,
+        state.agent_providers,
+        state.mcp_servers,
+        state.memory,
+    ).run()

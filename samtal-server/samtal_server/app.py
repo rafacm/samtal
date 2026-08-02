@@ -7,6 +7,7 @@ from samtal_server import __version__, ota, ws
 from samtal_server.config import Config, load_config
 from samtal_server.providers import build_agent_providers
 from samtal_server.tools.mcp import McpServers
+from samtal_server.tools.memory import MemoryStore
 
 
 @contextlib.asynccontextmanager
@@ -34,6 +35,10 @@ def create_app(config: Config | None = None) -> FastAPI:
     # is not.
     app.state.agent_providers = build_agent_providers(app.state.config)
     app.state.mcp_servers = McpServers.build(app.state.config)
+    # Absent memory configuration means no remember tool and no
+    # injection; the directory itself is created on the first write.
+    memory = app.state.config.memory
+    app.state.memory = None if memory is None else MemoryStore(memory.dir)
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:

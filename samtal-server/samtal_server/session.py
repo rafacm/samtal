@@ -38,7 +38,10 @@ from samtal_server.protocol import framing, messages
 from samtal_server.protocol import mcp as mcp_protocol
 from samtal_server.providers import AgentProviders, Endpointer, TextDelta, Turn
 from samtal_server.text import SentenceSplitter
+from samtal_server.tools import builtin
 from samtal_server.tools.device import DeviceToolClient
+from samtal_server.tools.mcp import McpServers
+from samtal_server.tools.memory import MemoryStore
 
 logger = logging.getLogger(__name__)
 
@@ -77,9 +80,13 @@ class Session:
         websocket: WebSocket,
         config: Config,
         agent_providers: dict[str, AgentProviders],
+        mcp_servers: McpServers | None = None,
+        memory: MemoryStore | None = None,
     ) -> None:
         self.websocket = websocket
         self.config = config
+        self._mcp_servers = mcp_servers if mcp_servers is not None else McpServers({})
+        self._memory = memory
         self.session_id = uuid.uuid4().hex
         self.protocol_version = 1
         self.listening = False
@@ -387,7 +394,7 @@ class Session:
         resampler = Resampler(providers.tts.sample_rate, OUTPUT_AUDIO.sample_rate)
         self._pace_start = None
         self._pace_count = 0
-        async for event in providers.llm.stream(providers.prompt, self._turns):
+        async for event in providers.llm.stream(self._system_prompt(), self._turns):
             if isinstance(event, TextDelta):
                 for sentence in splitter.push(event.text):
                     await self._speak(sentence, resampler, spoken)
@@ -398,6 +405,11 @@ class Session:
         # partial frame, which flushing pads with silence.
         packets = self._encoder.encode(resampler.flush()) + self._encoder.flush()
         await self._send_frames(packets)
+
+    def _system_prompt(self) -> str:
+        """The active agent's prompt, plus whatever it remembers."""
+        assert self._providers is not None and self._agent is not None
+        return builtin.with_memory(self._providers.prompt, self._memory, self._agent)
 
     async def _speak(self, sentence: str, resampler: Resampler, spoken: list[str]) -> None:
         assert self._providers is not None
