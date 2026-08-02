@@ -88,6 +88,17 @@ uv sync --extra faster-whisper --extra piper
 SAMTAL_LOCAL_LANE=1 uv run pytest tests/local -q
 ```
 
+The run ends with a summary of the conversation it held, so a pass shows
+its work rather than a green dot:
+
+```
+=========================== local lane conversation ============================
+pipeline: silero + faster-whisper small + qwen3:8b + en_US-lessac-medium
+question: "What is the capital of Sweden?" (1.6 s of audio)
+heard   : "What is the capital of Sweden?" (+1.2 s)
+reply   : "The capital of Sweden is Stockholm." (first sentence +3.8 s, 2.0 s of audio)
+```
+
 A pre-flight check runs first and fails with the command that fixes
 whatever is missing (extras not installed, no Ollama answering, no usable
 model). By default it talks to Ollama at `localhost:11434` and prefers
