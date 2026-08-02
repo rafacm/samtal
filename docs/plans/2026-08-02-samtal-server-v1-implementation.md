@@ -313,7 +313,12 @@ Deviations and additions relative to the plan:
   Piper-synthesized "What is the capital of Sweden?". The transcript came
   back exact, the reply ("The capital of Sweden is Stockholm.") was spoken
   back, and both engine downloads happened at server startup as designed.
-  ASR took about 1.8 s for a 2.3 s utterance on CPU int8.
+  ASR took about 1.8 s for a 2.3 s utterance on CPU int8. That ad-hoc run
+  was then committed as the plan's "second lane with Ollama": an opt-in
+  `tests/local` lane (`SAMTAL_LOCAL_LANE=1`, never in CI, skips without
+  the opt-in) holding the same conversation, with a pre-flight check that
+  fails naming whatever is missing (extras, a reachable Ollama, a usable
+  model) and the command that fixes it.
 
 Resolution of plan open questions: the local ASR default (question 1)
 resolved to faster-whisper and the keyless TTS default (question 2) to

@@ -75,6 +75,28 @@ uv run ruff check .                 # lint
 The test lanes run the whole pipeline on the built-in mock providers, so
 they need no keys, no model downloads, and no network.
 
+### The local lane: a real conversation
+
+CI never touches real engines. To check the overall work with them, an
+opt-in third lane holds one real conversation end to end: it starts a
+real server on the fully local pipeline (Silero, faster-whisper, Ollama,
+Piper), speaks a Piper-synthesized question through the device simulator,
+and asserts the transcript and a coherent spoken reply.
+
+```bash
+uv sync --extra faster-whisper --extra piper
+SAMTAL_LOCAL_LANE=1 uv run pytest tests/local -q
+```
+
+A pre-flight check runs first and fails with the command that fixes
+whatever is missing (extras not installed, no Ollama answering, no usable
+model). By default it talks to Ollama at `localhost:11434` and prefers
+`qwen3:8b`, falling back to the first installed model;
+`SAMTAL_LOCAL_OLLAMA` and `SAMTAL_LOCAL_LLM_MODEL` override both. The
+first run downloads the whisper model and Piper voice at server startup
+and can take a few minutes; later runs finish in seconds. Without
+`SAMTAL_LOCAL_LANE=1` the lane skips, so a bare `pytest` stays safe.
+
 ## Configuration
 
 Configuration is handled by

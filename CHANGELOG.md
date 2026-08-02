@@ -23,6 +23,10 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   (core), `piper` TTS (extra, GPL-3.0), and deterministic keyless `mock`
   providers that let CI run the whole pipeline. Model weights and voices
   download at startup, never ship in the package.
+- samtal-server opt-in local test lane (`SAMTAL_LOCAL_LANE=1 uv run
+  pytest tests/local`): one real conversation through the fully local
+  pipeline against a local Ollama, with a pre-flight check that fails
+  naming whatever is missing. Never runs in CI; skips without the opt-in.
 
 - samtal-server device websocket endpoint (M3) at `/xiaozhi/v1/`: accepted
   upgrade, hello exchange with a 10 second timeout, and an audio loop that
