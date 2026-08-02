@@ -12,6 +12,15 @@ frames, framed by `tts start`/`sentence_start`/`stop` with the
 transcript announced in an `stt` message. Conversation history lives
 here, one list of turns per connection.
 
+The reply is a tool loop, and the loop lives here rather than in a
+provider because only the session can change agents between rounds.
+Per reply it snapshots the tools the active agent may use, streams,
+executes whatever the model asked for, feeds the results back, and
+streams again, up to a small cap whose last round forbids calling so a
+reply always ends in speech. History stays text-only: the structured
+tool turns exist in a working copy inside one reply, and what survives
+is what was actually said aloud.
+
 Two end-of-utterance triggers coexist because the firmware's listening
 modes differ: manual mode sends `listen stop`, while auto and realtime
 modes stream mic audio until the server decides the user finished,
@@ -24,6 +33,7 @@ import asyncio
 import contextlib
 import logging
 import uuid
+from collections.abc import Sequence
 from typing import Any
 
 import av
@@ -36,9 +46,18 @@ from samtal_server.config import Config
 from samtal_server.config.models import normalize_mac
 from samtal_server.protocol import framing, messages
 from samtal_server.protocol import mcp as mcp_protocol
-from samtal_server.providers import AgentProviders, Endpointer, TextDelta, Turn
+from samtal_server.providers import (
+    AgentProviders,
+    Endpointer,
+    TextDelta,
+    ToolCall,
+    ToolChoice,
+    ToolDef,
+    ToolResult,
+    Turn,
+)
 from samtal_server.text import SentenceSplitter
-from samtal_server.tools import builtin
+from samtal_server.tools import builtin, names
 from samtal_server.tools.device import DeviceToolClient
 from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
@@ -64,12 +83,41 @@ OUTPUT_AUDIO = messages.AudioParams(
 POLICY_VIOLATION = 1008
 PROTOCOL_ERROR = 1002
 
+# How many times one reply may stream, call tools, and stream again.
+# The last permitted round forbids calling, so a reply always ends in
+# speech rather than in a tool nobody hears the result of.
+MAX_TOOL_ROUNDS = 4
+
+# How long a builtin or a device tool may take. Server tools use their
+# own entry's tool_timeout_s. The device hears silence meanwhile, which
+# is why this is not generous.
+DEFAULT_TOOL_TIMEOUT_S = 15.0
+
+# The ephemeral user turn a newly switched-in agent is greeted with. It
+# is never recorded in the history: it exists because both APIs need a
+# fresh completion to end on a user turn, and writing it into `_turns`
+# would falsify the transcript with words nobody said.
+SWITCH_GREETING = (
+    "You have just taken over this conversation from another assistant. "
+    "Greet the user briefly as yourself, in the language they have been "
+    "speaking, and carry on from what was said above."
+)
+
 
 class AgentNotAllowed(ValueError):
     """Something asked a session to become an agent its device is not
-    bound to. M6's switch_agent tool turns this into a spoken refusal;
-    until then it can only mean a bug, since the only activation is the
-    device's own first bound agent."""
+    bound to. The switch_agent tool turns this into a spoken refusal,
+    phrased by the agent that is already talking; anywhere else it can
+    only mean a bug."""
+
+
+def _not_allowed(name: str, agents: Sequence[str]) -> AgentNotAllowed:
+    """The refusal, built in one place because the model is shown the
+    same text the enforcement raises."""
+    return AgentNotAllowed(
+        f'this device is not bound to agent "{name}"'
+        + (f" (bound to: {', '.join(agents)})" if agents else "")
+    )
 
 
 class Session:
@@ -141,6 +189,12 @@ class Session:
             return
         self._agents = agents
         self._activate_agent(agents[0])
+        # A server that was down at boot, or that dropped since, gets a
+        # background reconnect now, so it is picked up by the time this
+        # conversation needs it rather than at the next server restart.
+        self._mcp_servers.revive(
+            entry for agent in agents for entry in self.config.mcp_for_agent(agent)
+        )
 
         hello = await self._receive_hello()
         if hello is None:
@@ -197,8 +251,11 @@ class Session:
         """Talk as this agent from now on: its prompt, its providers, and a
         fresh endpointer from its VAD, since the previous agent's endpointer
         carries the previous agent's tuning and mid-utterance state. Called
-        once at connect in M5; M6's switch_agent tool calls it again
-        mid-session, and decides then what becomes of the history.
+        once at connect, and again mid-reply when switch_agent hands the
+        conversation over. The history carries across the switch: it is
+        text-only, so nothing provider-specific leaks with it, and the
+        new agent seeing what was said is what makes "switch to the
+        tutor and explain what we just discussed" work.
 
         The device's bound list is enforced here rather than left to
         callers, because the next caller is a tool whose argument a model
@@ -206,10 +263,7 @@ class Session:
         talk to. Nothing is swapped when the name is refused, so the
         session keeps the agent it already had."""
         if name not in self._agents:
-            raise AgentNotAllowed(
-                f'this device is not bound to agent "{name}"'
-                + (f" (bound to: {', '.join(self._agents)})" if self._agents else "")
-            )
+            raise _not_allowed(name, self._agents)
         self._agent = name
         self._providers = self._agent_providers[name]
         self._endpointer = self._providers.vad.new_endpointer()
@@ -385,26 +439,213 @@ class Session:
                 await self.websocket.send_text(messages.tts_message(self.session_id, "stop"))
 
     async def _speak_reply(self, transcript: str, spoken: list[str]) -> None:
-        """Stream the LLM reply, speaking each sentence as it completes.
-        `spoken` collects what was said so the history keeps even the part
-        of a reply that an abort cut short."""
+        """One reply, which may be spoken by more than one agent.
+
+        `spoken` collects what was said so the history keeps even the
+        part of a reply that an abort cut short. A successful
+        switch_agent ends the current agent's loop: what it said so far
+        becomes its own assistant turn, the new agent is activated, and
+        a fresh loop runs as that agent, so the greeting arrives in the
+        new prompt and the new voice. At most one handover per reply, so
+        two agents cannot ping-pong."""
+        switches_left = 1
+        greeting: Turn | None = None
+        while True:
+            target = await self._tool_loop(spoken, greeting, switches_left)
+            if target is None:
+                return
+            if spoken:
+                said = " ".join(spoken)
+                self._turns.append(Turn("assistant", said))
+                logger.info('session %s: %s said "%s"', self.session_id, self._agent, said)
+                spoken.clear()
+            previous = self._agent
+            self._activate_agent(target)
+            switches_left -= 1
+            logger.info(
+                "session %s: handed over from agent %s to %s",
+                self.session_id,
+                previous,
+                target,
+            )
+            greeting = Turn("user", SWITCH_GREETING)
+
+    async def _tool_loop(
+        self, spoken: list[str], greeting: Turn | None, switches_left: int
+    ) -> str | None:
+        """Stream, run whatever tools the model asked for, and stream
+        again, up to the round cap. Returns the agent to hand over to,
+        or None when the reply is finished.
+
+        The tool snapshot and the resampler are taken here rather than
+        per round, because they belong to the agent speaking; the next
+        agent gets its own."""
         assert self._providers is not None
         providers = self._providers
-        splitter = SentenceSplitter()
+        tools = self._tool_snapshot()
+        working = list(self._turns)
+        if greeting is not None:
+            working.append(greeting)
         resampler = Resampler(providers.tts.sample_rate, OUTPUT_AUDIO.sample_rate)
         self._pace_start = None
         self._pace_count = 0
-        async for event in providers.llm.stream(self._system_prompt(), self._turns):
-            if isinstance(event, TextDelta):
-                for sentence in splitter.push(event.text):
-                    await self._speak(sentence, resampler, spoken)
-        tail = splitter.flush()
-        if tail is not None:
-            await self._speak(tail, resampler, spoken)
+
+        switch_to: str | None = None
+        for round_index in range(MAX_TOOL_ROUNDS):
+            choice: ToolChoice = "none" if round_index == MAX_TOOL_ROUNDS - 1 else "auto"
+            splitter = SentenceSplitter()
+            leg: list[str] = []
+            calls: list[ToolCall] = []
+            async for event in providers.llm.stream(
+                self._system_prompt(), working, tools, choice
+            ):
+                if isinstance(event, TextDelta):
+                    for sentence in splitter.push(event.text):
+                        await self._speak(sentence, resampler, leg)
+                else:
+                    calls.append(event)
+            tail = splitter.flush()
+            if tail is not None:
+                await self._speak(tail, resampler, leg)
+            spoken.extend(leg)
+            if not calls:
+                break
+            # Whatever preamble was spoken before the calls is part of
+            # the assistant turn that asked for them.
+            working.append(Turn("assistant", " ".join(leg), tool_calls=tuple(calls)))
+            results, switch_to = await self._run_tools(calls, switches_left)
+            if switch_to is not None:
+                break
+            working.append(Turn("tool", "", tool_results=tuple(results)))
+
         # Drain the resampler's interpolation tail and the encoder's
         # partial frame, which flushing pads with silence.
         packets = self._encoder.encode(resampler.flush()) + self._encoder.flush()
         await self._send_frames(packets)
+        return switch_to
+
+    def _tool_snapshot(self) -> list[ToolDef]:
+        """What the active agent may reach this reply: the builtins that
+        apply, the device's tools once discovery has finished, and the
+        tools of the MCP servers its configuration names that are up.
+
+        Taken per reply rather than per session, so a server that came
+        back and a device that finished discovering are both picked up
+        on the next utterance."""
+        assert self._agent is not None
+        tools: list[ToolDef] = []
+        # A device bound to one agent has nowhere to switch, so it gets
+        # no dead tool.
+        if len(self._agents) > 1:
+            tools.append(builtin.switch_agent_tool(self._agents))
+        if self._memory is not None:
+            tools.append(builtin.remember_tool())
+        if self._device_tools is not None:
+            tools.extend(self._device_tools.tools())
+        tools.extend(self._mcp_servers.tools_for(self.config.mcp_for_agent(self._agent)))
+        return tools
+
+    async def _run_tools(
+        self, calls: Sequence[ToolCall], switches_left: int
+    ) -> tuple[list[ToolResult], str | None]:
+        """Execute one round of calls. Everything but switch_agent runs
+        concurrently, since device and server tools are independent;
+        switch_agent is resolved here instead, because a successful one
+        ends the loop rather than producing a result the model reads."""
+        plain = [call for call in calls if call.name != names.SWITCH_AGENT]
+        handovers = [call for call in calls if call.name == names.SWITCH_AGENT]
+        results = list(await asyncio.gather(*(self._run_one(call) for call in plain)))
+
+        switch_to: str | None = None
+        for position, call in enumerate(handovers):
+            refusal = self._refuse_handover(call, switches_left, position)
+            if refusal is not None:
+                results.append(refusal)
+                continue
+            switch_to = str(call.arguments["agent"])
+        return results, switch_to
+
+    def _refuse_handover(
+        self, call: ToolCall, switches_left: int, position: int
+    ) -> ToolResult | None:
+        """Why this switch_agent cannot happen, as an error result the
+        current agent phrases in its own voice and language, or None
+        when it can."""
+        if switches_left <= 0 or position > 0:
+            return ToolResult(
+                call.id,
+                "this conversation has already been handed over once in this reply; "
+                "answer as yourself instead",
+                is_error=True,
+            )
+        target = call.arguments.get("agent")
+        if not isinstance(target, str) or not target.strip():
+            return ToolResult(
+                call.id,
+                'switch_agent needs an "agent" argument naming one of the available '
+                f"assistants: {', '.join(self._agents)}",
+                is_error=True,
+            )
+        if target not in self._agents:
+            return ToolResult(call.id, str(_not_allowed(target, self._agents)), is_error=True)
+        return None
+
+    async def _run_one(self, call: ToolCall) -> ToolResult:
+        """One tool call, bounded and never raising into the loop. Every
+        failure becomes an error result: the model explains it in its
+        own words, where a canned apology would be fixed-language and
+        would throw away whatever the model could still salvage."""
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        try:
+            async with asyncio.timeout(self._timeout_for(call.name)):
+                content, is_error = await self._dispatch(call)
+        except TimeoutError:
+            content, is_error = f'the tool "{call.name}" did not answer in time', True
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            content, is_error = f'the tool "{call.name}" failed: {exc}', True
+        logger.info(
+            "session %s: tool %s took %.2f s%s",
+            self.session_id,
+            call.name,
+            loop.time() - started,
+            " and failed" if is_error else "",
+        )
+        return ToolResult(tool_call_id=call.id, content=content, is_error=is_error)
+
+    async def _dispatch(self, call: ToolCall) -> tuple[str, bool]:
+        """Route a call by the structure of its name: builtins are bare,
+        the device's tools are the ones it listed, and everything else
+        carries its MCP server entry as a prefix."""
+        if call.malformed_arguments is not None:
+            logger.warning(
+                "session %s: tool %s got unparseable arguments: %s",
+                self.session_id,
+                call.name,
+                call.malformed_arguments,
+            )
+            return "the arguments were not a JSON object; call again with valid ones", True
+        if call.name == names.REMEMBER and self._memory is not None:
+            assert self._agent is not None
+            return await builtin.remember(self._memory, self._agent, call.arguments), False
+        if self._device_tools is not None and self._device_tools.knows(call.name):
+            return await self._device_tools.call(call.name, call.arguments)
+        split = names.split_qualified(call.name)
+        if split is not None and split[0] in self._mcp_servers:
+            return await self._mcp_servers.call(split[0], split[1], call.arguments)
+        return f'there is no tool called "{call.name}"', True
+
+    def _timeout_for(self, name: str) -> float:
+        """A server tool gets its entry's configured timeout; builtins
+        and device tools the module default."""
+        split = names.split_qualified(name)
+        if split is not None:
+            configured = self._mcp_servers.timeout_for(split[0])
+            if configured is not None:
+                return configured
+        return DEFAULT_TOOL_TIMEOUT_S
 
     def _system_prompt(self) -> str:
         """The active agent's prompt, plus whatever it remembers."""
