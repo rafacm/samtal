@@ -100,8 +100,10 @@ the [implementation notes](2026-08-02-samtal-server-v1-implementation.md).
   tools, round-tripped through LLM tool calling. Accept: simulator
   conversation triggers a mock MCP tool and the reply reflects its result.
 - [ ] **M7 Hardening and release**: device token auth on by default,
-  connection and session limits, structured logging, multi-arch Docker image
-  built in CI, README quick start. Accept: `docker run` with one mounted
+  connection and session limits, structured logging (emit the heard/replied
+  conversation events as structured records, so log retention yields
+  transcripts until v3 brings a real conversation store), multi-arch Docker
+  image built in CI, README quick start. Accept: `docker run` with one mounted
   YAML serves a conversation; image published.
 
 ## Testing strategy
