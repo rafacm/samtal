@@ -22,6 +22,22 @@ MODEL_ENV = "SAMTAL_LOCAL_LLM_MODEL"
 DEFAULT_OLLAMA = "http://localhost:11434/v1"
 PREFERRED_MODEL = "qwen3:8b"
 
+# Lines the tests append and pytest_terminal_summary prints, so the run
+# reports the conversation it held instead of a bare green dot.
+_report: list[str] = []
+
+
+@pytest.fixture(scope="session")
+def conversation_report() -> list[str]:
+    return _report
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
+    if _report:
+        terminalreporter.write_sep("=", "local lane conversation")
+        for line in _report:
+            terminalreporter.write_line(line)
+
 
 @dataclass(frozen=True)
 class LocalLane:
