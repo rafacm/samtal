@@ -13,6 +13,7 @@ import json
 import math
 import re
 import struct
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +25,7 @@ from samtal_server.audio import rms
 from samtal_server.audio.opus import OpusDecoder, OpusEncoder
 from samtal_server.config import Config
 from samtal_server.protocol import framing
+from samtal_server.providers import build_agent_providers
 from samtal_server.ws import WEBSOCKET_PATH
 
 DEVICE_MAC = "AA:BB:CC:DD:EE:FF"
@@ -402,6 +404,25 @@ def test_two_devices_hold_two_conversations_at_once() -> None:
     # buffers are per session, not per provider.
     assert 540 <= heard_ms(poet_texts) <= 660
     assert 180 <= heard_ms(tutor_texts) <= 300
+
+
+def test_a_session_refuses_an_agent_its_device_is_not_bound_to() -> None:
+    # The bound list is the boundary, enforced where the swap happens:
+    # M6's switch_agent passes this a name a model chose, and an agent
+    # that merely exists on the server is not one this device may reach.
+    config = two_persona_config()
+    session = session_module.Session(
+        cast(Any, None), config, build_agent_providers(config)
+    )
+    session._agents = ["tutor"]
+    session._activate_agent("tutor")
+
+    with pytest.raises(session_module.AgentNotAllowed, match="poet"):
+        session._activate_agent("poet")
+    # Refused, and nothing swapped: the session still talks as the tutor.
+    assert session._agent == "tutor"
+    assert session._providers is not None
+    assert session._providers.prompt == "TUTOR"
 
 
 def test_a_device_with_no_agent_is_turned_away() -> None:

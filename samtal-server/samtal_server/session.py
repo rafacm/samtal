@@ -58,6 +58,13 @@ POLICY_VIOLATION = 1008
 PROTOCOL_ERROR = 1002
 
 
+class AgentNotAllowed(ValueError):
+    """Something asked a session to become an agent its device is not
+    bound to. M6's switch_agent tool turns this into a spoken refusal;
+    until then it can only mean a bug, since the only activation is the
+    device's own first bound agent."""
+
+
 class Session:
     """The server side of one device connection."""
 
@@ -150,7 +157,18 @@ class Session:
         fresh endpointer from its VAD, since the previous agent's endpointer
         carries the previous agent's tuning and mid-utterance state. Called
         once at connect in M5; M6's switch_agent tool calls it again
-        mid-session, and decides then what becomes of the history."""
+        mid-session, and decides then what becomes of the history.
+
+        The device's bound list is enforced here rather than left to
+        callers, because the next caller is a tool whose argument a model
+        chose: an agent that merely exists is not one this device may
+        talk to. Nothing is swapped when the name is refused, so the
+        session keeps the agent it already had."""
+        if name not in self._agents:
+            raise AgentNotAllowed(
+                f'this device is not bound to agent "{name}"'
+                + (f" (bound to: {', '.join(self._agents)})" if self._agents else "")
+            )
         self._agent = name
         self._providers = self._agent_providers[name]
         self._endpointer = self._providers.vad.new_endpointer()
