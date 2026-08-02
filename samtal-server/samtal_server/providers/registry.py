@@ -55,6 +55,15 @@ class OptionsReader:
             raise ProviderError(f'{self._label}: option "{key}" must be an integer')
         return value
 
+    def mapping(self, key: str) -> dict[str, object]:
+        """A nested option written as a YAML mapping, empty when absent."""
+        value = self._pending.pop(key, None)
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ProviderError(f'{self._label}: option "{key}" must be a mapping')
+        return {str(name): item for name, item in value.items()}
+
     def finish(self) -> None:
         if self._pending:
             unknown = ", ".join(sorted(self._pending))
