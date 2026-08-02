@@ -89,8 +89,13 @@ Deviations and additions relative to the plan:
   `127.0.0.1` and so will not match a proxy's address; a TLS-terminating
   proxy therefore still derives `ws://` rather than `wss://`. The README
   tells proxied deployments to set `server.websocket_url` explicitly.
-  Revisit in M7 when the container image lands: trusting proxy headers by
-  configuration would let the derivation work there too.
+  Confirmed after the merge rather than taken from uvicorn's documentation:
+  the same server, sent the same request with `X-Forwarded-Proto: https`,
+  answers `wss://` when reached over loopback and `ws://` when reached over
+  the host's LAN address, since only the first is in `forwarded_allow_ips`.
+  What remains untested is a full deployment behind a real TLS-terminating
+  proxy, which M7 makes possible. Revisit there: trusting proxy headers by
+  configuration would let the derivation work unattended.
 - **The websocket URL is derived, not required.** `server.websocket_url` is
   optional; unset, the reply is built from the address the device reached
   the OTA endpoint on (`ws://{Host}/xiaozhi/v1/`, `wss` under HTTPS). A LAN
