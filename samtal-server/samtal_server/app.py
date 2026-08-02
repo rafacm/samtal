@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from samtal_server import __version__, ota
+from samtal_server import __version__, ota, ws
 from samtal_server.config import Config, load_config
 
 
@@ -16,6 +16,7 @@ def create_app(config: Config | None = None) -> FastAPI:
         return {"status": "ok", "version": __version__}
 
     app.include_router(ota.router)
+    app.include_router(ws.router)
 
     return app
 

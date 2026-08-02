@@ -23,11 +23,11 @@ from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from samtal_server.config import Config
+from samtal_server.ws import WEBSOCKET_PATH
 
 logger = logging.getLogger(__name__)
 
 OTA_PATH = "/xiaozhi/ota/"
-WEBSOCKET_PATH = "/xiaozhi/v1/"
 
 # What a device reports when it tells us nothing usable. Any real version is
 # greater, so a device that hides its version is never offered an update.
