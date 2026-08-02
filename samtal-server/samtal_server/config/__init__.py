@@ -3,6 +3,7 @@
 from samtal_server.config.loader import ConfigError, load_config
 from samtal_server.config.models import (
     AgentConfig,
+    AgentDefaults,
     Config,
     ProviderConfig,
     ProvidersConfig,
@@ -11,6 +12,7 @@ from samtal_server.config.models import (
 
 __all__ = [
     "AgentConfig",
+    "AgentDefaults",
     "Config",
     "ConfigError",
     "ProviderConfig",
