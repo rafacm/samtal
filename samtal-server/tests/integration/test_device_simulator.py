@@ -1,0 +1,90 @@
+"""The xiaozhi-sdk device simulator against a live server.
+
+This is the plan's M3 acceptance: the sdk discovers the websocket URL
+through the OTA endpoint, completes the hello exchange, and round-trips
+audio. Since the sdk encodes and decodes with opuslib, the run also
+cross-validates the server's PyAV codec against an independent one.
+"""
+
+import asyncio
+import math
+import struct
+
+import numpy as np
+import pytest
+import uvicorn
+from xiaozhi_sdk import XiaoZhiWebsocket
+
+from samtal_server.app import create_app
+from samtal_server.config import Config
+
+DEVICE_MAC = "aa:bb:cc:dd:ee:01"
+SAMPLE_RATE = 16000
+FRAME_MS = 60
+FRAME_BYTES = SAMPLE_RATE * FRAME_MS // 1000 * 2
+
+
+@pytest.fixture
+async def server_port():
+    config = Config(agents={"assistant": {}}, default_agent="assistant")
+    server = uvicorn.Server(
+        uvicorn.Config(create_app(config), host="127.0.0.1", port=0, log_level="warning")
+    )
+    task = asyncio.create_task(server.serve())
+    while not server.started:
+        if task.done():
+            task.result()
+        await asyncio.sleep(0.01)
+    yield server.servers[0].sockets[0].getsockname()[1]
+    server.should_exit = True
+    await task
+
+
+def speech_pcm(duration_ms: int) -> bytes:
+    samples = SAMPLE_RATE * duration_ms // 1000
+    return b"".join(
+        struct.pack("<h", int(8000 * math.sin(2 * math.pi * 300 * n / SAMPLE_RATE)))
+        for n in range(samples)
+    )
+
+
+async def test_the_simulator_completes_hello_and_hears_its_echo(server_port: int) -> None:
+    events: list[dict] = []
+    reply_finished = asyncio.Event()
+
+    async def on_message(data: dict) -> None:
+        events.append(data)
+        if data.get("type") == "tts" and data.get("state") == "stop":
+            reply_finished.set()
+
+    client = XiaoZhiWebsocket(
+        on_message,
+        ota_url=f"http://127.0.0.1:{server_port}/xiaozhi/ota/",
+        audio_sample_rate=SAMPLE_RATE,
+    )
+    try:
+        # OTA discovery, websocket upgrade, hello exchange, listen start.
+        assert await client.init_connection(DEVICE_MAC)
+        assert client.session_id
+
+        # About a second of tone, then silence: the server's endpointer
+        # must end the utterance without any listen stop.
+        pcm = speech_pcm(960)
+        for start in range(0, len(pcm), FRAME_BYTES):
+            assert await client.send_audio(pcm[start : start + FRAME_BYTES])
+        await client.send_silence_audio(1.2)
+        await asyncio.wait_for(reply_finished.wait(), timeout=10)
+    finally:
+        await client.close()
+
+    tts_states = [e["state"] for e in events if e.get("type") == "tts"]
+    assert tts_states[0] == "start"
+    assert "sentence_start" in tts_states
+    assert tts_states[-1] == "stop"
+
+    # The echo, decoded by the sdk's own opuslib decoder.
+    echoed = np.concatenate(list(client.output_audio_queue))
+    duration_s = echoed.size / SAMPLE_RATE
+    assert 0.9 <= duration_s <= 4.0
+    tone_rms = math.sqrt(float(np.mean(echoed.astype(np.float64) ** 2)))
+    assert tone_rms > 500
