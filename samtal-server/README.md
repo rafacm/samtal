@@ -44,9 +44,24 @@ uv run pytest tests/integration -q  # integration tests
 uv run ruff check .                 # lint
 ```
 
+## Configuration
+
+The server reads one YAML file, passed as `--config /path/to/config.yaml` or
+via the `SAMTAL_CONFIG` environment variable; with neither set, defaults
+apply. [`config.example.yaml`](config.example.yaml) documents every key:
+`server` (host/port), named `providers` per stage (`llm`, `asr`, `tts`,
+`vad`), `agents` combining a prompt with provider references, `devices`
+binding MAC addresses to agents, and `default_agent` for unknown devices.
+
+Secrets never live in the file: a provider names the environment variable
+that holds its key (for example `api_key_env: ANTHROPIC_API_KEY`). Instance
+configs stay out of the repository; `*.local.yaml` is gitignored for local
+experiments. `SAMTAL_HOST` and `SAMTAL_PORT` override the `server` section
+when set.
+
 ## Status
 
-Stack decided, implementation starting; the v1 plan lives at
+Implementation in progress; the v1 plan lives at
 [`docs/plans/2026-08-02-samtal-server-v1.md`](../docs/plans/2026-08-02-samtal-server-v1.md).
 The upstream server currently runs as our reference implementation. Setup notes for the working local demo are in
 [`../docs/xiaozhi-notes.md`](../docs/xiaozhi-notes.md).
