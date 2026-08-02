@@ -21,6 +21,9 @@ dependencies = [
 [project.optional-dependencies]
 # Local ASR (MIT). Model weights download from Hugging Face at startup.
 faster-whisper = ["faster-whisper>=1.2"]
+# Local TTS. piper-tts is GPL-3.0, which is why it is an optional extra
+# and must never become a core dependency.
+piper = ["piper-tts>=1.6"]
 
 [project.scripts]
 samtal-server = "samtal_server.main:main"
