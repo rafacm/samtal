@@ -72,7 +72,7 @@ manual test against real hardware on the desk.
 Status (tick when the milestone's PR merges, with the PR number):
 
 - [x] M0 Skeleton (PR #1, merged 2026-08-02)
-- [ ] M1 Config
+- [x] M1 Config (PR #2, merged 2026-08-02)
 - [ ] M2 OTA endpoint
 - [ ] M3 Protocol handshake and audio loop
 - [ ] M4 Conversation pipeline
