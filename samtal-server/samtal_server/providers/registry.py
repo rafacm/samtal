@@ -64,16 +64,22 @@ class OptionsReader:
 Factory = Callable[[str, ProviderConfig], object]
 
 
+def _silero(label: str, config: ProviderConfig) -> object:
+    from samtal_server.providers import silero
+
+    return silero.build(label, config)
+
+
 def _factories() -> dict[str, dict[str, Factory]]:
-    # Imported here rather than at module top because mock imports the
-    # OptionsReader above; the table itself is tiny.
+    # Imported here rather than at module top because the implementation
+    # modules import the OptionsReader above; the table itself is tiny.
     from samtal_server.providers import mock
 
     return {
         "llm": {"mock": mock.build_llm},
         "asr": {"mock": mock.build_asr},
         "tts": {"mock": mock.build_tts},
-        "vad": {"mock": mock.build_vad},
+        "vad": {"mock": mock.build_vad, "silero": _silero},
     }
 
 

@@ -1,0 +1,93 @@
+"""End-of-utterance detection on Silero VAD.
+
+pysilero-vad compiles the Silero model and its ONNX runtime into one
+small wheel with no Python dependencies, which is why this is a core
+dependency rather than an extra. The endpointer keeps the M3 feed/reset
+shape and bookkeeping (trailing-silence window after speech, utterance
+cap), but decides speech per 512-sample window by Silero probability
+instead of signal energy.
+"""
+
+from pysilero_vad import SileroVoiceActivityDetector
+
+from samtal_server.config.models import ProviderConfig
+from samtal_server.providers.base import Endpointer, VadProvider
+from samtal_server.providers.registry import OptionsReader
+
+# The only rate Silero VAD accepts here, and the pipeline's input rate.
+SAMPLE_RATE = 16000
+
+
+class SileroEndpointer:
+    """Buffers fed PCM into Silero's fixed windows; True the moment the
+    utterance ends. Silence before any speech counts toward nothing, so
+    a device left listening in a quiet room never trips this."""
+
+    def __init__(
+        self, threshold: float, trailing_silence_ms: float, max_utterance_ms: float
+    ) -> None:
+        self._detector = SileroVoiceActivityDetector()
+        self._threshold = threshold
+        self._trailing_silence_ms = trailing_silence_ms
+        self._max_utterance_ms = max_utterance_ms
+        self._window_bytes = self._detector.chunk_bytes()
+        self._window_ms = self._detector.chunk_samples() * 1000 / SAMPLE_RATE
+        self._pending = b""
+        self.reset()
+
+    def reset(self) -> None:
+        self._detector.reset()
+        self._pending = b""
+        self._speech_heard = False
+        self._silence_ms = 0.0
+        self._utterance_ms = 0.0
+
+    def feed(self, pcm: bytes) -> bool:
+        self._pending += pcm
+        ended = False
+        while len(self._pending) >= self._window_bytes:
+            window = self._pending[: self._window_bytes]
+            self._pending = self._pending[self._window_bytes :]
+            ended = self._account(window) or ended
+        return ended
+
+    def _account(self, window: bytes) -> bool:
+        if self._detector(window) >= self._threshold:
+            self._speech_heard = True
+            self._silence_ms = 0.0
+        elif self._speech_heard:
+            self._silence_ms += self._window_ms
+        if not self._speech_heard:
+            return False
+        self._utterance_ms += self._window_ms
+        return (
+            self._silence_ms >= self._trailing_silence_ms
+            or self._utterance_ms >= self._max_utterance_ms
+        )
+
+
+class SileroVad(VadProvider):
+    def __init__(
+        self, threshold: float, trailing_silence_ms: float, max_utterance_ms: float
+    ) -> None:
+        self._threshold = threshold
+        self._trailing_silence_ms = trailing_silence_ms
+        self._max_utterance_ms = max_utterance_ms
+
+    def new_endpointer(self) -> Endpointer:
+        return SileroEndpointer(
+            threshold=self._threshold,
+            trailing_silence_ms=self._trailing_silence_ms,
+            max_utterance_ms=self._max_utterance_ms,
+        )
+
+
+def build(label: str, config: ProviderConfig) -> SileroVad:
+    options = OptionsReader(label, config)
+    provider = SileroVad(
+        threshold=options.number("threshold", 0.5),
+        trailing_silence_ms=options.number("trailing_silence_ms", 700.0),
+        max_utterance_ms=options.number("max_utterance_ms", 10_000.0),
+    )
+    options.finish()
+    return provider

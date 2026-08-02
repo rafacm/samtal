@@ -11,7 +11,7 @@ import math
 import struct
 from collections.abc import AsyncIterator, Sequence
 
-from samtal_server.audio.endpointing import EnergyEndpointer
+from samtal_server.audio import rms
 from samtal_server.config.models import ProviderConfig
 from samtal_server.providers.base import (
     AsrProvider,
@@ -26,6 +26,50 @@ from samtal_server.providers.registry import OptionsReader
 TONE_HZ = 440.0
 TONE_AMPLITUDE = 8000
 CHUNK_MS = 20
+
+
+class EnergyEndpointer:
+    """End-of-utterance detection by signal energy: the utterance has
+    ended once speech has been heard and the signal then stays below an
+    RMS threshold for a trailing-silence window, or once it has simply
+    run long enough. This was the M3 stand-in for a real VAD; it lives
+    on as the mock because it is deterministic on synthetic audio."""
+
+    def __init__(
+        self,
+        sample_rate: int = 16000,
+        threshold: float = 500.0,
+        trailing_silence_ms: float = 700.0,
+        max_utterance_ms: float = 10_000.0,
+    ) -> None:
+        self._sample_rate = sample_rate
+        self._threshold = threshold
+        self._trailing_silence_ms = trailing_silence_ms
+        self._max_utterance_ms = max_utterance_ms
+        self.reset()
+
+    def reset(self) -> None:
+        self._speech_heard = False
+        self._silence_ms = 0.0
+        self._utterance_ms = 0.0
+
+    def feed(self, pcm: bytes) -> bool:
+        """Account one chunk; True when the utterance just ended. Silence
+        before any speech counts toward nothing, so a device left
+        listening in a quiet room never trips this."""
+        duration_ms = len(pcm) / 2 / self._sample_rate * 1000
+        if rms(pcm) >= self._threshold:
+            self._speech_heard = True
+            self._silence_ms = 0.0
+        elif self._speech_heard:
+            self._silence_ms += duration_ms
+        if not self._speech_heard:
+            return False
+        self._utterance_ms += duration_ms
+        return (
+            self._silence_ms >= self._trailing_silence_ms
+            or self._utterance_ms >= self._max_utterance_ms
+        )
 
 
 class MockVad(VadProvider):
