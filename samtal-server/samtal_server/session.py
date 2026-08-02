@@ -293,6 +293,7 @@ class Session:
         finally:
             if spoken:
                 self._turns.append(Turn("assistant", " ".join(spoken)))
+                logger.info('session %s: replied "%s"', self.session_id, " ".join(spoken))
             with contextlib.suppress(WebSocketDisconnect, RuntimeError):
                 await self.websocket.send_text(messages.tts_message(self.session_id, "stop"))
 
