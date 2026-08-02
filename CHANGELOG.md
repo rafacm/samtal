@@ -28,6 +28,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   environment variable name only, and validation reports every problem
   with its location. A documented `config.example.yaml` ships with the
   server.
+- `docs/README.md` as an index of the research notes, plans, and feature
+  docs, linked from the root README's project layout.
+- samtal-server README sections on transports (WebSocket only for v1, with
+  upstream's MQTT+UDP as the additive alternative; WebRTC is not an upstream
+  transport) and on ports and topology, covering the single-port choice, its
+  tradeoffs, and what it means on Kubernetes.
 - Waveshare ESP32-S3-Touch-AMOLED-2.16 (480×480 AMOLED, dual-mic AEC) listed
   as a planned target board.
 - samtal-server stack decision: Python 3.12 + FastAPI (uv-managed), with the

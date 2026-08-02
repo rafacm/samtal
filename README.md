@@ -22,7 +22,7 @@ A self-hostable voice assistant that pairs **small ESP32-S3 devices** (a microph
 
 The design premise is a **thin device and a smart server**: the firmware's only tie to a backend is a single config URL, and everything else (endpoints, credentials, even firmware updates) is delivered by *your* server at runtime. Customization lives server-side, in Python, not in C++ you have to reflash.
 
-- **Self-hosted end to end.** The device speaks Opus over a WebSocket to your server and nothing else. Run it on a laptop or ship it as a container image to your own infrastructure.
+- **Self-hosted end to end.** The device speaks Opus over a WebSocket to your server and nothing else. Run it on a laptop or ship it as a container image to your own infrastructure. WebSocket is the only transport for v1; upstream's MQTT+UDP alternative may follow. 🚧
 - **No account, no activation, no phone app.** Point the device at your server once; it connects and talks.
 - **Pluggable LLM.** Anthropic, any OpenAI-compatible endpoint, or fully local via [Ollama](https://ollama.com). 🚧
 - **Pluggable voice.** Speech recognition and synthesis are swappable providers; a zero-API-key local pipeline (SileroVAD + SenseVoice + EdgeTTS) works today.
@@ -57,7 +57,7 @@ The short version:
 | --- | --- |
 | [`samtal-server/`](samtal-server/) | The conversation server (Python): OTA/config endpoint, WebSocket audio channel, VAD → ASR → LLM → TTS pipeline with pluggable providers. 🚧 |
 | [`samtal-esp32/`](samtal-esp32/) | Thin firmware customization: samtal server as default endpoint, English wake word, minimal UI changes. 🚧 |
-| [`docs/`](docs/) | Research notes on the upstream architecture, the device↔server protocol, and the working demo procedure. |
+| [`docs/`](docs/README.md) | Research notes on the upstream architecture and the device↔server protocol, plus the plans and implementation notes behind each milestone. |
 | `vendor/` | Reference clones of the upstream projects (not committed). |
 
 ## Credits

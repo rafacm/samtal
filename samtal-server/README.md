@@ -89,6 +89,74 @@ devices are being sent, which is the quickest way to check a deployment.
 samtal-server serves no firmware images: the reply always tells the device it
 is up to date, and never asks it to activate.
 
+## Transports
+
+**WebSocket only.** The device speaks Opus over one WebSocket, and that is
+the only transport samtal-server implements or plans for v1.
+
+Upstream supports a second one, **MQTT plus UDP**: the OTA reply carries an
+`mqtt` section instead of a `websocket` one, control messages go over MQTT
+and audio over a separate UDP stream. samtal-server never sends an `mqtt`
+section, so devices always take the WebSocket path. Supporting it later is
+additive and needs no change to what exists: the OTA endpoint would choose
+which section to send per device.
+
+**WebRTC is not an upstream transport.** The only WebRTC reference upstream
+is the WebRTC/NSNet noise-suppression algorithm in the device's audio front
+end (and it ships disabled). A WebRTC transport would be new work on both
+sides, not adoption of something the firmware already speaks.
+
+## Ports and topology
+
+Both endpoints share one port (`server.port`, default 8003), because
+samtal-server is a single ASGI app. Upstream splits them across two (HTTP
+8003, WebSocket 8000).
+
+The advertised WebSocket URL is deliberately independent of the listening
+topology, which is what keeps this from being a one-way door: whatever the
+process listens on, `server.websocket_url` decides what devices are told to
+connect to.
+
+What one port buys:
+
+- A LAN deployment needs no configuration at all. The WebSocket URL is
+  derived from the address the device reached the OTA endpoint on. With two
+  ports that is impossible, since the request tells you the HTTP port and not
+  the other one.
+- One firewall rule, one container port, one certificate, one route.
+
+What it costs:
+
+- No separation at the network layer. Exposing one endpoint and not the
+  other, or giving them different idle timeouts, has to be done by path
+  rather than by port. This matters in practice: a WebSocket carrying a
+  conversation needs a long idle timeout, an OTA check wants a short one.
+- No independent scaling or lifecycle. WebSocket connections are long-lived
+  and stateful while OTA requests are short and stateless, but they share a
+  process, so they share a worker pool, a restart, and a crash.
+
+### On Kubernetes
+
+One container port, one Service port, one Ingress or HTTPRoute with two path
+rules, and `/healthz` on the same port for probes.
+
+Two things need attention:
+
+- **Set `server.websocket_url` explicitly.** Behind an ingress the derived
+  URL is wrong: uvicorn only trusts `X-Forwarded-Proto` from
+  `--forwarded-allow-ips` (`127.0.0.1` by default, never the ingress pod's
+  IP), so a TLS ingress still derives `ws://` rather than `wss://`. Set the
+  public URL and the guesswork disappears.
+- **Rolling updates drop conversations.** Every active WebSocket ends when a
+  pod terminates, and because the OTA endpoint shares that pod it cannot be
+  rolled independently. Give the Deployment a `terminationGracePeriodSeconds`
+  long enough for conversations to finish, and a PodDisruptionBudget.
+
+Separating the two tiers later does not require separate ports, or any code
+change. Run the same image as two Deployments, route `/xiaozhi/ota/` to one
+and `/xiaozhi/v1/` to the other, and point `server.websocket_url` at the
+WebSocket tier's hostname. Devices follow, because they are told where to go.
+
 ## Status
 
 Implementation in progress; the v1 plan lives at
