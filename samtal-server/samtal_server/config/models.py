@@ -19,11 +19,10 @@ from pydantic_settings import (
 
 _MAC_RE = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$")
 
-# Provider option names that would put a secret in the config file. Each has a
-# *_env counterpart that names an environment variable instead.
-_INLINE_SECRET_KEYS = frozenset(
-    {"api_key", "apikey", "token", "access_token", "secret", "password"}
-)
+# Fragments that mark a provider option as secret-bearing. Keys ending in
+# _env are the sanctioned pattern: they name an environment variable instead
+# of holding the value.
+_SECRET_KEY_FRAGMENTS = ("secret", "token", "password", "api_key", "apikey", "credential")
 
 PROVIDER_STAGES = ("llm", "asr", "tts", "vad")
 
@@ -47,10 +46,14 @@ class ProviderConfig(BaseModel):
     @model_validator(mode="after")
     def _reject_inline_secrets(self) -> "ProviderConfig":
         for key in self.model_extra or {}:
-            if key.lower() in _INLINE_SECRET_KEYS:
+            lowered = key.lower()
+            if lowered.endswith("_env"):
+                continue
+            if any(fragment in lowered for fragment in _SECRET_KEY_FRAGMENTS):
                 raise ValueError(
-                    f'inline secret "{key}" is not allowed; reference an environment '
-                    f'variable instead, for example {key}_env: MY_PROVIDER_{key.upper()}'
+                    f'"{key}" looks like an inline secret, which is not allowed; '
+                    f"reference an environment variable instead, for example "
+                    f"{key}_env: MY_PROVIDER_{key.upper()}"
                 )
         return self
 
