@@ -4,6 +4,7 @@ import sys
 import uvicorn
 from dotenv import find_dotenv, load_dotenv
 
+from samtal_server.app import create_app
 from samtal_server.config import ConfigError, load_config
 from samtal_server.config.loader import CONFIG_ENV_VAR
 
@@ -29,8 +30,11 @@ def main() -> None:
         print(exc, file=sys.stderr)
         raise SystemExit(1) from None
 
+    # Pass the app object rather than an import string: the config just read
+    # (from --config, which reaches nothing else) has to be the one the app
+    # serves from.
     uvicorn.run(
-        "samtal_server.app:app",
+        create_app(config),
         host=config.server.host,
         port=config.server.port,
     )
