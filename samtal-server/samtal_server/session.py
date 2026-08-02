@@ -33,7 +33,7 @@ from samtal_server.audio.resample import Resampler
 from samtal_server.config import Config
 from samtal_server.config.models import normalize_mac
 from samtal_server.protocol import framing, messages
-from samtal_server.providers import AgentProviders, Endpointer, Turn
+from samtal_server.providers import AgentProviders, Endpointer, TextDelta, Turn
 from samtal_server.text import SentenceSplitter
 
 logger = logging.getLogger(__name__)
@@ -347,9 +347,10 @@ class Session:
         resampler = Resampler(providers.tts.sample_rate, OUTPUT_AUDIO.sample_rate)
         self._pace_start = None
         self._pace_count = 0
-        async for delta in providers.llm.stream(providers.prompt, self._turns):
-            for sentence in splitter.push(delta):
-                await self._speak(sentence, resampler, spoken)
+        async for event in providers.llm.stream(providers.prompt, self._turns):
+            if isinstance(event, TextDelta):
+                for sentence in splitter.push(event.text):
+                    await self._speak(sentence, resampler, spoken)
         tail = splitter.flush()
         if tail is not None:
             await self._speak(tail, resampler, spoken)

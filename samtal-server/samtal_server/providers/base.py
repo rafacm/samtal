@@ -13,8 +13,8 @@ announces the rate it produces.
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from dataclasses import dataclass, field
+from typing import Any, Literal, Protocol, runtime_checkable
 
 
 class ProviderError(Exception):
@@ -23,11 +23,73 @@ class ProviderError(Exception):
 
 
 @dataclass(frozen=True)
-class Turn:
-    """One conversation turn as the LLM stage sees it."""
+class ToolDef:
+    """One tool as the model is told about it. The schema is JSON Schema,
+    which is what MCP speaks on both sides of this server, so nothing has
+    to be translated on the way in."""
 
-    role: str  # "user" or "assistant"
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ToolCall:
+    """The model asking for a tool, as the session receives it.
+
+    `malformed_arguments` holds the raw argument text when a model
+    streamed something that is not a JSON object. The call still reaches
+    the session, which answers it with an error result: a model that
+    mangles its own arguments should be told so and get another round,
+    not crash the reply."""
+
+    id: str
+    name: str
+    arguments: dict[str, Any] = field(default_factory=dict)
+    malformed_arguments: str | None = None
+
+
+@dataclass(frozen=True)
+class ToolResult:
+    """What a tool answered, as the model is told about it. Failures are
+    results too: the model phrases what to tell the user, in its own
+    voice and the user's language."""
+
+    tool_call_id: str
     content: str
+    is_error: bool = False
+
+
+@dataclass(frozen=True)
+class TextDelta:
+    """A piece of the spoken reply, as it streams."""
+
+    text: str
+
+
+# What an LLM stream yields: speech, or a request to run a tool.
+LlmEvent = TextDelta | ToolCall
+
+# Whether the model may call the tools it was given. "none" still sends
+# the definitions (so the conversation stays consistent) while forbidding
+# a call, which is how the session guarantees a reply ends in speech.
+ToolChoice = Literal["auto", "none"]
+
+
+@dataclass(frozen=True)
+class Turn:
+    """One conversation turn as the LLM stage sees it.
+
+    The two tool fields are empty for everything the session keeps:
+    persistent history is plain text, and the structured turns exist
+    only in the working copy inside one reply. An assistant turn that
+    asked for tools carries `tool_calls`; the turn answering them has
+    role "tool" and carries `tool_results`."""
+
+    role: str  # "user", "assistant", or "tool"
+    content: str
+    tool_calls: tuple[ToolCall, ...] = ()
+    tool_results: tuple[ToolResult, ...] = ()
 
 
 @runtime_checkable
@@ -57,10 +119,22 @@ class AsrProvider(ABC):
 
 
 class LlmProvider(ABC):
-    """Streams the reply to a conversation as text deltas."""
+    """Streams the reply to a conversation as speech and tool requests.
+
+    Providers stay translators: they map the neutral model above onto
+    one API's wire shape and back. The tool loop itself (executing
+    calls, feeding results back, capping the rounds) belongs to the
+    session, which is the only place that can switch agents between
+    rounds."""
 
     @abstractmethod
-    def stream(self, system: str, turns: Sequence[Turn]) -> AsyncIterator[str]: ...
+    def stream(
+        self,
+        system: str,
+        turns: Sequence[Turn],
+        tools: Sequence[ToolDef] = (),
+        tool_choice: ToolChoice = "auto",
+    ) -> AsyncIterator[LlmEvent]: ...
 
 
 class TtsProvider(ABC):

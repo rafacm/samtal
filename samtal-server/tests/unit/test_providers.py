@@ -61,13 +61,13 @@ async def test_mock_llm_formats_the_last_user_turn_into_the_reply() -> None:
         Turn("assistant", "You said one."),
         Turn("user", "two sugars"),
     ]
-    reply = "".join([delta async for delta in llm.stream("prompt", turns)])
+    reply = "".join([event.text async for event in llm.stream("prompt", turns)])
     assert reply == "You said two sugars."
 
 
 async def test_mock_llm_can_quote_the_prompt_it_was_given() -> None:
     llm = build_provider("llm", "m", provider_config(type="mock", reply="{system}: {text}."))
-    reply = "".join([delta async for delta in llm.stream("POET", [Turn("user", "hi")])])
+    reply = "".join([event.text async for event in llm.stream("POET", [Turn("user", "hi")])])
     assert reply == "POET: hi."
 
 

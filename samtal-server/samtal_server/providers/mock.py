@@ -16,7 +16,12 @@ from samtal_server.config.models import ProviderConfig
 from samtal_server.providers.base import (
     AsrProvider,
     Endpointer,
+    LlmEvent,
     LlmProvider,
+    TextDelta,
+    ToolCall,
+    ToolChoice,
+    ToolDef,
     TtsProvider,
     Turn,
     VadProvider,
@@ -108,18 +113,66 @@ class MockAsr(AsrProvider):
 class MockLlm(LlmProvider):
     """Formats the last user turn into the configured reply template,
     streamed word by word so sentence assembly is exercised. The template
-    takes `{text}` (the last user turn) and `{system}` (the prompt the
-    session handed over), the latter so a test can prove a reply came
-    from one agent's own prompt and not another's."""
+    takes `{text}` (the last user turn), `{system}` (the prompt the
+    session handed over, so a test can prove a reply came from one
+    agent's own prompt and not another's), and `{tool_result}` (whatever
+    the tools answered this reply).
 
-    def __init__(self, reply: str) -> None:
+    Tool calling is scripted rather than decided: when `tool_when` is a
+    substring of the last user turn, the first round asks for
+    `tool_name` with `tool_arguments` and says nothing, and the round
+    after the results come back speaks the template. That makes the
+    whole loop deterministic, which is what the acceptance test needs.
+    Without the tool options this behaves exactly as it did before."""
+
+    def __init__(
+        self,
+        reply: str,
+        tool_when: str | None = None,
+        tool_name: str = "",
+        tool_arguments: dict[str, object] | None = None,
+    ) -> None:
         self._reply = reply
+        self._tool_when = tool_when
+        self._tool_name = tool_name
+        self._tool_arguments = tool_arguments or {}
+        self._calls = 0
 
-    async def stream(self, system: str, turns: Sequence[Turn]) -> AsyncIterator[str]:
+    async def stream(
+        self,
+        system: str,
+        turns: Sequence[Turn],
+        tools: Sequence[ToolDef] = (),
+        tool_choice: ToolChoice = "auto",
+    ) -> AsyncIterator[LlmEvent]:
         last_user = next((turn.content for turn in reversed(turns) if turn.role == "user"), "")
-        reply = self._reply.format(text=last_user, system=system)
+        results = [result for turn in turns for result in turn.tool_results]
+
+        if self._wants_a_tool(last_user, results, tool_choice):
+            self._calls += 1
+            yield ToolCall(
+                id=f"call_{self._calls}",
+                name=self._tool_name,
+                arguments=dict(self._tool_arguments),
+            )
+            return
+
+        reply = self._reply.format(
+            text=last_user,
+            system=system,
+            tool_result=" ".join(result.content for result in results),
+        )
         for index, word in enumerate(reply.split(" ")):
-            yield word if index == 0 else " " + word
+            yield TextDelta(word if index == 0 else " " + word)
+
+    def _wants_a_tool(
+        self, last_user: str, results: Sequence[object], tool_choice: ToolChoice
+    ) -> bool:
+        """One call per reply, and never when the session has forbidden
+        calling, so the scripted loop always terminates in speech."""
+        if self._tool_when is None or tool_choice == "none":
+            return False
+        return self._tool_when in last_user and not results
 
 
 class MockTts(TtsProvider):
@@ -174,7 +227,12 @@ def build_asr(label: str, config: ProviderConfig) -> MockAsr:
 
 def build_llm(label: str, config: ProviderConfig) -> MockLlm:
     options = OptionsReader(label, config)
-    provider = MockLlm(reply=options.string("reply", "You said {text}.") or "")
+    provider = MockLlm(
+        reply=options.string("reply", "You said {text}.") or "",
+        tool_when=options.string("tool_when"),
+        tool_name=options.string("tool_name", "") or "",
+        tool_arguments=options.mapping("tool_arguments"),
+    )
     options.finish()
     return provider
 
