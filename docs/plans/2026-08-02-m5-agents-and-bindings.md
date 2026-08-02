@@ -9,6 +9,10 @@ to this file: they go in the v1 plan's own
 new M5 section appended in the same change that ticks the milestone in the
 v1 plan's checklist.
 
+The plan below is left as it was agreed. Where the implementation
+departed from it, a quoted "Departed from" line marks the spot and links
+to the notes; the reasoning lives there, not here.
+
 ## State at the start of M5
 
 M0 to M4 are merged (PRs #1 to #4 and #6), `main` is clean, no open PRs.
@@ -77,6 +81,9 @@ M4 behaviour is preserved: an agent whose effective pipeline is missing
 any of the four stages fails the boot with the agent named, never the
 first conversation.
 
+> Departed from: only the completeness check moved. See
+> [the M5 implementation notes](2026-08-02-samtal-server-v1-implementation.md#m5-agents-and-bindings-pr-7).
+
 ### 2. Device bindings: a set with an active default
 
 `devices` values accept a string (unchanged, one agent) or a non-empty
@@ -123,12 +130,20 @@ agent; with a config lacking `default_agent`, an unbound MAC gets the
 1008 close. Unit tests additionally assert that two sessions of
 different agents share no mutable provider state they should not.
 
+> Departed from: the 1008 case needs a config with no agents at all,
+> since M1 makes "agents but no `default_agent`" unconfigurable. See
+> [the M5 implementation notes](2026-08-02-samtal-server-v1-implementation.md#m5-agents-and-bindings-pr-7).
+
 ### 5. Local lane and documentation
 
 - `tests/local` gains an opt-in two-persona run (same
   `SAMTAL_LOCAL_LANE=1` gate and pre-flight style as M4's): two Piper
   voices, two prompts, real Silero and faster-whisper, asserting the two
   replies differ and the voices are distinct.
+
+  > Departed from: the voices are identified, not merely contrasted,
+  > because pitch does not separate them. See
+  > [the M5 implementation notes](2026-08-02-samtal-server-v1-implementation.md#m5-agents-and-bindings-pr-7).
 - `config.example.yaml` gains `agent_defaults`, a second persona with its
   own voice, and a list-valued device binding, in the same change as the
   schema change (repository rule).
