@@ -9,6 +9,25 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- samtal-server tools and MCP (M6): the assistant can now do things, not
+  only say them. Three sources of tools merge into one list the model
+  sees, kept apart by the shape of their names rather than by collision
+  handling: MCP servers configured per agent under a new top-level
+  `mcp_servers` section (stdio and streamable-http, referenced through
+  an `mcp` list that `agent_defaults` can supply, secrets written as
+  `$VAR` and resolved at boot), the device's own tools discovered over
+  the conversation socket, and two builtins. `switch_agent` moves a
+  conversation between the agents its device is bound to, and the new
+  agent greets in its own prompt and its own voice with the history
+  carried over; `remember` keeps a fact in a per-agent file that is
+  injected into that agent's prompt on every reply, configured by an
+  optional `memory` section. The session owns the tool loop, so
+  providers stay translators and the round after a handover can go to a
+  different one; a tool that fails, times out, or does not exist becomes
+  an error result the model explains in its own voice rather than a
+  broken reply. A server that is unreachable at startup logs a warning
+  and reconnects in the background, while configuration mistakes still
+  fail the boot. The official `mcp` SDK is now a core dependency.
 - samtal-server agents and bindings (M5): distinct personas, enforced. A
   new top-level `agent_defaults` section holds what every agent uses
   unless it names something else, so a typical agent shrinks to a prompt
