@@ -153,6 +153,23 @@ def test_inline_secret_is_rejected_with_env_hint() -> None:
         load_config_from_data(data)
 
 
+@pytest.mark.parametrize("key", ["client_secret", "secret_key", "auth_token", "password"])
+def test_secret_like_option_names_are_rejected(key: str) -> None:
+    data = {"providers": {"llm": {"x": {"type": "openai_compatible", key: "shh"}}}}
+    with pytest.raises(ConfigError, match=f"{key}_env"):
+        load_config_from_data(data)
+
+
+def test_env_reference_options_are_allowed() -> None:
+    data = {
+        "providers": {
+            "llm": {"x": {"type": "openai_compatible", "client_secret_env": "MY_SECRET"}}
+        }
+    }
+    config = load_config_from_data(data)
+    assert config.providers.llm["x"].options == {"client_secret_env": "MY_SECRET"}
+
+
 def test_provider_options_pass_through() -> None:
     config = load_config_from_data(
         {"providers": {"llm": {"local": {"type": "openai_compatible", "model": "qwen3:8b"}}}}
