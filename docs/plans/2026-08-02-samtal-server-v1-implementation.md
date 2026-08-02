@@ -422,3 +422,33 @@ poet answer "Sweden's pride is Stockholm's view." in the Piper lessac
 voice and the travel guide answer "The capital of Sweden is Stockholm."
 in the amy voice, from one server, over one shared whisper and one shared
 local model.
+
+### Device checkpoint
+
+Not required for M5 by the plan, and carried out anyway, because hearing
+two personas is the whole point of the milestone. Waveshare
+ESP32-S3-Touch-LCD-1.54 on the desk (MAC `28:84:85:49:8c:a8`, firmware
+2.4.0, NVS `ota_url` unchanged since M2), server on the dev machine
+(192.168.1.33:8003) with a gitignored `checkpoint.local.yaml` in the M5
+shape: `agent_defaults` holding the shared pipeline (Ollama
+`gemma4:e4b`, faster-whisper `small`, Silero), and two agents differing
+in nothing but prompt and Piper voice, `storyteller` on
+`en_US-amy-medium` and `assistant` on `en_US-lessac-medium`.
+
+- Bound to the list `[storyteller, assistant]`, the board's boot OTA
+  fetch logged `resolved to agent storyteller (also bound to assistant)`
+  and its session opened on the same. That is M5's routing rule, first
+  entry active, on real hardware.
+- Asked for "Tell me a story about a fox in the snow" (a 3.2 s utterance,
+  whisper detecting English at 0.80), the storyteller answered with a
+  four-sentence bedtime story, spoken back in the amy voice: a different
+  voice from the one this board used at the M4 checkpoint.
+- The binding was then flipped to `[assistant, storyteller]` and the
+  server restarted. The same board resolved to `assistant`, and "What's
+  the capital of Sweden?" came back as "The capital of Sweden is
+  Stockholm." in the lessac voice, about five seconds after the
+  transcript. Same device, same MAC, other prompt and other voice, which
+  is what rules out the voice being whatever the server happened to load.
+- Not exercised on hardware: two devices on different agents at the same
+  time, which the integration lane covers with two concurrent simulators,
+  and moving between the two agents a device is bound to, which is M6.
