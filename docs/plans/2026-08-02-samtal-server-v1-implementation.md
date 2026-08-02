@@ -559,11 +559,17 @@ Discoveries and smaller decisions:
   timeout path, and the error path, spawned with `sys.executable` so CI
   needs nothing beyond the project's own dependencies.
 
-Verified on the dev machine, not on hardware: 308 unit tests and 18
-integration tests green, ruff clean. The opt-in local lane's new
-tool-calling test was written but not run in this session; its
+Verified on the dev machine: 308 unit tests and 18 integration tests
+green, ruff clean, and the opt-in local lane green on real engines. The
+lane's new tool-calling test had `qwen3:8b` answer "The secret word is
+rhubarb." to "Ask the tool for the secret word, then tell me what it
+is.", through Silero, faster-whisper `small`, Ollama, and Piper, with
+the word itself existing nowhere but inside the stdio MCP server. A
+real model handed these definitions does work out that it should call
+one, which is the only thing the scripted mock cannot prove. The lane's
 pre-flight checks Ollama's reported capabilities for the model it is
-about to use, because not every local model can call tools.
+about to use, because not every local model can call tools; `qwen3:8b`
+reports `tools` and was used unchanged.
 
 ### Device checkpoint
 
