@@ -50,6 +50,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- Hardware tables (root and samtal-esp32 READMEs) now list the e-paper
+  board first, link each board name to its product page, and keep a single
+  "wiki" link in the Links column.
 - samtal-server now logs its own work: the CLI gives the root logger a
   handler, which uvicorn does not do, so messages from samtal-server no
   longer vanish while uvicorn's request lines appear.

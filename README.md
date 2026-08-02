@@ -36,9 +36,9 @@ Any board supported by xiaozhi-esp32 can work; these are the ones samtal targets
 
 | Board | Display | Audio | Links | Status |
 | --- | --- | --- | --- | --- |
-| Waveshare ESP32-S3-Touch-LCD-1.54 | 240×240 LCD, touch | dual-mic with hardware echo cancellation | [product](https://www.waveshare.com/esp32-s3-lcd-1.54.htm) · [doc](https://docs.waveshare.com/ESP32-S3-Touch-LCD-1.54) | **working** (upstream firmware) |
-| Waveshare ESP32-S3-ePaper-1.54 | 200×200 e-paper | single mic | [product](https://www.waveshare.com/esp32-s3-epaper-1.54.htm) · [doc](https://docs.waveshare.com/ESP32-S3-ePaper-1.54) | planned 🚧 |
-| Waveshare ESP32-S3-Touch-AMOLED-2.16 | 480×480 AMOLED, touch | dual-mic with hardware echo cancellation | [product](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) · [doc](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.16) | planned 🚧 |
+| [Waveshare ESP32-S3-ePaper-1.54](https://www.waveshare.com/esp32-s3-epaper-1.54.htm) | 200×200 e-paper | single mic | [wiki](https://docs.waveshare.com/ESP32-S3-ePaper-1.54) | planned 🚧 |
+| [Waveshare ESP32-S3-Touch-LCD-1.54](https://www.waveshare.com/esp32-s3-lcd-1.54.htm) | 240×240 LCD, touch | dual-mic with hardware echo cancellation | [wiki](https://docs.waveshare.com/ESP32-S3-Touch-LCD-1.54) | **working** (upstream firmware) |
+| [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) | 480×480 AMOLED, touch | dual-mic with hardware echo cancellation | [wiki](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.16) | planned 🚧 |
 
 ## Getting Started
 

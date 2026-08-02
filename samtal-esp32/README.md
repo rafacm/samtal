@@ -16,9 +16,9 @@ endpoint and everything else at runtime. Planned customizations:
 
 | Board | Display | Audio | Links | Status |
 |---|---|---|---|---|
-| Waveshare ESP32-S3-Touch-LCD-1.54 | 240×240 LCD (ST7789), CST816 touch | ES8311 + ES7210 (AEC) | [product](https://www.waveshare.com/esp32-s3-lcd-1.54.htm) · [doc](https://docs.waveshare.com/ESP32-S3-Touch-LCD-1.54) | working with upstream prebuilt firmware |
-| Waveshare ESP32-S3-ePaper-1.54 | 200×200 e-paper | ES8311, single mic | [product](https://www.waveshare.com/esp32-s3-epaper-1.54.htm) · [doc](https://docs.waveshare.com/ESP32-S3-ePaper-1.54) | planned |
-| Waveshare ESP32-S3-Touch-AMOLED-2.16 | 480×480 AMOLED (CO5300), CST9220 touch | ES8311 + ES7210 (AEC) | [product](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) · [doc](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.16) | planned |
+| [Waveshare ESP32-S3-ePaper-1.54](https://www.waveshare.com/esp32-s3-epaper-1.54.htm) | 200×200 e-paper | ES8311, single mic | [wiki](https://docs.waveshare.com/ESP32-S3-ePaper-1.54) | planned |
+| [Waveshare ESP32-S3-Touch-LCD-1.54](https://www.waveshare.com/esp32-s3-lcd-1.54.htm) | 240×240 LCD (ST7789), CST816 touch | ES8311 + ES7210 (AEC) | [wiki](https://docs.waveshare.com/ESP32-S3-Touch-LCD-1.54) | working with upstream prebuilt firmware |
+| [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) | 480×480 AMOLED (CO5300), CST9220 touch | ES8311 + ES7210 (AEC) | [wiki](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.16) | planned |
 
 ## Building
 
