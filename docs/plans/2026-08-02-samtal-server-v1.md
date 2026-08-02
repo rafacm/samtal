@@ -97,7 +97,8 @@ the [implementation notes](2026-08-02-samtal-server-v1-implementation.md).
   (PR #7): per-device agent resolution, per-agent prompt, providers, and
   voice. Accept: two simulated devices with different MACs get different
   personas in one server run.
-- [ ] **M6 Tools/MCP**: server-side MCP servers per agent plus device MCP
+- [x] **[M6 Tools/MCP](2026-08-02-samtal-server-v1-implementation.md#m6-toolsmcp-pr-8)**
+  (PR #8): server-side MCP servers per agent plus device MCP
   tools, round-tripped through LLM tool calling. Accept: simulator
   conversation triggers a mock MCP tool and the reply reflects its result.
 - [ ] **M7 Hardening and release**: device token auth on by default,

@@ -452,3 +452,126 @@ in nothing but prompt and Piper voice, `storyteller` on
 - Not exercised on hardware: two devices on different agents at the same
   time, which the integration lane covers with two concurrent simulators,
   and moving between the two agents a device is bound to, which is M6.
+
+## M6 Tools/MCP (PR #8)
+
+Implemented from the dedicated
+[M6 plan](2026-08-02-m6-tools-and-mcp.md), whose thirteen commits are the
+thirteen commits of the PR. Its architecture survived contact intact: the
+session owns the tool loop and providers stay translators, history stays
+text-only with the structured turns living in a working copy inside one
+reply, the tool namespace is structural rather than collision-handled, a
+successful `switch_agent` ends the old agent's loop and the new one
+greets, memory is per agent and reaches the model by injection, and a
+dead MCP server warns instead of failing the boot. None of the plan's
+"do not reopen" decisions were reopened.
+
+Four deviations from the plan's letter, all found while building:
+
+- **`ToolCall` grew a fourth field.** The plan's neutral model is
+  `id`, `name`, `arguments`, and separately says that malformed argument
+  JSON from a model "becomes an error tool result rather than an
+  exception". Those two do not fit together: with only a `dict`, an
+  empty `arguments` means both "the model asked for a tool that takes
+  none" and "the model produced junk", and the session cannot tell
+  which. `ToolCall` therefore carries an optional
+  `malformed_arguments` holding the raw text, which the session turns
+  into the error result and the log line. The alternative, typing
+  `arguments` as `dict | None`, pushes a None check onto every reader
+  to say less.
+- **The secret-key rule for MCP entries is wider than M1's.** The plan
+  says keys matching the M1 secret fragments must use the `$VAR` form,
+  but the canonical header carrying a secret is `Authorization`, which
+  matches none of `secret`, `token`, `password`, `api_key`, `apikey`,
+  `credential`; the plan's own example (`Authorization: $WEATHER_TOKEN`)
+  would have passed the guard unenforced. The MCP check adds `auth` to
+  the fragments. The provider check is untouched, so nothing that
+  validated before validates differently now.
+- **`$VAR` resolution happens where the managers are built, not in the
+  model.** The plan puts resolution "at boot", which the pydantic
+  validator would also satisfy, but resolving there would leave the
+  parsed configuration holding plaintext secrets for the life of the
+  process, and `Config` is dumped in logs and error messages.
+  `resolve_env_references` is a function in `config.models` called by
+  `McpServers.build`, which `create_app` runs. One consequence worth
+  stating: an unset `$VAR` in an entry no agent references does not
+  fail the boot, because that entry is never built. That matches
+  providers, where an unreferenced entry is likewise never built and
+  its `api_key_env` never resolved.
+- **Each MCP manager owns its own lifecycle task.** The plan has
+  managers closing "via the lifespan's exit (`AsyncExitStack`)". The
+  SDK's clients are async context managers over anyio task groups, and
+  entering one in one task while exiting it in another is exactly what
+  breaks their cancel scopes; background reconnects mean a manager's
+  stack is routinely entered by a task that is not the lifespan's. Each
+  manager therefore runs a task that enters the stack, publishes its
+  tools, waits on a stop event, and exits the stack itself. The
+  lifespan asks them all to stop, which is the same guarantee (no stdio
+  child outlives the server) reached the only way the SDK allows.
+
+Discoveries and smaller decisions:
+
+- **Both xiaozhi-sdk traps the plan records are real, and were hit
+  knowingly.** `initialize` without a `capabilities.vision` stanza
+  raises a KeyError in the sdk (`mcp.py` indexes `params.capabilities.
+  vision.url` and `.token` unconditionally), so the request carries one
+  of empty strings; with it, discovery completes against the sdk in
+  every integration conversation, which is how the handshake is
+  covered without a board. The sdk also returns silently from
+  `tools/call` for a name it does not know, so a device call that is
+  never answered can only be a timeout, which is why the session bounds
+  every call and the client discards its pending request when it fires.
+- **xiaozhi-sdk JSON-encodes whatever a device tool returns.** A device
+  tool answering `"72 percent"` arrives as `"\"72 percent\""`. The
+  server does not unwrap it: that is the device's own encoding, the
+  model reads it fine, and unwrapping would guess at which quotes are
+  data. The real MCP SDK returns plain text, so a server tool's answer
+  arrives unquoted, and the two integration assertions differ by
+  exactly that.
+- **A `tools/names.py` leaf module holds the namespace.** The plan
+  describes the rules but not where they live. Configuration validates
+  entry names against them, so they cannot sit anywhere that imports
+  configuration; `names` imports nothing but `re`, and `tools/__init__`
+  stays a docstring so importing a submodule cannot drag the package's
+  re-exports (and the cycle back to `config`) along.
+- **The mock LLM's scripted tool calling was enough for the whole
+  loop.** `tool_when`, `tool_name`, `tool_arguments`, and a
+  `{tool_result}` placeholder cover the acceptance, device tools,
+  switching, refusal, memory, and the timeout path, all deterministic.
+  The unit lane's harder cases (the round cap, the `tool_choice`
+  sequence, two switches in one round) use a `ScriptedLlm` fake instead,
+  because they need a different script per round.
+- **Proving cross-conversation memory needed care.** Injection re-reads
+  the file every round, so within one reply the fact a `remember` call
+  just stored is already in the next round's prompt: a single
+  conversation proves nothing about persistence. The integration test
+  holds two conversations that remember the same fact and asserts the
+  second one's reply quotes it twice. Only one of those copies is its
+  own, so the other is the first conversation's, surviving the
+  disconnect.
+- **The integration lane grew a `conftest.py`.** The server runner, the
+  device simulator, and the spectral helpers moved there now that two
+  modules need them, and `test_two_personas.py` was rewired onto them.
+  Same reasoning as M5's move of the local lane's `serve` and `speak`
+  fixtures: it avoids cross-imports between test modules.
+- **The stdio test server is four functions of FastMCP.** `secret_word`,
+  `add`, `slow_answer`, and `always_fails` cover the answer path, the
+  timeout path, and the error path, spawned with `sys.executable` so CI
+  needs nothing beyond the project's own dependencies.
+
+Verified on the dev machine, not on hardware: 308 unit tests and 18
+integration tests green, ruff clean. The opt-in local lane's new
+tool-calling test was written but not run in this session; its
+pre-flight checks Ollama's reported capabilities for the model it is
+about to use, because not every local model can call tools.
+
+### Device checkpoint
+
+Not required for M6 by the plan, and not carried out. The natural test
+is asking the assistant to lower its own volume, which is a real
+`self.audio_speaker.set_volume` call through the device MCP channel and
+would be the first exercise of that channel against firmware rather
+than against xiaozhi-sdk. Two other things remain unexercised on
+hardware and would ride along: moving between the two agents a device
+is bound to (noted as M6's at the M5 checkpoint), and a real MCP server
+attached to a real board.
