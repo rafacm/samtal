@@ -93,6 +93,17 @@ def _openai_compatible(label: str, config: ProviderConfig) -> object:
     return openai_llm.build(label, config)
 
 
+def _piper(label: str, config: ProviderConfig) -> object:
+    try:
+        from samtal_server.providers import piper_tts
+    except ImportError as exc:
+        raise ProviderError(
+            f'{label}: type "piper" needs the piper extra; '
+            f"install it with: uv sync --extra piper"
+        ) from exc
+    return piper_tts.build(label, config)
+
+
 def _factories() -> dict[str, dict[str, Factory]]:
     # Imported here rather than at module top because the implementation
     # modules import the OptionsReader above; the table itself is tiny.
@@ -105,7 +116,7 @@ def _factories() -> dict[str, dict[str, Factory]]:
             "openai_compatible": _openai_compatible,
         },
         "asr": {"mock": mock.build_asr, "faster_whisper": _faster_whisper},
-        "tts": {"mock": mock.build_tts},
+        "tts": {"mock": mock.build_tts, "piper": _piper},
         "vad": {"mock": mock.build_vad, "silero": _silero},
     }
 

@@ -56,8 +56,15 @@ providers:
       # beam_size: 5
   tts:
     piper:
+      # piper-tts is GPL-3.0 and therefore an optional extra:
+      #   uv sync --extra piper
       type: piper
+      # Voice name from the Piper voice collection
+      # (https://huggingface.co/rhasspy/piper-voices), downloaded at
+      # server startup.
       voice: sv_SE-nst-medium
+      # Where voices are stored (default: ~/.cache/samtal/piper).
+      # download_dir: /var/lib/samtal/piper
   vad:
     silero:
       type: silero
