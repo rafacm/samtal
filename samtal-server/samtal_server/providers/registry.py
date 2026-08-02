@@ -70,6 +70,17 @@ def _silero(label: str, config: ProviderConfig) -> object:
     return silero.build(label, config)
 
 
+def _faster_whisper(label: str, config: ProviderConfig) -> object:
+    try:
+        from samtal_server.providers import faster_whisper
+    except ImportError as exc:
+        raise ProviderError(
+            f'{label}: type "faster_whisper" needs the faster-whisper extra; '
+            f"install it with: uv sync --extra faster-whisper"
+        ) from exc
+    return faster_whisper.build(label, config)
+
+
 def _factories() -> dict[str, dict[str, Factory]]:
     # Imported here rather than at module top because the implementation
     # modules import the OptionsReader above; the table itself is tiny.
@@ -77,7 +88,7 @@ def _factories() -> dict[str, dict[str, Factory]]:
 
     return {
         "llm": {"mock": mock.build_llm},
-        "asr": {"mock": mock.build_asr},
+        "asr": {"mock": mock.build_asr, "faster_whisper": _faster_whisper},
         "tts": {"mock": mock.build_tts},
         "vad": {"mock": mock.build_vad, "silero": _silero},
     }

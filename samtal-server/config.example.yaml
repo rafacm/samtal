@@ -43,8 +43,17 @@ providers:
       base_url: http://localhost:11434/v1
       model: qwen3:8b
   asr:
-    sensevoice:
-      type: sensevoice
+    whisper:
+      type: faster_whisper
+      # Whisper model size (tiny/base/small/medium/large-v3 or a
+      # Hugging Face model id); weights download at server startup.
+      model: small
+      # Language hint (ISO 639-1, e.g. sv or en); omit to auto-detect
+      # per utterance.
+      # language: sv
+      # device: cpu
+      # compute_type: int8
+      # beam_size: 5
   tts:
     piper:
       type: piper
@@ -65,7 +74,7 @@ agents:
     prompt: >
       You are a helpful voice assistant. Keep replies short and speakable.
     llm: claude
-    asr: sensevoice
+    asr: whisper
     tts: piper
     vad: silero
 

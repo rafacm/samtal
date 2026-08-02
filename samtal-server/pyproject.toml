@@ -16,6 +16,10 @@ dependencies = [
     "uvicorn[standard]>=0.34",
 ]
 
+[project.optional-dependencies]
+# Local ASR (MIT). Model weights download from Hugging Face at startup.
+faster-whisper = ["faster-whisper>=1.2"]
+
 [project.scripts]
 samtal-server = "samtal_server.main:main"
 
