@@ -71,7 +71,7 @@ manual test against real hardware on the desk.
 
 Status (tick when the milestone's PR merges, with the PR number):
 
-- [ ] M0 Skeleton (PR #1, in review)
+- [x] M0 Skeleton (PR #1, merged 2026-08-02)
 - [ ] M1 Config
 - [ ] M2 OTA endpoint
 - [ ] M3 Protocol handshake and audio loop
