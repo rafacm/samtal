@@ -67,9 +67,12 @@ the workflow file itself.
   Key parameters, Verification, and Files modified. Milestone work under a
   plan is documented by the implementation doc and the PR instead. No
   session transcripts are kept in this repository.
-- Active plans keep a milestone status checklist; tick the milestone (with
-  its PR number) in the same change that completes it, so a fresh session
-  can resume from the repository alone.
+- Active plans keep a milestone checklist that doubles as the milestone
+  descriptions (one annotated checkbox item per milestone, no separate
+  status list). Tick the milestone (with its PR number) in the same change
+  that completes it, and turn its name into a link to its section in the
+  implementation doc, so a fresh session can resume from the repository
+  alone.
 - PR descriptions include a Verification section as a task list. Check a box
   only when that step was actually carried out; leave it unchecked with a
   short note when it cannot be verified yet. Unchecked boxes are

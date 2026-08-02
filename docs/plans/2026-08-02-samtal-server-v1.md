@@ -67,46 +67,40 @@ Modules, roughly one package each:
 ## Milestones
 
 Each milestone is mergeable and ends green in CI. "Device checkpoint" means a
-manual test against real hardware on the desk.
+manual test against real hardware on the desk. Tick a milestone (with its PR
+number) in the same change that completes it, linking it to its section in
+the [implementation notes](2026-08-02-samtal-server-v1-implementation.md).
 
-Status (tick when the milestone's PR merges, with the PR number):
-
-- [x] M0 Skeleton (PR #1, merged 2026-08-02)
-- [x] M1 Config (PR #2, merged 2026-08-02)
-- [ ] M2 OTA endpoint
-- [ ] M3 Protocol handshake and audio loop
-- [ ] M4 Conversation pipeline
-- [ ] M5 Agents and bindings
-- [ ] M6 Tools/MCP
-- [ ] M7 Hardening and release
-
-- **M0 Skeleton**: uv project, package layout, pytest, ruff, and the GitHub
-  Actions workflow described under Testing strategy. Accept: `uv run pytest`
-  passes on a trivial test locally and in CI, and the workflow only runs when
-  `samtal-server/` changes.
-- **M1 Config**: pydantic config models, YAML loading, validation errors that
-  actually help. Accept: example config parses; bad configs fail with clear
-  messages.
-- **M2 OTA endpoint**: device POST answered with websocket URL and firmware
-  "up to date"; unknown devices get `default_agent`. Accept: simulator and
-  `curl` get correct JSON. Device checkpoint: real board redirected to
-  samtal-server reaches the websocket.
-- **M3 Protocol handshake and audio loop**: websocket accept, `hello`
+- [x] **[M0 Skeleton](2026-08-02-samtal-server-v1-implementation.md#m0-skeleton-pr-1-merged-2026-08-02)**
+  (PR #1, merged 2026-08-02): uv project, package layout, pytest, ruff, and
+  the GitHub Actions workflow described under Testing strategy. Accept:
+  `uv run pytest` passes on a trivial test locally and in CI, and the
+  workflow only runs when `samtal-server/` changes.
+- [x] **[M1 Config](2026-08-02-samtal-server-v1-implementation.md#m1-config-pr-2-merged-2026-08-02)**
+  (PR #2, merged 2026-08-02): pydantic config models, YAML loading,
+  validation errors that actually help. Accept: example config parses; bad
+  configs fail with clear messages.
+- [ ] **M2 OTA endpoint**: device POST answered with websocket URL and
+  firmware "up to date"; unknown devices get `default_agent`. Accept:
+  simulator and `curl` get correct JSON. Device checkpoint: real board
+  redirected to samtal-server reaches the websocket.
+- [ ] **M3 Protocol handshake and audio loop**: websocket accept, `hello`
   exchange, Opus decode/encode round trip (echo or canned reply). Accept:
   xiaozhi-sdk connects, completes hello, exchanges audio frames in CI.
-- **M4 Conversation pipeline**: VAD, ASR, LLM, TTS wired with mock providers
-  in CI and real providers locally. Accept: scripted simulator conversation
-  gets a coherent spoken reply. Device checkpoint: first real conversation.
-- **M5 Agents and bindings**: per-device agent resolution, per-agent prompt,
-  providers, and voice. Accept: two simulated devices with different MACs get
-  different personas in one server run.
-- **M6 Tools/MCP**: server-side MCP servers per agent plus device MCP tools,
-  round-tripped through LLM tool calling. Accept: simulator conversation
-  triggers a mock MCP tool and the reply reflects its result.
-- **M7 Hardening and release**: device token auth on by default, connection
-  and session limits, structured logging, multi-arch Docker image built in
-  CI, README quick start. Accept: `docker run` with one mounted YAML serves a
-  conversation; image published.
+- [ ] **M4 Conversation pipeline**: VAD, ASR, LLM, TTS wired with mock
+  providers in CI and real providers locally. Accept: scripted simulator
+  conversation gets a coherent spoken reply. Device checkpoint: first real
+  conversation.
+- [ ] **M5 Agents and bindings**: per-device agent resolution, per-agent
+  prompt, providers, and voice. Accept: two simulated devices with different
+  MACs get different personas in one server run.
+- [ ] **M6 Tools/MCP**: server-side MCP servers per agent plus device MCP
+  tools, round-tripped through LLM tool calling. Accept: simulator
+  conversation triggers a mock MCP tool and the reply reflects its result.
+- [ ] **M7 Hardening and release**: device token auth on by default,
+  connection and session limits, structured logging, multi-arch Docker image
+  built in CI, README quick start. Accept: `docker run` with one mounted
+  YAML serves a conversation; image published.
 
 ## Testing strategy
 
