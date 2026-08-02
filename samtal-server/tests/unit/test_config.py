@@ -12,7 +12,12 @@ EXAMPLE_CONFIG = Path(__file__).parents[2] / "config.example.yaml"
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for var in ("SAMTAL_CONFIG", "SAMTAL_HOST", "SAMTAL_PORT"):
+    for var in (
+        "SAMTAL_CONFIG",
+        "SAMTAL_SERVER__HOST",
+        "SAMTAL_SERVER__PORT",
+        "SAMTAL_DEFAULT_AGENT",
+    ):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -51,17 +56,38 @@ def test_env_overrides_beat_the_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = write_config(tmp_path, "server:\n  host: 10.0.0.1\n  port: 9000\n")
-    monkeypatch.setenv("SAMTAL_HOST", "127.0.0.1")
-    monkeypatch.setenv("SAMTAL_PORT", "9100")
+    monkeypatch.setenv("SAMTAL_SERVER__HOST", "127.0.0.1")
+    monkeypatch.setenv("SAMTAL_SERVER__PORT", "9100")
     config = load_config(path)
     assert config.server.host == "127.0.0.1"
     assert config.server.port == 9100
 
 
+def test_partial_env_override_keeps_file_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = write_config(tmp_path, "server:\n  host: 10.0.0.1\n  port: 9000\n")
+    monkeypatch.setenv("SAMTAL_SERVER__PORT", "9100")
+    config = load_config(path)
+    assert config.server.host == "10.0.0.1"
+    assert config.server.port == 9100
+
+
+def test_any_top_level_key_is_env_overridable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = write_config(
+        tmp_path,
+        "agents:\n  assistant: {}\n  other: {}\ndefault_agent: assistant\n",
+    )
+    monkeypatch.setenv("SAMTAL_DEFAULT_AGENT", "other")
+    assert load_config(path).default_agent == "other"
+
+
 def test_non_numeric_port_override_reports_location(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("SAMTAL_PORT", "not-a-port")
+    monkeypatch.setenv("SAMTAL_SERVER__PORT", "not-a-port")
     with pytest.raises(ConfigError, match=r"server\.port"):
         load_config()
 
