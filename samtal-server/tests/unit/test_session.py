@@ -168,6 +168,29 @@ def test_abort_discards_the_buffered_utterance() -> None:
     assert abs(len(audio) - len(pcm)) <= FRAME_BYTES
 
 
+def test_abort_during_a_streaming_reply_does_not_eat_the_next_utterance() -> None:
+    # The device barging in mid-reply and speaking again immediately must
+    # get the new utterance echoed: cancellation of the reply task is
+    # awaited, never left in flight to shadow the follow-up.
+    with TestClient(create_app(config_with_agent())) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            websocket.send_text(json.dumps({"type": "listen", "state": "start", "mode": "manual"}))
+            send_pcm(websocket, speech_pcm(1200), OpusEncoder())
+            websocket.send_text(json.dumps({"type": "listen", "state": "stop"}))
+            # The reply is now streaming (20 frames, paced over 1.2 s).
+            # Barge in and speak again straight away.
+            websocket.send_text(json.dumps({"type": "abort", "reason": "wake_word_detected"}))
+            websocket.send_text(json.dumps({"type": "listen", "state": "start", "mode": "manual"}))
+            pcm = speech_pcm(240)
+            send_pcm(websocket, pcm, OpusEncoder())
+            websocket.send_text(json.dumps({"type": "listen", "state": "stop"}))
+            # Skip whatever the aborted reply got out, up to its tts stop.
+            collect_reply(websocket)
+            _, audio = collect_reply(websocket)
+    assert abs(len(audio) - len(pcm)) <= FRAME_BYTES
+
+
 def test_version_2_framing_round_trips() -> None:
     with TestClient(create_app(config_with_agent())) as client:
         with connect(client, version=2) as websocket:
