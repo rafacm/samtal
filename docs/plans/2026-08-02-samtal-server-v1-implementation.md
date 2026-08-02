@@ -569,15 +569,70 @@ real model handed these definitions does work out that it should call
 one, which is the only thing the scripted mock cannot prove. The lane's
 pre-flight checks Ollama's reported capabilities for the model it is
 about to use, because not every local model can call tools; `qwen3:8b`
-reports `tools` and was used unchanged.
+reports `tools` and was used unchanged. Verified on hardware too: see
+the device checkpoint below.
 
 ### Device checkpoint
 
-Not required for M6 by the plan, and not carried out. The natural test
-is asking the assistant to lower its own volume, which is a real
-`self.audio_speaker.set_volume` call through the device MCP channel and
-would be the first exercise of that channel against firmware rather
-than against xiaozhi-sdk. Two other things remain unexercised on
-hardware and would ride along: moving between the two agents a device
-is bound to (noted as M6's at the M5 checkpoint), and a real MCP server
-attached to a real board.
+Not required for M6 by the plan, and carried out anyway, because a tool
+milestone that has only ever run against a simulator has not been tested
+where it matters. Waveshare ESP32-S3-Touch-LCD-1.54 on the desk (MAC
+`28:84:85:49:8c:a8`, firmware 2.4.0, NVS `ota_url` unchanged since M2),
+server on the dev machine with a gitignored `checkpoint.local.yaml` in
+the M6 shape: Ollama `gemma4:e4b` (which reports the `tools`
+capability), faster-whisper `small`, Silero, and two agents bound to the
+board as `[assistant, storyteller]`, the assistant on `en_US-lessac-
+medium` with `mcp: [tools]` and the storyteller on `en_US-amy-medium`
+with `mcp: []`. The `tools` entry is the same stdio MCP server the test
+lane spawns.
+
+- **The device MCP channel works against firmware, not just the
+  simulator.** Every session's handshake completed in about 35 ms and
+  listed five real tools: `self_get_device_status`,
+  `self_audio_speaker_set_volume`, `self_screen_set_brightness`,
+  `self_screen_set_theme`, `self_system_reconfigure_wifi`. That is the
+  vision stanza accepted by the real board as well as by xiaozhi-sdk,
+  and the dotted names sanitized into something both LLM APIs accept.
+- **A device tool ran.** "Set your volume to 30%." called
+  `self_audio_speaker_set_volume` in 0.01 s and came back as "The volume
+  is now set to 30 percent.", with the speaker audibly quieter. First
+  real hardware control through the tool loop.
+- **A server MCP tool ran.** "Ask the tools for the secret word." called
+  `tools__secret_word` and answered "The secret word is rhubarb." The
+  word exists nowhere but inside the spawned subprocess, so the board
+  reached a process on the server through the model.
+- **Memory survived a disconnect.** "Remember that I'm vegetarian."
+  wrote `- The user is vegetarian` to `memory.local/assistant.md`, keyed
+  by agent. A later conversation, on a new session with a new prompt,
+  answered "What do you know about me?" with "I remember you are
+  vegetarian, but I don't have any other personal information about you
+  right now." and made no tool call in that round, which is what makes
+  it injection rather than recall.
+- **The handover works, prompt and voice together.** "Let me talk to the
+  storyteller." logged `handed over from agent assistant to storyteller`
+  1.8 s after the transcript, and the reply was "Hello there! I am the
+  Storyteller, and it sounds like you are ready for a nice bedtime
+  story. Would you like to hear about brave knights, or perhaps
+  adventurous stars?", audibly in the amy voice rather than lessac. The
+  assistant spoke nothing before switching, so the whole reply came from
+  the new agent. This is the case M5's checkpoint recorded as "not
+  exercised on hardware: moving between the two agents a device is bound
+  to, which is M6".
+
+One interruption worth recording, because it will happen again: the dev
+machine's DHCP lease changed mid-checkpoint, and the board kept POSTing
+to the address in its NVS. Nothing in samtal was at fault (the board
+booted, joined wifi, and resolved the host correctly; the server
+answered on every address it actually had), but recovering it cost more
+time than the checkpoint itself. Reclaiming the old address as an
+`ifconfig alias` did not work: macOS kept the /24 mask and installed a
+reject route, and the alias never answered while the interface's primary
+addresses did. Setting the interface's primary address instead
+(`ipconfig set en7 MANUAL 192.168.1.33 255.255.255.0`) worked
+immediately. A DHCP reservation for the dev machine would remove the
+whole class of problem, and is worth doing before the M7 checkpoint.
+
+Not exercised on hardware: a streamable-http MCP server (only stdio was
+attached), a tool timing out or failing on the board, and two devices
+holding tool conversations at once. The integration lane covers all
+three.
