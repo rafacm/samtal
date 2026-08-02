@@ -85,9 +85,10 @@ the [implementation notes](2026-08-02-samtal-server-v1-implementation.md).
   date"; unknown devices get `default_agent`. Accept: simulator and `curl`
   get correct JSON. Device checkpoint: real board redirected to
   samtal-server reaches the websocket.
-- [ ] **M3 Protocol handshake and audio loop**: websocket accept, `hello`
-  exchange, Opus decode/encode round trip (echo or canned reply). Accept:
-  xiaozhi-sdk connects, completes hello, exchanges audio frames in CI.
+- [x] **[M3 Protocol handshake and audio loop](2026-08-02-samtal-server-v1-implementation.md#m3-protocol-handshake-and-audio-loop-pr-4)**
+  (PR #4): websocket accept, `hello` exchange, Opus decode/encode round
+  trip (echo or canned reply). Accept: xiaozhi-sdk connects, completes
+  hello, exchanges audio frames in CI.
 - [ ] **M4 Conversation pipeline**: VAD, ASR, LLM, TTS wired with mock
   providers in CI and real providers locally. Accept: scripted simulator
   conversation gets a coherent spoken reply. Device checkpoint: first real

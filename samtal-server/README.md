@@ -7,12 +7,14 @@ It implements the two endpoints a device needs:
 
 - **HTTP OTA/config endpoint** (`/xiaozhi/ota/`): the device POSTs its
   identity and receives the WebSocket URL (and optionally firmware updates).
-- 🚧 **WebSocket endpoint** (`/xiaozhi/v1/`): the conversation channel,
+- **WebSocket endpoint** (`/xiaozhi/v1/`): the conversation channel,
   carrying Opus audio frames up, JSON control messages both ways, and Opus
   audio back.
 
-Behind the WebSocket sits the pipeline: VAD → ASR → LLM (with MCP tools) →
-TTS. Every stage is a pluggable provider.
+🚧 Behind the WebSocket will sit the pipeline: VAD → ASR → LLM (with MCP
+tools) → TTS, every stage a pluggable provider. Until it lands, the server
+echoes each utterance back re-encoded, which proves the handshake and the
+audio loop end to end.
 
 ## Goals
 

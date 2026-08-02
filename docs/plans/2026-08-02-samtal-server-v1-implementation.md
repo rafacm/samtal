@@ -172,3 +172,82 @@ no NVS rewrite was needed:
 
 Note for future checkpoints: the board has a battery, so unplugging USB does
 not power it off. Long-press PWR, or toggle RTS over the serial port.
+
+## M3 Protocol handshake and audio loop (PR #4)
+
+Deviations and additions relative to the plan:
+
+- **The Opus bindings question was decided here, not in M4.** M3 cannot
+  exist without a codec, so open question 3 resolved early: PyAV, over the
+  opuslib that upstream and xiaozhi-sdk use. PyAV ships maintained binary
+  wheels for every target including arm64 (opuslib is source-only,
+  unmaintained since about 2018, and depends on ctypes finding a system
+  libopus), and the same dependency covers M4's resampling and TTS-format
+  decoding. Two codec discoveries worth keeping: FFmpeg's Opus decoders
+  always emit 48 kHz, Opus's internal rate, so the decoder resamples to the
+  promised 16 kHz internally (with a constant filter delay of about one
+  millisecond); and the encoder's flush pads the final partial frame with
+  silence rather than draining the codec, which keeps the encoder reusable
+  across utterances at the cost of the few milliseconds of lookahead held
+  inside.
+- **The advertised binary protocol version stays 1** (open question 4, left
+  as M3's call by M2). The version 2 timestamps exist for server-side AEC,
+  which samtal-server does not do. All three framings are implemented and
+  unit-tested byte-for-byte against the firmware's packed network-order
+  structs, and the session serves whichever version the device's hello
+  declares, so changing the advertised version is configuration only.
+- **An energy endpointer arrived unplanned.** The board in auto listening
+  mode never sends `listen stop`: it streams mic audio until the server
+  decides the user finished. Without endpointing, the device checkpoint
+  would connect and stream but never hear an echo. The detector (RMS
+  threshold, 700 ms trailing silence, 10 s cap) has the same feed/reset
+  shape Silero will take over in M4; its thresholds are module constants,
+  not configuration, because it is not meant to outlive M4.
+- **The echo announces 16 kHz out, not the plan's 24 kHz.** Echoing at the
+  device's input rate needs no resampling; the real output rate belongs to
+  M4's TTS.
+- **The server hello is maximal, not minimal.** xiaozhi-sdk indexes
+  `session_id` and every `audio_params` field without defaults and crashes
+  when one is missing, although upstream's protocol document marks them
+  optional. The hello builder therefore requires them all.
+- **M3 took its share of the rejection M2 deferred.** A device whose
+  `Device-Id` is not a MAC, or that resolves to no agent, is accepted and
+  then closed with 1008 and a short reason, so both sides log something
+  useful. M5 owns the rest (per-agent enforcement).
+- **Realtime mode is treated as auto mode.** Its defining feature,
+  listening while the server speaks, needs the pipeline; frames arriving
+  during a reply are dropped. Revisit no earlier than M4.
+- **Replies are paced.** Outgoing frames go out on monotonic deadlines at
+  the frame cadence rather than as a burst, so a long echo cannot flood
+  the device's playback queue; `abort` cancels the stream mid-reply and
+  still sends `tts stop`.
+- **`WEBSOCKET_PATH` moved from `ota.py` to the new `ws.py`.** The OTA
+  endpoint points devices at the websocket endpoint, so the import now
+  follows that direction.
+- **Dev lane additions**: xiaozhi-sdk and pytest-asyncio joined the dev
+  group. The sdk bundles its own libopus, so CI still needs no system
+  packages, and because it encodes and decodes with opuslib, the
+  integration run cross-validates the server's PyAV codec against an
+  independent implementation.
+
+Resolution of plan open questions: Opus bindings (question 3) resolved to
+PyAV; the binary protocol version to advertise (question 4) resolved to 1.
+The ASR and TTS defaults (questions 1 and 2) remain open for M4.
+
+### Device checkpoint
+
+Not required by the plan until M4, but run anyway with the board on the
+desk (MAC `28:84:85:49:8c:a8`, NVS `ota_url` unchanged since M2):
+
+- A short PWR press opens the websocket that answered 403 throughout M2.
+  The server logs the accepted upgrade, then the completed hello: agent
+  resolved, protocol v1, 16000 Hz 60 ms frames in.
+- Speaking a short sentence and pausing produced the echo from the board's
+  speaker after roughly the endpointer's trailing-silence window, with
+  "(echo)" on the display. The server logged a 1.0 s utterance.
+- The echo is noticeably quieter than synthesized speech will be: it is
+  the board's own mic capture played back, so the level is the mic's, not
+  a TTS engine's. Nothing to fix in M3; M4's TTS does not inherit it.
+- After the reply the board returned to listening on its own (auto mode),
+  and the session closed cleanly when the conversation ended on the
+  device.
