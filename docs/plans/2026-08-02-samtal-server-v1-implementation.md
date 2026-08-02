@@ -304,6 +304,32 @@ now closed.
 
 ### Device checkpoint
 
+The first real conversation, on the fully local pipeline, against the
+Waveshare ESP32-S3-Touch-LCD-1.54 on the desk (MAC `28:84:85:49:8c:a8`,
+NVS `ota_url` unchanged since M2). Server on the dev machine
+(192.168.1.33:8003) with the gitignored `checkpoint.local.yaml`: Silero
+VAD, faster-whisper `small` (CPU, int8), Ollama `gemma4:e4b` through the
+`openai_compatible` provider, and the Piper `en_US-lessac-medium` voice.
+
+- The board was reset over serial; it fetched its configuration from the
+  server ("Current is the latest version", "Activation done") and resolved
+  to the `assistant` agent.
+- A short PWR press opened the websocket and completed the hello, the
+  server now announcing 24 kHz output; the board accepted it.
+- Speaking to the board ("Hi! Are you there? This is Rafael.", a 3.1 s
+  utterance): Silero endpointed real room audio, whisper detected English
+  (0.84) and transcribed the sentence exactly, and the reply came out of
+  the board's speaker in the Piper voice. Transcription took about 1.9 s
+  of the ASR-to-reply latency.
+- After the reply the board went back to listening on its own (auto mode),
+  ready for the next turn; the session stayed open throughout.
+- One gap surfaced by the checkpoint: the session logged what it heard but
+  not what it replied, so the reply text could not be quoted from the
+  server log. Fixed in the same change as this note: the reply is now
+  logged when its sentences have been spoken.
+
+### Device checkpoint
+
 Not required by the plan until M4, but run anyway with the board on the
 desk (MAC `28:84:85:49:8c:a8`, NVS `ota_url` unchanged since M2):
 
