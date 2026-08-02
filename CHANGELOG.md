@@ -11,6 +11,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 - Waveshare ESP32-S3-Touch-AMOLED-2.16 (480×480 AMOLED, dual-mic AEC) listed
   as a planned target board.
+- samtal-server stack decision: Python 3.12 + FastAPI (uv-managed), with the
+  xiaozhi-sdk device simulator for hardware-free integration tests; pipecat
+  considered as a later orchestration step.
 
 ### Changed
 
