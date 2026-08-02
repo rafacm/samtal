@@ -24,7 +24,8 @@ sentence by sentence, every stage a pluggable provider chosen per agent.
     gateways)
   - **ASR**: local (faster-whisper) or cloud
   - **TTS**: pluggable engines as optional extras (Piper)
-  - **MCP**: attach any MCP servers as tools for the assistant 🚧
+  - **MCP**: attach any MCP servers as tools for the assistant, alongside
+    the device's own
 - Distributed as a multi-arch container image, deployable on your own
   infrastructure
 
@@ -50,6 +51,74 @@ faster-whisper + Ollama (through `openai_compatible`) + Piper.
 Licensing note: `piper-tts` (piper1-gpl) is GPL-3.0, which is why it is an
 optional extra and never a core dependency of the MIT server. The same
 applies to any future `edge-tts` provider.
+
+## Tools
+
+Beyond speaking, an agent reaches three kinds of tool, merged into one
+list the model sees and told apart by the shape of their names.
+
+**MCP servers** are named entries under `mcp_servers`, the way providers
+are, and an agent references them through an `mcp` list that
+`agent_defaults` can supply. Naming a list replaces the inherited one
+rather than extending it, so `mcp: []` is how an agent opts out of tools
+its siblings have. Each server's tools are offered under its entry name
+(`home__turn_on_light`), which is why an entry name has to be a plain
+`[A-Za-z0-9_-]+` name and cannot be `self`, `switch_agent`, or
+`remember`. Both transports the specification defines are supported:
+
+```yaml
+mcp_servers:
+  home:
+    transport: stdio
+    command: mcp-proxy
+    args: ["http://homeassistant.local:8123/mcp_server/sse"]
+    env:
+      API_ACCESS_TOKEN: $HOME_ASSISTANT_TOKEN
+  weather:
+    transport: streamable_http
+    url: http://localhost:8000/mcp
+    headers:
+      Authorization: $WEATHER_TOKEN
+    tool_timeout_s: 15
+```
+
+Secrets follow the same rule as everywhere else: a value of `$NAME` is
+read from that environment variable at startup, and any secret-looking
+key (`token`, `api_key`, `authorization`, ...) must use that form. An
+unset variable fails the boot, as does an unknown reference or a
+reserved entry name. A server that is merely unreachable does not: it
+logs a warning, contributes no tools, and reconnects in the background
+when a session that would use it opens.
+
+**The device's own tools** need no configuration. A board whose hello
+advertises `features.mcp` is asked for its tools over the same socket
+the audio runs on, and they arrive under their firmware names with the
+dots replaced (`self_audio_speaker_set_volume`), because both LLM APIs
+restrict tool names to `[A-Za-z0-9_-]`.
+
+**Builtins** are `switch_agent`, offered when the device is bound to
+more than one agent, and `remember`, offered when memory is configured.
+A successful `switch_agent` ends the current agent's reply: the new
+agent greets the user in its own prompt and its own voice, with the
+conversation so far carried over. `remember` appends one fact to the
+agent's memory file:
+
+```yaml
+memory:
+  dir: /var/lib/samtal/memory
+```
+
+One file per agent, created on first write and injected into that
+agent's system prompt on every reply, capped at 8 KiB or 200 lines with
+the oldest dropped first. Memory is keyed by agent and not by device: a
+persona is one entity across rooms. Leave the section out and there is
+no `remember` tool and no injection.
+
+A tool that fails, times out, or does not exist comes back to the model
+as an error result rather than ending the reply, so the assistant says
+what went wrong in its own voice and the user's language. The device
+hears silence while a tool runs, bounded by `tool_timeout_s` (15 seconds
+by default).
 
 ## Stack
 
@@ -116,17 +185,17 @@ The server reads one YAML file, passed as `--config /path/to/config.yaml` or
 via the `SAMTAL_CONFIG` environment variable; with neither set, defaults
 apply. [`config.example.yaml`](config.example.yaml) documents every key:
 `server` (host/port), named `providers` per stage (`llm`, `asr`, `tts`,
-`vad`), `agent_defaults` holding what every agent uses unless it says
-otherwise, `agents` combining a prompt with provider references,
-`devices` binding MAC addresses to agents, and `default_agent` for
-unknown devices.
+`vad`), named `mcp_servers`, `agent_defaults` holding what every agent
+uses unless it says otherwise, `agents` combining a prompt with provider
+and MCP references, `devices` binding MAC addresses to agents,
+`default_agent` for unknown devices, and an optional `memory` section.
 
 Since a voice is a `tts` provider entry, two agents that should sound
 different reference two entries, and a typical agent is a prompt plus a
 voice. `agent_defaults` takes no prompt: a prompt is what makes an agent
 that agent. A device is bound to one agent or to a list of them; with a
 list, the first entry is the agent a conversation starts on, and the
-rest are the ones it will be switchable to.
+rest are the ones `switch_agent` can reach.
 
 Every key can be overridden with a `SAMTAL_`-prefixed environment variable,
 nested keys joined with `__`: `SAMTAL_SERVER__PORT=9000`,
@@ -137,7 +206,8 @@ container deployments: the YAML arrives as a mounted file, overrides and
 secrets as environment variables.
 
 Secrets never live in the file: a provider names the environment variable
-that holds its key (for example `api_key_env: ANTHROPIC_API_KEY`). Instance
+that holds its key (for example `api_key_env: ANTHROPIC_API_KEY`), and an
+MCP server writes `$NAME` where the secret goes. Instance
 configs stay out of the repository; `*.local.yaml` and `.env` are gitignored
 for local experiments.
 
