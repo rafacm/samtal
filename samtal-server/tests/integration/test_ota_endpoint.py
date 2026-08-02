@@ -22,6 +22,9 @@ from samtal_server.app import create_app
 from samtal_server.config import Config
 from samtal_server.ota import OTA_PATH
 
+MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")}
+MOCK_AGENT = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
+
 DEVICE_MAC = "aa:bb:cc:dd:ee:ff"
 DEVICE_UUID = "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
 
@@ -44,7 +47,8 @@ def _free_port() -> int:
 def server() -> Iterator[str]:
     """A real uvicorn serving the app, yielding its base URL."""
     config = Config(
-        agents={"assistant": {}, "kitchen": {}},
+        providers=MOCK_PROVIDERS,
+        agents={"assistant": MOCK_AGENT, "kitchen": MOCK_AGENT},
         devices={DEVICE_MAC: "kitchen"},
         default_agent="assistant",
     )

@@ -8,9 +8,18 @@ ImportError from the middle of a request.
 """
 
 from collections.abc import Callable
+from dataclasses import dataclass
+from typing import cast
 
-from samtal_server.config.models import ProviderConfig
-from samtal_server.providers.base import ProviderError
+from samtal_server.config import Config
+from samtal_server.config.models import PROVIDER_STAGES, ProviderConfig
+from samtal_server.providers.base import (
+    AsrProvider,
+    LlmProvider,
+    ProviderError,
+    TtsProvider,
+    VadProvider,
+)
 
 
 class OptionsReader:
@@ -79,3 +88,46 @@ def build_provider(stage: str, name: str, config: ProviderConfig) -> object:
             f'{label}: unknown {stage} provider type "{config.type}" (known types: {known})'
         )
     return factory(label, config)
+
+
+@dataclass(frozen=True)
+class AgentProviders:
+    """Everything a session needs to hold a conversation as one agent."""
+
+    prompt: str
+    llm: LlmProvider
+    asr: AsrProvider
+    tts: TtsProvider
+    vad: VadProvider
+
+
+def build_agent_providers(config: Config) -> dict[str, AgentProviders]:
+    """Build every provider the configured agents reference, sharing one
+    instance per named entry across agents. Runs at startup, so a bad
+    provider configuration, a missing extra, or an agent without a full
+    pipeline fails the boot rather than the first conversation."""
+    built: dict[tuple[str, str], object] = {}
+
+    def get(stage: str, agent_name: str) -> object:
+        provider_name = getattr(config.agents[agent_name], stage)
+        if provider_name is None:
+            raise ProviderError(
+                f"agents.{agent_name}: no {stage} provider is named; the conversation "
+                f"pipeline needs all of: {', '.join(PROVIDER_STAGES)}"
+            )
+        key = (stage, provider_name)
+        if key not in built:
+            provider_config = getattr(config.providers, stage)[provider_name]
+            built[key] = build_provider(stage, provider_name, provider_config)
+        return built[key]
+
+    return {
+        name: AgentProviders(
+            prompt=agent.prompt,
+            llm=cast(LlmProvider, get("llm", name)),
+            asr=cast(AsrProvider, get("asr", name)),
+            tts=cast(TtsProvider, get("tts", name)),
+            vad=cast(VadProvider, get("vad", name)),
+        )
+        for name, agent in config.agents.items()
+    }

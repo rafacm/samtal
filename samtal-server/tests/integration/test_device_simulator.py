@@ -18,6 +18,9 @@ from xiaozhi_sdk import XiaoZhiWebsocket
 from samtal_server.app import create_app
 from samtal_server.config import Config
 
+MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")}
+MOCK_AGENT = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
+
 DEVICE_MAC = "aa:bb:cc:dd:ee:01"
 SAMPLE_RATE = 16000
 FRAME_MS = 60
@@ -26,7 +29,8 @@ FRAME_BYTES = SAMPLE_RATE * FRAME_MS // 1000 * 2
 
 @pytest.fixture
 async def server_port():
-    config = Config(agents={"assistant": {}}, default_agent="assistant")
+    config = Config(providers=MOCK_PROVIDERS,
+        agents={"assistant": MOCK_AGENT}, default_agent="assistant")
     server = uvicorn.Server(
         uvicorn.Config(create_app(config), host="127.0.0.1", port=0, log_level="warning")
     )

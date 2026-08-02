@@ -3,8 +3,14 @@
 import pytest
 
 from samtal_server.audio.endpointing import rms
+from samtal_server.config import Config
 from samtal_server.config.models import ProviderConfig
-from samtal_server.providers import ProviderError, Turn, build_provider
+from samtal_server.providers import (
+    ProviderError,
+    Turn,
+    build_agent_providers,
+    build_provider,
+)
 from samtal_server.providers.mock import MockAsr, MockLlm, MockTts, MockVad
 
 
@@ -68,6 +74,32 @@ async def test_mock_tts_speaks_longer_for_longer_text() -> None:
     long = await spoken("A much longer sentence than the short one was.")
     assert len(long) > len(short)
     assert rms(short) > 1000
+
+
+def test_agents_share_one_instance_per_named_provider() -> None:
+    config = Config(
+        providers={stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")},
+        agents={
+            "assistant": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
+            "kitchen": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
+        },
+        default_agent="assistant",
+    )
+    providers = build_agent_providers(config)
+    assert providers["assistant"].llm is providers["kitchen"].llm
+    assert providers["assistant"].tts is providers["kitchen"].tts
+
+
+def test_an_agent_without_a_full_pipeline_fails_the_boot() -> None:
+    config = Config(
+        providers={"llm": {"mock": {"type": "mock"}}},
+        agents={"assistant": {"llm": "mock"}},
+        default_agent="assistant",
+    )
+    with pytest.raises(ProviderError) as excinfo:
+        build_agent_providers(config)
+    assert "agents.assistant" in str(excinfo.value)
+    assert "asr" in str(excinfo.value)
 
 
 def test_mock_vad_hands_out_independent_endpointers() -> None:
