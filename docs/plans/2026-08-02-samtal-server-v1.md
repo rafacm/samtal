@@ -93,9 +93,10 @@ the [implementation notes](2026-08-02-samtal-server-v1-implementation.md).
   (PR #6): VAD, ASR, LLM, TTS wired with mock providers in CI and real
   providers locally. Accept: scripted simulator conversation gets a
   coherent spoken reply. Device checkpoint: first real conversation.
-- [ ] **M5 Agents and bindings**: per-device agent resolution, per-agent
-  prompt, providers, and voice. Accept: two simulated devices with different
-  MACs get different personas in one server run.
+- [x] **[M5 Agents and bindings](2026-08-02-samtal-server-v1-implementation.md#m5-agents-and-bindings-pr-7)**
+  (PR #7): per-device agent resolution, per-agent prompt, providers, and
+  voice. Accept: two simulated devices with different MACs get different
+  personas in one server run.
 - [ ] **M6 Tools/MCP**: server-side MCP servers per agent plus device MCP
   tools, round-tripped through LLM tool calling. Accept: simulator
   conversation triggers a mock MCP tool and the reply reflects its result.
