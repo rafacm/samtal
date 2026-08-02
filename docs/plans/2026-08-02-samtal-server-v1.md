@@ -80,10 +80,11 @@ the [implementation notes](2026-08-02-samtal-server-v1-implementation.md).
   (PR #2, merged 2026-08-02): pydantic config models, YAML loading,
   validation errors that actually help. Accept: example config parses; bad
   configs fail with clear messages.
-- [ ] **M2 OTA endpoint**: device POST answered with websocket URL and
-  firmware "up to date"; unknown devices get `default_agent`. Accept:
-  simulator and `curl` get correct JSON. Device checkpoint: real board
-  redirected to samtal-server reaches the websocket.
+- [x] **[M2 OTA endpoint](2026-08-02-samtal-server-v1-implementation.md#m2-ota-endpoint-pr-3)**
+  (PR #3): device POST answered with websocket URL and firmware "up to
+  date"; unknown devices get `default_agent`. Accept: simulator and `curl`
+  get correct JSON. Device checkpoint: real board redirected to
+  samtal-server reaches the websocket.
 - [ ] **M3 Protocol handshake and audio loop**: websocket accept, `hello`
   exchange, Opus decode/encode round trip (echo or canned reply). Accept:
   xiaozhi-sdk connects, completes hello, exchanges audio frames in CI.

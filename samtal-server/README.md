@@ -5,10 +5,11 @@ The Samtal conversation server (Python), based on
 
 It implements the two endpoints a device needs:
 
-- **HTTP OTA/config endpoint**: the device POSTs its identity and receives
-  the WebSocket URL (and optionally firmware updates).
-- **WebSocket endpoint**: the conversation channel, carrying Opus audio frames
-  up, JSON control messages both ways, and Opus audio back.
+- **HTTP OTA/config endpoint** (`/xiaozhi/ota/`): the device POSTs its
+  identity and receives the WebSocket URL (and optionally firmware updates).
+- 🚧 **WebSocket endpoint** (`/xiaozhi/v1/`): the conversation channel,
+  carrying Opus audio frames up, JSON control messages both ways, and Opus
+  audio back.
 
 Behind the WebSocket sits the pipeline: VAD → ASR → LLM (with MCP tools) →
 TTS. Every stage is a pluggable provider.
@@ -67,6 +68,26 @@ Secrets never live in the file: a provider names the environment variable
 that holds its key (for example `api_key_env: ANTHROPIC_API_KEY`). Instance
 configs stay out of the repository; `*.local.yaml` and `.env` are gitignored
 for local experiments.
+
+## Pointing a device at the server
+
+A device running stock xiaozhi firmware knows only its OTA URL, held in NVS
+(namespace `wifi`, key `ota_url`); see
+[`../docs/xiaozhi-notes.md`](../docs/xiaozhi-notes.md) for how to write it.
+Point it at `http://<server-host>:8003/xiaozhi/ota/` and everything else
+reaches the device from the reply: the WebSocket URL, its token and protocol
+version, and the wall clock.
+
+By default the WebSocket URL is derived from the address the device reached
+the OTA endpoint on, so a LAN deployment needs no extra configuration. Set
+`server.websocket_url` when the server sits behind a proxy or a name the
+request headers do not carry.
+
+Opening `http://<server-host>:8003/xiaozhi/ota/` in a browser reports where
+devices are being sent, which is the quickest way to check a deployment.
+
+samtal-server serves no firmware images: the reply always tells the device it
+is up to date, and never asks it to activate.
 
 ## Status
 
