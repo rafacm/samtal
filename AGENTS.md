@@ -18,6 +18,30 @@ display) talk to a Python conversation server over WebSocket. It builds on
 - `vendor/`: reference clones of the upstream repos. Not committed; recreate
   with the clone commands at the top of `docs/xiaozhi-notes.md`.
 
+## Workflow
+
+- Before beginning any new work: verify the current branch is `main`
+  (`git branch --show-current`), pull latest changes (`git pull --rebase`),
+  and stop to ask for guidance if either step has problems.
+- All code work happens on a dedicated branch off `main` with a descriptive
+  name (e.g. `feature/ota-endpoint`, `fix/opus-framing`), merged back via
+  pull request. Never commit code directly to `main`. Documentation-only
+  changes may go straight to `main`.
+- The repository allows rebase merges only; squash and merge commits are
+  disabled.
+
+## Documentation process
+
+- When a plan is accepted, commit it to `docs/plans/` as one Markdown file
+  with a `YYYY-MM-DD-` date prefix (e.g. `2026-08-02-samtal-server-v1.md`).
+- Significant changes get a feature doc in `docs/features/`, same date-prefix
+  naming, covering: Problem, Changes, Key parameters, Verification, and
+  Files modified. No session transcripts are kept in this repository.
+- Keep in sync: the hardware tables in `README.md` and
+  `samtal-esp32/README.md` list the same boards and must move together. When
+  the samtal-server config schema changes, update `config.example.yaml` in
+  the same change.
+
 ## Writing conventions
 
 - Never use em-dashes anywhere: docs, commit messages, code comments.
@@ -42,6 +66,16 @@ display) talk to a Python conversation server over WebSocket. It builds on
   server.
 - Model weights (SenseVoice, Silero, ESP-SR wake words) are downloaded at
   deploy time, never committed or redistributed.
+
+## GitHub API (`gh`) tips
+
+- Wrap request bodies containing backticks in a `$(cat <<'EOF' ... EOF)`
+  heredoc; bare backticks in `-f body="..."` are interpreted by zsh.
+- Reply to a PR review comment by POSTing to
+  `repos/OWNER/REPO/pulls/PR/comments` with `-F in_reply_to=COMMENT_ID`;
+  there is no `/replies` sub-endpoint (it returns 404).
+- PR review comments live at `pulls/PR/comments`; general PR comments at
+  `issues/PR/comments` (PRs are issues).
 
 ## Hardware context
 

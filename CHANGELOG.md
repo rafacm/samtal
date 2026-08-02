@@ -12,8 +12,13 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 - Waveshare ESP32-S3-Touch-AMOLED-2.16 (480×480 AMOLED, dual-mic AEC) listed
   as a planned target board.
 - samtal-server stack decision: Python 3.12 + FastAPI (uv-managed), with the
-  xiaozhi-sdk device simulator for hardware-free integration tests; pipecat
-  considered as a later orchestration step.
+  xiaozhi-sdk device simulator for hardware-free integration tests.
+- samtal-server v1 plan (`docs/plans/2026-08-02-samtal-server-v1.md`):
+  architecture, milestones M0 to M7 with device checkpoints, folder-scoped
+  GitHub Actions CI, and instance-config separation.
+- Workflow and documentation conventions in `AGENTS.md`: feature branches
+  with rebase-only PRs for code work, dated plan files in `docs/plans/`,
+  feature docs in `docs/features/`, and `gh` API tips.
 
 ### Changed
 

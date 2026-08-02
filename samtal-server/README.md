@@ -30,13 +30,13 @@ Python 3.12 with [FastAPI](https://fastapi.tiangolo.com), managed with
 [uv](https://docs.astral.sh/uv/). Pydantic models validate the YAML
 configuration; the same types back the future admin API. Integration tests
 drive the server with the [xiaozhi-sdk](https://pypi.org/project/xiaozhi-sdk/)
-device simulator, so CI holds real conversations without hardware.
-[Pipecat](https://github.com/pipecat-ai/pipecat) integration for pipeline
-orchestration is a candidate later step; the protocol edge is kept isolated so
-it can slot in without rework.
+device simulator, so CI holds real conversations without hardware. The wire
+protocol is kept isolated behind a small interface, separate from the
+conversation pipeline.
 
 ## Status
 
-Stack decided, implementation starting. The upstream server currently runs as
-our reference implementation. Setup notes for the working local demo are in
+Stack decided, implementation starting; the v1 plan lives at
+[`docs/plans/2026-08-02-samtal-server-v1.md`](../docs/plans/2026-08-02-samtal-server-v1.md).
+The upstream server currently runs as our reference implementation. Setup notes for the working local demo are in
 [`../docs/xiaozhi-notes.md`](../docs/xiaozhi-notes.md).
