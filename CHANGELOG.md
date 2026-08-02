@@ -9,6 +9,15 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- samtal-server device OTA/config endpoint (M2) at `/xiaozhi/ota/`: a device
+  POSTs its system info and receives the WebSocket URL, an (as yet empty)
+  token, the binary protocol version to speak, and the wall clock. The
+  firmware section always answers "up to date" because samtal-server serves
+  no images, and no activation section is ever sent. The `Device-Id` MAC
+  resolves to an agent through the config, falling back to `default_agent`.
+  A `GET` on the same path reports where devices are being sent. New
+  `server` keys: `websocket_url` (defaults to the address the device reached
+  the OTA endpoint on), `protocol_version`, and `timezone_offset_minutes`.
 - samtal-server configuration layer (M1), built on pydantic-settings:
   models for `server`, `providers`, `agents`, `devices`, and
   `default_agent`, loaded from one YAML file (`--config` or
@@ -35,6 +44,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- samtal-server now logs its own work: the CLI gives the root logger a
+  handler, which uvicorn does not do, so messages from samtal-server no
+  longer vanish while uvicorn's request lines appear.
 - Updated logo artwork (`assets/samtal-logo.png`), same concept: the person
   and the device sharing one waveform.
 - Hardware tables now link each board's product page and technical

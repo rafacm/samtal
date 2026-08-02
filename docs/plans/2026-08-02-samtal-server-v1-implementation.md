@@ -70,3 +70,83 @@ Deviations and additions relative to the plan:
   defaults are decided; M4 settles them.
 
 Resolution of plan open questions: none (all four remain open for M4).
+
+## M2 OTA endpoint (PR #3)
+
+Deviations and additions relative to the plan:
+
+- **One port, not two.** Upstream splits HTTP (8003) and WebSocket (8000);
+  samtal-server is a single FastAPI app, so both endpoints share
+  `server.port` (8003). The websocket URL handed to devices therefore names
+  the same port they just POSTed to.
+- **The websocket URL is derived, not required.** `server.websocket_url` is
+  optional; unset, the reply is built from the address the device reached
+  the OTA endpoint on (`ws://{Host}/xiaozhi/v1/`, `wss` under HTTPS). A LAN
+  deployment then needs no configuration at all, and the value is correct
+  behind a proxy that rewrites `Host`, which upstream's `get_local_ip()`
+  is not. Setting the key explicitly still wins.
+- **Two more `server` keys arrived with it**: `protocol_version` (default 1,
+  matching the firmware's own default of bare Opus frames) and
+  `timezone_offset_minutes` (default: the server's current offset). The
+  device sets its clock from `server_time`, and the offset upstream defaults
+  to is China's.
+- **`create_app` now takes a `Config` and the CLI passes the app object.**
+  Handlers need the config, and with an import string uvicorn would build a
+  second app reading `SAMTAL_CONFIG`, so a path given with `--config` would
+  be silently ignored. The module-level `app` an external ASGI server
+  imports is built lazily through a module `__getattr__`, so importing
+  `create_app` does not load the config twice as an import side effect.
+- **Logging had to be turned on at all** (not part of the milestone as
+  planned). Uvicorn configures only its own loggers, so everything
+  samtal-server logged went to a handler-less root logger and vanished while
+  uvicorn's request lines still appeared. The CLI now calls
+  `logging.basicConfig`; M7 replaces it with structured logging.
+- **Agent resolution is logged, not enforced.** The plan has unknown devices
+  fall back to `default_agent`, which they do. A device that resolves to no
+  agent at all (no binding and no `default_agent`) is still answered with a
+  full configuration and logged as a warning: refusing a device belongs to
+  the session that cannot serve it, not to a configuration fetch. M3 and M5
+  own that rejection.
+- **Malformed input is split by how much the reply depends on it.** Missing
+  or non-MAC `Device-Id`, and missing `Client-Id`, are a 400. An unparseable
+  body is not: only the reported firmware version comes from it, so the
+  device is answered with `0.0.0` (never newer than anything, so never
+  offered an update) rather than turned away. Upstream answers 200 with an
+  error body in every case, which the firmware cannot distinguish from
+  success.
+- **No `activation` section, ever.** Omitting it is what keeps devices from
+  being asked to activate, so it is asserted in the tests rather than left
+  implicit.
+- **`token` is sent as `""` rather than omitted.** The firmware writes every
+  key of the `websocket` object into NVS, so sending an empty token clears
+  one left behind by another server. Real tokens arrive in M7.
+
+Resolution of plan open questions: the binary protocol version (question 4)
+is now configurable and defaults to 1; the value to advertise is still M3's
+call. The other three remain open for M4.
+
+### Device checkpoint
+
+Verified against the Waveshare ESP32-S3-Touch-LCD-1.54 on the desk
+(MAC `28:84:85:49:8c:a8`), whose `ota_url` already pointed at port 8003, so
+no NVS rewrite was needed:
+
+- The board POSTs on boot and gets 200. Its log shows `Ota: Current is the
+  latest version` and `Application: Activation done`, and no
+  `No websocket section found!`, so the whole reply was accepted.
+- The once-per-second `Display: System time is not set, tm_year: 70` warning
+  stops after the first reply, so `server_time` sets the clock.
+- Reading the NVS partition back (`esptool read_flash 0x9000 0x4000`, parsed
+  with `nvs_tool.py -d written`) shows the live `websocket` namespace holding
+  `url = ws://192.168.1.33:8003/xiaozhi/v1/` and `version = 1`, with the
+  previous upstream `:8000` entry erased. No `token` key: the firmware only
+  writes a value that differs, and an unset key already reads as empty.
+- With the board's MAC bound to a non-default agent, the server logs
+  `device 28:84:85:49:8c:a8 (esp32-s3-touch-lcd-1.54, firmware 2.4.0)
+  resolved to agent kitchen`, so per-device binding works on real hardware.
+
+Not verified: the board actually opening the websocket. It only does so when
+a conversation starts, which needs the wake word or the PWR button, and
+`/xiaozhi/v1/` does not exist until M3. The NVS contents are the stronger
+evidence available at this milestone; the connection itself belongs to M3's
+checkpoint.
