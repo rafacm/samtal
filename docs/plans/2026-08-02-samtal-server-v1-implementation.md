@@ -554,10 +554,27 @@ Discoveries and smaller decisions:
   modules need them, and `test_two_personas.py` was rewired onto them.
   Same reasoning as M5's move of the local lane's `serve` and `speak`
   fixtures: it avoids cross-imports between test modules.
+- **The namespace guarantee had a hole, found in review.** Configuration
+  validates an `mcp_servers` entry name, and the device client
+  sanitized its dotted names, but the tool names a server listed went
+  out with only the prefix added. A third-party server may publish
+  anything, and both LLM APIs refuse names outside `[A-Za-z0-9_-]` or
+  longer than 64 characters, so one badly named tool nobody asked for
+  would have failed every later request rather than itself. A name
+  legal on its own could also overflow the cap once prefixed, which a
+  check on the unprefixed name would have missed. Both sources now
+  publish through one `tools/publish.py`: sanitize, drop what cannot be
+  expressed (with the reason logged), keep a reverse map, keep the
+  first of any collision. The lesson generalizes: "collisions are
+  impossible by construction" held for the part of the name we choose
+  and said nothing about the part the far side chooses.
 - **The stdio test server is four functions of FastMCP.** `secret_word`,
   `add`, `slow_answer`, and `always_fails` cover the answer path, the
   timeout path, and the error path, spawned with `sys.executable` so CI
-  needs nothing beyond the project's own dependencies.
+  needs nothing beyond the project's own dependencies. Two more are
+  registered by hand, `weather.today/v2` and a 60 character name,
+  because a Python function name cannot express what a real server is
+  free to publish.
 
 Verified on the dev machine: 308 unit tests and 18 integration tests
 green, ruff clean, and the opt-in local lane green on real engines. The
