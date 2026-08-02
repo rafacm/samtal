@@ -8,8 +8,16 @@ written inline.
 import re
 from contextvars import ContextVar
 from pathlib import Path
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -26,6 +34,10 @@ _SECRET_KEY_FRAGMENTS = ("secret", "token", "password", "api_key", "apikey", "cr
 
 PROVIDER_STAGES = ("llm", "asr", "tts", "vad")
 
+# Identifiers (provider names, agent names, references between them) must
+# survive stripping with at least one character.
+NonBlankStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
+
 
 class ServerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -40,7 +52,7 @@ class ProviderConfig(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    type: str
+    type: NonBlankStr
     api_key_env: str | None = None
 
     @model_validator(mode="after")
@@ -66,20 +78,20 @@ class ProviderConfig(BaseModel):
 class ProvidersConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    llm: dict[str, ProviderConfig] = Field(default_factory=dict)
-    asr: dict[str, ProviderConfig] = Field(default_factory=dict)
-    tts: dict[str, ProviderConfig] = Field(default_factory=dict)
-    vad: dict[str, ProviderConfig] = Field(default_factory=dict)
+    llm: dict[NonBlankStr, ProviderConfig] = Field(default_factory=dict)
+    asr: dict[NonBlankStr, ProviderConfig] = Field(default_factory=dict)
+    tts: dict[NonBlankStr, ProviderConfig] = Field(default_factory=dict)
+    vad: dict[NonBlankStr, ProviderConfig] = Field(default_factory=dict)
 
 
 class AgentConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     prompt: str = ""
-    llm: str | None = None
-    asr: str | None = None
-    tts: str | None = None
-    vad: str | None = None
+    llm: NonBlankStr | None = None
+    asr: NonBlankStr | None = None
+    tts: NonBlankStr | None = None
+    vad: NonBlankStr | None = None
 
 
 def normalize_mac(value: str) -> str:
@@ -124,9 +136,9 @@ class Config(BaseSettings):
 
     server: ServerConfig = Field(default_factory=ServerConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
-    agents: dict[str, AgentConfig] = Field(default_factory=dict)
-    devices: dict[str, str] = Field(default_factory=dict)
-    default_agent: str | None = None
+    agents: dict[NonBlankStr, AgentConfig] = Field(default_factory=dict)
+    devices: dict[str, NonBlankStr] = Field(default_factory=dict)
+    default_agent: NonBlankStr | None = None
 
     @field_validator("devices", mode="before")
     @classmethod

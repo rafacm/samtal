@@ -170,6 +170,31 @@ def test_env_reference_options_are_allowed() -> None:
     assert config.providers.llm["x"].options == {"client_secret_env": "MY_SECRET"}
 
 
+def test_blank_identifiers_are_rejected() -> None:
+    data = {
+        "providers": {"llm": {"": {"type": ""}}},
+        "agents": {"": {}},
+        "default_agent": "",
+    }
+    with pytest.raises(ConfigError) as excinfo:
+        load_config_from_data(data)
+    message = str(excinfo.value)
+    assert "providers.llm..[key]" in message
+    assert "providers.llm..type" in message
+    assert "agents..[key]" in message
+    assert "default_agent" in message
+
+
+def test_whitespace_provider_reference_is_rejected() -> None:
+    data = {
+        "providers": {"llm": {"claude": {"type": "anthropic"}}},
+        "agents": {"assistant": {"llm": "   "}},
+        "default_agent": "assistant",
+    }
+    with pytest.raises(ConfigError, match=r"agents\.assistant\.llm"):
+        load_config_from_data(data)
+
+
 def test_provider_options_pass_through() -> None:
     config = load_config_from_data(
         {"providers": {"llm": {"local": {"type": "openai_compatible", "model": "qwen3:8b"}}}}
