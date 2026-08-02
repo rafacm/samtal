@@ -1,0 +1,161 @@
+"""The device OTA/config endpoint.
+
+A device running stock xiaozhi firmware knows exactly one thing about its
+backend: the OTA URL held in NVS. On every boot it POSTs its system info
+there and takes the rest of its configuration from the reply, persisting it
+to NVS: the websocket URL with its token and protocol version, the wall
+clock, and whether a firmware update is waiting.
+
+samtal-server serves no firmware images, so the firmware section always
+answers "up to date" by echoing back the version the device reported. The
+reply also never carries an `activation` section, which is what keeps
+devices from ever being asked to activate.
+
+Upstream reference: `main/ota.cc` in 78/xiaozhi-esp32 parses this response.
+"""
+
+import logging
+import time
+from datetime import datetime
+from typing import Any
+
+from fastapi import APIRouter, Request, Response
+from fastapi.responses import JSONResponse, PlainTextResponse
+
+from samtal_server.config import Config
+
+logger = logging.getLogger(__name__)
+
+OTA_PATH = "/xiaozhi/ota/"
+WEBSOCKET_PATH = "/xiaozhi/v1/"
+
+# What a device reports when it tells us nothing usable. Any real version is
+# greater, so a device that hides its version is never offered an update.
+UNKNOWN_VERSION = "0.0.0"
+
+router = APIRouter()
+
+
+def websocket_url_for(config: Config, request: Request) -> str:
+    """The websocket URL to hand this device: the configured one, or the
+    address it just reached the OTA endpoint on."""
+    configured = config.server.websocket_url
+    if configured:
+        return configured
+    scheme = "wss" if request.url.scheme == "https" else "ws"
+    return f"{scheme}://{request.url.netloc}{WEBSOCKET_PATH}"
+
+
+def timezone_offset_minutes(config: Config) -> int:
+    """Minutes east of UTC for the device clock, from the config or from the
+    server's own current offset."""
+    configured = config.server.timezone_offset_minutes
+    if configured is not None:
+        return configured
+    offset = datetime.now().astimezone().utcoffset()
+    return round(offset.total_seconds() / 60) if offset is not None else 0
+
+
+def reported_version(payload: dict[str, Any]) -> str:
+    """The firmware version the device reports in `application.version`."""
+    application = payload.get("application")
+    if isinstance(application, dict):
+        version = application.get("version")
+        if isinstance(version, str) and version.strip():
+            return version.strip()
+    return UNKNOWN_VERSION
+
+
+def reported_board(payload: dict[str, Any]) -> str:
+    """The board type the device reports, for logging only."""
+    board = payload.get("board")
+    if isinstance(board, dict):
+        board_type = board.get("type")
+        if isinstance(board_type, str) and board_type.strip():
+            return board_type.strip()
+    return "unknown"
+
+
+@router.post(OTA_PATH)
+async def check_version(request: Request) -> Response:
+    config: Config = request.app.state.config
+
+    device_id = request.headers.get("device-id", "").strip()
+    client_id = request.headers.get("client-id", "").strip()
+    if not device_id:
+        return _bad_request("the Device-Id header is required and holds the device MAC")
+    if not client_id:
+        return _bad_request("the Client-Id header is required and holds the device UUID")
+
+    try:
+        agent = config.agent_for_device(device_id)
+    except ValueError as exc:
+        return _bad_request(f"Device-Id header: {exc}")
+
+    payload = await _read_json_object(request)
+    version = reported_version(payload)
+
+    if agent is None:
+        logger.warning(
+            "device %s (%s, firmware %s) has no agent: bind it under devices "
+            "or set default_agent",
+            device_id,
+            reported_board(payload),
+            version,
+        )
+    else:
+        logger.info(
+            "device %s (%s, firmware %s) resolved to agent %s",
+            device_id,
+            reported_board(payload),
+            version,
+            agent,
+        )
+
+    return JSONResponse(
+        {
+            "server_time": {
+                "timestamp": int(time.time() * 1000),
+                "timezone_offset": timezone_offset_minutes(config),
+            },
+            # No image to offer: echoing the reported version back is how the
+            # firmware reads "up to date", since it only updates for a
+            # strictly newer one.
+            "firmware": {"version": version, "url": ""},
+            "websocket": {
+                "url": websocket_url_for(config, request),
+                # Empty until M7 turns on device tokens. Sent rather than
+                # omitted so a token left in NVS by another server is cleared.
+                "token": "",
+                "version": config.server.protocol_version,
+            },
+        }
+    )
+
+
+@router.get(OTA_PATH)
+async def describe(request: Request) -> Response:
+    """A human check that the endpoint is reachable and pointed somewhere
+    sensible. Devices only ever POST here."""
+    config: Config = request.app.state.config
+    return PlainTextResponse(
+        f"samtal-server OTA endpoint.\n"
+        f"Devices are sent to {websocket_url_for(config, request)} "
+        f"(protocol version {config.server.protocol_version}).\n"
+    )
+
+
+def _bad_request(message: str) -> JSONResponse:
+    logger.warning("rejected OTA request: %s", message)
+    return JSONResponse({"error": message}, status_code=400)
+
+
+async def _read_json_object(request: Request) -> dict[str, Any]:
+    """The device's system info, or an empty mapping. Nothing in the reply
+    depends on it beyond the firmware version and logging, so a device that
+    sends a malformed body is still answered rather than turned away."""
+    try:
+        payload = await request.json()
+    except (ValueError, UnicodeDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
