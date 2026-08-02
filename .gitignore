@@ -12,6 +12,7 @@ models/
 
 # Instance-specific configuration stays out of the repository
 *.local.yaml
+.env
 
 # ESP-IDF build artifacts
 build/

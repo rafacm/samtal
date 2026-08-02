@@ -2,12 +2,19 @@ import argparse
 import sys
 
 import uvicorn
+from dotenv import find_dotenv, load_dotenv
 
 from samtal_server.config import ConfigError, load_config
 from samtal_server.config.loader import CONFIG_ENV_VAR
 
 
 def main() -> None:
+    # Read a .env file into the environment before anything looks at it, so
+    # it can carry SAMTAL_* overrides, SAMTAL_CONFIG, and provider secrets.
+    # Real environment variables keep priority over .env values. usecwd makes
+    # the search start from the invocation directory, not this file's.
+    load_dotenv(find_dotenv(usecwd=True))
+
     parser = argparse.ArgumentParser(prog="samtal-server")
     parser.add_argument(
         "--config",
