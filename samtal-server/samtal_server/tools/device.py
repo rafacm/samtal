@@ -20,7 +20,7 @@ from typing import Any
 
 from samtal_server.protocol import mcp
 from samtal_server.providers import ToolDef
-from samtal_server.tools import names
+from samtal_server.tools.publish import PublishedTools, publish
 
 logger = logging.getLogger(__name__)
 
@@ -49,19 +49,16 @@ class DeviceToolClient:
         self._client_version = client_version
         self._next_id = 0
         self._pending: dict[int, asyncio.Future[mcp.Response]] = {}
-        self._tools: list[ToolDef] = []
-        # Sanitized name back to the name the device listed, which is
-        # what a call has to carry.
-        self._originals: dict[str, str] = {}
+        self._published = PublishedTools(tools=[], originals={})
         self.discovered = False
 
     def tools(self) -> list[ToolDef]:
         """The device's tools under names the LLM APIs accept. Empty
         until discovery has completed."""
-        return list(self._tools)
+        return list(self._published.tools)
 
     def knows(self, name: str) -> bool:
-        return name in self._originals
+        return self._published.knows(name)
 
     async def discover(self) -> None:
         """Run the handshake and list the tools. Never raises: a device
@@ -94,41 +91,18 @@ class DeviceToolClient:
         return listed
 
     def _adopt(self, listed: Sequence[mcp.DeviceTool]) -> None:
-        """Publish the listed tools under sanitized names, dropping the
-        ones the LLM APIs cannot express. First listed wins a collision,
-        which makes the outcome the same on every run."""
-        tools: list[ToolDef] = []
-        originals: dict[str, str] = {}
-        for tool in listed:
-            name = names.sanitize(tool.name)
-            if len(name) > names.MAX_TOOL_NAME_LENGTH:
-                logger.warning(
-                    "%s: dropping device tool %s, its name is longer than %d characters",
-                    self._label,
-                    tool.name,
-                    names.MAX_TOOL_NAME_LENGTH,
-                )
-                continue
-            if name in originals:
-                logger.warning(
-                    "%s: dropping device tool %s, it sanitizes to %s like %s",
-                    self._label,
-                    tool.name,
-                    name,
-                    originals[name],
-                )
-                continue
-            originals[name] = tool.name
-            tools.append(
-                ToolDef(name=name, description=tool.description, input_schema=tool.input_schema)
-            )
-        self._tools = tools
-        self._originals = originals
+        """Publish the listed tools under names the LLM APIs accept.
+        Dotted device names always need this; the same rule covers the
+        MCP servers, so neither side can break a request with a name."""
+        self._published = publish(
+            ((tool.name, tool.description, tool.input_schema) for tool in listed),
+            label=self._label,
+        )
         logger.info(
             "%s: %d device tool(s): %s",
             self._label,
-            len(tools),
-            ", ".join(tool.name for tool in tools) or "none",
+            len(self._published.tools),
+            ", ".join(tool.name for tool in self._published.tools) or "none",
         )
 
     async def call(self, name: str, arguments: dict[str, Any]) -> tuple[str, bool]:
@@ -136,7 +110,7 @@ class DeviceToolClient:
         The caller bounds how long this may take: xiaozhi-sdk ignores a
         tools/call for a name it does not know without answering, so a
         call that is never answered has to be a timeout somewhere."""
-        original = self._originals.get(name)
+        original = self._published.original_for(name)
         if original is None:
             raise KeyError(f'the device has no tool called "{name}"')
         response = await self._request(

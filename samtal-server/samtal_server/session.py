@@ -634,7 +634,7 @@ class Session:
             return await self._device_tools.call(call.name, call.arguments)
         split = names.split_qualified(call.name)
         if split is not None and split[0] in self._mcp_servers:
-            return await self._mcp_servers.call(split[0], split[1], call.arguments)
+            return await self._mcp_servers.call(call.name, call.arguments)
         return f'there is no tool called "{call.name}"', True
 
     def _timeout_for(self, name: str) -> float:

@@ -29,6 +29,7 @@ from mcp.client.streamable_http import streamablehttp_client
 from samtal_server.config import Config, McpServerConfig, resolve_env_references
 from samtal_server.providers import ToolDef
 from samtal_server.tools import names
+from samtal_server.tools.publish import PublishedTools, publish
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +61,7 @@ class McpServerManager:
         self._env = resolve_env_references(f"{location}.env", config.env)
         self._headers = resolve_env_references(f"{location}.headers", config.headers)
         self._session: ClientSession | None = None
-        self._tools: list[ToolDef] = []
+        self._published = PublishedTools(tools=[], originals={})
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self._settled = asyncio.Event()
@@ -81,7 +82,7 @@ class McpServerManager:
         """This server's tools, under the names the model sees. Empty
         while the server is down, which is how an agent configured with
         an unreachable server still holds a conversation."""
-        return list(self._tools)
+        return list(self._published.tools)
 
     async def start(self) -> None:
         """Connect and list the tools, or log why not. Never raises: a
@@ -115,20 +116,23 @@ class McpServerManager:
                 async with asyncio.timeout(CONNECT_TIMEOUT_S):
                     session = await self._connect(stack)
                     listed = await session.list_tools()
-                self._tools = [
-                    ToolDef(
-                        name=names.qualified(self._name, tool.name),
-                        description=tool.description or "",
-                        input_schema=tool.inputSchema,
-                    )
-                    for tool in listed.tools
-                ]
+                # A third-party server's names are no more trustworthy
+                # than a device's: they publish through the same rule,
+                # or one badly named tool fails every later request.
+                self._published = publish(
+                    (
+                        (tool.name, tool.description or "", tool.inputSchema)
+                        for tool in listed.tools
+                    ),
+                    prefix=self._name,
+                    label=f"mcp server {self._name}",
+                )
                 self._session = session
                 logger.info(
                     "mcp server %s connected with %d tool(s): %s",
                     self._name,
-                    len(self._tools),
-                    ", ".join(tool.name for tool in self._tools) or "none",
+                    len(self._published.tools),
+                    ", ".join(tool.name for tool in self._published.tools) or "none",
                 )
                 self._settled.set()
                 await self._stop.wait()
@@ -140,7 +144,7 @@ class McpServerManager:
             )
         finally:
             self._session = None
-            self._tools = []
+            self._published = PublishedTools(tools=[], originals={})
             self._settled.set()
 
     async def _connect(self, stack: AsyncExitStack) -> ClientSession:
@@ -163,15 +167,20 @@ class McpServerManager:
         await session.initialize()
         return session
 
-    async def call(self, tool: str, arguments: dict[str, Any]) -> tuple[str, bool]:
-        """Run one of this server's tools, by its own name. A transport
-        failure marks the server down (so the next session revives it)
-        and is raised for the session to turn into an error result."""
+    async def call(self, published: str, arguments: dict[str, Any]) -> tuple[str, bool]:
+        """Run one of this server's tools, named as the model was given
+        it. The name goes back out as the server listed it, since what
+        the model saw may have been sanitized. A transport failure marks
+        the server down (so the next session revives it) and is raised
+        for the session to turn into an error result."""
         session = self._session
         if session is None:
             raise McpServerDown(f'MCP server "{self._name}" is not connected')
+        original = self._published.original_for(published)
+        if original is None:
+            raise KeyError(f'MCP server "{self._name}" has no tool called "{published}"')
         try:
-            result = await session.call_tool(tool, arguments)
+            result = await session.call_tool(original, arguments)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -183,7 +192,7 @@ class McpServerManager:
         """Unwind the connection so the next session reconnects it."""
         logger.warning("mcp server %s: dropping the connection after a failed call", self._name)
         self._session = None
-        self._tools = []
+        self._published = PublishedTools(tools=[], originals={})
         self._stop.set()
 
 
@@ -259,8 +268,12 @@ class McpServers:
         manager = self._managers.get(entry)
         return None if manager is None else manager.tool_timeout_s
 
-    async def call(self, entry: str, tool: str, arguments: dict[str, Any]) -> tuple[str, bool]:
-        manager = self._managers.get(entry)
+    async def call(self, published: str, arguments: dict[str, Any]) -> tuple[str, bool]:
+        """Run a tool under the qualified name the model was given. The
+        entry prefix says which server owns it, and the server maps the
+        rest back to whatever it actually listed."""
+        split = names.split_qualified(published)
+        manager = self._managers.get(split[0]) if split is not None else None
         if manager is None:
-            raise McpServerDown(f'no MCP server named "{entry}"')
-        return await manager.call(tool, arguments)
+            raise McpServerDown(f'no MCP server owns a tool called "{published}"')
+        return await manager.call(published, arguments)

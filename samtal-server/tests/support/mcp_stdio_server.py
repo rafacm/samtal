@@ -41,5 +41,21 @@ def always_fails() -> str:
     raise RuntimeError("this tool is broken on purpose")
 
 
+def _dotted() -> str:
+    """A name the MCP specification allows and both LLM APIs refuse."""
+    return "dotted answer"
+
+
+def _overlong() -> str:
+    """A name that is legal until an entry prefix is added to it."""
+    return "long answer"
+
+
+# Registered by hand rather than by decorator, because a function name
+# cannot express what a real third-party server is free to publish.
+server.add_tool(_dotted, name="weather.today/v2", description="A dotted, slashed name.")
+server.add_tool(_overlong, name="b" * 60, description="A name only just short enough.")
+
+
 if __name__ == "__main__":
     server.run()
