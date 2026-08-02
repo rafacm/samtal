@@ -1,5 +1,7 @@
 """The provider registry and the deterministic mock providers."""
 
+import struct
+
 import pytest
 
 from samtal_server.audio import rms
@@ -61,6 +63,28 @@ async def test_mock_llm_formats_the_last_user_turn_into_the_reply() -> None:
     ]
     reply = "".join([delta async for delta in llm.stream("prompt", turns)])
     assert reply == "You said two sugars."
+
+
+async def test_mock_llm_can_quote_the_prompt_it_was_given() -> None:
+    llm = build_provider("llm", "m", provider_config(type="mock", reply="{system}: {text}."))
+    reply = "".join([delta async for delta in llm.stream("POET", [Turn("user", "hi")])])
+    assert reply == "POET: hi."
+
+
+async def test_mock_tts_speaks_the_configured_tone() -> None:
+    for tone_hz in (440.0, 880.0):
+        tts = build_provider("tts", "m", provider_config(type="mock", tone_hz=tone_hz))
+        audio = b"".join([chunk async for chunk in tts.synthesize("A sentence to speak.")])
+        assert abs(tone_of(audio, tts.sample_rate) - tone_hz) < 10
+
+
+def tone_of(pcm: bytes, sample_rate: int) -> float:
+    """The frequency of a pure tone, from its zero crossings."""
+    samples = struct.unpack(f"<{len(pcm) // 2}h", pcm)
+    crossings = sum(
+        1 for a, b in zip(samples, samples[1:], strict=False) if (a < 0) != (b < 0)
+    )
+    return crossings / 2 / (len(samples) / sample_rate)
 
 
 async def test_mock_tts_speaks_longer_for_longer_text() -> None:
