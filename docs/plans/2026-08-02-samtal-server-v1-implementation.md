@@ -234,6 +234,24 @@ Resolution of plan open questions: Opus bindings (question 3) resolved to
 PyAV; the binary protocol version to advertise (question 4) resolved to 1.
 The ASR and TTS defaults (questions 1 and 2) remain open for M4.
 
+### Device checkpoint
+
+Not required by the plan until M4, but run anyway with the board on the
+desk (MAC `28:84:85:49:8c:a8`, NVS `ota_url` unchanged since M2):
+
+- A short PWR press opens the websocket that answered 403 throughout M2.
+  The server logs the accepted upgrade, then the completed hello: agent
+  resolved, protocol v1, 16000 Hz 60 ms frames in.
+- Speaking a short sentence and pausing produced the echo from the board's
+  speaker after roughly the endpointer's trailing-silence window, with
+  "(echo)" on the display. The server logged a 1.0 s utterance.
+- The echo is noticeably quieter than synthesized speech will be: it is
+  the board's own mic capture played back, so the level is the mic's, not
+  a TTS engine's. Nothing to fix in M3; M4's TTS does not inherit it.
+- After the reply the board returned to listening on its own (auto mode),
+  and the session closed cleanly when the conversation ended on the
+  device.
+
 ## M4 Conversation pipeline (PR #6)
 
 Deviations and additions relative to the plan:
@@ -327,21 +345,3 @@ VAD, faster-whisper `small` (CPU, int8), Ollama `gemma4:e4b` through the
   not what it replied, so the reply text could not be quoted from the
   server log. Fixed in the same change as this note: the reply is now
   logged when its sentences have been spoken.
-
-### Device checkpoint
-
-Not required by the plan until M4, but run anyway with the board on the
-desk (MAC `28:84:85:49:8c:a8`, NVS `ota_url` unchanged since M2):
-
-- A short PWR press opens the websocket that answered 403 throughout M2.
-  The server logs the accepted upgrade, then the completed hello: agent
-  resolved, protocol v1, 16000 Hz 60 ms frames in.
-- Speaking a short sentence and pausing produced the echo from the board's
-  speaker after roughly the endpointer's trailing-silence window, with
-  "(echo)" on the display. The server logged a 1.0 s utterance.
-- The echo is noticeably quieter than synthesized speech will be: it is
-  the board's own mic capture played back, so the level is the mic's, not
-  a TTS engine's. Nothing to fix in M3; M4's TTS does not inherit it.
-- After the reply the board returned to listening on its own (auto mode),
-  and the session closed cleanly when the conversation ended on the
-  device.
