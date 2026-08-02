@@ -8,6 +8,7 @@ from dotenv import find_dotenv, load_dotenv
 from samtal_server.app import create_app
 from samtal_server.config import ConfigError, load_config
 from samtal_server.config.loader import CONFIG_ENV_VAR
+from samtal_server.providers import ProviderError
 
 
 def main() -> None:
@@ -36,15 +37,16 @@ def main() -> None:
 
     try:
         config = load_config(args.config)
-    except ConfigError as exc:
+        # Pass the app object rather than an import string: the config just
+        # read (from --config, which reaches nothing else) has to be the one
+        # the app serves from.
+        app = create_app(config)
+    except (ConfigError, ProviderError) as exc:
         print(exc, file=sys.stderr)
         raise SystemExit(1) from None
 
-    # Pass the app object rather than an import string: the config just read
-    # (from --config, which reaches nothing else) has to be the one the app
-    # serves from.
     uvicorn.run(
-        create_app(config),
+        app,
         host=config.server.host,
         port=config.server.port,
     )

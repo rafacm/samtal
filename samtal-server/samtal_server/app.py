@@ -2,6 +2,7 @@ from fastapi import FastAPI
 
 from samtal_server import __version__, ota, ws
 from samtal_server.config import Config, load_config
+from samtal_server.providers import build_agent_providers
 
 
 def create_app(config: Config | None = None) -> FastAPI:
@@ -10,6 +11,10 @@ def create_app(config: Config | None = None) -> FastAPI:
     config itself (it also honours --config) and passes it in."""
     app = FastAPI(title="samtal-server", version=__version__)
     app.state.config = config if config is not None else load_config()
+    # Built here so a bad provider configuration (unknown type, bad option,
+    # missing extra, agent without a full pipeline) fails the boot rather
+    # than the first conversation.
+    app.state.agent_providers = build_agent_providers(app.state.config)
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:

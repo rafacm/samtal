@@ -9,9 +9,14 @@ from samtal_server.providers.base import (
     Turn,
     VadProvider,
 )
-from samtal_server.providers.registry import build_provider
+from samtal_server.providers.registry import (
+    AgentProviders,
+    build_agent_providers,
+    build_provider,
+)
 
 __all__ = [
+    "AgentProviders",
     "AsrProvider",
     "Endpointer",
     "LlmProvider",
@@ -19,5 +24,6 @@ __all__ = [
     "TtsProvider",
     "Turn",
     "VadProvider",
+    "build_agent_providers",
     "build_provider",
 ]

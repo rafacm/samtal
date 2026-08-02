@@ -42,8 +42,14 @@ DEVICE_HELLO = {
 }
 
 
+MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")}
+MOCK_AGENT = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
+
+
 def config_with_agent() -> Config:
-    return Config(agents={"assistant": {}}, default_agent="assistant")
+    return Config(
+        providers=MOCK_PROVIDERS, agents={"assistant": MOCK_AGENT}, default_agent="assistant"
+    )
 
 
 def connect(client: TestClient, device_id: str | None = DEVICE_MAC, version: int = 1):

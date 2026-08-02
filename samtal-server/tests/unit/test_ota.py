@@ -14,6 +14,9 @@ from samtal_server.app import create_app
 from samtal_server.config import Config
 from samtal_server.ota import OTA_PATH
 
+MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")}
+MOCK_AGENT = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
+
 DEVICE_MAC = "AA:BB:CC:DD:EE:FF"
 DEVICE_UUID = "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
 
@@ -106,7 +109,8 @@ def test_unknown_device_falls_back_to_the_default_agent(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     config = Config(
-        agents={"assistant": {}, "kitchen": {}},
+        providers=MOCK_PROVIDERS,
+        agents={"assistant": MOCK_AGENT, "kitchen": MOCK_AGENT},
         devices={"11:22:33:44:55:66": "kitchen"},
         default_agent="assistant",
     )
@@ -120,7 +124,8 @@ def test_bound_device_resolves_to_its_own_agent(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     config = Config(
-        agents={"assistant": {}, "kitchen": {}},
+        providers=MOCK_PROVIDERS,
+        agents={"assistant": MOCK_AGENT, "kitchen": MOCK_AGENT},
         devices={DEVICE_MAC.lower(): "kitchen"},
         default_agent="assistant",
     )
@@ -165,7 +170,8 @@ def test_dashed_and_uppercase_macs_resolve_the_same_device(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     config = Config(
-        agents={"kitchen": {}},
+        providers=MOCK_PROVIDERS,
+        agents={"kitchen": MOCK_AGENT},
         devices={"aa:bb:cc:dd:ee:ff": "kitchen"},
         default_agent="kitchen",
     )
