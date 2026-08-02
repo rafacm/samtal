@@ -7,6 +7,8 @@ the command that fixes them, because a silently skipped acceptance run
 checks nothing.
 """
 
+import asyncio
+import contextlib
 import importlib.util
 import json
 import os
@@ -14,6 +16,11 @@ import urllib.request
 from dataclasses import dataclass
 
 import pytest
+import uvicorn
+
+from samtal_server.app import create_app
+from samtal_server.audio.resample import Resampler
+from samtal_server.config import Config
 
 LANE_ENV = "SAMTAL_LOCAL_LANE"
 OLLAMA_ENV = "SAMTAL_LOCAL_OLLAMA"
@@ -37,6 +44,52 @@ def pytest_terminal_summary(terminalreporter, exitstatus, config) -> None:
         terminalreporter.write_sep("=", "local lane conversation")
         for line in _report:
             terminalreporter.write_line(line)
+
+
+@pytest.fixture(scope="session")
+def serve():
+    """The server runner, as a fixture so tests need no cross-imports:
+    `async with serve(config) as port: ...`."""
+    return _running
+
+
+@pytest.fixture(scope="session")
+def speak():
+    """The Piper synthesizer, likewise: `speak(text, voice, rate)`."""
+    return _piper_pcm
+
+
+@contextlib.asynccontextmanager
+async def _running(config: Config):
+    """A live server on an ephemeral port. Building the app builds the
+    providers, which is where model and voice downloads happen on a first
+    run, so starting can take minutes before it takes seconds."""
+    server = uvicorn.Server(
+        uvicorn.Config(create_app(config), host="127.0.0.1", port=0, log_level="warning")
+    )
+    task = asyncio.create_task(server.serve())
+    while not server.started:
+        if task.done():
+            task.result()
+        await asyncio.sleep(0.01)
+    try:
+        yield server.servers[0].sockets[0].getsockname()[1]
+    finally:
+        server.should_exit = True
+        await task
+
+
+def _piper_pcm(text: str, voice: str, sample_rate: int) -> bytes:
+    """`text` spoken by a Piper voice, resampled to the device mic rate.
+    This is how the lane puts a real spoken question into the pipeline."""
+    from piper import PiperVoice
+
+    from samtal_server.providers.piper_tts import DEFAULT_DOWNLOAD_DIR, ensure_voice
+
+    loaded = PiperVoice.load(ensure_voice(voice, DEFAULT_DOWNLOAD_DIR))
+    pcm = b"".join(chunk.audio_int16_bytes for chunk in loaded.synthesize(text))
+    resampler = Resampler(loaded.config.sample_rate, sample_rate)
+    return resampler.process(pcm) + resampler.flush()
 
 
 @dataclass(frozen=True)

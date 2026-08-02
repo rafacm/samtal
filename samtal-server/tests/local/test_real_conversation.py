@@ -19,11 +19,8 @@ import math
 
 import numpy as np
 import pytest
-import uvicorn
 from xiaozhi_sdk import XiaoZhiWebsocket
 
-from samtal_server.app import create_app
-from samtal_server.audio.resample import Resampler
 from samtal_server.config import Config
 
 DEVICE_MAC = "aa:bb:cc:dd:ee:02"
@@ -41,7 +38,7 @@ PROMPT = (
 
 
 @pytest.fixture
-async def server_port(local_lane):
+async def server_port(local_lane, serve):
     config = Config(
         providers={
             "llm": {
@@ -66,35 +63,14 @@ async def server_port(local_lane):
         },
         default_agent="assistant",
     )
-    # create_app builds the providers: this is where model and voice
+    # Serving builds the providers: this is where model and voice
     # downloads happen on a first run.
-    server = uvicorn.Server(
-        uvicorn.Config(create_app(config), host="127.0.0.1", port=0, log_level="warning")
-    )
-    task = asyncio.create_task(server.serve())
-    while not server.started:
-        if task.done():
-            task.result()
-        await asyncio.sleep(0.01)
-    yield server.servers[0].sockets[0].getsockname()[1]
-    server.should_exit = True
-    await task
-
-
-def question_pcm() -> bytes:
-    """The question, spoken by Piper and resampled to the mic rate."""
-    from piper import PiperVoice
-
-    from samtal_server.providers.piper_tts import DEFAULT_DOWNLOAD_DIR, ensure_voice
-
-    voice = PiperVoice.load(ensure_voice(VOICE, DEFAULT_DOWNLOAD_DIR))
-    pcm = b"".join(chunk.audio_int16_bytes for chunk in voice.synthesize(QUESTION))
-    resampler = Resampler(voice.config.sample_rate, SAMPLE_RATE)
-    return resampler.process(pcm) + resampler.flush()
+    async with serve(config) as port:
+        yield port
 
 
 async def test_a_real_conversation_gets_a_coherent_spoken_reply(
-    server_port: int, local_lane, conversation_report: list[str]
+    server_port: int, local_lane, speak, conversation_report: list[str]
 ) -> None:
     events: list[dict] = []
     arrived_at: dict[int, float] = {}
@@ -114,7 +90,7 @@ async def test_a_real_conversation_gets_a_coherent_spoken_reply(
     )
     try:
         assert await client.init_connection(DEVICE_MAC)
-        pcm = question_pcm()
+        pcm = speak(QUESTION, VOICE, SAMPLE_RATE)
         for start in range(0, len(pcm), FRAME_BYTES):
             assert await client.send_audio(pcm[start : start + FRAME_BYTES])
         question_done = loop.time()
