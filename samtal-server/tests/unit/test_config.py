@@ -174,6 +174,46 @@ def test_agent_referencing_unknown_provider_lists_defined_ones() -> None:
         load_config_from_data(data)
 
 
+def test_agent_defaults_fill_in_the_stages_an_agent_leaves_out() -> None:
+    data = {
+        "providers": {
+            "llm": {"claude": {"type": "anthropic"}},
+            "tts": {"alto": {"type": "mock"}, "tenor": {"type": "mock"}},
+        },
+        "agent_defaults": {"llm": "claude", "tts": "alto"},
+        "agents": {"poet": {"tts": "tenor"}, "tutor": {}},
+        "default_agent": "tutor",
+    }
+    config = load_config_from_data(data)
+    assert config.provider_for_agent("poet", "llm") == ("claude", "agent_defaults.llm")
+    assert config.provider_for_agent("poet", "tts") == ("tenor", "agents.poet.tts")
+    assert config.provider_for_agent("tutor", "tts") == ("alto", "agent_defaults.tts")
+    # A stage neither layer names resolves to nothing, which is the boot
+    # completeness check's problem, not the schema's.
+    assert config.provider_for_agent("tutor", "vad") == (None, "agent_defaults.vad")
+
+
+def test_a_wrong_agent_default_is_reported_once_against_its_own_layer() -> None:
+    data = {
+        "providers": {"llm": {"claude": {"type": "anthropic"}}},
+        "agent_defaults": {"llm": "claud"},
+        "agents": {"poet": {}, "tutor": {}},
+        "default_agent": "poet",
+    }
+    with pytest.raises(ConfigError) as excinfo:
+        load_config_from_data(data)
+    message = str(excinfo.value)
+    assert 'agent_defaults.llm: unknown llm provider "claud" (defined: claude)' in message
+    assert "agents.poet" not in message
+
+
+def test_agent_defaults_reject_a_prompt() -> None:
+    # A prompt is a persona's identity; inheriting one silently would make
+    # two agents the same agent.
+    with pytest.raises(ConfigError, match="agent_defaults.prompt"):
+        load_config_from_data({"agent_defaults": {"prompt": "You are helpful."}})
+
+
 def test_inline_secret_is_rejected_with_env_hint() -> None:
     data = {"providers": {"llm": {"claude": {"type": "anthropic", "api_key": "sk-123"}}}}
     with pytest.raises(ConfigError, match="api_key_env"):
