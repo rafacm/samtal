@@ -34,10 +34,11 @@ The design premise is a **thin device and a smart server**: the firmware's only 
 
 Any board supported by xiaozhi-esp32 can work; these are the ones samtal targets and tests:
 
-| Board | Display | Audio | Status |
-| --- | --- | --- | --- |
-| [Waveshare ESP32-S3-Touch-LCD-1.54](https://www.waveshare.com/wiki/ESP32-S3-Touch-LCD-1.54) | 240×240 LCD, touch | dual-mic with hardware echo cancellation | **working** (upstream firmware) |
-| [Waveshare ESP32-S3-ePaper-1.54](https://www.waveshare.com/wiki/ESP32-S3-ePaper-1.54) | 200×200 e-paper | single mic | planned 🚧 |
+| Board | Display | Audio | Links | Status |
+| --- | --- | --- | --- | --- |
+| Waveshare ESP32-S3-Touch-LCD-1.54 | 240×240 LCD, touch | dual-mic with hardware echo cancellation | [product](https://www.waveshare.com/esp32-s3-lcd-1.54.htm) · [doc](https://docs.waveshare.com/ESP32-S3-Touch-LCD-1.54) | **working** (upstream firmware) |
+| Waveshare ESP32-S3-ePaper-1.54 | 200×200 e-paper | single mic | [product](https://www.waveshare.com/esp32-s3-epaper-1.54.htm) · [doc](https://docs.waveshare.com/ESP32-S3-ePaper-1.54) | planned 🚧 |
+| Waveshare ESP32-S3-Touch-AMOLED-2.16 | 480×480 AMOLED, touch | dual-mic with hardware echo cancellation | [product](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm) · [doc](https://docs.waveshare.com/ESP32-S3-Touch-AMOLED-2.16) | planned 🚧 |
 
 ## Getting Started
 

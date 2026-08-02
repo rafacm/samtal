@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-02
+
+### Added
+
+- Waveshare ESP32-S3-Touch-AMOLED-2.16 (480×480 AMOLED, dual-mic AEC) listed
+  as a planned target board.
+
+### Changed
+
+- Hardware tables now link each board's product page and technical
+  documentation ("doc").
+
 ## 2026-08-01
 
 ### Changed
