@@ -27,6 +27,8 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 - Hardware tables now link each board's product page and technical
   documentation ("doc").
+- The logo is a single transparent PNG of the original artwork
+  (`assets/samtal-logo.png`); the traced SVG variant is removed.
 
 ## 2026-08-01
 
