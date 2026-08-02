@@ -1,9 +1,12 @@
 """The xiaozhi-sdk device simulator against a live server.
 
-This is the plan's M3 acceptance: the sdk discovers the websocket URL
-through the OTA endpoint, completes the hello exchange, and round-trips
-audio. Since the sdk encodes and decodes with opuslib, the run also
-cross-validates the server's PyAV codec against an independent one.
+This is the plan's M4 acceptance: the sdk discovers the websocket URL
+through the OTA endpoint, completes the hello exchange, speaks an
+utterance, and gets a coherent spoken reply from the conversation
+pipeline running on the mock providers (an `stt` transcript, a
+sentence with the reply text, and the spoken audio). Since the sdk
+encodes and decodes with opuslib, the run also cross-validates the
+server's PyAV codec against an independent one.
 """
 
 import asyncio
@@ -26,11 +29,18 @@ SAMPLE_RATE = 16000
 FRAME_MS = 60
 FRAME_BYTES = SAMPLE_RATE * FRAME_MS // 1000 * 2
 
+# The mock TTS speaks 40 ms per character with a 240 ms floor, at 24 kHz.
+EXPECTED_REPLY = "You said hello."
+EXPECTED_REPLY_S = 40 * len(EXPECTED_REPLY) / 1000
+
 
 @pytest.fixture
 async def server_port():
-    config = Config(providers=MOCK_PROVIDERS,
-        agents={"assistant": MOCK_AGENT}, default_agent="assistant")
+    config = Config(
+        providers=MOCK_PROVIDERS,
+        agents={"assistant": MOCK_AGENT},
+        default_agent="assistant",
+    )
     server = uvicorn.Server(
         uvicorn.Config(create_app(config), host="127.0.0.1", port=0, log_level="warning")
     )
@@ -52,7 +62,7 @@ def speech_pcm(duration_ms: int) -> bytes:
     )
 
 
-async def test_the_simulator_completes_hello_and_hears_its_echo(server_port: int) -> None:
+async def test_a_scripted_conversation_gets_a_spoken_reply(server_port: int) -> None:
     events: list[dict] = []
     reply_finished = asyncio.Event()
 
@@ -81,14 +91,22 @@ async def test_the_simulator_completes_hello_and_hears_its_echo(server_port: int
     finally:
         await client.close()
 
+    # The pipeline announced what it heard and what it answered.
+    (stt,) = [e for e in events if e.get("type") == "stt"]
+    assert stt["text"] == "hello"
     tts_states = [e["state"] for e in events if e.get("type") == "tts"]
     assert tts_states[0] == "start"
-    assert "sentence_start" in tts_states
     assert tts_states[-1] == "stop"
+    spoken = [
+        e["text"] for e in events if e.get("type") == "tts" and e["state"] == "sentence_start"
+    ]
+    assert spoken == [EXPECTED_REPLY]
 
-    # The echo, decoded by the sdk's own opuslib decoder.
-    echoed = np.concatenate(list(client.output_audio_queue))
-    duration_s = echoed.size / SAMPLE_RATE
-    assert 0.9 <= duration_s <= 4.0
-    tone_rms = math.sqrt(float(np.mean(echoed.astype(np.float64) ** 2)))
+    # The spoken reply, decoded by the sdk's own opuslib decoder. The sdk
+    # decodes at the rate it was constructed with rather than the 24 kHz
+    # the server hello announced, so assert on a rate-agnostic window.
+    audio = np.concatenate(list(client.output_audio_queue))
+    duration_s = audio.size / SAMPLE_RATE
+    assert EXPECTED_REPLY_S / 2 <= duration_s <= EXPECTED_REPLY_S * 3
+    tone_rms = math.sqrt(float(np.mean(audio.astype(np.float64) ** 2)))
     assert tone_rms > 500
