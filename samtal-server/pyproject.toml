@@ -44,3 +44,10 @@ select = ["E", "F", "W", "I", "UP", "B"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    "error",
+    # opuslib, the codec inside the xiaozhi-sdk test simulator (the server
+    # itself uses PyAV), compiles with an `is not 0` identity comparison.
+    # Unmaintained upstream, so the warning is not going away.
+    "ignore:\"is not\" with 'int' literal:SyntaxWarning",
+]
