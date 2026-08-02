@@ -10,6 +10,9 @@ __pycache__/
 models/
 *.pt
 
+# Instance-specific configuration stays out of the repository
+*.local.yaml
+
 # ESP-IDF build artifacts
 build/
 sdkconfig.old
