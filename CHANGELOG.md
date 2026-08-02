@@ -19,6 +19,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 - Workflow and documentation conventions in `AGENTS.md`: feature branches
   with rebase-only PRs for code work, dated plan files in `docs/plans/`,
   feature docs in `docs/features/`, and `gh` API tips.
+- M0 skeleton for samtal-server: uv-managed Python 3.12 package with FastAPI
+  app and `/healthz`, unit and integration test lanes, ruff, and the
+  folder-scoped GitHub Actions workflow.
 
 ### Changed
 

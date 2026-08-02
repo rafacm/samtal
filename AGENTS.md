@@ -18,6 +18,23 @@ display) talk to a Python conversation server over WebSocket. It builds on
 - `vendor/`: reference clones of the upstream repos. Not committed; recreate
   with the clone commands at the top of `docs/xiaozhi-notes.md`.
 
+## Commands
+
+All samtal-server commands run from the `samtal-server/` directory. Use `uv`
+for Python; never `pip install` directly.
+
+```bash
+uv sync                          # Install/update dependencies
+uv run samtal-server             # Run the server (SAMTAL_HOST/SAMTAL_PORT env)
+uv run pytest tests/unit -q      # Unit tests
+uv run pytest tests/integration -q  # Integration tests
+uv run ruff check .              # Lint
+```
+
+CI (`.github/workflows/samtal-server.yml`) runs the same lint, unit, and
+integration steps, and only triggers on changes under `samtal-server/` or to
+the workflow file itself.
+
 ## Workflow
 
 - Before beginning any new work: verify the current branch is `main`
@@ -29,6 +46,10 @@ display) talk to a Python conversation server over WebSocket. It builds on
   changes may go straight to `main`.
 - The repository allows rebase merges only; squash and merge commits are
   disabled.
+- Commit in small, human-digestible units: one logical change per commit
+  (e.g. package skeleton, tests, and CI workflow are three commits, not
+  one). Every commit has an imperative title of roughly 50 characters and a
+  body explaining the what and the why.
 
 ## Documentation process
 

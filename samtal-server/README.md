@@ -34,6 +34,16 @@ device simulator, so CI holds real conversations without hardware. The wire
 protocol is kept isolated behind a small interface, separate from the
 conversation pipeline.
 
+## Development
+
+```bash
+uv sync                             # install dependencies
+uv run samtal-server                # run the server
+uv run pytest tests/unit -q         # unit tests
+uv run pytest tests/integration -q  # integration tests
+uv run ruff check .                 # lint
+```
+
 ## Status
 
 Stack decided, implementation starting; the v1 plan lives at
