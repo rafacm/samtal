@@ -107,26 +107,34 @@ class MockAsr(AsrProvider):
 
 class MockLlm(LlmProvider):
     """Formats the last user turn into the configured reply template,
-    streamed word by word so sentence assembly is exercised."""
+    streamed word by word so sentence assembly is exercised. The template
+    takes `{text}` (the last user turn) and `{system}` (the prompt the
+    session handed over), the latter so a test can prove a reply came
+    from one agent's own prompt and not another's."""
 
     def __init__(self, reply: str) -> None:
         self._reply = reply
 
     async def stream(self, system: str, turns: Sequence[Turn]) -> AsyncIterator[str]:
         last_user = next((turn.content for turn in reversed(turns) if turn.role == "user"), "")
-        reply = self._reply.format(text=last_user)
+        reply = self._reply.format(text=last_user, system=system)
         for index, word in enumerate(reply.split(" ")):
             yield word if index == 0 else " " + word
 
 
 class MockTts(TtsProvider):
     """Speaks a fixed tone; the duration follows the text length, so a
-    test can tell replies apart by ear (or by sample count)."""
+    test can tell replies apart by ear (or by sample count). The tone
+    frequency is an option, which is how two mock "voices" are told
+    apart in received audio."""
 
-    def __init__(self, sample_rate: int, ms_per_char: float, min_ms: float) -> None:
+    def __init__(
+        self, sample_rate: int, ms_per_char: float, min_ms: float, tone_hz: float = TONE_HZ
+    ) -> None:
         self.sample_rate = sample_rate
         self._ms_per_char = ms_per_char
         self._min_ms = min_ms
+        self._tone_hz = tone_hz
 
     async def synthesize(self, text: str) -> AsyncIterator[bytes]:
         duration_ms = max(self._min_ms, self._ms_per_char * len(text))
@@ -139,7 +147,7 @@ class MockTts(TtsProvider):
                     "<h",
                     int(
                         TONE_AMPLITUDE
-                        * math.sin(2 * math.pi * TONE_HZ * (start + n) / self.sample_rate)
+                        * math.sin(2 * math.pi * self._tone_hz * (start + n) / self.sample_rate)
                     ),
                 )
                 for n in range(count)
@@ -177,6 +185,7 @@ def build_tts(label: str, config: ProviderConfig) -> MockTts:
         sample_rate=options.integer("sample_rate", 24_000),
         ms_per_char=options.number("ms_per_char", 40.0),
         min_ms=options.number("min_ms", 240.0),
+        tone_hz=options.number("tone_hz", TONE_HZ),
     )
     options.finish()
     return provider
