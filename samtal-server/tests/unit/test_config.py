@@ -44,6 +44,33 @@ def test_no_config_gives_defaults() -> None:
     assert config.default_agent is None
 
 
+def test_ota_server_settings_have_defaults() -> None:
+    config = load_config()
+    assert config.server.websocket_url is None
+    assert config.server.protocol_version == 1
+    assert config.server.timezone_offset_minutes is None
+
+
+def test_websocket_url_is_accepted_and_stripped() -> None:
+    config = load_config_from_data(
+        {"server": {"websocket_url": "  ws://192.168.1.10:8003/xiaozhi/v1/  "}}
+    )
+    assert config.server.websocket_url == "ws://192.168.1.10:8003/xiaozhi/v1/"
+
+
+@pytest.mark.parametrize("url", ["http://host/xiaozhi/v1/", "192.168.1.10:8003", ""])
+def test_non_websocket_url_is_rejected(url: str) -> None:
+    with pytest.raises(ConfigError) as excinfo:
+        load_config_from_data({"server": {"websocket_url": url}})
+    assert "must start with ws:// or wss://" in str(excinfo.value)
+
+
+def test_protocol_version_outside_the_known_range_is_rejected() -> None:
+    with pytest.raises(ConfigError) as excinfo:
+        load_config_from_data({"server": {"protocol_version": 4}})
+    assert "server.protocol_version" in str(excinfo.value)
+
+
 def test_config_path_from_environment(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

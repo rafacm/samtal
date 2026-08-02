@@ -16,6 +16,19 @@
 server:
   host: 0.0.0.0
   port: 8003
+  # The websocket URL the OTA endpoint hands to devices. Commented out here
+  # because the default (derive it from the address the device reached the
+  # OTA endpoint on) is what a plain LAN deployment wants. Set it when the
+  # server sits behind a proxy or a name the request headers do not carry.
+  # websocket_url: ws://192.168.1.10:8003/xiaozhi/v1/
+  #
+  # Binary protocol version advertised to devices: 1 is bare Opus frames,
+  # 2 and 3 add timestamp headers.
+  # protocol_version: 1
+  #
+  # Minutes east of UTC, sent so the device can set its clock to local time.
+  # Defaults to the server's own current offset.
+  # timezone_offset_minutes: 120
 
 # Providers are named so agents can reference them. Every entry needs a
 # `type`; the remaining keys are options for that provider implementation.
