@@ -45,6 +45,32 @@ class ServerConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = Field(default=8003, ge=1, le=65535)
 
+    # The websocket URL handed to devices by the OTA endpoint. Left unset it
+    # is derived from the address the device reached the OTA endpoint on,
+    # which is right for a plain LAN deployment; set it explicitly when the
+    # server sits behind a proxy or a name the request headers do not carry.
+    websocket_url: str | None = None
+
+    # Binary protocol version advertised to devices. The firmware defaults to
+    # 1 (bare Opus frames); 2 and 3 add timestamp headers.
+    protocol_version: int = Field(default=1, ge=1, le=3)
+
+    # Minutes east of UTC, sent so the device can set its clock to local time.
+    # Left unset the server's own current offset is used.
+    timezone_offset_minutes: int | None = Field(default=None, ge=-1440, le=1440)
+
+    @field_validator("websocket_url")
+    @classmethod
+    def _check_websocket_scheme(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        url = value.strip()
+        if not url.startswith(("ws://", "wss://")):
+            raise ValueError(
+                f'"{value}" is not a websocket URL; it must start with ws:// or wss://'
+            )
+        return url
+
 
 class ProviderConfig(BaseModel):
     """One provider entry. Options beyond `type` are passed through to the
