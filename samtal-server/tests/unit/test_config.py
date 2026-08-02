@@ -33,7 +33,7 @@ def test_example_config_parses() -> None:
     assert config.agents["assistant"].llm == "claude"
     assert config.providers.llm["claude"].type == "anthropic"
     assert config.providers.llm["claude"].api_key_env == "ANTHROPIC_API_KEY"
-    assert config.devices["aa:bb:cc:dd:ee:ff"] == "assistant"
+    assert config.devices["aa:bb:cc:dd:ee:ff"] == ["assistant"]
 
 
 def test_no_config_gives_defaults() -> None:
@@ -277,9 +277,59 @@ def test_device_macs_are_normalized() -> None:
             "devices": {"AA-BB-CC-DD-EE-FF": "assistant"},
         }
     )
-    assert config.devices == {"aa:bb:cc:dd:ee:ff": "assistant"}
-    assert config.agent_for_device("AA:BB:CC:DD:EE:FF") == "assistant"
-    assert config.agent_for_device("11:22:33:44:55:66") == "assistant"
+    assert config.devices == {"aa:bb:cc:dd:ee:ff": ["assistant"]}
+    assert config.agents_for_device("AA:BB:CC:DD:EE:FF") == ["assistant"]
+    assert config.agents_for_device("11:22:33:44:55:66") == ["assistant"]
+
+
+def test_a_device_can_be_bound_to_several_agents() -> None:
+    config = load_config_from_data(
+        {
+            "agents": {"poet": {}, "tutor": {}, "kitchen": {}},
+            "default_agent": "kitchen",
+            "devices": {"aa:bb:cc:dd:ee:ff": ["poet", "tutor"]},
+        }
+    )
+    # The first entry is the agent a conversation starts on; the rest are
+    # what M6's switch_agent will be allowed to reach.
+    assert config.agents_for_device("aa:bb:cc:dd:ee:ff") == ["poet", "tutor"]
+    assert config.agents_for_device("11:22:33:44:55:66") == ["kitchen"]
+
+
+def test_a_device_resolves_to_nothing_when_no_agent_is_configured() -> None:
+    # Defining agents forces a default_agent, so this is the empty
+    # configuration: the case the websocket session turns away with 1008.
+    assert load_config_from_data({}).agents_for_device("11:22:33:44:55:66") == []
+
+
+def test_a_device_bound_to_no_agent_is_rejected() -> None:
+    data = {
+        "agents": {"poet": {}},
+        "default_agent": "poet",
+        "devices": {"aa:bb:cc:dd:ee:ff": []},
+    }
+    with pytest.raises(ConfigError, match="at least one agent"):
+        load_config_from_data(data)
+
+
+def test_an_agent_listed_twice_for_one_device_is_rejected() -> None:
+    data = {
+        "agents": {"poet": {}},
+        "default_agent": "poet",
+        "devices": {"aa:bb:cc:dd:ee:ff": ["poet", "poet"]},
+    }
+    with pytest.raises(ConfigError, match='agent "poet" is listed more than once'):
+        load_config_from_data(data)
+
+
+def test_an_unknown_agent_in_a_device_list_is_rejected() -> None:
+    data = {
+        "agents": {"poet": {}},
+        "default_agent": "poet",
+        "devices": {"aa:bb:cc:dd:ee:ff": ["poet", "ghost"]},
+    }
+    with pytest.raises(ConfigError, match=r'devices\.aa:bb:cc:dd:ee:ff: agent "ghost"'):
+        load_config_from_data(data)
 
 
 def test_invalid_mac_is_rejected() -> None:

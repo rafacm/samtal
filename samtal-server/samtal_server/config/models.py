@@ -175,20 +175,22 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     agent_defaults: AgentDefaults = Field(default_factory=AgentDefaults)
     agents: dict[NonBlankStr, AgentConfig] = Field(default_factory=dict)
-    devices: dict[str, NonBlankStr] = Field(default_factory=dict)
+    # One device may be bound to several agents; the value is written as a
+    # single name or a list, and always stored as a list.
+    devices: dict[str, list[NonBlankStr]] = Field(default_factory=dict)
     default_agent: NonBlankStr | None = None
 
     @field_validator("devices", mode="before")
     @classmethod
-    def _normalize_device_macs(cls, value: object) -> object:
+    def _normalize_device_bindings(cls, value: object) -> object:
         if not isinstance(value, dict):
             return value
-        normalized: dict[str, str] = {}
-        for mac, agent in value.items():
+        normalized: dict[str, object] = {}
+        for mac, bound in value.items():
             key = normalize_mac(str(mac))
             if key in normalized:
                 raise ValueError(f'device "{mac}" appears more than once (as {key})')
-            normalized[key] = agent
+            normalized[key] = _binding_as_list(key, bound)
         return normalized
 
     @model_validator(mode="after")
@@ -206,9 +208,10 @@ class Config(BaseSettings):
                 + (f" (defined: {', '.join(sorted(self.agents))})" if self.agents else "")
             )
 
-        for mac, agent in self.devices.items():
-            if agent not in self.agents:
-                problems.append(f'devices.{mac}: agent "{agent}" is not a defined agent')
+        for mac, bound in self.devices.items():
+            for agent in bound:
+                if agent not in self.agents:
+                    problems.append(f'devices.{mac}: agent "{agent}" is not a defined agent')
 
         # Each layer's own references are checked where they are written,
         # so a wrong default is reported once as agent_defaults.llm rather
@@ -245,7 +248,30 @@ class Config(BaseSettings):
             return own, f"agents.{agent}.{stage}"
         return getattr(self.agent_defaults, stage), f"agent_defaults.{stage}"
 
-    def agent_for_device(self, mac: str) -> str | None:
-        """Resolve the agent name bound to a device MAC, falling back to
-        default_agent for unknown devices."""
-        return self.devices.get(normalize_mac(mac), self.default_agent)
+    def agents_for_device(self, mac: str) -> list[str]:
+        """The agents a device may talk to, the first of them the one a
+        conversation starts on. Unknown devices fall back to default_agent;
+        a device with no binding and no default_agent resolves to nothing,
+        and is turned away."""
+        bound = self.devices.get(normalize_mac(mac))
+        if bound:
+            return list(bound)
+        return [self.default_agent] if self.default_agent is not None else []
+
+
+def _binding_as_list(mac: str, bound: object) -> object:
+    """A device binding written as one agent name or as a list, normalized
+    to a list. Anything else is left for pydantic to report."""
+    names = [bound] if isinstance(bound, str) else bound
+    if not isinstance(names, list):
+        return bound
+    if not names:
+        raise ValueError(f"devices.{mac}: bind the device to at least one agent")
+    seen: set[str] = set()
+    for name in names:
+        if not isinstance(name, str):
+            continue
+        if name.strip() in seen:
+            raise ValueError(f'devices.{mac}: agent "{name.strip()}" is listed more than once')
+        seen.add(name.strip())
+    return names
