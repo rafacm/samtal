@@ -1,13 +1,31 @@
-import os
+import argparse
+import sys
 
 import uvicorn
 
+from samtal_server.config import ConfigError, load_config
+from samtal_server.config.loader import CONFIG_ENV_VAR
+
 
 def main() -> None:
+    parser = argparse.ArgumentParser(prog="samtal-server")
+    parser.add_argument(
+        "--config",
+        metavar="PATH",
+        help=f"path to the YAML config file (default: ${CONFIG_ENV_VAR})",
+    )
+    args = parser.parse_args()
+
+    try:
+        config = load_config(args.config)
+    except ConfigError as exc:
+        print(exc, file=sys.stderr)
+        raise SystemExit(1) from None
+
     uvicorn.run(
         "samtal_server.app:app",
-        host=os.environ.get("SAMTAL_HOST", "0.0.0.0"),
-        port=int(os.environ.get("SAMTAL_PORT", "8003")),
+        host=config.server.host,
+        port=config.server.port,
     )
 
 
