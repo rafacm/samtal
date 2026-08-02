@@ -47,13 +47,18 @@ class MockVad(VadProvider):
 
 
 class MockAsr(AsrProvider):
-    """Answers the configured transcript for any non-empty utterance."""
+    """Answers the configured transcript for any non-empty utterance.
+    An `{ms}` in the text becomes the utterance duration, so a test can
+    see how much audio actually reached the pipeline."""
 
     def __init__(self, text: str) -> None:
         self._text = text
 
     async def transcribe(self, pcm: bytes, sample_rate: int) -> str:
-        return self._text if pcm else ""
+        if not pcm:
+            return ""
+        duration_ms = len(pcm) // 2 * 1000 // sample_rate
+        return self._text.replace("{ms}", str(duration_ms))
 
 
 class MockLlm(LlmProvider):

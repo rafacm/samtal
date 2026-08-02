@@ -127,6 +127,12 @@ def server_hello(session_id: str, audio_params: AudioParams) -> str:
     )
 
 
+def stt_message(session_id: str, text: str) -> str:
+    """The transcription of what the user said, which the device shows
+    on its display while the reply is being prepared."""
+    return json.dumps({"session_id": session_id, "type": "stt", "text": text})
+
+
 def tts_message(
     session_id: str,
     state: Literal["start", "stop", "sentence_start"],

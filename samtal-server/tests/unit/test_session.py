@@ -3,10 +3,15 @@
 The client side here plays the device: same headers as `Ota::SetupHttp`
 sets, same hello as `WebsocketProtocol::OpenAudioChannel` sends, and the
 same Opus codec the server uses, running the client's leg of the audio.
+The pipeline behind the session is the mock providers: the ASR answers
+a configured transcript (`{ms}` becomes the utterance duration), the
+LLM replies "You said <transcript>.", and the TTS speaks a tone whose
+length follows the text.
 """
 
 import json
 import math
+import re
 import struct
 
 import pytest
@@ -25,8 +30,13 @@ DEVICE_MAC = "AA:BB:CC:DD:EE:FF"
 DEVICE_UUID = "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
 
 SAMPLE_RATE = 16000
+OUTPUT_RATE = 24000
 FRAME_MS = 60
 FRAME_BYTES = SAMPLE_RATE * FRAME_MS // 1000 * 2
+
+# The mock TTS formula, for computing expected reply durations.
+TTS_MS_PER_CHAR = 40
+TTS_MIN_MS = 240
 
 DEVICE_HELLO = {
     "type": "hello",
@@ -42,13 +52,19 @@ DEVICE_HELLO = {
 }
 
 
-MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")}
-MOCK_AGENT = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
-
-
-def config_with_agent() -> Config:
+def config_with_agent(asr_text: str = "hello", llm_reply: str | None = None) -> Config:
+    llm: dict[str, object] = {"type": "mock"}
+    if llm_reply is not None:
+        llm["reply"] = llm_reply
     return Config(
-        providers=MOCK_PROVIDERS, agents={"assistant": MOCK_AGENT}, default_agent="assistant"
+        providers={
+            "llm": {"mock": llm},
+            "asr": {"mock": {"type": "mock", "text": asr_text}},
+            "tts": {"mock": {"type": "mock"}},
+            "vad": {"mock": {"type": "mock"}},
+        },
+        agents={"assistant": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")},
+        default_agent="assistant",
     )
 
 
@@ -84,7 +100,7 @@ def send_pcm(websocket, pcm: bytes, encoder: OpusEncoder, version: int = 1) -> N
 
 def collect_reply(websocket, version: int = 1) -> tuple[list[dict], bytes]:
     """Read until tts stop, returning the JSON messages and decoded audio."""
-    decoder = OpusDecoder()
+    decoder = OpusDecoder(sample_rate=OUTPUT_RATE)
     texts: list[dict] = []
     audio = b""
     while True:
@@ -99,6 +115,26 @@ def collect_reply(websocket, version: int = 1) -> tuple[list[dict], bytes]:
             audio += decoder.decode(frame.payload)
 
 
+def sentences(texts: list[dict]) -> list[str]:
+    return [m["text"] for m in texts if m.get("type") == "tts" and m["state"] == "sentence_start"]
+
+
+def heard_ms(texts: list[dict]) -> int:
+    """The utterance duration the mock ASR embedded in the transcript."""
+    (stt,) = [m for m in texts if m.get("type") == "stt"]
+    match = re.search(r"\d+", stt["text"])
+    assert match is not None, stt
+    return int(match.group())
+
+
+def audio_ms(audio: bytes) -> float:
+    return len(audio) / 2 / OUTPUT_RATE * 1000
+
+
+def expected_tone_ms(spoken: list[str]) -> float:
+    return sum(max(TTS_MIN_MS, TTS_MS_PER_CHAR * len(text)) for text in spoken)
+
+
 def test_the_handshake_answers_a_firmware_hello() -> None:
     with TestClient(create_app(config_with_agent())) as client:
         with connect(client) as websocket:
@@ -108,13 +144,13 @@ def test_the_handshake_answers_a_firmware_hello() -> None:
     assert reply["session_id"]
     assert reply["audio_params"] == {
         "format": "opus",
-        "sample_rate": 16000,
+        "sample_rate": OUTPUT_RATE,
         "channels": 1,
         "frame_duration": 60,
     }
 
 
-def test_listen_stop_gets_the_utterance_echoed_back() -> None:
+def test_listen_stop_gets_a_spoken_reply_with_transcript_and_sentences() -> None:
     with TestClient(create_app(config_with_agent())) as client:
         with connect(client) as websocket:
             reply = shake_hands(websocket)
@@ -124,21 +160,23 @@ def test_listen_stop_gets_the_utterance_echoed_back() -> None:
                     {"session_id": session_id, "type": "listen", "state": "start", "mode": "manual"}
                 )
             )
-            pcm = speech_pcm(600)
-            send_pcm(websocket, pcm, OpusEncoder())
+            send_pcm(websocket, speech_pcm(600), OpusEncoder())
             websocket.send_text(
                 json.dumps({"session_id": session_id, "type": "listen", "state": "stop"})
             )
             texts, audio = collect_reply(websocket)
 
+    (stt,) = [m for m in texts if m["type"] == "stt"]
+    assert stt["text"] == "hello"
     states = [m["state"] for m in texts if m["type"] == "tts"]
     assert states[0] == "start"
-    assert "sentence_start" in states
     assert states[-1] == "stop"
+    assert sentences(texts) == ["You said hello."]
     assert all(m["session_id"] == session_id for m in texts)
-    # The echo is the decode/encode round trip of what was sent.
-    assert abs(len(audio) - len(pcm)) <= FRAME_BYTES
-    assert rms(audio) > rms(pcm) * 0.5
+    # The audio is the mock TTS tone for the sentence, plus at most one
+    # frame of padding from the encoder flush.
+    assert abs(audio_ms(audio) - expected_tone_ms(sentences(texts))) <= FRAME_MS
+    assert rms(audio) > 1000
 
 
 def test_trailing_silence_ends_the_utterance_without_listen_stop() -> None:
@@ -152,49 +190,75 @@ def test_trailing_silence_ends_the_utterance_without_listen_stop() -> None:
             send_pcm(websocket, speech_pcm(600), encoder)
             send_pcm(websocket, b"\x00" * (FRAME_BYTES * 20), encoder)
             texts, audio = collect_reply(websocket)
-    assert [m["state"] for m in texts if m["type"] == "tts"][0] == "start"
+    assert sentences(texts) == ["You said hello."]
     assert rms(audio) > 100
 
 
-def test_abort_discards_the_buffered_utterance() -> None:
-    with TestClient(create_app(config_with_agent())) as client:
+def test_the_reply_is_spoken_sentence_by_sentence() -> None:
+    config = config_with_agent(llm_reply="First point about {text}. And a second one.")
+    with TestClient(create_app(config)) as client:
         with connect(client) as websocket:
             shake_hands(websocket)
             websocket.send_text(json.dumps({"type": "listen", "state": "start", "mode": "manual"}))
             send_pcm(websocket, speech_pcm(300), OpusEncoder())
+            websocket.send_text(json.dumps({"type": "listen", "state": "stop"}))
+            texts, audio = collect_reply(websocket)
+    assert sentences(texts) == ["First point about hello.", "And a second one."]
+    assert abs(audio_ms(audio) - expected_tone_ms(sentences(texts))) <= FRAME_MS
+
+
+def test_an_empty_transcript_still_closes_with_tts_stop() -> None:
+    # The device (in auto mode) waits for tts stop before listening again,
+    # so hearing nothing must still answer with an empty start/stop pair.
+    with TestClient(create_app(config_with_agent(asr_text=""))) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            websocket.send_text(json.dumps({"type": "listen", "state": "start", "mode": "manual"}))
+            send_pcm(websocket, speech_pcm(300), OpusEncoder())
+            websocket.send_text(json.dumps({"type": "listen", "state": "stop"}))
+            texts, audio = collect_reply(websocket)
+    assert [m["state"] for m in texts if m["type"] == "tts"] == ["start", "stop"]
+    assert [m for m in texts if m["type"] == "stt"] == []
+    assert audio == b""
+
+
+def test_abort_discards_the_buffered_utterance() -> None:
+    with TestClient(create_app(config_with_agent(asr_text="{ms}"))) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            websocket.send_text(json.dumps({"type": "listen", "state": "start", "mode": "manual"}))
+            send_pcm(websocket, speech_pcm(600), OpusEncoder())
             websocket.send_text(json.dumps({"type": "abort", "reason": "wake_word_detected"}))
             # After the abort, a stop with an empty buffer must not speak.
             websocket.send_text(json.dumps({"type": "listen", "state": "stop"}))
             websocket.send_text(json.dumps({"type": "listen", "state": "start", "mode": "manual"}))
-            pcm = speech_pcm(240)
-            send_pcm(websocket, pcm, OpusEncoder())
+            send_pcm(websocket, speech_pcm(240), OpusEncoder())
             websocket.send_text(json.dumps({"type": "listen", "state": "stop"}))
-            _, audio = collect_reply(websocket)
-    # Only the post-abort utterance comes back.
-    assert abs(len(audio) - len(pcm)) <= FRAME_BYTES
+            texts, _ = collect_reply(websocket)
+    # Only the post-abort utterance was transcribed.
+    assert 180 <= heard_ms(texts) <= 300
 
 
 def test_abort_during_a_streaming_reply_does_not_eat_the_next_utterance() -> None:
     # The device barging in mid-reply and speaking again immediately must
-    # get the new utterance echoed: cancellation of the reply task is
+    # get the new utterance answered: cancellation of the reply task is
     # awaited, never left in flight to shadow the follow-up.
-    with TestClient(create_app(config_with_agent())) as client:
+    with TestClient(create_app(config_with_agent(asr_text="{ms}"))) as client:
         with connect(client) as websocket:
             shake_hands(websocket)
             websocket.send_text(json.dumps({"type": "listen", "state": "start", "mode": "manual"}))
             send_pcm(websocket, speech_pcm(1200), OpusEncoder())
             websocket.send_text(json.dumps({"type": "listen", "state": "stop"}))
-            # The reply is now streaming (20 frames, paced over 1.2 s).
+            # The reply is now streaming, paced at the frame cadence.
             # Barge in and speak again straight away.
             websocket.send_text(json.dumps({"type": "abort", "reason": "wake_word_detected"}))
             websocket.send_text(json.dumps({"type": "listen", "state": "start", "mode": "manual"}))
-            pcm = speech_pcm(240)
-            send_pcm(websocket, pcm, OpusEncoder())
+            send_pcm(websocket, speech_pcm(240), OpusEncoder())
             websocket.send_text(json.dumps({"type": "listen", "state": "stop"}))
             # Skip whatever the aborted reply got out, up to its tts stop.
             collect_reply(websocket)
-            _, audio = collect_reply(websocket)
-    assert abs(len(audio) - len(pcm)) <= FRAME_BYTES
+            texts, _ = collect_reply(websocket)
+    assert 180 <= heard_ms(texts) <= 300
 
 
 def test_version_2_framing_round_trips() -> None:
@@ -202,26 +266,25 @@ def test_version_2_framing_round_trips() -> None:
         with connect(client, version=2) as websocket:
             shake_hands(websocket, version=2)
             websocket.send_text(json.dumps({"type": "listen", "state": "start", "mode": "manual"}))
-            pcm = speech_pcm(300)
-            send_pcm(websocket, pcm, OpusEncoder(), version=2)
+            send_pcm(websocket, speech_pcm(300), OpusEncoder(), version=2)
             websocket.send_text(json.dumps({"type": "listen", "state": "stop"}))
-            _, audio = collect_reply(websocket, version=2)
-    assert abs(len(audio) - len(pcm)) <= FRAME_BYTES
+            texts, audio = collect_reply(websocket, version=2)
+    assert sentences(texts) == ["You said hello."]
+    assert rms(audio) > 1000
 
 
 def test_frames_sent_while_not_listening_are_dropped() -> None:
-    with TestClient(create_app(config_with_agent())) as client:
+    with TestClient(create_app(config_with_agent(asr_text="{ms}"))) as client:
         with connect(client) as websocket:
             shake_hands(websocket)
             encoder = OpusEncoder()
             # No listen start yet: this must accumulate nothing.
             send_pcm(websocket, speech_pcm(600), encoder)
             websocket.send_text(json.dumps({"type": "listen", "state": "start", "mode": "manual"}))
-            pcm = speech_pcm(240)
-            send_pcm(websocket, pcm, encoder)
+            send_pcm(websocket, speech_pcm(240), encoder)
             websocket.send_text(json.dumps({"type": "listen", "state": "stop"}))
-            _, audio = collect_reply(websocket)
-    assert abs(len(audio) - len(pcm)) <= FRAME_BYTES
+            texts, _ = collect_reply(websocket)
+    assert 180 <= heard_ms(texts) <= 300
 
 
 def test_unknown_and_malformed_messages_do_not_end_the_session() -> None:
@@ -231,8 +294,7 @@ def test_unknown_and_malformed_messages_do_not_end_the_session() -> None:
             websocket.send_text('{"type": "goodbye"}')
             websocket.send_text("not json")
             websocket.send_text(json.dumps({"type": "listen", "state": "start", "mode": "manual"}))
-            pcm = speech_pcm(240)
-            send_pcm(websocket, pcm, OpusEncoder())
+            send_pcm(websocket, speech_pcm(240), OpusEncoder())
             websocket.send_text(json.dumps({"type": "listen", "state": "stop"}))
             texts, _ = collect_reply(websocket)
     assert reply["type"] == "hello"
