@@ -355,25 +355,49 @@ VAD, faster-whisper `small` (CPU, int8), Ollama `gemma4:e4b` through the
 
 Implemented from the dedicated
 [M5 plan](2026-08-02-m5-agents-and-bindings.md), whose nine commits are the
-nine commits of the PR. **No deviations from that plan**: `agent_defaults`
-carries the four stage fields and no prompt, a voice stays a TTS provider
-entry, device bindings became a list with the first entry active at
-connect, the session gained an explicit active agent, and the deferred
-items (realtime listening mode, OpenAI-compatible cloud ASR and TTS,
-memory) stayed deferred. The v1 plan's open questions were all closed in
-M4 and none reopened.
+nine commits of the PR. Its structure and its decisions survived contact
+unchanged: `agent_defaults` carries the four stage fields and no prompt, a
+voice stays a TTS provider entry, device bindings became a list with the
+first entry active at connect, the session gained an explicit active
+agent, and the deferred items (realtime listening mode,
+OpenAI-compatible cloud ASR and TTS, memory) stayed deferred. The v1
+plan's open questions were all closed in M4 and none reopened.
 
-Discoveries and decisions made while building it:
+Three deviations from the plan's letter, all found while building:
 
-- **Each configuration layer is validated where it is written.** The plan
-  asked for cross-reference validation on the effective view with errors
-  naming the layer the bad reference came from. Validating the effective
-  view literally would report a wrong `agent_defaults.llm` once per agent
-  inheriting it, so each layer's own references are checked once instead:
-  a wrong default is one error, a wrong override is one error, and both
-  quote the place that holds the mistake. `Config.provider_for_agent`
-  returns the effective provider together with that location, and is what
-  the boot-time completeness check reads.
+- **Only half of the validation moved to the effective view.** The plan
+  said cross-reference validation and the boot-time completeness check
+  both would, with errors naming the layer the bad reference came from.
+  The completeness check does. Cross-reference validation does not:
+  reading the effective view literally would report a wrong
+  `agent_defaults.llm` once per agent inheriting it, so each layer's own
+  references are checked where they are written instead. A wrong default
+  is one error, a wrong override is one error, and both quote the place
+  that holds the mistake, which is the outcome the plan actually wanted.
+  `Config.provider_for_agent` returns the effective provider together
+  with that location, and is what the completeness check reads.
+- **The local lane identifies voices rather than contrasting them.** The
+  plan asked the two-persona local test to assert "the voices are
+  distinct". Pitch turned out not to separate them: `en_US-lessac-medium`
+  and `en_US-amy-medium` measure about 180 Hz and 200 Hz, close enough
+  that any threshold would be either flaky or meaningless (the first
+  attempt failed on exactly that). The test instead re-speaks each
+  device's actual reply locally in both configured voices and requires
+  the received audio to resemble its own agent's, comparing a long-term
+  average log spectrum. Since the words are identical in every
+  comparison, the voice is the only difference left, and on the desk the
+  margin is about fourteenfold (0.014 against 0.199). This is a stronger
+  claim than the plan's: not "the two differ" but "each device was
+  answered in the voice its agent names".
+- **The turned-away device has no agents at all, not merely no
+  `default_agent`.** The plan's fourth acceptance case was "a config
+  lacking `default_agent`". M1's validation forbids that shape: defining
+  agents requires a `default_agent`, so the only configuration that
+  resolves a device to nothing is one with no agents whatsoever, and that
+  is what the test uses. The behaviour under test is unchanged.
+
+Discoveries and smaller decisions:
+
 - **`AgentConfig` is `AgentDefaults` plus a prompt.** Subclassing keeps the
   two in step by construction and makes "the same four stages, and a
   prompt only an agent may have" the literal structure.
@@ -384,18 +408,6 @@ Discoveries and decisions made while building it:
   carries that agent's own voice. The unit lane measures the tone with a
   single DFT bin (no numpy needed); the integration lane, which decodes
   through the sdk's opuslib, takes the dominant frequency of an FFT.
-- **The local lane identifies voices rather than contrasting them.** The
-  plan asked the two-persona local test to assert "the voices are
-  distinct". Pitch turned out not to separate them: `en_US-lessac-medium`
-  and `en_US-amy-medium` measure about 180 Hz and 200 Hz, close enough
-  that any threshold would be either flaky or meaningless. The test
-  instead re-speaks each device's actual reply locally in both configured
-  voices and requires the received audio to resemble its own agent's,
-  comparing a long-term average log spectrum. Since the words are
-  identical in every comparison, the voice is the only difference left,
-  and on the desk the margin is about fourteenfold (0.014 against 0.199).
-  This is a stronger claim than the plan's: not "the two differ" but "each
-  device was answered in the voice its agent names".
 - **The 1008 rejection is asserted directly in the integration lane.** The
   xiaozhi-sdk reports a server-side close only indirectly, so that one
   case connects with a plain websockets client and reads the close code
