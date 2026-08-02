@@ -1,0 +1,56 @@
+# samtal-server configuration example.
+#
+# Copy this file somewhere outside the repository (or to a gitignored
+# *.local.yaml) and point the server at it:
+#
+#   SAMTAL_CONFIG=/path/to/config.yaml uv run samtal-server
+#   uv run samtal-server --config /path/to/config.yaml
+#
+# Secrets never live in this file: a provider references the environment
+# variable that holds its key (api_key_env), and the server reads the
+# variable at startup. SAMTAL_HOST and SAMTAL_PORT override the server
+# section when set.
+
+server:
+  host: 0.0.0.0
+  port: 8003
+
+# Providers are named so agents can reference them. Every entry needs a
+# `type`; the remaining keys are options for that provider implementation.
+providers:
+  llm:
+    claude:
+      type: anthropic
+      model: claude-sonnet-5
+      api_key_env: ANTHROPIC_API_KEY
+    local:
+      type: openai_compatible
+      base_url: http://localhost:11434/v1
+      model: qwen3:8b
+  asr:
+    sensevoice:
+      type: sensevoice
+  tts:
+    piper:
+      type: piper
+      voice: sv_SE-nst-medium
+  vad:
+    silero:
+      type: silero
+
+# Agents combine a prompt with one provider per stage.
+agents:
+  assistant:
+    prompt: >
+      You are a helpful voice assistant. Keep replies short and speakable.
+    llm: claude
+    asr: sensevoice
+    tts: piper
+    vad: silero
+
+# Devices are bound to agents by MAC address (as sent in the Device-Id
+# header). Unknown devices get default_agent.
+devices:
+  "aa:bb:cc:dd:ee:ff": assistant
+
+default_agent: assistant
