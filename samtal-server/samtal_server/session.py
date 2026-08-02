@@ -24,17 +24,21 @@ import asyncio
 import contextlib
 import logging
 import uuid
+from typing import Any
 
 import av
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+from samtal_server import __version__
 from samtal_server.audio.opus import OpusDecoder, OpusEncoder
 from samtal_server.audio.resample import Resampler
 from samtal_server.config import Config
 from samtal_server.config.models import normalize_mac
 from samtal_server.protocol import framing, messages
+from samtal_server.protocol import mcp as mcp_protocol
 from samtal_server.providers import AgentProviders, Endpointer, TextDelta, Turn
 from samtal_server.text import SentenceSplitter
+from samtal_server.tools.device import DeviceToolClient
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +99,11 @@ class Session:
         self._utterance = bytearray()
         self._turns: list[Turn] = []
         self._reply_task: asyncio.Task[None] | None = None
+        # The device's own tools, when it said it has any. Discovery runs
+        # in the background, so an early utterance simply runs without
+        # them rather than waiting.
+        self._device_tools: DeviceToolClient | None = None
+        self._discovery: asyncio.Task[None] | None = None
         # Outgoing frame pacing, reset per reply on the first frame.
         self._pace_start: float | None = None
         self._pace_count = 0
@@ -143,6 +152,7 @@ class Session:
             hello.audio_params.sample_rate,
             hello.audio_params.frame_duration,
         )
+        self._start_device_discovery(hello)
 
         try:
             await self._serve()
@@ -150,7 +160,31 @@ class Session:
             pass
         finally:
             await self._cancel_reply()
+            await self._stop_device_discovery()
             logger.info("session %s closed (device %s)", self.session_id, mac)
+
+    def _start_device_discovery(self, hello: messages.DeviceHello) -> None:
+        """Ask a device that advertised MCP for its tools. In the
+        background: the handshake is three round trips, and the
+        conversation must not wait on a board that may never answer."""
+        if hello.features.get("mcp") is not True:
+            return
+        self._device_tools = DeviceToolClient(
+            self._send_mcp, f"session {self.session_id}", "samtal-server", __version__
+        )
+        self._discovery = asyncio.create_task(self._device_tools.discover())
+
+    async def _stop_device_discovery(self) -> None:
+        if self._device_tools is not None:
+            self._device_tools.close()
+        if self._discovery is not None:
+            self._discovery.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._discovery
+            self._discovery = None
+
+    async def _send_mcp(self, payload: dict[str, Any]) -> None:
+        await self.websocket.send_text(mcp_protocol.envelope(self.session_id, payload))
 
     def _activate_agent(self, name: str) -> None:
         """Talk as this agent from now on: its prompt, its providers, and a
@@ -262,8 +296,14 @@ class Session:
                 )
                 await self._cancel_reply()
                 self._reset_utterance()
-            case messages.McpMessage():
-                logger.debug("session %s: MCP message ignored until M6", self.session_id)
+            case messages.McpMessage(payload=payload):
+                if self._device_tools is None:
+                    logger.debug(
+                        "session %s: MCP message from a device that did not advertise MCP",
+                        self.session_id,
+                    )
+                else:
+                    self._device_tools.handle(payload)
             case _:
                 logger.debug(
                     "session %s: ignoring %s message", self.session_id, message.type
