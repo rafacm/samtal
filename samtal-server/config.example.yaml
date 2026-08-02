@@ -8,8 +8,10 @@
 #
 # Secrets never live in this file: a provider references the environment
 # variable that holds its key (api_key_env), and the server reads the
-# variable at startup. SAMTAL_HOST and SAMTAL_PORT override the server
-# section when set.
+# variable at startup. Any key here can be overridden with a
+# SAMTAL_-prefixed environment variable, nested keys joined with __
+# (SAMTAL_SERVER__PORT=9000, SAMTAL_DEFAULT_AGENT=assistant); a .env file
+# next to where the server is started works too.
 
 server:
   host: 0.0.0.0

@@ -9,12 +9,16 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
-- samtal-server configuration layer (M1): pydantic models for `server`,
-  `providers`, `agents`, `devices`, and `default_agent`, loaded from one
-  YAML file (`--config` or `SAMTAL_CONFIG`) with `SAMTAL_HOST`/`SAMTAL_PORT`
-  overrides. Secrets are referenced by environment variable name only, and
-  validation reports every problem with its location. A documented
-  `config.example.yaml` ships with the server.
+- samtal-server configuration layer (M1), built on pydantic-settings:
+  models for `server`, `providers`, `agents`, `devices`, and
+  `default_agent`, loaded from one YAML file (`--config` or
+  `SAMTAL_CONFIG`). Any key is overridable via `SAMTAL_`-prefixed
+  environment variables (nested keys joined with `__`, e.g.
+  `SAMTAL_SERVER__PORT`), and a `.env` file is read at startup with
+  environment variables taking priority. Secrets are referenced by
+  environment variable name only, and validation reports every problem
+  with its location. A documented `config.example.yaml` ships with the
+  server.
 - Waveshare ESP32-S3-Touch-AMOLED-2.16 (480×480 AMOLED, dual-mic AEC) listed
   as a planned target board.
 - samtal-server stack decision: Python 3.12 + FastAPI (uv-managed), with the
