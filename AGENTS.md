@@ -55,9 +55,18 @@ the workflow file itself.
 
 - When a plan is accepted, commit it to `docs/plans/` as one Markdown file
   with a `YYYY-MM-DD-` date prefix (e.g. `2026-08-02-samtal-server-v1.md`).
-- Significant changes get a feature doc in `docs/features/`, same date-prefix
-  naming, covering: Problem, Changes, Key parameters, Verification, and
-  Files modified. No session transcripts are kept in this repository.
+- Each plan has a companion implementation doc, same filename with an
+  `-implementation` suffix (e.g.
+  `2026-08-02-samtal-server-v1-implementation.md`), with one section per
+  milestone appended in the same change that ticks the milestone checklist.
+  It records deviations from the plan, resolutions of the plan's open
+  questions, and discoveries; a milestone with no deviations says so
+  explicitly.
+- Significant changes outside any active plan get a feature doc in
+  `docs/features/`, same date-prefix naming, covering: Problem, Changes,
+  Key parameters, Verification, and Files modified. Milestone work under a
+  plan is documented by the implementation doc and the PR instead. No
+  session transcripts are kept in this repository.
 - Active plans keep a milestone status checklist; tick the milestone (with
   its PR number) in the same change that completes it, so a fresh session
   can resume from the repository alone.
