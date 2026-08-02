@@ -95,7 +95,8 @@ class Session:
             await self._close(POLICY_VIOLATION, "Device-Id must be the device MAC")
             return
 
-        agent = self.config.agent_for_device(mac)
+        agents = self.config.agents_for_device(mac)
+        agent = agents[0] if agents else None
         providers = self._agent_providers.get(agent) if agent is not None else None
         if agent is None or providers is None:
             logger.warning(

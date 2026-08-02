@@ -88,14 +88,14 @@ async def check_version(request: Request) -> Response:
         return _bad_request("the Client-Id header is required and holds the device UUID")
 
     try:
-        agent = config.agent_for_device(device_id)
+        agents = config.agents_for_device(device_id)
     except ValueError as exc:
         return _bad_request(f"Device-Id header: {exc}")
 
     payload = await _read_json_object(request)
     version = reported_version(payload)
 
-    if agent is None:
+    if not agents:
         logger.warning(
             "device %s (%s, firmware %s) has no agent: bind it under devices "
             "or set default_agent",
@@ -105,11 +105,12 @@ async def check_version(request: Request) -> Response:
         )
     else:
         logger.info(
-            "device %s (%s, firmware %s) resolved to agent %s",
+            "device %s (%s, firmware %s) resolved to agent %s%s",
             device_id,
             reported_board(payload),
             version,
-            agent,
+            agents[0],
+            f" (also bound to {', '.join(agents[1:])})" if len(agents) > 1 else "",
         )
 
     return JSONResponse(
