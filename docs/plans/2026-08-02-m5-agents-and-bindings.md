@@ -38,6 +38,19 @@ Agreed with Rafael before this plan was written:
   first bound agent is activated at connect, and a device with no binding
   falls back to `default_agent`, the agent any conversation lands on when
   nothing more specific matches.
+- **No clarification step for choosing the starting agent, in M5 or
+  M6.** A conversation always starts with the device's first-listed
+  agent; asking "which agent do you want?" at every conversation start
+  would cost seconds before every interaction, would need a voice before
+  any agent (and therefore any voice) has been chosen, and would
+  duplicate in keyword matching what M6's tool calling does properly.
+  Instead, M6's `switch_agent` tool definition must carry the device's
+  allowed agent list, so the active agent can enumerate the options when
+  asked ("who can I talk to?") and switch on request. A menu-style
+  device then needs no mechanism at all: bind a "receptionist" persona
+  first in its list, whose prompt greets, lists the available agents,
+  and switches as soon as the user chooses. The clarification step is
+  configuration, not code.
 - **No memory work in M5.** Persistent per-agent memory arrives as
   file-backed remember/recall tools in M6; the keying decision (per agent
   vs per agent and device) is made there. Session history stays
