@@ -33,7 +33,7 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 - samtal-server README sections on transports (WebSocket only for v1, with
   upstream's MQTT+UDP as the additive alternative; WebRTC is not an upstream
   transport) and on ports and topology, covering the single-port choice, its
-  tradeoffs, and what it means on Kubernetes.
+  tradeoffs, and what a reverse proxy in front of it has to get right.
 - Waveshare ESP32-S3-Touch-AMOLED-2.16 (480×480 AMOLED, dual-mic AEC) listed
   as a planned target board.
 - samtal-server stack decision: Python 3.12 + FastAPI (uv-managed), with the

@@ -134,6 +134,29 @@ the [implementation notes](2026-08-02-samtal-server-v1-implementation.md).
 - Security defaults per the agreed layers: auth enabled by default,
   configurable OTA path segment, no public endpoints beyond the two the
   device needs.
+- Single-port consequences to settle in M7. Both endpoints share
+  `server.port` and are told apart by path, which pushes work onto whatever
+  routes to them; the README documents the operator-facing version, and M7
+  is where the image and its defaults have to answer for it:
+  - **Idle timeouts differ per path.** The conversation socket goes quiet
+    between utterances, so a timeout tuned for short HTTP requests cuts
+    conversations off; the OTA path wants the opposite. Where only one
+    value can be set, the long one has to win. Worth deciding whether the
+    server sends WebSocket pings to keep the socket alive under proxies
+    that cannot be configured per path, since that removes the tradeoff
+    entirely.
+  - **Forwarded headers are not trusted by default.** Uvicorn's
+    `--forwarded-allow-ips` defaults to `127.0.0.1`, so behind a
+    TLS-terminating proxy the derived URL says `ws://` instead of `wss://`.
+    Today the answer is to set `server.websocket_url` explicitly; M7 should
+    decide whether the image exposes that setting so the derivation works
+    unattended.
+  - **A redeploy ends every conversation in flight**, and OTA cannot be
+    restarted independently of it. The image needs a drain period on
+    shutdown, which means handling the termination signal rather than dying
+    on it.
+  - Orchestrator-specific manifests stay with the deployment, not in this
+    repository.
 
 ## Open questions (decide during M4, not before)
 

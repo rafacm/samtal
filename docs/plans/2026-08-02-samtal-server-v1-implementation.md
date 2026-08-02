@@ -80,15 +80,17 @@ Deviations and additions relative to the plan:
   `server.port` (8003). The websocket URL handed to devices therefore names
   the same port they just POSTed to. Not a one-way door: the advertised URL
   is independent of the listening topology, so the two tiers can be split
-  later by routing alone, with no code change. The tradeoffs, including what
-  this means on Kubernetes, are documented in the samtal-server README.
+  later by routing alone, with no code change. The tradeoffs, and what a
+  reverse proxy in front has to get right, are documented in the
+  samtal-server README; the parts the container image has to answer for are
+  listed under the plan's Packaging and deployment.
 - **Behind a proxy the derived URL is wrong, and quietly.** Uvicorn only
   trusts `X-Forwarded-Proto` from `--forwarded-allow-ips`, which defaults to
-  `127.0.0.1` and so never matches an ingress pod's IP; a TLS ingress
-  therefore still derives `ws://` rather than `wss://`. The README tells
-  proxied and Kubernetes deployments to set `server.websocket_url`
-  explicitly. Revisit in M7 when the container image lands: trusting proxy
-  headers by configuration would let the derivation work there too.
+  `127.0.0.1` and so will not match a proxy's address; a TLS-terminating
+  proxy therefore still derives `ws://` rather than `wss://`. The README
+  tells proxied deployments to set `server.websocket_url` explicitly.
+  Revisit in M7 when the container image lands: trusting proxy headers by
+  configuration would let the derivation work there too.
 - **The websocket URL is derived, not required.** `server.websocket_url` is
   optional; unset, the reply is built from the address the device reached
   the OTA endpoint on (`ws://{Host}/xiaozhi/v1/`, `wss` under HTTPS). A LAN
