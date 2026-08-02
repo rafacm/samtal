@@ -20,7 +20,7 @@ from starlette.websockets import WebSocketDisconnect
 
 import samtal_server.session as session_module
 from samtal_server.app import create_app
-from samtal_server.audio.endpointing import rms
+from samtal_server.audio import rms
 from samtal_server.audio.opus import OpusDecoder, OpusEncoder
 from samtal_server.config import Config
 from samtal_server.protocol import framing

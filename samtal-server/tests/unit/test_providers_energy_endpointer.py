@@ -1,9 +1,10 @@
-"""The energy endpointer, fed synthetic 60 ms chunks."""
+"""The energy endpointer (now the mock VAD), fed synthetic 60 ms chunks."""
 
 import math
 import struct
 
-from samtal_server.audio.endpointing import EnergyEndpointer, rms
+from samtal_server.audio import rms
+from samtal_server.providers.mock import EnergyEndpointer
 
 SAMPLE_RATE = 16000
 CHUNK_MS = 60

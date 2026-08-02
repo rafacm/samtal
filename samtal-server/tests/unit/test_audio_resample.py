@@ -3,7 +3,7 @@
 import math
 import struct
 
-from samtal_server.audio.endpointing import rms
+from samtal_server.audio import rms
 from samtal_server.audio.resample import Resampler
 
 

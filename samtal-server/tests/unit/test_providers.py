@@ -2,7 +2,7 @@
 
 import pytest
 
-from samtal_server.audio.endpointing import rms
+from samtal_server.audio import rms
 from samtal_server.config import Config
 from samtal_server.config.models import ProviderConfig
 from samtal_server.providers import (

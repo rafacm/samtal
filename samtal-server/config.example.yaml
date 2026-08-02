@@ -52,6 +52,12 @@ providers:
   vad:
     silero:
       type: silero
+      # End-of-utterance tuning, defaults shown: Silero speech
+      # probability threshold, the silence that ends an utterance, and
+      # the cap on utterance length.
+      # threshold: 0.5
+      # trailing_silence_ms: 700
+      # max_utterance_ms: 10000
 
 # Agents combine a prompt with one provider per stage.
 agents:
