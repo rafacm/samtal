@@ -111,10 +111,7 @@ class Session:
         except WebSocketDisconnect:
             pass
         finally:
-            if self._reply_task is not None:
-                self._reply_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await self._reply_task
+            await self._cancel_reply()
             logger.info("session %s closed (device %s)", self.session_id, mac)
 
     async def _receive_hello(self) -> messages.DeviceHello | None:
@@ -203,8 +200,7 @@ class Session:
                 logger.info(
                     "session %s: device aborted (%s)", self.session_id, reason or "no reason"
                 )
-                if self._reply_task is not None:
-                    self._reply_task.cancel()
+                await self._cancel_reply()
                 self._reset_utterance()
             case messages.McpMessage():
                 logger.debug("session %s: MCP message ignored until M6", self.session_id)
@@ -221,6 +217,12 @@ class Session:
         self._reset_utterance()
         self.listening = False
         if self._reply_task is not None and not self._reply_task.done():
+            # Only reachable in realtime mode, where the mic streams while
+            # a reply plays; one reply at a time until M4 revisits realtime.
+            logger.warning(
+                "session %s: dropping an utterance, a reply is already streaming",
+                self.session_id,
+            )
             return
         logger.info(
             "session %s: utterance of %.1f s, echoing it back",
@@ -232,6 +234,17 @@ class Session:
     def _reset_utterance(self) -> None:
         self._utterance.clear()
         self._endpointer.reset()
+
+    async def _cancel_reply(self) -> None:
+        """Cancel a reply in flight and see the cancellation through.
+        Waiting matters: a fire-and-forget cancel leaves the task not yet
+        done, and an utterance finishing in that window would be dropped."""
+        if self._reply_task is None:
+            return
+        self._reply_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await self._reply_task
+        self._reply_task = None
 
     async def _reply(self, pcm: bytes) -> None:
         """Speak the utterance back, paced at the frame cadence so the
