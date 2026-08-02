@@ -155,8 +155,13 @@ no NVS rewrite was needed:
   `device 28:84:85:49:8c:a8 (esp32-s3-touch-lcd-1.54, firmware 2.4.0)
   resolved to agent kitchen`, so per-device binding works on real hardware.
 
-Not verified: the board actually opening the websocket. It only does so when
-a conversation starts, which needs the wake word or the PWR button, and
-`/xiaozhi/v1/` does not exist until M3. The NVS contents are the stronger
-evidence available at this milestone; the connection itself belongs to M3's
-checkpoint.
+- The board opens the websocket URL it was given. A short PWR press starts a
+  conversation, and the server logs `192.168.1.59 - "WebSocket /xiaozhi/v1/"
+  403`, three times per press as the firmware retries. **403, not 404**:
+  Starlette closes an unmatched websocket scope before accepting it, and
+  uvicorn turns that into 403 on the upgrade. The device plays its
+  connection-failure tone and returns to idle, which is the correct outcome
+  until M3 serves that path.
+
+Note for future checkpoints: the board has a battery, so unplugging USB does
+not power it off. Long-press PWR, or toggle RTS over the serial port.
