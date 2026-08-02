@@ -68,6 +68,38 @@ def config_with_agent(asr_text: str = "hello", llm_reply: str | None = None) -> 
     )
 
 
+POET_MAC = "aa:bb:cc:dd:ee:01"
+TUTOR_MAC = "aa:bb:cc:dd:ee:02"
+BOTH_MAC = "aa:bb:cc:dd:ee:03"
+UNBOUND_MAC = "aa:bb:cc:dd:ee:04"
+POET_TONE = 440.0
+TUTOR_TONE = 880.0
+
+
+def two_persona_config() -> Config:
+    """Two agents that share everything but their prompt and their voice,
+    the shared half coming from agent_defaults. The mock LLM quotes the
+    prompt it was handed, so a reply names the agent that spoke it."""
+    return Config(
+        providers={
+            "llm": {"mock": {"type": "mock", "reply": "{system} heard {text}."}},
+            "asr": {"mock": {"type": "mock", "text": "{ms} ms"}},
+            "tts": {
+                "tenor": {"type": "mock", "tone_hz": POET_TONE},
+                "alto": {"type": "mock", "tone_hz": TUTOR_TONE},
+            },
+            "vad": {"mock": {"type": "mock"}},
+        },
+        agent_defaults={"llm": "mock", "asr": "mock", "vad": "mock"},
+        agents={
+            "poet": {"prompt": "POET", "tts": "tenor"},
+            "tutor": {"prompt": "TUTOR", "tts": "alto"},
+        },
+        devices={POET_MAC: ["poet"], TUTOR_MAC: "tutor", BOTH_MAC: ["tutor", "poet"]},
+        default_agent="poet",
+    )
+
+
 def connect(client: TestClient, device_id: str | None = DEVICE_MAC, version: int = 1):
     headers = {
         "Authorization": "Bearer ",
@@ -133,6 +165,24 @@ def audio_ms(audio: bytes) -> float:
 
 def expected_tone_ms(spoken: list[str]) -> float:
     return sum(max(TTS_MIN_MS, TTS_MS_PER_CHAR * len(text)) for text in spoken)
+
+
+def tone_strength(audio: bytes, hz: float) -> float:
+    """How much of `audio` sits at `hz`: one DFT bin, normalized, which is
+    all it takes to tell two mock voices apart after an Opus round trip."""
+    samples = struct.unpack(f"<{len(audio) // 2}h", audio)
+    angles = [2 * math.pi * hz * n / OUTPUT_RATE for n in range(len(samples))]
+    real = sum(s * math.cos(a) for s, a in zip(samples, angles, strict=True))
+    imaginary = sum(s * math.sin(a) for s, a in zip(samples, angles, strict=True))
+    return math.hypot(real, imaginary) / len(samples)
+
+
+def say_something(websocket, duration_ms: int = 300) -> tuple[list[dict], bytes]:
+    """One full turn: listen, speak, stop, and collect the reply."""
+    websocket.send_text(json.dumps({"type": "listen", "state": "start", "mode": "manual"}))
+    send_pcm(websocket, speech_pcm(duration_ms), OpusEncoder())
+    websocket.send_text(json.dumps({"type": "listen", "state": "stop"}))
+    return collect_reply(websocket)
 
 
 def test_the_handshake_answers_a_firmware_hello() -> None:
@@ -299,6 +349,59 @@ def test_unknown_and_malformed_messages_do_not_end_the_session() -> None:
             texts, _ = collect_reply(websocket)
     assert reply["type"] == "hello"
     assert texts
+
+
+@pytest.mark.parametrize(
+    ("mac", "marker", "tone", "other_tone"),
+    [
+        (POET_MAC, "POET", POET_TONE, TUTOR_TONE),
+        (TUTOR_MAC, "TUTOR", TUTOR_TONE, POET_TONE),
+        # Bound to both: the first entry is the agent the conversation
+        # starts on, and nothing else selects it.
+        (BOTH_MAC, "TUTOR", TUTOR_TONE, POET_TONE),
+        # Bound to nothing at all: default_agent, which is the poet here.
+        (UNBOUND_MAC, "POET", POET_TONE, TUTOR_TONE),
+    ],
+)
+def test_a_device_gets_the_prompt_and_the_voice_of_its_own_agent(
+    mac: str, marker: str, tone: float, other_tone: float
+) -> None:
+    with TestClient(create_app(two_persona_config())) as client:
+        with connect(client, device_id=mac) as websocket:
+            shake_hands(websocket)
+            texts, audio = say_something(websocket)
+    # The reply quotes the prompt the session handed its LLM.
+    assert sentences(texts)[0].startswith(marker)
+    # And it came back in that agent's voice.
+    assert tone_strength(audio, tone) > 10 * tone_strength(audio, other_tone)
+
+
+def test_two_devices_hold_two_conversations_at_once() -> None:
+    # Same server, two open sessions, two personas: neither the prompt nor
+    # the voice nor the audio buffered so far may leak between them.
+    with TestClient(create_app(two_persona_config())) as client:
+        with (
+            connect(client, device_id=POET_MAC) as poet,
+            connect(client, device_id=TUTOR_MAC) as tutor,
+        ):
+            shake_hands(poet)
+            shake_hands(tutor)
+            # The poet is mid-utterance, buffering and not yet endpointed,
+            # while the tutor speaks a shorter one and gets answered.
+            poet.send_text(json.dumps({"type": "listen", "state": "start", "mode": "manual"}))
+            send_pcm(poet, speech_pcm(600), OpusEncoder())
+            tutor_texts, tutor_audio = say_something(tutor, duration_ms=240)
+            poet.send_text(json.dumps({"type": "listen", "state": "stop"}))
+            poet_texts, poet_audio = collect_reply(poet)
+
+    assert sentences(poet_texts)[0].startswith("POET")
+    assert sentences(tutor_texts)[0].startswith("TUTOR")
+    assert tone_strength(poet_audio, POET_TONE) > 10 * tone_strength(poet_audio, TUTOR_TONE)
+    assert tone_strength(tutor_audio, TUTOR_TONE) > 10 * tone_strength(tutor_audio, POET_TONE)
+    # Each session heard only its own audio: the endpointers and utterance
+    # buffers are per session, not per provider.
+    assert 540 <= heard_ms(poet_texts) <= 660
+    assert 180 <= heard_ms(tutor_texts) <= 300
 
 
 def test_a_device_with_no_agent_is_turned_away() -> None:
