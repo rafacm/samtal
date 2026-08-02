@@ -62,9 +62,28 @@ wants an interactive terminal). The port is `/dev/cu.usbmodem101` at
       --after hard_reset read_mac
   ```
 
-  Toggling RTS from pyserial is the usual advice, since RTS drives EN, and
-  it did reset this board once. At the M5 checkpoint it did not: the board
-  kept running and its uptime kept climbing. Prefer esptool.
+  **Toggling RTS alone does nothing**, whatever the usual "RTS drives EN"
+  advice says, because there is no reset pin behind this port. DTR and RTS
+  are two bits of a single USB CDC `SET_CONTROL_LINE_STATE` request, and
+  the USB-Serial-JTAG controller decodes the pair the way the classic
+  auto-reset circuit does: EN goes low only when **RTS is high and DTR is
+  low**. pyserial asserts both lines when it opens the port, so a bare
+  `setRTS(True)` / `setRTS(False)` toggle moves (DTR=1, RTS=1) to (1, 0)
+  and never passes through (0, 1). Measured on the board, one open port,
+  each combination held for 200 ms:
+
+  | DTR | RTS | result |
+  | --- | --- | ---------- |
+  | 1   | 1   | no reset   |
+  | 1   | 0   | no reset   |
+  | 0   | 1   | **reset**  |
+
+  From pyserial, one line fixes it: `port.setDTR(False)` before the RTS
+  toggle. esptool arrives at the same place by another road, which is why
+  it works: its bootloader-entry sequence leaves both lines low, so the
+  RTS toggle inside its `HardReset` lands on (0, 1). Replay that same
+  `HardReset` from pyserial's freshly opened state and it resets nothing,
+  which is the trap an earlier version of this note fell into.
 - **Read the boot log** with pyserial from the ESP-IDF Python environment
   (`~/.espressif/python_env/idf*/bin/python`), not the system `python3`,
   which has no `serial` module. Reset and read in one process that holds
