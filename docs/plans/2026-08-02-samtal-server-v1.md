@@ -89,10 +89,10 @@ the [implementation notes](2026-08-02-samtal-server-v1-implementation.md).
   (PR #4): websocket accept, `hello` exchange, Opus decode/encode round
   trip (echo or canned reply). Accept: xiaozhi-sdk connects, completes
   hello, exchanges audio frames in CI.
-- [ ] **M4 Conversation pipeline**: VAD, ASR, LLM, TTS wired with mock
-  providers in CI and real providers locally. Accept: scripted simulator
-  conversation gets a coherent spoken reply. Device checkpoint: first real
-  conversation.
+- [x] **[M4 Conversation pipeline](2026-08-02-samtal-server-v1-implementation.md#m4-conversation-pipeline-pr-6)**
+  (PR #6): VAD, ASR, LLM, TTS wired with mock providers in CI and real
+  providers locally. Accept: scripted simulator conversation gets a
+  coherent spoken reply. Device checkpoint: first real conversation.
 - [ ] **M5 Agents and bindings**: per-device agent resolution, per-agent
   prompt, providers, and voice. Accept: two simulated devices with different
   MACs get different personas in one server run.

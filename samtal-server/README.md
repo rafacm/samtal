@@ -11,21 +11,45 @@ It implements the two endpoints a device needs:
   carrying Opus audio frames up, JSON control messages both ways, and Opus
   audio back.
 
-🚧 Behind the WebSocket will sit the pipeline: VAD → ASR → LLM (with MCP
-tools) → TTS, every stage a pluggable provider. Until it lands, the server
-echoes each utterance back re-encoded, which proves the handshake and the
-audio loop end to end.
+Behind the WebSocket sits the conversation pipeline: VAD segments speech,
+ASR transcribes it, the LLM streams a reply, and TTS speaks it back
+sentence by sentence, every stage a pluggable provider chosen per agent.
+🚧 MCP tools land in a later milestone.
 
 ## Goals
 
 - Python-only, no database required for the core loop
 - Configurable providers:
-  - **LLM**: Anthropic, any OpenAI-compatible endpoint, Ollama
-  - **ASR**: local (SenseVoice) or cloud
-  - **TTS**: pluggable engines as optional extras
-  - **MCP**: attach any MCP servers as tools for the assistant
+  - **LLM**: Anthropic, any OpenAI-compatible endpoint (Ollama, LM Studio,
+    gateways)
+  - **ASR**: local (faster-whisper) or cloud
+  - **TTS**: pluggable engines as optional extras (Piper)
+  - **MCP**: attach any MCP servers as tools for the assistant 🚧
 - Distributed as a multi-arch container image, deployable on your own
   infrastructure
+
+## Providers
+
+Each pipeline stage is a named provider entry in the configuration, and
+each agent picks one provider per stage. The v1 set:
+
+| Stage | Type                | Runs      | Install                          |
+| ----- | ------------------- | --------- | -------------------------------- |
+| vad   | `silero`            | locally   | core (pysilero-vad)              |
+| asr   | `faster_whisper`    | locally   | `uv sync --extra faster-whisper` |
+| llm   | `anthropic`         | Anthropic | core                             |
+| llm   | `openai_compatible` | anywhere  | core                             |
+| tts   | `piper`             | locally   | `uv sync --extra piper`          |
+| any   | `mock`              | in tests  | core (deterministic, keyless)    |
+
+Model weights are never shipped: faster-whisper models and Piper voices
+download at server startup into a local cache (`download_dir` on the
+provider entry). A fully local, keyless pipeline is Silero +
+faster-whisper + Ollama (through `openai_compatible`) + Piper.
+
+Licensing note: `piper-tts` (piper1-gpl) is GPL-3.0, which is why it is an
+optional extra and never a core dependency of the MIT server. The same
+applies to any future `edge-tts` provider.
 
 ## Stack
 
@@ -41,11 +65,15 @@ conversation pipeline.
 
 ```bash
 uv sync                             # install dependencies
+uv sync --extra faster-whisper --extra piper  # add the local ASR/TTS engines
 uv run samtal-server                # run the server
 uv run pytest tests/unit -q         # unit tests
 uv run pytest tests/integration -q  # integration tests
 uv run ruff check .                 # lint
 ```
+
+The test lanes run the whole pipeline on the built-in mock providers, so
+they need no keys, no model downloads, and no network.
 
 ## Configuration
 

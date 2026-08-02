@@ -75,11 +75,16 @@ providers:
       # trailing_silence_ms: 700
       # max_utterance_ms: 10000
 
-# Agents combine a prompt with one provider per stage.
+# Agents combine a prompt with one provider per stage; every stage must
+# name a provider for the server to start.
 agents:
   assistant:
+    # State the reply language explicitly: models otherwise pick one by
+    # their training bias (the reference server's default is Chinese).
     prompt: >
-      You are a helpful voice assistant. Keep replies short and speakable.
+      You are a helpful voice assistant. Keep replies short, plain, and
+      speakable: one or two sentences, no lists, no markdown. Always
+      reply in the language the user spoke.
     llm: claude
     asr: whisper
     tts: piper
