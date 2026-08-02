@@ -1,12 +1,16 @@
 """One conversation session per device websocket connection.
 
-The session owns the handshake and the conversation loop. While the
-device listens, decoded mic audio feeds the agent's endpointer; when the
-utterance ends, ASR transcribes it, the LLM streams a reply into
-sentences, and TTS speaks each sentence back as paced Opus frames,
-framed by `tts start`/`sentence_start`/`stop` with the transcript
-announced in an `stt` message. Conversation history lives here, one
-list of turns per connection.
+The session owns the handshake and the conversation loop. It talks as
+one agent at a time, the active agent, picked at connect from the agents
+the device is bound to; prompt, providers, and endpointer all come from
+that agent, so swapping it swaps all three.
+
+While the device listens, decoded mic audio feeds the agent's
+endpointer; when the utterance ends, ASR transcribes it, the LLM streams
+a reply into sentences, and TTS speaks each sentence back as paced Opus
+frames, framed by `tts start`/`sentence_start`/`stop` with the
+transcript announced in an `stt` message. Conversation history lives
+here, one list of turns per connection.
 
 Two end-of-utterance triggers coexist because the firmware's listening
 modes differ: manual mode sends `listen stop`, while auto and realtime
@@ -69,6 +73,11 @@ class Session:
         self.protocol_version = 1
         self.listening = False
         self._agent_providers = agent_providers
+        # The agents this device may talk to, and the one it is talking to
+        # now. M5 activates the first at connect and never switches; M6's
+        # switch_agent tool moves between them.
+        self._agents: list[str] = []
+        self._agent: str | None = None
         self._providers: AgentProviders | None = None
         self._decoder = OpusDecoder(sample_rate=PIPELINE_SAMPLE_RATE)
         self._encoder = OpusEncoder(
@@ -95,10 +104,10 @@ class Session:
             await self._close(POLICY_VIOLATION, "Device-Id must be the device MAC")
             return
 
-        agents = self.config.agents_for_device(mac)
-        agent = agents[0] if agents else None
-        providers = self._agent_providers.get(agent) if agent is not None else None
-        if agent is None or providers is None:
+        agents = [
+            name for name in self.config.agents_for_device(mac) if name in self._agent_providers
+        ]
+        if not agents:
             logger.warning(
                 "session %s rejected: device %s has no agent: bind it under devices "
                 "or set default_agent",
@@ -107,8 +116,8 @@ class Session:
             )
             await self._close(POLICY_VIOLATION, "no agent is configured for this device")
             return
-        self._providers = providers
-        self._endpointer = providers.vad.new_endpointer()
+        self._agents = agents
+        self._activate_agent(agents[0])
 
         hello = await self._receive_hello()
         if hello is None:
@@ -116,12 +125,13 @@ class Session:
         self.protocol_version = hello.version
         await self.websocket.send_text(messages.server_hello(self.session_id, OUTPUT_AUDIO))
         logger.info(
-            "session %s open: device %s (client %s) agent %s, protocol v%d, "
+            "session %s open: device %s (client %s) agent %s%s, protocol v%d, "
             "%d Hz %d ms frames in",
             self.session_id,
             mac,
             client_id or "unknown",
-            agent,
+            self._agent,
+            f" (also bound to {', '.join(self._agents[1:])})" if len(self._agents) > 1 else "",
             self.protocol_version,
             hello.audio_params.sample_rate,
             hello.audio_params.frame_duration,
@@ -134,6 +144,17 @@ class Session:
         finally:
             await self._cancel_reply()
             logger.info("session %s closed (device %s)", self.session_id, mac)
+
+    def _activate_agent(self, name: str) -> None:
+        """Talk as this agent from now on: its prompt, its providers, and a
+        fresh endpointer from its VAD, since the previous agent's endpointer
+        carries the previous agent's tuning and mid-utterance state. Called
+        once at connect in M5; M6's switch_agent tool calls it again
+        mid-session, and decides then what becomes of the history."""
+        self._agent = name
+        self._providers = self._agent_providers[name]
+        self._endpointer = self._providers.vad.new_endpointer()
+        self._reset_utterance()
 
     async def _receive_hello(self) -> messages.DeviceHello | None:
         """The device speaks first; anything but a timely, well-formed
