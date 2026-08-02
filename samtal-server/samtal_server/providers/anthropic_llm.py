@@ -7,15 +7,73 @@ applies (ANTHROPIC_API_KEY, or a logged-in profile).
 
 import os
 from collections.abc import AsyncIterator, Sequence
+from typing import Any
 
 from anthropic import AsyncAnthropic
 
 from samtal_server.config.models import ProviderConfig
-from samtal_server.providers.base import LlmProvider, ProviderError, Turn
+from samtal_server.providers.base import (
+    LlmEvent,
+    LlmProvider,
+    ProviderError,
+    TextDelta,
+    ToolCall,
+    ToolChoice,
+    ToolDef,
+    Turn,
+)
 from samtal_server.providers.registry import OptionsReader
 
 # Spoken replies are short; this caps runaways, not conversation.
 DEFAULT_MAX_TOKENS = 1024
+
+
+def anthropic_messages(turns: Sequence[Turn]) -> list[dict[str, Any]]:
+    """The pipeline's turns as Anthropic messages.
+
+    Text turns stay plain strings. An assistant turn that asked for
+    tools becomes content blocks, its spoken preamble first and one
+    `tool_use` block per call; the turn answering them becomes a user
+    message of `tool_result` blocks, which is where this API puts them.
+    """
+    messages: list[dict[str, Any]] = []
+    for turn in turns:
+        if turn.tool_results:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": result.tool_call_id,
+                            "content": result.content,
+                            "is_error": result.is_error,
+                        }
+                        for result in turn.tool_results
+                    ],
+                }
+            )
+        elif turn.tool_calls:
+            blocks: list[dict[str, Any]] = []
+            if turn.content:
+                blocks.append({"type": "text", "text": turn.content})
+            blocks += [
+                {"type": "tool_use", "id": call.id, "name": call.name, "input": call.arguments}
+                for call in turn.tool_calls
+            ]
+            messages.append({"role": "assistant", "content": blocks})
+        else:
+            messages.append({"role": turn.role, "content": turn.content})
+    return messages
+
+
+def anthropic_tools(tools: Sequence[ToolDef]) -> list[dict[str, Any]]:
+    """Tool definitions in this API's shape. MCP's JSON Schema is what
+    `input_schema` already holds, so nothing is translated."""
+    return [
+        {"name": tool.name, "description": tool.description, "input_schema": tool.input_schema}
+        for tool in tools
+    ]
 
 
 class AnthropicLlm(LlmProvider):
@@ -24,17 +82,33 @@ class AnthropicLlm(LlmProvider):
         self._model = model
         self._max_tokens = max_tokens
 
-    async def stream(self, system: str, turns: Sequence[Turn]) -> AsyncIterator[str]:
+    async def stream(
+        self,
+        system: str,
+        turns: Sequence[Turn],
+        tools: Sequence[ToolDef] = (),
+        tool_choice: ToolChoice = "auto",
+    ) -> AsyncIterator[LlmEvent]:
         request: dict[str, object] = {
             "model": self._model,
             "max_tokens": self._max_tokens,
-            "messages": [{"role": turn.role, "content": turn.content} for turn in turns],
+            "messages": anthropic_messages(turns),
         }
         if system:
             request["system"] = system
+        if tools:
+            request["tools"] = anthropic_tools(tools)
+            request["tool_choice"] = {"type": tool_choice}
         async with self._client.messages.stream(**request) as stream:
             async for text in stream.text_stream:
-                yield text
+                yield TextDelta(text)
+            # Tool calls come from the assembled message rather than the
+            # deltas: their arguments arrive as JSON fragments, and the
+            # SDK has already stitched them together by this point.
+            message = await stream.get_final_message()
+        for block in message.content:
+            if block.type == "tool_use":
+                yield ToolCall(id=block.id, name=block.name, arguments=dict(block.input or {}))
 
 
 def resolve_api_key(label: str, api_key_env: str | None) -> str | None:
