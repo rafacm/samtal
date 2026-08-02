@@ -9,6 +9,17 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- samtal-server device websocket endpoint (M3) at `/xiaozhi/v1/`: accepted
+  upgrade, hello exchange with a 10 second timeout, and an audio loop that
+  echoes each utterance back re-encoded (a full Opus decode/encode round
+  trip on PyAV), framed by `tts` messages and paced at the frame cadence.
+  Utterances end on `listen stop` or through an energy endpointer standing
+  in for M4's VAD; `abort` interrupts a reply in flight; binary framing
+  covers protocol versions 1 to 3; devices that resolve to no agent are
+  closed with policy code 1008. The integration lane now runs the
+  xiaozhi-sdk simulator end to end against a live server. Verified on the
+  desk: the board that got 403 since M2 now holds the hello exchange and
+  echoes speech.
 - samtal-server device OTA/config endpoint (M2) at `/xiaozhi/ota/`: a device
   POSTs its system info and receives the WebSocket URL, an (as yet empty)
   token, the binary protocol version to speak, and the wall clock. The
