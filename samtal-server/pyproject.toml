@@ -15,7 +15,7 @@ samtal-server = "samtal_server.main:main"
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28",
+    "httpx2>=2.9.1",
     "pytest>=8.3",
     "ruff>=0.9",
 ]
