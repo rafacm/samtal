@@ -81,6 +81,43 @@ providers:
       # trailing_silence_ms: 700
       # max_utterance_ms: 10000
 
+# MCP servers, named so agents can reference them. The entry name
+# becomes the prefix its tools are offered to the model under
+# (`home__turn_on_light`), which is why it must be a plain
+# [A-Za-z0-9_-]+ name and cannot be `self`, `switch_agent`, or
+# `remember`: those already mean something in the merged tool list.
+#
+# `transport` decides which fields apply. Secrets are never written
+# here: a value of $NAME is read from that environment variable at
+# startup, and any key that looks secret-bearing (token, api_key,
+# authorization, ...) must use that form. A server that is down at
+# startup only logs a warning; its tools are absent and the server
+# reconnects in the background when a session needs it.
+mcp_servers:
+  home:
+    transport: stdio
+    command: mcp-proxy
+    args:
+      - http://homeassistant.local:8123/mcp_server/sse
+    env:
+      API_ACCESS_TOKEN: $HOME_ASSISTANT_TOKEN
+    # How long one call may take before the model is told it timed out.
+    # The device hears silence meanwhile, so keep it short.
+    # tool_timeout_s: 15
+  weather:
+    transport: streamable_http
+    url: http://localhost:8000/mcp
+    headers:
+      Authorization: $WEATHER_TOKEN
+
+# Facts agents remember between conversations. The whole section is
+# optional: without it there is no `remember` tool and nothing is
+# injected into any prompt. One file per agent, created on first write,
+# read into the system prompt on every reply. Memory is keyed by agent
+# and not by device, because a persona is one entity across rooms.
+memory:
+  dir: /var/lib/samtal/memory
+
 # What every agent uses unless it names something else. There is
 # deliberately no prompt here: a prompt is what makes an agent that
 # agent, and inheriting one silently would make two agents the same one.
@@ -88,6 +125,8 @@ agent_defaults:
   llm: claude
   asr: whisper
   vad: silero
+  mcp:
+    - weather
 
 # Agents combine a prompt with one provider per stage; every stage must
 # resolve to a provider (here or in agent_defaults) for the server to
@@ -101,6 +140,11 @@ agents:
       speakable: one or two sentences, no lists, no markdown. Always
       reply in the language the user spoke.
     tts: piper
+    # Naming a list replaces the inherited one rather than extending it,
+    # like the stage fields above.
+    mcp:
+      - home
+      - weather
   storyteller:
     prompt: >
       You tell bedtime stories in English. Every reply is one short
@@ -109,6 +153,8 @@ agents:
     # Overriding a default: this one runs on the local model.
     llm: local
     tts: piper_english
+    # An empty list is how an agent opts out of tools its siblings have.
+    mcp: []
 
 # Devices are bound to agents by MAC address (as sent in the Device-Id
 # header), as one agent or as a list of them. With a list, the first
