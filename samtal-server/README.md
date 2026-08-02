@@ -46,6 +46,8 @@ uv run ruff check .                 # lint
 
 ## Configuration
 
+Configuration is handled by
+[pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/).
 The server reads one YAML file, passed as `--config /path/to/config.yaml` or
 via the `SAMTAL_CONFIG` environment variable; with neither set, defaults
 apply. [`config.example.yaml`](config.example.yaml) documents every key:
@@ -53,11 +55,18 @@ apply. [`config.example.yaml`](config.example.yaml) documents every key:
 `vad`), `agents` combining a prompt with provider references, `devices`
 binding MAC addresses to agents, and `default_agent` for unknown devices.
 
+Every key can be overridden with a `SAMTAL_`-prefixed environment variable,
+nested keys joined with `__`: `SAMTAL_SERVER__PORT=9000`,
+`SAMTAL_DEFAULT_AGENT=assistant`. Environment variables beat the YAML file,
+and a `.env` file in the directory the server is started from is read at
+startup (real environment variables beat `.env` too). This layering matches
+container deployments: the YAML arrives as a mounted file, overrides and
+secrets as environment variables or mounted secret files.
+
 Secrets never live in the file: a provider names the environment variable
 that holds its key (for example `api_key_env: ANTHROPIC_API_KEY`). Instance
-configs stay out of the repository; `*.local.yaml` is gitignored for local
-experiments. `SAMTAL_HOST` and `SAMTAL_PORT` override the `server` section
-when set.
+configs stay out of the repository; `*.local.yaml` and `.env` are gitignored
+for local experiments.
 
 ## Status
 

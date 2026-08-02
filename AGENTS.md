@@ -25,7 +25,7 @@ for Python; never `pip install` directly.
 
 ```bash
 uv sync                          # Install/update dependencies
-uv run samtal-server             # Run the server (SAMTAL_HOST/SAMTAL_PORT env)
+uv run samtal-server             # Run the server (--config or SAMTAL_CONFIG)
 uv run pytest tests/unit -q      # Unit tests
 uv run pytest tests/integration -q  # Integration tests
 uv run ruff check .              # Lint
