@@ -61,7 +61,7 @@ nested keys joined with `__`: `SAMTAL_SERVER__PORT=9000`,
 and a `.env` file in the directory the server is started from is read at
 startup (real environment variables beat `.env` too). This layering matches
 container deployments: the YAML arrives as a mounted file, overrides and
-secrets as environment variables or mounted secret files.
+secrets as environment variables.
 
 Secrets never live in the file: a provider names the environment variable
 that holds its key (for example `api_key_env: ANTHROPIC_API_KEY`). Instance
