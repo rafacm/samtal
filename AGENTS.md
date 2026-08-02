@@ -61,6 +61,10 @@ the workflow file itself.
 - Active plans keep a milestone status checklist; tick the milestone (with
   its PR number) in the same change that completes it, so a fresh session
   can resume from the repository alone.
+- PR descriptions include a Verification section as a task list. Check a box
+  only when that step was actually carried out; leave it unchecked with a
+  short note when it cannot be verified yet. Unchecked boxes are
+  information, never decoration.
 - Keep in sync: the hardware tables in `README.md` and
   `samtal-esp32/README.md` list the same boards and must move together. When
   the samtal-server config schema changes, update `config.example.yaml` in
