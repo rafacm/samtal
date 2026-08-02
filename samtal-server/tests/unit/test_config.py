@@ -30,10 +30,15 @@ def write_config(tmp_path: Path, text: str) -> Path:
 def test_example_config_parses() -> None:
     config = load_config(EXAMPLE_CONFIG)
     assert config.default_agent == "assistant"
-    assert config.agents["assistant"].llm == "claude"
     assert config.providers.llm["claude"].type == "anthropic"
     assert config.providers.llm["claude"].api_key_env == "ANTHROPIC_API_KEY"
+    # The assistant inherits its LLM and overrides its voice; the
+    # storyteller overrides both.
+    assert config.provider_for_agent("assistant", "llm") == ("claude", "agent_defaults.llm")
+    assert config.provider_for_agent("assistant", "tts") == ("piper", "agents.assistant.tts")
+    assert config.provider_for_agent("storyteller", "llm") == ("local", "agents.storyteller.llm")
     assert config.devices["aa:bb:cc:dd:ee:ff"] == ["assistant"]
+    assert config.agents_for_device("11:22:33:44:55:66") == ["storyteller", "assistant"]
 
 
 def test_no_config_gives_defaults() -> None:
