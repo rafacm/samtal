@@ -5,9 +5,12 @@ from samtal_server.config.models import (
     AgentConfig,
     AgentDefaults,
     Config,
+    McpServerConfig,
+    MemoryConfig,
     ProviderConfig,
     ProvidersConfig,
     ServerConfig,
+    resolve_env_references,
 )
 
 __all__ = [
@@ -15,8 +18,11 @@ __all__ = [
     "AgentDefaults",
     "Config",
     "ConfigError",
+    "McpServerConfig",
+    "MemoryConfig",
     "ProviderConfig",
     "ProvidersConfig",
     "ServerConfig",
     "load_config",
+    "resolve_env_references",
 ]

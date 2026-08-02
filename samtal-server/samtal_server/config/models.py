@@ -1,14 +1,17 @@
 """Pydantic models for the samtal-server YAML configuration.
 
-Top-level keys: server, providers, agent_defaults, agents, devices,
-default_agent. Secrets are referenced by environment variable name (for
-example api_key_env), never written inline.
+Top-level keys: server, providers, mcp_servers, agent_defaults, agents,
+devices, default_agent, memory. Secrets are referenced by environment
+variable name (for example api_key_env, or a $VAR value in an MCP
+server's env and headers), never written inline.
 """
 
+import os
 import re
+from collections.abc import Mapping
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
@@ -25,12 +28,23 @@ from pydantic_settings import (
     YamlConfigSettingsSource,
 )
 
+from samtal_server.tools import names
+
 _MAC_RE = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$")
 
 # Fragments that mark a provider option as secret-bearing. Keys ending in
 # _env are the sanctioned pattern: they name an environment variable instead
 # of holding the value.
 _SECRET_KEY_FRAGMENTS = ("secret", "token", "password", "api_key", "apikey", "credential")
+
+# The same rule for an MCP server's env and headers, where the key that
+# carries a secret is as often called Authorization as it is token.
+_MCP_SECRET_KEY_FRAGMENTS = (*_SECRET_KEY_FRAGMENTS, "auth")
+
+# An environment reference in an MCP server's env or headers: the whole
+# value is $NAME, which is resolved from the server's own environment at
+# boot. A value that must begin with a literal $ is not supported.
+_ENV_REFERENCE_RE = re.compile(r"^\$([A-Za-z_][A-Za-z0-9_]*)$")
 
 PROVIDER_STAGES = ("llm", "asr", "tts", "vad")
 
@@ -110,6 +124,116 @@ class ProvidersConfig(BaseModel):
     vad: dict[NonBlankStr, ProviderConfig] = Field(default_factory=dict)
 
 
+def _env_reference(value: str) -> str | None:
+    """The variable name behind a `$VAR` value, or None for a literal."""
+    match = _ENV_REFERENCE_RE.match(value.strip())
+    return match.group(1) if match else None
+
+
+def resolve_env_references(location: str, values: Mapping[str, str]) -> dict[str, str]:
+    """A `$VAR` mapping with its secrets read from the server's own
+    environment. Literal values for non-secret keys pass through. An
+    unset variable raises, naming where it was written, because at call
+    time it would fail every conversation that reaches the server.
+
+    Kept out of the model so the parsed configuration never holds a
+    secret: resolution happens at boot, where the value is used."""
+    resolved: dict[str, str] = {}
+    for key, value in values.items():
+        name = _env_reference(value)
+        if name is None:
+            resolved[key] = value
+            continue
+        secret = os.environ.get(name, "")
+        if not secret:
+            raise ValueError(
+                f"{location}.{key}: references ${name}, but it is not set in the environment"
+            )
+        resolved[key] = secret
+    return resolved
+
+
+class McpServerConfig(BaseModel):
+    """One MCP server, named so agents can reference it.
+
+    `transport` decides which of the two field groups applies: a stdio
+    server is a command this server spawns, a streamable_http one is a
+    URL it connects to. Naming a field of the other transport is an
+    error rather than a silently ignored key, since the difference
+    between "my headers are ignored" and "my headers are wrong" is a
+    debugging afternoon.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    transport: Literal["stdio", "streamable_http"]
+
+    command: str | None = None
+    args: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+
+    url: str | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
+
+    # How long one tool call on this server may take before the model is
+    # told it timed out. Spoken silence is the cost, so it is short.
+    tool_timeout_s: float = Field(default=15.0, gt=0)
+
+    @model_validator(mode="after")
+    def _check_transport_fields(self) -> "McpServerConfig":
+        stdio_only = ("command", "args", "env")
+        http_only = ("url", "headers")
+        if self.transport == "stdio":
+            required, foreign = "command", http_only
+        else:
+            required, foreign = "url", stdio_only
+
+        problems: list[str] = []
+        value = getattr(self, required)
+        if value is None or not str(value).strip():
+            problems.append(f'transport "{self.transport}" needs "{required}"')
+        named = [field for field in foreign if field in self.model_fields_set]
+        if named:
+            problems.append(
+                f'transport "{self.transport}" has no {", ".join(named)}; '
+                f"that belongs to the other transport"
+            )
+        problems += self._secret_problems()
+        if problems:
+            raise ValueError("; ".join(problems))
+        return self
+
+    def _secret_problems(self) -> list[str]:
+        """Secret-bearing env and header keys must name an environment
+        variable, the same rule that keeps provider secrets out of the
+        configuration file."""
+        problems: list[str] = []
+        for group, values in (("env", self.env), ("headers", self.headers)):
+            for key, value in values.items():
+                lowered = key.lower()
+                if not any(fragment in lowered for fragment in _MCP_SECRET_KEY_FRAGMENTS):
+                    continue
+                if _env_reference(value) is None:
+                    problems.append(
+                        f'{group}.{key} looks like an inline secret, which is not '
+                        f"allowed; reference an environment variable instead, for "
+                        f"example {key}: $MY_SERVER_SECRET"
+                    )
+        return problems
+
+
+class MemoryConfig(BaseModel):
+    """Where the agents' remembered facts are kept.
+
+    The whole section is optional: without it there is no `remember`
+    tool and nothing is injected into any prompt.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    dir: Path
+
+
 class AgentDefaults(BaseModel):
     """Provider references every agent inherits unless it names its own.
 
@@ -123,6 +247,11 @@ class AgentDefaults(BaseModel):
     asr: NonBlankStr | None = None
     tts: NonBlankStr | None = None
     vad: NonBlankStr | None = None
+
+    # The MCP servers this agent talks to. None means inherit; a list
+    # replaces rather than extends the inherited one, like the stage
+    # fields, so an agent naming an empty list opts out of tools.
+    mcp: list[NonBlankStr] | None = None
 
 
 class AgentConfig(AgentDefaults):
@@ -173,12 +302,36 @@ class Config(BaseSettings):
 
     server: ServerConfig = Field(default_factory=ServerConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
+    # Named like providers, and referenced by agents the same way. The
+    # entry name becomes the prefix its tools are offered under.
+    mcp_servers: dict[NonBlankStr, McpServerConfig] = Field(default_factory=dict)
+    memory: MemoryConfig | None = None
     agent_defaults: AgentDefaults = Field(default_factory=AgentDefaults)
     agents: dict[NonBlankStr, AgentConfig] = Field(default_factory=dict)
     # One device may be bound to several agents; the value is written as a
     # single name or a list, and always stored as a list.
     devices: dict[str, list[NonBlankStr]] = Field(default_factory=dict)
     default_agent: NonBlankStr | None = None
+
+    @field_validator("mcp_servers")
+    @classmethod
+    def _check_entry_names(
+        cls, value: dict[str, McpServerConfig]
+    ) -> dict[str, McpServerConfig]:
+        """An entry name becomes a tool-name prefix, so it has to be a
+        legal tool name, and it may not be one the merged list already
+        uses. That is what makes a namespace collision unrepresentable
+        rather than something to resolve at merge time."""
+        problems = [
+            f'mcp_servers.{name}: not a usable entry name; it becomes a tool-name '
+            f"prefix, so it must match [A-Za-z0-9_-]+ and must not be one of: "
+            + ", ".join(names.RESERVED_ENTRY_NAMES)
+            for name in value
+            if not names.is_valid_entry_name(name)
+        ]
+        if problems:
+            raise ValueError("\n".join(problems))
+        return value
 
     @field_validator("devices", mode="before")
     @classmethod
@@ -233,6 +386,14 @@ class Config(BaseSettings):
                     problems.append(
                         f'{source}.{stage}: unknown {stage} provider "{ref}"{hint}'
                     )
+            for entry in layer.mcp or []:
+                if entry not in self.mcp_servers:
+                    hint = (
+                        f" (defined: {', '.join(sorted(self.mcp_servers))})"
+                        if self.mcp_servers
+                        else "; no mcp_servers entries are defined"
+                    )
+                    problems.append(f'{source}.mcp: unknown MCP server "{entry}"{hint}')
 
         if problems:
             raise ValueError("\n".join(problems))
@@ -247,6 +408,22 @@ class Config(BaseSettings):
         if own is not None:
             return own, f"agents.{agent}.{stage}"
         return getattr(self.agent_defaults, stage), f"agent_defaults.{stage}"
+
+    def mcp_for_agent(self, agent: str) -> list[str]:
+        """The MCP servers an agent talks to: its own list when it names
+        one, agent_defaults otherwise. A list replaces rather than
+        extends, so `mcp: []` is how an agent opts out of tools its
+        siblings have."""
+        own = self.agents[agent].mcp
+        if own is not None:
+            return list(own)
+        return list(self.agent_defaults.mcp or [])
+
+    def referenced_mcp_servers(self) -> set[str]:
+        """The entries some agent actually uses. Only these are
+        connected at startup, the way only referenced providers are
+        built."""
+        return {entry for agent in self.agents for entry in self.mcp_for_agent(agent)}
 
     def agents_for_device(self, mac: str) -> list[str]:
         """The agents a device may talk to, the first of them the one a
