@@ -25,6 +25,8 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- Updated logo artwork (`assets/samtal-logo.png`), same concept: the person
+  and the device sharing one waveform.
 - Hardware tables now link each board's product page and technical
   documentation ("doc").
 - The logo is a single transparent PNG of the original artwork
