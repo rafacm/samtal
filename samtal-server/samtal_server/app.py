@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from samtal_server import __version__
+from samtal_server import __version__, ota
 from samtal_server.config import Config, load_config
 
 
@@ -14,6 +14,8 @@ def create_app(config: Config | None = None) -> FastAPI:
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
         return {"status": "ok", "version": __version__}
+
+    app.include_router(ota.router)
 
     return app
 
