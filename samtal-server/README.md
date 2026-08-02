@@ -135,27 +135,37 @@ What it costs:
   and stateful while OTA requests are short and stateless, but they share a
   process, so they share a worker pool, a restart, and a crash.
 
-### On Kubernetes
+### Behind a reverse proxy
 
-One container port, one Service port, one Ingress or HTTPRoute with two path
-rules, and `/healthz` on the same port for probes.
+One port and two paths means a proxy in front has to treat those paths
+differently. Four things to get right:
 
-Two things need attention:
+- **Set `server.websocket_url` explicitly.** The derived URL is wrong behind
+  a proxy that terminates TLS: uvicorn only trusts `X-Forwarded-Proto` from
+  `--forwarded-allow-ips`, which defaults to `127.0.0.1` and so will not
+  match the proxy's address. The reply then says `ws://` where it should say
+  `wss://`, and devices fail to connect with nothing obviously
+  misconfigured.
+- **Give the two paths different idle timeouts.** An OTA check is a
+  sub-second request. A conversation WebSocket goes quiet whenever nobody is
+  speaking, so a proxy timeout tuned for short HTTP requests (60 seconds is
+  a common default) cuts the conversation off mid-pause. Where the timeout
+  can only be set once for the whole service, the long value has to win: a
+  generous timeout on the OTA path costs little, a short one on the
+  WebSocket path ends conversations.
+- **Allow the upgrade and turn off response buffering** on the WebSocket
+  path. A proxy that buffers, or that does not pass `Upgrade` and
+  `Connection` through, either breaks the handshake or adds latency to every
+  spoken reply.
+- **Restarts end conversations.** Every open WebSocket dies with the
+  process, and the OTA endpoint shares that process, so neither can be
+  restarted without the other. Allow a drain period long enough for
+  conversations in flight to finish.
 
-- **Set `server.websocket_url` explicitly.** Behind an ingress the derived
-  URL is wrong: uvicorn only trusts `X-Forwarded-Proto` from
-  `--forwarded-allow-ips` (`127.0.0.1` by default, never the ingress pod's
-  IP), so a TLS ingress still derives `ws://` rather than `wss://`. Set the
-  public URL and the guesswork disappears.
-- **Rolling updates drop conversations.** Every active WebSocket ends when a
-  pod terminates, and because the OTA endpoint shares that pod it cannot be
-  rolled independently. Give the Deployment a `terminationGracePeriodSeconds`
-  long enough for conversations to finish, and a PodDisruptionBudget.
-
-Separating the two tiers later does not require separate ports, or any code
-change. Run the same image as two Deployments, route `/xiaozhi/ota/` to one
-and `/xiaozhi/v1/` to the other, and point `server.websocket_url` at the
-WebSocket tier's hostname. Devices follow, because they are told where to go.
+Separating the two later needs no separate ports and no code change: run the
+same image twice, route `/xiaozhi/ota/` to one group and `/xiaozhi/v1/` to
+the other, and point `server.websocket_url` at the second. Devices follow,
+because they are told where to go.
 
 ## Status
 
