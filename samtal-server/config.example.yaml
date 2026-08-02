@@ -65,6 +65,12 @@ providers:
       voice: sv_SE-nst-medium
       # Where voices are stored (default: ~/.cache/samtal/piper).
       # download_dir: /var/lib/samtal/piper
+    # A voice is a provider entry: two agents that should sound different
+    # reference two entries. There is no per-agent voice option, because
+    # for Piper the voice is the loaded model either way.
+    piper_english:
+      type: piper
+      voice: en_US-lessac-medium
   vad:
     silero:
       type: silero
@@ -75,8 +81,17 @@ providers:
       # trailing_silence_ms: 700
       # max_utterance_ms: 10000
 
+# What every agent uses unless it names something else. There is
+# deliberately no prompt here: a prompt is what makes an agent that
+# agent, and inheriting one silently would make two agents the same one.
+agent_defaults:
+  llm: claude
+  asr: whisper
+  vad: silero
+
 # Agents combine a prompt with one provider per stage; every stage must
-# name a provider for the server to start.
+# resolve to a provider (here or in agent_defaults) for the server to
+# start. A typical agent is therefore a prompt and a voice.
 agents:
   assistant:
     # State the reply language explicitly: models otherwise pick one by
@@ -85,14 +100,24 @@ agents:
       You are a helpful voice assistant. Keep replies short, plain, and
       speakable: one or two sentences, no lists, no markdown. Always
       reply in the language the user spoke.
-    llm: claude
-    asr: whisper
     tts: piper
-    vad: silero
+  storyteller:
+    prompt: >
+      You tell bedtime stories in English. Every reply is one short
+      story of a few sentences, calm and speakable, no lists, no
+      markdown.
+    # Overriding a default: this one runs on the local model.
+    llm: local
+    tts: piper_english
 
 # Devices are bound to agents by MAC address (as sent in the Device-Id
-# header). Unknown devices get default_agent.
+# header), as one agent or as a list of them. With a list, the first
+# entry is the agent a conversation starts on and the rest are the ones
+# it may be switched to. Unknown devices get default_agent.
 devices:
   "aa:bb:cc:dd:ee:ff": assistant
+  "11:22:33:44:55:66":
+    - storyteller
+    - assistant
 
 default_agent: assistant

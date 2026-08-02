@@ -9,6 +9,19 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- samtal-server agents and bindings (M5): distinct personas, enforced. A
+  new top-level `agent_defaults` section holds what every agent uses
+  unless it names something else, so a typical agent shrinks to a prompt
+  and a voice; it deliberately takes no prompt, since a prompt is what
+  makes an agent that agent. A device is bound to one agent or to a list
+  of them, the first being the agent a conversation starts on and the
+  rest the ones M6's spoken switching will reach, and the session now
+  holds an explicit active agent whose prompt, providers, and endpointer
+  swap together. Two simulated devices in one server run get two
+  personas: the reply text comes from each agent's own prompt and the
+  audio in each agent's own voice. The opt-in local lane runs the same
+  thing on real engines, identifying the voice each device was answered
+  in by re-speaking the reply in both configured voices.
 - samtal-server conversation pipeline (M4), replacing the M3 echo: while
   the device listens, decoded audio feeds a Silero VAD endpointer; the
   finished utterance is transcribed (announced to the device in an `stt`
@@ -80,6 +93,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- samtal-server `devices` values are now one agent name or a list of
+  them, always stored as a list, and `Config.agent_for_device` became
+  `agents_for_device`, returning the whole list. Existing single-name
+  bindings keep working unchanged. `config.example.yaml` gained
+  `agent_defaults`, a second voice, a second persona, and a list-valued
+  binding.
 - samtal-server agents must now name a provider for all four pipeline
   stages (`llm`, `asr`, `tts`, `vad`); the server refuses to start
   otherwise. `config.example.yaml`'s placeholder `sensevoice` entry became

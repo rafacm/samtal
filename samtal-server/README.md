@@ -116,8 +116,17 @@ The server reads one YAML file, passed as `--config /path/to/config.yaml` or
 via the `SAMTAL_CONFIG` environment variable; with neither set, defaults
 apply. [`config.example.yaml`](config.example.yaml) documents every key:
 `server` (host/port), named `providers` per stage (`llm`, `asr`, `tts`,
-`vad`), `agents` combining a prompt with provider references, `devices`
-binding MAC addresses to agents, and `default_agent` for unknown devices.
+`vad`), `agent_defaults` holding what every agent uses unless it says
+otherwise, `agents` combining a prompt with provider references,
+`devices` binding MAC addresses to agents, and `default_agent` for
+unknown devices.
+
+Since a voice is a `tts` provider entry, two agents that should sound
+different reference two entries, and a typical agent is a prompt plus a
+voice. `agent_defaults` takes no prompt: a prompt is what makes an agent
+that agent. A device is bound to one agent or to a list of them; with a
+list, the first entry is the agent a conversation starts on, and the
+rest are the ones it will be switchable to.
 
 Every key can be overridden with a `SAMTAL_`-prefixed environment variable,
 nested keys joined with `__`: `SAMTAL_SERVER__PORT=9000`,
