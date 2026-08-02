@@ -6,8 +6,16 @@ written inline.
 """
 
 import re
+from contextvars import ContextVar
+from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+    YamlConfigSettingsSource,
+)
 
 _MAC_RE = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$")
 
@@ -82,8 +90,34 @@ def normalize_mac(value: str) -> str:
     return mac
 
 
-class Config(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+# The YAML file the settings source should read, set by the loader around
+# instantiation. pydantic-settings has no init kwarg for a runtime-chosen
+# path yet (pydantic-settings#259).
+yaml_file_var: ContextVar[Path | None] = ContextVar("samtal_yaml_file", default=None)
+
+
+class Config(BaseSettings):
+    model_config = SettingsConfigDict(
+        extra="forbid",
+        env_prefix="SAMTAL_",
+        env_nested_delimiter="__",
+    )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        return (
+            init_settings,
+            env_settings,
+            YamlConfigSettingsSource(settings_cls, yaml_file=yaml_file_var.get()),
+            file_secret_settings,
+        )
 
     server: ServerConfig = Field(default_factory=ServerConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)

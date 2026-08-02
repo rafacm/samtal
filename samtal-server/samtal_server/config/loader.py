@@ -1,8 +1,10 @@
 """Load and validate the YAML configuration file.
 
 The path comes from the explicit argument, then the SAMTAL_CONFIG environment
-variable; with neither set, defaults apply. SAMTAL_HOST and SAMTAL_PORT
-override the server section either way.
+variable; with neither set, defaults apply. Values follow pydantic-settings
+source priority: SAMTAL_-prefixed environment variables (nested keys joined
+with __, for example SAMTAL_SERVER__PORT) override the YAML file, which
+overrides the field defaults.
 """
 
 import os
@@ -10,8 +12,9 @@ from pathlib import Path
 
 import yaml
 from pydantic import ValidationError
+from pydantic_settings.exceptions import SettingsError
 
-from samtal_server.config.models import Config
+from samtal_server.config.models import Config, yaml_file_var
 
 CONFIG_ENV_VAR = "SAMTAL_CONFIG"
 
@@ -27,19 +30,25 @@ def load_config(path: str | Path | None = None) -> Config:
     else:
         path = Path(path)
 
-    data: dict[str, object] = {}
     if path is not None:
-        data = _read_yaml(path)
+        _check_config_file(path)
 
-    _apply_env_overrides(data)
-
+    token = yaml_file_var.set(path)
     try:
-        return Config.model_validate(data)
+        return Config()
     except ValidationError as exc:
         raise ConfigError(_format_validation_error(exc, path)) from exc
+    except SettingsError as exc:
+        source = str(path) if path is not None else "the configuration"
+        raise ConfigError(f"invalid config in {source}: {exc}") from exc
+    finally:
+        yaml_file_var.reset(token)
 
 
-def _read_yaml(path: Path) -> dict[str, object]:
+def _check_config_file(path: Path) -> None:
+    """Pre-flight check with stable, helpful messages: the pydantic-settings
+    YAML source silently skips a missing file, and its parse errors do not
+    reliably name line and column."""
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError:
@@ -56,29 +65,11 @@ def _read_yaml(path: Path) -> dict[str, object]:
             detail = f"{exc.problem} at line {mark.line + 1}, column {mark.column + 1}"
         raise ConfigError(f"invalid YAML in {path}: {detail}") from exc
 
-    if data is None:
-        return {}
-    if not isinstance(data, dict):
+    if data is not None and not isinstance(data, dict):
         raise ConfigError(
             f"invalid config in {path}: top level must be a mapping of "
             f"server/providers/agents/devices/default_agent, got {type(data).__name__}"
         )
-    return data
-
-
-def _apply_env_overrides(data: dict[str, object]) -> None:
-    overrides = {
-        "host": os.environ.get("SAMTAL_HOST"),
-        "port": os.environ.get("SAMTAL_PORT"),
-    }
-    if not any(value for value in overrides.values()):
-        return
-    server = data.setdefault("server", {})
-    if not isinstance(server, dict):
-        return  # leave the bad value for validation to report
-    for key, value in overrides.items():
-        if value:
-            server[key] = value
 
 
 def _format_validation_error(exc: ValidationError, path: Path | None) -> str:
