@@ -1,4 +1,5 @@
 import argparse
+import logging
 import sys
 
 import uvicorn
@@ -15,6 +16,15 @@ def main() -> None:
     # Real environment variables keep priority over .env values. usecwd makes
     # the search start from the invocation directory, not this file's.
     load_dotenv(find_dotenv(usecwd=True))
+
+    # Give the root logger a handler. Uvicorn configures only its own loggers,
+    # so without this everything samtal-server logs is discarded while
+    # uvicorn's own request lines still appear, which reads as if the server
+    # were silent about its own work. M7 replaces this with structured logging.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+    )
 
     parser = argparse.ArgumentParser(prog="samtal-server")
     parser.add_argument(
