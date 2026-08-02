@@ -124,6 +124,41 @@ def test_an_agent_without_a_full_pipeline_fails_the_boot() -> None:
         build_agent_providers(config)
     assert "agents.assistant" in str(excinfo.value)
     assert "asr" in str(excinfo.value)
+    assert "agent_defaults.asr" in str(excinfo.value)
+
+
+def test_agent_defaults_complete_a_pipeline_an_agent_only_half_names() -> None:
+    config = Config(
+        providers={
+            "llm": {"mock": {"type": "mock"}},
+            "asr": {"mock": {"type": "mock"}},
+            "tts": {"alto": {"type": "mock"}, "tenor": {"type": "mock", "tone_hz": 880.0}},
+            "vad": {"mock": {"type": "mock"}},
+        },
+        agent_defaults={"llm": "mock", "asr": "mock", "tts": "alto", "vad": "mock"},
+        agents={"poet": {"prompt": "POET", "tts": "tenor"}, "tutor": {"prompt": "TUTOR"}},
+        default_agent="tutor",
+    )
+    providers = build_agent_providers(config)
+    # The inherited stages are literally one instance; the overridden one
+    # is the agent's own.
+    assert providers["poet"].llm is providers["tutor"].llm
+    assert providers["poet"].vad is providers["tutor"].vad
+    assert providers["poet"].tts is not providers["tutor"].tts
+    assert providers["poet"].prompt == "POET"
+    assert providers["tutor"].prompt == "TUTOR"
+
+
+def test_an_agent_default_naming_a_broken_provider_fails_the_boot() -> None:
+    config = Config(
+        providers={stage: {"mock": {"type": "mock"}} for stage in ("asr", "tts", "vad")}
+        | {"llm": {"broken": {"type": "mock", "repply": "typo"}}},
+        agent_defaults=dict.fromkeys(("asr", "tts", "vad"), "mock") | {"llm": "broken"},
+        agents={"assistant": {}},
+        default_agent="assistant",
+    )
+    with pytest.raises(ProviderError, match="providers.llm.broken"):
+        build_agent_providers(config)
 
 
 def test_mock_vad_hands_out_independent_endpointers() -> None:

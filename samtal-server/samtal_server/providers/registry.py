@@ -147,16 +147,19 @@ class AgentProviders:
 
 def build_agent_providers(config: Config) -> dict[str, AgentProviders]:
     """Build every provider the configured agents reference, sharing one
-    instance per named entry across agents. Runs at startup, so a bad
-    provider configuration, a missing extra, or an agent without a full
-    pipeline fails the boot rather than the first conversation."""
+    instance per named entry across agents. Agents are read through their
+    effective view, so a stage comes from the agent or from agent_defaults.
+    Runs at startup, so a bad provider configuration, a missing extra, or
+    an agent without a full pipeline fails the boot rather than the first
+    conversation."""
     built: dict[tuple[str, str], object] = {}
 
     def get(stage: str, agent_name: str) -> object:
-        provider_name = getattr(config.agents[agent_name], stage)
+        provider_name, _ = config.provider_for_agent(agent_name, stage)
         if provider_name is None:
             raise ProviderError(
-                f"agents.{agent_name}: no {stage} provider is named; the conversation "
+                f"agents.{agent_name}: no {stage} provider is named, and "
+                f"agent_defaults.{stage} names none either; the conversation "
                 f"pipeline needs all of: {', '.join(PROVIDER_STAGES)}"
             )
         key = (stage, provider_name)
