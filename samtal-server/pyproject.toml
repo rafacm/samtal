@@ -22,7 +22,9 @@ samtal-server = "samtal_server.main:main"
 dev = [
     "httpx2>=2.9.1",
     "pytest>=8.3",
+    "pytest-asyncio>=1.4.0",
     "ruff>=0.9",
+    "xiaozhi-sdk>=0.5.1",
 ]
 
 [build-system]
@@ -40,3 +42,5 @@ select = ["E", "F", "W", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
