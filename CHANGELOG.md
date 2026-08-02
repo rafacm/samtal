@@ -61,6 +61,8 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- README header now shows project status badges for server CI, Python,
+  FastAPI, ESP-IDF, and the MIT license.
 - Hardware tables (root and samtal-esp32 READMEs) now list the e-paper
   board first, link each board name to its product page, and keep a single
   "wiki" link in the Links column.

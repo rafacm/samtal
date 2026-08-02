@@ -7,6 +7,12 @@
 **samtal** *(n.)* Swedish for *conversation*;<br>
 from *sam-* (together) + *tal* (speech). Speech, together, with your own hardware.
 
+[![Server CI](https://github.com/rafacm/samtal/actions/workflows/samtal-server.yml/badge.svg)](https://github.com/rafacm/samtal/actions/workflows/samtal-server.yml)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue)](https://www.python.org/)
+[![FastAPI >=0.115](https://img.shields.io/badge/fastapi-%3E%3D0.115-009688)](https://fastapi.tiangolo.com/)
+[![ESP-IDF v6.0.x](https://img.shields.io/badge/ESP--IDF-v6.0.x-E7352C)](https://docs.espressif.com/projects/esp-idf/en/latest/esp32s3/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-brightgreen)](LICENSE)
+
 [What is it?](#what-is-samtal) • [Features](#features) • [Hardware](#hardware) • [Getting Started](#getting-started) • [Project Layout](#project-layout) • [Credits](#credits) • [Changelog](#changelog)
 
 </div>
