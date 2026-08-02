@@ -69,6 +69,17 @@ Modules, roughly one package each:
 Each milestone is mergeable and ends green in CI. "Device checkpoint" means a
 manual test against real hardware on the desk.
 
+Status (tick when the milestone's PR merges, with the PR number):
+
+- [ ] M0 Skeleton (PR #1, in review)
+- [ ] M1 Config
+- [ ] M2 OTA endpoint
+- [ ] M3 Protocol handshake and audio loop
+- [ ] M4 Conversation pipeline
+- [ ] M5 Agents and bindings
+- [ ] M6 Tools/MCP
+- [ ] M7 Hardening and release
+
 - **M0 Skeleton**: uv project, package layout, pytest, ruff, and the GitHub
   Actions workflow described under Testing strategy. Accept: `uv run pytest`
   passes on a trivial test locally and in CI, and the workflow only runs when

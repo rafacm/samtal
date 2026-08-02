@@ -58,6 +58,9 @@ the workflow file itself.
 - Significant changes get a feature doc in `docs/features/`, same date-prefix
   naming, covering: Problem, Changes, Key parameters, Verification, and
   Files modified. No session transcripts are kept in this repository.
+- Active plans keep a milestone status checklist; tick the milestone (with
+  its PR number) in the same change that completes it, so a fresh session
+  can resume from the repository alone.
 - Keep in sync: the hardware tables in `README.md` and
   `samtal-esp32/README.md` list the same boards and must move together. When
   the samtal-server config schema changes, update `config.example.yaml` in
