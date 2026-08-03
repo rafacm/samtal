@@ -123,15 +123,30 @@ jobs:
           SAMTAL_SMOKE_OTA_URL: http://127.0.0.1:8003/xiaozhi/ota/
         run: uv run pytest tests/smoke -v
 
+      # `docker stop` is what sends SIGTERM and waits; -t is above
+      # server.drain_s so the drain finishes rather than being killed
+      # part-way through. `docker rm -f` would SIGKILL and exercise
+      # nothing, which is what this step used to do.
+      #
+      # Deliberately not `if: always()` and deliberately not masked with
+      # `|| true`: this asserts that the shutdown ran, and a cleanup
+      # command that cannot fail cannot assert anything.
+      - name: Stop the container and check it drained
+        run: |
+          docker stop -t 30 samtal-smoke
+          if ! docker logs samtal-smoke 2>&1 | grep -q "shutting down: draining conversations"; then
+            echo "::error::SIGTERM did not reach the server: no drain ran before exit"
+            docker logs samtal-smoke
+            exit 1
+          fi
+
       - name: Container logs
         if: always()
         run: docker logs samtal-smoke || true
 
-      - name: Stop the container
+      - name: Remove the container
         if: always()
-        # Above server.drain_s, so the drain has room to finish rather
-        # than being killed halfway through it.
-        run: docker rm -f -t 30 samtal-smoke || true
+        run: docker rm -f samtal-smoke || true
 
       - name: Log in to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
