@@ -12,7 +12,7 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 - samtal-server hardening and release (M7): the server is now something
   you can deploy. It ships as a multi-arch container image
   (`ghcr.io/rafacm/samtal-server`, amd64 and arm64, tagged `latest`, the
-  build date, and the commit SHA), built and published by CI only after
+  build time, and the commit SHA), built and published by CI only after
   the tests pass, with both local engines baked in so one `docker run`
   with one mounted YAML serves a conversation. Model weights are still
   never baked in: `HOME` points at the mounted volume, where whisper
@@ -38,6 +38,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- Published images carry the build time (`2026-08-03-1200`, UTC) where
+  they carried the build date. A date-only tag was claimed by every
+  build that day, so it moved like a second `latest` while reading like
+  a release marker: two merges on 2026-08-03 both took `2026-08-03`,
+  and the second changed what that tag meant four hours after the
+  first. `latest` is now the only tag that moves.
 - `default_agent` is now required only when agents are defined and no
   device is bound to one. Omitting it is how a deployment says "only
   these devices": every unknown MAC then resolves to no agent, is issued
