@@ -19,6 +19,7 @@ import pytest
 import uvicorn
 
 from samtal_server.app import create_app
+from samtal_server.auth import build_device_auth
 from samtal_server.config import Config
 from samtal_server.ota import OTA_PATH
 
@@ -43,18 +44,20 @@ def _free_port() -> int:
         return sock.getsockname()[1]
 
 
+CONFIG = Config(
+    providers=MOCK_PROVIDERS,
+    agents={"assistant": MOCK_AGENT, "kitchen": MOCK_AGENT},
+    devices={DEVICE_MAC: "kitchen"},
+    default_agent="assistant",
+)
+
+
 @pytest.fixture(scope="module")
 def server() -> Iterator[str]:
     """A real uvicorn serving the app, yielding its base URL."""
-    config = Config(
-        providers=MOCK_PROVIDERS,
-        agents={"assistant": MOCK_AGENT, "kitchen": MOCK_AGENT},
-        devices={DEVICE_MAC: "kitchen"},
-        default_agent="assistant",
-    )
     port = _free_port()
     server = uvicorn.Server(
-        uvicorn.Config(create_app(config), host="127.0.0.1", port=port, log_level="warning")
+        uvicorn.Config(create_app(CONFIG), host="127.0.0.1", port=port, log_level="warning")
     )
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
@@ -100,8 +103,12 @@ def test_device_gets_a_complete_configuration(server: str) -> None:
 
     host = server.removeprefix("http://")
     assert body["websocket"]["url"] == f"ws://{host}/xiaozhi/v1/"
-    assert body["websocket"]["token"] == ""
     assert body["websocket"]["version"] == 1
+    # Auth is on by default, so a bound device is handed a token this
+    # server will accept back on the websocket handshake.
+    auth = build_device_auth(CONFIG)
+    assert auth is not None
+    assert auth.verify(body["websocket"]["token"], DEVICE_UUID, DEVICE_MAC)
     assert body["firmware"] == {"version": "2.4.0", "url": ""}
     assert body["server_time"]["timestamp"] > 1_700_000_000_000
     assert "activation" not in body

@@ -395,10 +395,15 @@ class Config(BaseSettings):
     def _check_references(self) -> "Config":
         problems: list[str] = []
 
-        if self.agents and self.default_agent is None:
+        # Omitting default_agent is how a deployment says "only these
+        # devices": every unknown MAC then resolves to no agent, is issued
+        # no token, and is turned away, so the devices map is the
+        # allowlist. Omitting it with nothing bound either is the case
+        # that cannot be meant, since no device could reach any agent.
+        if self.agents and self.default_agent is None and not self.devices:
             problems.append(
-                "default_agent is required when agents are defined; set it to one of: "
-                + ", ".join(sorted(self.agents))
+                "default_agent is required when agents are defined and no device is "
+                "bound to one; set it to one of: " + ", ".join(sorted(self.agents))
             )
         if self.default_agent is not None and self.default_agent not in self.agents:
             problems.append(

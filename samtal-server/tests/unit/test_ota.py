@@ -55,8 +55,10 @@ def test_reply_carries_the_websocket_url_the_device_needs() -> None:
     assert response.status_code == 200
     websocket = response.json()["websocket"]
     assert websocket["url"] == "ws://testserver/xiaozhi/v1/"
-    assert websocket["token"] == ""
     assert websocket["version"] == 1
+    # A bare Config() binds no device to any agent, so this one gets no
+    # token; the token cases are in test_ota_tokens.py.
+    assert websocket["token"] == ""
 
 
 def test_configured_websocket_url_wins_over_the_request_address() -> None:
