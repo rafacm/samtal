@@ -17,6 +17,7 @@ import asyncio
 import pytest
 import websockets
 
+from samtal_server.auth import build_device_auth
 from samtal_server.config import Config
 from samtal_server.ws import WEBSOCKET_PATH
 from tests.integration.conftest import converse, dominant_hz, running, spoken
@@ -83,15 +84,20 @@ async def test_an_unbound_device_gets_the_default_agent(server_port: int) -> Non
 
 
 async def test_a_device_with_no_agent_at_all_is_turned_away() -> None:
-    # No agents and no default_agent: the upgrade is accepted (so the
-    # device gets a reason rather than a bare handshake failure) and then
-    # closed with the policy code.
-    async with running(Config()) as port:
+    # No agents and no default_agent: the device proves who it is at the
+    # handshake, so the upgrade is accepted (it gets a reason rather than
+    # a bare handshake failure) and then closed with the policy code.
+    client_id = "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
+    config = Config()
+    auth = build_device_auth(config)
+    assert auth is not None
+    async with running(config) as port:
         websocket = await websockets.connect(
             f"ws://127.0.0.1:{port}{WEBSOCKET_PATH}",
             additional_headers={
                 "Device-Id": UNBOUND_MAC,
-                "Client-Id": "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8",
+                "Client-Id": client_id,
+                "Authorization": f"Bearer {auth.issue(client_id, UNBOUND_MAC)}",
             },
         )
         with pytest.raises(websockets.ConnectionClosed) as excinfo:

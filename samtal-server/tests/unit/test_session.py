@@ -26,7 +26,7 @@ from samtal_server.audio.opus import OpusDecoder, OpusEncoder
 from samtal_server.config import Config
 from samtal_server.protocol import framing
 from samtal_server.providers import build_agent_providers
-from samtal_server.ws import WEBSOCKET_PATH
+from samtal_server.ws import WEBSOCKET_PATH, signed_device_id
 
 DEVICE_MAC = "AA:BB:CC:DD:EE:FF"
 DEVICE_UUID = "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
@@ -103,14 +103,30 @@ def two_persona_config() -> Config:
 
 
 def connect(client: TestClient, device_id: str | None = DEVICE_MAC, version: int = 1):
+    """The handshake a device makes, token and all.
+
+    Auth is on in every lane, so the token here is a real one, issued by
+    the app under test the way the OTA reply would issue it. That keeps
+    these tests on the same path a device is on, and leaves the refusal
+    cases to the tests that are about refusals.
+    """
     headers = {
-        "Authorization": "Bearer ",
+        "Authorization": f"Bearer {token_for(client, device_id)}",
         "Protocol-Version": str(version),
         "Client-Id": DEVICE_UUID,
     }
     if device_id is not None:
         headers["Device-Id"] = device_id
     return client.websocket_connect(WEBSOCKET_PATH, headers=headers)
+
+
+def token_for(client: TestClient, device_id: str | None) -> str:
+    """A token the app under test accepts for this device id, signed for
+    the same form the handshake will present it in."""
+    device_auth = client.app.state.device_auth
+    if device_auth is None:
+        return ""
+    return device_auth.issue(DEVICE_UUID, signed_device_id(device_id or ""))
 
 
 def shake_hands(websocket, version: int = 1) -> dict:
