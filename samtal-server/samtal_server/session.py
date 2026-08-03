@@ -85,9 +85,19 @@ OUTPUT_AUDIO = messages.AudioParams(
 )
 
 # Websocket close codes (RFC 6455): policy violation for who you are,
-# protocol error for what you sent.
+# protocol error for what you sent, going away for a server on its way
+# out, and normal closure for an ordinary end, which is what the
+# duration cap is.
 POLICY_VIOLATION = 1008
 PROTOCOL_ERROR = 1002
+GOING_AWAY = 1001
+NORMAL_CLOSURE = 1000
+
+# How long a session being shut down waits for a reply that is already
+# speaking. Long enough for a sentence to finish, short enough that a
+# stuck provider does not hold up the process; the drain's own bound is
+# stricter in practice.
+SHUTDOWN_REPLY_GRACE_S = 10.0
 
 # How many times one reply may stream, call tools, and stream again.
 # The last permitted round forbids calling, so a reply always ends in
@@ -253,7 +263,22 @@ class Session:
         self._start_device_discovery(hello)
 
         try:
-            await self._serve()
+            # The cap on a session's total life, which is also what idles
+            # one out: a device that stopped talking hours ago holds a
+            # slot until this fires.
+            async with asyncio.timeout(self.config.server.limits.max_session_s):
+                await self._serve()
+        except TimeoutError:
+            logger.info(
+                "session %s reached the %.0f s time limit",
+                self.session_id,
+                self.config.server.limits.max_session_s,
+                extra=self._event("session_limit", duration_s=self._open_duration_s()),
+            )
+            # The firmware reads a close as the end of a conversation and
+            # reconnects on the next wake word, so this is invisible in
+            # normal use.
+            await self.request_shutdown(NORMAL_CLOSURE, "session time limit reached")
         except WebSocketDisconnect:
             pass
         finally:
@@ -265,6 +290,27 @@ class Session:
                 mac,
                 extra=self._event("session_closed", duration_s=self._open_duration_s()),
             )
+
+    async def request_shutdown(
+        self, code: int = GOING_AWAY, reason: str = "server shutting down"
+    ) -> None:
+        """End this session cleanly: let a reply that is already speaking
+        finish its sentence, then close.
+
+        The duration cap and the shutdown drain share this, so how a
+        session is ended politely lives in one place. Cutting a reply off
+        mid-word is what this exists to avoid: the device is speaking to
+        somebody. A reply that will not finish inside the grace period is
+        abandoned rather than waited on, and the caller's own bound (the
+        drain period) is stricter again.
+        """
+        reply = self._reply_task
+        if reply is not None and not reply.done():
+            # asyncio.wait rather than await: a reply that failed is a
+            # reply that finished, and its exception is not this method's
+            # to raise.
+            await asyncio.wait([reply], timeout=SHUTDOWN_REPLY_GRACE_S)
+        await self._close(code, reason)
 
     def _open_duration_s(self) -> float:
         """How long this session has been open, to one hundredth of a
