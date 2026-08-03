@@ -27,7 +27,10 @@ modes stream mic audio until the server decides the user finished,
 which is what the endpointer is for. The modes also differ in who
 re-arms the listening: auto mode sends a fresh `listen start` after
 each reply, while a realtime device asks once and then streams
-continuously, so a realtime session here never stops listening.
+continuously, so a realtime session here never stops listening. It
+therefore hears the user through its own speech, and an utterance that
+ends while a reply is streaming cancels that reply and is answered,
+which is what barge-in is.
 
 What happens in a conversation is logged twice over: as a human
 sentence, and as structured `extra=` fields (`event`, `session`,
@@ -510,19 +513,28 @@ class Session:
         sending `listen start` after the reply's `tts stop`. Not in
         realtime mode: that device asked once and is still streaming, so
         stopping here would leave nobody to re-arm it and the session
-        would answer one utterance and go deaf."""
+        would answer one utterance and go deaf.
+
+        An utterance that ends while a reply is still streaming is the
+        user cutting in, so the reply in flight is cancelled and this one
+        answered instead. Cancelling sends the old reply's `tts stop`
+        before the new reply's `tts start`, because `_cancel_reply` waits
+        for the task it cancelled."""
         pcm = bytes(self._utterance)
         self._reset_utterance()
         if not self._realtime:
             self.listening = False
         if self._reply_task is not None and not self._reply_task.done():
-            # Reachable in realtime mode, where the mic streams while a
-            # reply plays; one reply at a time for now.
-            logger.warning(
-                "session %s: dropping an utterance, a reply is already streaming",
+            # From the mic this is realtime mode only, where the device
+            # streams through playback: it asks for that mode exactly
+            # when its echo cancellation is on, so what arrived is the
+            # user's voice and not the assistant's.
+            logger.info(
+                "session %s: barge-in, cancelling the reply in flight",
                 self.session_id,
+                extra=self._event("barge_in"),
             )
-            return
+            await self._cancel_reply()
         logger.info(
             "session %s: utterance of %.1f s",
             self.session_id,

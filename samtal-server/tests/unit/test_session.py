@@ -13,6 +13,7 @@ import json
 import math
 import re
 import struct
+from collections.abc import Callable
 from typing import Any, cast
 
 import pytest
@@ -44,6 +45,14 @@ TTS_MIN_MS = 240
 # listen stop: the endpointer's 700 ms window plus a couple of frames, so
 # which frame trips it does not have to be predicted exactly.
 ENDPOINT_SILENCE_MS = 840
+
+# A reply the mock voice takes about eight seconds to speak, so a barge
+# sent while it streams lands with most of it still unsaid.
+LONG_REPLY = (
+    "There is a longer answer to that, and it takes the mock voice about eight "
+    "seconds to say, which leaves plenty of room for somebody to lose patience "
+    "and cut in long before the end of it arrives."
+)
 
 DEVICE_HELLO = {
     "type": "hello",
@@ -172,8 +181,11 @@ def assert_endpointed_speech(texts: list[dict], speech_ms: int) -> None:
     assert speech_ms + 600 <= heard_ms(texts) <= speech_ms + ENDPOINT_SILENCE_MS + 180
 
 
-def collect_reply(websocket, version: int = 1) -> tuple[list[dict], bytes]:
-    """Read until tts stop, returning the JSON messages and decoded audio."""
+def collect_until(
+    websocket, done: Callable[[dict], bool], version: int = 1
+) -> tuple[list[dict], bytes]:
+    """Read messages and audio until one of them says to stop, returning
+    the JSON messages and the decoded audio."""
     decoder = OpusDecoder(sample_rate=OUTPUT_RATE)
     texts: list[dict] = []
     audio = b""
@@ -182,11 +194,31 @@ def collect_reply(websocket, version: int = 1) -> tuple[list[dict], bytes]:
         if received.get("text") is not None:
             message = json.loads(received["text"])
             texts.append(message)
-            if message.get("type") == "tts" and message.get("state") == "stop":
+            if done(message):
                 return texts, audio
         else:
             frame = framing.unwrap(version, received["bytes"])
             audio += decoder.decode(frame.payload)
+
+
+def collect_reply(websocket, version: int = 1) -> tuple[list[dict], bytes]:
+    """Read until tts stop, returning the JSON messages and decoded audio."""
+    return collect_until(websocket, is_reply_end, version)
+
+
+def is_reply_end(message: dict) -> bool:
+    return message.get("type") == "tts" and message.get("state") == "stop"
+
+
+def is_reply_start(message: dict) -> bool:
+    """The first sentence of a reply, which is where the server is
+    audibly speaking and a barge-in has something to interrupt."""
+    return message.get("type") == "tts" and message.get("state") == "sentence_start"
+
+
+def is_transcript(message: dict) -> bool:
+    """What the server heard, announced before it starts answering."""
+    return message.get("type") == "stt"
 
 
 def sentences(texts: list[dict]) -> list[str]:
@@ -373,6 +405,33 @@ def test_realtime_mode_serves_a_second_utterance_without_listen_start() -> None:
             second, _ = collect_reply(websocket)
     assert_endpointed_speech(first, 600)
     assert_endpointed_speech(second, 240)
+
+
+def test_realtime_barge_in_cancels_the_reply_in_flight() -> None:
+    # The point of listening through playback: speech that lands while
+    # the server is talking cuts the reply off and is answered, with no
+    # abort and no listen message anywhere. Only the mic said so.
+    config = config_with_agent(asr_text="{ms}", llm_reply=LONG_REPLY)
+    with TestClient(create_app(config)) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            encoder = OpusEncoder()
+            websocket.send_text(
+                json.dumps({"type": "listen", "state": "start", "mode": "realtime"})
+            )
+            send_pcm(websocket, speech_pcm(600), encoder)
+            endpoint_silence(websocket, encoder)
+            opening, opening_audio = collect_until(websocket, is_reply_start)
+            # The long reply is now streaming, paced at the frame cadence.
+            send_pcm(websocket, speech_pcm(240), encoder)
+            endpoint_silence(websocket, encoder)
+            cut, cut_audio = collect_reply(websocket)
+            answer, _ = collect_until(websocket, is_transcript)
+    assert sentences(opening + cut)[0].startswith(LONG_REPLY[:20])
+    # Cut off well short of the whole reply, and the interruption
+    # answered as an utterance in its own right.
+    assert audio_ms(opening_audio + cut_audio) < TTS_MS_PER_CHAR * len(LONG_REPLY) / 2
+    assert_endpointed_speech(answer, 240)
 
 
 def test_abort_in_realtime_mode_keeps_the_session_listening() -> None:
