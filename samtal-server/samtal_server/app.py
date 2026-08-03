@@ -7,6 +7,7 @@ from samtal_server import __version__, ota, ws
 from samtal_server.auth import build_device_auth
 from samtal_server.config import Config, load_config
 from samtal_server.providers import build_agent_providers
+from samtal_server.registry import SessionRegistry
 from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
 
@@ -33,6 +34,9 @@ def create_app(config: Config | None = None) -> FastAPI:
     # secret in the environment, so a deployment that forgot one never
     # comes up serving every device that connects.
     app.state.device_auth = build_device_auth(app.state.config)
+    # One registry per app: what decides whether there is room for the
+    # next conversation, and what the drain reaches the live ones through.
+    app.state.sessions = SessionRegistry(app.state.config.server.limits.max_sessions)
     # Built here so a bad provider configuration (unknown type, bad option,
     # missing extra, agent without a full pipeline) fails the boot rather
     # than the first conversation. The same for MCP servers: an unknown
