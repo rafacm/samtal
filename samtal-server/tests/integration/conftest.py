@@ -27,10 +27,14 @@ FRAME_BYTES = SAMPLE_RATE * FRAME_MS // 1000 * 2
 
 
 @contextlib.asynccontextmanager
-async def running(config: Config):
-    """A live server on an ephemeral port, torn down on the way out."""
+async def running_app(config: Config):
+    """A live server on an ephemeral port, yielding its port and the app
+    it serves, torn down on the way out. The app is what a test needs
+    when it has to reach server-side state (the session registry) that a
+    device could not."""
+    app = create_app(config)
     server = uvicorn.Server(
-        uvicorn.Config(create_app(config), host="127.0.0.1", port=0, log_level="warning")
+        uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning")
     )
     task = asyncio.create_task(server.serve())
     while not server.started:
@@ -38,10 +42,17 @@ async def running(config: Config):
             task.result()
         await asyncio.sleep(0.01)
     try:
-        yield server.servers[0].sockets[0].getsockname()[1]
+        yield server.servers[0].sockets[0].getsockname()[1], app
     finally:
         server.should_exit = True
         await task
+
+
+@contextlib.asynccontextmanager
+async def running(config: Config):
+    """A live server on an ephemeral port, yielding just the port."""
+    async with running_app(config) as (port, _):
+        yield port
 
 
 def speech_pcm(duration_ms: int) -> bytes:
@@ -110,6 +121,12 @@ def spoken(events: list[dict]) -> str:
 def serve():
     """The server runner: `async with serve(config) as port: ...`."""
     return running
+
+
+@pytest.fixture
+def serve_app():
+    """The same, plus the app: `async with serve_app(c) as (port, app):`."""
+    return running_app
 
 
 @pytest.fixture
