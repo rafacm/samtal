@@ -304,6 +304,28 @@ The WebSocket path never moves: the token is what protects it.
 `/xiaozhi/v1/`, and `/healthz`. FastAPI's `/docs`, `/redoc`, and
 `/openapi.json` are turned off.
 
+## Listening and barge-in
+
+The firmware decides how it listens and the server follows. In `auto`
+mode the device shuts its microphone off while a reply plays and sends a
+fresh `listen start` afterwards. In `realtime` mode, which it picks when
+its echo cancellation is on, it streams continuously and asks only once,
+so the session here never stops listening: an utterance that ends while
+a reply is playing cancels that reply and is answered instead. Talking
+over the assistant stops it, which is what barge-in means.
+
+```yaml
+server:
+  barge_in: true          # speech during a reply interrupts it
+```
+
+Turn it off for a board whose echo cancellation leaks the speaker back
+into the microphone, typically a single-mic board, where a reply would
+otherwise interrupt itself. Conversations stay multi-turn with it off;
+only the interrupting goes. What says a board wants it: replies that
+answer nothing at all, arriving just after the previous reply finished
+speaking.
+
 ## Limits
 
 Two numbers bound what one server holds, and neither is visible in normal
@@ -357,6 +379,7 @@ and `device`, plus its own:
 | `replied`          | a reply finishes                | `agent`, `text`                    |
 | `agent_said`       | one agent's part of a reply     | `agent`, `text`                    |
 | `handover`         | `switch_agent` succeeds         | `from_agent`, `to_agent`           |
+| `barge_in`         | speech cuts a reply short       | (none of its own)                  |
 | `tool_call`        | a tool returns                  | `agent`, `tool`, `duration_ms`, `is_error` |
 | `session_limit`    | the duration cap fires          | `duration_s`                       |
 | `session_closed`   | a conversation ends             | `duration_s`                       |

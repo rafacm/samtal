@@ -135,6 +135,15 @@ class ServerConfig(BaseModel):
     auth: AuthConfig = Field(default_factory=AuthConfig)
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
 
+    # Whether speech arriving while a reply is playing interrupts it. On
+    # by default, because a device only streams its mic through playback
+    # when its echo cancellation is on, and what arrives is then the
+    # user's voice. Turn it off for a board whose cancellation leaks the
+    # speaker back into the mic (a single-mic board), where the reply
+    # would otherwise interrupt itself: conversations stay multi-turn,
+    # and what arrives during a reply is dropped instead.
+    barge_in: bool = True
+
     # How long a shutdown waits for conversations in flight to finish
     # speaking before the process goes. Twenty seconds sits inside the
     # thirty an orchestrator commonly allows between SIGTERM and SIGKILL;
