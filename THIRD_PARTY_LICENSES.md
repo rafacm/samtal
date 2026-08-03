@@ -69,3 +69,29 @@ SOFTWARE.
   deploy time and carry their own licenses; they are not redistributed here.
 - The `edge-tts` Python package is GPL-3.0; Samtal treats TTS engines as
   optional pluggable providers so that the core server does not depend on it.
+
+## The published container image
+
+`ghcr.io/rafacm/samtal-server` bundles samtal-server with both of its
+optional local engines, so that one `docker run` serves a conversation
+without a cloud account. Two of its contents carry copyleft terms:
+
+- **piper-tts** (piper1-gpl) is **GPL-3.0**. It is installed in the image
+  as an independent, unmodified package that samtal-server calls through
+  its ordinary Python API; the two are aggregated on one filesystem, not
+  combined into a derived work. samtal-server itself remains MIT and does
+  not depend on piper outside the optional `piper` extra. Corresponding
+  source for piper-tts is available from
+  <https://github.com/OHF-voice/piper1-gpl>.
+- **PyAV** ships a bundled FFmpeg build, most of which is **LGPL-2.1 or
+  later**. It is likewise installed unmodified and dynamically linked, and
+  its source is available from <https://github.com/PyAV-Org/PyAV> and
+  <https://ffmpeg.org>.
+
+Model weights are never included in the image. Whisper models and Piper
+voices download at first start into the mounted `/data` volume, under
+their own licenses.
+
+An image without the GPL engine is a reasonable thing to want; a
+core-only variant is noted as a possible follow-up rather than shipped
+today.

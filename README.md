@@ -28,7 +28,7 @@ A self-hostable voice assistant that pairs **small ESP32-S3 devices** (a microph
 
 The design premise is a **thin device and a smart server**: the firmware's only tie to a backend is a single config URL, and everything else (endpoints, credentials, even firmware updates) is delivered by *your* server at runtime. Customization lives server-side, in Python, not in C++ you have to reflash.
 
-- **Self-hosted end to end.** The device speaks Opus over a WebSocket to your server and nothing else. Run it on a laptop or ship it as a container image to your own infrastructure. WebSocket is the only transport for v1; upstream's MQTT+UDP alternative may follow. 🚧
+- **Self-hosted end to end.** The device speaks Opus over a WebSocket to your server and nothing else. Run it on a laptop or ship the published multi-arch container image to your own infrastructure. WebSocket is the only transport for v1; upstream's MQTT+UDP alternative may follow.
 - **No account, no activation, no phone app.** Point the device at your server once; it connects and talks.
 - **Pluggable LLM.** Anthropic, any OpenAI-compatible endpoint, or fully local via [Ollama](https://ollama.com). 🚧
 - **Pluggable voice.** Speech recognition and synthesis are swappable providers; a zero-API-key local pipeline (SileroVAD + SenseVoice + EdgeTTS) works today.
@@ -48,20 +48,43 @@ Any board supported by xiaozhi-esp32 can work; these are the ones samtal targets
 
 ## Getting Started
 
-samtal does not have its own releases yet. What works today is the validated reference setup: upstream prebuilt firmware on the device, the upstream Python server locally, and one NVS write to point the device at your server. The complete procedure, including configuration for a fully local zero-API-key pipeline, is documented in [`docs/xiaozhi-notes.md`](docs/xiaozhi-notes.md).
+The device runs upstream's prebuilt xiaozhi firmware; the server is samtal's, and ships as a container image.
 
-The short version:
+**1. Run the server.** For a trial on a network you trust, authentication off and everything in one file:
 
-1. **Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`.
-2. **Point** the device at your server by writing one NVS key (`wifi/ota_url`) over USB.
-3. **Run** the Python server with your chosen providers in one YAML file.
-4. **Provision WiFi** from the device's captive portal, press the button, and talk.
+```bash
+docker run -d --name samtal -p 8003:8003 \
+  -e SAMTAL_SERVER__AUTH__ENABLED=false \
+  -v /path/to/config.yaml:/config/config.yaml:ro \
+  -v samtal-data:/data \
+  ghcr.io/rafacm/samtal-server:latest
+```
+
+For anything that outlives an afternoon, leave authentication on (it is the default) and give it a secret:
+
+```bash
+docker run -d --name samtal -p 8003:8003 \
+  -e SAMTAL_AUTH_SECRET="$(openssl rand -hex 32)" \
+  -v /path/to/config.yaml:/config/config.yaml:ro \
+  -v samtal-data:/data \
+  ghcr.io/rafacm/samtal-server:latest
+```
+
+Start from [`samtal-server/config.example.yaml`](samtal-server/config.example.yaml), which documents every key. Speech models download into the `/data` volume at first start, so the first run takes a few minutes and later ones take seconds.
+
+**2. Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`.
+
+**3. Point** the device at your server by writing one NVS key (`wifi/ota_url` = `http://<server-host>:8003/xiaozhi/ota/`) over USB.
+
+**4. Provision WiFi** from the device's captive portal, press the button, and talk.
+
+The complete procedure, including a fully local zero-API-key pipeline and every serial gotcha, is in [`docs/xiaozhi-notes.md`](docs/xiaozhi-notes.md); the server's own options, security defaults, and container details are in [`samtal-server/README.md`](samtal-server/README.md). samtal has no versioned releases yet: images are tagged `latest`, the build date, and the commit SHA.
 
 ## Project Layout
 
 | Directory | What it is |
 | --- | --- |
-| [`samtal-server/`](samtal-server/) | The conversation server (Python): OTA/config endpoint, WebSocket audio channel, VAD → ASR → LLM → TTS pipeline with pluggable providers. 🚧 |
+| [`samtal-server/`](samtal-server/) | The conversation server (Python): OTA/config endpoint, WebSocket audio channel, VAD → ASR → LLM → TTS pipeline with pluggable providers, MCP tools, device authentication. Published as a multi-arch container image. |
 | [`samtal-esp32/`](samtal-esp32/) | Thin firmware customization: samtal server as default endpoint, English wake word, minimal UI changes. 🚧 |
 | [`docs/`](docs/README.md) | Research notes on the upstream architecture and the device↔server protocol, plus the plans and implementation notes behind each milestone. |
 | `vendor/` | Reference clones of the upstream projects (not committed). |
