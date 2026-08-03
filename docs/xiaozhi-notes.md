@@ -41,6 +41,23 @@ git clone --depth 1 https://github.com/xinnan-tech/xiaozhi-esp32-server.git vend
 
   Read the partition first (`read_flash 0x9000 0x4000`) if you want to
   preserve the existing device UUID (namespace `board`, key `uuid`).
+  Regenerating replaces the whole partition, so carry over everything
+  worth keeping: `wifi/ssid`, `wifi/password`, `board/uuid`,
+  `display/theme`, `audio/output_volume`. The `phy` namespace can be
+  dropped (the board recalibrates on the next boot and says so with a
+  `phy_init: Saving new calibration data` line), and so can `websocket`,
+  which the first OTA reply repopulates. Comparing the per-entry CRC32s
+  before and after proves the carried values survived byte for byte.
+- **An HTTPS backend needs no firmware certificate work.** The firmware
+  trusts the ESP-IDF certificate bundle and sets
+  `CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_CROSS_SIGNED_VERIFY=y`, which is
+  exactly what a Let's Encrypt host needs today: the bundle carries
+  `ISRG Root X1` and `X2` but not the newer `ISRG Root YR`, and such
+  hosts serve `Root YR` cross-signed by `X1`, so the chain validates
+  through the cross-sign. The boot log confirms it with
+  `esp-x509-crt-bundle: Certificate validated`. Pin nothing: `X1` is the
+  anchor that actually works, `Root YR` on its own is not self-signed and
+  fails strict path building, and the leaf rotates roughly every 90 days.
 - Interaction on this board: short-press PWR toggles the conversation;
   long-press powers off. Wake word in prebuilt builds is Chinese
   ("nǐ hǎo xiǎo zhì"); an English model (`wn9_hiesp`, "Hi ESP") is available
@@ -111,6 +128,25 @@ wants an interactive terminal). The port is `/dev/cu.usbmodem101` at
   `Client-Id` = UUID); response JSON contains `websocket {url, token,
   version}` (and/or `mqtt {...}`), optional `firmware {version, url}` and
   optional `activation {...}` (omit it and no activation is ever required).
+- **A successful OTA check does not mean the device is authorised.** A
+  board whose MAC is missing from samtal-server's `devices:` allowlist
+  still gets `200 OK`, with `websocket.token` empty; the refusal comes
+  later, at the WebSocket handshake, as a `403` logged as `auth_rejected`
+  with reason `no_token`. Nothing in the OTA response says the device is
+  unwelcome, so a board that provisions perfectly and then never speaks
+  is this, not a network fault. Treat an empty token as a hard
+  provisioning error rather than connecting anyway. One POST from a
+  laptop, sending the board's MAC as `Device-Id` and its UUID as
+  `Client-Id`, answers the question before touching the hardware. A
+  plain `GET` on the same URL returns a human-readable line naming the
+  WebSocket URL, which smoke-tests routing without revealing anything.
+- **Probing the WebSocket route with `curl` needs `--http1.1`.** curl
+  negotiates HTTP/2 by default, where a WebSocket upgrade is not a valid
+  handshake, so the request arrives as an ordinary `GET` and a WS-only
+  route correctly answers `404`, which reads like a broken route. With
+  `--http1.1` and the `Connection`, `Upgrade` and `Sec-WebSocket-*`
+  headers, a `403` from an unauthenticated probe is the success signal:
+  the route is alive and device auth is enforced.
 - WebSocket handshake headers: `Authorization: Bearer <token>`,
   `Protocol-Version`, `Device-Id`, `Client-Id`. Then a JSON `hello` exchange;
   audio is binary **Opus**, device→server 16 kHz mono 60 ms frames,

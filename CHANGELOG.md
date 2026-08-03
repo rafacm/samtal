@@ -38,6 +38,16 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- `docs/xiaozhi-notes.md` records three findings from provisioning a
+  board against an HTTPS backend: that a device missing from the
+  `devices:` allowlist still gets `200 OK` from the OTA check with an
+  empty token and is refused only at the WebSocket handshake, that the
+  firmware needs no certificate work because the ESP-IDF bundle plus
+  cross-signed verification covers the current Let's Encrypt chain, and
+  that probing a WebSocket route with `curl` requires `--http1.1` or the
+  route answers a misleading `404`. The NVS note now also lists which
+  namespaces to carry across a regeneration and which regenerate
+  themselves.
 - Published images carry the build time (`2026-08-03-1200`, UTC) where
   they carried the build date. A date-only tag was claimed by every
   build that day, so it moved like a second `latest` while reading like
