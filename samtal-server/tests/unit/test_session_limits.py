@@ -107,7 +107,7 @@ def session_with(reply: asyncio.Task[None] | None = None) -> tuple[Session, Fake
 
 async def test_request_shutdown_closes_going_away_by_default() -> None:
     session, websocket = session_with()
-    await session.request_shutdown()
+    assert await session.request_shutdown() is True
     assert websocket.closed == (GOING_AWAY, "server shutting down")
 
 
@@ -120,32 +120,51 @@ async def test_request_shutdown_waits_for_a_reply_to_finish_speaking() -> None:
         spoke = True
 
     session, websocket = session_with(asyncio.create_task(reply()))
-    await session.request_shutdown()
-    # The sentence finished before the socket closed: somebody was
-    # listening to it.
+    # True: the sentence finished before the socket closed, because
+    # somebody was listening to it.
+    assert await session.request_shutdown() is True
     assert spoke
     assert websocket.closed == (GOING_AWAY, "server shutting down")
 
 
-async def test_a_reply_that_will_not_finish_is_abandoned_not_waited_on(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(session_module, "SHUTDOWN_REPLY_GRACE_S", 0.05)
-
+async def test_a_reply_that_outlasts_the_grace_is_abandoned_and_reported() -> None:
     async def forever() -> None:
         await asyncio.sleep(30)
 
     task = asyncio.create_task(forever())
     session, websocket = session_with(task)
-    await session.request_shutdown()
+    # False is what lets the drain say a reply was cut mid-sentence
+    # rather than report a clean drain over the top of it.
+    assert await session.request_shutdown(grace_s=0.05) is False
     assert websocket.closed is not None
     task.cancel()
 
 
-async def test_a_failed_reply_does_not_become_this_methods_exception() -> None:
+async def test_the_caller_decides_how_long_a_reply_is_worth_waiting_for() -> None:
+    """The drain passes its own budget, so server.drain_s lengthens what
+    a reply actually gets. Without this the module constant capped it."""
+
+    async def reply() -> None:
+        await asyncio.sleep(0.2)
+
+    session, _ = session_with(asyncio.create_task(reply()))
+    assert await session.request_shutdown(grace_s=5.0) is True
+
+
+async def test_the_default_grace_applies_when_no_caller_names_one() -> None:
+    """The duration cap has no budget of its own, so it gets the module
+    default rather than an unbounded wait."""
+    assert session_module.SHUTDOWN_REPLY_GRACE_S == 10.0
+    session, websocket = session_with()
+    await session.request_shutdown(NORMAL_CLOSURE, "session time limit reached")
+    assert websocket.closed == (NORMAL_CLOSURE, "session time limit reached")
+
+
+async def test_a_failed_reply_counts_as_a_finished_one() -> None:
     async def fails() -> None:
         raise RuntimeError("the provider went away")
 
     session, websocket = session_with(asyncio.create_task(fails()))
-    await session.request_shutdown()
+    # It is not speaking any more, which is what the caller asked about.
+    assert await session.request_shutdown() is True
     assert websocket.closed is not None

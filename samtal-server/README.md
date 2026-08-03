@@ -321,6 +321,13 @@ lets every reply in flight finish speaking, and closes those sockets with
 1001, all inside `drain_s`. A second signal forces the exit. Give
 `docker stop` a `-t` above `drain_s`; its default is ten seconds.
 
+`drain_s` is the whole budget a reply gets, so raise it if your replies
+are long: a spoken answer is paced at the frame rate, so thirty seconds
+of speech takes thirty seconds to deliver. When a reply outlasts the
+budget its socket is still closed politely, but the drain logs
+`drain_incomplete` with `cut_mid_reply`, which is the signal that
+`drain_s` is too short for the replies this server gives.
+
 ## Logging
 
 Two formats, one handler:
@@ -348,6 +355,9 @@ and `device`, plus its own:
 | `session_closed`   | a conversation ends             | `duration_s`                       |
 | `session_rejected` | a device is turned away         | `reason`                           |
 | `auth_rejected`    | a handshake is refused          | `reason`                           |
+| `drain_started`    | a shutdown begins draining      | `sessions`, `timeout_s`            |
+| `drain_finished`   | every reply finished speaking   | `sessions`                         |
+| `drain_incomplete` | a reply was cut, or a session hung | `cut_mid_reply`, `unfinished`   |
 
 Retained JSON logs are the conversation store until v3 brings a real one:
 filter on `event` in `heard`, `replied`, `agent_said` and group by

@@ -20,6 +20,14 @@ if TYPE_CHECKING:  # the session imports nothing from here
 
 logger = logging.getLogger(__name__)
 
+# Held back from the drain budget for the closes themselves, so the
+# overall bound is a backstop for a session stuck somewhere other than
+# its reply rather than something that races the per-reply wait. Capped
+# at a tenth of the budget as well, so that a deliberately short drain
+# period still spends most of itself on the replies.
+CLOSE_MARGIN_S = 1.0
+CLOSE_MARGIN_FRACTION = 0.1
+
 
 class SessionRegistry:
     """The live sessions, and whether there is room for another."""
@@ -76,17 +84,38 @@ class SessionRegistry:
                 "timeout_s": timeout_s,
             },
         )
-        _, pending = await asyncio.wait(
-            [asyncio.create_task(session.request_shutdown()) for session in sessions],
+        # The drain's budget is what a reply is given, rather than some
+        # constant inside the session: an operator who raises drain_s to
+        # cover long replies has to actually get longer replies out of it.
+        # A slice is held back for the close itself, so the outer bound
+        # below stays a backstop instead of racing the inner one.
+        reply_grace_s = timeout_s - min(CLOSE_MARGIN_S, timeout_s * CLOSE_MARGIN_FRACTION)
+        done, pending = await asyncio.wait(
+            [
+                asyncio.create_task(session.request_shutdown(grace_s=reply_grace_s))
+                for session in sessions
+            ],
             timeout=timeout_s,
         )
         for task in pending:
             task.cancel()
-        if pending:
+
+        # A session whose reply outlasted the grace was closed mid-sentence.
+        # It has to be reported: it is the signal that drain_s is too short,
+        # and reporting it as a clean drain would hide exactly that.
+        cut = sum(1 for task in done if task.exception() is None and not task.result())
+        if pending or cut:
             logger.warning(
-                "%d session(s) did not finish inside the drain period",
+                "drained with %d session(s) cut mid-reply and %d that did not finish",
+                cut,
                 len(pending),
-                extra={"event": "drain_timeout", "sessions": len(pending)},
+                extra={
+                    "event": "drain_incomplete",
+                    "sessions": len(sessions),
+                    "cut_mid_reply": cut,
+                    "unfinished": len(pending),
+                    "timeout_s": timeout_s,
+                },
             )
         else:
             logger.info(
