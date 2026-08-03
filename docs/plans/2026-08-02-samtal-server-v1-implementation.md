@@ -653,3 +653,118 @@ Not exercised on hardware: a streamable-http MCP server (only stdio was
 attached), a tool timing out or failing on the board, and two devices
 holding tool conversations at once. The integration lane covers all
 three.
+
+## M7 Hardening and release (PR #9)
+
+Implemented from the dedicated
+[M7 plan](2026-08-03-m7-hardening-and-release.md), whose fifteen commits
+are the commits here plus two the plan did not anticipate (see below).
+
+Deviations and additions relative to the plan:
+
+- **`default_agent` had to become optional.** The plan's "no separate
+  device allowlist" decision rests on omitting `default_agent` so that
+  unknown MACs resolve to no agent, get no token, and are turned away.
+  M5's validator required `default_agent` whenever any agent was
+  defined, which made that state unrepresentable and the whole
+  no-agent-no-token path unreachable. It is now required only when
+  agents are defined *and* no device is bound to one, so the case that
+  cannot be meant (agents nothing can reach) stays an error. Exercised
+  on hardware: the checkpoint config binds one MAC and names no
+  default, and the board resolved to its agent.
+- **`ota_check` carries no `session` field.** The plan's event table
+  says every event carries `event`, `session`, and `device`. No session
+  exists when a device checks OTA, so that event is keyed by device
+  alone rather than by a null session.
+- **The interactive API docs are turned off**, which the plan did not
+  mention. It follows from the security default the plan does state (no
+  public endpoints beyond the two a device needs), and the smoke lane is
+  what surfaced that FastAPI was serving three more.
+- **The drain's reply grace was a defect, found by the checkpoint.**
+  `request_shutdown` bounded its wait on the in-flight reply with a
+  hardcoded ten-second constant, so `server.drain_s` never reached the
+  thing the plan documents it as controlling, and any reply longer than
+  ten seconds was cut mid-sentence whatever an operator configured.
+  Worse, `asyncio.wait` returns normally on timeout, so a cut reply was
+  indistinguishable from a finished one and the drain logged "every
+  session drained" over the top of it. The grace is now a parameter the
+  caller decides; the drain passes its own budget less a small slice
+  held back for the closes, `request_shutdown` answers whether the reply
+  actually finished, and a cut reply is reported as `drain_incomplete`
+  with a `cut_mid_reply` count. A reply that outlasts the budget is now
+  closed 1001 rather than abandoned to uvicorn's 1012.
+
+Measurements worth keeping:
+
+- The CI image job runs in 6m54s cold: 2m43s for the amd64 build, 3m19s
+  for the arm64 build under QEMU, 9s for the arm64 extras import, 6s to
+  a healthy container, and 4s for the smoke lane. The QEMU build being
+  this cheap answers the plan's "native arm runners are the follow-up if
+  the job proves slow": it did not prove slow, and that follow-up looks
+  not worth doing. The publish step still rebuilds multi-arch, which the
+  first push to `main` will price; a digest-and-merge restructure would
+  remove it.
+- The image is 882 MB with both engines and no models.
+
+### Device checkpoint
+
+Waveshare ESP32-S3-Touch-LCD-1.54 on the desk (MAC `28:84:85:49:8c:a8`,
+UUID `34c0b0c4-c209-4ba5-8e79-585bc5d4ebe4`, firmware 2.4.0), running
+the image built from this branch rather than the published one, because
+publishing is gated on the merge this checkpoint is a precondition for.
+Real pipeline (Silero, faster-whisper `small`, Ollama `gemma4:e4b`,
+Piper `en_US-lessac-medium`), JSON logs, `SAMTAL_AUTH_SECRET` set, one
+mounted YAML and one `docker run`.
+
+- **The token round trip works against firmware.** Before M7 the board's
+  NVS `websocket` namespace held `url` and `version` and no `token`,
+  because M6 sent an empty one. After one OTA check it held
+  `cfSjt9GL….1785739430`, which verifies under the container's secret
+  for this board's client and device ids and fails for any other MAC or
+  under any other secret. Every subsequent handshake was accepted with
+  no `auth_rejected`, so the board persisted the token and sent it back
+  as a bearer credential exactly as the plan assumed.
+- **The allowlist shape works.** The config binds one MAC and names no
+  `default_agent`; the board resolved to `assistant` on every check.
+- **A wrong secret locks the device out, and an OTA re-check recovers
+  it.** Restarting the container with a different secret and pressing
+  PWR produced one `auth_rejected` with `reason=bad_token` naming the
+  device, zero sessions opened, and, on the board, an error tone and a
+  blank screen: the handshake is refused before any socket exists.
+  Restoring the secret and resetting the board produced an `ota_check`,
+  a fresh token, and a normal conversation 18 s later. The lockout is
+  transient by design, since the firmware refreshes at its next OTA
+  check; what a wrong secret costs is every device's current token, not
+  permanent access.
+- **`docker stop` mid-reply lets the sentence finish.** SIGTERM arrived
+  0.2 s after the transcript, before the LLM had produced a reply at
+  all, and the drain still waited through ASR, the model, TTS, and
+  playback: "The capital of Sweden is Stockholm." came out of the
+  speaker complete, then `drain_finished`, then the process exited, with
+  `docker stop` returning in 5 s of its 20 s budget. **This failed on
+  the first attempt** and is what found the grace defect above: the same
+  test cut the board off mid-word at exactly 10.000 s. After the fix a
+  deliberately long reply reached 19 s before being cut and was reported
+  as `cut_mid_reply=1`, which is the bound working and saying so.
+- **Retained JSON logs read back as transcripts.** Filtering the saved
+  container logs on `event` in `heard`/`replied`/`agent_said` and
+  grouping by `session` recovered all five conversations of the
+  checkpoint with speaker attribution and timestamps. The session whose
+  reply was cut shows a user turn and no reply, which is the transcript
+  being honest rather than incomplete.
+
+One defect found that is not M7's, filed as
+[#10](https://github.com/rafacm/samtal/issues/10): a session in
+**realtime** listening mode goes deaf after its first utterance. `listen
+start` is the only thing that sets `listening`, `_finish_utterance`
+clears it, and a realtime-mode board sends `listen start` once and then
+streams continuously, so the flag is never re-armed. Auto mode re-arms
+every turn, which is why M3, M4, and M6 never saw it: those checkpoints
+all recorded the board in auto mode, and it now presents as realtime.
+Why the mode changed is unexplained from the server side. This is M4's
+deferred realtime handling, latent since M4, and the fix is its own PR.
+
+Not exercised on hardware: the published image (only the identical
+locally built one), the GHCR publish path (gated on the merge), a
+read-only root filesystem, `FORWARDED_ALLOW_IPS` behind a real proxy,
+and the concurrent-session cap with more than one board.
