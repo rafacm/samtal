@@ -23,6 +23,7 @@ from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from samtal_server.config import Config
+from samtal_server.config.models import normalize_mac
 from samtal_server.ws import WEBSOCKET_PATH
 
 logger = logging.getLogger(__name__)
@@ -88,29 +89,44 @@ async def check_version(request: Request) -> Response:
         return _bad_request("the Client-Id header is required and holds the device UUID")
 
     try:
-        agents = config.agents_for_device(device_id)
+        mac = normalize_mac(device_id)
     except ValueError as exc:
         return _bad_request(f"Device-Id header: {exc}")
+    agents = config.agents_for_device(mac)
 
     payload = await _read_json_object(request)
     version = reported_version(payload)
+    board = reported_board(payload)
+    # No session exists yet, so the structured record carries the device
+    # rather than a session id; the websocket events pick the device up
+    # from here.
+    event = {
+        "event": "ota_check",
+        "device": mac,
+        "client": client_id,
+        "board": board,
+        "firmware": version,
+        "agents": agents,
+    }
 
     if not agents:
         logger.warning(
             "device %s (%s, firmware %s) has no agent: bind it under devices "
             "or set default_agent",
             device_id,
-            reported_board(payload),
+            board,
             version,
+            extra=event,
         )
     else:
         logger.info(
             "device %s (%s, firmware %s) resolved to agent %s%s",
             device_id,
-            reported_board(payload),
+            board,
             version,
             agents[0],
             f" (also bound to {', '.join(agents[1:])})" if len(agents) > 1 else "",
+            extra=event,
         )
 
     return JSONResponse(
