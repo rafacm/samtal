@@ -5,6 +5,66 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-03
+
+### Added
+
+- samtal-server hardening and release (M7): the server is now something
+  you can deploy. It ships as a multi-arch container image
+  (`ghcr.io/rafacm/samtal-server`, amd64 and arm64, tagged `latest`, the
+  build date, and the commit SHA), built and published by CI only after
+  the tests pass, with both local engines baked in so one `docker run`
+  with one mounted YAML serves a conversation. Model weights are still
+  never baked in: `HOME` points at the mounted volume, where whisper
+  models and Piper voices download at first start. A fourth test lane,
+  `tests/smoke`, holds a whole conversation with the freshly built
+  container in CI, which turns the milestone acceptance into something
+  checked rather than remembered.
+- Structured logging: `server.log_format` (`text` or `json`, and `json`
+  is the image's default) and `server.log_level`. Every conversation
+  event now carries structured fields alongside its human sentence
+  (`event`, `session`, `device`, plus what the event holds), so retained
+  JSON logs filtered on `heard`/`replied`/`agent_said` and grouped by
+  session read back as transcripts. That stands in for a conversation
+  store until v3 brings a real one.
+- Limits and a graceful shutdown: `server.limits.max_sessions` (eight
+  concurrent conversations) and `server.limits.max_session_s` (an hour,
+  which bounds an idle session too, so there is no separate idle key).
+  On SIGTERM the server stops admitting sessions and lets every reply in
+  flight finish speaking before closing those sockets, inside
+  `server.drain_s`; a second signal forces the exit. Uvicorn cannot do
+  this part, since it fail-closes every websocket with 1012 the moment
+  its own shutdown begins.
+
+### Changed
+
+- `default_agent` is now required only when agents are defined and no
+  device is bound to one. Omitting it is how a deployment says "only
+  these devices": every unknown MAC then resolves to no agent, is issued
+  no token, and is turned away, which makes the `devices` map the
+  allowlist without a second list to keep in sync.
+- WebSocket pings are explicit at 20 seconds, which settles the per-path
+  idle timeout question the v1 plan parked: a proxy in front needs only
+  a read timeout above that interval, and the two paths need no
+  different treatment.
+
+### Security
+
+- Device authentication is on by default, and a server started with it
+  enabled and no secret in the environment refuses to boot rather than
+  quietly serving every device that connects. The OTA endpoint issues
+  each bound device an HMAC token (upstream's scheme, so stock firmware
+  needs no change), and the websocket handshake verifies it before
+  accepting the upgrade: a missing, forged, expired, or foreign token is
+  refused with HTTP 403 and never reaches a socket. Opting out for a
+  trial on a trusted network is one deliberate flag,
+  `server.auth.enabled: false`.
+- `server.ota_path` makes the endpoint's path configurable, so a public
+  deployment can hide the one endpoint that cannot require a token
+  behind a long random segment.
+- FastAPI's `/docs`, `/redoc`, and `/openapi.json` are no longer served.
+  A device needs two paths and a healthcheck a third.
+
 ## 2026-08-02
 
 ### Added

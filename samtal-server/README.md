@@ -14,7 +14,12 @@ It implements the two endpoints a device needs:
 Behind the WebSocket sits the conversation pipeline: VAD segments speech,
 ASR transcribes it, the LLM streams a reply, and TTS speaks it back
 sentence by sentence, every stage a pluggable provider chosen per agent.
-🚧 MCP tools land in a later milestone.
+Agents reach tools over MCP, both their own servers and the device's own
+controls.
+
+Those two paths, plus `/healthz`, are everything the server exposes: the
+interactive API docs are turned off, and the WebSocket requires a device
+token the OTA endpoint issued.
 
 ## Goals
 
@@ -177,6 +182,32 @@ first run downloads the whisper model and Piper voice at server startup
 and can take a few minutes; later runs finish in seconds. Without
 `SAMTAL_LOCAL_LANE=1` the lane skips, so a bare `pytest` stays safe.
 
+### The smoke lane: a conversation with a container
+
+A fourth lane runs nothing itself. It points at a server that is already
+up and holds one whole conversation with it: healthz, an OTA check whose
+token it verifies, and a full utterance-to-audio exchange through the
+device simulator. CI runs it against the image it just built, which is
+what turns "`docker run` with one mounted YAML serves a conversation"
+into something checked rather than remembered.
+
+```bash
+docker build -t samtal-server:local .
+docker run -d --name samtal-smoke -p 8003:8003 \
+  -e SAMTAL_AUTH_SECRET=smoke-secret \
+  -v "$PWD/tests/smoke/config.yaml:/config/config.yaml:ro" \
+  samtal-server:local
+
+SAMTAL_SMOKE_OTA_URL=http://127.0.0.1:8003/xiaozhi/ota/ \
+SAMTAL_AUTH_SECRET=smoke-secret \
+  uv run pytest tests/smoke -v
+```
+
+The secret has to match the one the server under test was started with:
+the lane verifies the token it is issued, and that needs the signing key.
+It skips without `SAMTAL_SMOKE_OTA_URL`, so a bare `pytest` stays safe,
+and it works against any reachable server, not only a container.
+
 ## Configuration
 
 Configuration is handled by
@@ -210,6 +241,160 @@ that holds its key (for example `api_key_env: ANTHROPIC_API_KEY`), and an
 MCP server writes `$NAME` where the secret goes. Instance
 configs stay out of the repository; `*.local.yaml` and `.env` are gitignored
 for local experiments.
+
+## Security
+
+**Devices authenticate, by default.** The OTA endpoint issues each device
+a token, the firmware persists it to NVS, and the WebSocket handshake
+checks it before accepting the upgrade. A connection with no token, a
+forged one, an expired one, or one issued for a different device is
+refused with HTTP 403 on the upgrade, which stock firmware handles by
+retrying and picking up a fresh token at its next OTA check.
+
+The token is upstream's scheme, `sig.ts`, where `sig` is HMAC-SHA256 over
+`client_id|device_id|ts`. It is stateless: a restart does not lock out
+every device holding a persisted token, and two replicas sharing a secret
+accept each other's tokens.
+
+The secret comes from the environment, never from the config file:
+
+```bash
+SAMTAL_AUTH_SECRET=$(openssl rand -hex 32)
+```
+
+**A missing secret fails the boot.** Authentication is enabled by default,
+and starting with it enabled and no secret refuses to come up, naming the
+variable and the fix. A deployment that forgot its secret must not look
+exactly like a working one. For a trial on a network you trust, opting
+out is one deliberate flag:
+
+```yaml
+server:
+  auth:
+    enabled: false
+```
+
+or `SAMTAL_SERVER__AUTH__ENABLED=false` in the environment.
+
+**Who gets a token is the allowlist.** A token is only issued to a device
+the configuration resolves to at least one agent. Omit `default_agent`
+and the `devices` map becomes an allowlist: an unknown MAC is issued
+nothing and turned away. There is no second list to keep in sync.
+
+**The OTA endpoint is the token issuer, so it cannot require a token.**
+What protects it instead is stingy issuance and a path you choose. When
+the server is reachable from outside your network, hide it behind a long
+random segment and write that whole URL into the device's NVS:
+
+```yaml
+server:
+  ota_path: /xiaozhi/ota/8f3a9c2b1d4e5f60/   # openssl rand -hex 8
+```
+
+The WebSocket path never moves: the token is what protects it.
+
+**Nothing else is exposed.** `/xiaozhi/ota/` (or wherever you put it),
+`/xiaozhi/v1/`, and `/healthz`. FastAPI's `/docs`, `/redoc`, and
+`/openapi.json` are turned off.
+
+## Limits
+
+Two numbers bound what one server holds, and neither is visible in normal
+use: a device refused a slot or closed by the duration cap reconnects on
+its next wake word.
+
+```yaml
+server:
+  limits:
+    max_sessions: 8       # concurrent conversations
+    max_session_s: 3600   # one session's maximum life
+  drain_s: 20             # how long a shutdown waits for replies to finish
+```
+
+There is deliberately no idle timeout: `max_session_s` bounds an idle
+session too, and a device that stopped talking hours ago is exactly what
+it is for. `max_sessions` is a count with no queue behind it, because a
+conversation waiting in line is worse than one that never started.
+
+**Shutting down drains.** On SIGTERM the server stops admitting sessions,
+lets every reply in flight finish speaking, and closes those sockets with
+1001, all inside `drain_s`. A second signal forces the exit. Give
+`docker stop` a `-t` above `drain_s`; its default is ten seconds.
+
+## Logging
+
+Two formats, one handler:
+
+```yaml
+server:
+  log_format: text   # or json, which is the container image's default
+  log_level: INFO
+```
+
+Every conversation event is logged as a human sentence and, in `json`
+mode, as a line of structured fields. Each carries `event`, `session`,
+and `device`, plus its own:
+
+| `event`            | when                            | fields                             |
+| ------------------ | ------------------------------- | ---------------------------------- |
+| `ota_check`        | a device checks in (no session) | `client`, `board`, `firmware`, `agents` |
+| `session_open`     | a conversation starts           | `client`, `agent`, `agents`, `protocol` |
+| `heard`            | an utterance is transcribed     | `agent`, `text`, `duration_s`      |
+| `replied`          | a reply finishes                | `agent`, `text`                    |
+| `agent_said`       | one agent's part of a reply     | `agent`, `text`                    |
+| `handover`         | `switch_agent` succeeds         | `from_agent`, `to_agent`           |
+| `tool_call`        | a tool returns                  | `agent`, `tool`, `duration_ms`, `is_error` |
+| `session_limit`    | the duration cap fires          | `duration_s`                       |
+| `session_closed`   | a conversation ends             | `duration_s`                       |
+| `session_rejected` | a device is turned away         | `reason`                           |
+| `auth_rejected`    | a handshake is refused          | `reason`                           |
+
+Retained JSON logs are the conversation store until v3 brings a real one:
+filter on `event` in `heard`, `replied`, `agent_said` and group by
+`session`, and you have the transcript. Tokens are never logged, at any
+level.
+
+## Running in a container
+
+The image carries both local engines, so one `docker run` with one
+mounted YAML serves a conversation:
+
+```bash
+docker run -d --name samtal \
+  -p 8003:8003 \
+  -e SAMTAL_AUTH_SECRET \
+  -v /path/to/config.yaml:/config/config.yaml:ro \
+  -v samtal-data:/data \
+  ghcr.io/rafacm/samtal-server:latest
+```
+
+- `/config/config.yaml` is where `SAMTAL_CONFIG` points. Mount it
+  read-only; override any key with a `SAMTAL_`-prefixed environment
+  variable.
+- `/data` is the volume every engine caches into (`HOME` points there):
+  whisper models and Piper voices download at first start and survive a
+  new image. Model weights are never baked in.
+- Logs default to `json` in the image, which is the only default that
+  differs from running it directly. Override with
+  `SAMTAL_SERVER__LOG_FORMAT=text`.
+- The healthcheck assumes the default port; change `server.port` and
+  override `--health-cmd` too.
+- A read-only root filesystem works: add `--read-only --tmpfs /tmp` and
+  keep the two mounts.
+- Stop it with `docker stop -t 30 samtal`, above `drain_s`, so
+  conversations in flight finish their sentence.
+
+Behind a TLS-terminating proxy, either set `server.websocket_url`
+explicitly or pass the proxy's address in `FORWARDED_ALLOW_IPS`, which
+uvicorn honours from the environment.
+
+Images are published to `ghcr.io/rafacm/samtal-server` for amd64 and
+arm64, tagged `latest`, the build date, and the short commit SHA. Each
+one has passed the unit, integration, and smoke lanes.
+
+The image contains `piper-tts` (GPL-3.0) alongside the MIT server. That
+is aggregation, not a derived work; see
+[`../THIRD_PARTY_LICENSES.md`](../THIRD_PARTY_LICENSES.md).
 
 ## Pointing a device at the server
 
@@ -282,27 +467,31 @@ What it costs:
 One port and two paths means a proxy in front has to treat those paths
 differently. Four things to get right:
 
-- **Set `server.websocket_url` explicitly.** The derived URL is wrong behind
-  a proxy that terminates TLS: uvicorn only trusts `X-Forwarded-Proto` from
-  `--forwarded-allow-ips`, which defaults to `127.0.0.1` and so will not
-  match the proxy's address. The reply then says `ws://` where it should say
-  `wss://`, and devices fail to connect with nothing obviously
-  misconfigured.
-- **Give the two paths different idle timeouts.** An OTA check is a
-  sub-second request. A conversation WebSocket goes quiet whenever nobody is
-  speaking, so a proxy timeout tuned for short HTTP requests (60 seconds is
-  a common default) cuts the conversation off mid-pause. Where the timeout
-  can only be set once for the whole service, the long value has to win: a
-  generous timeout on the OTA path costs little, a short one on the
-  WebSocket path ends conversations.
+- **Set `server.websocket_url` explicitly, or trust the proxy.** The
+  derived URL is wrong behind a proxy that terminates TLS: uvicorn only
+  trusts `X-Forwarded-Proto` from `forwarded_allow_ips`, which defaults to
+  `127.0.0.1` and so will not match the proxy's address. The reply then
+  says `ws://` where it should say `wss://`, and devices fail to connect
+  with nothing obviously misconfigured. Either name the URL yourself, or
+  put the proxy's address in the `FORWARDED_ALLOW_IPS` environment
+  variable, which uvicorn reads when the setting is not passed. There is
+  no config key for it: `server.websocket_url` is the explicit answer, and
+  the environment variable covers the rest without a second way to say the
+  same thing.
+- **One idle timeout is enough, above 20 seconds.** The server pings every
+  connected device every 20 seconds, so a conversation WebSocket is never
+  actually idle even when nobody is speaking. A proxy therefore needs only
+  a read timeout above that interval, and the two paths need no different
+  treatment.
 - **Allow the upgrade and turn off response buffering** on the WebSocket
   path. A proxy that buffers, or that does not pass `Upgrade` and
   `Connection` through, either breaks the handshake or adds latency to every
   spoken reply.
 - **Restarts end conversations.** Every open WebSocket dies with the
   process, and the OTA endpoint shares that process, so neither can be
-  restarted without the other. Allow a drain period long enough for
-  conversations in flight to finish.
+  restarted without the other. The server drains on SIGTERM (see
+  [Limits](#limits)); give whatever stops it a grace period above
+  `drain_s`.
 
 Separating the two later needs no separate ports and no code change: run the
 same image twice, route `/xiaozhi/ota/` to one group and `/xiaozhi/v1/` to
@@ -311,7 +500,10 @@ because they are told where to go.
 
 ## Status
 
-Implementation in progress; the v1 plan lives at
-[`docs/plans/2026-08-02-samtal-server-v1.md`](../docs/plans/2026-08-02-samtal-server-v1.md).
-The upstream server currently runs as our reference implementation. Setup notes for the working local demo are in
-[`../docs/xiaozhi-notes.md`](../docs/xiaozhi-notes.md).
+samtal-server serves conversations end to end: OTA and WebSocket
+endpoints, the VAD/ASR/LLM/TTS pipeline on pluggable providers, agents
+bound to devices, MCP tools on both sides, device authentication, limits,
+structured logging, and a published multi-arch container image. The v1
+plan and its per-milestone implementation notes live in
+[`docs/plans/`](../docs/plans/); setup notes for a device on your desk are
+in [`../docs/xiaozhi-notes.md`](../docs/xiaozhi-notes.md).
