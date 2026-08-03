@@ -27,6 +27,12 @@ modes stream mic audio until the server decides the user finished,
 which is what the endpointer is for. Realtime mode's defining feature,
 listening while the server speaks, is not honoured yet: frames arriving
 during playback are dropped, as in auto mode.
+
+What happens in a conversation is logged twice over: as a human
+sentence, and as structured `extra=` fields (`event`, `session`,
+`device`, and whatever the event carries) that the JSON log format
+emits as top-level keys. Retained JSON logs are therefore the
+transcript store until v3 brings a real one.
 """
 
 import asyncio
@@ -138,6 +144,11 @@ class Session:
         self.session_id = uuid.uuid4().hex
         self.protocol_version = 1
         self.listening = False
+        # The device's MAC, set before anything can reject the connection so
+        # a rejection names the device it turned away. Unknown until the
+        # handshake headers are read.
+        self._mac: str | None = None
+        self._opened_at: float | None = None
         self._agent_providers = agent_providers
         # The agents this device may talk to, and the one it is talking to
         # now. M5 activates the first at connect and never switches; M6's
@@ -163,15 +174,33 @@ class Session:
         self._pace_start: float | None = None
         self._pace_count = 0
 
+    def _event(self, event: str, **fields: Any) -> dict[str, Any]:
+        """The structured half of a log line: what every conversation
+        event carries, plus this event's own fields. Passed as `extra=`,
+        so it is invisible in the text format and top-level keys in the
+        JSON one."""
+        return {
+            "event": event,
+            "session": self.session_id,
+            "device": self._mac,
+            **fields,
+        }
+
     async def run(self) -> None:
         device_id = self.websocket.headers.get("device-id", "").strip()
         client_id = self.websocket.headers.get("client-id", "").strip()
         await self.websocket.accept()
+        self._opened_at = asyncio.get_running_loop().time()
 
         try:
-            mac = normalize_mac(device_id)
+            mac = self._mac = normalize_mac(device_id)
         except ValueError as exc:
-            logger.warning("session %s rejected: Device-Id header: %s", self.session_id, exc)
+            logger.warning(
+                "session %s rejected: Device-Id header: %s",
+                self.session_id,
+                exc,
+                extra=self._event("session_rejected", reason="bad_device_id"),
+            )
             await self._close(POLICY_VIOLATION, "Device-Id must be the device MAC")
             return
 
@@ -184,6 +213,7 @@ class Session:
                 "or set default_agent",
                 self.session_id,
                 mac,
+                extra=self._event("session_rejected", reason="no_agent"),
             )
             await self._close(POLICY_VIOLATION, "no agent is configured for this device")
             return
@@ -212,6 +242,13 @@ class Session:
             self.protocol_version,
             hello.audio_params.sample_rate,
             hello.audio_params.frame_duration,
+            extra=self._event(
+                "session_open",
+                client=client_id or None,
+                agent=self._agent,
+                agents=list(self._agents),
+                protocol=self.protocol_version,
+            ),
         )
         self._start_device_discovery(hello)
 
@@ -222,7 +259,19 @@ class Session:
         finally:
             await self._cancel_reply()
             await self._stop_device_discovery()
-            logger.info("session %s closed (device %s)", self.session_id, mac)
+            logger.info(
+                "session %s closed (device %s)",
+                self.session_id,
+                mac,
+                extra=self._event("session_closed", duration_s=self._open_duration_s()),
+            )
+
+    def _open_duration_s(self) -> float:
+        """How long this session has been open, to one hundredth of a
+        second. Zero before the socket was accepted."""
+        if self._opened_at is None:
+            return 0.0
+        return round(asyncio.get_running_loop().time() - self._opened_at, 2)
 
     def _start_device_discovery(self, hello: messages.DeviceHello) -> None:
         """Ask a device that advertised MCP for its tools. In the
@@ -416,11 +465,19 @@ class Session:
         assert self._providers is not None
         providers = self._providers
         spoken: list[str] = []
+        heard_s = round(len(pcm) / 2 / PIPELINE_SAMPLE_RATE, 2)
         try:
             transcript = (await providers.asr.transcribe(pcm, PIPELINE_SAMPLE_RATE)).strip()
             if transcript:
                 await self.websocket.send_text(messages.stt_message(self.session_id, transcript))
-                logger.info('session %s: heard "%s"', self.session_id, transcript)
+                logger.info(
+                    'session %s: heard "%s"',
+                    self.session_id,
+                    transcript,
+                    extra=self._event(
+                        "heard", agent=self._agent, text=transcript, duration_s=heard_s
+                    ),
+                )
             else:
                 logger.info("session %s: nothing transcribed", self.session_id)
             await self.websocket.send_text(messages.tts_message(self.session_id, "start"))
@@ -433,8 +490,14 @@ class Session:
             logger.exception("session %s: reply failed", self.session_id)
         finally:
             if spoken:
-                self._turns.append(Turn("assistant", " ".join(spoken)))
-                logger.info('session %s: replied "%s"', self.session_id, " ".join(spoken))
+                said = " ".join(spoken)
+                self._turns.append(Turn("assistant", said))
+                logger.info(
+                    'session %s: replied "%s"',
+                    self.session_id,
+                    said,
+                    extra=self._event("replied", agent=self._agent, text=said),
+                )
             with contextlib.suppress(WebSocketDisconnect, RuntimeError):
                 await self.websocket.send_text(messages.tts_message(self.session_id, "stop"))
 
@@ -457,7 +520,13 @@ class Session:
             if spoken:
                 said = " ".join(spoken)
                 self._turns.append(Turn("assistant", said))
-                logger.info('session %s: %s said "%s"', self.session_id, self._agent, said)
+                logger.info(
+                    'session %s: %s said "%s"',
+                    self.session_id,
+                    self._agent,
+                    said,
+                    extra=self._event("agent_said", agent=self._agent, text=said),
+                )
                 spoken.clear()
             previous = self._agent
             self._activate_agent(target)
@@ -467,6 +536,7 @@ class Session:
                 self.session_id,
                 previous,
                 target,
+                extra=self._event("handover", from_agent=previous, to_agent=target),
             )
             greeting = Turn("user", SWITCH_GREETING)
 
@@ -606,12 +676,20 @@ class Session:
             raise
         except Exception as exc:
             content, is_error = f'the tool "{call.name}" failed: {exc}', True
+        elapsed = loop.time() - started
         logger.info(
             "session %s: tool %s took %.2f s%s",
             self.session_id,
             call.name,
-            loop.time() - started,
+            elapsed,
             " and failed" if is_error else "",
+            extra=self._event(
+                "tool_call",
+                agent=self._agent,
+                tool=call.name,
+                duration_ms=round(elapsed * 1000),
+                is_error=is_error,
+            ),
         )
         return ToolResult(tool_call_id=call.id, content=content, is_error=is_error)
 
