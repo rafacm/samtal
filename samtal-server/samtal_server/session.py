@@ -417,11 +417,11 @@ class Session:
             if received["type"] == "websocket.disconnect":
                 return
             if received.get("bytes") is not None:
-                self._handle_audio(received["bytes"])
+                await self._handle_audio(received["bytes"])
             elif received.get("text") is not None:
                 await self._handle_text(received["text"])
 
-    def _handle_audio(self, data: bytes) -> None:
+    async def _handle_audio(self, data: bytes) -> None:
         if not self.listening or self._endpointer is None:
             return
         try:
@@ -438,7 +438,7 @@ class Session:
             return
         self._utterance.extend(pcm)
         if self._endpointer.feed(pcm):
-            self._finish_utterance()
+            await self._finish_utterance()
 
     async def _handle_text(self, text: str) -> None:
         try:
@@ -455,7 +455,7 @@ class Session:
             case messages.ListenMessage(state="stop"):
                 self.listening = False
                 if self._utterance:
-                    self._finish_utterance()
+                    await self._finish_utterance()
             case messages.ListenMessage(state="detect", text=word):
                 logger.debug("session %s: wake word reported: %s", self.session_id, word)
             case messages.AbortMessage(reason=reason):
@@ -477,7 +477,7 @@ class Session:
                     "session %s: ignoring %s message", self.session_id, message.type
                 )
 
-    def _finish_utterance(self) -> None:
+    async def _finish_utterance(self) -> None:
         """Hand the buffered utterance to the reply task. Listening stops
         until the device asks again, which auto mode does by sending
         `listen start` after the reply's `tts stop`."""
