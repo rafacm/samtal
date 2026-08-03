@@ -48,6 +48,25 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   a read timeout above that interval, and the two paths need no
   different treatment.
 
+### Fixed
+
+- A realtime-mode session no longer goes deaf after its first utterance.
+  It served exactly one exchange: a realtime device sends `listen start`
+  once and then streams continuously, and the server stopped listening
+  after every utterance waiting for a re-arm that was never coming, so a
+  board answered one question per button press. The firmware asks for
+  realtime exactly when its echo cancellation is on, which makes this
+  the normal case for the hardware this project targets rather than an
+  edge case. A realtime session now keeps listening, including while it
+  speaks, so an utterance that ends mid-reply cancels that reply and is
+  answered instead: talking over the assistant stops it. The new
+  `server.barge_in` (default true) turns the interrupting off for a
+  board whose echo cancellation leaks the speaker back into the
+  microphone, where a reply would otherwise interrupt itself;
+  conversations stay multi-turn either way. The listening mode a device
+  asks for is now logged at info, and an interruption logs a `barge_in`
+  event.
+
 ### Security
 
 - Device authentication is on by default, and a server started with it
