@@ -28,7 +28,18 @@ def create_app(config: Config | None = None) -> FastAPI:
     """Build the ASGI app. Without a config the file named by SAMTAL_CONFIG
     is loaded, which is what an external ASGI server gets; the CLI loads the
     config itself (it also honours --config) and passes it in."""
-    app = FastAPI(title="samtal-server", version=__version__, lifespan=lifespan)
+    # No interactive docs, no schema. A device needs two paths and a
+    # healthcheck needs a third; publishing an API description of them to
+    # anyone who asks is surface with no reader, and the security default
+    # is that nothing beyond what a device needs is exposed.
+    app = FastAPI(
+        title="samtal-server",
+        version=__version__,
+        lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
     app.state.config = config if config is not None else load_config()
     # Auth is resolved first and fails the boot when it is enabled with no
     # secret in the environment, so a deployment that forgot one never
