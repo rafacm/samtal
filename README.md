@@ -60,15 +60,20 @@ docker run -d --name samtal -p 8003:8003 \
   ghcr.io/rafacm/samtal-server:latest
 ```
 
-For anything that outlives an afternoon, leave authentication on (it is the default) and give it a secret:
+For anything that outlives an afternoon, leave authentication on (it is the default) and give it a secret. Generate the secret **once** and keep it somewhere you can read it back:
 
 ```bash
+openssl rand -hex 32 > ~/.samtal-secret          # once, ever
+
+export SAMTAL_AUTH_SECRET=$(cat ~/.samtal-secret)
 docker run -d --name samtal -p 8003:8003 \
-  -e SAMTAL_AUTH_SECRET="$(openssl rand -hex 32)" \
+  -e SAMTAL_AUTH_SECRET \
   -v /path/to/config.yaml:/config/config.yaml:ro \
   -v samtal-data:/data \
   ghcr.io/rafacm/samtal-server:latest
 ```
+
+Generating it inline in the `docker run` would mint a new secret on every restart, and each new secret invalidates the token every device has stored. A device that has one then gets refused until its next OTA check, which it only makes on boot, so it sits there playing an error tone at you.
 
 Start from [`samtal-server/config.example.yaml`](samtal-server/config.example.yaml), which documents every key. Speech models download into the `/data` volume at first start, so the first run takes a few minutes and later ones take seconds.
 

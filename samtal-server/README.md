@@ -262,6 +262,13 @@ The secret comes from the environment, never from the config file:
 SAMTAL_AUTH_SECRET=$(openssl rand -hex 32)
 ```
 
+Generate it once and keep it. Changing the secret invalidates the token
+every device has stored, and a device only refreshes at its next OTA
+check, which it makes on boot: until then it is refused at the handshake
+and plays an error tone with nothing on its screen. That is the intended
+behaviour of a rotated secret, but it is worth doing deliberately rather
+than by regenerating one inside a `docker run` you repeat.
+
 **A missing secret fails the boot.** Authentication is enabled by default,
 and starting with it enabled and no secret refuses to come up, naming the
 variable and the fix. A deployment that forgot its secret must not look
