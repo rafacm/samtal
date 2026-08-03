@@ -36,13 +36,13 @@ from samtal_server.ws import WEBSOCKET_PATH
 
 logger = logging.getLogger(__name__)
 
+# The default path, and the one every test and the README use. An operator
+# who exposes the server publicly overrides it with server.ota_path.
 OTA_PATH = "/xiaozhi/ota/"
 
 # What a device reports when it tells us nothing usable. Any real version is
 # greater, so a device that hides its version is never offered an update.
 UNKNOWN_VERSION = "0.0.0"
-
-router = APIRouter()
 
 
 def websocket_url_for(config: Config, request: Request) -> str:
@@ -106,7 +106,17 @@ def reported_board(payload: dict[str, Any]) -> str:
     return "unknown"
 
 
-@router.post(OTA_PATH)
+def build_router(path: str = OTA_PATH) -> APIRouter:
+    """The OTA router, served at the configured path. Built per app
+    rather than at import time, because the path is configuration and a
+    module-level router would have been decided before the config was
+    read."""
+    router = APIRouter()
+    router.post(path)(check_version)
+    router.get(path)(describe)
+    return router
+
+
 async def check_version(request: Request) -> Response:
     config: Config = request.app.state.config
 
@@ -177,7 +187,6 @@ async def check_version(request: Request) -> Response:
     )
 
 
-@router.get(OTA_PATH)
 async def describe(request: Request) -> Response:
     """A human check that the endpoint is reachable and pointed somewhere
     sensible. Devices only ever POST here."""

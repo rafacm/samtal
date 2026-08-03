@@ -91,6 +91,13 @@ class ServerConfig(BaseModel):
     # server sits behind a proxy or a name the request headers do not carry.
     websocket_url: str | None = None
 
+    # Where the OTA endpoint is served. It is the token issuer, so it cannot
+    # itself require a token; an operator exposing the server publicly hides
+    # it behind a long random segment (/xiaozhi/ota/8f3a.../) and writes that
+    # URL into the device's NVS. The websocket path is fixed: the token is
+    # what protects it.
+    ota_path: str = "/xiaozhi/ota/"
+
     # Binary protocol version advertised to devices. The firmware defaults to
     # 1 (bare Opus frames); 2 and 3 add timestamp headers.
     protocol_version: int = Field(default=1, ge=1, le=3)
@@ -117,6 +124,17 @@ class ServerConfig(BaseModel):
                 + ", ".join(_LOG_LEVELS)
             )
         return level
+
+    @field_validator("ota_path")
+    @classmethod
+    def _check_ota_path(cls, value: str) -> str:
+        path = value.strip()
+        if not path.startswith("/") or not path.endswith("/"):
+            raise ValueError(
+                f'"{value}" is not a usable OTA path; it must start and end with '
+                f'"/", for example /xiaozhi/ota/ or /xiaozhi/ota/8f3a9c2b.../'
+            )
+        return path
 
     @field_validator("websocket_url")
     @classmethod

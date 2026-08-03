@@ -26,6 +26,15 @@ server:
   # 2 and 3 add timestamp headers.
   # protocol_version: 1
   #
+  # Where the OTA endpoint is served. It issues the device tokens, so it
+  # cannot itself require one; exposing the server publicly, append a
+  # long random segment and write that whole URL into the device's NVS:
+  #
+  #   openssl rand -hex 16
+  #
+  # The websocket path never moves: the token is what protects it.
+  # ota_path: /xiaozhi/ota/
+  #
   # Minutes east of UTC, sent so the device can set its clock to local time.
   # Defaults to the server's own current offset.
   # timezone_offset_minutes: 120

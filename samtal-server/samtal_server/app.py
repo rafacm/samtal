@@ -49,7 +49,10 @@ def create_app(config: Config | None = None) -> FastAPI:
     def healthz() -> dict[str, str]:
         return {"status": "ok", "version": __version__}
 
-    app.include_router(ota.router)
+    # The OTA router is built here rather than imported ready-made: its
+    # path is configuration, and a module-level router would have been
+    # decided before the config was read.
+    app.include_router(ota.build_router(app.state.config.server.ota_path))
     app.include_router(ws.router)
 
     return app
