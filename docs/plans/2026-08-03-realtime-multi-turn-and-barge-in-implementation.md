@@ -135,5 +135,16 @@ of scope for this PR: the session cannot know where speech began, since
 `Endpointer` is only `feed() -> bool` and `reset()`. Both endpointers
 track it internally (`_speech_heard` in each), so the fix is to report
 speech start across that protocol and trim to a short pre-roll, which
-touches the mock and Silero implementations together. Filed as a
-follow-up rather than widened into this branch.
+touches the mock and Silero implementations together. Filed as issue
+#14 rather than widened into this branch.
+
+The second checkpoint, a single-mic board with `barge_in: false`, could
+not run: the Waveshare ESP32-S3-ePaper-1.54 on the desk still carries
+factory demo firmware (LVGL plus a BLE GATT client demo), and its NVS
+has wifi credentials but no `ota_url` and no application namespace, so
+nothing on it reaches the OTA endpoint. Flashing and provisioning it is
+board bring-up rather than part of this fix, and it comes with a
+question worth answering first: a single-mic board may present `auto`
+rather than `realtime`, in which case the flag has no board to run on
+yet. Filed as issue #15, and PR #13's second box stays unchecked
+pointing at it.
