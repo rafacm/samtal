@@ -29,6 +29,14 @@ server:
   # Minutes east of UTC, sent so the device can set its clock to local time.
   # Defaults to the server's own current offset.
   # timezone_offset_minutes: 120
+  #
+  # How the server logs. "text" is the human format (the default); "json"
+  # is one object per line, which is what the container image defaults to
+  # and what makes retained logs readable back as conversation
+  # transcripts (filter on event: heard/replied/agent_said, group by
+  # session).
+  # log_format: text
+  # log_level: INFO
 
 # Providers are named so agents can reference them. Every entry needs a
 # `type`; the remaining keys are options for that provider implementation.

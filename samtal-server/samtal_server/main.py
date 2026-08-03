@@ -1,10 +1,10 @@
 import argparse
-import logging
 import sys
 
 import uvicorn
 from dotenv import find_dotenv, load_dotenv
 
+from samtal_server import logs
 from samtal_server.app import create_app
 from samtal_server.config import ConfigError, load_config
 from samtal_server.config.loader import CONFIG_ENV_VAR
@@ -18,15 +18,6 @@ def main() -> None:
     # the search start from the invocation directory, not this file's.
     load_dotenv(find_dotenv(usecwd=True))
 
-    # Give the root logger a handler. Uvicorn configures only its own loggers,
-    # so without this everything samtal-server logs is discarded while
-    # uvicorn's own request lines still appear, which reads as if the server
-    # were silent about its own work. M7 replaces this with structured logging.
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
-    )
-
     parser = argparse.ArgumentParser(prog="samtal-server")
     parser.add_argument(
         "--config",
@@ -37,6 +28,10 @@ def main() -> None:
 
     try:
         config = load_config(args.config)
+        # Logging is configured as early as the config allows, since the
+        # format is a config key. Anything that fails before this point is a
+        # config error, and those are printed to stderr rather than logged.
+        logs.configure(config.server)
         # Pass the app object rather than an import string: the config just
         # read (from --config, which reaches nothing else) has to be the one
         # the app serves from.
@@ -49,6 +44,10 @@ def main() -> None:
         app,
         host=config.server.host,
         port=config.server.port,
+        # Leave uvicorn's loggers to propagate into the root handler
+        # configured above, so its lines share our format and level
+        # instead of arriving in a second, fixed one.
+        log_config=None,
     )
 
 
