@@ -66,6 +66,15 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   conversations stay multi-turn either way. The listening mode a device
   asks for is now logged at info, and an interruption logs a `barge_in`
   event.
+- An interrupted reply now leaves the conversation history holding
+  exactly the sentences the user heard. Sentences were counted per
+  round, and a reply cut off mid-round lost all of them, so a device
+  that spoke for thirteen seconds before being interrupted left no
+  trace: the reply answering the interruption was written as though
+  none of it had been said. They are counted one at a time now, as
+  each sentence's audio goes out, which also keeps the sentence that
+  was cut off partway out of the history and out of the retained
+  logs.
 
 ### Security
 

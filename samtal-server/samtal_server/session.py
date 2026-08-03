@@ -629,8 +629,9 @@ class Session:
     async def _speak_reply(self, transcript: str, spoken: list[str]) -> None:
         """One reply, which may be spoken by more than one agent.
 
-        `spoken` collects what was said so the history keeps even the
-        part of a reply that an abort cut short. A successful
+        `spoken` collects sentences as their audio goes out, so an abort
+        or a barge-in leaves the history holding exactly the part of the
+        reply the user heard, sentence by sentence. A successful
         switch_agent ends the current agent's loop: what it said so far
         becomes its own assistant turn, the new agent is activated, and
         a fresh loop runs as that agent, so the greeting arrives in the
@@ -696,13 +697,12 @@ class Session:
             ):
                 if isinstance(event, TextDelta):
                     for sentence in splitter.push(event.text):
-                        await self._speak(sentence, resampler, leg)
+                        await self._speak_and_record(sentence, resampler, leg, spoken)
                 else:
                     calls.append(event)
             tail = splitter.flush()
             if tail is not None:
-                await self._speak(tail, resampler, leg)
-            spoken.extend(leg)
+                await self._speak_and_record(tail, resampler, leg, spoken)
             if not calls:
                 break
             # Whatever preamble was spoken before the calls is part of
@@ -856,13 +856,36 @@ class Session:
         return builtin.with_memory(self._providers.prompt, self._memory, self._agent)
 
     async def _speak(self, sentence: str, resampler: Resampler, spoken: list[str]) -> None:
+        """Say one sentence, and count it as said only once its audio has
+        gone out.
+
+        The order is the point. Frames are paced, so sending a sentence
+        takes about as long as hearing it, and a barge-in cancels this
+        coroutine somewhere in the middle of that. Counted first, a
+        sentence the user heard two frames of would go into the turn the
+        round hands the model as its own preamble."""
         assert self._providers is not None
         await self.websocket.send_text(
             messages.tts_message(self.session_id, "sentence_start", text=sentence)
         )
-        spoken.append(sentence)
         async for chunk in self._providers.tts.synthesize(sentence):
             await self._send_frames(self._encoder.encode(resampler.process(chunk)))
+        spoken.append(sentence)
+
+    async def _speak_and_record(
+        self, sentence: str, resampler: Resampler, leg: list[str], spoken: list[str]
+    ) -> None:
+        """Say a sentence and count it in both places at once: the
+        round's own list, which becomes the turn the model is shown, and
+        the reply's, which becomes the history.
+
+        One call rather than two lists merged at the end of the round,
+        because a barge-in cancels mid-round: merging later loses every
+        sentence of that round, including the ones the user sat through
+        and answered. Whoever speaks next then has no idea what was
+        already said."""
+        await self._speak(sentence, resampler, leg)
+        spoken.append(sentence)
 
     async def _send_frames(self, packets: list[bytes]) -> None:
         """Send Opus frames paced at the frame cadence, so a long reply
