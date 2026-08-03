@@ -48,6 +48,10 @@ _ENV_REFERENCE_RE = re.compile(r"^\$([A-Za-z_][A-Za-z0-9_]*)$")
 
 PROVIDER_STAGES = ("llm", "asr", "tts", "vad")
 
+# The logging level names, most to least verbose. NOTSET is left out: on
+# the root logger it means WARNING, which is not what writing it says.
+_LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+
 # Identifiers (provider names, agent names, references between them) must
 # survive stripping with at least one character.
 NonBlankStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
@@ -72,6 +76,23 @@ class ServerConfig(BaseModel):
     # Minutes east of UTC, sent so the device can set its clock to local time.
     # Left unset the server's own current offset is used.
     timezone_offset_minutes: int | None = Field(default=None, ge=-1440, le=1440)
+
+    # How the server logs. "text" is the human format; "json" is one object
+    # per line, which is what the container image defaults to, and what
+    # makes retained logs readable back as conversation transcripts.
+    log_format: Literal["text", "json"] = "text"
+    log_level: str = "INFO"
+
+    @field_validator("log_level")
+    @classmethod
+    def _check_log_level(cls, value: str) -> str:
+        level = value.strip().upper()
+        if level not in _LOG_LEVELS:
+            raise ValueError(
+                f'"{value}" is not a logging level; expected one of: '
+                + ", ".join(_LOG_LEVELS)
+            )
+        return level
 
     @field_validator("websocket_url")
     @classmethod

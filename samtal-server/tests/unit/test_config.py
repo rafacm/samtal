@@ -56,6 +56,30 @@ def test_ota_server_settings_have_defaults() -> None:
     assert config.server.timezone_offset_minutes is None
 
 
+def test_logging_settings_have_defaults() -> None:
+    config = load_config()
+    assert config.server.log_format == "text"
+    assert config.server.log_level == "INFO"
+
+
+def test_log_level_is_normalized_to_upper_case() -> None:
+    config = load_config_from_data({"server": {"log_level": "debug"}})
+    assert config.server.log_level == "DEBUG"
+
+
+@pytest.mark.parametrize("level", ["verbose", "NOTSET", ""])
+def test_unknown_log_level_is_rejected(level: str) -> None:
+    with pytest.raises(ConfigError) as excinfo:
+        load_config_from_data({"server": {"log_level": level}})
+    assert "is not a logging level" in str(excinfo.value)
+
+
+def test_unknown_log_format_is_rejected() -> None:
+    with pytest.raises(ConfigError) as excinfo:
+        load_config_from_data({"server": {"log_format": "logfmt"}})
+    assert "server.log_format" in str(excinfo.value)
+
+
 def test_websocket_url_is_accepted_and_stripped() -> None:
     config = load_config_from_data(
         {"server": {"websocket_url": "  ws://192.168.1.10:8003/xiaozhi/v1/  "}}
