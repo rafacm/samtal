@@ -37,3 +37,132 @@ jobs:
 
       - name: Integration tests
         run: uv run pytest tests/integration -v
+
+  # The image is built and smoke-tested on every run, and published only
+  # on a push to main. `needs: test` is what makes publishing conditional
+  # on the suite: nothing reaches the registry that did not pass it.
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/samtal-server
+      # Throwaway, and only ever inside this job: the smoke lane needs
+      # the signing key to verify the token the server issues it.
+      SAMTAL_AUTH_SECRET: smoke-lane-secret-not-a-real-deployment
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "samtal-server/uv.lock"
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the amd64 image
+        uses: docker/build-push-action@v6
+        with:
+          context: samtal-server
+          platforms: linux/amd64
+          load: true
+          tags: samtal-server:ci-amd64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # A wheel with no aarch64 variant is a thing a user should never be
+      # the first to find out about, so both architectures are asked to
+      # import the extras before anything is published.
+      - name: Check the extras import (amd64)
+        run: docker run --rm --entrypoint python samtal-server:ci-amd64 -c "import faster_whisper, piper"
+
+      - name: Build the arm64 image
+        uses: docker/build-push-action@v6
+        with:
+          context: samtal-server
+          platforms: linux/arm64
+          load: true
+          tags: samtal-server:ci-arm64
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Check the extras import (arm64, under QEMU)
+        run: docker run --rm --platform linux/arm64 --entrypoint python samtal-server:ci-arm64 -c "import faster_whisper, piper"
+
+      # The milestone acceptance, encoded: one mounted YAML, one docker
+      # run, one whole conversation.
+      - name: Start the container
+        run: |
+          docker run -d --name samtal-smoke \
+            -p 8003:8003 \
+            -e SAMTAL_AUTH_SECRET \
+            -v "$PWD/tests/smoke/config.yaml:/config/config.yaml:ro" \
+            samtal-server:ci-amd64
+
+      - name: Wait for the healthcheck
+        run: |
+          for _ in $(seq 60); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' samtal-smoke)
+            [ "$status" = "healthy" ] && exit 0
+            [ "$status" = "unhealthy" ] && break
+            sleep 2
+          done
+          echo "the container never became healthy"
+          docker logs samtal-smoke
+          exit 1
+
+      - name: Smoke tests
+        env:
+          SAMTAL_SMOKE_OTA_URL: http://127.0.0.1:8003/xiaozhi/ota/
+        run: uv run pytest tests/smoke -v
+
+      - name: Container logs
+        if: always()
+        run: docker logs samtal-smoke || true
+
+      - name: Stop the container
+        if: always()
+        # Above server.drain_s, so the drain has room to finish rather
+        # than being killed halfway through it.
+        run: docker rm -f -t 30 samtal-smoke || true
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          # Dates rather than versions, like the changelog: there is no
+          # semver yet, and a date plus a SHA says everything a rollback
+          # needs.
+          tags: |
+            type=raw,value=latest
+            type=raw,value={{date 'YYYY-MM-DD'}}
+            type=sha,format=short
+
+      - name: Publish
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/build-push-action@v6
+        with:
+          context: samtal-server
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
