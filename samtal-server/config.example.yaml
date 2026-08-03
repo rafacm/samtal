@@ -38,6 +38,23 @@ server:
   # log_format: text
   # log_level: INFO
 
+  # Device authentication. On by default, and the server refuses to boot
+  # when it is on with no secret in the environment, so a deployment
+  # never quietly serves every device that connects:
+  #
+  #   SAMTAL_AUTH_SECRET=$(openssl rand -hex 32)
+  #
+  # The OTA endpoint issues each bound device a token, the device
+  # persists it, and the websocket handshake checks it. Turning this off
+  # is the one deliberate flag for a trial on a trusted network.
+  auth:
+    enabled: true
+    # The environment variable holding the secret, never the secret.
+    secret_env: SAMTAL_AUTH_SECRET
+    # How long an issued token stays valid (30 days). Devices re-check
+    # OTA on every boot, so one in normal use is re-issued long before.
+    # token_expire_s: 2592000
+
 # Providers are named so agents can reference them. Every entry needs a
 # `type`; the remaining keys are options for that provider implementation.
 providers:
