@@ -20,7 +20,10 @@ Tokens are never logged, at any level.
 import base64
 import hashlib
 import hmac
+import os
 import time
+
+from samtal_server.config import Config, ConfigError
 
 
 class DeviceAuth:
@@ -62,3 +65,28 @@ class DeviceAuth:
         # urlsafe and unpadded: the token travels in an HTTP header and is
         # persisted to the device's NVS, so it stays free of "+/=".
         return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+
+def build_device_auth(config: Config) -> DeviceAuth | None:
+    """The server's token issuer, or None when auth is turned off.
+
+    Enabled auth with no secret in the environment is a boot failure,
+    not a warning: a deployment that has forgotten its secret must not
+    quietly serve every device that connects. The message carries the
+    fix and the deliberate way out, because this is the error somebody
+    meets at three in the morning on a first deploy.
+    """
+    auth = config.server.auth
+    if not auth.enabled:
+        return None
+    secret = os.environ.get(auth.secret_env, "").strip()
+    if not secret:
+        raise ConfigError(
+            f"device authentication is enabled but {auth.secret_env} is not set.\n"
+            f"Generate a secret and put it in the environment:\n"
+            f"  {auth.secret_env}=$(openssl rand -hex 32)\n"
+            f"Or turn authentication off for a trial on a trusted network, with\n"
+            f"server.auth.enabled: false in the config file, or\n"
+            f"SAMTAL_SERVER__AUTH__ENABLED=false in the environment."
+        )
+    return DeviceAuth(secret, auth.token_expire_s)

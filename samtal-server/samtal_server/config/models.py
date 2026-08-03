@@ -57,6 +57,28 @@ _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 NonBlankStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
+class AuthConfig(BaseModel):
+    """Device authentication for the websocket endpoint.
+
+    On by default: a deployment that forgets to configure a secret is
+    refused at boot rather than quietly served open. Turning it off is
+    one deliberate, visible flag, for a LAN trial.
+
+    The secret is referenced by the name of the environment variable
+    holding it, the same rule as every other secret in this file.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    secret_env: NonBlankStr = "SAMTAL_AUTH_SECRET"
+
+    # How long an issued token stays valid. Thirty days, upstream's
+    # default; the firmware re-checks OTA on every boot, so a device in
+    # normal use is re-issued long before it gets near this.
+    token_expire_s: int = Field(default=2592000, gt=0)
+
+
 class ServerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -82,6 +104,8 @@ class ServerConfig(BaseModel):
     # makes retained logs readable back as conversation transcripts.
     log_format: Literal["text", "json"] = "text"
     log_level: str = "INFO"
+
+    auth: AuthConfig = Field(default_factory=AuthConfig)
 
     @field_validator("log_level")
     @classmethod

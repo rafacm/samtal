@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from fastapi import FastAPI
 
 from samtal_server import __version__, ota, ws
+from samtal_server.auth import build_device_auth
 from samtal_server.config import Config, load_config
 from samtal_server.providers import build_agent_providers
 from samtal_server.tools.mcp import McpServers
@@ -28,6 +29,10 @@ def create_app(config: Config | None = None) -> FastAPI:
     config itself (it also honours --config) and passes it in."""
     app = FastAPI(title="samtal-server", version=__version__, lifespan=lifespan)
     app.state.config = config if config is not None else load_config()
+    # Auth is resolved first and fails the boot when it is enabled with no
+    # secret in the environment, so a deployment that forgot one never
+    # comes up serving every device that connects.
+    app.state.device_auth = build_device_auth(app.state.config)
     # Built here so a bad provider configuration (unknown type, bad option,
     # missing extra, agent without a full pipeline) fails the boot rather
     # than the first conversation. The same for MCP servers: an unknown
