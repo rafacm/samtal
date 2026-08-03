@@ -79,6 +79,26 @@ class AuthConfig(BaseModel):
     token_expire_s: int = Field(default=2592000, gt=0)
 
 
+class LimitsConfig(BaseModel):
+    """What one server will hold at once, and for how long.
+
+    Two numbers rather than a framework. There is no separate idle
+    timeout: a session's total life bounds an idle one too, and the
+    firmware treats the close as the end of a conversation and
+    reconnects on the next wake word, so the cap is invisible in normal
+    use.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Concurrent conversations. Each one holds an ASR, an LLM stream, and
+    # a TTS engine, so this is a resource bound and not a licence check.
+    max_sessions: int = Field(default=8, ge=1)
+
+    # One session's maximum life, in seconds. An hour by default.
+    max_session_s: float = Field(default=3600.0, gt=0)
+
+
 class ServerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -113,6 +133,7 @@ class ServerConfig(BaseModel):
     log_level: str = "INFO"
 
     auth: AuthConfig = Field(default_factory=AuthConfig)
+    limits: LimitsConfig = Field(default_factory=LimitsConfig)
 
     @field_validator("log_level")
     @classmethod

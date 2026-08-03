@@ -78,9 +78,10 @@ def refusal_reason(device_auth: DeviceAuth | None, websocket: WebSocket) -> str 
 async def conversation(websocket: WebSocket) -> None:
     state = websocket.app.state
 
+    device_id = websocket.headers.get("device-id", "").strip().lower()
+
     refusal = refusal_reason(state.device_auth, websocket)
     if refusal is not None:
-        device_id = websocket.headers.get("device-id", "").strip().lower()
         logger.warning(
             "refused a websocket handshake from %s: %s",
             device_id or "an unidentified device",
@@ -92,10 +93,30 @@ async def conversation(websocket: WebSocket) -> None:
         await websocket.close()
         return
 
-    await Session(
+    session = Session(
         websocket,
         state.config,
         state.agent_providers,
         state.mcp_servers,
         state.memory,
-    ).run()
+    )
+    # Capacity is checked after the token, so a full server still answers a
+    # bad token with a refusal about the token.
+    if not state.sessions.try_add(session):
+        logger.warning(
+            "refused a websocket handshake from %s: the server is at capacity",
+            device_id or "an unidentified device",
+            extra={
+                "event": "session_rejected",
+                "device": device_id or None,
+                "session": session.session_id,
+                "reason": "capacity",
+            },
+        )
+        await websocket.close()
+        return
+
+    try:
+        await session.run()
+    finally:
+        state.sessions.remove(session)

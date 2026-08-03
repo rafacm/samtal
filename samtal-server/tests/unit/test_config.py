@@ -56,6 +56,21 @@ def test_ota_server_settings_have_defaults() -> None:
     assert config.server.timezone_offset_minutes is None
 
 
+def test_limits_have_defaults() -> None:
+    limits = load_config().server.limits
+    assert limits.max_sessions == 8
+    assert limits.max_session_s == 3600
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [("max_sessions", 0), ("max_sessions", -1), ("max_session_s", 0), ("max_session_s", -5)],
+)
+def test_limits_below_one_session_or_second_are_rejected(key: str, value: int) -> None:
+    with pytest.raises(ConfigError):
+        load_config_from_data({"server": {"limits": {key: value}}})
+
+
 def test_ota_path_defaults_to_the_documented_one() -> None:
     assert load_config().server.ota_path == "/xiaozhi/ota/"
 

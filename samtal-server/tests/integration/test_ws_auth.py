@@ -1,4 +1,4 @@
-"""Device authentication against a live server.
+"""Device authentication and the connection cap, against a live server.
 
 The unit lane drives the gate in-process, where the ASGI test client
 reports a pre-accept close as a disconnect. Here a real client speaks
@@ -10,6 +10,8 @@ The rest of this lane now runs with auth on and xiaozhi-sdk forwarding
 the token the OTA endpoint issued it, so the accepted path is covered
 by every other test here.
 """
+
+import asyncio
 
 import pytest
 import websockets
@@ -82,6 +84,35 @@ async def test_a_doctored_token_is_refused_on_the_upgrade(serve) -> None:
         with pytest.raises(InvalidStatus) as excinfo:
             await connect(port, f"{doctored}.{issued}")
     assert excinfo.value.response.status_code == 403
+
+
+async def test_a_full_server_refuses_the_next_device_and_admits_it_later(serve) -> None:
+    """The cap is a count with no queue behind it: the second device is
+    turned away rather than parked, and gets in once a slot frees."""
+    config = bound_config()
+    config.server.limits.max_sessions = 1
+    auth = build_device_auth(config)
+    assert auth is not None
+    token = auth.issue(DEVICE_UUID, DEVICE_MAC)
+
+    async with serve(config) as port:
+        first = await connect(port, token)
+        with pytest.raises(InvalidStatus) as excinfo:
+            await connect(port, token)
+        assert excinfo.value.response.status_code == 403
+
+        await first.close()
+        # The server frees the slot as the connection closes, which the
+        # client learns about before the server has finished doing.
+        for _ in range(50):
+            try:
+                second = await connect(port, token)
+            except InvalidStatus:
+                await asyncio.sleep(0.05)
+            else:
+                await second.close()
+                return
+        pytest.fail("the slot was never freed")
 
 
 async def test_another_servers_token_is_refused(serve) -> None:

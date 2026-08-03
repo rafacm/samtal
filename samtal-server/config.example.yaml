@@ -64,6 +64,15 @@ server:
     # OTA on every boot, so one in normal use is re-issued long before.
     # token_expire_s: 2592000
 
+  # What one server holds at once, and for how long. A device refused for
+  # capacity reconnects on its next wake word; one that hits the duration
+  # cap is closed cleanly and does the same, so neither is visible in
+  # normal use. There is no separate idle timeout: max_session_s bounds an
+  # idle session too.
+  limits:
+    max_sessions: 8
+    max_session_s: 3600
+
 # Providers are named so agents can reference them. Every entry needs a
 # `type`; the remaining keys are options for that provider implementation.
 providers:
