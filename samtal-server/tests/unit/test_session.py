@@ -40,6 +40,11 @@ FRAME_BYTES = SAMPLE_RATE * FRAME_MS // 1000 * 2
 TTS_MS_PER_CHAR = 40
 TTS_MIN_MS = 240
 
+# The silence a test sends to end an utterance in the modes that have no
+# listen stop: the endpointer's 700 ms window plus a couple of frames, so
+# which frame trips it does not have to be predicted exactly.
+ENDPOINT_SILENCE_MS = 840
+
 DEVICE_HELLO = {
     "type": "hello",
     "version": 1,
@@ -146,6 +151,25 @@ def speech_pcm(duration_ms: int) -> bytes:
 def send_pcm(websocket, pcm: bytes, encoder: OpusEncoder, version: int = 1) -> None:
     for packet in encoder.encode(pcm):
         websocket.send_bytes(framing.wrap(version, packet))
+
+
+def endpoint_silence(websocket, encoder: OpusEncoder, version: int = 1) -> None:
+    """The silence that ends an utterance in auto and realtime modes,
+    where nothing sends a listen stop."""
+    send_pcm(websocket, b"\x00" * (FRAME_BYTES * ENDPOINT_SILENCE_MS // FRAME_MS), encoder, version)
+
+
+def assert_endpointed_speech(texts: list[dict], speech_ms: int) -> None:
+    """Assert the utterance the endpointer handed to ASR was this much
+    speech.
+
+    What ASR sees is always longer: an endpointed utterance carries the
+    trailing silence the endpointer sat through, and a realtime session
+    keeps buffering, so silence sent past one endpoint lands in front of
+    the next utterance. Hence a window rather than a duration, wide
+    enough for both and still far narrower than the gap between the
+    utterance lengths these tests tell apart."""
+    assert speech_ms + 600 <= heard_ms(texts) <= speech_ms + ENDPOINT_SILENCE_MS + 180
 
 
 def collect_reply(websocket, version: int = 1) -> tuple[list[dict], bytes]:
@@ -327,6 +351,95 @@ def test_abort_during_a_streaming_reply_does_not_eat_the_next_utterance() -> Non
             collect_reply(websocket)
             texts, _ = collect_reply(websocket)
     assert 180 <= heard_ms(texts) <= 300
+
+
+def test_realtime_mode_serves_a_second_utterance_without_listen_start() -> None:
+    # A realtime device asks to listen once and then streams its mic for
+    # the rest of the connection. Nothing re-arms the server, so the
+    # server must never disarm: issue #10 is one exchange per session.
+    with TestClient(create_app(config_with_agent(asr_text="{ms}"))) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            encoder = OpusEncoder()
+            websocket.send_text(
+                json.dumps({"type": "listen", "state": "start", "mode": "realtime"})
+            )
+            send_pcm(websocket, speech_pcm(600), encoder)
+            endpoint_silence(websocket, encoder)
+            first, _ = collect_reply(websocket)
+            # Straight on to the next question, with no listen start.
+            send_pcm(websocket, speech_pcm(240), encoder)
+            endpoint_silence(websocket, encoder)
+            second, _ = collect_reply(websocket)
+    assert_endpointed_speech(first, 600)
+    assert_endpointed_speech(second, 240)
+
+
+def test_abort_in_realtime_mode_keeps_the_session_listening() -> None:
+    # An abort ends the reply, not the listening: the realtime device is
+    # still streaming, and there is no listen start coming to revive a
+    # session that turned itself off here.
+    with TestClient(create_app(config_with_agent(asr_text="{ms}"))) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            encoder = OpusEncoder()
+            websocket.send_text(
+                json.dumps({"type": "listen", "state": "start", "mode": "realtime"})
+            )
+            send_pcm(websocket, speech_pcm(1200), encoder)
+            endpoint_silence(websocket, encoder)
+            websocket.send_text(json.dumps({"type": "abort", "reason": "wake_word_detected"}))
+            send_pcm(websocket, speech_pcm(240), encoder)
+            endpoint_silence(websocket, encoder)
+            # Skip whatever the aborted reply got out, up to its tts stop.
+            collect_reply(websocket)
+            texts, _ = collect_reply(websocket)
+    assert_endpointed_speech(texts, 240)
+
+
+def test_auto_mode_still_requires_a_new_listen_start_after_the_reply() -> None:
+    # The other half of the same rule: an auto-mode device shuts its mic
+    # down over the reply and re-arms with a fresh listen start, so what
+    # arrives in between is not the server's to hear.
+    with TestClient(create_app(config_with_agent(asr_text="{ms}"))) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            encoder = OpusEncoder()
+            websocket.send_text(json.dumps({"type": "listen", "state": "start", "mode": "auto"}))
+            send_pcm(websocket, speech_pcm(600), encoder)
+            endpoint_silence(websocket, encoder)
+            collect_reply(websocket)
+            # Dropped: no listen start has re-armed the session yet.
+            send_pcm(websocket, speech_pcm(600), encoder)
+            endpoint_silence(websocket, encoder)
+            websocket.send_text(json.dumps({"type": "listen", "state": "start", "mode": "auto"}))
+            send_pcm(websocket, speech_pcm(240), encoder)
+            endpoint_silence(websocket, encoder)
+            texts, _ = collect_reply(websocket)
+    assert_endpointed_speech(texts, 240)
+
+
+async def test_the_utterance_buffer_keeps_only_a_bounded_tail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Always listening means buffering the silences too, so the buffer
+    # keeps a bounded tail of recent audio rather than the whole session.
+    cap = SAMPLE_RATE * 2 * 2  # two seconds
+    monkeypatch.setattr(session_module, "UTTERANCE_TAIL_BYTES", cap)
+    config = two_persona_config()
+    session = session_module.Session(cast(Any, None), config, build_agent_providers(config))
+    session._agents = ["tutor"]
+    session._activate_agent("tutor")
+    session._listen_mode = "realtime"
+    session.listening = True
+
+    encoder = OpusEncoder()
+    for packet in encoder.encode(b"\x00" * (FRAME_BYTES * 66)):
+        await session._handle_audio(framing.wrap(1, packet))
+
+    # Trimmed to the cap, give or take the frame that crossed it, and
+    # the quiet room never looked like an utterance.
+    assert cap - FRAME_BYTES <= len(session._utterance) <= cap + FRAME_BYTES
 
 
 def test_version_2_framing_round_trips() -> None:

@@ -24,9 +24,10 @@ is what was actually said aloud.
 Two end-of-utterance triggers coexist because the firmware's listening
 modes differ: manual mode sends `listen stop`, while auto and realtime
 modes stream mic audio until the server decides the user finished,
-which is what the endpointer is for. Realtime mode's defining feature,
-listening while the server speaks, is not honoured yet: frames arriving
-during playback are dropped, as in auto mode.
+which is what the endpointer is for. The modes also differ in who
+re-arms the listening: auto mode sends a fresh `listen start` after
+each reply, while a realtime device asks once and then streams
+continuously, so a realtime session here never stops listening.
 
 What happens in a conversation is logged twice over: as a human
 sentence, and as structured `extra=` fields (`event`, `session`,
@@ -77,6 +78,14 @@ HELLO_TIMEOUT_S = 10.0
 # The rate the input side of the pipeline runs at: what devices send,
 # and what the endpointer and ASR are fed.
 PIPELINE_SAMPLE_RATE = 16000
+
+# How much recent mic audio the utterance buffer keeps. A realtime
+# session listens through the silences too, so without a bound the
+# buffer would grow for the whole session (about 115 MB at the one-hour
+# cap). Well above the endpointer's 10 s `max_utterance_ms`, so what a
+# trim can ever drop is silence nobody is going to transcribe.
+UTTERANCE_TAIL_S = 30
+UTTERANCE_TAIL_BYTES = UTTERANCE_TAIL_S * PIPELINE_SAMPLE_RATE * 2
 
 # What the server speaks: TTS output is resampled to this rate, encoded
 # in 60 ms Opus frames, and announced in the server hello.
@@ -154,6 +163,10 @@ class Session:
         self.session_id = uuid.uuid4().hex
         self.protocol_version = 1
         self.listening = False
+        # The mode the last `listen start` asked for, kept because it
+        # decides who re-arms the listening after an utterance: the
+        # device, or nobody.
+        self._listen_mode: str | None = None
         # The device's MAC, set before anything can reject the connection so
         # a rejection names the device it turned away. Unknown until the
         # handshake headers are read.
@@ -183,6 +196,14 @@ class Session:
         # Outgoing frame pacing, reset per reply on the first frame.
         self._pace_start: float | None = None
         self._pace_count = 0
+
+    @property
+    def _realtime(self) -> bool:
+        """Whether the device is streaming its mic continuously, which is
+        what realtime mode means. It sends `listen start` once and never
+        again, so listening that stops here stops for the rest of the
+        session: this is the flag that keeps it on."""
+        return self._listen_mode == "realtime"
 
     def _event(self, event: str, **fields: Any) -> dict[str, Any]:
         """The structured half of a log line: what every conversation
@@ -437,6 +458,8 @@ class Session:
             logger.warning("session %s: undecodable Opus packet: %s", self.session_id, exc)
             return
         self._utterance.extend(pcm)
+        if len(self._utterance) > UTTERANCE_TAIL_BYTES:
+            del self._utterance[: len(self._utterance) - UTTERANCE_TAIL_BYTES]
         if self._endpointer.feed(pcm):
             await self._finish_utterance()
 
@@ -449,7 +472,11 @@ class Session:
 
         match message:
             case messages.ListenMessage(state="start", mode=mode):
-                logger.debug("session %s: listening (%s mode)", self.session_id, mode)
+                # At info: which mode a board asks for decides how the
+                # rest of the session behaves, and diagnosing that from
+                # the logs should not take turning DEBUG on.
+                logger.info("session %s: listening (%s mode)", self.session_id, mode)
+                self._listen_mode = mode
                 self.listening = True
                 self._reset_utterance()
             case messages.ListenMessage(state="stop"):
@@ -478,15 +505,19 @@ class Session:
                 )
 
     async def _finish_utterance(self) -> None:
-        """Hand the buffered utterance to the reply task. Listening stops
-        until the device asks again, which auto mode does by sending
-        `listen start` after the reply's `tts stop`."""
+        """Hand the buffered utterance to the reply task. Listening then
+        stops until the device asks again, which auto mode does by
+        sending `listen start` after the reply's `tts stop`. Not in
+        realtime mode: that device asked once and is still streaming, so
+        stopping here would leave nobody to re-arm it and the session
+        would answer one utterance and go deaf."""
         pcm = bytes(self._utterance)
         self._reset_utterance()
-        self.listening = False
+        if not self._realtime:
+            self.listening = False
         if self._reply_task is not None and not self._reply_task.done():
-            # Only reachable in realtime mode, where the mic streams while
-            # a reply plays; one reply at a time until realtime is honoured.
+            # Reachable in realtime mode, where the mic streams while a
+            # reply plays; one reply at a time for now.
             logger.warning(
                 "session %s: dropping an utterance, a reply is already streaming",
                 self.session_id,
