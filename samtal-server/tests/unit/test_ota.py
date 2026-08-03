@@ -199,6 +199,38 @@ def test_unparseable_body_still_gets_a_usable_reply(body: bytes) -> None:
     assert response.json()["firmware"]["version"] == "0.0.0"
 
 
+def test_a_configured_ota_path_is_where_the_endpoint_serves() -> None:
+    """The endpoint issues tokens, so it cannot require one. Hiding it
+    behind a long random segment is what an operator exposing the server
+    publicly has instead."""
+    secret_path = "/xiaozhi/ota/8f3a9c2b1d4e/"
+    client = client_for(Config(server={"ota_path": secret_path}))
+
+    response = client.post(
+        secret_path, json=SYSTEM_INFO, headers={"Device-Id": DEVICE_MAC, "Client-Id": DEVICE_UUID}
+    )
+    assert response.status_code == 200
+    assert response.json()["websocket"]["url"] == "ws://testserver/xiaozhi/v1/"
+    assert client.get(secret_path).status_code == 200
+
+    # And the default path is gone, which is the whole point of moving it.
+    assert client.post(OTA_PATH, json=SYSTEM_INFO).status_code == 404
+    assert client.get(OTA_PATH).status_code == 404
+
+
+def test_the_websocket_path_does_not_move_with_it() -> None:
+    """Only the OTA path is configurable: the websocket is protected by
+    the token, so hiding it would buy nothing and cost a device that
+    holds an old URL."""
+    client = client_for(Config(server={"ota_path": "/somewhere/else/"}))
+    response = client.post(
+        "/somewhere/else/",
+        json=SYSTEM_INFO,
+        headers={"Device-Id": DEVICE_MAC, "Client-Id": DEVICE_UUID},
+    )
+    assert response.json()["websocket"]["url"].endswith("/xiaozhi/v1/")
+
+
 def test_get_describes_where_devices_are_sent() -> None:
     config = Config(server={"websocket_url": "ws://192.168.1.10:8003/xiaozhi/v1/"})
     response = client_for(config).get(OTA_PATH)

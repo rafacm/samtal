@@ -56,6 +56,24 @@ def test_ota_server_settings_have_defaults() -> None:
     assert config.server.timezone_offset_minutes is None
 
 
+def test_ota_path_defaults_to_the_documented_one() -> None:
+    assert load_config().server.ota_path == "/xiaozhi/ota/"
+
+
+def test_a_custom_ota_path_is_accepted_and_stripped() -> None:
+    config = load_config_from_data({"server": {"ota_path": "  /xiaozhi/ota/8f3a9c2b/  "}})
+    assert config.server.ota_path == "/xiaozhi/ota/8f3a9c2b/"
+
+
+@pytest.mark.parametrize(
+    "path", ["xiaozhi/ota/", "/xiaozhi/ota", "", "https://host/xiaozhi/ota/"]
+)
+def test_an_ota_path_without_both_slashes_is_rejected(path: str) -> None:
+    with pytest.raises(ConfigError) as excinfo:
+        load_config_from_data({"server": {"ota_path": path}})
+    assert "is not a usable OTA path" in str(excinfo.value)
+
+
 def test_logging_settings_have_defaults() -> None:
     config = load_config()
     assert config.server.log_format == "text"
