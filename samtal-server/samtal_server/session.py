@@ -292,25 +292,37 @@ class Session:
             )
 
     async def request_shutdown(
-        self, code: int = GOING_AWAY, reason: str = "server shutting down"
-    ) -> None:
+        self,
+        code: int = GOING_AWAY,
+        reason: str = "server shutting down",
+        grace_s: float = SHUTDOWN_REPLY_GRACE_S,
+    ) -> bool:
         """End this session cleanly: let a reply that is already speaking
-        finish its sentence, then close.
+        finish its sentence, then close. Answers whether it did finish.
 
         The duration cap and the shutdown drain share this, so how a
         session is ended politely lives in one place. Cutting a reply off
         mid-word is what this exists to avoid: the device is speaking to
-        somebody. A reply that will not finish inside the grace period is
-        abandoned rather than waited on, and the caller's own bound (the
-        drain period) is stricter again.
+        somebody.
+
+        `grace_s` is how long that is worth waiting for, and the caller
+        decides it: the drain passes its own budget, so configuring
+        `server.drain_s` actually lengthens what a reply is given. The
+        default is for callers with no budget of their own, like the
+        duration cap. A reply that outlasts the grace is abandoned rather
+        than waited on, and the False that comes back is what lets the
+        caller say so instead of reporting a clean drain.
         """
+        finished = True
         reply = self._reply_task
         if reply is not None and not reply.done():
             # asyncio.wait rather than await: a reply that failed is a
             # reply that finished, and its exception is not this method's
             # to raise.
-            await asyncio.wait([reply], timeout=SHUTDOWN_REPLY_GRACE_S)
+            done, _ = await asyncio.wait([reply], timeout=grace_s)
+            finished = bool(done)
         await self._close(code, reason)
+        return finished
 
     def _open_duration_s(self) -> float:
         """How long this session has been open, to one hundredth of a

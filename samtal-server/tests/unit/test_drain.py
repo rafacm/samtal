@@ -27,17 +27,25 @@ from samtal_server.registry import SessionRegistry
 
 
 class FakeSession:
-    """A session that records how it was asked to stop."""
+    """A session that records how it was asked to stop, and answers the
+    way a real one does: True when its reply finished inside the grace."""
 
     def __init__(self, speaking_for: float = 0.0) -> None:
         self.speaking_for = speaking_for
         self.shutdown: tuple[int, str] | None = None
+        self.granted_s: float | None = None
 
     async def request_shutdown(
-        self, code: int = 1001, reason: str = "server shutting down"
-    ) -> None:
-        await asyncio.sleep(self.speaking_for)
+        self,
+        code: int = 1001,
+        reason: str = "server shutting down",
+        grace_s: float = 10.0,
+    ) -> bool:
+        self.granted_s = grace_s
+        finished = self.speaking_for <= grace_s
+        await asyncio.sleep(min(self.speaking_for, grace_s))
         self.shutdown = (code, reason)
+        return finished
 
 
 def registry_with(*sessions: FakeSession, max_sessions: int = 8) -> SessionRegistry:
@@ -76,15 +84,66 @@ async def test_draining_an_idle_server_is_immediate() -> None:
     await asyncio.wait_for(registry.drain(timeout_s=30), timeout=1)
 
 
-async def test_a_session_that_will_not_stop_is_left_to_uvicorn() -> None:
-    stuck = FakeSession(speaking_for=30)
+async def test_a_reply_that_outlasts_the_budget_is_still_closed_politely() -> None:
+    """The grace expiring is not a reason to leave a socket hanging: the
+    device is told "server shutting down" with 1001, which is a better
+    answer than uvicorn's eventual 1012."""
+    long_reply = FakeSession(speaking_for=30)
     quick = FakeSession()
-    registry = registry_with(stuck, quick)
+    registry = registry_with(long_reply, quick)
     await asyncio.wait_for(registry.drain(timeout_s=0.2), timeout=5)
-    # The bound held: the fast one finished, the stuck one was abandoned
-    # rather than waited on, and uvicorn's 1012 is what closes it.
-    assert quick.shutdown is not None
-    assert stuck.shutdown is None
+    assert quick.shutdown == (1001, "server shutting down")
+    assert long_reply.shutdown == (1001, "server shutting down")
+
+
+async def test_a_session_stuck_in_its_own_shutdown_is_left_to_uvicorn(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The outer bound is the backstop for a session stuck somewhere the
+    reply grace cannot reach. Those are cancelled and left to uvicorn's
+    1012 fail-close."""
+
+    class StuckSession(FakeSession):
+        async def request_shutdown(self, code=1001, reason="", grace_s=10.0) -> bool:
+            await asyncio.sleep(60)
+            return True
+
+    registry = registry_with(StuckSession(), FakeSession())
+    with caplog.at_level("INFO"):
+        await asyncio.wait_for(registry.drain(timeout_s=0.3), timeout=5)
+
+    (incomplete,) = [
+        r for r in caplog.records if getattr(r, "event", None) == "drain_incomplete"
+    ]
+    assert incomplete.unfinished == 1
+
+
+async def test_the_drain_budget_is_what_a_reply_is_given() -> None:
+    """The defect the M7 device checkpoint caught: a constant inside the
+    session capped the wait at ten seconds, so raising server.drain_s
+    bought a long reply nothing and it was still cut mid-sentence."""
+    session = FakeSession()
+    await registry_with(session).drain(timeout_s=45)
+    assert session.granted_s is not None
+    # Nearly all of the budget, less the slice held back for the close.
+    assert 43 <= session.granted_s <= 45
+
+
+async def test_a_reply_cut_mid_sentence_is_reported_as_such(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Reporting this as a clean drain would hide the one signal that
+    says drain_s is too short for the replies this server gives."""
+    with caplog.at_level("INFO"):
+        await registry_with(FakeSession(speaking_for=30)).drain(timeout_s=1.2)
+
+    (incomplete,) = [
+        r for r in caplog.records if getattr(r, "event", None) == "drain_incomplete"
+    ]
+    assert incomplete.cut_mid_reply == 1
+    assert incomplete.unfinished == 0
+    assert incomplete.levelname == "WARNING"
+    assert "drain_finished" not in {getattr(r, "event", None) for r in caplog.records}
 
 
 async def test_the_drain_reports_what_it_could_not_finish(
@@ -94,7 +153,7 @@ async def test_the_drain_reports_what_it_could_not_finish(
         await registry_with(FakeSession(speaking_for=30)).drain(timeout_s=0.1)
     events = {getattr(record, "event", None) for record in caplog.records}
     assert "drain_started" in events
-    assert "drain_timeout" in events
+    assert "drain_incomplete" in events
 
 
 async def test_the_drain_reports_a_clean_finish(caplog: pytest.LogCaptureFixture) -> None:
