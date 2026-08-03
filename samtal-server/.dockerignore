@@ -1,0 +1,17 @@
+# The build copies pyproject.toml, uv.lock, samtal_server/, and
+# README.md. Everything else only invalidates layers or leaks local
+# state into an image.
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+tests/
+docs/
+
+# Local instance state: configs and memory files that are gitignored for
+# the same reason they must not reach an image.
+*.local.yaml
+memory.local/
+.env
