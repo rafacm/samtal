@@ -30,7 +30,9 @@ each reply, while a realtime device asks once and then streams
 continuously, so a realtime session here never stops listening. It
 therefore hears the user through its own speech, and an utterance that
 ends while a reply is streaming cancels that reply and is answered,
-which is what barge-in is.
+which is what barge-in is. `server.barge_in` turns that off for a board
+whose echo cancellation leaks its own voice back: those frames are then
+dropped, and the conversation stays multi-turn regardless.
 
 What happens in a conversation is logged twice over: as a human
 sentence, and as structured `extra=` fields (`event`, `session`,
@@ -448,6 +450,13 @@ class Session:
     async def _handle_audio(self, data: bytes) -> None:
         if not self.listening or self._endpointer is None:
             return
+        if not self.config.server.barge_in and self._replying():
+            # Barge-in off: this is a board whose echo cancellation is
+            # not trusted, so what arrives while the server speaks may be
+            # the server. Dropped here, before the decode, and nothing
+            # has to re-arm afterwards: the guard opens by itself when
+            # the reply ends.
+            return
         try:
             frame = framing.unwrap(self.protocol_version, data)
         except framing.FramingError as exc:
@@ -519,12 +528,22 @@ class Session:
         user cutting in, so the reply in flight is cancelled and this one
         answered instead. Cancelling sends the old reply's `tts stop`
         before the new reply's `tts start`, because `_cancel_reply` waits
-        for the task it cancelled."""
+        for the task it cancelled. With `server.barge_in` off the
+        utterance is dropped instead, which is what a board with leaky
+        echo cancellation wants; from the mic that case is already
+        filtered in `_handle_audio`, so what reaches here is a manual
+        `listen stop` mid-reply."""
         pcm = bytes(self._utterance)
         self._reset_utterance()
         if not self._realtime:
             self.listening = False
-        if self._reply_task is not None and not self._reply_task.done():
+        if self._replying():
+            if not self.config.server.barge_in:
+                logger.warning(
+                    "session %s: dropping an utterance, a reply is already streaming",
+                    self.session_id,
+                )
+                return
             # From the mic this is realtime mode only, where the device
             # streams through playback: it asks for that mode exactly
             # when its echo cancellation is on, so what arrived is the
@@ -541,6 +560,11 @@ class Session:
             len(pcm) / 2 / PIPELINE_SAMPLE_RATE,
         )
         self._reply_task = asyncio.create_task(self._reply(pcm))
+
+    def _replying(self) -> bool:
+        """Whether a reply is streaming right now, which is what both
+        halves of the barge-in decision turn on."""
+        return self._reply_task is not None and not self._reply_task.done()
 
     def _reset_utterance(self) -> None:
         self._utterance.clear()

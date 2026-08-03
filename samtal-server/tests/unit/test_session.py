@@ -68,11 +68,16 @@ DEVICE_HELLO = {
 }
 
 
-def config_with_agent(asr_text: str = "hello", llm_reply: str | None = None) -> Config:
+def config_with_agent(
+    asr_text: str = "hello",
+    llm_reply: str | None = None,
+    server: dict[str, object] | None = None,
+) -> Config:
     llm: dict[str, object] = {"type": "mock"}
     if llm_reply is not None:
         llm["reply"] = llm_reply
     return Config(
+        server=server or {},
         providers={
             "llm": {"mock": llm},
             "asr": {"mock": {"type": "mock", "text": asr_text}},
@@ -431,6 +436,38 @@ def test_realtime_barge_in_cancels_the_reply_in_flight() -> None:
     # Cut off well short of the whole reply, and the interruption
     # answered as an utterance in its own right.
     assert audio_ms(opening_audio + cut_audio) < TTS_MS_PER_CHAR * len(LONG_REPLY) / 2
+    assert_endpointed_speech(answer, 240)
+
+
+def test_realtime_without_barge_in_drops_frames_during_playback_but_hears_after() -> None:
+    # The fallback for a board whose echo cancellation leaks its own
+    # voice back: the reply plays to the end rather than interrupting
+    # itself, and the conversation is still multi-turn afterwards.
+    config = config_with_agent(
+        asr_text="{ms}", llm_reply=LONG_REPLY, server={"barge_in": False}
+    )
+    with TestClient(create_app(config)) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            encoder = OpusEncoder()
+            websocket.send_text(
+                json.dumps({"type": "listen", "state": "start", "mode": "realtime"})
+            )
+            send_pcm(websocket, speech_pcm(600), encoder)
+            endpoint_silence(websocket, encoder)
+            opening, opening_audio = collect_until(websocket, is_reply_start)
+            # Whatever the mic streams now is ignored, the assistant's own
+            # voice included.
+            send_pcm(websocket, speech_pcm(240), encoder)
+            endpoint_silence(websocket, encoder)
+            rest, rest_audio = collect_reply(websocket)
+            # And once the reply is over, still no listen start needed.
+            send_pcm(websocket, speech_pcm(240), encoder)
+            endpoint_silence(websocket, encoder)
+            answer, _ = collect_until(websocket, is_transcript)
+    spoken = sentences(opening + rest)
+    assert spoken == [LONG_REPLY]
+    assert abs(audio_ms(opening_audio + rest_audio) - expected_tone_ms(spoken)) <= FRAME_MS
     assert_endpointed_speech(answer, 240)
 
 

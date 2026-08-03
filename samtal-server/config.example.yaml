@@ -73,6 +73,15 @@ server:
     max_sessions: 8
     max_session_s: 3600
 
+  # Whether speech that arrives while a reply is playing interrupts it.
+  # On by default: a device only keeps streaming its microphone through
+  # playback when its echo cancellation is on, so what arrives then is
+  # the user cutting in. Turn it off for a board whose cancellation
+  # leaks the speaker back into the microphone (a single-mic board),
+  # where a reply would otherwise interrupt itself. Conversations stay
+  # multi-turn either way; only the interrupting goes.
+  # barge_in: true
+
   # How long a shutdown waits for conversations in flight to finish
   # speaking. Twenty seconds sits inside the thirty an orchestrator
   # commonly allows between SIGTERM and SIGKILL; `docker stop` needs its
