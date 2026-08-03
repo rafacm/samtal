@@ -11,17 +11,25 @@ answers "up to date" by echoing back the version the device reported. The
 reply also never carries an `activation` section, which is what keeps
 devices from ever being asked to activate.
 
+This endpoint is the token issuer, so it cannot itself require a token.
+What protects it instead is stinginess and a configurable path: a token
+is issued only to a device the configuration resolves to an agent, and
+an operator exposing the server publicly hides the endpoint behind a
+long random path segment.
+
 Upstream reference: `main/ota.cc` in 78/xiaozhi-esp32 parses this response.
 """
 
 import logging
 import time
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse, PlainTextResponse
 
+from samtal_server.auth import DeviceAuth
 from samtal_server.config import Config
 from samtal_server.config.models import normalize_mac
 from samtal_server.ws import WEBSOCKET_PATH
@@ -45,6 +53,27 @@ def websocket_url_for(config: Config, request: Request) -> str:
         return configured
     scheme = "wss" if request.url.scheme == "https" else "ws"
     return f"{scheme}://{request.url.netloc}{WEBSOCKET_PATH}"
+
+
+def token_for(
+    device_auth: DeviceAuth | None, client_id: str, mac: str, agents: Sequence[str]
+) -> str:
+    """The token this device gets, which is a token only when there is
+    something for it to reach.
+
+    A device the configuration does not resolve to an agent is turned
+    away at the websocket anyway, so issuing it a token would only widen
+    what an unauthenticated endpoint hands out: the `devices` map plus
+    `default_agent` is the allowlist, and this is where it bites.
+
+    The empty string is sent rather than the key omitted, in both the
+    no-agent and the auth-disabled case, because the firmware persists
+    what it is given: an empty token clears one left in NVS by another
+    server, where a missing key would leave it in place.
+    """
+    if device_auth is None or not agents:
+        return ""
+    return device_auth.issue(client_id, mac)
 
 
 def timezone_offset_minutes(config: Config) -> int:
@@ -141,9 +170,7 @@ async def check_version(request: Request) -> Response:
             "firmware": {"version": version, "url": ""},
             "websocket": {
                 "url": websocket_url_for(config, request),
-                # Empty until M7 turns on device tokens. Sent rather than
-                # omitted so a token left in NVS by another server is cleared.
-                "token": "",
+                "token": token_for(request.app.state.device_auth, client_id, mac, agents),
                 "version": config.server.protocol_version,
             },
         }

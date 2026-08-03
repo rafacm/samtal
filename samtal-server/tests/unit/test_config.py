@@ -176,9 +176,24 @@ def test_default_agent_must_be_defined() -> None:
         load_config_from_data({"default_agent": "ghost"})
 
 
-def test_agents_require_a_default_agent() -> None:
+def test_agents_no_device_can_reach_are_rejected() -> None:
     with pytest.raises(ConfigError, match="default_agent is required"):
         load_config_from_data({"agents": {"assistant": {}}})
+
+
+def test_bound_devices_make_default_agent_optional() -> None:
+    """Omitting default_agent is how a deployment says "only these
+    devices": the devices map becomes the allowlist, and every unknown
+    MAC resolves to nothing."""
+    config = load_config_from_data(
+        {
+            "agents": {"assistant": {}},
+            "devices": {"aa:bb:cc:dd:ee:ff": "assistant"},
+        }
+    )
+    assert config.default_agent is None
+    assert config.agents_for_device("aa:bb:cc:dd:ee:ff") == ["assistant"]
+    assert config.agents_for_device("11:22:33:44:55:66") == []
 
 
 def test_device_bound_to_unknown_agent() -> None:
@@ -385,11 +400,12 @@ def test_multiple_problems_reported_together() -> None:
     data = {
         "agents": {"assistant": {"llm": "ghost"}},
         "devices": {"aa:bb:cc:dd:ee:ff": "nobody"},
+        "default_agent": "also-nobody",
     }
     with pytest.raises(ConfigError) as excinfo:
         load_config_from_data(data)
     message = str(excinfo.value)
-    assert "default_agent is required" in message
+    assert 'default_agent "also-nobody" is not a defined agent' in message
     assert 'agent "nobody"' in message
     assert 'unknown llm provider "ghost"' in message
 
