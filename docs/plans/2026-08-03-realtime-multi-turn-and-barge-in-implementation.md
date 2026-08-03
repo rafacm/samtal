@@ -93,5 +93,47 @@ Resolution of the plan's open risks:
 
 Verification: `uv run ruff check .`, `uv run pytest tests/unit -q` (463
 passed), and `uv run pytest tests/integration -q` (27 passed) all from
-`samtal-server/`. The two hardware checkpoints in the plan's Process
-section run at the desk and are carried as unchecked boxes on PR #13.
+`samtal-server/`.
+
+### Hardware checkpoint, 2026-08-03
+
+Waveshare ESP32-S3-Touch-LCD-1.54, firmware 2.4.0, the board issue #10
+was found on. The server ran from this branch rather than from the
+image, on the local pipeline the earlier checkpoints used (Silero,
+faster-whisper `small`, Ollama `gemma4:e4b`, Piper `lessac`), with
+`barge_in` left at its default. One PWR press, four utterances, no
+button and no `listen start` in between:
+
+```
+12:17:19  listening (realtime mode)
+12:17:25  heard "Hey, what is the capital of Iceland?"
+12:17:35  replied "The capital of Iceland is Reykjavík."
+12:17:41  heard "And how many people live there?"
+12:17:52  replied "It has an estimated population of around 120,000 people..."
+12:17:59  heard "Tell me a long story about the lighthouse."
+12:18:12  barge-in, cancelling the reply in flight
+12:18:14  heard "Stop, what is 2 plus 2?"
+12:18:20  replied "Two plus two equals four."
+```
+
+The one `listening (realtime mode)` line, at info where the diagnosis
+had needed DEBUG, is the whole of the bug: the device says it once and
+the session carried it across every turn after.
+
+Discovered here and not visible from the tests: **every utterance after
+the first carries the whole gap since the previous one as silent
+lead-in.** The durations above are 3.8 s, then 15.6 s, 18.1 s, and
+15.5 s, where only the first is the length of what was said. A realtime
+session buffers continuously, so what reaches ASR is the reply's own
+playback time plus the pause plus the speech. It is bounded, and the
+30 s tail cap held, but faster-whisper is then transcribing 15 s where
+3 s is speech: about a second of extra latency per turn on this
+machine, five times the audio for an ASR priced by the minute, and one
+language detection down at 0.52 confidence (still correct, and all four
+transcripts were right). Not a defect in the design as planned, and out
+of scope for this PR: the session cannot know where speech began, since
+`Endpointer` is only `feed() -> bool` and `reset()`. Both endpointers
+track it internally (`_speech_heard` in each), so the fix is to report
+speech start across that protocol and trim to a short pre-roll, which
+touches the mock and Silero implementations together. Filed as a
+follow-up rather than widened into this branch.
