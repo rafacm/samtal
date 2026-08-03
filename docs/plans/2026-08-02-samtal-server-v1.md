@@ -101,7 +101,7 @@ the [implementation notes](2026-08-02-samtal-server-v1-implementation.md).
   (PR #8): server-side MCP servers per agent plus device MCP
   tools, round-tripped through LLM tool calling. Accept: simulator
   conversation triggers a mock MCP tool and the reply reflects its result.
-- [ ] **M7 Hardening and release**: device token auth on by default,
+- [x] [**M7 Hardening and release**](2026-08-02-samtal-server-v1-implementation.md#m7-hardening-and-release-pr-9) (PR #9): device token auth on by default,
   connection and session limits, structured logging (emit the heard/replied
   conversation events as structured records, so log retention yields
   transcripts until v3 brings a real conversation store), multi-arch Docker
