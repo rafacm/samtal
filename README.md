@@ -83,7 +83,7 @@ Start from [`samtal-server/config.example.yaml`](samtal-server/config.example.ya
 
 **4. Provision WiFi** from the device's captive portal, press the button, and talk.
 
-The complete procedure, including a fully local zero-API-key pipeline and every serial gotcha, is in [`docs/xiaozhi-notes.md`](docs/xiaozhi-notes.md); the server's own options, security defaults, and container details are in [`samtal-server/README.md`](samtal-server/README.md). samtal has no versioned releases yet: images are tagged `latest`, the build date, and the commit SHA.
+The complete procedure, including a fully local zero-API-key pipeline and every serial gotcha, is in [`docs/xiaozhi-notes.md`](docs/xiaozhi-notes.md); the server's own options, security defaults, and container details are in [`samtal-server/README.md`](samtal-server/README.md). samtal has no versioned releases yet: images are tagged `latest`, the build time (`2026-08-03-1200`, UTC), and the commit SHA (`sha-3f9362a`). Only `latest` moves; deploy from one of the other two.
 
 ## Project Layout
 

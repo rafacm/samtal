@@ -162,12 +162,15 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE }}
-          # Dates rather than versions, like the changelog: there is no
-          # semver yet, and a date plus a SHA says everything a rollback
-          # needs.
+          # Build times rather than versions, like the changelog's dates:
+          # there is no semver yet, and a timestamp plus a SHA says
+          # everything a rollback needs. To the minute (UTC), not the
+          # day: several merges land on a good day, and a tag a later
+          # build can claim is a moving pointer wearing a release's
+          # clothes. `latest` is the only tag here that moves.
           tags: |
             type=raw,value=latest
-            type=raw,value={{date 'YYYY-MM-DD'}}
+            type=raw,value={{date 'YYYY-MM-DD-HHmm'}}
             type=sha,format=short
 
       - name: Publish

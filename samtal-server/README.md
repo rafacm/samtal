@@ -429,8 +429,14 @@ explicitly or pass the proxy's address in `FORWARDED_ALLOW_IPS`, which
 uvicorn honours from the environment.
 
 Images are published to `ghcr.io/rafacm/samtal-server` for amd64 and
-arm64, tagged `latest`, the build date, and the short commit SHA. Each
-one has passed the unit, integration, and smoke lanes.
+arm64, tagged `latest`, the build time in UTC (`2026-08-03-1200`), and
+the short commit SHA (`sha-3f9362a`). Each one has passed the unit,
+integration, and smoke lanes.
+
+`latest` is the only one of the three that moves, so it is the tag to
+pull when trying the server and the wrong one to deploy from. The other
+two are never reused: several merges can land on one day, and each gets
+its own timestamp, so a rollback names the build it wants.
 
 The image contains `piper-tts` (GPL-3.0) alongside the MIT server. That
 is aggregation, not a derived work; see
