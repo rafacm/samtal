@@ -11,8 +11,9 @@ appended in the same change that ticks the checklist below.
 
 ## Checklist
 
-- [ ] Realtime multi-turn and barge-in: one PR delivering the fix, its
-  tests, and the documentation updates
+- [x] [Realtime multi-turn and barge-in](2026-08-03-realtime-multi-turn-and-barge-in-implementation.md#realtime-multi-turn-and-barge-in-pr-13):
+  one PR delivering the fix, its tests, and the documentation updates
+  (PR #13)
 
 ## Context
 
