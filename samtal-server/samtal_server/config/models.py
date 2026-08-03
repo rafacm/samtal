@@ -135,6 +135,12 @@ class ServerConfig(BaseModel):
     auth: AuthConfig = Field(default_factory=AuthConfig)
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
 
+    # How long a shutdown waits for conversations in flight to finish
+    # speaking before the process goes. Twenty seconds sits inside the
+    # thirty an orchestrator commonly allows between SIGTERM and SIGKILL;
+    # `docker stop` needs its own timeout raised above this.
+    drain_s: float = Field(default=20.0, ge=0)
+
     @field_validator("log_level")
     @classmethod
     def _check_log_level(cls, value: str) -> str:
