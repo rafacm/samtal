@@ -64,6 +64,17 @@ def test_listen_states_parse(state: str) -> None:
     assert message.state == state
 
 
+@pytest.mark.parametrize("mode", ["auto", "manual", "realtime"])
+def test_a_listen_start_carries_its_mode(mode: str) -> None:
+    # The mode is not decoration: realtime is the device saying it will
+    # stream continuously, which is what keeps a session listening.
+    message = parse_message(
+        json.dumps({"session_id": "s", "type": "listen", "state": "start", "mode": mode})
+    )
+    assert isinstance(message, ListenMessage)
+    assert message.mode == mode
+
+
 def test_a_wake_word_report_carries_its_text() -> None:
     message = parse_message(
         '{"session_id": "s", "type": "listen", "state": "detect", "text": "Hi ESP"}'
