@@ -76,6 +76,39 @@ Discoveries:
   the `WebSocketDisconnect`/`RuntimeError` the reply path already
   suppresses. Both `test_drain.py` files pass untouched.
 
+Review round, one finding, and the plan wrong in both directions:
+
+- **The plan's "half-spoken turns" claim does not survive contact.** It
+  reads: "`_reply`'s `finally` appends only sentences actually spoken;
+  history stays truthful under barge-in. No change." The review pointed
+  out that `_speak` counted a sentence the moment it sent
+  `sentence_start`, before any of its audio had gone out, so a barge-in
+  two frames in would record the whole sentence as an assistant turn.
+- **Measured, that consequence did not reach the history, for a reason
+  nobody had noticed.** `_speak` filled the round's `leg`, and
+  `_tool_loop` merged `leg` into `spoken` only after the round's stream
+  finished, so a cancellation mid-round discarded the round entirely.
+  Driving `_reply` to a cancellation mid-sentence left `_turns` holding
+  the user turn alone, with and without the reordering.
+- **What it did expose is the opposite defect, and that one is real.**
+  Sentences the user heard in full were dropped along with the
+  interrupted one. The hardware checkpoint shows it plainly: the board
+  spoke about thirteen seconds of the lighthouse story, and there is no
+  `replied` line for it anywhere in the log, so the reply that answered
+  "Stop, what is 2 plus 2?" was written against a history in which the
+  story was never told. Barge-in is what makes that routine, since
+  interrupting mid-round is the whole feature.
+- **Fixed at sentence granularity.** `_speak` counts a sentence once its
+  audio has gone out, and a new `_speak_and_record` puts each spoken
+  sentence into both the round's list and the reply's as it completes,
+  so the merge is per sentence rather than per round. The history after
+  an interruption is then exactly what was heard. Two tests:
+  `test_a_barge_in_keeps_the_sentences_the_user_heard` (the history
+  property, which fails against the round-granularity merge) and
+  `test_only_a_sentence_whose_audio_finished_counts_as_spoken` (the
+  ordering inside `_speak`, which is what keeps the model's own preamble
+  turn honest during a tool round).
+
 Resolution of the plan's open risks:
 
 - **Echo tail at reply boundaries**: still open by construction, since

@@ -9,6 +9,8 @@ LLM replies "You said <transcript>.", and the TTS speaks a tone whose
 length follows the text.
 """
 
+import asyncio
+import contextlib
 import json
 import math
 import re
@@ -24,9 +26,10 @@ import samtal_server.session as session_module
 from samtal_server.app import create_app
 from samtal_server.audio import rms
 from samtal_server.audio.opus import OpusDecoder, OpusEncoder
+from samtal_server.audio.resample import Resampler
 from samtal_server.config import Config
 from samtal_server.protocol import framing
-from samtal_server.providers import build_agent_providers
+from samtal_server.providers import Turn, build_agent_providers
 from samtal_server.ws import WEBSOCKET_PATH, signed_device_id
 
 DEVICE_MAC = "AA:BB:CC:DD:EE:FF"
@@ -513,6 +516,75 @@ def test_auto_mode_still_requires_a_new_listen_start_after_the_reply() -> None:
             endpoint_silence(websocket, encoder)
             texts, _ = collect_reply(websocket)
     assert_endpointed_speech(texts, 240)
+
+
+class RecordingSocket:
+    """Just enough websocket for `_speak`: it counts what went out."""
+
+    def __init__(self) -> None:
+        self.texts: list[str] = []
+        self.frames = 0
+
+    async def send_text(self, text: str) -> None:
+        self.texts.append(text)
+
+    async def send_bytes(self, data: bytes) -> None:
+        self.frames += 1
+
+
+async def test_a_barge_in_keeps_the_sentences_the_user_heard() -> None:
+    # The history after an interruption has to be what was heard: every
+    # sentence whose audio went out, and not the one cut off partway.
+    # Getting this wrong either way misleads whoever speaks next, since
+    # the reply that answers the interruption is written against it.
+    config = config_with_agent(asr_text="hello", llm_reply=f"Ready. {LONG_REPLY}")
+    socket = RecordingSocket()
+    session = session_module.Session(cast(Any, socket), config, build_agent_providers(config))
+    session._agents = ["assistant"]
+    session._activate_agent("assistant")
+
+    reply = asyncio.create_task(session._reply(speech_pcm(600)))
+    await asyncio.sleep(0.6)
+    heard_frames = socket.frames
+    reply.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await reply
+
+    # "Ready." was spoken in full and survives; the long sentence was
+    # audible, interrupted, and left out.
+    assert session._turns == [Turn("user", "hello"), Turn("assistant", "Ready.")]
+    assert heard_frames > TTS_MIN_MS // FRAME_MS
+
+
+async def test_only_a_sentence_whose_audio_finished_counts_as_spoken() -> None:
+    # What the history keeps has to be what the user actually heard.
+    # Barge-in cancels a reply in the middle of sending a sentence, and
+    # the model having written that sentence is not evidence anybody
+    # heard it: frames are paced, so being written and being heard are
+    # seconds apart.
+    config = two_persona_config()
+    socket = RecordingSocket()
+    session = session_module.Session(cast(Any, socket), config, build_agent_providers(config))
+    session._agents = ["tutor"]
+    session._activate_agent("tutor")
+    assert session._providers is not None
+    resampler = Resampler(
+        session._providers.tts.sample_rate, session_module.OUTPUT_AUDIO.sample_rate
+    )
+
+    spoken: list[str] = []
+    await session._speak("Short and finished.", resampler, spoken)
+    finished_frames = socket.frames
+
+    cut = asyncio.create_task(session._speak(LONG_REPLY, resampler, spoken))
+    await asyncio.sleep(0.1)
+    cut.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await cut
+
+    # The interrupted sentence was audible, and is still not recorded.
+    assert socket.frames > finished_frames
+    assert spoken == ["Short and finished."]
 
 
 async def test_the_utterance_buffer_keeps_only_a_bounded_tail(
