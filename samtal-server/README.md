@@ -376,6 +376,7 @@ and `device`, plus its own:
 | `ota_check`        | a device checks in (no session) | `client`, `board`, `firmware`, `agents` |
 | `session_open`     | a conversation starts           | `client`, `agent`, `agents`, `protocol` |
 | `heard`            | an utterance is transcribed     | `agent`, `text`, `duration_s`      |
+| `speaking_started` | the reply's first audio frame goes out | `agent`                     |
 | `replied`          | a reply finishes                | `agent`, `text`                    |
 | `agent_said`       | one agent's part of a reply     | `agent`, `text`                    |
 | `handover`         | `switch_agent` succeeds         | `from_agent`, `to_agent`           |

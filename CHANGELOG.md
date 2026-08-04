@@ -17,6 +17,11 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   worst-case decode latency), and `cpu_threads` (size the inference
   pool to a container CPU quota in config rather than through
   `OMP_NUM_THREADS`). All keep the engine's defaults when unset.
+- A `speaking_started` conversation event, logged when the first Opus
+  frame of a reply goes out. `replied` fires at the last frame of a
+  paced stream, so on its own the logs could not separate synthesis
+  cost from speaking time; the pair makes time-to-first-audio directly
+  measurable, which the operator measurements in #22 asked for.
 - `docs/adr/` holds architecture decision records: one immutable,
   date-prefixed file per decision that is hard to reverse, surprising
   without context, and the result of a real trade-off. The first two

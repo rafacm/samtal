@@ -10,6 +10,7 @@ did not change when the fields arrived.
 """
 
 import json
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -29,6 +30,7 @@ from tests.unit.test_session import (
 )
 from tests.unit.test_session_tools import (
     BOTH_MAC,
+    POET_MAC,
     ScriptedLlm,
     base_config,
     call,
@@ -141,6 +143,43 @@ def test_the_ota_check_is_an_event_of_its_own(caplog: pytest.LogCaptureFixture) 
     assert check.board == "waveshare"
     assert check.firmware == "2.4.0"
     assert check.agents == ["assistant"]
+
+
+def test_speaking_started_marks_the_first_frame_of_a_reply(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("INFO"):
+        hold_a_conversation(config_with_agent(asr_text="hello"))
+
+    started = only(caplog, "speaking_started")
+    assert started.agent == "assistant"
+    replied = only(caplog, "replied")
+    assert started.session == replied.session
+    # It exists to make time-to-first-audio measurable, so it must sit
+    # between the transcription and the end of the reply.
+    order = [caplog.records.index(record) for record in (only(caplog, "heard"), started, replied)]
+    assert order == sorted(order)
+
+
+async def test_a_reply_starts_speaking_only_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Pacing restarts per agent leg (a handover sets `_pace_start`
+    back to None); the event must not restart with it."""
+
+    class Sink:
+        async def send_bytes(self, data: bytes) -> None:
+            return None
+
+    session = session_for(base_config(), POET_MAC)
+    session.websocket = cast(Any, Sink())
+    with caplog.at_level("INFO"):
+        await session._send_frames([b"frame"])
+        session._pace_start = None
+        await session._send_frames([b"frame"])
+
+    started = only(caplog, "speaking_started")
+    assert started.agent == "poet"
 
 
 async def test_a_handover_logs_what_each_agent_said(
