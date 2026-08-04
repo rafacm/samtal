@@ -7,6 +7,14 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-08-04
 
+### Changed
+
+- The README now leads with the project's spirit: a "Conversational
+  AI. Sweded." tagline linking to the Be Kind Rewind creators' How To
+  Swede video, a "What is samtal?" section that opens with the sweding
+  idea and names the two upstream projects it starts from, and a
+  Credits note on where the word comes from.
+
 ### Added
 
 - A language surface for multilingual deployments that cannot pin

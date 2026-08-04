@@ -7,6 +7,8 @@
 **samtal** *(n.)* Swedish for *conversation*;<br>
 from *sam-* (together) + *tal* (speech). Speech, together, with your own hardware.
 
+Conversational AI. [Sweded](https://youtu.be/i5Rd8x4OJoY).
+
 [![Server CI](https://github.com/rafacm/samtal/actions/workflows/samtal-server.yml/badge.svg)](https://github.com/rafacm/samtal/actions/workflows/samtal-server.yml)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-blue)](https://www.python.org/)
 [![FastAPI >=0.115](https://img.shields.io/badge/fastapi-%3E%3D0.115-009688)](https://fastapi.tiangolo.com/)
@@ -22,7 +24,12 @@ from *sam-* (together) + *tal* (speech). Speech, together, with your own hardwar
 
 ## What is samtal?
 
-A self-hostable voice assistant that pairs **small ESP32-S3 devices** (a microphone, speaker, and display on your desk) with a **Python conversation server you run yourself**. The entire loop (wake word → speech recognition → language model → speech synthesis) happens on infrastructure you control: no vendor cloud, no account, no activation. Every stage is a **pluggable provider**: bring your own LLM (Anthropic, any OpenAI-compatible endpoint, or a local Ollama), your own voices, and your own tools via [MCP](https://modelcontextprotocol.io). Built on the excellent [xiaozhi](https://github.com/78/xiaozhi-esp32) firmware and protocol.
+> You take what you like and mix it with some other things you like and make a new thing. *Your* thing!<br>
+> -- from the movie [Be Kind Rewind (2008)](https://youtu.be/i5Rd8x4OJoY)
+
+We took two projects we liked, the [78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) firmware and the [xinnan-tech/xiaozhi-esp32-server](https://github.com/xinnan-tech/xiaozhi-esp32-server) conversation server, and some devices we also liked, the small [Waveshare ESP32-S3 boards](#hardware) that put a microphone, a speaker, and a display on your desk. We reimplemented what we wanted to make our own (the **conversation server**, rebuilt in Python you run yourself), kept what was already excellent (the firmware's board support, audio pipeline, and device protocol), and mixed in the things *you* like.
+
+The new thing is a self-hostable voice assistant where the device talks to **your server** and nothing else. Every stage is a **pluggable provider**: bring your own LLM (a local [Ollama](https://ollama.com), Anthropic, or any OpenAI-compatible endpoint), your own voices, and your own tools via [MCP](https://modelcontextprotocol.io). The whole loop (wake word → speech recognition → language model → speech synthesis) can run entirely on your own hardware, and wherever you choose a cloud provider instead, it is exactly that, your choice: your keys, through your server, swappable at will. No vendor cloud, no account, no activation. Your thing.
 
 ## Features
 
@@ -30,7 +37,7 @@ The design premise is a **thin device and a smart server**: the firmware's only 
 
 - **Self-hosted end to end.** The device speaks Opus over a WebSocket to your server and nothing else. Run it on a laptop or ship the published multi-arch container image to your own infrastructure. WebSocket is the only transport for v1; upstream's MQTT+UDP alternative may follow.
 - **No account, no activation, no phone app.** Point the device at your server once; it connects and talks.
-- **Pluggable LLM.** Anthropic, any OpenAI-compatible endpoint, or fully local via [Ollama](https://ollama.com). 🚧
+- **Pluggable LLM.** Fully local via [Ollama](https://ollama.com), or Anthropic and any OpenAI-compatible endpoint. 🚧
 - **Pluggable voice.** Speech recognition and synthesis are swappable providers; a zero-API-key local pipeline (SileroVAD + SenseVoice + EdgeTTS) works today.
 - **Tools via MCP, on both sides.** Attach any MCP server as assistant tools; the device itself exposes its controls (volume, brightness, screen) as MCP tools over the same channel.
 - **Compiler-grade upstream, thin fork.** Device support, audio pipeline, and echo cancellation come from the actively maintained [xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) project; samtal changes as little as possible on the device. 🚧
@@ -102,6 +109,8 @@ samtal is assembled on top of two MIT-licensed projects, and would be nothing wi
 - [**xinnan-tech/xiaozhi-esp32-server**](https://github.com/xinnan-tech/xiaozhi-esp32-server) is the Python conversation server samtal starts from.
 
 License notices are preserved in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+
+The word *sweded*, and the whole idea of remaking something you love with your own hands, comes from the film *Be Kind Rewind* (2008); its creators explain [How To Swede](https://youtu.be/i5Rd8x4OJoY) on YouTube.
 
 ## Changelog
 
