@@ -31,6 +31,10 @@ We took two projects we liked, the [78/xiaozhi-esp32](https://github.com/78/xiao
 
 The new thing is a self-hostable voice assistant where the device talks to **your server** and nothing else. Every stage is a **pluggable provider**: bring your own LLM (a local [Ollama](https://ollama.com), Anthropic, or any OpenAI-compatible endpoint), your own voices, and your own tools via [MCP](https://modelcontextprotocol.io). The whole loop (wake word → speech recognition → language model → speech synthesis) can run entirely on your own hardware, and wherever you choose a cloud provider instead, it is exactly that, your choice: your keys, through your server, swappable at will. No vendor cloud, no account, no activation. Your thing.
 
+![samtal architecture overview](docs/architecture/samtal-architecture-overview.png)
+
+That is the whole picture at a glance; one conversation turn in full detail, from wake word to spoken reply, is diagrammed in [docs/architecture](docs/README.md#architecture-diagrams).
+
 ## Features
 
 The design premise is a **thin device and a smart server**: the firmware's only tie to a backend is a single config URL, and everything else (endpoints, credentials, even firmware updates) is delivered by *your* server at runtime. Customization lives server-side, in Python, not in C++ you have to reflash.
