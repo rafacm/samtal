@@ -8,6 +8,7 @@ from samtal_server.config import Config, ConfigError, load_config
 from samtal_server.config.models import normalize_mac
 
 EXAMPLE_CONFIG = Path(__file__).parents[2] / "config.example.yaml"
+DEPLOY_EXAMPLE_CONFIG = Path(__file__).parents[2] / "config.deploy.example.yaml"
 
 
 @pytest.fixture(autouse=True)
@@ -39,6 +40,19 @@ def test_example_config_parses() -> None:
     assert config.provider_for_agent("storyteller", "llm") == ("local", "agents.storyteller.llm")
     assert config.devices["aa:bb:cc:dd:ee:ff"] == ["assistant"]
     assert config.agents_for_device("11:22:33:44:55:66") == ["storyteller", "assistant"]
+
+
+def test_deploy_example_config_parses() -> None:
+    config = load_config(DEPLOY_EXAMPLE_CONFIG)
+    assert config.default_agent == "assistant"
+    # The deployment profile sets what a plain LAN run leaves defaulted.
+    assert config.server.websocket_url == "wss://voice.example.com/xiaozhi/v1/"
+    assert config.server.ota_path != "/xiaozhi/ota/"
+    assert config.server.auth.enabled is True
+    whisper = config.providers.asr["whisper"]
+    assert whisper.type == "faster_whisper"
+    assert whisper.options["vad_filter"] is True
+    assert whisper.options["language_detect"] == "once"
 
 
 def test_no_config_gives_defaults() -> None:
