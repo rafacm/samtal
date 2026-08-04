@@ -9,6 +9,14 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- `docs/adr/` holds architecture decision records: one immutable,
+  date-prefixed file per decision that is hard to reverse, surprising
+  without context, and the result of a real trade-off. The first two
+  records backfill decisions from the v1 design whose consequences the
+  live-deployment measurements in #22 made visible: that providers are
+  startup-built singletons behind payload-only protocols, and that the
+  structured JSON log events are the server's observability surface and
+  transcript store until v3.
 - `samtal-esp32/README.md` documents how a board behaves in daily use.
   It separates what holds for any board running the upstream firmware,
   that the microphone is live locally for the wake word but reaches the
