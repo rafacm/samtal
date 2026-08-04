@@ -132,6 +132,18 @@ providers:
       # default can retry one bad utterance six times over; a short
       # ladder bounds worst-case latency, which a voice UI feels.
       # temperature: [0.0, 0.2]
+      # Detection scope. every_utterance (the default) detects fresh on
+      # each turn; once detects until a confident answer arrives, then
+      # reuses that language for the rest of the session, so later
+      # turns skip the whole detection pass. A speaker rarely switches
+      # language mid-conversation; a new conversation detects afresh.
+      # language_detect: once
+      # Below this detection confidence, distrust the guess: use
+      # language_fallback instead when one is set, and never lock a
+      # session to it. Misdetections cluster at low confidence, and a
+      # wrong language costs extra decode time on top of being wrong.
+      # language_confidence_floor: 0.6
+      # language_fallback: en
   tts:
     piper:
       # piper-tts is GPL-3.0 and therefore an optional extra:
