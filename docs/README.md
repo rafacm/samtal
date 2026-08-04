@@ -20,6 +20,7 @@ READMEs: [the project overview](../README.md),
 
 ## Architecture diagrams
 
+- [**samtal-architecture-overview**](architecture/samtal-architecture-overview.excalidraw) ([PNG render](architecture/samtal-architecture-overview.png)): the root README's at-a-glance picture: human, device, server, and the external services each side of the WebSocket talks to.
 - [**samtal-conversation-flow-detailed**](architecture/samtal-conversation-flow-detailed.excalidraw) ([PNG render](architecture/samtal-conversation-flow-detailed.png)): one conversation turn across four lanes (human, device, server, external services); flow 1 is the speech uplink from the human speaking to the LLM, flow 2 the reply downlink from synthesized sentences back to the speaker. The editable original is the Excalidraw scene of the same name in the team workspace; the committed file is its export, kept in sync manually, so flag it when a pipeline change makes it stale.
 
 ## Plans

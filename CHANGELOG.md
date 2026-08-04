@@ -539,6 +539,8 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   rather than committed; and agent memory sits on the data volume. A
   unit test keeps it parsing and pins the allowlist posture.
 
+- A high-level architecture overview diagram (`docs/architecture/samtal-architecture-overview.excalidraw`, with a PNG render), embedded in the root README: human, device, server, and the external services each side talks to.
+
 - An architecture diagram of one conversation turn (`docs/architecture/samtal-conversation-flow-detailed.excalidraw`, with a PNG render beside it): the speech uplink and the reply downlink across four lanes (human, device, server, external services). The editable original is the Excalidraw scene of the same name in the team workspace; the committed file is its export.
 - A language surface for multilingual deployments that cannot pin
   `language`: `language_detect: once` detects until one confident
