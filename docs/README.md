@@ -32,6 +32,14 @@ Verification, and Files modified. Milestone work under a plan is documented
 by that plan's implementation doc and its pull request instead. Empty for
 now.
 
+## Decisions
+
+`adr/` holds one architecture decision record per decision that is hard
+to reverse, surprising without context, and the result of a real
+trade-off. Records are immutable and date-prefixed; conventions are in
+[`adr/README.md`](adr/README.md). Issues hold evidence, ADRs hold
+decisions, plans hold execution.
+
 ## Conventions
 
 Documentation process, writing conventions, and the workflow these documents
