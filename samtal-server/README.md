@@ -214,7 +214,11 @@ Configuration is handled by
 [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/).
 The server reads one YAML file, passed as `--config /path/to/config.yaml` or
 via the `SAMTAL_CONFIG` environment variable; with neither set, defaults
-apply. [`config.example.yaml`](config.example.yaml) documents every key:
+apply. [`config.example.yaml`](config.example.yaml) documents every key,
+and [`config.deploy.example.yaml`](config.deploy.example.yaml) is a
+ready-to-adapt profile for the container image behind a proxy on a small
+CPU quota, holding the values the issue #22 latency measurements
+validated. The reference file covers:
 `server` (host/port), named `providers` per stage (`llm`, `asr`, `tts`,
 `vad`), named `mcp_servers`, `agent_defaults` holding what every agent
 uses unless it says otherwise, `agents` combining a prompt with provider

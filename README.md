@@ -82,7 +82,7 @@ docker run -d --name samtal -p 8003:8003 \
 
 Generating it inline in the `docker run` would mint a new secret on every restart, and each new secret invalidates the token every device has stored. A device that has one then gets refused until its next OTA check, which it only makes on boot, so it sits there playing an error tone at you.
 
-Start from [`samtal-server/config.example.yaml`](samtal-server/config.example.yaml), which documents every key. Speech models download into the `/data` volume at first start, so the first run takes a few minutes and later ones take seconds.
+Start from [`samtal-server/config.example.yaml`](samtal-server/config.example.yaml), which documents every key, or from [`samtal-server/config.deploy.example.yaml`](samtal-server/config.deploy.example.yaml), a ready-to-adapt profile for the container image behind a proxy on a small CPU quota. Speech models download into the `/data` volume at first start, so the first run takes a few minutes and later ones take seconds.
 
 **2. Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`.
 

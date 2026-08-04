@@ -17,6 +17,16 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- `config.deploy.example.yaml`: a deployment profile example for the
+  container image behind a TLS-terminating proxy on a small CPU quota,
+  holding the values the issue #22 latency measurements validated
+  (`cpu_threads` sized to the quota, `vad_filter: true`,
+  `condition_on_previous_text: false`, a two-step `temperature`
+  ladder, and `language_detect: once` with a confidence floor and
+  fallback). Where `config.example.yaml` documents every key, this
+  file sets only what a deployment should decide, so operators can
+  adapt it instead of re-deriving the tuning from the feature docs. A
+  unit test keeps it parsing.
 - A language surface for multilingual deployments that cannot pin
   `language`: `language_detect: once` detects until one confident
   answer and then reuses it for the rest of the session (saving the
