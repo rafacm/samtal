@@ -217,8 +217,8 @@ via the `SAMTAL_CONFIG` environment variable; with neither set, defaults
 apply. [`config.example.yaml`](config.example.yaml) documents every key,
 and [`config.deploy.example.yaml`](config.deploy.example.yaml) is a
 ready-to-adapt profile for the container image behind a proxy on a small
-CPU quota, holding the values the issue #22 latency measurements
-validated. The reference file covers:
+CPU quota, holding values validated by latency measurements from a live
+deployment. The reference file covers:
 `server` (host/port), named `providers` per stage (`llm`, `asr`, `tts`,
 `vad`), named `mcp_servers`, `agent_defaults` holding what every agent
 uses unless it says otherwise, `agents` combining a prompt with provider
