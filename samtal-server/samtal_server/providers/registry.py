@@ -55,6 +55,33 @@ class OptionsReader:
             raise ProviderError(f'{self._label}: option "{key}" must be an integer')
         return value
 
+    def boolean(self, key: str, default: bool) -> bool:
+        value = self._pending.pop(key, default)
+        if not isinstance(value, bool):
+            raise ProviderError(f'{self._label}: option "{key}" must be true or false')
+        return value
+
+    def numbers(self, key: str) -> list[float] | None:
+        """A non-empty list of numbers, with a single number taken as a
+        list of one; None when absent."""
+        value = self._pending.pop(key, None)
+        if value is None:
+            return None
+        if not isinstance(value, bool) and isinstance(value, int | float):
+            return [float(value)]
+        if (
+            isinstance(value, list)
+            and value
+            and all(
+                not isinstance(item, bool) and isinstance(item, int | float)
+                for item in value
+            )
+        ):
+            return [float(item) for item in value]
+        raise ProviderError(
+            f'{self._label}: option "{key}" must be a number or a non-empty list of numbers'
+        )
+
     def mapping(self, key: str) -> dict[str, object]:
         """A nested option written as a YAML mapping, empty when absent."""
         value = self._pending.pop(key, None)
