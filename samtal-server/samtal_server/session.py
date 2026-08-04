@@ -201,6 +201,10 @@ class Session:
         # Outgoing frame pacing, reset per reply on the first frame.
         self._pace_start: float | None = None
         self._pace_count = 0
+        # Whether this reply has sent any audio yet. Pacing restarts per
+        # agent leg, so it cannot double as this flag: the event below
+        # must fire once per reply, not once per handover.
+        self._speaking_started = False
 
     @property
     def _realtime(self) -> bool:
@@ -590,6 +594,7 @@ class Session:
         assert self._providers is not None
         providers = self._providers
         spoken: list[str] = []
+        self._speaking_started = False
         heard_s = round(len(pcm) / 2 / PIPELINE_SAMPLE_RATE, 2)
         try:
             transcript = (await providers.asr.transcribe(pcm, PIPELINE_SAMPLE_RATE)).strip()
@@ -893,6 +898,17 @@ class Session:
         first frame of the reply, not at ASR time."""
         if not packets:
             return
+        if not self._speaking_started:
+            # The `replied` event marks the last frame of a reply, so on
+            # its own the logs cannot tell synthesis cost from speaking
+            # time; this marks the first frame, making time-to-first-audio
+            # measurable (#22).
+            self._speaking_started = True
+            logger.info(
+                "session %s: speaking started",
+                self.session_id,
+                extra=self._event("speaking_started", agent=self._agent),
+            )
         loop = asyncio.get_running_loop()
         frame_s = OUTPUT_AUDIO.frame_duration / 1000
         if self._pace_start is None:
