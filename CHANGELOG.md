@@ -60,6 +60,21 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   accuracy cost (#22). Deployments that want the old behaviour set
   `beam_size: 5` explicitly.
 
+### Fixed
+
+- An utterance handed to ASR no longer carries the whole gap since the
+  previous one (#14). A continuously listening realtime session
+  buffers the reply's playback time and the user's thinking pause, and
+  every utterance after the first dragged up to thirty seconds of that
+  silence into transcription: slower on every turn, billed audio on
+  hosted ASR, and the source of the garbled transcripts and language
+  misdetections measured in #22. The endpointer now reports where
+  speech began, and the session trims the utterance to the speech plus
+  `server.utterance_pre_roll_ms` (default 300 ms, so the first phoneme
+  survives) plus the trailing window. `heard`'s `duration_s` therefore
+  means how long the user spoke again, which matters because retained
+  logs are the transcript store.
+
 ## 2026-08-03
 
 ### Added
