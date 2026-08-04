@@ -1,7 +1,9 @@
 # Providers are startup-built singletons behind payload-only protocols
 
 **Status:** Accepted (recorded 2026-08-04, backfilling a decision made
-in the v1 design)
+in the v1 design). The payload-only clause is amended by
+[ASR results carry language metadata](2026-08-04-asr-results-carry-language-metadata.md);
+the singleton and statelessness decisions stand.
 
 ## Context
 

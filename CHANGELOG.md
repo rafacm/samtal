@@ -9,6 +9,17 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- A language surface for multilingual deployments that cannot pin
+  `language`: `language_detect: once` detects until one confident
+  answer and then reuses it for the rest of the session (saving the
+  constant per-utterance detection pass that #22 measured at 3.4 s),
+  and `language_fallback` with `language_confidence_floor` uses a
+  configured language instead of trusting a low-confidence guess,
+  re-invoking before any decoding runs. Under the hood the ASR
+  protocol now returns text with language metadata and takes a
+  session-scoped hint (`AsrResult`, recorded as an ADR amendment),
+  and the `heard` event carries `language` and `language_confidence`
+  when an engine detected.
 - The `faster_whisper` ASR provider now exposes the decode options the
   live-deployment measurements in #22 identified: `vad_filter` and
   `vad_parameters` (strip non-speech inside the ASR call),
