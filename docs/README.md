@@ -18,6 +18,10 @@ READMEs: [the project overview](../README.md),
   [`THIRD_PARTY_LICENSES.md`](../THIRD_PARTY_LICENSES.md). Entries are
   added as a project is actually read, never assumed.
 
+## Architecture diagrams
+
+- [**samtal-conversation-flow**](architecture/samtal-conversation-flow.excalidraw) ([PNG render](architecture/samtal-conversation-flow.png)): one conversation turn across four lanes (human, device, server, external services); flow 1 is the speech uplink from the human speaking to the LLM, flow 2 the reply downlink from synthesized sentences back to the speaker. The editable original is the Excalidraw scene of the same name in the team workspace; the committed file is its export, kept in sync manually, so flag it when a pipeline change makes it stale.
+
 ## Plans
 
 One file per accepted plan, named with a `YYYY-MM-DD-` prefix, each with a

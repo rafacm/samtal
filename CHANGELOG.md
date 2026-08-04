@@ -538,6 +538,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   the secret `ota_path` segment is injected from the environment
   rather than committed; and agent memory sits on the data volume. A
   unit test keeps it parsing and pins the allowlist posture.
+
+- An architecture diagram of one conversation turn (`docs/architecture/samtal-conversation-flow.excalidraw`, with a PNG render beside it): the speech uplink and the reply downlink across four lanes (human, device, server, external services). The editable original is the Excalidraw scene of the same name in the team workspace; the committed file is its export.
+
 - A language surface for multilingual deployments that cannot pin
   `language`: `language_detect: once` detects until one confident
   answer and then reuses it for the rest of the session (saving the
