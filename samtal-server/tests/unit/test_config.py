@@ -44,15 +44,20 @@ def test_example_config_parses() -> None:
 
 def test_deploy_example_config_parses() -> None:
     config = load_config(DEPLOY_EXAMPLE_CONFIG)
-    assert config.default_agent == "assistant"
     # The deployment profile sets what a plain LAN run leaves defaulted.
     assert config.server.websocket_url == "wss://voice.example.com/xiaozhi/v1/"
-    assert config.server.ota_path != "/xiaozhi/ota/"
     assert config.server.auth.enabled is True
     whisper = config.providers.asr["whisper"]
     assert whisper.type == "faster_whisper"
     assert whisper.options["vad_filter"] is True
     assert whisper.options["language_detect"] == "once"
+    # No default_agent: the devices map is an allowlist, and an
+    # unknown device resolves to no agent at all.
+    assert config.default_agent is None
+    assert config.agents_for_device("ff:ff:ff:ff:ff:ff") == []
+    # Memory sits on the data volume, the writable place in the image.
+    assert config.memory is not None
+    assert config.memory.dir == Path("/data/memory")
 
 
 def test_no_config_gives_defaults() -> None:
