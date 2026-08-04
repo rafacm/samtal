@@ -33,7 +33,7 @@ The new thing is a self-hostable voice assistant where the device talks to **you
 
 ![samtal architecture overview](docs/architecture/samtal-architecture-overview.png)
 
-That is the whole picture at a glance; one conversation turn in full detail, from wake word to spoken reply, is diagrammed in [docs/architecture](docs/README.md#architecture-diagrams).
+That is the whole picture at a glance; one conversation turn in full detail, from wake word to spoken reply, is diagrammed and explained step by step in [docs/architecture](docs/architecture/README.md).
 
 ## Features
 

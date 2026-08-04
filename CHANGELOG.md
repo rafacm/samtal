@@ -539,6 +539,8 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   rather than committed; and agent memory sits on the data volume. A
   unit test keeps it parsing and pins the allowlist posture.
 
+- A teaching walkthrough of the diagrams (`docs/architecture/README.md`): every numbered step of the detailed conversation-turn diagram explained with the concept, the problem it solves, and links, expanding each acronym (AEC, VAD, ASR, LLM, TTS, MCP) before using it.
+
 - A high-level architecture overview diagram (`docs/architecture/samtal-architecture-overview.excalidraw`, with a PNG render), embedded in the root README: human, device, server, and the external services each side talks to.
 
 - An architecture diagram of one conversation turn (`docs/architecture/samtal-conversation-flow-detailed.excalidraw`, with a PNG render beside it): the speech uplink and the reply downlink across four lanes (human, device, server, external services). The editable original is the Excalidraw scene of the same name in the team workspace; the committed file is its export.
