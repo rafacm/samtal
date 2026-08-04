@@ -25,8 +25,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   ladder, and `language_detect: once` with a confidence floor and
   fallback). Where `config.example.yaml` documents every key, this
   file sets only what a deployment should decide, so operators can
-  adapt it instead of re-deriving the tuning from the feature docs. A
-  unit test keeps it parsing.
+  adapt it instead of re-deriving the tuning from the feature docs.
+  Operator review then hardened the profile: no `default_agent`, so
+  the `devices` map is an allowlist and unknown devices are refused;
+  the secret `ota_path` segment is injected from the environment
+  rather than committed; and agent memory sits on the data volume. A
+  unit test keeps it parsing and pins the allowlist posture.
 - A language surface for multilingual deployments that cannot pin
   `language`: `language_detect: once` detects until one confident
   answer and then reuses it for the rest of the session (saving the

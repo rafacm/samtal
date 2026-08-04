@@ -15,17 +15,26 @@ server:
   host: 0.0.0.0
   port: 8003
 
-  # Behind a proxy the request headers do not carry the public name, so
-  # the websocket URL the OTA endpoint hands to devices is set
-  # explicitly. wss, because the proxy terminates TLS.
+  # The websocket URL the OTA endpoint hands to devices, set explicitly
+  # because TLS ends at the proxy: the server itself only ever sees
+  # plain HTTP, so a URL derived from the request would say ws:// and
+  # devices would fail to connect with nothing obviously misconfigured.
   websocket_url: wss://voice.example.com/xiaozhi/v1/
 
   # The OTA endpoint issues the device tokens, so it cannot itself
   # require one. Exposed publicly it hides behind a random path segment
   # instead (openssl rand -hex 16); the same full URL goes into each
-  # device's NVS ota_url. The websocket path never moves: the token is
-  # what protects it.
-  ota_path: /xiaozhi/ota/replace-with-a-random-segment/
+  # device's NVS ota_url, and rewriting NVS wipes a board's wifi
+  # provisioning, so the segment is chosen once and never rotates.
+  # That makes it a credential. When the adapted file is
+  # version-controlled, as a container deployment's usually is, do not
+  # write the segment here: inject the whole path from the secret
+  # store instead, relying on environment overrides beating the file.
+  #
+  #   SAMTAL_SERVER__OTA_PATH=/xiaozhi/ota/<random-segment>/
+  #
+  # The websocket path never moves: the token is what protects it.
+  # ota_path: /xiaozhi/ota/replace-with-a-random-segment/
 
   # On by default, and the server refuses to boot without the secret in
   # the environment. Listed so the deployment remembers to provide it:
@@ -35,10 +44,22 @@ server:
     enabled: true
     secret_env: SAMTAL_AUTH_SECRET
 
+  # What one server holds at once. The cap is per container and
+  # defaults to 8; size it to the actual device fleet. A device
+  # refused for capacity reconnects on its next wake word.
+  # limits:
+  #   max_sessions: 8
+
+  # Minutes east of UTC, for devices that should show local time. A
+  # fixed offset, not a zone: it goes stale at every DST change.
+  # Unset, the server's own current offset applies.
+  # timezone_offset_minutes: 120
+
   # How long a shutdown waits for conversations in flight to finish
-  # speaking. The orchestrator's grace period between SIGTERM and
-  # SIGKILL must sit above this; `docker stop` defaults to ten seconds,
-  # below it, so it needs its own -t raised.
+  # speaking. Set the orchestrator's grace period between SIGTERM and
+  # SIGKILL to at least twice this, so a drain still in progress is
+  # never killed; `docker stop` defaults to ten seconds, below even
+  # the drain itself, so it needs its own -t raised.
   drain_s: 20
 
 providers:
@@ -58,7 +79,11 @@ providers:
       device: cpu
       compute_type: int8
       # The engine sizes its thread pool from the host's core count and
-      # ignores container CPU quotas: set this to the quota.
+      # ignores container CPU quotas: set this to the quota, and keep
+      # the two moving together, because drift between them is exactly
+      # the throttling this key exists to prevent. A non-zero value
+      # overrides OMP_NUM_THREADS for this engine; the variable still
+      # steers the process's other native libraries.
       cpu_threads: 3
       # Strip non-speech inside the ASR call before decoding. Cuts both
       # latency and hallucinations on silence-padded utterances.
@@ -73,10 +98,12 @@ providers:
       # Detect the language once per session and reuse the first
       # confident answer, so later turns skip the whole detection pass.
       # Below the floor the guess is distrusted: the utterance decodes
-      # as the fallback language instead, and nothing is locked.
+      # as the fallback language instead, and nothing is locked. Keep
+      # the fallback a language the agent's voice speaks: whatever is
+      # decoded, that one voice renders it.
       language_detect: once
       language_confidence_floor: 0.6
-      language_fallback: en
+      language_fallback: sv
 
   tts:
     piper:
@@ -88,6 +115,18 @@ providers:
   vad:
     silero:
       type: silero
+      # The silence that ends an utterance, and the biggest remaining
+      # deployment-decided latency knob: it sits directly in front of
+      # every reply. 500 to 600 is a meaningful cut from the 700
+      # default; the trade is clipping slow speakers mid-sentence.
+      # trailing_silence_ms: 600
+
+# Facts agents remember between conversations. Removing this section
+# removes the remember tool with it. The directory sits on the data
+# volume, the one place a container running a read-only root
+# filesystem can write.
+memory:
+  dir: /data/memory
 
 agent_defaults:
   llm: claude
@@ -104,9 +143,11 @@ agents:
       reply in the language the user spoke.
     tts: piper
 
-# Devices are bound by the MAC address they send as Device-Id; unknown
-# devices get default_agent.
+# Devices are bound by the MAC address they send as Device-Id. There
+# is deliberately no default_agent: omitting it is what turns this map
+# into an allowlist, so an unknown device resolves to no agent, is
+# issued no token, and is refused at the handshake. With the OTA
+# endpoint guarded only by its unguessable path, a publicly exposed
+# deployment wants that refusal.
 devices:
   "aa:bb:cc:dd:ee:ff": assistant
-
-default_agent: assistant
