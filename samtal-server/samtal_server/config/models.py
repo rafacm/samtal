@@ -144,6 +144,12 @@ class ServerConfig(BaseModel):
     # and what arrives during a reply is dropped instead.
     barge_in: bool = True
 
+    # How much audio from before the detected start of speech rides
+    # along to ASR, so the first phoneme survives the trim. The rest of
+    # the leading silence a continuously listening device piles up is
+    # dropped before transcription (#14).
+    utterance_pre_roll_ms: float = Field(default=300.0, ge=0)
+
     # How long a shutdown waits for conversations in flight to finish
     # speaking before the process goes. Twenty seconds sits inside the
     # thirty an orchestrator commonly allows between SIGTERM and SIGKILL;

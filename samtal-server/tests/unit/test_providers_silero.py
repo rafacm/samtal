@@ -59,6 +59,17 @@ def test_real_model_silence_never_ends_an_utterance_that_never_began() -> None:
     assert not any(endpointer.feed(b"\x00" * WINDOW_BYTES * 5) for _ in range(31))
 
 
+def test_speech_start_is_reported_to_window_granularity() -> None:
+    silence_windows = 10
+    endpointer = scripted_endpointer([0.0] * silence_windows + [0.9] * 5)
+    feed_windows(endpointer, silence_windows)
+    assert endpointer.speech_start() is None
+    feed_windows(endpointer, 5)
+    assert endpointer.speech_start() == silence_windows * WINDOW_BYTES
+    endpointer.reset()
+    assert endpointer.speech_start() is None
+
+
 def test_speech_then_trailing_silence_ends_the_utterance() -> None:
     speech_windows = 20  # 640 ms of speech
     endpointer = scripted_endpointer([0.9] * speech_windows)

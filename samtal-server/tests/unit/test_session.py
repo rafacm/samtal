@@ -393,6 +393,31 @@ def test_abort_during_a_streaming_reply_does_not_eat_the_next_utterance() -> Non
     assert 180 <= heard_ms(texts) <= 300
 
 
+def test_a_realtime_utterance_sheds_the_silence_that_came_before_it() -> None:
+    # The #14 regression: a realtime session buffers the whole gap since
+    # the previous utterance (reply playback, thinking time), and every
+    # utterance after the first carried it all to ASR. The trim keeps
+    # the speech, a pre-roll so the first phoneme survives, and the
+    # trailing window the endpointer sat through; the gap itself goes.
+    config = config_with_agent(asr_text="{ms} ms")
+    pre_roll_ms = config.server.utterance_pre_roll_ms
+    with TestClient(create_app(config)) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            websocket.send_text(
+                json.dumps({"type": "listen", "state": "start", "mode": "realtime"})
+            )
+            encoder = OpusEncoder()
+            # Sit quiet for five seconds, well over any pre-roll...
+            send_pcm(websocket, b"\x00" * (FRAME_BYTES * 5000 // FRAME_MS), encoder)
+            # ...then speak.
+            send_pcm(websocket, speech_pcm(600), encoder)
+            endpoint_silence(websocket, encoder)
+            texts, _ = collect_reply(websocket)
+
+    assert 600 + 600 <= heard_ms(texts) <= 600 + pre_roll_ms + ENDPOINT_SILENCE_MS + 180
+
+
 def test_realtime_mode_serves_a_second_utterance_without_listen_start() -> None:
     # A realtime device asks to listen once and then streams its mic for
     # the rest of the connection. Nothing re-arms the server, so the

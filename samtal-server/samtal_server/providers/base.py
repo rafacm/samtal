@@ -96,11 +96,19 @@ class Turn:
 class Endpointer(Protocol):
     """The per-session working end of the VAD stage: fed decoded PCM
     chunks while the device listens, it answers True the moment the
-    utterance has ended."""
+    utterance has ended.
+
+    `speech_start` is where in the fed stream the speech began: a byte
+    offset counted from the last reset, None while none has been heard.
+    It exists because only the endpointer knows, and the session needs
+    it to drop the leading silence a continuously listening device
+    piles up in front of every utterance (#14)."""
 
     def feed(self, pcm: bytes) -> bool: ...
 
     def reset(self) -> None: ...
+
+    def speech_start(self) -> int | None: ...
 
 
 class VadProvider(ABC):

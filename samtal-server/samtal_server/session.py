@@ -191,6 +191,11 @@ class Session:
         )
         self._endpointer: Endpointer | None = None
         self._utterance = bytearray()
+        # How much the tail cap has cut from the front of `_utterance`
+        # since the last reset, which is what maps the endpointer's
+        # speech-start offset (counted over everything fed) onto a
+        # position in the buffer that remains.
+        self._utterance_dropped = 0
         self._turns: list[Turn] = []
         self._reply_task: asyncio.Task[None] | None = None
         # The device's own tools, when it said it has any. Discovery runs
@@ -480,7 +485,9 @@ class Session:
             return
         self._utterance.extend(pcm)
         if len(self._utterance) > UTTERANCE_TAIL_BYTES:
-            del self._utterance[: len(self._utterance) - UTTERANCE_TAIL_BYTES]
+            excess = len(self._utterance) - UTTERANCE_TAIL_BYTES
+            del self._utterance[:excess]
+            self._utterance_dropped += excess
         if self._endpointer.feed(pcm):
             await self._finish_utterance()
 
@@ -542,7 +549,7 @@ class Session:
         echo cancellation wants; from the mic that case is already
         filtered in `_handle_audio`, so what reaches here is a manual
         `listen stop` mid-reply."""
-        pcm = bytes(self._utterance)
+        pcm = self._trimmed_utterance()
         self._reset_utterance()
         if not self._realtime:
             self.listening = False
@@ -575,8 +582,28 @@ class Session:
         halves of the barge-in decision turn on."""
         return self._reply_task is not None and not self._reply_task.done()
 
+    def _trimmed_utterance(self) -> bytes:
+        """The buffered utterance, cut down to the speech plus a short
+        pre-roll. A continuously listening session buffers everything
+        between utterances (the reply's own playback time, the pause
+        while the user thinks), and the endpointer rightly ignores that
+        silence, so it would otherwise all ride along to ASR (#14). The
+        pre-roll keeps the first phoneme intact; the trailing silence
+        the endpointer sat through stays, since it is bounded and ASR
+        needs the end of the speech anyway."""
+        speech_start = self._endpointer.speech_start() if self._endpointer is not None else None
+        if speech_start is None:
+            return bytes(self._utterance)
+        pre_roll = int(self.config.server.utterance_pre_roll_ms / 1000 * PIPELINE_SAMPLE_RATE) * 2
+        start = speech_start - self._utterance_dropped - pre_roll
+        if start <= 0:
+            return bytes(self._utterance)
+        start -= start % 2  # never split a 16-bit sample
+        return bytes(self._utterance[start:])
+
     def _reset_utterance(self) -> None:
         self._utterance.clear()
+        self._utterance_dropped = 0
         if self._endpointer is not None:
             self._endpointer.reset()
 

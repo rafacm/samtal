@@ -41,6 +41,21 @@ def test_speech_then_trailing_silence_ends_the_utterance() -> None:
     assert 600 <= (first + 1) * CHUNK_MS <= 900
 
 
+def test_speech_start_is_where_the_silence_ended() -> None:
+    endpointer = EnergyEndpointer()
+    assert endpointer.speech_start() is None
+    feed_ms(endpointer, SILENCE, 1200)
+    assert endpointer.speech_start() is None
+    feed_ms(endpointer, SPEECH, 600)
+    assert endpointer.speech_start() == len(SILENCE) * (1200 // CHUNK_MS)
+    # A later pause does not move it: the first speech is the anchor.
+    feed_ms(endpointer, SILENCE, 480)
+    feed_ms(endpointer, SPEECH, 120)
+    assert endpointer.speech_start() == len(SILENCE) * (1200 // CHUNK_MS)
+    endpointer.reset()
+    assert endpointer.speech_start() is None
+
+
 def test_a_pause_shorter_than_the_window_does_not_end_it() -> None:
     endpointer = EnergyEndpointer()
     feed_ms(endpointer, SPEECH, 600)

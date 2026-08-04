@@ -82,6 +82,12 @@ server:
   # multi-turn either way; only the interrupting goes.
   # barge_in: true
 
+  # How much audio from before the detected start of speech rides along
+  # to ASR, so the first phoneme survives the trim. Everything earlier
+  # is dropped before transcription: a continuously listening device
+  # otherwise carries the whole gap since the previous utterance.
+  # utterance_pre_roll_ms: 300
+
   # How long a shutdown waits for conversations in flight to finish
   # speaking. Twenty seconds sits inside the thirty an orchestrator
   # commonly allows between SIGTERM and SIGKILL; `docker stop` needs its
