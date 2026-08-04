@@ -1,0 +1,112 @@
+# samtal-server deployment example: the container image behind a
+# TLS-terminating proxy, on a small CPU quota. Where config.example.yaml
+# is the reference that documents every key, this file sets only what a
+# deployment should decide, with the values the issue #22 latency
+# measurements validated. Take it as the starting point and adapt the
+# names, agents and devices.
+#
+# The published image already reads its config from /config/config.yaml,
+# sends every model cache to the /data volume (HOME=/data), and defaults
+# its logs to the json format, so none of that appears here. Secrets
+# never live in this file: the keys below name environment variables,
+# and the deployment provides them.
+
+server:
+  host: 0.0.0.0
+  port: 8003
+
+  # Behind a proxy the request headers do not carry the public name, so
+  # the websocket URL the OTA endpoint hands to devices is set
+  # explicitly. wss, because the proxy terminates TLS.
+  websocket_url: wss://voice.example.com/xiaozhi/v1/
+
+  # The OTA endpoint issues the device tokens, so it cannot itself
+  # require one. Exposed publicly it hides behind a random path segment
+  # instead (openssl rand -hex 16); the same full URL goes into each
+  # device's NVS ota_url. The websocket path never moves: the token is
+  # what protects it.
+  ota_path: /xiaozhi/ota/replace-with-a-random-segment/
+
+  # On by default, and the server refuses to boot without the secret in
+  # the environment. Listed so the deployment remembers to provide it:
+  #
+  #   SAMTAL_AUTH_SECRET=$(openssl rand -hex 32)
+  auth:
+    enabled: true
+    secret_env: SAMTAL_AUTH_SECRET
+
+  # How long a shutdown waits for conversations in flight to finish
+  # speaking. The orchestrator's grace period between SIGTERM and
+  # SIGKILL must sit above this; `docker stop` defaults to ten seconds,
+  # below it, so it needs its own -t raised.
+  drain_s: 20
+
+providers:
+  llm:
+    claude:
+      type: anthropic
+      model: claude-sonnet-5
+      # The environment variable holding the key, never the key.
+      api_key_env: ANTHROPIC_API_KEY
+
+  asr:
+    whisper:
+      type: faster_whisper
+      # Weights download into /data at first start, so the first boot
+      # takes minutes and later ones seconds.
+      model: small
+      device: cpu
+      compute_type: int8
+      # The engine sizes its thread pool from the host's core count and
+      # ignores container CPU quotas: set this to the quota.
+      cpu_threads: 3
+      # Strip non-speech inside the ASR call before decoding. Cuts both
+      # latency and hallucinations on silence-padded utterances.
+      vad_filter: true
+      # Feeding each window's text into the next is the documented
+      # cause of repetition loops; false is the standard mitigation.
+      condition_on_previous_text: false
+      # A short fallback ladder for failed decodes. The engine's
+      # six-step default can retry one bad utterance six times over,
+      # and a voice UI feels that worst case.
+      temperature: [0.0, 0.2]
+      # Detect the language once per session and reuse the first
+      # confident answer, so later turns skip the whole detection pass.
+      # Below the floor the guess is distrusted: the utterance decodes
+      # as the fallback language instead, and nothing is locked.
+      language_detect: once
+      language_confidence_floor: 0.6
+      language_fallback: en
+
+  tts:
+    piper:
+      type: piper
+      # Voice name from the Piper voice collection, downloaded into
+      # /data at first start.
+      voice: sv_SE-nst-medium
+
+  vad:
+    silero:
+      type: silero
+
+agent_defaults:
+  llm: claude
+  asr: whisper
+  vad: silero
+
+agents:
+  assistant:
+    # State the reply language explicitly: models otherwise pick one by
+    # their training bias.
+    prompt: >
+      You are a helpful voice assistant. Keep replies short, plain, and
+      speakable: one or two sentences, no lists, no markdown. Always
+      reply in the language the user spoke.
+    tts: piper
+
+# Devices are bound by the MAC address they send as Device-Id; unknown
+# devices get default_agent.
+devices:
+  "aa:bb:cc:dd:ee:ff": assistant
+
+default_agent: assistant
