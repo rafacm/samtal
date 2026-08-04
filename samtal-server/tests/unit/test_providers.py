@@ -41,6 +41,34 @@ def test_a_wrongly_typed_option_is_rejected_at_build_time() -> None:
     assert '"threshold"' in str(excinfo.value)
 
 
+def test_the_boolean_reader_takes_only_true_or_false() -> None:
+    from samtal_server.providers.registry import OptionsReader
+
+    reader = OptionsReader("providers.asr.ears", provider_config(type="mock", flag=True))
+    assert reader.boolean("flag", False) is True
+    assert reader.boolean("absent", False) is False
+    with pytest.raises(ProviderError) as excinfo:
+        OptionsReader(
+            "providers.asr.ears", provider_config(type="mock", flag="yes")
+        ).boolean("flag", False)
+    assert '"flag"' in str(excinfo.value)
+
+
+def test_the_numbers_reader_takes_a_list_or_a_single_number() -> None:
+    from samtal_server.providers.registry import OptionsReader
+
+    label = "providers.asr.ears"
+    assert OptionsReader(label, provider_config(type="mock", t=[0, 0.2])).numbers(
+        "t"
+    ) == [0.0, 0.2]
+    assert OptionsReader(label, provider_config(type="mock", t=0.4)).numbers("t") == [0.4]
+    assert OptionsReader(label, provider_config(type="mock")).numbers("t") is None
+    for bad in (["a"], [], True, [0.0, True]):
+        with pytest.raises(ProviderError) as excinfo:
+            OptionsReader(label, provider_config(type="mock", t=bad)).numbers("t")
+        assert '"t"' in str(excinfo.value)
+
+
 def test_every_stage_builds_its_mock() -> None:
     assert isinstance(build_provider("llm", "m", provider_config(type="mock")), MockLlm)
     assert isinstance(build_provider("asr", "m", provider_config(type="mock")), MockAsr)
