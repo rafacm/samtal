@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-04
+
+### Added
+
+- `samtal-esp32/README.md` documents how a board behaves in daily use.
+  It separates what holds for any board running the upstream firmware,
+  that the microphone is live locally for the wake word but reaches the
+  server only during a conversation, that nothing in the firmware ends
+  that conversation once it is open, and the 2.4 GHz limit that governs
+  phone hotspots, from what is read out of one board's own
+  configuration, which is the controls and the sleep and shutdown
+  timings. The hardware tables in both READMEs now link the working
+  board's status to it.
+
 ## 2026-08-03
 
 ### Added
