@@ -1,9 +1,9 @@
 # samtal-server deployment example: the container image behind a
 # TLS-terminating proxy, on a small CPU quota. Where config.example.yaml
 # is the reference that documents every key, this file sets only what a
-# deployment should decide, with the values the issue #22 latency
-# measurements validated. Take it as the starting point and adapt the
-# names, agents and devices.
+# deployment should decide, with values validated by latency
+# measurements from a live deployment. Take it as the starting point
+# and adapt the names, agents and devices.
 #
 # The published image already reads its config from /config/config.yaml,
 # sends every model cache to the /data volume (HOME=/data), and defaults
