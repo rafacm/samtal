@@ -78,8 +78,8 @@ def test_every_stage_builds_its_mock() -> None:
 
 async def test_mock_asr_answers_the_configured_text_for_audio_and_nothing_for_none() -> None:
     asr = build_provider("asr", "m", provider_config(type="mock", text="tea please"))
-    assert await asr.transcribe(b"\x00\x01" * 320, 16000) == "tea please"
-    assert await asr.transcribe(b"", 16000) == ""
+    assert (await asr.transcribe(b"\x00\x01" * 320, 16000)).text == "tea please"
+    assert (await asr.transcribe(b"", 16000)).text == ""
 
 
 async def test_mock_llm_formats_the_last_user_turn_into_the_reply() -> None:

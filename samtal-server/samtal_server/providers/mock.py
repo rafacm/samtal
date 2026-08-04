@@ -15,6 +15,7 @@ from samtal_server.audio import rms
 from samtal_server.config.models import ProviderConfig
 from samtal_server.providers.base import (
     AsrProvider,
+    AsrResult,
     Endpointer,
     LlmEvent,
     LlmProvider,
@@ -103,11 +104,13 @@ class MockAsr(AsrProvider):
     def __init__(self, text: str) -> None:
         self._text = text
 
-    async def transcribe(self, pcm: bytes, sample_rate: int) -> str:
+    async def transcribe(
+        self, pcm: bytes, sample_rate: int, language_hint: str | None = None
+    ) -> AsrResult:
         if not pcm:
-            return ""
+            return AsrResult(text="")
         duration_ms = len(pcm) // 2 * 1000 // sample_rate
-        return self._text.replace("{ms}", str(duration_ms))
+        return AsrResult(text=self._text.replace("{ms}", str(duration_ms)))
 
 
 class MockLlm(LlmProvider):

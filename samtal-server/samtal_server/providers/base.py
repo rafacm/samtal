@@ -111,11 +111,36 @@ class VadProvider(ABC):
     def new_endpointer(self) -> Endpointer: ...
 
 
+@dataclass(frozen=True)
+class AsrResult:
+    """A transcription, and what the engine learned getting it.
+
+    `language` and `language_confidence` are what detection concluded,
+    None when the engine did not detect (pinned, hinted, or an engine
+    that has no notion of language). `lock_language` is the provider
+    asking the session to reuse a language for the rest of the session:
+    the session hands it back as `language_hint` on later calls, which
+    is what lets a per-session policy live in a provider that is itself
+    shared between sessions and holds no per-session state."""
+
+    text: str
+    language: str | None = None
+    language_confidence: float | None = None
+    lock_language: str | None = None
+
+
 class AsrProvider(ABC):
-    """Speech to text, one whole utterance at a time."""
+    """Speech to text, one whole utterance at a time.
+
+    `language_hint` is a session-scoped suggestion, usually a
+    `lock_language` this provider returned earlier in the same session;
+    a provider is free to ignore it, and a configured language always
+    beats it."""
 
     @abstractmethod
-    async def transcribe(self, pcm: bytes, sample_rate: int) -> str: ...
+    async def transcribe(
+        self, pcm: bytes, sample_rate: int, language_hint: str | None = None
+    ) -> AsrResult: ...
 
 
 class LlmProvider(ABC):

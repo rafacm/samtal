@@ -2,6 +2,7 @@
 
 from samtal_server.providers.base import (
     AsrProvider,
+    AsrResult,
     Endpointer,
     LlmEvent,
     LlmProvider,
@@ -24,6 +25,7 @@ from samtal_server.providers.registry import (
 __all__ = [
     "AgentProviders",
     "AsrProvider",
+    "AsrResult",
     "Endpointer",
     "LlmEvent",
     "LlmProvider",

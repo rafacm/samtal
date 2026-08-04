@@ -10,6 +10,7 @@ did not change when the fields arrived.
 """
 
 import json
+from dataclasses import replace
 from typing import Any, cast
 
 import pytest
@@ -20,6 +21,7 @@ from samtal_server.app import create_app
 from samtal_server.config import Config
 from samtal_server.logs import JsonFormatter
 from samtal_server.ota import OTA_PATH
+from samtal_server.providers import AsrProvider, AsrResult
 from tests.unit.test_session import (
     DEVICE_MAC,
     DEVICE_UUID,
@@ -32,6 +34,7 @@ from tests.unit.test_session_tools import (
     BOTH_MAC,
     POET_MAC,
     ScriptedLlm,
+    _nothing,
     base_config,
     call,
     run_reply,
@@ -180,6 +183,60 @@ async def test_a_reply_starts_speaking_only_once(
 
     started = only(caplog, "speaking_started")
     assert started.agent == "poet"
+
+
+class LockingAsr(AsrProvider):
+    """Detects Spanish confidently on the first call and asks for it to
+    be reused; later calls answer in whatever they were pinned to."""
+
+    def __init__(self) -> None:
+        self.hints: list[str | None] = []
+
+    async def transcribe(
+        self, pcm: bytes, sample_rate: int, language_hint: str | None = None
+    ) -> AsrResult:
+        self.hints.append(language_hint)
+        if language_hint is None:
+            return AsrResult(
+                "hola", language="es", language_confidence=0.97, lock_language="es"
+            )
+        return AsrResult("hola otra vez", language=language_hint)
+
+
+async def test_the_session_hands_a_locked_language_back_as_a_hint(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The detect-once policy lives in the provider, but the cache is
+    the session's: `lock_language` from one utterance returns as
+    `language_hint` on the next, and the heard events carry what was
+    detected."""
+
+    class TextSink:
+        async def send_text(self, text: str) -> None:
+            return None
+
+    session = session_for(base_config(), BOTH_MAC)
+    assert session._providers is not None
+    asr = LockingAsr()
+    session._providers = replace(session._providers, asr=asr)
+    session.websocket = cast(Any, TextSink())
+
+    async def speak(sentence: str, resampler: Any, into: list[str]) -> None:
+        into.append(sentence)
+
+    session._speak = speak  # type: ignore[method-assign]
+    session._send_frames = _nothing  # type: ignore[method-assign]
+
+    with caplog.at_level("INFO"):
+        await session._reply(b"\x00\x00" * 320)
+        await session._reply(b"\x00\x00" * 320)
+
+    assert asr.hints == [None, "es"]
+    first, second = events(caplog, "heard")
+    assert first.language == "es"
+    assert first.language_confidence == 0.97
+    assert second.language == "es"
+    assert not hasattr(second, "language_confidence")
 
 
 async def test_a_handover_logs_what_each_agent_said(

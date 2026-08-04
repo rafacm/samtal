@@ -198,6 +198,11 @@ class Session:
         # them rather than waiting.
         self._device_tools: DeviceToolClient | None = None
         self._discovery: asyncio.Task[None] | None = None
+        # The language the ASR provider asked this session to reuse
+        # (`AsrResult.lock_language`). Session-scoped on purpose: the
+        # provider is shared between sessions and holds no per-session
+        # state, and the speaker does not change on an agent switch.
+        self._asr_language: str | None = None
         # Outgoing frame pacing, reset per reply on the first frame.
         self._pace_start: float | None = None
         self._pace_count = 0
@@ -597,15 +602,33 @@ class Session:
         self._speaking_started = False
         heard_s = round(len(pcm) / 2 / PIPELINE_SAMPLE_RATE, 2)
         try:
-            transcript = (await providers.asr.transcribe(pcm, PIPELINE_SAMPLE_RATE)).strip()
+            result = await providers.asr.transcribe(
+                pcm, PIPELINE_SAMPLE_RATE, language_hint=self._asr_language
+            )
+            if result.lock_language is not None:
+                self._asr_language = result.lock_language
+            transcript = result.text.strip()
             if transcript:
                 await self.websocket.send_text(messages.stt_message(self.session_id, transcript))
+                # Only engines that detected carry these; a mock or a
+                # pinned language adds no noise to the record.
+                language_fields: dict[str, Any] = {}
+                if result.language is not None:
+                    language_fields["language"] = result.language
+                if result.language_confidence is not None:
+                    language_fields["language_confidence"] = round(
+                        result.language_confidence, 2
+                    )
                 logger.info(
                     'session %s: heard "%s"',
                     self.session_id,
                     transcript,
                     extra=self._event(
-                        "heard", agent=self._agent, text=transcript, duration_s=heard_s
+                        "heard",
+                        agent=self._agent,
+                        text=transcript,
+                        duration_s=heard_s,
+                        **language_fields,
                     ),
                 )
             else:
