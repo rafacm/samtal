@@ -107,11 +107,31 @@ providers:
       # Hugging Face model id); weights download at server startup.
       model: small
       # Language hint (ISO 639-1, e.g. sv or en); omit to auto-detect
-      # per utterance.
+      # per utterance. Detection costs a constant encoder pass per
+      # utterance, several seconds of it on a small CPU.
       # language: sv
       # device: cpu
       # compute_type: int8
-      # beam_size: 5
+      # Greedy decoding by default: beam search costs a multiple of
+      # the CPU time and buys little accuracy on short spoken commands.
+      # beam_size: 1
+      # Threads for CPU inference. The engine sizes its pool from the
+      # host's core count and ignores container CPU quotas, so inside
+      # a limit set this to the quota (0 keeps the engine default).
+      # cpu_threads: 3
+      # Strip non-speech inside the ASR call before decoding. Cuts
+      # both latency and hallucinations on silence-padded utterances;
+      # recommended on. vad_parameters tunes the engine's own VAD.
+      # vad_filter: true
+      # vad_parameters:
+      #   min_silence_duration_ms: 500
+      # Feeding each window's text into the next is the documented
+      # cause of repetition loops; false is the standard mitigation.
+      # condition_on_previous_text: false
+      # Fallback ladder for failed decodes. The engine's six-step
+      # default can retry one bad utterance six times over; a short
+      # ladder bounds worst-case latency, which a voice UI feels.
+      # temperature: [0.0, 0.2]
   tts:
     piper:
       # piper-tts is GPL-3.0 and therefore an optional extra:
