@@ -9,6 +9,14 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- The `faster_whisper` ASR provider now exposes the decode options the
+  live-deployment measurements in #22 identified: `vad_filter` and
+  `vad_parameters` (strip non-speech inside the ASR call),
+  `condition_on_previous_text` (false is the standard mitigation for
+  repetition loops), `temperature` (a short fallback ladder bounds
+  worst-case decode latency), and `cpu_threads` (size the inference
+  pool to a container CPU quota in config rather than through
+  `OMP_NUM_THREADS`). All keep the engine's defaults when unset.
 - `docs/adr/` holds architecture decision records: one immutable,
   date-prefixed file per decision that is hard to reverse, surprising
   without context, and the result of a real trade-off. The first two
@@ -26,6 +34,15 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   configuration, which is the controls and the sleep and shutdown
   timings. The hardware tables in both READMEs now link the working
   board's status to it.
+
+### Changed
+
+- `faster_whisper`'s `beam_size` now defaults to 1 (greedy decoding)
+  instead of 5. Beam search costs a multiple of the decode time on CPU
+  and buys little accuracy on short spoken commands (#19); production
+  measurement showed the predicted speedup with no attributable
+  accuracy cost (#22). Deployments that want the old behaviour set
+  `beam_size: 5` explicitly.
 
 ## 2026-08-03
 
