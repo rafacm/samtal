@@ -33,6 +33,15 @@ promise.
   asserting the endpoint stays on the host. Types that know their own
   egress reject the key, so a stray declaration is a boot error
   rather than a silent no-op.
+- MCP servers sit inside the same boundary, a review finding on the
+  PR: tool arguments carry conversation-derived data, and a
+  local_only config could otherwise attach a `streamable_http` server
+  at a public URL. No transport knows its own egress (a stdio command
+  may proxy anywhere, a url may name localhost), so there is nothing
+  class-level to consult: under local_only, every referenced
+  `mcp_servers` entry must declare `egress: false`, checked in
+  `McpServers.build` at boot. Unreferenced entries are left alone,
+  matching how only referenced providers are built.
 - The issue's optional sanity check that a declared base_url's host
   is loopback or a private address is not included: the declaration
   is the operator's assertion, and the check can be added later
@@ -44,6 +53,7 @@ promise.
 |---|---|---|
 | `server.local_only` | `false` | refuse to boot any provider that sends session data off the host |
 | `providers.<stage>.<name>.egress` | unset | the operator's egress assertion; honoured only for `openai_compatible`, rejected on types that know their own |
+| `mcp_servers.<name>.egress` | unset | the operator asserting the server's command or URL stays on the local network; required for referenced entries under `local_only` |
 
 ## Verification
 
@@ -54,6 +64,10 @@ promise.
   `openai_compatible` refused with the declaration to add, a declared
   `egress: false` building, a stray declaration on a fixed type
   rejected, and everything building as before with local_only off.
+- MCP unit tests (`tests/unit/test_tools_mcp.py`): a referenced entry
+  without the declaration is refused naming the entry and the
+  declaration to add, a declared `egress: false` builds, a declared
+  `egress: true` is refused, and unreferenced entries are ignored.
 - Real-engine boot checks on the development machine with cached
   weights: an all-local config (Silero, faster-whisper `small`,
   Piper, `openai_compatible` with `egress: false`) booted with
@@ -74,7 +88,9 @@ promise.
 - `samtal-server/samtal_server/providers/anthropic_llm.py`
 - `samtal-server/samtal_server/providers/openai_llm.py`
 - `samtal-server/samtal_server/config/models.py`
+- `samtal-server/samtal_server/tools/mcp.py`
 - `samtal-server/tests/unit/test_providers_egress.py`
+- `samtal-server/tests/unit/test_tools_mcp.py`
 - `samtal-server/config.example.yaml`
 - `samtal-server/README.md`
 - `CHANGELOG.md`

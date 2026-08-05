@@ -19,7 +19,10 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 - New `server.local_only` flag (default `false`): when on, building
   any egress-marked provider refuses to boot with an error naming the
   stage and provider, and an `openai_compatible` entry is refused
-  unless it declares `egress: false`. Boot-time, never runtime: a
+  unless it declares `egress: false`. MCP servers sit inside the same
+  boundary, since tool arguments carry conversation-derived data and
+  no transport knows its own egress: every referenced `mcp_servers`
+  entry needs the same declaration. Boot-time, never runtime: a
   local_only server that starts is a local_only server. The fully
   local promise becomes a property the server checks instead of a
   documentation property of a carefully chosen configuration.
