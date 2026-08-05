@@ -135,6 +135,13 @@ class ServerConfig(BaseModel):
     auth: AuthConfig = Field(default_factory=AuthConfig)
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
 
+    # Refuse to boot any provider that sends session data off this host.
+    # Running without a cloud dependency is otherwise a documentation
+    # property of a carefully chosen configuration; this makes it a
+    # checked one. Boot-time, never runtime: a local_only server that
+    # starts is a local_only server (#30).
+    local_only: bool = False
+
     # Whether speech arriving while a reply is playing interrupts it. On
     # by default, because a device only streams its mic through playback
     # when its echo cancellation is on, and what arrives is then the
@@ -210,6 +217,13 @@ class ProviderConfig(BaseModel):
 
     type: NonBlankStr
     api_key_env: str | None = None
+
+    # The operator's own egress assertion, honoured only for types whose
+    # class-level marking is None because their configuration decides
+    # (openai_compatible, where base_url can name localhost or a cloud
+    # vendor). Declaring it on a type that knows its own egress is
+    # rejected when the provider is built.
+    egress: bool | None = None
 
     @model_validator(mode="after")
     def _reject_inline_secrets(self) -> "ProviderConfig":

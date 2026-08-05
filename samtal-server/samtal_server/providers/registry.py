@@ -157,9 +157,12 @@ def _factories() -> dict[str, dict[str, Factory]]:
     }
 
 
-def build_provider(stage: str, name: str, config: ProviderConfig) -> object:
+def build_provider(
+    stage: str, name: str, config: ProviderConfig, local_only: bool = False
+) -> object:
     """Build the provider behind `providers.<stage>.<name>`, raising
-    ProviderError for unknown types, bad options, or missing extras."""
+    ProviderError for unknown types, bad options, missing extras, or an
+    egress-marked provider under `local_only`."""
     label = f"providers.{stage}.{name}"
     factory = _factories()[stage].get(config.type)
     if factory is None:
@@ -167,7 +170,40 @@ def build_provider(stage: str, name: str, config: ProviderConfig) -> object:
         raise ProviderError(
             f'{label}: unknown {stage} provider type "{config.type}" (known types: {known})'
         )
-    return factory(label, config)
+    provider = factory(label, config)
+    _check_egress(label, config, provider, local_only)
+    return provider
+
+
+def _check_egress(
+    label: str, config: ProviderConfig, provider: object, local_only: bool
+) -> None:
+    """Enforce the egress rules for one built provider (#30). The
+    class-level marking is authoritative; the configuration's `egress`
+    key exists only for types that cannot know their own (an
+    openai_compatible base_url decides). An unmarked type counts as
+    egress, so forgetting the marking fails a local_only boot instead
+    of quietly leaking."""
+    marked = getattr(type(provider), "egress", True)
+    if marked is not None and config.egress is not None:
+        raise ProviderError(
+            f'{label}: "egress" is decided by type "{config.type}" and cannot '
+            f"be declared in the configuration; remove the key"
+        )
+    if not local_only:
+        return
+    egress = marked if marked is not None else config.egress
+    if egress is None:
+        raise ProviderError(
+            f'{label}: server.local_only is on, and whether type "{config.type}" '
+            f"sends session data off this host depends on its base_url; declare "
+            f'"egress: false" on this entry to assert the endpoint stays local'
+        )
+    if egress:
+        raise ProviderError(
+            f'{label}: server.local_only is on, but type "{config.type}" sends '
+            f"session data off this host"
+        )
 
 
 @dataclass(frozen=True)
@@ -185,8 +221,9 @@ def build_agent_providers(config: Config) -> dict[str, AgentProviders]:
     """Build every provider the configured agents reference, sharing one
     instance per named entry across agents. Agents are read through their
     effective view, so a stage comes from the agent or from agent_defaults.
-    Runs at startup, so a bad provider configuration, a missing extra, or
-    an agent without a full pipeline fails the boot rather than the first
+    Runs at startup, so a bad provider configuration, a missing extra,
+    an egress-marked provider under server.local_only, or an agent
+    without a full pipeline fails the boot rather than the first
     conversation."""
     built: dict[tuple[str, str], object] = {}
 
@@ -201,7 +238,9 @@ def build_agent_providers(config: Config) -> dict[str, AgentProviders]:
         key = (stage, provider_name)
         if key not in built:
             provider_config = getattr(config.providers, stage)[provider_name]
-            built[key] = build_provider(stage, provider_name, provider_config)
+            built[key] = build_provider(
+                stage, provider_name, provider_config, config.server.local_only
+            )
         return built[key]
 
     return {
