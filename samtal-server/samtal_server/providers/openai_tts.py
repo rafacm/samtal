@@ -67,7 +67,9 @@ SPEED_RANGE = (0.25, 4.0)
 # ignore `speed`, while `tts-1` and `tts-1-hd` are the other way round.
 # The API ignores the one it does not take rather than refusing it, so
 # the mismatch is caught here; a knob that silently never takes effect
-# is what this module's option checking exists to prevent.
+# is what this module's option checking exists to prevent. This is a
+# fact about OpenAI's own models, so `check_steering` applies it only
+# when the endpoint is OpenAI's.
 _PROSE_STEERED_PREFIX = "gpt-4o"
 
 
@@ -138,8 +140,21 @@ class OpenAiTts(TtsProvider):
                 )
 
 
-def check_steering(label: str, model: str, instructions: str | None, speed: float | None) -> None:
-    """Refuse the steering knob the configured model does not take."""
+def check_steering(
+    label: str, model: str, instructions: str | None, speed: float | None, base_url: str
+) -> None:
+    """Refuse the steering knob the configured model does not take.
+
+    Only on OpenAI itself. The rule below is a fact about OpenAI's
+    models, not about the dialect: a compatible server is free to name a
+    model `gpt-4o-something` and read `speed`, or to read `instructions`
+    on a model named nothing like OpenAI's, and its `speed` need not
+    stop at 4.0 either. Guessing on its behalf would reject working
+    configurations before the request is even sent, which is worse than
+    the silent-no-op this check exists to prevent, because the server
+    that could answer never hears the question."""
+    if base_url != DEFAULT_BASE_URL:
+        return
     prose_steered = model.startswith(_PROSE_STEERED_PREFIX)
     if speed is not None and prose_steered:
         raise ProviderError(
@@ -167,7 +182,7 @@ def build(label: str, config: ProviderConfig) -> OpenAiTts:
     timeout_s = options.number("timeout_s", DEFAULT_TIMEOUT_S)
     options.finish()
     assert model is not None and base_url is not None  # defaults are strings
-    check_steering(label, model, instructions, speed)
+    check_steering(label, model, instructions, speed, base_url)
     api_key = resolve_api_key(label, config.api_key_env)
     if api_key is None:
         if base_url == DEFAULT_BASE_URL:
