@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-05
+
+### Fixed
+
+- The README's feature list claimed a local voice pipeline of
+  "SileroVAD + SenseVoice + EdgeTTS"; SenseVoice and EdgeTTS were
+  never implemented. It now names the stack the provider registry
+  actually ships: Silero VAD, faster-whisper, Piper.
+
 ## 2026-08-04
 
 ### Changed
