@@ -9,6 +9,17 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- New `openai` TTS provider type, streaming cloud synthesis as raw
+  PCM. It needs no optional extra and adds no dependency: the `openai`
+  client already ships for the `openai_compatible` LLM type, and
+  speech is a method on it, so one key serves both stages. Options:
+  `voice` and `api_key_env` (both required), plus `model` (default
+  `gpt-4o-mini-tts`), `instructions`, `speed` and `timeout_s`. There
+  is no audio format option: the API's `pcm` format is fixed at
+  24 kHz, which is the device rate, so nothing is resampled. Naming
+  `speed` on a `gpt-4o` model, or `instructions` on a `tts-1` model,
+  fails the boot rather than becoming a knob the API silently ignores.
+  The type marks egress, so `server.local_only` refuses it.
 - New `elevenlabs` TTS provider type, streaming cloud synthesis as raw
   PCM. It needs no optional extra: the API is one streaming POST, so
   the provider speaks it over `httpx` (now a direct dependency)
