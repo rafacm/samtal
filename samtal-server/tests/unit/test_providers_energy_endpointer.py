@@ -56,6 +56,21 @@ def test_speech_start_is_where_the_silence_ended() -> None:
     assert endpointer.speech_start() is None
 
 
+def test_speech_ms_counts_only_the_chunks_classified_as_speech() -> None:
+    endpointer = EnergyEndpointer()
+    assert endpointer.speech_ms() == 0.0
+    feed_ms(endpointer, SILENCE, 1200)
+    assert endpointer.speech_ms() == 0.0
+    feed_ms(endpointer, SPEECH, 600)
+    assert endpointer.speech_ms() == 600.0
+    # A pause adds nothing; more speech accumulates.
+    feed_ms(endpointer, SILENCE, 480)
+    feed_ms(endpointer, SPEECH, 120)
+    assert endpointer.speech_ms() == 720.0
+    endpointer.reset()
+    assert endpointer.speech_ms() == 0.0
+
+
 def test_a_pause_shorter_than_the_window_does_not_end_it() -> None:
     endpointer = EnergyEndpointer()
     feed_ms(endpointer, SPEECH, 600)

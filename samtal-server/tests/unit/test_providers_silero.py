@@ -70,6 +70,17 @@ def test_speech_start_is_reported_to_window_granularity() -> None:
     assert endpointer.speech_start() is None
 
 
+def test_speech_ms_counts_speech_windows_to_window_granularity() -> None:
+    # 5 silent windows, 10 speech, 5 silent, 5 speech: only the 15
+    # speech windows count, whatever came between them.
+    endpointer = scripted_endpointer([0.0] * 5 + [0.9] * 10 + [0.0] * 5 + [0.9] * 5)
+    assert endpointer.speech_ms() == 0.0
+    feed_windows(endpointer, 25)
+    assert endpointer.speech_ms() == 15 * WINDOW_MS
+    endpointer.reset()
+    assert endpointer.speech_ms() == 0.0
+
+
 def test_speech_then_trailing_silence_ends_the_utterance() -> None:
     speech_windows = 20  # 640 ms of speech
     endpointer = scripted_endpointer([0.9] * speech_windows)

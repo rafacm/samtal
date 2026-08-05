@@ -58,11 +58,15 @@ class EnergyEndpointer:
         self._speech_heard = False
         self._silence_ms = 0.0
         self._utterance_ms = 0.0
+        self._speech_ms = 0.0
         self._fed_bytes = 0
         self._speech_start: int | None = None
 
     def speech_start(self) -> int | None:
         return self._speech_start
+
+    def speech_ms(self) -> float:
+        return self._speech_ms
 
     def feed(self, pcm: bytes) -> bool:
         """Account one chunk; True when the utterance just ended. Silence
@@ -74,6 +78,7 @@ class EnergyEndpointer:
                 # The start of this chunk, to fed-chunk granularity.
                 self._speech_start = self._fed_bytes
             self._speech_heard = True
+            self._speech_ms += duration_ms
             self._silence_ms = 0.0
         elif self._speech_heard:
             self._silence_ms += duration_ms
