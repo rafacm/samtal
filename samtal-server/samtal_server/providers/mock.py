@@ -95,6 +95,9 @@ class EnergyEndpointer:
 class MockVad(VadProvider):
     """Energy endpointing with the M3 thresholds, as a provider."""
 
+    # The mocks are network-free by construction.
+    egress = False
+
     def __init__(
         self, threshold: float, trailing_silence_ms: float, max_utterance_ms: float
     ) -> None:
@@ -114,6 +117,8 @@ class MockAsr(AsrProvider):
     """Answers the configured transcript for any non-empty utterance.
     An `{ms}` in the text becomes the utterance duration, so a test can
     see how much audio actually reached the pipeline."""
+
+    egress = False
 
     def __init__(self, text: str) -> None:
         self._text = text
@@ -141,6 +146,8 @@ class MockLlm(LlmProvider):
     after the results come back speaks the template. That makes the
     whole loop deterministic, which is what the acceptance test needs.
     Without the tool options this behaves exactly as it did before."""
+
+    egress = False
 
     def __init__(
         self,
@@ -197,6 +204,8 @@ class MockTts(TtsProvider):
     test can tell replies apart by ear (or by sample count). The tone
     frequency is an option, which is how two mock "voices" are told
     apart in received audio."""
+
+    egress = False
 
     def __init__(
         self, sample_rate: int, ms_per_char: float, min_ms: float, tone_hz: float = TONE_HZ

@@ -46,6 +46,9 @@ def pcm_to_float(pcm: bytes) -> "np.ndarray":
 
 
 class FasterWhisperAsr(AsrProvider):
+    # Inference runs on the host; only the weights download, at startup.
+    egress = False
+
     def __init__(
         self,
         model: str,

@@ -103,6 +103,11 @@ def tool_call_from_fragments(fragments: dict[str, str], index: int) -> ToolCall:
 
 
 class OpenAiCompatibleLlm(LlmProvider):
+    # The base_url decides: Ollama on localhost keeps everything on the
+    # host, api.openai.com does not. Under server.local_only the entry
+    # therefore needs its own explicit `egress` declaration.
+    egress = None
+
     def __init__(self, base_url: str, model: str, max_tokens: int, api_key: str | None) -> None:
         self._client = AsyncOpenAI(base_url=base_url, api_key=api_key or "unused")
         self._model = model

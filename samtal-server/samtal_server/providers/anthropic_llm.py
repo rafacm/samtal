@@ -77,6 +77,9 @@ def anthropic_tools(tools: Sequence[ToolDef]) -> list[dict[str, Any]]:
 
 
 class AnthropicLlm(LlmProvider):
+    # Every request carries the conversation to the vendor's API.
+    egress = True
+
     def __init__(self, model: str, max_tokens: int, api_key: str | None) -> None:
         self._client = AsyncAnthropic(api_key=api_key) if api_key else AsyncAnthropic()
         self._model = model
