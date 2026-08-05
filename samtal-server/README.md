@@ -320,7 +320,9 @@ over the assistant stops it, which is what barge-in means.
 
 ```yaml
 server:
-  barge_in: true          # speech during a reply interrupts it
+  barge_in: true               # speech during a reply interrupts it
+  barge_in_min_speech_ms: 500  # least classified speech that may interrupt
+  barge_in_refractory_ms: 1000 # interruptions ignored after playback starts
 ```
 
 Turn it off for a board whose echo cancellation leaks the speaker back
@@ -329,6 +331,20 @@ otherwise interrupt itself. Conversations stay multi-turn with it off;
 only the interrupting goes. What says a board wants it: replies that
 answer nothing at all, arriving just after the previous reply finished
 speaking.
+
+An interruption the endpointer hears is gated before it may cancel: a
+reply is only cancelled on evidence of user speech. Speech shorter than
+`barge_in_min_speech_ms` is a noise blip and never interrupts; inside
+`barge_in_refractory_ms` of the reply's first audio frame, nothing
+does, since what the microphone hears then is as likely the playback
+onset as the user. Past both, the reply pauses while ASR transcribes
+the interruption, and only a non-empty transcript cancels; an empty
+one resumes the reply where it stopped, about one ASR pass later. An
+interruption landing while the reply is still transcribing merges with
+what it interrupted instead, so one reply answers the whole sentence.
+Every one of these decisions is a structured log event, which is what
+the thresholds are tuned from. A manual `listen stop` mid-reply is the
+user holding the button and speaking, so it cancels unconditionally.
 
 ## Limits
 
@@ -384,7 +400,9 @@ and `device`, plus its own:
 | `replied`          | a reply finishes                | `agent`, `text`                    |
 | `agent_said`       | one agent's part of a reply     | `agent`, `text`                    |
 | `handover`         | `switch_agent` succeeds         | `from_agent`, `to_agent`           |
-| `barge_in`         | speech cuts a reply short       | (none of its own)                  |
+| `barge_in`         | speech cuts a reply short       | `speech_ms`, plus `speaking_ms` when the reply had started speaking |
+| `barge_in_suppressed` | an interruption is dropped and the reply lives | `reason` (`min_speech`, `refractory`, `no_transcript`), `speech_ms` |
+| `barge_in_merged`  | an interruption merges with the utterance the reply was transcribing | `speech_ms` |
 | `tool_call`        | a tool returns                  | `agent`, `tool`, `duration_ms`, `is_error` |
 | `session_limit`    | the duration cap fires          | `duration_s`                       |
 | `session_closed`   | a conversation ends             | `duration_s`                       |
