@@ -82,6 +82,16 @@ server:
   # multi-turn either way; only the interrupting goes.
   # barge_in: true
 
+  # The gates in front of a barge-in, applied to an utterance the
+  # endpointer ends while a reply is playing. Speech shorter than the
+  # floor never interrupts, and neither does anything inside the
+  # refractory window after the reply starts speaking; past both, the
+  # reply is paused while ASR confirms the interruption, and cancelled
+  # only when something was actually said. A reply is only cancelled
+  # on evidence of user speech; acoustics alone can at most pause it.
+  # barge_in_min_speech_ms: 500
+  # barge_in_refractory_ms: 1000
+
   # How much audio from before the detected start of speech rides along
   # to ASR, so the first phoneme survives the trim. Everything earlier
   # is dropped before transcription: a continuously listening device

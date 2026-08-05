@@ -144,6 +144,17 @@ class ServerConfig(BaseModel):
     # and what arrives during a reply is dropped instead.
     barge_in: bool = True
 
+    # The least endpointer-classified speech, in milliseconds, an
+    # utterance needs before it may interrupt a reply. Noise blips and
+    # playback bleed rarely sustain half a second of speech; a real
+    # interjection does (#28).
+    barge_in_min_speech_ms: float = Field(default=500.0, ge=0)
+
+    # How long after a reply's first audio frame that interruptions are
+    # ignored, covering the transient a device's echo cancellation lets
+    # through at playback onset.
+    barge_in_refractory_ms: float = Field(default=1000.0, ge=0)
+
     # How much audio from before the detected start of speech rides
     # along to ASR, so the first phoneme survives the trim. The rest of
     # the leading silence a continuously listening device piles up is
