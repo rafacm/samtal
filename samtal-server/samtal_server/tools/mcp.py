@@ -209,6 +209,27 @@ def _result_text(result: mcp.types.CallToolResult) -> str:
     return "\n".join(parts)
 
 
+def _check_egress(name: str, entry: McpServerConfig) -> None:
+    """Enforce server.local_only for one referenced MCP server (#30).
+    Tool arguments carry conversation-derived data, and no transport
+    knows its own egress (a stdio command may proxy anywhere, a url may
+    name localhost), so unlike providers there is nothing class-level to
+    consult: every referenced entry needs the operator's declaration."""
+    if entry.egress is False:
+        return
+    if entry.egress is None:
+        raise McpConfigError(
+            f"mcp_servers.{name}: server.local_only is on, and whether an MCP "
+            f"server sends session data off this network cannot be known from "
+            f'its transport; declare "egress: false" on this entry to assert '
+            f"that whatever its command or URL reaches stays local"
+        )
+    raise McpConfigError(
+        f"mcp_servers.{name}: server.local_only is on, but this entry declares "
+        f"that it sends session data off this network"
+    )
+
+
 class McpServers:
     """Every MCP server some agent references, built at startup."""
 
@@ -219,11 +240,15 @@ class McpServers:
     def build(cls, config: Config) -> "McpServers":
         """Managers for the entries agents actually use, the way only
         referenced providers are built. Raises McpConfigError for an
-        entry that cannot be built, which fails the boot."""
+        entry that cannot be built, or one that server.local_only
+        forbids, which fails the boot."""
         managers: dict[str, McpServerManager] = {}
         for name in sorted(config.referenced_mcp_servers()):
+            entry = config.mcp_servers[name]
+            if config.server.local_only:
+                _check_egress(name, entry)
             try:
-                managers[name] = McpServerManager(name, config.mcp_servers[name])
+                managers[name] = McpServerManager(name, entry)
             except ValueError as exc:
                 raise McpConfigError(f"mcp_servers.{name}: {exc}") from exc
         return cls(managers)
