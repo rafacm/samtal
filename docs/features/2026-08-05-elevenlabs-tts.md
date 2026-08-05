@@ -113,6 +113,40 @@ past httpx's 5 second default `keepalive_expiry`, the next request
 still returned first audio in 186 ms. Reconnecting is cheap relative
 to the request itself, so no connection warming is needed.
 
+### Device checkpoint
+
+Ran on the Waveshare ESP32-S3-Touch-LCD-1.54, against a config with
+two agents bound to the board: `cloud` on ElevenLabs and `local` on
+Piper, so one conversation covers the provider and the A/B by ear.
+
+A multi-turn conversation went through: two questions answered on the
+cloud agent, then "it's the local" handed over to Piper mid-session and
+the voice changed audibly. Four ElevenLabs requests, all 200, no
+non-200s, and no `incomplete sample` warnings, which is the log line
+that fires if a response ever ends mid-sample.
+
+The number the desk showed that the bench could not: `speaking started`
+is logged 4 ms after the streaming POST returns its headers. The first
+Opus frame leaves for the device as the audio arrives, rather than
+after the sentence is synthesized, which is the whole point of using
+the streaming endpoint.
+
+Getting there needed a detour worth recording. The board's NVS
+`ota_url` pointed at a deployed server, so pressing PWR held a
+conversation against that instead, with its old voice; the server here
+logged nothing at all. Rewriting a provisioned board's NVS is
+destructive, since ESP-IDF generates whole partitions rather than
+editing keys, and this one carries wifi credentials, the device UUID
+and RF calibration. Instead the 16 KB partition was dumped, one entry
+patched in place, and the original flashed back afterwards, verified
+byte-identical by hash. The patch keeps the stored size at 88 bytes and
+pads the shorter URL with NULs, so the span and every following entry
+stay at their exact offsets; `Settings::GetString` in the firmware
+resizes to the stored length and then pops every trailing NUL, so the
+padding reads back as the short URL. Both CRCs were recomputed from the
+untouched partition first, and the patcher refuses to write if its CRC
+convention does not reproduce them.
+
 ## Files modified
 
 - `samtal-server/samtal_server/providers/elevenlabs_tts.py` (new)
