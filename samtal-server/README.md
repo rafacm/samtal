@@ -151,15 +151,10 @@ what the [voice
 settings](https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices)
 do to a voice.
 
-**What it costs in latency.** Measured against Piper on the same
-machine, median of five rounds: first audio at about 130 ms whatever
-the sentence, against Piper's 43 ms for a short sentence and 92 ms for
-a longer one. So roughly +90 ms on a short reply and +40 ms on a
-longer one. The gap narrows because ElevenLabs streams, and the clock
-stops at the first chunk, while Piper synthesizes a whole sentence
-before yielding anything; past a certain sentence length Piper is the
-slower of the two to start speaking. An idle conversation pays nothing
-extra to resume.
+**What it costs in latency.** First audio at about 130 to 190 ms
+whatever the sentence, which is the fastest of the two cloud types by
+a wide margin; see Choosing a voice above for the comparison and what
+the numbers mean. An idle conversation pays nothing extra to resume.
 
 **It sends your replies to ElevenLabs**, which is what the reply text
 is: the API is billed by character. The type is marked as egress
@@ -212,17 +207,14 @@ and the [text-to-speech
 guide](https://platform.openai.com/docs/guides/text-to-speech).
 
 **What it costs in latency, and it is the one real drawback.** First
-audio arrives at about 820 to 900 ms, against ElevenLabs' 190 ms and
-Piper's 40 to 80 ms on the same machine (median of five, same
-sentences). So roughly +700 ms on ElevenLabs and +800 ms on Piper,
-which is a pause a person notices at the start of every reply.
+audio arrives at about 820 to 900 ms, roughly +700 ms on ElevenLabs
+and +800 ms on Piper: a pause a person notices at the start of every
+reply. See Choosing a voice above for the comparison in full.
 
-The provider does stream: the figure is flat whatever the sentence
-length, and a longer sentence starts no later than a short one, so the
-wait is OpenAI's time to first byte rather than a whole sentence being
-synthesized before anything is sent. The default model is the fastest
-of the three, and by some margin, which is worth stating because it
-contradicts how the older pair is usually described:
+Which model you pick matters more here than the option table suggests,
+and the default is the fastest of the three by some margin. Worth
+stating plainly, because it contradicts how the older pair is usually
+described:
 
 | Model | Short sentence | Longer sentence |
 | ----- | -------------- | --------------- |
