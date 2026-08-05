@@ -49,6 +49,17 @@ class OptionsReader:
             raise ProviderError(f'{self._label}: option "{key}" must be a number')
         return float(value)
 
+    def optional_number(self, key: str) -> float | None:
+        """A number that has no default, None when absent: the provider
+        leaves the knob out of the request rather than guessing at the
+        API's own default."""
+        value = self._pending.pop(key, None)
+        if value is None:
+            return None
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise ProviderError(f'{self._label}: option "{key}" must be a number')
+        return float(value)
+
     def integer(self, key: str, default: int) -> int:
         value = self._pending.pop(key, default)
         if isinstance(value, bool) or not isinstance(value, int):
@@ -137,6 +148,14 @@ def _elevenlabs(label: str, config: ProviderConfig) -> object:
     return elevenlabs_tts.build(label, config)
 
 
+def _openai_tts(label: str, config: ProviderConfig) -> object:
+    # No extra to guard: the openai client is a core dependency, carried
+    # for the openai_compatible LLM type, and speech is a method on it.
+    from samtal_server.providers import openai_tts
+
+    return openai_tts.build(label, config)
+
+
 def _piper(label: str, config: ProviderConfig) -> object:
     try:
         from samtal_server.providers import piper_tts
@@ -160,7 +179,12 @@ def _factories() -> dict[str, dict[str, Factory]]:
             "openai_compatible": _openai_compatible,
         },
         "asr": {"mock": mock.build_asr, "faster_whisper": _faster_whisper},
-        "tts": {"mock": mock.build_tts, "elevenlabs": _elevenlabs, "piper": _piper},
+        "tts": {
+            "mock": mock.build_tts,
+            "elevenlabs": _elevenlabs,
+            "openai": _openai_tts,
+            "piper": _piper,
+        },
         "vad": {"mock": mock.build_vad, "silero": _silero},
     }
 
