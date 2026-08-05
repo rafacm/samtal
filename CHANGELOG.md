@@ -9,6 +9,20 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- Every provider type now carries a class-level `egress` marking:
+  whether it sends session data (audio, transcripts, replies) off the
+  host. `anthropic` marks egress; `silero`, `faster_whisper`, `piper`
+  and the mocks mark local. `openai_compatible` cannot know its own
+  (the `base_url` decides), so it defers to an explicit per-entry
+  `egress` declaration in the configuration; the other types reject
+  that key, and a type without any marking counts as egress.
+- New `server.local_only` flag (default `false`): when on, building
+  any egress-marked provider refuses to boot with an error naming the
+  stage and provider, and an `openai_compatible` entry is refused
+  unless it declares `egress: false`. Boot-time, never runtime: a
+  local_only server that starts is a local_only server. The fully
+  local promise becomes a property the server checks instead of a
+  documentation property of a carefully chosen configuration.
 - Barge-in is gated: an utterance the endpointer ends while a reply is
   in flight only cancels it on evidence of user speech. Four gates, in
   order: speech shorter than `server.barge_in_min_speech_ms` (default
