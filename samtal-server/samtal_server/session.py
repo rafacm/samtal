@@ -30,9 +30,14 @@ each reply, while a realtime device asks once and then streams
 continuously, so a realtime session here never stops listening. It
 therefore hears the user through its own speech, and an utterance that
 ends while a reply is streaming cancels that reply and is answered,
-which is what barge-in is. `server.barge_in` turns that off for a board
-whose echo cancellation leaks its own voice back: those frames are then
-dropped, and the conversation stays multi-turn regardless.
+which is what barge-in is. An endpointer-driven cancel is gated: a
+reply is only cancelled on evidence of user speech (enough classified
+speech, a transcript when in doubt), because acoustics alone are as
+often noise or the reply's own bleed as the user (#28). A manual
+`listen stop` mid-reply is a deliberate act and cancels
+unconditionally. `server.barge_in` turns all of it off for a board
+whose echo cancellation leaks its own voice back: those frames are
+then dropped, and the conversation stays multi-turn regardless.
 
 What happens in a conversation is logged twice over: as a human
 sentence, and as structured `extra=` fields (`event`, `session`,
@@ -60,6 +65,7 @@ from samtal_server.protocol import framing, messages
 from samtal_server.protocol import mcp as mcp_protocol
 from samtal_server.providers import (
     AgentProviders,
+    AsrResult,
     Endpointer,
     TextDelta,
     ToolCall,
@@ -215,6 +221,23 @@ class Session:
         # agent leg, so it cannot double as this flag: the event below
         # must fire once per reply, not once per handover.
         self._speaking_started = False
+        # When this reply's first frame went out, for the barge-in
+        # refractory gate and the barge_in event's speaking_ms.
+        self._speaking_started_at: float | None = None
+        # The PCM the reply task in flight was handed, held until its
+        # ASR call returns. Still being set is the mid-ASR marker: a
+        # barge-in landing then killed the head of the user's own
+        # sentence, so this is also the merge source that reconstitutes
+        # it in front of the continuation.
+        self._reply_pcm: bytes | None = None
+        # The frame pacer waits on this before each send. The
+        # transcript-confirmation gate clears it to hold playback while
+        # ASR decides whether anything was said; resuming shifts the
+        # pacing clock by the pause, so the stream picks up where it
+        # stopped instead of bursting to catch up.
+        self._pace_resume = asyncio.Event()
+        self._pace_resume.set()
+        self._pace_paused_at: float | None = None
 
     @property
     def _realtime(self) -> bool:
@@ -489,7 +512,7 @@ class Session:
             del self._utterance[:excess]
             self._utterance_dropped += excess
         if self._endpointer.feed(pcm):
-            await self._finish_utterance()
+            await self._finish_utterance(endpointed=True)
 
     async def _handle_text(self, text: str) -> None:
         try:
@@ -532,7 +555,7 @@ class Session:
                     "session %s: ignoring %s message", self.session_id, message.type
                 )
 
-    async def _finish_utterance(self) -> None:
+    async def _finish_utterance(self, endpointed: bool = False) -> None:
         """Hand the buffered utterance to the reply task. Listening then
         stops until the device asks again, which auto mode does by
         sending `listen start` after the reply's `tts stop`. Not in
@@ -544,15 +567,22 @@ class Session:
         user cutting in, so the reply in flight is cancelled and this one
         answered instead. Cancelling sends the old reply's `tts stop`
         before the new reply's `tts start`, because `_cancel_reply` waits
-        for the task it cancelled. With `server.barge_in` off the
-        utterance is dropped instead, which is what a board with leaky
-        echo cancellation wants; from the mic that case is already
-        filtered in `_handle_audio`, so what reaches here is a manual
-        `listen stop` mid-reply."""
+        for the task it cancelled. When the endpointer decided the end,
+        the cancel first has to pass the gates in `_gate_barge_in`,
+        because that decision is acoustic and acoustics mid-reply are as
+        often noise or playback bleed as the user; a manual `listen
+        stop` is the user holding the button and speaking, so it stays
+        unconditional. With `server.barge_in` off the utterance is
+        dropped instead, which is what a board with leaky echo
+        cancellation wants; from the mic that case is already filtered
+        in `_handle_audio`, so what reaches here is a manual `listen
+        stop` mid-reply."""
+        speech_ms = round(self._endpointer.speech_ms()) if self._endpointer is not None else 0
         pcm = self._trimmed_utterance()
         self._reset_utterance()
         if not self._realtime:
             self.listening = False
+        result: AsrResult | None = None
         if self._replying():
             if not self.config.server.barge_in:
                 logger.warning(
@@ -560,22 +590,145 @@ class Session:
                     self.session_id,
                 )
                 return
-            # From the mic this is realtime mode only, where the device
-            # streams through playback: it asks for that mode exactly
-            # when its echo cancellation is on, so what arrived is the
-            # user's voice and not the assistant's.
-            logger.info(
-                "session %s: barge-in, cancelling the reply in flight",
-                self.session_id,
-                extra=self._event("barge_in"),
-            )
-            await self._cancel_reply()
+            if endpointed:
+                gated = await self._gate_barge_in(pcm, speech_ms)
+                if gated is None:
+                    return
+                pcm, result = gated
+            else:
+                logger.info(
+                    "session %s: barge-in, cancelling the reply in flight",
+                    self.session_id,
+                    extra=self._event(
+                        "barge_in", speech_ms=speech_ms, **self._speaking_ms_field()
+                    ),
+                )
+                await self._cancel_reply()
         logger.info(
             "session %s: utterance of %.1f s",
             self.session_id,
             len(pcm) / 2 / PIPELINE_SAMPLE_RATE,
         )
-        self._reply_task = asyncio.create_task(self._reply(pcm))
+        self._reply_pcm = pcm if result is None else None
+        self._reply_task = asyncio.create_task(self._reply(pcm, result))
+
+    async def _gate_barge_in(
+        self, pcm: bytes, speech_ms: int
+    ) -> tuple[bytes, AsrResult | None] | None:
+        """Decide what an endpointed utterance may do to the reply in
+        flight: None to drop it and let the reply live, or the PCM to
+        answer (with its transcription, when confirming it already ran
+        ASR). The gates exist because a reply is only cancelled on
+        evidence of user speech; acoustics alone can at most pause it
+        (see the ADR of that name).
+
+        In order: too little classified speech is a noise blip and is
+        dropped; a reply still inside ASR was transcribing the head of
+        the user's own sentence, so it is cancelled and its audio
+        prepended, one reply answering the whole sentence; right after
+        playback starts, the onset transient the device's echo
+        cancellation lets through is dropped; anything else pauses the
+        outgoing frames and asks ASR, and only a non-empty transcript
+        cancels. An empty one resumes the paced stream where it
+        stopped, so a wrong pause costs one ASR latency, not a reply."""
+        server = self.config.server
+        if speech_ms < server.barge_in_min_speech_ms:
+            logger.info(
+                "session %s: barge-in suppressed, %d ms of speech is under the "
+                "%.0f ms floor",
+                self.session_id,
+                speech_ms,
+                server.barge_in_min_speech_ms,
+                extra=self._event(
+                    "barge_in_suppressed", reason="min_speech", speech_ms=speech_ms
+                ),
+            )
+            return None
+        if self._reply_pcm is not None:
+            head = self._reply_pcm
+            logger.info(
+                "session %s: barge-in mid-transcription, merging the utterances",
+                self.session_id,
+                extra=self._event("barge_in_merged", speech_ms=speech_ms),
+            )
+            await self._cancel_reply()
+            return head + pcm, None
+        loop = asyncio.get_running_loop()
+        if (
+            self._speaking_started_at is not None
+            and (loop.time() - self._speaking_started_at) * 1000
+            < server.barge_in_refractory_ms
+        ):
+            logger.info(
+                "session %s: barge-in suppressed inside the refractory window",
+                self.session_id,
+                extra=self._event(
+                    "barge_in_suppressed", reason="refractory", speech_ms=speech_ms
+                ),
+            )
+            return None
+        assert self._providers is not None
+        self._pause_speaking()
+        try:
+            # In the receive path on purpose: incoming frames buffer in
+            # the socket for the duration, so ordering is unaffected.
+            result = await self._providers.asr.transcribe(
+                pcm, PIPELINE_SAMPLE_RATE, language_hint=self._asr_language
+            )
+        except Exception:
+            logger.exception("session %s: barge-in confirmation failed", self.session_id)
+            self._resume_speaking()
+            return None
+        if not result.text.strip():
+            logger.info(
+                "session %s: barge-in suppressed, nothing transcribed",
+                self.session_id,
+                extra=self._event(
+                    "barge_in_suppressed", reason="no_transcript", speech_ms=speech_ms
+                ),
+            )
+            self._resume_speaking()
+            return None
+        logger.info(
+            "session %s: barge-in, cancelling the reply in flight",
+            self.session_id,
+            extra=self._event("barge_in", speech_ms=speech_ms, **self._speaking_ms_field()),
+        )
+        await self._cancel_reply()
+        # The pause belonged to the cancelled reply; the one about to
+        # answer starts with the frames flowing.
+        self._pace_paused_at = None
+        self._pace_resume.set()
+        return pcm, result
+
+    def _speaking_ms_field(self) -> dict[str, int]:
+        """The barge_in event's speaking_ms: milliseconds from
+        speaking_started to the cancel decision, absent when the reply
+        had not yet spoken."""
+        if self._speaking_started_at is None:
+            return {}
+        elapsed = asyncio.get_running_loop().time() - self._speaking_started_at
+        return {"speaking_ms": round(elapsed * 1000)}
+
+    def _pause_speaking(self) -> None:
+        """Hold the outgoing frame pacing before the next send. Audio
+        stops within a frame either way; what a pause preserves is the
+        option of resuming."""
+        if self._pace_paused_at is not None:
+            return
+        self._pace_paused_at = asyncio.get_running_loop().time()
+        self._pace_resume.clear()
+
+    def _resume_speaking(self) -> None:
+        """Let the frames flow again, with the pacing clock shifted by
+        the pause so the stream picks up where it stopped rather than
+        bursting to catch up on the frames the pause displaced."""
+        if self._pace_paused_at is None:
+            return
+        if self._pace_start is not None:
+            self._pace_start += asyncio.get_running_loop().time() - self._pace_paused_at
+        self._pace_paused_at = None
+        self._pace_resume.set()
 
     def _replying(self) -> bool:
         """Whether a reply is streaming right now, which is what both
@@ -618,20 +771,30 @@ class Session:
             await self._reply_task
         self._reply_task = None
 
-    async def _reply(self, pcm: bytes) -> None:
+    async def _reply(self, pcm: bytes, result: AsrResult | None = None) -> None:
         """Run one utterance through ASR, the LLM, and TTS. Cancelled by
         `abort`; provider failures end the reply but not the session. The
         closing `tts stop` is sent even then, because the device (in auto
-        mode) waits for it before listening again."""
+        mode) waits for it before listening again.
+
+        `result` is a transcription that already exists: a confirmed
+        barge-in ran ASR to decide the cancel, and reusing its full
+        result (language fields included) is what keeps ASR at one run
+        and `heard` at one event per interruption."""
         assert self._providers is not None
         providers = self._providers
         spoken: list[str] = []
         self._speaking_started = False
+        self._speaking_started_at = None
         heard_s = round(len(pcm) / 2 / PIPELINE_SAMPLE_RATE, 2)
         try:
-            result = await providers.asr.transcribe(
-                pcm, PIPELINE_SAMPLE_RATE, language_hint=self._asr_language
-            )
+            if result is None:
+                result = await providers.asr.transcribe(
+                    pcm, PIPELINE_SAMPLE_RATE, language_hint=self._asr_language
+                )
+            # ASR is done, so the mid-ASR marker comes down: from here a
+            # barge-in has nothing of the user's left to destroy.
+            self._reply_pcm = None
             if result.lock_language is not None:
                 self._asr_language = result.lock_language
             transcript = result.text.strip()
@@ -669,6 +832,7 @@ class Session:
         except Exception:
             logger.exception("session %s: reply failed", self.session_id)
         finally:
+            self._reply_pcm = None
             if spoken:
                 said = " ".join(spoken)
                 self._turns.append(Turn("assistant", said))
@@ -948,23 +1112,27 @@ class Session:
         first frame of the reply, not at ASR time."""
         if not packets:
             return
+        loop = asyncio.get_running_loop()
         if not self._speaking_started:
             # The `replied` event marks the last frame of a reply, so on
             # its own the logs cannot tell synthesis cost from speaking
             # time; this marks the first frame, making time-to-first-audio
             # measurable (#22).
             self._speaking_started = True
+            self._speaking_started_at = loop.time()
             logger.info(
                 "session %s: speaking started",
                 self.session_id,
                 extra=self._event("speaking_started", agent=self._agent),
             )
-        loop = asyncio.get_running_loop()
         frame_s = OUTPUT_AUDIO.frame_duration / 1000
         if self._pace_start is None:
             self._pace_start = loop.time()
         for packet in packets:
             await asyncio.sleep(self._pace_start + self._pace_count * frame_s - loop.time())
+            # A barge-in being confirmed holds the stream here; resuming
+            # shifts `_pace_start`, so the cadence survives the pause.
+            await self._pace_resume.wait()
             await self.websocket.send_bytes(framing.wrap(self.protocol_version, packet))
             self._pace_count += 1
 
