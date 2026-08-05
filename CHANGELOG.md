@@ -7,6 +7,47 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-08-05
 
+### Added
+
+- Barge-in is gated: an utterance the endpointer ends while a reply is
+  in flight only cancels it on evidence of user speech. Four gates, in
+  order: speech shorter than `server.barge_in_min_speech_ms` (default
+  500) is dropped; an interruption landing while the reply is still
+  transcribing cancels it but prepends its audio, so one reply answers
+  the user's whole sentence instead of losing its head; anything
+  within `server.barge_in_refractory_ms` (default 1000) of the reply's
+  first audio frame is dropped as playback-onset transient; everything
+  else pauses the outgoing frames while ASR transcribes the
+  interruption, cancelling only on a non-empty transcript and
+  otherwise resuming the reply where it stopped. The gates apply to
+  endpointer-driven utterance ends only: a manual `listen stop`
+  mid-reply still cancels unconditionally, and `barge_in: false` is
+  untouched. The decision is recorded in
+  `docs/adr/2026-08-05-replies-cancel-only-on-evidence-of-speech.md`.
+- The `Endpointer` protocol gained `speech_ms()`: milliseconds
+  classified as speech since the last reset, at each implementation's
+  own window granularity.
+- New structured log events, since events are the observability
+  surface: `barge_in_suppressed` (`reason`: `min_speech`,
+  `refractory`, or `no_transcript`, plus `speech_ms`) fires when a
+  gate drops an interruption, and `barge_in_merged` (`speech_ms`)
+  fires on the mid-transcription merge. The `speech_ms` they carry is
+  exactly the data the two thresholds should be tuned with from a
+  deployment's retained logs.
+- The deployment profile documents both keys with noisy-deployment
+  guidance: the VAD `threshold` is the companion knob (stricter
+  speech classification keeps noise from reaching the gates at all),
+  and its `trailing_silence_ms` suggestion now carries a caution,
+  since shorter trailing silence makes mid-sentence chopping
+  likelier.
+
+### Changed
+
+- The `barge_in` event gained `speech_ms` (the endpointer's
+  speech-classified duration for the interrupting utterance) and
+  `speaking_ms` (milliseconds from `speaking_started` to the cancel
+  decision, absent when the reply had not yet spoken).
+
 ### Fixed
 
 - The README's feature list claimed a local voice pipeline of
