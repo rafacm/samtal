@@ -89,11 +89,31 @@ their figure is flat and a longer sentence starts no later than a
 short one. Past a long enough sentence Piper is the slower of the two
 to start speaking, even though it is local.
 
+**The number above is only the start of the reply, and that is not
+the whole cost.** A reply is spoken sentence by sentence, and each
+sentence is synthesized only once the previous one has finished
+playing, so the same wait falls at every sentence boundary too. On a
+three-sentence reply:
+
+| | Gap at each sentence boundary | Total dead air mid-reply |
+| --- | --- | --- |
+| Piper | 40 to 80 ms | negligible |
+| ElevenLabs | 111 to 131 ms | 242 ms |
+| OpenAI | 520 to 617 ms | 1138 ms |
+
+Around 130 ms passes unnoticed. Around 600 ms does not: it is audible
+as the voice stuttering every few seconds through a long reply, and it
+is the reason to think twice before putting OpenAI on an agent that
+tells stories rather than answering in a sentence. The fix is to
+synthesize the next sentence while the current one is still playing,
+which would close the gap for every engine here; it is not done yet.
+
 So: **Piper** if it must stay on your host or cost nothing per
-character, **ElevenLabs** for the best voice per millisecond, and
-**OpenAI** when the deployment is already on OpenAI and one key is
-worth more to you than 700 ms. Each type's own section below has its
-options and the details behind its number.
+character, **ElevenLabs** for the best voice per millisecond and the
+only cloud type comfortable with long replies today, and **OpenAI**
+when the deployment is already on OpenAI, one key is worth more to you
+than 700 ms, and replies are short. Each type's own section below has
+its options and the details behind its number.
 
 These are one machine on one day from one network, not a benchmark.
 Your ratios should hold; your absolute numbers will not. (The
@@ -209,7 +229,13 @@ guide](https://platform.openai.com/docs/guides/text-to-speech).
 **What it costs in latency, and it is the one real drawback.** First
 audio arrives at about 820 to 900 ms, roughly +700 ms on ElevenLabs
 and +800 ms on Piper: a pause a person notices at the start of every
-reply. See Choosing a voice above for the comparison in full.
+reply, and again at every sentence boundary within it, which is the
+part that makes long replies stutter. See Choosing a voice above for
+the comparison in full.
+
+Until that lands, this type suits agents that answer in a sentence or
+two. On an agent that tells stories, the gaps are the thing you will
+hear.
 
 Which model you pick matters more here than the option table suggests,
 and the default is the fastest of the three by some margin. Worth

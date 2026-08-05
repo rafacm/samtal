@@ -142,8 +142,56 @@ there is no extra that might be absent. Full unit suite: 543 passed,
 2 skipped (both pre-existing, the piper and faster-whisper extras).
 Integration suite: 27 passed. `uv run ruff check .` clean.
 
-**Not verified here:** the end-to-end leg on the test board. The
-ElevenLabs change has it and this one does not.
+**On the test board (Waveshare ESP32-S3-Touch-LCD-1.54).** A
+multi-turn conversation end to end: five turns answered, ASR, LLM,
+this provider, and the device's own tool discovery all working, no
+`incomplete sample` warnings, and two barge-ins that cancelled a reply
+mid-synthesis and released the streaming connection cleanly. This is
+the leg that found the defect below, which every desk measurement had
+missed.
+
+## The finding: latency is paid per sentence, not per reply
+
+The single-sentence measurements above are the start-of-reply cost,
+and they are not the whole story. A reply is spoken sentence by
+sentence, and `session.py` synthesizes sentence N+1 only after
+sentence N has finished playing: `_speak_and_record` awaits `_speak`,
+which synthesizes and sends before returning, and `_send_frames` paces
+frames to realtime, so "sent" means "played". Every sentence boundary
+therefore exposes the next sentence's full time to first byte as
+silence.
+
+Reported from the board as "hiccups in the assistant's voice" during a
+long reply, then reproduced on the desk with the same three-sentence
+text through both cloud providers:
+
+| | s1 to s2 | s2 to s3 | total dead air mid-reply |
+| --- | --- | --- | --- |
+| OpenAI | 617 ms | 520 ms | 1138 ms |
+| ElevenLabs | 131 ms | 111 ms | 242 ms |
+
+Around 130 ms is absorbed; around 600 ms is audible every few seconds
+through a long reply. The pacer makes the artifact worse than a plain
+pause: its schedule is absolute from the reply's first frame, so once
+a stall pushes it behind, the following frames get a negative sleep
+and burst to catch up, giving a dropout followed by a flood.
+
+This is not a defect in this provider. It is a missing optimisation in
+the session loop that this provider is the first to be slow enough to
+expose, and the fix (a sentence of lookahead) would close the gap for
+every engine. Filed as #37. The documentation here and in
+`config.example.yaml` bounds the recommendation to short replies until
+it lands, which is the honest reading rather than a latency footnote.
+
+**Investigated and ruled out: barge-in.** Three interruption attempts
+during the same reply were suppressed at 256, 64 and 32 ms of
+classified speech, under the 500 ms floor. This is #28's known
+double-talk behaviour, already documented there from the same board
+("quiet speech during max-volume playback reaches the endpointer at
+only 32 to 288 ms"), and the board's `output_volume` was 100. It is
+unrelated to this provider and would happen identically on Piper. An
+early hypothesis that the dead-air gaps were disrupting the echo
+canceller was dropped: #28 shows the attenuation happens regardless.
 
 ## Files modified
 

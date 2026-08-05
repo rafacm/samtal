@@ -20,6 +20,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   `speed` on a `gpt-4o` model, or `instructions` on a `tts-1` model,
   fails the boot rather than becoming a knob the API silently ignores.
   The type marks egress, so `server.local_only` refuses it.
+  Documented with a caveat found on the test board: because a reply is
+  synthesized sentence by sentence with no lookahead, this provider's
+  time to first byte is paid at every sentence boundary as well as at
+  the start, measured at 520 to 617 ms per boundary against
+  ElevenLabs' 111 to 131 ms, which is audible as stuttering on long
+  replies. The provider suits short answers until #37 lands.
 - New `elevenlabs` TTS provider type, streaming cloud synthesis as raw
   PCM. It needs no optional extra: the API is one streaming POST, so
   the provider speaks it over `httpx` (now a direct dependency)
