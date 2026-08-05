@@ -67,6 +67,40 @@ Licensing note: `piper-tts` (piper1-gpl) is GPL-3.0, which is why it is an
 optional extra and never a core dependency of the MIT server. The same
 applies to any future `edge-tts` provider.
 
+### Choosing a voice
+
+The three TTS types differ in the one thing a conversation actually
+feels: how long the device stays silent before it starts speaking.
+Measured on one machine in a single run, median of five rounds per
+sentence, so the columns are comparable with each other:
+
+| | Piper | ElevenLabs | OpenAI |
+| --- | ----- | ---------- | ------ |
+| "The kitchen light is now off." | 40 ms | 194 ms | 888 ms |
+| "Hello, I am your samtal assistant..." | 79 ms | 188 ms | 764 ms |
+| "Hej, jag är din samtalsassistent." | 54 ms | 194 ms | 818 ms |
+| Runs | on your host | ElevenLabs | OpenAI |
+| Needs | `--extra piper` | a key | a key |
+
+Read down the columns, not across the rows. Piper is the only one
+whose figure grows with sentence length, because it synthesizes a
+whole sentence before yielding anything; both cloud types stream, so
+their figure is flat and a longer sentence starts no later than a
+short one. Past a long enough sentence Piper is the slower of the two
+to start speaking, even though it is local.
+
+So: **Piper** if it must stay on your host or cost nothing per
+character, **ElevenLabs** for the best voice per millisecond, and
+**OpenAI** when the deployment is already on OpenAI and one key is
+worth more to you than 700 ms. Each type's own section below has its
+options and the details behind its number.
+
+These are one machine on one day from one network, not a benchmark.
+Your ratios should hold; your absolute numbers will not. (The
+ElevenLabs section quotes ~130 ms from its own earlier measurement,
+with a different voice on a different day, which is the size of the
+run-to-run variation to expect.)
+
 ### ElevenLabs
 
 The reason to reach for the `elevenlabs` TTS type is that it sounds
