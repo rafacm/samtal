@@ -159,7 +159,7 @@ voice copied from someone else's configuration works. Hear them in the
 | ------ | ------- | ------------ |
 | `voice` | required | Which voice speaks |
 | `api_key_env` | required | Name of the variable holding the key |
-| `model` | `gpt-4o-mini-tts` | The current speech model, steered in prose. `tts-1` is the older low-latency model and `tts-1-hd` its higher fidelity sibling |
+| `model` | `gpt-4o-mini-tts` | The current speech model, steered in prose, and the fastest of the three to start speaking. `tts-1` and `tts-1-hd` are the older pair |
 | `instructions` | unset | How to speak, in prose ("Speak slowly and warmly"). Read by the `gpt-4o` models only |
 | `speed` | unset | A multiplier from 0.25 to 4.0. Read by `tts-1` and `tts-1-hd` only |
 | `timeout_s` | `30` | Seconds before a synthesis request is abandoned |
@@ -176,6 +176,29 @@ rest: the [speech
 endpoint](https://platform.openai.com/docs/api-reference/audio/createSpeech)
 and the [text-to-speech
 guide](https://platform.openai.com/docs/guides/text-to-speech).
+
+**What it costs in latency, and it is the one real drawback.** First
+audio arrives at about 820 to 900 ms, against ElevenLabs' 190 ms and
+Piper's 40 to 80 ms on the same machine (median of five, same
+sentences). So roughly +700 ms on ElevenLabs and +800 ms on Piper,
+which is a pause a person notices at the start of every reply.
+
+The provider does stream: the figure is flat whatever the sentence
+length, and a longer sentence starts no later than a short one, so the
+wait is OpenAI's time to first byte rather than a whole sentence being
+synthesized before anything is sent. The default model is the fastest
+of the three, and by some margin, which is worth stating because it
+contradicts how the older pair is usually described:
+
+| Model | Short sentence | Longer sentence |
+| ----- | -------------- | --------------- |
+| `gpt-4o-mini-tts` | 908 ms | 820 ms |
+| `tts-1` | 1549 ms | 1413 ms |
+| `tts-1-hd` | 1974 ms | 1861 ms |
+
+Reach for this type because the deployment is already on OpenAI and
+one key is worth something. If what you want is the best voice per
+millisecond, ElevenLabs is the better buy.
 
 **It sends your replies to OpenAI**, and the type is marked as egress
 accordingly, so `server.local_only: true` refuses to boot it (see
