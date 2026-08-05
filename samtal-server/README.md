@@ -228,9 +228,16 @@ sits silent for three timeouts plus backoff. A sentence that fails
 should fail now and let the conversation move on.
 
 The last two are the one place this type refuses a configuration the
-API would accept. Each model reads one of them and silently ignores
-the other, so naming the wrong one for the model fails the boot rather
-than becoming a knob that never takes effect.
+API would accept. Each OpenAI model reads one of them and silently
+ignores the other, so naming the wrong one for the model fails the
+boot rather than becoming a knob that never takes effect.
+
+That check applies only when `base_url` is OpenAI's, because it is a
+fact about OpenAI's models rather than about the dialect. A compatible
+server may name a model `gpt-4o-anything` and read `speed`, or read
+`instructions` on a model named nothing like OpenAI's, and its `speed`
+need not stop at 4.0. Both knobs are passed through to such an
+endpoint unexamined, so it answers for itself.
 
 There is no audio format option, unlike ElevenLabs: the API's `pcm`
 format is fixed at 24 kHz, which is the rate devices are spoken at, so

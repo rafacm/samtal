@@ -116,6 +116,25 @@ def test_a_speed_outside_the_api_range_is_refused(monkeypatch: pytest.MonkeyPatc
         )
 
 
+def test_a_compatible_endpoint_keeps_its_own_model_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Which knob a model reads is a fact about OpenAI's models, not
+    about the dialect. A compatible server may name a model anything and
+    read either knob, so guessing on its behalf would reject working
+    configurations before the request is sent."""
+    monkeypatch.setenv("OPENAI_KEY", "secret")
+    local = {"base_url": "http://localhost:8080/v1", "egress": False}
+    # Each of these is refused against OpenAI itself, three tests above.
+    for extra in (
+        {"model": "gpt-4o-mini-tts", "speed": 1.2},
+        {"model": "kokoro", "instructions": "Speak cheerfully"},
+        {"model": "kokoro", "speed": 9.0},
+    ):
+        built = build_tts(type="openai", voice="alloy", **local, **extra)
+        assert isinstance(built, OpenAiTts)
+
+
 def test_the_base_url_decides_egress_rather_than_the_type(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
