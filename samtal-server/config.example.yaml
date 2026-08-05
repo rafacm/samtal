@@ -201,9 +201,13 @@ providers:
     # markedly better than a local voice for it.
     eleven:
       type: elevenlabs
-      # Voice id from your ElevenLabs voice library (the id, not the
-      # display name).
-      voice_id: 21m00Tcm4TlvDq8ikWAM
+      # Voice id from your ElevenLabs voice library: the id, not the
+      # display name, and account-specific even for the stock voices.
+      # List yours with:
+      #   curl -s -H "xi-api-key: $ELEVENLABS_API_KEY" \
+      #     https://api.elevenlabs.io/v1/voices \
+      #     | jq -r '.voices[] | "\(.voice_id)  \(.name)"'
+      voice_id: PUT_YOUR_VOICE_ID_HERE
       api_key_env: ELEVENLABS_API_KEY
       # Default: eleven_flash_v2_5, the low-latency model (~75 ms to
       # first byte, 32 languages). eleven_multilingual_v2 sounds

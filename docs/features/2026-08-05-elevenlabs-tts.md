@@ -80,9 +80,38 @@ latency sets `model` and pays for it in the gap the user hears.
   extra to be missing.
 - Full suite green: 527 unit tests (2 skipped, both pre-existing), 27
   integration tests, `ruff check` clean.
-- Real-API verification and the latency comparison against Piper are
-  the PR's remaining boxes; they need an ElevenLabs key and the test
-  board.
+
+### Against the real API
+
+Three sentences synthesized, two English and one Swedish, then fed
+back through the ASR stage (whisper small, resampled to 16 kHz the way
+the session does it). All three transcribed to their input text,
+including the Swedish "samtalsassistent". That is the alignment check
+that matters: a one-byte shift is white noise, and white noise
+transcribes to nothing.
+
+### Added latency versus Piper
+
+Median of five rounds per sentence, same machine, warm.
+
+| Sentence | Speech | Piper first audio | ElevenLabs first audio | Added |
+| -------- | ------ | ----------------- | ---------------------- | ----- |
+| "The kitchen light is now off." | 1.65 s | 43 ms | 132 ms | +89 ms |
+| "Hello, I am your samtal assistant. How can I help you today?" | 3.6 s | 92 ms | 131 ms | +39 ms |
+
+The shape is more useful than either number. ElevenLabs is flat at
+about 130 ms whatever the sentence, because it streams and the clock
+stops at the first chunk. Piper's grows with sentence length, because
+it synthesizes the whole sentence in one thread hop before yielding
+anything. So the penalty shrinks as sentences get longer, and for a
+long enough sentence Piper would be the slower of the two to first
+audio. Occasional network variance shows up as an outlier (one round
+hit 646 ms); the medians are stable.
+
+An idle gap costs nothing measurable: after 12 seconds of silence,
+past httpx's 5 second default `keepalive_expiry`, the next request
+still returned first audio in 186 ms. Reconnecting is cheap relative
+to the request itself, so no connection warming is needed.
 
 ## Files modified
 
