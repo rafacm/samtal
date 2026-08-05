@@ -240,6 +240,36 @@ providers:
       #   speed: 1.0
       # Seconds before a synthesis request is abandoned.
       # timeout_s: 30
+    # The other cloud voice: worth it when the deployment is already on
+    # OpenAI, since the same key serves the LLM stage and the voices
+    # are the stock ones rather than something to pick out of a
+    # library. The endpoint reference and the guide:
+    # https://platform.openai.com/docs/api-reference/audio/createSpeech
+    # https://platform.openai.com/docs/guides/text-to-speech
+    openai_voice:
+      type: openai
+      # One of the stock voices, the same on every account: alloy, ash,
+      # ballad, coral, echo, sage, shimmer, verse, marin, cedar. Hear
+      # them at https://www.openai.fm/
+      voice: alloy
+      api_key_env: OPENAI_API_KEY
+      # Default: gpt-4o-mini-tts, the current speech model. tts-1 is
+      # the older low-latency model and tts-1-hd its higher fidelity
+      # sibling.
+      # model: tts-1
+      # How to speak, in prose. Read by the gpt-4o models only, which
+      # is why naming it alongside a tts-1 model fails the boot rather
+      # than being ignored.
+      # instructions: Speak slowly and warmly, like a patient teacher.
+      # A multiplier from 0.25 to 4.0, and the tts-1 models' answer to
+      # instructions: they read this and ignore the prose, while the
+      # gpt-4o models do the opposite.
+      # speed: 1.0
+      # Seconds before a synthesis request is abandoned.
+      # timeout_s: 30
+      # No audio format option, unlike ElevenLabs above: the API's pcm
+      # format is fixed at 24 kHz, which is the rate devices are spoken
+      # at, so nothing is resampled and there is nothing to choose.
   vad:
     silero:
       type: silero

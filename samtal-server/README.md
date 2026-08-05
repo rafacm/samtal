@@ -47,6 +47,7 @@ each agent picks one provider per stage. The v1 set:
 | llm   | `openai_compatible` | anywhere   | core                             |
 | tts   | `piper`             | locally    | `uv sync --extra piper`          |
 | tts   | `elevenlabs`        | ElevenLabs | core                             |
+| tts   | `openai`            | OpenAI     | core                             |
 | any   | `mock`              | in tests   | core (deterministic, keyless)    |
 
 Model weights are never shipped: faster-whisper models and Piper voices
@@ -56,10 +57,11 @@ faster-whisper + Ollama (through `openai_compatible`) + Piper, and
 `server.local_only: true` makes the server refuse to boot anything
 else (see Security below).
 
-Cloud providers need no extra. They speak their APIs over HTTP rather
-than a vendor SDK, so they are in every install and cost nothing to
-carry; what makes a provider optional is weight or licensing, and a
-network client has neither.
+Cloud providers need no extra. They speak their APIs over HTTP, or
+through an SDK the core install already carries for another stage, so
+they are in every install and cost nothing to carry; what makes a
+provider optional is weight or licensing, and a network client has
+neither.
 
 Licensing note: `piper-tts` (piper1-gpl) is GPL-3.0, which is why it is an
 optional extra and never a core dependency of the MIT server. The same
@@ -67,9 +69,9 @@ applies to any future `edge-tts` provider.
 
 ### ElevenLabs
 
-The `elevenlabs` TTS type is the one cloud voice implemented so far,
-and the reason to reach for it is that it sounds markedly better than
-Piper. It needs two things: a key, and a voice id.
+The reason to reach for the `elevenlabs` TTS type is that it sounds
+markedly better than Piper. It needs two things: a key, and a voice
+id.
 
 ```yaml
 providers:
@@ -130,6 +132,54 @@ is: the API is billed by character. The type is marked as egress
 accordingly, so `server.local_only: true` refuses to boot it (see
 Security below). Nothing else in the pipeline moves: VAD, ASR and the
 LLM stay wherever you configured them.
+
+### OpenAI
+
+The `openai` TTS type is the one to reach for if the deployment is
+already on OpenAI: the same key serves the LLM stage, and the voices
+are the stock ones, so there is nothing to pick out of a library.
+
+```yaml
+providers:
+  tts:
+    openai_voice:
+      type: openai
+      voice: alloy
+      api_key_env: OPENAI_API_KEY
+```
+
+Keys are named, never written, exactly as for ElevenLabs above.
+
+Voices are shared across every account (`alloy`, `ash`, `ballad`,
+`coral`, `echo`, `sage`, `shimmer`, `verse`, `marin`, `cedar`), so a
+voice copied from someone else's configuration works. Hear them in the
+[voice gallery](https://www.openai.fm/).
+
+| Option | Default | What it does |
+| ------ | ------- | ------------ |
+| `voice` | required | Which voice speaks |
+| `api_key_env` | required | Name of the variable holding the key |
+| `model` | `gpt-4o-mini-tts` | The current speech model, steered in prose. `tts-1` is the older low-latency model and `tts-1-hd` its higher fidelity sibling |
+| `instructions` | unset | How to speak, in prose ("Speak slowly and warmly"). Read by the `gpt-4o` models only |
+| `speed` | unset | A multiplier from 0.25 to 4.0. Read by `tts-1` and `tts-1-hd` only |
+| `timeout_s` | `30` | Seconds before a synthesis request is abandoned |
+
+The last two are the one place this type refuses a configuration the
+API would accept. Each model reads one of them and silently ignores
+the other, so naming the wrong one for the model fails the boot rather
+than becoming a knob that never takes effect.
+
+There is no audio format option, unlike ElevenLabs: the API's `pcm`
+format is fixed at 24 kHz, which is the rate devices are spoken at, so
+nothing is resampled and there is nothing to choose. Reference for the
+rest: the [speech
+endpoint](https://platform.openai.com/docs/api-reference/audio/createSpeech)
+and the [text-to-speech
+guide](https://platform.openai.com/docs/guides/text-to-speech).
+
+**It sends your replies to OpenAI**, and the type is marked as egress
+accordingly, so `server.local_only: true` refuses to boot it (see
+Security below).
 
 ## Tools
 
@@ -386,8 +436,8 @@ The WebSocket path never moves: the token is what protects it.
 whether it sends session data (audio, transcripts, replies) off the
 host, and with `server.local_only: true` the server refuses to boot any
 provider that does, naming the stage and provider. The local engines
-(Silero, faster-whisper, Piper) pass; an `anthropic` or `elevenlabs`
-entry fails. An
+(Silero, faster-whisper, Piper) pass; an `anthropic`, `elevenlabs`, or
+`openai` entry fails. An
 `openai_compatible` entry can point at Ollama on localhost or at a
 cloud vendor, so under `local_only` it must carry your own declaration:
 
