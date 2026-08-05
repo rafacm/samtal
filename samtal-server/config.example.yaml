@@ -196,6 +196,35 @@ providers:
     piper_english:
       type: piper
       voice: en_US-lessac-medium
+    # Cloud synthesis, streamed. Costs a network round trip per
+    # sentence and sends the reply text to the vendor, and sounds
+    # markedly better than a local voice for it.
+    eleven:
+      type: elevenlabs
+      # Voice id from your ElevenLabs voice library (the id, not the
+      # display name).
+      voice_id: 21m00Tcm4TlvDq8ikWAM
+      api_key_env: ELEVENLABS_API_KEY
+      # Default: eleven_flash_v2_5, the low-latency model (~75 ms to
+      # first byte, 32 languages). eleven_multilingual_v2 sounds
+      # better and answers slower, which a conversation feels.
+      # model: eleven_multilingual_v2
+      # Audio asked of the API. Only the pcm_<rate> formats work here,
+      # since the stage streams raw PCM; the default matches the rate
+      # devices are spoken at, so nothing is resampled. pcm_44100 and
+      # up need a paid ElevenLabs tier.
+      # output_format: pcm_24000
+      # Pin the spoken language (ISO 639-1) instead of letting the
+      # model infer it from the text.
+      # language_code: sv
+      # Passed to the API as given. Higher stability is more monotone
+      # and more predictable; speed is a multiplier around 1.0.
+      # voice_settings:
+      #   stability: 0.5
+      #   similarity_boost: 0.75
+      #   speed: 1.0
+      # Seconds before a synthesis request is abandoned.
+      # timeout_s: 30
   vad:
     silero:
       type: silero

@@ -39,14 +39,15 @@ token the OTA endpoint issued.
 Each pipeline stage is a named provider entry in the configuration, and
 each agent picks one provider per stage. The v1 set:
 
-| Stage | Type                | Runs      | Install                          |
-| ----- | ------------------- | --------- | -------------------------------- |
-| vad   | `silero`            | locally   | core (pysilero-vad)              |
-| asr   | `faster_whisper`    | locally   | `uv sync --extra faster-whisper` |
-| llm   | `anthropic`         | Anthropic | core                             |
-| llm   | `openai_compatible` | anywhere  | core                             |
-| tts   | `piper`             | locally   | `uv sync --extra piper`          |
-| any   | `mock`              | in tests  | core (deterministic, keyless)    |
+| Stage | Type                | Runs       | Install                          |
+| ----- | ------------------- | ---------- | -------------------------------- |
+| vad   | `silero`            | locally    | core (pysilero-vad)              |
+| asr   | `faster_whisper`    | locally    | `uv sync --extra faster-whisper` |
+| llm   | `anthropic`         | Anthropic  | core                             |
+| llm   | `openai_compatible` | anywhere   | core                             |
+| tts   | `piper`             | locally    | `uv sync --extra piper`          |
+| tts   | `elevenlabs`        | ElevenLabs | core                             |
+| any   | `mock`              | in tests   | core (deterministic, keyless)    |
 
 Model weights are never shipped: faster-whisper models and Piper voices
 download at server startup into a local cache (`download_dir` on the
@@ -54,6 +55,13 @@ provider entry). A fully local, keyless pipeline is Silero +
 faster-whisper + Ollama (through `openai_compatible`) + Piper, and
 `server.local_only: true` makes the server refuse to boot anything
 else (see Security below).
+
+Cloud providers need no extra. `elevenlabs` speaks its API over HTTP
+rather than a vendor SDK, so it is in every install and costs nothing
+to carry; what makes a provider optional is weight or licensing, and a
+network client has neither. Its key is named, never written: the entry
+carries `api_key_env: ELEVENLABS_API_KEY` and the server reads that
+variable at startup, failing the boot if it is unset.
 
 Licensing note: `piper-tts` (piper1-gpl) is GPL-3.0, which is why it is an
 optional extra and never a core dependency of the MIT server. The same
@@ -314,7 +322,8 @@ The WebSocket path never moves: the token is what protects it.
 whether it sends session data (audio, transcripts, replies) off the
 host, and with `server.local_only: true` the server refuses to boot any
 provider that does, naming the stage and provider. The local engines
-(Silero, faster-whisper, Piper) pass; an `anthropic` entry fails. An
+(Silero, faster-whisper, Piper) pass; an `anthropic` or `elevenlabs`
+entry fails. An
 `openai_compatible` entry can point at Ollama on localhost or at a
 cloud vendor, so under `local_only` it must carry your own declaration:
 

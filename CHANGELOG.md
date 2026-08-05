@@ -9,6 +9,15 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- New `elevenlabs` TTS provider type, streaming cloud synthesis as raw
+  PCM. It needs no optional extra: the API is one streaming POST, so
+  the provider speaks it over `httpx` (now a direct dependency)
+  instead of a vendor SDK, and is present in every install. Options:
+  `voice_id` and `api_key_env` (both required), plus `model`
+  (default `eleven_flash_v2_5`, the low-latency model), `output_format`
+  (default `pcm_24000`, which matches the device rate so nothing is
+  resampled), `language_code`, `voice_settings` and `timeout_s`. The
+  type marks egress, so `server.local_only` refuses it.
 - Every provider type now carries a class-level `egress` marking:
   whether it sends session data (audio, transcripts, replies) off the
   host. `anthropic` marks egress; `silero`, `faster_whisper`, `piper`
