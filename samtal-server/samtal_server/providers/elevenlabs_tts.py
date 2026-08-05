@@ -1,0 +1,199 @@
+"""Cloud text to speech on ElevenLabs, streamed as raw PCM.
+
+No SDK and no extra: the streaming endpoint is one POST whose response
+body is the audio, so `httpx` (already a dependency) covers it, and a
+cloud provider carries none of the weight or licensing that makes the
+local engines optional (#11).
+
+`output_format` asks the API for signed 16-bit little-endian mono at a
+named rate, which is exactly what this stage's interface passes along,
+so the default `pcm_24000` matches the device output rate and the
+session's resampler has nothing to do. The API bills by character and
+the request carries the reply text, so the type marks egress.
+"""
+
+import logging
+import re
+from collections.abc import AsyncIterator
+
+import httpx
+
+from samtal_server.config.models import ProviderConfig
+from samtal_server.providers.anthropic_llm import resolve_api_key
+from samtal_server.providers.base import ProviderError, TtsProvider
+from samtal_server.providers.registry import OptionsReader
+
+logger = logging.getLogger(__name__)
+
+API_BASE_URL = "https://api.elevenlabs.io"
+
+# Flash is the low-latency model (~75 ms to first byte, 32 languages
+# including Swedish). A voice assistant is the case it exists for; an
+# operator who would rather have Multilingual v2's fidelity than its
+# latency sets `model` instead.
+DEFAULT_MODEL = "eleven_flash_v2_5"
+
+DEFAULT_OUTPUT_FORMAT = "pcm_24000"
+
+# Long enough for a slow first byte, short enough that a hung request
+# does not hold a sentence open for the whole conversation.
+DEFAULT_TIMEOUT_S = 30.0
+
+# Only the PCM formats are usable here: the stage's contract is s16le
+# PCM, and decoding mp3 or opus just to re-encode it would add both a
+# dependency and latency. `pcm_44100` and up need a paid ElevenLabs
+# tier, which is the API's error to report, not ours to predict.
+_PCM_FORMAT = re.compile(r"^pcm_(\d+)$")
+
+# Named exactly as the API names them, since they are passed through.
+_VOICE_SETTING_NUMBERS = ("stability", "similarity_boost", "style", "speed")
+_VOICE_SETTING_FLAGS = ("use_speaker_boost",)
+
+
+def parse_sample_rate(label: str, output_format: str) -> int:
+    """The rate an output format produces, rejecting the formats this
+    stage cannot pass through."""
+    match = _PCM_FORMAT.match(output_format)
+    if match is None:
+        raise ProviderError(
+            f'{label}: option "output_format" must be one of the pcm_<rate> '
+            f'formats (this stage streams raw PCM), not "{output_format}"'
+        )
+    return int(match.group(1))
+
+
+def read_voice_settings(label: str, settings: dict[str, object]) -> dict[str, object]:
+    """The `voice_settings` mapping, validated key by key. Unknown keys
+    are rejected here for the same reason unknown options are: a typo
+    that the API silently ignores is a knob that never took effect."""
+    known = set(_VOICE_SETTING_NUMBERS) | set(_VOICE_SETTING_FLAGS)
+    unknown = sorted(set(settings) - known)
+    if unknown:
+        raise ProviderError(
+            f'{label}: unknown voice_settings key(s): {", ".join(unknown)} '
+            f'(known: {", ".join(sorted(known))})'
+        )
+    for key in _VOICE_SETTING_NUMBERS:
+        value = settings.get(key)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int | float)):
+            raise ProviderError(f'{label}: voice_settings "{key}" must be a number')
+    for key in _VOICE_SETTING_FLAGS:
+        value = settings.get(key)
+        if value is not None and not isinstance(value, bool):
+            raise ProviderError(f'{label}: voice_settings "{key}" must be true or false')
+    return dict(settings)
+
+
+class ElevenLabsTts(TtsProvider):
+    # The reply text goes to the vendor's API to be spoken.
+    egress = True
+
+    def __init__(
+        self,
+        voice_id: str,
+        model: str,
+        output_format: str,
+        sample_rate: int,
+        api_key: str,
+        language_code: str | None = None,
+        voice_settings: dict[str, object] | None = None,
+        timeout_s: float = DEFAULT_TIMEOUT_S,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self._voice_id = voice_id
+        self._model = model
+        self._output_format = output_format
+        self.sample_rate = sample_rate
+        self._language_code = language_code
+        self._voice_settings = voice_settings or {}
+        # One client per provider entry, so its connection pool is
+        # reused across sentences and sessions: a fresh TLS handshake
+        # per sentence would show up as latency in the gap the user
+        # hears. Providers are built at startup and live as long as the
+        # server, which is also this client's lifetime.
+        self._client = client or httpx.AsyncClient(
+            base_url=API_BASE_URL,
+            timeout=httpx.Timeout(timeout_s, connect=timeout_s),
+            headers={"xi-api-key": api_key},
+        )
+
+    def _body(self, text: str) -> dict[str, object]:
+        body: dict[str, object] = {"text": text, "model_id": self._model}
+        if self._language_code:
+            body["language_code"] = self._language_code
+        if self._voice_settings:
+            body["voice_settings"] = self._voice_settings
+        return body
+
+    async def synthesize(self, text: str) -> AsyncIterator[bytes]:
+        """Stream one sentence, yielding PCM as it arrives.
+
+        Chunks are yielded sample-aligned. HTTP chunk boundaries fall
+        wherever the network puts them, so a response chunk can end on
+        the first byte of a sample; the odd byte is carried into the
+        next chunk rather than passed on, because everything downstream
+        counts samples in pairs and would shift the rest of the reply
+        by one byte."""
+        request = self._client.build_request(
+            "POST",
+            f"/v1/text-to-speech/{self._voice_id}/stream",
+            params={"output_format": self._output_format},
+            json=self._body(text),
+        )
+        response = await self._client.send(request, stream=True)
+        try:
+            if response.status_code != httpx.codes.OK:
+                raise await _api_error(response)
+            remainder = b""
+            async for chunk in response.aiter_bytes():
+                chunk = remainder + chunk
+                aligned = len(chunk) - len(chunk) % 2
+                remainder = chunk[aligned:]
+                if aligned:
+                    yield chunk[:aligned]
+            if remainder:
+                logger.warning(
+                    "elevenlabs: dropping %d trailing byte of an incomplete sample",
+                    len(remainder),
+                )
+        finally:
+            await response.aclose()
+
+
+async def _api_error(response: httpx.Response) -> RuntimeError:
+    """A failed request as an exception the session's reply handler can
+    log. The body carries the reason (an unknown voice, an exhausted
+    quota, a tier that does not allow the format), so it is worth more
+    than the status alone; it is truncated because a stray HTML error
+    page would otherwise fill the log."""
+    body = (await response.aread()).decode("utf-8", "replace").strip()
+    detail = f": {body[:500]}" if body else ""
+    return RuntimeError(f"elevenlabs returned HTTP {response.status_code}{detail}")
+
+
+def build(label: str, config: ProviderConfig) -> ElevenLabsTts:
+    options = OptionsReader(label, config)
+    voice_id = options.required_string("voice_id")
+    model = options.string("model", DEFAULT_MODEL)
+    output_format = options.string("output_format", DEFAULT_OUTPUT_FORMAT)
+    language_code = options.string("language_code")
+    timeout_s = options.number("timeout_s", DEFAULT_TIMEOUT_S)
+    voice_settings = read_voice_settings(label, options.mapping("voice_settings"))
+    options.finish()
+    assert model is not None and output_format is not None  # defaults are strings
+    api_key = resolve_api_key(label, config.api_key_env)
+    if api_key is None:
+        raise ProviderError(
+            f'{label}: type "elevenlabs" needs an API key; name the environment '
+            f'variable holding it with "api_key_env"'
+        )
+    return ElevenLabsTts(
+        voice_id=voice_id,
+        model=model,
+        output_format=output_format,
+        sample_rate=parse_sample_rate(label, output_format),
+        api_key=api_key,
+        language_code=language_code,
+        voice_settings=voice_settings,
+        timeout_s=timeout_s,
+    )
