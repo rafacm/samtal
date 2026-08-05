@@ -13,13 +13,21 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   PCM. It needs no optional extra and adds no dependency: the `openai`
   client already ships for the `openai_compatible` LLM type, and
   speech is a method on it, so one key serves both stages. Options:
-  `voice` and `api_key_env` (both required), plus `model` (default
+  `voice` (required), `api_key_env` (required for OpenAI itself),
+  `base_url` (default `https://api.openai.com/v1`), `model` (default
   `gpt-4o-mini-tts`), `instructions`, `speed` and `timeout_s`. There
   is no audio format option: the API's `pcm` format is fixed at
   24 kHz, which is the device rate, so nothing is resampled. Naming
   `speed` on a `gpt-4o` model, or `instructions` on a `tts-1` model,
   fails the boot rather than becoming a knob the API silently ignores.
-  The type marks egress, so `server.local_only` refuses it.
+  `base_url` reaches any server implementing `/v1/audio/speech`, so a
+  local pipeline stays available through this type and no key is
+  needed for one; that also means the endpoint rather than the type
+  decides egress, and an entry under `server.local_only` declares its
+  own, exactly as `openai_compatible` does. Retries are off, so
+  `timeout_s` bounds a sentence: the SDK would otherwise attempt a
+  failed request three times, leaving the device silent for three
+  timeouts plus backoff.
   Documented with a caveat found on the test board: because a reply is
   synthesized sentence by sentence with no lookahead, this provider's
   time to first byte is paid at every sentence boundary as well as at
