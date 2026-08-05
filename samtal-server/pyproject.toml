@@ -9,6 +9,9 @@ dependencies = [
     "anthropic>=0.120.0",
     "av>=18.0.0",
     "fastapi>=0.115",
+    # Direct because the cloud providers speak their APIs over it rather
+    # than pulling in a vendor SDK; it arrives with the LLM SDKs anyway.
+    "httpx>=0.28",
     "mcp>=1.2",
     "openai>=2.48.0",
     "pydantic>=2.9",

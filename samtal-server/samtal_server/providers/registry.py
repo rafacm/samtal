@@ -129,6 +129,14 @@ def _openai_compatible(label: str, config: ProviderConfig) -> object:
     return openai_llm.build(label, config)
 
 
+def _elevenlabs(label: str, config: ProviderConfig) -> object:
+    # No extra to guard: the provider speaks the API over httpx, which
+    # the core install already carries.
+    from samtal_server.providers import elevenlabs_tts
+
+    return elevenlabs_tts.build(label, config)
+
+
 def _piper(label: str, config: ProviderConfig) -> object:
     try:
         from samtal_server.providers import piper_tts
@@ -152,7 +160,7 @@ def _factories() -> dict[str, dict[str, Factory]]:
             "openai_compatible": _openai_compatible,
         },
         "asr": {"mock": mock.build_asr, "faster_whisper": _faster_whisper},
-        "tts": {"mock": mock.build_tts, "piper": _piper},
+        "tts": {"mock": mock.build_tts, "elevenlabs": _elevenlabs, "piper": _piper},
         "vad": {"mock": mock.build_vad, "silero": _silero},
     }
 
