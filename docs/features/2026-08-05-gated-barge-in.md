@@ -72,10 +72,30 @@ data-loss bug independent of noise.
   `barge_in: false` test still passes untouched.
 - Full unit suite green locally (501 passed); integration suite green
   (27 passed); lint clean.
-- Not verified here, hardware or field only: paused-then-resumed Opus
-  playback on the board, the noisy-room desk repro, and the operator
-  re-measurement from the reporting deployment, for which the
-  `speech_ms` on the new events is exactly the tuning data.
+- Desk checkpoint on the Waveshare board (2026-08-05, local server on
+  this branch): four voice interruptions passed the transcript gate
+  and were answered, with the reused transcript visible as `heard`
+  firing milliseconds after the cancel; the acoustic aftermath of one
+  interruption was suppressed at 288 ms under the floor, the shape-2
+  silence bug being caught live; and claps, played music, and
+  playback bleed never cut a reply even with the floor lowered to
+  30 ms, because the board's echo canceller crushes non-speech during
+  playback before the gates ever see it. Two findings for the
+  follow-up list: whisper hallucinated text from a clap plus playback
+  bleed under language auto-detection (the text-domain echo check
+  would catch this; the production floor keeps such junk out of ASR
+  entirely), and quiet speech during loud playback reaches the
+  endpointer heavily attenuated (32 to 288 ms of classified speech
+  for real sentences), which is the number to watch when tuning the
+  floor.
+- Not verified here: the paused-then-resumed playback gap on the
+  device. The pause and the cancel are device-verified; an empty
+  transcript could not be produced acoustically at the desk, since
+  the echo canceller rejects non-speech and real words rightly
+  confirm, so the resume remains unit-tested only. Listen for it in
+  the field on `no_transcript` events. Also pending: the operator
+  re-measurement from the reporting deployment, for which `speech_ms`
+  on the new events is exactly the tuning data.
 
 ## Files modified
 
