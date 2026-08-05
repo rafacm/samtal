@@ -38,6 +38,9 @@ def ensure_voice(voice: str, download_dir: Path) -> Path:
 
 
 class PiperTts(TtsProvider):
+    # Synthesis runs on the host; only the voice downloads, at startup.
+    egress = False
+
     def __init__(self, voice: str, download_dir: Path) -> None:
         self._voice = PiperVoice.load(ensure_voice(voice, download_dir))
         self.sample_rate = self._voice.config.sample_rate

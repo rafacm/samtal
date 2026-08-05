@@ -81,6 +81,9 @@ class SileroEndpointer:
 
 
 class SileroVad(VadProvider):
+    # Inference runs on the host; the model ships with the package.
+    egress = False
+
     def __init__(
         self, threshold: float, trailing_silence_ms: float, max_utterance_ms: float
     ) -> None:

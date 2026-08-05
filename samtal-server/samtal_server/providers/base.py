@@ -14,12 +14,29 @@ announces the rate it produces.
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, ClassVar, Literal, Protocol, runtime_checkable
 
 
 class ProviderError(Exception):
     """A provider that cannot be built as configured: an unknown type,
     a bad option, or a missing optional dependency."""
+
+
+class Provider:
+    """What every stage's provider type has in common: the egress marking.
+
+    `egress` declares whether providers of this type send session data
+    (audio, transcripts, replies) off the host. True marks a cloud
+    provider, False one that keeps everything on the machine, and None a
+    type whose configuration decides (an openai_compatible base_url can
+    name localhost or a vendor), which under `server.local_only` demands
+    an explicit `egress` declaration on the provider entry (#30).
+
+    The default is True: a type that forgot to declare is treated as
+    sending data away, so the omission fails a local_only boot instead
+    of quietly leaking."""
+
+    egress: ClassVar[bool | None] = True
 
 
 @dataclass(frozen=True)
@@ -119,7 +136,7 @@ class Endpointer(Protocol):
     def speech_ms(self) -> float: ...
 
 
-class VadProvider(ABC):
+class VadProvider(Provider, ABC):
     """Builds endpointers. One provider serves many sessions; each
     session gets its own endpointer, because endpointing is stateful."""
 
@@ -145,7 +162,7 @@ class AsrResult:
     lock_language: str | None = None
 
 
-class AsrProvider(ABC):
+class AsrProvider(Provider, ABC):
     """Speech to text, one whole utterance at a time.
 
     `language_hint` is a session-scoped suggestion, usually a
@@ -159,7 +176,7 @@ class AsrProvider(ABC):
     ) -> AsrResult: ...
 
 
-class LlmProvider(ABC):
+class LlmProvider(Provider, ABC):
     """Streams the reply to a conversation as speech and tool requests.
 
     Providers stay translators: they map the neutral model above onto
@@ -178,7 +195,7 @@ class LlmProvider(ABC):
     ) -> AsyncIterator[LlmEvent]: ...
 
 
-class TtsProvider(ABC):
+class TtsProvider(Provider, ABC):
     """Text to speech, streamed as PCM chunks at `sample_rate`."""
 
     sample_rate: int
