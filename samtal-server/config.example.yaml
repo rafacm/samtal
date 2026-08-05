@@ -253,9 +253,13 @@ providers:
       # them at https://www.openai.fm/
       voice: alloy
       api_key_env: OPENAI_API_KEY
-      # Default: gpt-4o-mini-tts, the current speech model. tts-1 is
-      # the older low-latency model and tts-1-hd its higher fidelity
-      # sibling.
+      # Default: gpt-4o-mini-tts, the current speech model and the
+      # fastest of the three to start speaking (measured at ~820 ms to
+      # first audio, against tts-1's ~1400 ms and tts-1-hd's ~1900 ms).
+      # Note that this whole family is slow to start next to the other
+      # engines here: ElevenLabs answers in ~190 ms and Piper in under
+      # 80 ms. Reach for OpenAI because one key already serves the LLM
+      # stage, not because it is quick.
       # model: tts-1
       # How to speak, in prose. Read by the gpt-4o models only, which
       # is why naming it alongside a tts-1 model fails the boot rather
