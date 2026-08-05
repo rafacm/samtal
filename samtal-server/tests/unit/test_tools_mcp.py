@@ -108,11 +108,16 @@ async def test_a_stopped_server_leaves_no_child_behind() -> None:
         await manager.call("tools__secret_word", {})
 
 
-def config_with(servers: dict[str, object], agent_mcp: list[str] | None) -> Config:
+def config_with(
+    servers: dict[str, object],
+    agent_mcp: list[str] | None,
+    local_only: bool = False,
+) -> Config:
     agent: dict[str, object] = {"prompt": "A"}
     if agent_mcp is not None:
         agent["mcp"] = agent_mcp
     return Config(
+        server={"local_only": local_only},
         providers={
             "llm": {"mock": {"type": "mock"}},
             "asr": {"mock": {"type": "mock"}},
@@ -140,6 +145,37 @@ async def test_only_referenced_entries_are_managed() -> None:
     assert len(servers) == 1
     assert "tools" in servers
     assert "unused" not in servers
+
+
+async def test_local_only_refuses_a_referenced_server_without_a_declaration() -> None:
+    config = config_with({"tools": entry_data()}, ["tools"], local_only=True)
+    with pytest.raises(McpConfigError) as excinfo:
+        McpServers.build(config)
+    message = str(excinfo.value)
+    assert "mcp_servers.tools" in message
+    assert '"egress: false"' in message
+
+
+async def test_local_only_builds_a_server_the_operator_declared_local() -> None:
+    config = config_with({"tools": entry_data(egress=False)}, ["tools"], local_only=True)
+    servers = McpServers.build(config)
+    assert "tools" in servers
+
+
+async def test_local_only_refuses_a_server_declared_egress() -> None:
+    config = config_with({"tools": entry_data(egress=True)}, ["tools"], local_only=True)
+    with pytest.raises(McpConfigError, match="off this network"):
+        McpServers.build(config)
+
+
+async def test_local_only_leaves_unreferenced_entries_alone() -> None:
+    config = config_with(
+        {"tools": entry_data(egress=False), "unused": entry_data()},
+        ["tools"],
+        local_only=True,
+    )
+    servers = McpServers.build(config)
+    assert len(servers) == 1
 
 
 async def test_the_registry_starts_lists_and_stops() -> None:

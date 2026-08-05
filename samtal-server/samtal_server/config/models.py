@@ -305,6 +305,14 @@ class McpServerConfig(BaseModel):
     url: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
 
+    # Whether this server sends session data off the local network. Tool
+    # arguments carry conversation-derived data, and neither transport
+    # can tell on its own: a stdio command may proxy anywhere, a url may
+    # name localhost. Under server.local_only every referenced entry
+    # must therefore declare egress: false, the operator asserting that
+    # whatever its command or URL reaches stays local (#30).
+    egress: bool | None = None
+
     # How long one tool call on this server may take before the model is
     # told it timed out. Spoken silence is the cost, so it is short.
     tool_timeout_s: float = Field(default=15.0, gt=0)
