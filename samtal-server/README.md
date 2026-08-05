@@ -51,7 +51,9 @@ each agent picks one provider per stage. The v1 set:
 Model weights are never shipped: faster-whisper models and Piper voices
 download at server startup into a local cache (`download_dir` on the
 provider entry). A fully local, keyless pipeline is Silero +
-faster-whisper + Ollama (through `openai_compatible`) + Piper.
+faster-whisper + Ollama (through `openai_compatible`) + Piper, and
+`server.local_only: true` makes the server refuse to boot anything
+else (see Security below).
 
 Licensing note: `piper-tts` (piper1-gpl) is GPL-3.0, which is why it is an
 optional extra and never a core dependency of the MIT server. The same
@@ -307,6 +309,30 @@ The WebSocket path never moves: the token is what protects it.
 **Nothing else is exposed.** `/xiaozhi/ota/` (or wherever you put it),
 `/xiaozhi/v1/`, and `/healthz`. FastAPI's `/docs`, `/redoc`, and
 `/openapi.json` are turned off.
+
+**Fully local is checked, not hoped for.** Every provider type declares
+whether it sends session data (audio, transcripts, replies) off the
+host, and with `server.local_only: true` the server refuses to boot any
+provider that does, naming the stage and provider. The local engines
+(Silero, faster-whisper, Piper) pass; an `anthropic` entry fails. An
+`openai_compatible` entry can point at Ollama on localhost or at a
+cloud vendor, so under `local_only` it must carry your own declaration:
+
+```yaml
+providers:
+  llm:
+    local:
+      type: openai_compatible
+      base_url: http://localhost:11434/v1
+      model: qwen3:8b
+      # Your assertion that this endpoint stays on this host.
+      egress: false
+```
+
+The check runs at boot, never at request time: a local_only server that
+starts is a local_only server, and a config edit that would break the
+promise stops the server from coming up instead of quietly shipping
+audio to a vendor.
 
 ## Listening and barge-in
 
