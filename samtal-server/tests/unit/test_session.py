@@ -443,8 +443,14 @@ def test_realtime_mode_serves_a_second_utterance_without_listen_start() -> None:
 def test_realtime_barge_in_cancels_the_reply_in_flight() -> None:
     # The point of listening through playback: speech that lands while
     # the server is talking cuts the reply off and is answered, with no
-    # abort and no listen message anywhere. Only the mic said so.
-    config = config_with_agent(asr_text="{ms}", llm_reply=LONG_REPLY)
+    # abort and no listen message anywhere. Only the mic said so. The
+    # interruption is 600 ms of speech, past the default minimum-speech
+    # floor, and the refractory window is off so the cut can land right
+    # after playback starts; the mock ASR then transcribes something,
+    # which is what confirms the cancel.
+    config = config_with_agent(
+        asr_text="{ms}", llm_reply=LONG_REPLY, server={"barge_in_refractory_ms": 0}
+    )
     with TestClient(create_app(config)) as client:
         with connect(client) as websocket:
             shake_hands(websocket)
@@ -456,7 +462,7 @@ def test_realtime_barge_in_cancels_the_reply_in_flight() -> None:
             endpoint_silence(websocket, encoder)
             opening, opening_audio = collect_until(websocket, is_reply_start)
             # The long reply is now streaming, paced at the frame cadence.
-            send_pcm(websocket, speech_pcm(240), encoder)
+            send_pcm(websocket, speech_pcm(600), encoder)
             endpoint_silence(websocket, encoder)
             cut, cut_audio = collect_reply(websocket)
             answer, _ = collect_until(websocket, is_transcript)
@@ -464,7 +470,7 @@ def test_realtime_barge_in_cancels_the_reply_in_flight() -> None:
     # Cut off well short of the whole reply, and the interruption
     # answered as an utterance in its own right.
     assert audio_ms(opening_audio + cut_audio) < TTS_MS_PER_CHAR * len(LONG_REPLY) / 2
-    assert_endpointed_speech(answer, 240)
+    assert_endpointed_speech(answer, 600)
 
 
 def test_realtime_without_barge_in_drops_frames_during_playback_but_hears_after() -> None:
