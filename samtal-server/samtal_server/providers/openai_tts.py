@@ -1,9 +1,16 @@
-"""Cloud text to speech on OpenAI, streamed as raw PCM.
+"""Text to speech over the OpenAI speech API, streamed as raw PCM.
 
 No SDK to add and no extra: `openai` is already a core dependency,
 installed for the `openai_compatible` LLM provider, and speech is a
 method on the client that already ships. One key therefore serves both
 stages for a deployment already on OpenAI (#11).
+
+`base_url` is the same door the `openai_compatible` LLM type opens:
+several self-hosted speech servers implement `/v1/audio/speech`, so
+pointing this type at one keeps a fully local pipeline available
+through the same dialect. It defaults to OpenAI itself, and it is what
+decides whether this provider sends anything off the host, which is
+why the type cannot declare its own egress.
 
 `response_format="pcm"` is the only format this stage can pass through,
 and the API defines it as signed 16-bit little-endian mono at 24 kHz
@@ -35,9 +42,22 @@ SAMPLE_RATE = 24000
 # sets `model`.
 DEFAULT_MODEL = "gpt-4o-mini-tts"
 
+DEFAULT_BASE_URL = "https://api.openai.com/v1"
+
 # Long enough for a slow first byte, short enough that a hung request
-# does not hold a sentence open for the whole conversation.
+# does not hold a sentence open for the whole conversation. It is a
+# real bound only because retries are off: see MAX_RETRIES.
 DEFAULT_TIMEOUT_S = 30.0
+
+# The SDK retries twice by default, which would make `timeout_s` a
+# third of the truth: three attempts plus backoff, all of it inside one
+# sentence of the serial TTS loop, with the device silent throughout.
+# A voice turn has no use for that. A sentence that fails should fail
+# now, so the reply handler can log it and the conversation moves on,
+# rather than the user waiting a minute and a half for audio that is
+# no longer wanted. The ElevenLabs provider speaks raw httpx and has
+# never retried, so this also makes the two cloud voices behave alike.
+MAX_RETRIES = 0
 
 # The API's own range for `speed`.
 SPEED_RANGE = (0.25, 4.0)
@@ -52,8 +72,11 @@ _PROSE_STEERED_PREFIX = "gpt-4o"
 
 
 class OpenAiTts(TtsProvider):
-    # The reply text goes to the vendor's API to be spoken.
-    egress = True
+    # The base_url decides: a self-hosted speech server on localhost
+    # keeps the reply text on the host, api.openai.com does not. Under
+    # server.local_only the entry therefore needs its own explicit
+    # `egress` declaration, exactly as openai_compatible does.
+    egress = None
 
     sample_rate = SAMPLE_RATE
 
@@ -62,6 +85,7 @@ class OpenAiTts(TtsProvider):
         voice: str,
         model: str,
         api_key: str,
+        base_url: str = DEFAULT_BASE_URL,
         instructions: str | None = None,
         speed: float | None = None,
         timeout_s: float = DEFAULT_TIMEOUT_S,
@@ -76,7 +100,12 @@ class OpenAiTts(TtsProvider):
         # per sentence would show up as latency in the gap the user
         # hears. Providers are built at startup and live as long as the
         # server, which is also this client's lifetime.
-        self._client = client or AsyncOpenAI(api_key=api_key, timeout=timeout_s)
+        self._client = client or AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=timeout_s,
+            max_retries=MAX_RETRIES,
+        )
 
     async def synthesize(self, text: str) -> AsyncIterator[bytes]:
         """Stream one sentence, yielding PCM as it arrives.
@@ -132,22 +161,32 @@ def build(label: str, config: ProviderConfig) -> OpenAiTts:
     options = OptionsReader(label, config)
     voice = options.required_string("voice")
     model = options.string("model", DEFAULT_MODEL)
+    base_url = options.string("base_url", DEFAULT_BASE_URL)
     instructions = options.string("instructions")
     speed = options.optional_number("speed")
     timeout_s = options.number("timeout_s", DEFAULT_TIMEOUT_S)
     options.finish()
-    assert model is not None  # the default is a string
+    assert model is not None and base_url is not None  # defaults are strings
     check_steering(label, model, instructions, speed)
     api_key = resolve_api_key(label, config.api_key_env)
     if api_key is None:
-        raise ProviderError(
-            f'{label}: type "openai" needs an API key; name the environment '
-            f'variable holding it with "api_key_env"'
-        )
+        if base_url == DEFAULT_BASE_URL:
+            # OpenAI itself always needs one, and an unset variable
+            # should fail the boot rather than every conversation.
+            raise ProviderError(
+                f'{label}: type "openai" needs an API key when it speaks to '
+                f'{DEFAULT_BASE_URL}; name the environment variable holding it '
+                f'with "api_key_env"'
+            )
+        # A self-hosted endpoint usually wants no key, but the SDK
+        # insists on one, so it gets the same placeholder the
+        # openai_compatible LLM type uses.
+        api_key = "unused"
     return OpenAiTts(
         voice=voice,
         model=model,
         api_key=api_key,
+        base_url=base_url,
         instructions=instructions,
         speed=speed,
         timeout_s=timeout_s,

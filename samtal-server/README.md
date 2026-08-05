@@ -207,11 +207,25 @@ voice copied from someone else's configuration works. Hear them in the
 | Option | Default | What it does |
 | ------ | ------- | ------------ |
 | `voice` | required | Which voice speaks |
-| `api_key_env` | required | Name of the variable holding the key |
+| `api_key_env` | required for OpenAI itself | Name of the variable holding the key |
 | `model` | `gpt-4o-mini-tts` | The current speech model, steered in prose, and the fastest of the three to start speaking. `tts-1` and `tts-1-hd` are the older pair |
+| `base_url` | `https://api.openai.com/v1` | Point it at any server implementing `/v1/audio/speech` |
 | `instructions` | unset | How to speak, in prose ("Speak slowly and warmly"). Read by the `gpt-4o` models only |
 | `speed` | unset | A multiplier from 0.25 to 4.0. Read by `tts-1` and `tts-1-hd` only |
-| `timeout_s` | `30` | Seconds before a synthesis request is abandoned |
+| `timeout_s` | `30` | Seconds before a synthesis request is abandoned, and a real bound: retries are off |
+
+`base_url` is the same door the `openai_compatible` LLM type opens.
+Several self-hosted speech servers implement this endpoint, so a fully
+local pipeline stays available through the same dialect, and such an
+entry needs no key. It is also what decides whether this type sends
+anything off your host, which is why it cannot declare its own egress:
+under `server.local_only` the entry carries its own `egress: false` to
+assert the endpoint is local, exactly as `openai_compatible` does.
+
+Retries are off. The SDK would otherwise attempt a failed request
+three times, which inside the serial sentence loop means the device
+sits silent for three timeouts plus backoff. A sentence that fails
+should fail now and let the conversation move on.
 
 The last two are the one place this type refuses a configuration the
 API would accept. Each model reads one of them and silently ignores
@@ -252,9 +266,8 @@ Reach for this type because the deployment is already on OpenAI and
 one key is worth something. If what you want is the best voice per
 millisecond, ElevenLabs is the better buy.
 
-**It sends your replies to OpenAI**, and the type is marked as egress
-accordingly, so `server.local_only: true` refuses to boot it (see
-Security below).
+**It sends your replies wherever `base_url` points**, which by default
+is OpenAI. See Security below for how `server.local_only` treats it.
 
 ## Tools
 
@@ -511,10 +524,10 @@ The WebSocket path never moves: the token is what protects it.
 whether it sends session data (audio, transcripts, replies) off the
 host, and with `server.local_only: true` the server refuses to boot any
 provider that does, naming the stage and provider. The local engines
-(Silero, faster-whisper, Piper) pass; an `anthropic`, `elevenlabs`, or
-`openai` entry fails. An
-`openai_compatible` entry can point at Ollama on localhost or at a
-cloud vendor, so under `local_only` it must carry your own declaration:
+(Silero, faster-whisper, Piper) pass; an `anthropic` or `elevenlabs`
+entry fails. The two `base_url` types, `openai_compatible` for the LLM
+stage and `openai` for TTS, can each point at localhost or at a cloud
+vendor, so under `local_only` they must carry your own declaration:
 
 ```yaml
 providers:

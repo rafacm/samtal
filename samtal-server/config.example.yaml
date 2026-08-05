@@ -253,6 +253,13 @@ providers:
       # them at https://www.openai.fm/
       voice: alloy
       api_key_env: OPENAI_API_KEY
+      # Any server implementing /v1/audio/speech works here, the same
+      # way openai_compatible opens the LLM stage to local models; a
+      # self-hosted one needs no api_key_env above. This is also what
+      # decides whether replies leave the host, so the type cannot
+      # declare its own egress: under server.local_only an entry
+      # carries `egress: false` to assert the endpoint is local.
+      # base_url: http://localhost:8080/v1
       # Default: gpt-4o-mini-tts, the current speech model and the
       # fastest of the three to start speaking (measured at ~820 ms to
       # first audio, against tts-1's ~1400 ms and tts-1-hd's ~1900 ms).
@@ -281,7 +288,10 @@ providers:
       # instructions: they read this and ignore the prose, while the
       # gpt-4o models do the opposite.
       # speed: 1.0
-      # Seconds before a synthesis request is abandoned.
+      # Seconds before a synthesis request is abandoned, and a real
+      # bound because retries are off: the SDK would otherwise try a
+      # failed request three times, leaving the device silent for three
+      # timeouts plus backoff inside a single sentence.
       # timeout_s: 30
       # No audio format option, unlike ElevenLabs above: the API's pcm
       # format is fixed at 24 kHz, which is the rate devices are spoken

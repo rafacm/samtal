@@ -116,13 +116,59 @@ def test_a_speed_outside_the_api_range_is_refused(monkeypatch: pytest.MonkeyPatc
         )
 
 
-def test_the_type_marks_egress_and_rejects_a_declaration(
+def test_the_base_url_decides_egress_rather_than_the_type(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """A self-hosted speech endpoint keeps the reply text on the host and
+    api.openai.com does not, so the type cannot know its own egress and
+    the entry declares it, exactly as openai_compatible does."""
     monkeypatch.setenv("OPENAI_KEY", "secret")
-    assert OpenAiTts.egress is True
-    with pytest.raises(ProviderError, match="decided by type"):
-        build_tts(type="openai", voice="alloy", api_key_env="OPENAI_KEY", egress=False)
+    assert OpenAiTts.egress is None
+    built = build_tts(
+        type="openai",
+        voice="alloy",
+        api_key_env="OPENAI_KEY",
+        base_url="http://localhost:8080/v1",
+        egress=False,
+    )
+    assert isinstance(built, OpenAiTts)
+
+
+def test_local_only_refuses_the_default_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_KEY", "secret")
+    with pytest.raises(ProviderError, match="sends session data off this host"):
+        build_provider(
+            "tts",
+            "voice",
+            ProviderConfig.model_validate(
+                {"type": "openai", "voice": "alloy", "api_key_env": "OPENAI_KEY", "egress": True}
+            ),
+            local_only=True,
+        )
+
+
+def test_local_only_admits_a_local_endpoint_that_declares_itself() -> None:
+    built = build_provider(
+        "tts",
+        "voice",
+        ProviderConfig.model_validate(
+            {
+                "type": "openai",
+                "voice": "alloy",
+                "base_url": "http://localhost:8080/v1",
+                "egress": False,
+            }
+        ),
+        local_only=True,
+    )
+    assert isinstance(built, OpenAiTts)
+
+
+def test_a_local_endpoint_needs_no_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The SDK insists on a key; a self-hosted server usually does not."""
+    monkeypatch.delenv("OPENAI_KEY", raising=False)
+    built = build_tts(type="openai", voice="alloy", base_url="http://localhost:8080/v1")
+    assert isinstance(built, OpenAiTts)
 
 
 # --- the request -----------------------------------------------------
@@ -214,3 +260,36 @@ async def test_an_api_error_raises_with_the_reason() -> None:
 
     with pytest.raises(APIStatusError, match="invalid api key"):
         await collect(provider(handler))
+
+
+async def test_a_failing_sentence_is_attempted_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The SDK retries twice by default, which would make timeout_s a
+    third of the truth: three attempts plus backoff inside one sentence
+    of the serial TTS loop, with the device silent throughout."""
+    monkeypatch.setenv("OPENAI_KEY", "secret")
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        return httpx.Response(500, json={"error": {"message": "upstream boom"}})
+
+    built = build_tts(type="openai", voice="alloy", api_key_env="OPENAI_KEY")
+    assert isinstance(built, OpenAiTts)
+    # The built client is the one under test: retries are configured
+    # where it is constructed, so a hand-made client would not prove it.
+    built._client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))  # type: ignore[attr-defined]
+
+    with pytest.raises(APIStatusError):
+        await collect(built)
+    assert attempts == 1
+
+
+async def test_the_timeout_is_the_one_the_entry_asked_for(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_KEY", "secret")
+    built = build_tts(type="openai", voice="alloy", api_key_env="OPENAI_KEY", timeout_s=7)
+    assert isinstance(built, OpenAiTts)
+    assert built._client.timeout == 7  # type: ignore[attr-defined]
+    assert built._client.max_retries == 0  # type: ignore[attr-defined]
