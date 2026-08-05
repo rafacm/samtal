@@ -50,6 +50,18 @@ server:
   # limits:
   #   max_sessions: 8
 
+  # Barge-in gating for a noisy deployment, defaults shown. Speech
+  # shorter than the floor never interrupts a reply, nothing does
+  # inside the refractory window after playback starts, and past both
+  # the reply is paused and cancelled only when ASR transcribes actual
+  # words. When room noise or playback bleed still cuts replies short,
+  # raise the floor first. The companion knob is the VAD threshold
+  # under providers.vad below: raising it makes the endpointer
+  # stricter about what counts as speech in the first place, so less
+  # noise ever reaches these gates.
+  # barge_in_min_speech_ms: 500
+  # barge_in_refractory_ms: 1000
+
   # Minutes east of UTC, for devices that should show local time. A
   # fixed offset, not a zone: it goes stale at every DST change.
   # Unset, the server's own current offset applies.
@@ -115,10 +127,21 @@ providers:
   vad:
     silero:
       type: silero
+      # Speech probability threshold, default shown. In a noisy room
+      # this is the companion knob to the server's barge-in gates:
+      # raise it toward 0.6 or 0.7 so less noise counts as speech at
+      # all, instead of leaning on the gates to catch it later.
+      # threshold: 0.5
+      #
       # The silence that ends an utterance, and the biggest remaining
       # deployment-decided latency knob: it sits directly in front of
       # every reply. 500 to 600 is a meaningful cut from the 700
       # default; the trade is clipping slow speakers mid-sentence.
+      # Caution: the shorter this gets, the more sentences endpoint at
+      # a mid-sentence pause. The barge-in merge stitches a chopped
+      # sentence back together, but only by restarting the reply, so
+      # do not shorten this further in a deployment that interrupts
+      # too much already.
       # trailing_silence_ms: 600
 
 # Facts agents remember between conversations. Removing this section
