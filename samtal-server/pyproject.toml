@@ -56,6 +56,15 @@ select = ["E", "F", "W", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# The suites name their files for what they test at their own level, so
+# `test_ws_auth.py` and `test_drain.py` exist under both tests/unit and
+# tests/integration. pytest's default import mode registers a test
+# module by its bare basename, which makes that pair a collision and
+# breaks any run that collects both suites, `uv run pytest` included.
+# importlib mode imports each file by its full path instead, so the
+# names can stay descriptive and CI does not have to keep the suites in
+# separate commands to avoid it.
+addopts = ["--import-mode=importlib"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 filterwarnings = [

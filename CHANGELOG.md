@@ -76,6 +76,16 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Fixed
 
+- `uv run pytest` failed to collect. `tests/unit` and
+  `tests/integration` each hold a `test_ws_auth.py` and a
+  `test_drain.py`, named for what they test at their own level, and
+  pytest's default import mode registers a test module by its bare
+  basename, so each pair collided. Any run collecting both suites
+  errored, including the bare command the configured `testpaths`
+  implies; only CI's split into two invocations hid it. The suites now
+  run under `--import-mode=importlib`, which imports each file by its
+  full path, so the descriptive names stay and the obvious command
+  works.
 - The README's feature list claimed a local voice pipeline of
   "SileroVAD + SenseVoice + EdgeTTS"; SenseVoice and EdgeTTS were
   never implemented. It now names the stack the provider registry
