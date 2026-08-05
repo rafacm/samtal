@@ -73,14 +73,16 @@ server:
     max_sessions: 8
     max_session_s: 3600
 
-  # Refuse to boot any provider that sends session data off this host.
-  # With this on, an entry of a cloud type (anthropic) fails at startup
-  # with an error naming the stage and provider, and an
+  # Refuse to boot anything that sends session data off this host.
+  # With this on, a provider entry of a cloud type (anthropic) fails at
+  # startup with an error naming the stage and provider, an
   # openai_compatible entry is refused unless it declares egress: false
-  # (see the providers section). Running fully local becomes a checked
-  # property of the server rather than a documentation property of a
-  # carefully chosen configuration: a local_only server that starts is
-  # a local_only server. Off by default.
+  # (see the providers section), and every referenced mcp_servers entry
+  # needs the same declaration (see mcp_servers). Running fully local
+  # becomes a checked property of the server rather than a
+  # documentation property of a carefully chosen configuration: a
+  # local_only server that starts is a local_only server. Off by
+  # default.
   # local_only: false
 
   # Whether speech that arrives while a reply is playing interrupts it.
@@ -224,6 +226,14 @@ mcp_servers:
       - http://homeassistant.local:8123/mcp_server/sse
     env:
       API_ACCESS_TOKEN: $HOME_ASSISTANT_TOKEN
+    # Tool arguments carry conversation-derived data, and no transport
+    # can know where they end up: a stdio command may proxy anywhere, a
+    # url may name localhost. Under server.local_only every referenced
+    # entry must therefore declare its egress; false is the operator
+    # asserting that whatever the command or URL reaches stays on your
+    # own network, as this proxy to a Home Assistant on the LAN does.
+    # egress: false
+    #
     # How long one call may take before the model is told it timed out.
     # The device hears silence meanwhile, so keep it short.
     # tool_timeout_s: 15

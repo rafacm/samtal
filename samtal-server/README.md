@@ -329,7 +329,14 @@ providers:
       egress: false
 ```
 
-The check runs at boot, never at request time: a local_only server that
+MCP servers sit inside the same boundary, because tool arguments carry
+conversation-derived data. No transport can know where they end up (a
+stdio command may proxy anywhere, a URL may name localhost), so under
+`local_only` every MCP server an agent references must carry the same
+`egress: false` declaration, asserting that whatever its command or URL
+reaches stays on your own network.
+
+The checks run at boot, never at request time: a local_only server that
 starts is a local_only server, and a config edit that would break the
 promise stops the server from coming up instead of quietly shipping
 audio to a vendor.
