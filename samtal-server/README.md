@@ -56,16 +56,80 @@ faster-whisper + Ollama (through `openai_compatible`) + Piper, and
 `server.local_only: true` makes the server refuse to boot anything
 else (see Security below).
 
-Cloud providers need no extra. `elevenlabs` speaks its API over HTTP
-rather than a vendor SDK, so it is in every install and costs nothing
-to carry; what makes a provider optional is weight or licensing, and a
-network client has neither. Its key is named, never written: the entry
-carries `api_key_env: ELEVENLABS_API_KEY` and the server reads that
-variable at startup, failing the boot if it is unset.
+Cloud providers need no extra. They speak their APIs over HTTP rather
+than a vendor SDK, so they are in every install and cost nothing to
+carry; what makes a provider optional is weight or licensing, and a
+network client has neither.
 
 Licensing note: `piper-tts` (piper1-gpl) is GPL-3.0, which is why it is an
 optional extra and never a core dependency of the MIT server. The same
 applies to any future `edge-tts` provider.
+
+### ElevenLabs
+
+The `elevenlabs` TTS type is the one cloud voice implemented so far,
+and the reason to reach for it is that it sounds markedly better than
+Piper. It needs two things: a key, and a voice id.
+
+```yaml
+providers:
+  tts:
+    eleven:
+      type: elevenlabs
+      voice_id: PUT_YOUR_VOICE_ID_HERE
+      api_key_env: ELEVENLABS_API_KEY
+```
+
+The key is named, never written. `api_key_env` gives the name of an
+environment variable and the server reads it at startup, failing the
+boot if it is unset rather than failing every conversation later. A
+`.env` file next to the config works, since the server loads one.
+
+The voice id is the id, not the display name, and it is
+account-specific even for the stock voices, so an id copied from
+someone else's configuration will usually 404. Pick one in the
+ElevenLabs app, or list your own:
+
+```bash
+curl -s -H "xi-api-key: $ELEVENLABS_API_KEY" \
+  https://api.elevenlabs.io/v1/voices \
+  | jq -r '.voices[] | "\(.voice_id)  \(.name)"'
+```
+
+| Option | Default | What it does |
+| ------ | ------- | ------------ |
+| `voice_id` | required | Which voice speaks |
+| `api_key_env` | required | Name of the variable holding the key |
+| `model` | `eleven_flash_v2_5` | Flash is the low-latency model (~75 ms to first byte, 32 languages including Swedish). `eleven_multilingual_v2` sounds better and answers slower |
+| `output_format` | `pcm_24000` | Must be one of the `pcm_<rate>` formats. The default matches the rate devices are spoken at, so nothing is resampled. `pcm_44100` and up need a paid tier |
+| `language_code` | unset | ISO 639-1, pins the spoken language instead of letting the model infer it from the text |
+| `voice_settings` | unset | `stability`, `similarity_boost`, `style`, `speed`, `use_speaker_boost`, passed to the API as given |
+| `timeout_s` | `30` | Seconds before a synthesis request is abandoned |
+
+Reference for all of it: the [streaming
+endpoint](https://elevenlabs.io/docs/api-reference/text-to-speech/stream),
+the [model list](https://elevenlabs.io/docs/overview/models), the
+[voice listing
+endpoint](https://elevenlabs.io/docs/api-reference/voices/search), and
+what the [voice
+settings](https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices)
+do to a voice.
+
+**What it costs in latency.** Measured against Piper on the same
+machine, median of five rounds: first audio at about 130 ms whatever
+the sentence, against Piper's 43 ms for a short sentence and 92 ms for
+a longer one. So roughly +90 ms on a short reply and +40 ms on a
+longer one. The gap narrows because ElevenLabs streams, and the clock
+stops at the first chunk, while Piper synthesizes a whole sentence
+before yielding anything; past a certain sentence length Piper is the
+slower of the two to start speaking. An idle conversation pays nothing
+extra to resume.
+
+**It sends your replies to ElevenLabs**, which is what the reply text
+is: the API is billed by character. The type is marked as egress
+accordingly, so `server.local_only: true` refuses to boot it (see
+Security below). Nothing else in the pipeline moves: VAD, ASR and the
+LLM stay wherever you configured them.
 
 ## Tools
 

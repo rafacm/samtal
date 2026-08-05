@@ -199,19 +199,27 @@ providers:
     # Cloud synthesis, streamed. Costs a network round trip per
     # sentence and sends the reply text to the vendor, and sounds
     # markedly better than a local voice for it.
+    #
+    # Every option below is passed to the ElevenLabs streaming
+    # endpoint, whose reference documents all of them:
+    # https://elevenlabs.io/docs/api-reference/text-to-speech/stream
     eleven:
       type: elevenlabs
       # Voice id from your ElevenLabs voice library: the id, not the
       # display name, and account-specific even for the stock voices.
-      # List yours with:
+      # Browse and pick one in the ElevenLabs app, or list yours with:
       #   curl -s -H "xi-api-key: $ELEVENLABS_API_KEY" \
       #     https://api.elevenlabs.io/v1/voices \
       #     | jq -r '.voices[] | "\(.voice_id)  \(.name)"'
+      # The current listing endpoint, with search and filtering:
+      # https://elevenlabs.io/docs/api-reference/voices/search
       voice_id: PUT_YOUR_VOICE_ID_HERE
       api_key_env: ELEVENLABS_API_KEY
       # Default: eleven_flash_v2_5, the low-latency model (~75 ms to
       # first byte, 32 languages). eleven_multilingual_v2 sounds
-      # better and answers slower, which a conversation feels.
+      # better and answers slower, which a conversation feels. The
+      # model list, with each one's languages and latency:
+      # https://elevenlabs.io/docs/overview/models
       # model: eleven_multilingual_v2
       # Audio asked of the API. Only the pcm_<rate> formats work here,
       # since the stage streams raw PCM; the default matches the rate
@@ -222,7 +230,10 @@ providers:
       # model infer it from the text.
       # language_code: sv
       # Passed to the API as given. Higher stability is more monotone
-      # and more predictable; speed is a multiplier around 1.0.
+      # and more predictable; speed is a multiplier around 1.0, capped
+      # at 0.7 to 1.2. The other keys are style and use_speaker_boost,
+      # which costs latency. What each one does to a voice:
+      # https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices
       # voice_settings:
       #   stability: 0.5
       #   similarity_boost: 0.75
