@@ -288,6 +288,48 @@ async def test_the_transcript_is_stripped() -> None:
     assert result.text == "Hej hej"
 
 
+# --- an echoed prompt ------------------------------------------------
+
+
+async def test_a_transcript_that_is_the_prompt_is_treated_as_nothing_said() -> None:
+    """The model hands the prompt back on short or low-content audio.
+    It reached a field session as an utterance the user never said, and
+    the prompt named the agents, so the model read it as a request and
+    handed over."""
+    asr = provider(
+        transcript_handler("samtal, Oliver, Greta, Mateo"),
+        prompt="samtal, Oliver, Greta, Mateo",
+    )
+    assert (await asr.transcribe(ONE_SECOND, 16000)).text == ""
+
+
+async def test_the_echo_is_matched_trimmed_and_case_insensitively() -> None:
+    asr = provider(transcript_handler("  SAMTAL, oliver  \n"), prompt=" samtal, Oliver ")
+    assert (await asr.transcribe(ONE_SECOND, 16000)).text == ""
+
+
+async def test_an_echo_written_as_a_sentence_is_still_an_echo() -> None:
+    """The model is transcribing, so it sometimes ends the prompt it
+    hands back with a full stop. Seen once in 45 provoked echoes."""
+    asr = provider(
+        transcript_handler("Samtal, Oliver, Greta, Mateo."),
+        prompt="samtal, Oliver, Greta, Mateo",
+    )
+    assert (await asr.transcribe(ONE_SECOND, 16000)).text == ""
+
+
+async def test_a_transcript_that_merely_contains_the_prompt_is_kept() -> None:
+    """Someone can say the words in the prompt. Only a transcript that
+    is the prompt and nothing else is an echo."""
+    asr = provider(transcript_handler("samtal, are you there?"), prompt="samtal")
+    assert (await asr.transcribe(ONE_SECOND, 16000)).text == "samtal, are you there?"
+
+
+async def test_an_entry_with_no_prompt_suppresses_nothing() -> None:
+    asr = provider(transcript_handler("samtal"))
+    assert (await asr.transcribe(ONE_SECOND, 16000)).text == "samtal"
+
+
 async def test_no_language_is_reported_and_no_session_lock_is_asked_for() -> None:
     """The response carries no usable language and no confidence at all,
     so the fields stay empty rather than echoing the configuration back

@@ -93,6 +93,21 @@ MIN_AUDIO_S = 0.1
 # even though there is no file.
 UPLOAD_NAME = "utterance.wav"
 
+# Sentence-final punctuation an echoed prompt can come back wearing:
+# the model is transcribing, so it writes what it returns as a
+# sentence. Measured, and rare rather than theoretical: of 45 echoes
+# provoked against `gpt-4o-mini-transcribe`, 44 were the prompt exactly
+# (in either case) and one carried a trailing full stop. Ignoring it
+# would leave the fix passing a spurious utterance through once in
+# tens of turns, which is the frequency the field report itself had.
+TRAILING = ".!?…。！？"
+
+
+def _normalized(text: str) -> str:
+    """A transcript reduced to what makes it the same words as another:
+    surrounding space, sentence-final punctuation, and case."""
+    return text.strip().rstrip(TRAILING).strip().casefold()
+
 
 def wav_bytes(pcm: bytes, sample_rate: int) -> bytes:
     """s16le mono PCM in a WAV container.
@@ -178,8 +193,31 @@ class OpenAiAsr(AsrProvider):
             prompt=self._prompt if self._prompt else Omit(),
             temperature=self._temperature if self._temperature is not None else Omit(),
         )
+        text = response.text.strip()
+        if self._is_echoed_prompt(text):
+            logger.warning(
+                "openai asr: the transcript came back as the configured prompt, "
+                "treating %.2f s of audio as nothing said",
+                len(pcm) / 2 / sample_rate,
+            )
+            return AsrResult(text="")
         # Language fields stay empty: this provider does not detect.
-        return AsrResult(text=response.text.strip())
+        return AsrResult(text=text)
+
+    def _is_echoed_prompt(self, text: str) -> bool:
+        """Whether the model handed the prompt back instead of hearing
+        anything. A known shape on short or low-content audio, and not a
+        cosmetic one: an echo is fed to the session as an utterance the
+        user never said, so a prompt naming the agents can trigger a
+        handover nobody asked for.
+
+        Equality rather than containment: a longer transcript that
+        happens to open with the prompt is a person saying those words.
+        A real utterance that is exactly the prompt string loses nothing
+        worth keeping."""
+        if not self._prompt:
+            return False
+        return _normalized(text) == _normalized(self._prompt)
 
 
 def build(label: str, config: ProviderConfig) -> OpenAiAsr:
