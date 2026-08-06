@@ -104,10 +104,10 @@ footprint and is not worth it at these volumes.
 
 ## Verification
 
-`uv run pytest tests/unit -q`: 651 passed, 2 skipped.
+`uv run pytest tests/unit -q`: 652 passed, 2 skipped.
 `uv run pytest tests/integration -q`: 27 passed. `ruff check` clean.
 
-Thirty-four tests across two files: `test_capture.py` for what the
+Thirty-five tests across two files: `test_capture.py` for what the
 format guarantees, `test_capture_session.py` for the wiring, driven
 through a real session over a websocket.
 
@@ -122,6 +122,7 @@ relevant piece reverted:
 | a capture still recording is never pruned | protection removed | the live capture is unlinked from under its own writer |
 | the budget is enforced when a capture closes | prune-on-close removed | two over-budget captures left on disk |
 | events stop at the limit too | limit check on events removed | an event an hour past the end of the audio |
+| every offset indexes into the audio | clamp removed from the write path | the aggregate flushed on close lands past the end |
 
 Against the issue's acceptance list:
 
@@ -154,10 +155,12 @@ Against the issue's acceptance list:
 Also verified: a conversation survives a capture directory it cannot
 use, and nothing is written at all unless a directory is configured.
 
-### Four review findings, all fixed
+### Five review findings, all fixed
 
-`codex review` found four real defects across two passes, each with a
-test that fails without its fix:
+`codex review` found five real defects across three passes, each with a
+test that fails without its fix. Three of them were the same guarantee
+leaking in different places, which is why the last fix moves it into the
+write path rather than patching another call site:
 
 1. **Event offsets could point past the end of the audio.** A session
    can be open through stretches with nothing decodable, and the
@@ -179,6 +182,12 @@ test that fails without its fix:
    hour would have written `session_closed` at 3600 s into a decision
    track whose audio ended at 900 s. The limit now ends the recording
    whichever way it is reached.
+5. **The aggregate flushed on close could still land past the audio.**
+   The general form of the previous two. An event's offset is now
+   derived from a frame index clamped to the same limit the audio is
+   clamped to, so both halves come from one number and every record
+   indexes into the WAV by construction rather than by each caller
+   remembering to.
 
 ## On what this does not do
 

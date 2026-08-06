@@ -354,6 +354,29 @@ def test_events_stop_at_the_limit_too(tmp_path: Path) -> None:
         assert record["t_ms"] <= audio_ms
 
 
+def test_every_offset_indexes_into_the_audio_even_at_the_limit(tmp_path: Path) -> None:
+    # A review finding, and the general form of the previous one: the
+    # aggregate that close() flushes was stamped with the clock, which
+    # can be past the limit the audio was clamped to. Derived from a
+    # clamped frame index now, so the guarantee holds for every record
+    # by construction rather than by each caller remembering.
+    opened = time.monotonic()
+    capture = store(tmp_path, max_session_s=0.05).open("s1", opened, MANIFEST)
+    assert capture is not None
+    capture.dropped("barge_in_off", opened + 0.01)
+    capture.event({"event": "late"}, opened + 0.075)
+    capture.close()
+
+    mic, _ = read_channels(capture.wav_path)
+    audio_ms = len(mic) / CAPTURE_RATE * 1000
+    recorded = [json.loads(line) for line in capture.jsonl_path.read_text().splitlines()]
+    assert recorded, "nothing was recorded at all"
+    for record in recorded:
+        assert record["t_ms"] <= audio_ms, (
+            f"{record['event']} at {record['t_ms']} ms is past {audio_ms:.1f} ms of audio"
+        )
+
+
 def test_a_capture_still_recording_is_never_pruned(tmp_path: Path) -> None:
     # A review finding. Unlinking underneath an open descriptor leaves
     # the session writing to a file nobody can find.

@@ -303,15 +303,23 @@ class SessionCapture:
     def _write_event(self, payload: dict[str, Any], now: float) -> None:
         """The write itself, without the limit check, so the last
         records a closing capture emits are not turned away by the very
-        limit that is closing it."""
+        limit that is closing it.
+
+        The offset is derived from a frame index rather than from the
+        clock, and that index is clamped to the limit the audio is
+        clamped to. Both halves of the guarantee then come from one
+        number: every offset in the track indexes into the WAV, by
+        construction rather than by every caller remembering to.
+        """
         if self._events is None:
             return
-        record = {"t_ms": round(self._at(now) * 1000, 1), **payload}
+        frame = min(self._frame_of(now), int(self._max_session_s * CAPTURE_RATE))
+        record = {"t_ms": round(frame / CAPTURE_RATE * 1000, 1), **payload}
         # An event's offset is only useful if it indexes into the audio,
         # and a session can be open through stretches with no decodable
         # audio at all. Remembering where the last one landed is what
         # lets close() pad the file out to cover it.
-        self._event_frame = max(self._event_frame, self._frame_of(now))
+        self._event_frame = max(self._event_frame, frame)
         try:
             self._events.write(json.dumps(record, default=str) + "\n")
             # For the same reason the audio is flushed: the events
