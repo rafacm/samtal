@@ -541,9 +541,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 - A teaching walkthrough of the diagrams (`docs/architecture/README.md`): every numbered step of the detailed conversation-turn diagram explained with the concept, the problem it solves, and links, expanding each acronym (AEC, VAD, ASR, LLM, TTS, MCP) before using it.
 
-- A high-level architecture overview diagram (`docs/architecture/samtal-architecture-overview.excalidraw`, with a PNG render), embedded in the root README: human, device, server, and the external services each side talks to.
+- A high-level architecture overview diagram (`docs/architecture/excalidraw/samtal-architecture-overview.excalidraw`, with a PNG render), embedded in the root README: human, device, server, and the external services each side talks to.
 
-- An architecture diagram of one conversation turn (`docs/architecture/samtal-conversation-flow-detailed.excalidraw`, with a PNG render beside it): the speech uplink and the reply downlink across four lanes (human, device, server, external services). The editable original is the Excalidraw scene of the same name in the team workspace; the committed file is its export.
+- An architecture diagram of one conversation turn (`docs/architecture/excalidraw/samtal-conversation-flow-detailed.excalidraw`, with a PNG render beside it): the speech uplink and the reply downlink across four lanes (human, device, server, external services). The editable original is the Excalidraw scene of the same name in the team workspace; the committed file is its export.
 - A language surface for multilingual deployments that cannot pin
   `language`: `language_detect: once` detects until one confident
   answer and then reuses it for the rest of the session (saving the

@@ -1,16 +1,18 @@
 # Architecture diagrams
 
-Two Excalidraw diagrams describe the system at different altitudes. The editable originals are scenes of the same names in the team Excalidraw workspace (samtal collection); the committed `.excalidraw` files are their exports and the `.png` files their renders, kept in sync manually. Flag them when a pipeline change makes them stale.
+Diagrams live in a directory per authoring tool, so a second tool can join without either one's files having to be picked out of a shared folder.
+
+[`excalidraw/`](excalidraw/) holds the hand-drawn pair below, which describe the system at two altitudes. Their editable originals are scenes of the same names in the team Excalidraw workspace (samtal collection); the committed `.excalidraw` files are those scenes' exports and the `.png` files their renders, kept in sync by hand. That last part is the catch: nothing in the repository can tell you an export has drifted from its scene, so flag them when a pipeline change makes them stale.
 
 ## The overview
 
-[![samtal architecture overview](samtal-architecture-overview.png)](samtal-architecture-overview.excalidraw)
+[![samtal architecture overview](excalidraw/samtal-architecture-overview.png)](excalidraw/samtal-architecture-overview.excalidraw)
 
 The picture the root README leads with: a human talks to an ESP32-S3 device, the device talks to your samtal-server over one WebSocket, and the server talks to whatever providers you configured. Everything that follows is that loop, zoomed in.
 
 ## One conversation turn, in detail
 
-[![samtal conversation flow, detailed](samtal-conversation-flow-detailed.png)](samtal-conversation-flow-detailed.excalidraw)
+[![samtal conversation flow, detailed](excalidraw/samtal-conversation-flow-detailed.png)](excalidraw/samtal-conversation-flow-detailed.excalidraw)
 
 The diagram reads top to bottom as one turn of conversation: flow 1 (blue) carries your speech up to the language model, flow 2 (green) carries its reply back down to your ears. Dashed gray lines are the control and tool messages riding the same connection. Before the first turn, the device has already fetched its configuration from the server's over-the-air (OTA) endpoint, opened the WebSocket with the token that response contained, and agreed on audio codecs in a `hello` exchange; that setup is the thin note at the top of the diagram, and the [xiaozhi research notes](../xiaozhi-notes.md) document it key by key.
 
