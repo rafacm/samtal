@@ -128,8 +128,11 @@ async def run_reply(session: session_module.Session, said: str) -> list[str]:
     what these tests are about, not the audio."""
     spoken: list[str] = []
 
-    async def speak(sentence: str, resampler: Any, into: list[str]) -> None:
-        into.append(sentence)
+    async def speak(synthesis: Any, resampler: Any, into: list[str]) -> None:
+        # Sentences reach _speak as a synthesis in flight now (#37), so
+        # the stub takes the text off it and skips the audio entirely.
+        synthesis.cancel()
+        into.append(synthesis.sentence)
 
     session._speak = speak  # type: ignore[method-assign]
     session._send_frames = _nothing  # type: ignore[method-assign]
