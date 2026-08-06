@@ -439,13 +439,14 @@ guide](https://platform.openai.com/docs/guides/text-to-speech).
 **What it costs in latency, and it is the one real drawback.** First
 audio arrives at about 820 to 900 ms, roughly +700 ms on ElevenLabs
 and +800 ms on Piper: a pause a person notices at the start of every
-reply, and again at every sentence boundary within it, which is the
-part that makes long replies stutter. See Choosing a voice above for
-the comparison in full.
+reply. See Choosing a voice above for the comparison in full.
 
-Until that lands, this type suits agents that answer in a sentence or
-two. On an agent that tells stories, the gaps are the thing you will
-hear.
+That cost is now paid once per reply rather than once per sentence.
+The server synthesizes the next sentence while the current one is
+still playing, so the boundaries inside a reply cost a single frame,
+and the stutter that used to make this type unsuitable for an agent
+that tells stories is gone. Reply length no longer picks between the
+types; the wait before the first word is what does.
 
 Which model you pick matters more here than the option table suggests,
 and the default is the fastest of the three by some margin. Worth
