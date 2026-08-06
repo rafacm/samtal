@@ -42,17 +42,20 @@ Two traps, neither guessable, both of which have already cost a session.
 - **Do not restore with `git checkout <file>`.** It restores the committed
   version, which silently discards unrelated uncommitted edits to that file.
   Copy the file aside first and copy it back.
-- **After restoring a file, `touch` it.** `mv` and `cp -p` carry the backup's
-  older mtime, so the source looks older than any cached bytecode of it and
-  the interpreter keeps running the pre-restore version. The test suite writes
-  no bytecode (`tests/conftest.py` sets `sys.dont_write_bytecode`), so pytest
-  is safe, but anything run outside it is not. Export
+- **After restoring a file, `touch` it.** A cached `.pyc` records the source's
+  size and its mtime in whole seconds, and CPython accepts the cache when both
+  still match. Restoring carries the backup's mtime rather than the current
+  time, which can land back on the second the cache was compiled on, so the
+  interpreter keeps running the pre-restore version. The test suite writes no
+  bytecode and clears the caches it finds (`tests/conftest.py`), so pytest is
+  safe, but anything run outside it is not. Export
   `PYTHONDONTWRITEBYTECODE=1` for those, or clear `__pycache__`.
 
 The same shape bites a revert-run-restore cycle that checks a regression test
 really fails without its fix: swapping two statements preserves the byte count,
-a scripted cycle finishes inside one second, and CPython's default `.pyc`
-validation looks at nothing else.
+a scripted cycle finishes inside one second, and the `.pyc` validation looks at
+nothing else. If a result ever contradicts the source you are reading, suspect
+this before suspecting the code.
 
 ## Workflow
 
