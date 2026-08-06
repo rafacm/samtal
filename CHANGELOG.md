@@ -18,14 +18,20 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   `temperature` and `timeout_s`. The stage's PCM goes up as WAV, whose
   header carries whatever rate the pipeline is running at, so nothing
   is re-encoded and no rate is pinned. `base_url` reaches any server
-  implementing `/v1/audio/transcriptions`, which needs no key, and the
+  implementing `/v1/audio/transcriptions`: a keyless self-hosted one
+  may leave `api_key_env` out, while a gateway or hosted endpoint that
+  authenticates still names its variable there, since only the
+  *requirement* for a key is specific to OpenAI's own host. The
   endpoint rather than the type decides egress, so an entry under
   `server.local_only` declares its own. Retries are off, so `timeout_s`
-  bounds a turn. Audio under the API's 0.1 s minimum is answered empty
+  bounds a turn. Audio under OpenAI's 0.1 s minimum is answered empty
   without a round trip, which is the barge-in path: a snippet of tens
   of milliseconds is transcribed to decide whether an interruption was
   real, and the API's refusal would be logged as a failure rather than
-  the non-answer it is.
+  the non-answer it is. That floor was measured against OpenAI, so it
+  applies only there; a compatible endpoint sets its own accepted
+  length, as it already does for the model rules and the temperature
+  range.
   Unlike the TTS types, this one is usually the faster choice as well
   as the more accurate: measured against local `faster_whisper` small
   on an int8 CPU, 536 to 658 ms per utterance against 1688 to 1781 ms,
