@@ -99,6 +99,8 @@ async def conversation(websocket: WebSocket) -> None:
         state.agent_providers,
         state.mcp_servers,
         state.memory,
+        state.capture,
+        state.device_facts,
     )
     # Capacity is checked after the token, so a full server still answers a
     # bad token with a refusal about the token.

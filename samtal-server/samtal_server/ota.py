@@ -138,6 +138,11 @@ async def check_version(request: Request) -> Response:
     payload = await _read_json_object(request)
     version = reported_version(payload)
     board = reported_board(payload)
+    # This is the only moment a device ever states its firmware version:
+    # the websocket handshake does not carry it. Kept so the session
+    # about to open can name it, which a capture manifest needs, since
+    # echo cancellation is firmware-side.
+    request.app.state.device_facts.record(mac, version, board)
     # No session exists yet, so the structured record carries the device
     # rather than a session id; the websocket events pick the device up
     # from here.

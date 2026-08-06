@@ -51,6 +51,7 @@ import contextlib
 import logging
 import uuid
 from collections.abc import AsyncIterator, Sequence
+from datetime import UTC, datetime
 from typing import Any
 
 import av
@@ -60,6 +61,12 @@ from samtal_server import __version__
 from samtal_server.audio.opus import OpusDecoder, OpusEncoder
 from samtal_server.audio.resample import Resampler
 from samtal_server.build_info import revision
+from samtal_server.capture import (
+    CAPTURE_RATE,
+    CaptureStore,
+    DeviceFacts,
+    SessionCapture,
+)
 from samtal_server.config import Config
 from samtal_server.config.models import normalize_mac
 from samtal_server.protocol import framing, messages
@@ -250,9 +257,19 @@ class Session:
         agent_providers: dict[str, AgentProviders],
         mcp_servers: McpServers | None = None,
         memory: MemoryStore | None = None,
+        captures: CaptureStore | None = None,
+        device_facts: DeviceFacts | None = None,
     ) -> None:
         self.websocket = websocket
         self.config = config
+        self._captures = captures
+        self._device_facts = device_facts if device_facts is not None else DeviceFacts()
+        self._capture: SessionCapture | None = None
+        # Built only when a capture starts, so a server that is not
+        # recording pays for none of this.
+        self._capture_decoder: OpusDecoder | None = None
+        self._capture_reply_decoder: OpusDecoder | None = None
+        self._capture_resampler: Resampler | None = None
         self._mcp_servers = mcp_servers if mcp_servers is not None else McpServers({})
         self._memory = memory
         self.session_id = uuid.uuid4().hex
@@ -341,13 +358,20 @@ class Session:
         """The structured half of a log line: what every conversation
         event carries, plus this event's own fields. Passed as `extra=`,
         so it is invisible in the text format and top-level keys in the
-        JSON one."""
-        return {
+        JSON one.
+
+        Every event goes through here, which is why the capture's
+        decision track is hooked here too rather than at each call
+        site: an event that is logged is an event that is recorded."""
+        payload = {
             "event": event,
             "session": self.session_id,
             "device": self._mac,
             **fields,
         }
+        if self._capture is not None:
+            self._capture.event(payload, asyncio.get_running_loop().time())
+        return payload
 
     async def run(self) -> None:
         device_id = self.websocket.headers.get("device-id", "").strip()
@@ -393,6 +417,9 @@ class Session:
         if hello is None:
             return
         self.protocol_version = hello.version
+        # Before the session_open event below, so that event is the first
+        # line of the decision track rather than missing from it.
+        self._start_capture(client_id)
         await self.websocket.send_text(messages.server_hello(self.session_id, OUTPUT_AUDIO))
         logger.info(
             "session %s open: device %s (client %s) agent %s%s, protocol v%d, "
@@ -452,6 +479,12 @@ class Session:
                 mac,
                 extra=self._event("session_closed", duration_s=self._open_duration_s()),
             )
+            # After session_closed, so it is the last line of the
+            # decision track and the WAV header is patched with a length
+            # covering everything.
+            if self._capture is not None:
+                self._capture.close()
+                self._capture = None
 
     async def request_shutdown(
         self,
@@ -492,6 +525,77 @@ class Session:
         if self._opened_at is None:
             return 0.0
         return round(asyncio.get_running_loop().time() - self._opened_at, 2)
+
+    def _start_capture(self, client_id: str) -> None:
+        """Begin recording this session, when a directory is configured."""
+        if self._captures is None or self._opened_at is None:
+            return
+        self._capture = self._captures.open(
+            self.session_id, self._opened_at, self._manifest(client_id)
+        )
+        if self._capture is None:
+            return
+        self._capture_decoder = OpusDecoder(sample_rate=PIPELINE_SAMPLE_RATE)
+        self._capture_reply_decoder = OpusDecoder(sample_rate=OUTPUT_AUDIO.sample_rate)
+        self._capture_resampler = Resampler(OUTPUT_AUDIO.sample_rate, CAPTURE_RATE)
+
+    def _manifest(self, client_id: str) -> dict[str, Any]:
+        """What this capture was made against.
+
+        A capture outlives the code that made it, so it has to carry
+        enough to be interpreted later. The barge-in thresholds matter
+        most: an old capture analysed after they change is misleading
+        unless it states its own. The provider entries are recorded
+        verbatim rather than as a hash, because the exact model string
+        is the only handle on a hosted model whose behaviour changed
+        without a version bump on this side. They hold environment
+        variable names rather than secrets, which the config schema
+        enforces.
+        """
+        server = self.config.server
+        return {
+            "session": self.session_id,
+            "started_at": datetime.now(UTC).isoformat(),
+            "server": {"version": __version__, "revision": revision()},
+            "device": {
+                "mac": self._mac,
+                "client": client_id or None,
+                # Reported at OTA check-in, not on this socket. Empty
+                # when the device reached the websocket without checking
+                # in first, which a restarted server also produces.
+                **self._device_facts.get(self._mac),
+            },
+            "protocol": self.protocol_version,
+            "agent": self._agent,
+            "agents": list(self._agents),
+            "providers": self._provider_manifest(),
+            "audio": {
+                "capture_rate": CAPTURE_RATE,
+                "pipeline_rate": PIPELINE_SAMPLE_RATE,
+                "output_rate": OUTPUT_AUDIO.sample_rate,
+                "frame_duration_ms": OUTPUT_AUDIO.frame_duration,
+            },
+            "barge_in": {
+                "enabled": server.barge_in,
+                "min_speech_ms": server.barge_in_min_speech_ms,
+                "refractory_ms": server.barge_in_refractory_ms,
+                "utterance_pre_roll_ms": server.utterance_pre_roll_ms,
+            },
+        }
+
+    def _provider_manifest(self) -> dict[str, Any]:
+        if self._agent is None:
+            return {}
+        described: dict[str, Any] = {}
+        for stage in ("llm", "asr", "tts", "vad"):
+            name, _ = self.config.provider_for_agent(self._agent, stage)
+            if name is None:
+                continue
+            entry = getattr(self.config.providers, stage).get(name)
+            if entry is None:
+                continue
+            described[stage] = {"name": name, **entry.model_dump(exclude_none=True)}
+        return described
 
     def _start_idle_watchdog(self) -> None:
         """Start the timer that hangs up on a conversation nobody is
@@ -660,7 +764,14 @@ class Session:
                 await self._handle_text(received["text"])
 
     async def _handle_audio(self, data: bytes) -> None:
+        # Before every guard below, deliberately. The guards drop frames
+        # when the session is not listening and when barge-in is off
+        # mid-reply, and those are precisely the frames that explain a
+        # misfire, so a capture taken after them would be missing the
+        # evidence it exists for (#42).
+        self._capture_microphone(data)
         if not self.listening or self._endpointer is None:
+            self._note_dropped("not_listening")
             return
         if not self.config.server.barge_in and self._replying():
             # Barge-in off: this is a board whose echo cancellation is
@@ -668,26 +779,89 @@ class Session:
             # the server. Dropped here, before the decode, and nothing
             # has to re-arm afterwards: the guard opens by itself when
             # the reply ends.
+            self._note_dropped("barge_in_off")
             return
         try:
             frame = framing.unwrap(self.protocol_version, data)
         except framing.FramingError as exc:
             logger.warning("session %s: dropped binary frame: %s", self.session_id, exc)
+            self._note_dropped("framing_error")
             return
         if frame.payload_type != framing.PAYLOAD_OPUS:
+            self._note_dropped("not_opus")
             return
         try:
             pcm = self._decoder.decode(frame.payload)
         except av.FFmpegError as exc:
             logger.warning("session %s: undecodable Opus packet: %s", self.session_id, exc)
+            self._note_dropped("undecodable")
             return
         self._utterance.extend(pcm)
         if len(self._utterance) > UTTERANCE_TAIL_BYTES:
             excess = len(self._utterance) - UTTERANCE_TAIL_BYTES
             del self._utterance[:excess]
             self._utterance_dropped += excess
-        if self._endpointer.feed(pcm):
+        endpointed = self._endpointer.feed(pcm)
+        # After the feed, so the sample is the endpointer's opinion of
+        # the audio just recorded rather than of the frame before it.
+        self._capture_vad()
+        if endpointed:
             await self._finish_utterance(endpointed=True)
+
+    def _note_dropped(self, reason: str) -> None:
+        if self._capture is not None:
+            self._capture.dropped(reason, asyncio.get_running_loop().time())
+
+    def _capture_vad(self) -> None:
+        if self._capture is None or self._endpointer is None:
+            return
+        self._capture.vad(
+            self._endpointer.speech_ms(),
+            self.listening,
+            self._replying(),
+            asyncio.get_running_loop().time(),
+        )
+
+    def _capture_microphone(self, data: bytes) -> None:
+        """Decode a mic frame for the capture, whatever the session then
+        does with it.
+
+        Its own decoder, not the pipeline's: this one sees every frame
+        while the pipeline's sees only the frames that got past the
+        guards, and pushing the guarded frames through the pipeline
+        decoder would change what the conversation hears."""
+        if self._capture is None or self._capture_decoder is None:
+            return
+        try:
+            frame = framing.unwrap(self.protocol_version, data)
+            if frame.payload_type != framing.PAYLOAD_OPUS:
+                return
+            pcm = self._capture_decoder.decode(frame.payload)
+        except (framing.FramingError, av.FFmpegError):
+            # Already counted as dropped by the caller, and a frame the
+            # capture cannot read is not a reason to stop capturing.
+            return
+        self._capture.microphone(pcm, asyncio.get_running_loop().time())
+
+    def _capture_reply(self, packet: bytes) -> None:
+        """Record a frame as it is paced out, which is what the speaker
+        played rather than what was synthesized. Decoded back from the
+        Opus that actually went to the device, and resampled to the
+        capture rate so one sample index means one instant in both
+        channels."""
+        if (
+            self._capture is None
+            or self._capture_reply_decoder is None
+            or self._capture_resampler is None
+        ):
+            return
+        try:
+            pcm = self._capture_reply_decoder.decode(packet)
+        except av.FFmpegError:
+            return
+        self._capture.reply(
+            self._capture_resampler.process(pcm), asyncio.get_running_loop().time()
+        )
 
     async def _handle_text(self, text: str) -> None:
         try:
@@ -1417,6 +1591,7 @@ class Session:
             # shifts `_pace_start`, so the cadence survives the pause.
             await self._pace_resume.wait()
             await self.websocket.send_bytes(framing.wrap(self.protocol_version, packet))
+            self._capture_reply(packet)
             self._pace_count += 1
 
     async def _close(self, code: int, reason: str) -> None:
