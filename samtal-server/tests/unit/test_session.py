@@ -604,10 +604,19 @@ async def test_only_a_sentence_whose_audio_finished_counts_as_spoken() -> None:
     )
 
     spoken: list[str] = []
-    await session._speak("Short and finished.", resampler, spoken)
+    tts = session._providers.tts
+    await session._speak(
+        session_module._Synthesis("Short and finished.", tts, session.session_id),
+        resampler,
+        spoken,
+    )
     finished_frames = socket.frames
 
-    cut = asyncio.create_task(session._speak(LONG_REPLY, resampler, spoken))
+    cut = asyncio.create_task(
+        session._speak(
+            session_module._Synthesis(LONG_REPLY, tts, session.session_id), resampler, spoken
+        )
+    )
     await asyncio.sleep(0.1)
     cut.cancel()
     with contextlib.suppress(asyncio.CancelledError):
