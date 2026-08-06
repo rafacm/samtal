@@ -1,17 +1,22 @@
-"""The cap on how long one session lives, and the polite close.
+"""The two bounds on how long one session lives, and the polite close.
 
-There is no separate idle timeout: a session's total life bounds an idle
-one too, which is the whole reason the cap exists (a device that stopped
-talking hours ago still holds a slot). The firmware reads the close as
-the end of a conversation and reconnects on the next wake word, so a cap
-set sensibly is invisible in normal use.
+`max_session_s` caps a session's total life. `idle_timeout_s` is the
+shorter one users actually meet: a realtime device streams its mic
+continuously and nothing in the firmware ever closes the channel, so
+walking away used to leave a mic running until the hour was up (#20).
+Both end the same way, and the firmware reads the close as the end of a
+conversation and reconnects on the next wake word, so both are invisible
+in normal use.
 
-request_shutdown is the shared way to end a session politely, used both
-by the cap here and by the shutdown drain: a reply already speaking
-finishes its sentence first, because somebody is listening to it.
+request_shutdown is the shared way to end a session politely, used by
+the cap, the idle timeout, and the shutdown drain alike: a reply already
+speaking finishes its sentence first, because somebody is listening
+to it.
 """
 
 import asyncio
+import json
+import time
 from typing import Any, cast
 
 import pytest
@@ -20,14 +25,19 @@ from starlette.websockets import WebSocketDisconnect
 
 import samtal_server.session as session_module
 from samtal_server.app import create_app
+from samtal_server.audio.opus import OpusEncoder
 from samtal_server.providers import build_agent_providers
 from samtal_server.session import GOING_AWAY, NORMAL_CLOSURE, Session
 from tests.unit.test_session import (
+    collect_reply,
     config_with_agent,
     connect,
+    endpoint_silence,
     say_something,
+    send_pcm,
     sentences,
     shake_hands,
+    speech_pcm,
 )
 
 
@@ -35,6 +45,28 @@ def capped_config(seconds: float):
     config = config_with_agent()
     config.server.limits.max_session_s = seconds
     return config
+
+
+# Far enough above any idle timeout used here that it never fires
+# first, near enough that a broken idle timeout ends the test in
+# seconds. wait_for_close blocks until something closes the socket, so
+# without a second bound a regression would hang the lane rather than
+# fail it, and the close reason is what tells the two apart.
+BACKSTOP_S = 10.0
+
+
+def idle_config(seconds: float, **kwargs: Any):
+    """A config whose idle timeout is the bound under test."""
+    config = config_with_agent(**kwargs)
+    config.server.limits.idle_timeout_s = seconds
+    config.server.limits.max_session_s = BACKSTOP_S
+    return config
+
+
+def listen_realtime(websocket) -> None:
+    """What a realtime device sends once and never again. It is what
+    makes the idle timeout apply at all."""
+    websocket.send_text(json.dumps({"type": "listen", "state": "start", "mode": "realtime"}))
 
 
 def wait_for_close(websocket) -> WebSocketDisconnect:
@@ -85,6 +117,108 @@ def test_the_session_is_logged_as_having_hit_the_limit(
 
     (limited,) = [r for r in caplog.records if getattr(r, "event", None) == "session_limit"]
     assert limited.duration_s >= 0.3
+
+
+def test_a_realtime_session_that_stops_talking_is_hung_up_on() -> None:
+    # #20: the device asks to listen once and streams its mic for the
+    # rest of the connection, and nothing in the firmware ever closes
+    # that channel. Walking away is exactly this: the listen start, and
+    # then nothing.
+    with TestClient(create_app(idle_config(0.3))) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            listen_realtime(websocket)
+            closed = wait_for_close(websocket)
+    assert closed.code == NORMAL_CLOSURE
+    assert closed.reason == "idle timeout"
+
+
+def test_the_idle_timeout_leaves_a_session_that_never_went_realtime_alone() -> None:
+    # An auto or manual device stops listening after each reply and
+    # re-arms per turn, so it is not streaming a room to anybody and the
+    # timeout deliberately does not apply. Its bound is max_session_s, as
+    # before. The sleep is several times the timeout: if this applied,
+    # the socket would be long gone before the turn is attempted.
+    with TestClient(create_app(idle_config(0.2))) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            time.sleep(1.0)
+            texts, _ = say_something(websocket)
+            assert sentences(texts) == ["You said hello."]
+
+
+def test_talking_resets_the_idle_clock() -> None:
+    # The timeout counts from the end of the last utterance, not from
+    # the start of the session, so a conversation that keeps going is
+    # never interrupted by it. Both turns here land well inside the
+    # window, and the second only happens because the first moved it.
+    config = idle_config(1.5, asr_text="{ms}")
+    with TestClient(create_app(config)) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            listen_realtime(websocket)
+            encoder = OpusEncoder()
+            send_pcm(websocket, speech_pcm(240), encoder)
+            endpoint_silence(websocket, encoder)
+            first, _ = collect_reply(websocket)
+            send_pcm(websocket, speech_pcm(240), encoder)
+            endpoint_silence(websocket, encoder)
+            second, _ = collect_reply(websocket)
+    assert sentences(first) and sentences(second)
+
+
+# A reply the server takes longer to speak than the idle timeout, so
+# the timer comes due in the middle of it. Mock TTS speaks at about
+# 0.04 s per character and the frames are paced in real time, so this
+# is roughly 1.8 s against the 1 s timeout below: comfortably over it,
+# and two turns of it still comfortably under BACKSTOP_S.
+LONG_REPLY = "One. Two. Three. Four. Five. Six. Seven. Eight."
+
+
+def test_a_reply_still_speaking_is_not_an_idle_session() -> None:
+    # A reply has not ended while it is still streaming, so it counts as
+    # activity in its own right.
+    #
+    # The failure this guards against is not a reply cut off mid-word:
+    # request_shutdown politely waits for one to finish speaking. It is
+    # what happens next. A timer that came due during the reply has
+    # already decided to hang up, so the user is given no window at all
+    # to answer what they just heard: the socket closes the instant the
+    # reply ends, and the second turn below never happens.
+    config = idle_config(1.0, llm_reply=LONG_REPLY)
+    with TestClient(create_app(config)) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            listen_realtime(websocket)
+            encoder = OpusEncoder()
+            send_pcm(websocket, speech_pcm(240), encoder)
+            endpoint_silence(websocket, encoder)
+            first, _ = collect_reply(websocket)
+            # Answering the reply, inside the window it should have left.
+            send_pcm(websocket, speech_pcm(240), encoder)
+            endpoint_silence(websocket, encoder)
+            second, _ = collect_reply(websocket)
+    assert sentences(first) == LONG_REPLY.split()
+    assert sentences(second) == LONG_REPLY.split()
+
+
+def test_the_idle_close_is_logged_as_its_own_event(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # A distinct event from session_limit: an operator reading the logs
+    # should be able to tell a conversation that was abandoned from one
+    # that ran out of its hour.
+    with caplog.at_level("INFO"):
+        with TestClient(create_app(idle_config(0.3))) as client:
+            with connect(client) as websocket:
+                shake_hands(websocket)
+                listen_realtime(websocket)
+                wait_for_close(websocket)
+
+    (idled,) = [r for r in caplog.records if getattr(r, "event", None) == "session_idle"]
+    assert idled.idle_s == 0.3
+    assert idled.duration_s >= 0.3
+    assert not [r for r in caplog.records if getattr(r, "event", None) == "session_limit"]
 
 
 class FakeWebsocket:
