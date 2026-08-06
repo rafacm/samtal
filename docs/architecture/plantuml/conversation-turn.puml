@@ -1,0 +1,149 @@
+@startuml samtal-conversation-turn
+' One conversation turn as the code actually runs it. Ordering and
+' concurrency are the point here, which is what a sequence diagram can
+' show and a box-and-arrow picture cannot: the tool loop's rounds, the
+' sentence lookahead overlapping playback, and who re-arms the listening.
+
+title samtal: one conversation turn, from wake word to spoken reply
+
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontSize 12
+skinparam BoxPadding 12
+skinparam sequenceMessageAlign left
+
+actor "Person" as H
+participant "ESP32-S3\ndevice" as D #EEF3FF
+
+box "samtal-server" #EEF8EE
+  participant "Session" as S
+  participant "Endpointer\n(silero)" as V
+  participant "ASR" as A
+  participant "LLM" as L
+  participant "Tools" as T
+  participant "TTS" as P
+end box
+
+== Before the first turn (once per boot, once per connection) ==
+
+D -> S : POST /xiaozhi/ota/ with system info
+S --> D : websocket url, device token,\nprotocol version, wall clock
+note right of D
+  Persisted to NVS. samtal-server serves no
+  firmware images, so the firmware section
+  always answers "up to date", and the reply
+  never carries an activation section.
+end note
+D -> S : WebSocket upgrade,\nAuthorization: Bearer <token>
+note over S : Token verified **before** the accept.\nA failure is an HTTP 403 on the upgrade,\nwhich stock firmware retries and refreshes.
+D -> S : hello (audio params, device MAC, client id)
+S --> D : hello (opus, 24 kHz, 60 ms frames)
+note over S : Ten seconds each way, then the session gives up.\nThe device is resolved to an agent here; a device\nbound to no agent is told so and closed.
+S ->> D : mcp initialize, tools/list
+D -->> S : self.* tools (volume, brightness, screen)
+note right of S : Discovery runs as a background task,\nso a first utterance never waits on it.
+
+== Flow 1: from the voice to the model ==
+
+H -> D : wake word (ESP-SR on the chip),\nor a button press
+D -> S : listen start (mode: auto | manual | realtime)
+H -> D : speaks
+note over D
+  The speaker and the microphone sit centimetres
+  apart, so the microphone hears the assistant too.
+  Hardware echo cancellation (ES7210 + ES8311)
+  subtracts the known playback before anything
+  else runs. It is what makes barge-in possible.
+end note
+D -> S : binary Opus frames, 16 kHz, 60 ms each\n(v1 bare packets; v2 and v3 prefix a header)
+S -> S : decode to PCM, s16le mono 16 kHz
+
+loop while the device is listening
+  S -> V : feed(pcm)
+  V --> S : still speaking
+end
+V --> S : **utterance ended**\n(enough trailing silence)
+
+S -> S : trim to speech_start minus\nutterance_pre_roll_ms (300 ms default)
+note right of S
+  A continuously listening device piles silence in
+  front of every utterance. Only the endpointer knows
+  where the speech began, so it reports the offset and
+  the session cuts there rather than transcribing the
+  wait. The buffer is bounded: a realtime session
+  listens through the silences for the whole session.
+end note
+
+S -> A : transcribe(pcm, 16000, language_hint)
+A --> S : text, detected language,\noptional lock_language
+note right of A
+  `lock_language` is the provider asking the session
+  to reuse a language for the rest of the session.
+  It is how a per-session policy lives in a provider
+  that is shared between sessions and holds no
+  per-session state of its own.
+end note
+S -> D : stt (the transcript, for the display)
+
+== The reply: a tool loop the session owns ==
+
+note over S, T
+  The loop lives in the session, not in a provider,
+  because only the session can change agents between
+  rounds. Up to MAX_TOOL_ROUNDS = 4; the last round is
+  sent with tool_choice = "none", so a reply always
+  ends in speech rather than in a tool nobody hears.
+end note
+
+loop up to 4 rounds
+  S -> L : stream(system prompt + memory,\nturns, tool snapshot, tool_choice)
+  L --> S : text deltas, or tool calls
+  alt the model asked for tools
+    S -> T : execute (builtin, self_*, or <entry>__*)
+    T --> S : results, failures included
+    note right of T : A failure is a result too: the model\nphrases what to tell the user, in its\nown voice and the user's language.
+  else the model is speaking
+  end
+end
+
+== Flow 2: from the model's words to the ears ==
+
+S -> S : SentenceSplitter: cut on sentence-ending\npunctuation once the whitespace has arrived
+S -> D : tts start
+
+loop per sentence
+  S -> P : synthesize(sentence)
+  activate P
+  P --> S : PCM chunks at the voice's rate
+  S -> S : resample to 24 kHz, encode 60 ms Opus,\npace to realtime
+  S -> D : tts sentence_start + Opus frames
+  D -> H : speaks the sentence
+  S -> P : synthesize(**next** sentence) while this one plays
+  deactivate P
+end
+
+note over S, P
+  Synthesizing only after a sentence finished playing puts
+  its whole time to first byte on the speaker as silence,
+  once per sentence: measured at 617 ms and 520 ms on a
+  three-sentence reply, and reported from a board session
+  as "hiccups in the assistant's voice". Running ahead
+  spends that time against playback already happening.
+  The lookahead buffer holds **one chunk**, not the sentence,
+  so the paced consumer keeps its backpressure on a provider
+  that can produce far faster than realtime.
+end note
+
+S -> D : tts stop
+
+alt auto mode
+  D -> S : listen start (the device re-arms itself)
+else realtime mode
+  note over D, S : The device asked once and never stopped streaming,\nso the session never stops listening. It therefore\nhears the user through its own reply, which is\nwhat makes barge-in reachable (and gated).
+else manual mode
+  H -> D : press to talk again
+end
+
+note over S : Silence past server.limits.idle_timeout_s\n(120 s by default) hangs up a realtime session,\nwhich would otherwise hold a slot forever.
+
+@enduml

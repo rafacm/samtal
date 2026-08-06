@@ -4,6 +4,8 @@ Diagrams live in a directory per authoring tool, so a second tool can join witho
 
 [`excalidraw/`](excalidraw/) holds the hand-drawn pair below, which describe the system at two altitudes. Their editable originals are scenes of the same names in the team Excalidraw workspace (samtal collection); the committed `.excalidraw` files are those scenes' exports and the `.png` files their renders, kept in sync by hand. That last part is the catch: nothing in the repository can tell you an export has drifted from its scene, so flag them when a pipeline change makes them stale.
 
+[`plantuml/`](plantuml/) holds diagrams whose source is text in this repository and whose renders come from a command. They are plainer to look at and they cannot drift unnoticed: a pipeline change and the picture of it move in the same commit, and a reviewer reads the diff. Three of them, covering what leaves the host, the ordering inside one turn, and the barge-in decision; the directory's own [README](plantuml/README.md) says what each one is for and how to render them.
+
 ## The overview
 
 [![samtal architecture overview](excalidraw/samtal-architecture-overview.png)](excalidraw/samtal-architecture-overview.excalidraw)
