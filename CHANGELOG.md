@@ -190,6 +190,22 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   a `stop` it was never told to expect is the one way this could
   strand one. Recorded as an ADR.
 
+- CI passes the short commit SHA as `SAMTAL_REVISION`, so a running
+  container's `revision` equals its image tag's suffix instead of being
+  40 characters against the tag's seven. The field meant two different
+  things depending on which source produced it, and a deployment was
+  caught by it: its post-deploy check compared `/healthz` to the `sha-`
+  tag with equality, which is the natural reading, and got a false
+  failure. The seven characters come from one expression shared by the
+  build arguments, the smoke lane and `docker/metadata-action`'s
+  `type=sha,format=short`, so the tag and the reported revision cannot
+  drift apart. Deliberately not `git rev-parse --short`, whose length
+  git widens as a repository grows: what this has to agree with is the
+  tag. A working tree still reports `git describe --always --dirty`,
+  keeping the `-dirty` marker that says a build is running code which
+  is not any commit, and an image built with no build argument still
+  reports `unknown`.
+
 - The rules an `openai` provider derives from its `base_url` (whether
   a key is required, whether the type's model rules apply, the retry
   policy) moved to a shared `providers/openai_endpoint.py`, now that

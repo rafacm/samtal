@@ -1010,15 +1010,13 @@ $ curl -s localhost:8003/healthz
 {"status":"ok","version":"0.1.0","revision":"a1b2c3d"}
 ```
 
-**The format depends on where the revision came from, and the two are
-not interchangeable.** From a working tree it is `git describe`, which
-is short (`a1b2c3d`). From a published image it is whatever
-`SAMTAL_REVISION` was built with, and CI passes the full 40-character
-commit SHA, so a deployed container reports
-`9fd3de5be80244ddea00e3a304241254d0150350` while its image tag reads
-`sha-9fd3de5`. **Matching a running pod to its image tag is therefore a
-prefix check, not an equality check.** Scripting it as equality gives a
-false failure, which is exactly how this was found.
+**A running pod's revision equals its image tag's suffix**: a container
+from the image tagged `sha-9fd3de5` reports `9fd3de5`, so a post-deploy
+check is an equality check. CI passes the same seven characters
+`docker/metadata-action` puts in the tag, computed from one expression,
+so the two cannot drift. It used to pass the full 40-character SHA,
+which made the match a prefix check; a deployment scripted it as
+equality, which is the natural reading, and got a false failure.
 
 It also rides every `session_open` event, which is the widest payoff for
 one field: the JSON logs already ship to a collector, so every session is
@@ -1042,7 +1040,7 @@ The value is resolved once at startup, in this order:
 Building an image yourself:
 
 ```console
-docker build --build-arg SAMTAL_REVISION=$(git rev-parse HEAD) -t samtal-server .
+docker build --build-arg SAMTAL_REVISION=$(git rev-parse --short HEAD) -t samtal-server .
 ```
 
 ## Running in a container
