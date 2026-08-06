@@ -116,6 +116,48 @@ def test_a_speed_outside_the_api_range_is_refused(monkeypatch: pytest.MonkeyPatc
         )
 
 
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://api.openai.com/v1",
+        "https://api.openai.com/v1/",
+        "HTTPS://API.OPENAI.COM/v1",
+        "https://api.openai.com:443/v1",
+    ],
+)
+def test_every_spelling_of_openai_keeps_the_startup_guarantees(
+    base_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The host decides, not the spelling. A raw string comparison would
+    let a trailing slash boot keyless and fail on the first synthesis,
+    and would skip the model rules with it."""
+    monkeypatch.delenv("OPENAI_KEY", raising=False)
+    with pytest.raises(ProviderError, match="needs an API key"):
+        build_tts(type="openai", voice="alloy", base_url=base_url)
+
+    monkeypatch.setenv("OPENAI_KEY", "secret")
+    with pytest.raises(ProviderError, match='ignores option "speed"'):
+        build_tts(
+            type="openai",
+            voice="alloy",
+            api_key_env="OPENAI_KEY",
+            base_url=base_url,
+            speed=1.2,
+        )
+
+
+@pytest.mark.parametrize("base_url", ["not-a-url", "api.openai.com/v1", "https://"])
+def test_a_base_url_that_is_not_a_url_fails_the_build(
+    base_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Including the one that looks like OpenAI but has no scheme, which
+    would otherwise be treated as a compatible endpoint and boot
+    keyless."""
+    monkeypatch.setenv("OPENAI_KEY", "secret")
+    with pytest.raises(ProviderError, match='"base_url" must be a URL'):
+        build_tts(type="openai", voice="alloy", api_key_env="OPENAI_KEY", base_url=base_url)
+
+
 def test_a_compatible_endpoint_keeps_its_own_model_rules(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

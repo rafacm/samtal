@@ -21,7 +21,10 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   `speed` on a `gpt-4o` model, or `instructions` on a `tts-1` model,
   fails the boot rather than becoming a knob the API silently ignores;
   that check knows OpenAI's models, so it applies only when `base_url`
-  is OpenAI's and a compatible server receives both knobs unexamined.
+  names OpenAI's host and a compatible server receives both knobs
+  unexamined. The host is what decides, so every spelling of OpenAI's
+  endpoint keeps the same startup checks, and a `base_url` that is not
+  a URL fails the boot rather than the first synthesis.
   `base_url` reaches any server implementing `/v1/audio/speech`, so a
   local pipeline stays available through this type and no key is
   needed for one; that also means the endpoint rather than the type

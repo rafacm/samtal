@@ -222,6 +222,11 @@ anything off your host, which is why it cannot declare its own egress:
 under `server.local_only` the entry carries its own `egress: false` to
 assert the endpoint is local, exactly as `openai_compatible` does.
 
+Whether an entry counts as OpenAI is decided by the host, so every
+spelling of it (a trailing slash, an explicit port, a different case)
+keeps the same startup checks. A `base_url` that is not a URL at all
+fails the boot rather than the first synthesis.
+
 Retries are off. The SDK would otherwise attempt a failed request
 three times, which inside the serial sentence loop means the device
 sits silent for three timeouts plus backoff. A sentence that fails
@@ -232,8 +237,8 @@ API would accept. Each OpenAI model reads one of them and silently
 ignores the other, so naming the wrong one for the model fails the
 boot rather than becoming a knob that never takes effect.
 
-That check applies only when `base_url` is OpenAI's, because it is a
-fact about OpenAI's models rather than about the dialect. A compatible
+That check applies only when `base_url` names OpenAI's host, because
+it is a fact about OpenAI's models rather than about the dialect. A compatible
 server may name a model `gpt-4o-anything` and read `speed`, or read
 `instructions` on a model named nothing like OpenAI's, and its `speed`
 need not stop at 4.0. Both knobs are passed through to such an
