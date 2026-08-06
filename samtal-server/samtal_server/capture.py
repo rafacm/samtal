@@ -186,6 +186,9 @@ class SessionCapture:
         # out to cover it rather than leaving offsets past the end.
         self._event_frame = 0
         self._on_close = on_close
+        # Guards close() against being re-entered from an event written
+        # while it is closing.
+        self._closing = False
 
     def start(self) -> None:
         self._wav = self.wav_path.open("wb")
@@ -245,13 +248,7 @@ class SessionCapture:
         if self._stopped or self._wav is None or not pcm:
             return
         if self._expired(now):
-            logger.info(
-                "session %s: capture reached its %.0f s limit",
-                self._session_id,
-                self._max_session_s,
-                extra={"event": "capture_limit", "session": self._session_id},
-            )
-            self.close()
+            self._finish_at_limit()
             return
         at = max(channel.next_frame, self._frame_of(now), self._start_frame)
         try:
@@ -275,10 +272,39 @@ class SessionCapture:
         self._data_bytes += len(block)
         self._start_frame = up_to_frame
 
+    def _finish_at_limit(self) -> None:
+        """End a capture that has run as long as it is allowed to. The
+        conversation carries on; only the recording stops."""
+        if self._closing:
+            return
+        logger.info(
+            "session %s: capture reached its %.0f s limit",
+            self._session_id,
+            self._max_session_s,
+            extra={"event": "capture_limit", "session": self._session_id},
+        )
+        self.close()
+
     def event(self, payload: dict[str, Any], now: float) -> None:
         """One line of the decision track: the event as logged, plus
-        where it lands in the audio."""
+        where it lands in the audio.
+
+        Subject to the same limit as the audio. The audio is clamped to
+        it on close, so an event written past it would be an offset with
+        no audio under it, which is the one thing the decision track
+        promises not to be."""
         if self._stopped or self._events is None:
+            return
+        if self._expired(now):
+            self._finish_at_limit()
+            return
+        self._write_event(payload, now)
+
+    def _write_event(self, payload: dict[str, Any], now: float) -> None:
+        """The write itself, without the limit check, so the last
+        records a closing capture emits are not turned away by the very
+        limit that is closing it."""
+        if self._events is None:
             return
         record = {"t_ms": round(self._at(now) * 1000, 1), **payload}
         # An event's offset is only useful if it indexes into the audio,
@@ -325,7 +351,7 @@ class SessionCapture:
     def _emit_dropped(self, now: float) -> None:
         if not self._dropped:
             return
-        self.event(
+        self._write_event(
             {
                 "event": "frames_dropped",
                 "session": self._session_id,
@@ -342,10 +368,12 @@ class SessionCapture:
         still every byte of audio it managed to write, and the manifest
         says which it is."""
         if self._wav is None and self._events is None:
+            self._closing = True
             if self._on_close is not None:
                 self._on_close(self._session_id)
                 self._on_close = None
             return
+        self._closing = True
         now = time.monotonic()
         with contextlib.suppress(Exception):
             self._emit_dropped(now)

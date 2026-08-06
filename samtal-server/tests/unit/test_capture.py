@@ -334,6 +334,26 @@ def test_padding_to_the_last_event_stops_at_the_session_limit(tmp_path: Path) ->
     assert len(mic) <= CAPTURE_RATE + 2, "a stray late event stretched the file"
 
 
+def test_events_stop_at_the_limit_too(tmp_path: Path) -> None:
+    # A review finding. The audio is clamped to the limit on close, so
+    # an event written past it would be an offset with no audio under
+    # it, which is the one thing the decision track promises not to be.
+    opened = time.monotonic()
+    capture = store(tmp_path, max_session_s=1.0).open("s1", opened, MANIFEST)
+    assert capture is not None
+    capture.event({"event": "session_open"}, opened)
+    capture.event({"event": "much_later"}, opened + 3600.0)
+    capture.close()
+
+    recorded = [json.loads(line) for line in capture.jsonl_path.read_text().splitlines()]
+    assert [record["event"] for record in recorded] == ["session_open"]
+
+    mic, _ = read_channels(capture.wav_path)
+    audio_ms = len(mic) / CAPTURE_RATE * 1000
+    for record in recorded:
+        assert record["t_ms"] <= audio_ms
+
+
 def test_a_capture_still_recording_is_never_pruned(tmp_path: Path) -> None:
     # A review finding. Unlinking underneath an open descriptor leaves
     # the session writing to a file nobody can find.
