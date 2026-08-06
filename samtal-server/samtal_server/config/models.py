@@ -82,11 +82,9 @@ class AuthConfig(BaseModel):
 class LimitsConfig(BaseModel):
     """What one server will hold at once, and for how long.
 
-    Two numbers rather than a framework. There is no separate idle
-    timeout: a session's total life bounds an idle one too, and the
-    firmware treats the close as the end of a conversation and
-    reconnects on the next wake word, so the cap is invisible in normal
-    use.
+    Three numbers rather than a framework. The firmware treats a close
+    as the end of a conversation and reconnects on the next wake word,
+    so both of the time bounds here are invisible in normal use.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -97,6 +95,19 @@ class LimitsConfig(BaseModel):
 
     # One session's maximum life, in seconds. An hour by default.
     max_session_s: float = Field(default=3600.0, gt=0)
+
+    # How long a realtime session may go without a conversation before
+    # the server hangs up, in seconds, counted from the end of the last
+    # utterance or the end of the last reply, whichever came later. Two
+    # minutes by default: long enough to think, read something out, or
+    # answer the door, short enough that walking away does not leave a
+    # mic streaming for the rest of the hour.
+    #
+    # Only realtime sessions, because only they stream continuously; an
+    # auto-mode device stops listening after each reply and re-arms per
+    # turn, and is bounded by max_session_s as before. There is no off
+    # switch: a deployment that wants none sets it near max_session_s.
+    idle_timeout_s: float = Field(default=120.0, gt=0)
 
 
 class ServerConfig(BaseModel):
