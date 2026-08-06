@@ -42,6 +42,31 @@ def test_example_config_parses() -> None:
     assert config.agents_for_device("11:22:33:44:55:66") == ["storyteller", "assistant"]
 
 
+SMOKE_SLIM_CONFIG = Path(__file__).parents[1] / "smoke" / "config.slim.yaml"
+SMOKE_LOCAL_ENGINES_CONFIG = Path(__file__).parents[1] / "smoke" / "config.local-engines.yaml"
+
+
+def test_the_slim_boot_config_names_no_local_engine() -> None:
+    """The slim image's boot check is only a check if its config would
+    actually fail on an image without the extras. A local engine
+    creeping in here would make it pass for the wrong reason."""
+    config = load_config(SMOKE_SLIM_CONFIG)
+    local = {"faster_whisper", "piper"}
+    for stage in ("asr", "tts", "llm"):
+        for name, entry in getattr(config.providers, stage).items():
+            assert entry.type not in local, f"{stage}.{name} is a local engine"
+    # silero is the deliberate exception: a core dependency, in both
+    # variants, running on every frame whichever ASR is configured.
+    assert config.providers.vad["silero"].type == "silero"
+
+
+def test_the_local_engine_config_really_names_one() -> None:
+    """And the negative check is only a check if its config would boot
+    on the default image and fail on slim."""
+    config = load_config(SMOKE_LOCAL_ENGINES_CONFIG)
+    assert config.providers.asr["whisper"].type == "faster_whisper"
+
+
 def test_deploy_example_config_parses() -> None:
     config = load_config(DEPLOY_EXAMPLE_CONFIG)
     # The deployment profile sets what a plain LAN run leaves defaulted.
