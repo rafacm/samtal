@@ -50,7 +50,7 @@ import asyncio
 import contextlib
 import logging
 import uuid
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
 import av
@@ -73,6 +73,7 @@ from samtal_server.providers import (
     ToolChoice,
     ToolDef,
     ToolResult,
+    TtsProvider,
     Turn,
 )
 from samtal_server.text import SentenceSplitter
@@ -139,6 +140,71 @@ SWITCH_GREETING = (
     "Greet the user briefly as yourself, in the language they have been "
     "speaking, and carry on from what was said above."
 )
+
+
+class _Synthesis:
+    """One sentence being turned into audio, started before the moment it
+    is needed.
+
+    A reply is spoken sentence by sentence, and frames are paced to
+    realtime, so sending a sentence takes about as long as hearing it.
+    Synthesizing only when the previous sentence has finished playing
+    therefore puts the next sentence's whole time to first byte on the
+    speaker as silence, once per sentence, for the whole reply. Measured
+    on a three-sentence reply: 617 ms and 520 ms between sentences
+    through `gpt-4o-mini-tts`, reported from a board session as "hiccups
+    in the assistant's voice". Starting the work early spends that time
+    against playback that is already happening (#37).
+
+    The task drains the provider into a buffer as fast as the provider
+    will give it. `chunks()` then yields what has arrived and waits for
+    the rest, so the first sentence of a reply still streams (nothing is
+    held back waiting for a sentence to finish) while a sentence
+    synthesized ahead is simply already there.
+
+    A failure is held rather than raised where it happened, and re-raised
+    from `chunks()` at the point the sentence would have been spoken.
+    That keeps the order of what a caller sees: the sentences before a
+    failing one are spoken, and the reply fails where it would have.
+    """
+
+    def __init__(self, sentence: str, tts: TtsProvider, session_id: str) -> None:
+        self.sentence = sentence
+        self._buffer: asyncio.Queue[bytes | None] = asyncio.Queue()
+        self._failure: BaseException | None = None
+        self._session_id = session_id
+        self._task = asyncio.create_task(self._drain(tts))
+
+    async def _drain(self, tts: TtsProvider) -> None:
+        try:
+            async for chunk in tts.synthesize(self.sentence):
+                self._buffer.put_nowait(chunk)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - re-raised in chunks()
+            self._failure = exc
+        finally:
+            self._buffer.put_nowait(None)
+
+    async def chunks(self) -> AsyncIterator[bytes]:
+        """The audio, in order, waiting only for what has not arrived."""
+        while True:
+            chunk = await self._buffer.get()
+            if chunk is None:
+                break
+            yield chunk
+        if self._failure is not None:
+            raise self._failure
+
+    def cancel(self) -> None:
+        """Abandon a sentence that will never be spoken. Nothing to
+        record: `_speak` counts a sentence only after its audio has gone
+        out, so one dropped here was never counted anywhere."""
+        self._task.cancel()
+
+    async def wait_cancelled(self) -> None:
+        with contextlib.suppress(asyncio.CancelledError):
+            await self._task
 
 
 class AgentNotAllowed(ValueError):
@@ -1026,17 +1092,42 @@ class Session:
             splitter = SentenceSplitter()
             leg: list[str] = []
             calls: list[ToolCall] = []
-            async for event in providers.llm.stream(
-                self._system_prompt(), working, tools, choice
-            ):
-                if isinstance(event, TextDelta):
-                    for sentence in splitter.push(event.text):
-                        await self._speak_and_record(sentence, resampler, leg, spoken)
-                else:
-                    calls.append(event)
-            tail = splitter.flush()
-            if tail is not None:
-                await self._speak_and_record(tail, resampler, leg, spoken)
+            # The sentence being synthesized ahead of the one being
+            # spoken. One, not a queue: every sentence here plays for
+            # longer than the next takes to start, so a single sentence
+            # of lookahead closes the gap, and more would only mean more
+            # concurrent requests to the provider and more audio held
+            # for a reply a barge-in may cancel.
+            ahead: _Synthesis | None = None
+            try:
+                async for event in providers.llm.stream(
+                    self._system_prompt(), working, tools, choice
+                ):
+                    if isinstance(event, TextDelta):
+                        for sentence in splitter.push(event.text):
+                            ahead = await self._speak_after(
+                                ahead, sentence, providers.tts, resampler, leg, spoken
+                            )
+                    else:
+                        calls.append(event)
+                tail = splitter.flush()
+                if tail is not None:
+                    ahead = await self._speak_after(
+                        ahead, tail, providers.tts, resampler, leg, spoken
+                    )
+                # The round ends here, so the lookahead stops here too:
+                # there is no next sentence to overlap with, and the
+                # tools below must not run over the top of speech.
+                if ahead is not None:
+                    await self._speak_and_record(ahead, resampler, leg, spoken)
+                    ahead = None
+            finally:
+                # A barge-in cancels this coroutine anywhere above, and
+                # a sentence synthesized ahead of it must not outlive
+                # the reply it belonged to.
+                if ahead is not None:
+                    ahead.cancel()
+                    await ahead.wait_cancelled()
             if not calls:
                 break
             # Whatever preamble was spoken before the calls is part of
@@ -1189,7 +1280,39 @@ class Session:
         assert self._providers is not None and self._agent is not None
         return builtin.with_memory(self._providers.prompt, self._memory, self._agent)
 
-    async def _speak(self, sentence: str, resampler: Resampler, spoken: list[str]) -> None:
+    async def _speak_after(
+        self,
+        ahead: _Synthesis | None,
+        sentence: str,
+        tts: TtsProvider,
+        resampler: Resampler,
+        leg: list[str],
+        spoken: list[str],
+    ) -> _Synthesis:
+        """Start `sentence` synthesizing, then speak whatever was already
+        waiting. Answers the new sentence, now the one waiting.
+
+        The order of these two statements is the entire fix. Starting
+        first means the new sentence's time to first byte is spent
+        against the previous sentence's playback, which is already
+        happening; speaking first would spend it against silence, which
+        is what it used to do."""
+        started = _Synthesis(sentence, tts, self.session_id)
+        if ahead is not None:
+            try:
+                await self._speak_and_record(ahead, resampler, leg, spoken)
+            except BaseException:
+                # The sentence just started will never be spoken now,
+                # whether this was a provider failure or a barge-in
+                # cancelling the reply.
+                started.cancel()
+                await started.wait_cancelled()
+                raise
+        return started
+
+    async def _speak(
+        self, synthesis: _Synthesis, resampler: Resampler, spoken: list[str]
+    ) -> None:
         """Say one sentence, and count it as said only once its audio has
         gone out.
 
@@ -1197,17 +1320,27 @@ class Session:
         takes about as long as hearing it, and a barge-in cancels this
         coroutine somewhere in the middle of that. Counted first, a
         sentence the user heard two frames of would go into the turn the
-        round hands the model as its own preamble."""
-        assert self._providers is not None
+        round hands the model as its own preamble. A sentence synthesized
+        ahead and never spoken is counted nowhere at all, which is the
+        same rule seen from the other end.
+
+        The audio arrives from `synthesis`, which may already have some
+        or all of it buffered. Resampling and encoding stay here, in
+        order, because the resampler and the encoder are stateful and
+        belong to the stream rather than to a sentence.
+
+        `sentence_start` goes out now rather than when synthesis began:
+        it tells the device what is being said, and what is being said is
+        what is about to be heard."""
         await self.websocket.send_text(
-            messages.tts_message(self.session_id, "sentence_start", text=sentence)
+            messages.tts_message(self.session_id, "sentence_start", text=synthesis.sentence)
         )
-        async for chunk in self._providers.tts.synthesize(sentence):
+        async for chunk in synthesis.chunks():
             await self._send_frames(self._encoder.encode(resampler.process(chunk)))
-        spoken.append(sentence)
+        spoken.append(synthesis.sentence)
 
     async def _speak_and_record(
-        self, sentence: str, resampler: Resampler, leg: list[str], spoken: list[str]
+        self, synthesis: _Synthesis, resampler: Resampler, leg: list[str], spoken: list[str]
     ) -> None:
         """Say a sentence and count it in both places at once: the
         round's own list, which becomes the turn the model is shown, and
@@ -1218,8 +1351,8 @@ class Session:
         sentence of that round, including the ones the user sat through
         and answered. Whoever speaks next then has no idea what was
         already said."""
-        await self._speak(sentence, resampler, leg)
-        spoken.append(sentence)
+        await self._speak(synthesis, resampler, leg)
+        spoken.append(synthesis.sentence)
 
     async def _send_frames(self, packets: list[bytes]) -> None:
         """Send Opus frames paced at the frame cadence, so a long reply
