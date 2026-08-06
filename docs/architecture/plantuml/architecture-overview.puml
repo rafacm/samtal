@@ -1,0 +1,132 @@
+@startuml samtal-architecture-overview
+' What runs where, and what leaves the host. The colour of a provider is
+' its `egress` class marking (samtal_server/providers/base.py), which is
+' what `server.local_only` is checked against at boot.
+'
+' Deliberately at overview altitude: the ordering inside one turn is in
+' conversation-turn.puml, and the barge-in branches in
+' barge-in-decision.puml. Anything that belongs to those does not
+' belong here.
+'
+' Needs Graphviz (`brew install plantuml` brings it). Add
+' `!pragma layout smetana` to render without it, at some cost in layout.
+
+title samtal: what runs where, and what leaves the host
+
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam componentStyle rectangle
+skinparam ArrowColor #555555
+skinparam ArrowFontSize 11
+skinparam defaultFontSize 12
+skinparam packageStyle rectangle
+skinparam RectangleBorderThickness 2
+skinparam nodesep 25
+skinparam ranksep 55
+
+actor "Person\nin the room" as Human
+
+rectangle "ESP32-S3 device\nthin: xiaozhi firmware, one config URL" as DEV #EEF3FF {
+  component "**Audio front end**\nwake word (ESP-SR), echo cancellation\nin hardware (ES7210 + ES8311),\nOpus at 16 kHz up and 24 kHz down" as AUDIO
+  component "**Display**\nstt text, tts sentences" as DISP
+  component "**Device MCP server**\nself.* tools: volume,\nbrightness, screen" as DEVMCP
+  component "**NVS**\nota_url, websocket url,\ndevice token" as NVS
+}
+
+rectangle "samtal-server (FastAPI)" as SRV #EEF8EE {
+  component "**OTA / config endpoint**\nPOST /xiaozhi/ota/, the token issuer.\nStateless HMAC-SHA256 tokens,\nso no token table to lose" as OTA
+  component "**WebSocket endpoint**\n/xiaozhi/v1/, Bearer gate before\nthe accept. SessionRegistry caps\nthe count and drains on shutdown" as WS
+  component "**Session**\none per connection: handshake,\nconversation loop, tool loop,\nbarge-in gates" as SESS
+  component "**Tool namespace**\nbuiltin | self_* | <entry>__*,\ncollision-free by construction" as TOOLS
+  component "**Agent memory** and optional\n**session capture**\nfacts per agent; wav + jsonl + json" as SIDE
+  component "**Provider registry**\nbuilds the providers at startup,\nenforces server.local_only" as PREG
+}
+
+rectangle "Pipeline providers, one set per agent\ncolour = the type's egress marking" as PROV #FFFBF0 {
+
+  rectangle "Stays on the machine\negress = False" as PLOCAL #D9EAD3 {
+    component "VAD\n**silero**" as VAD #D9EAD3
+    component "ASR\n**faster_whisper**" as ASRL #D9EAD3
+    component "TTS\n**piper**" as TTSP #D9EAD3
+  }
+
+  rectangle "The base_url decides\negress = None" as PMAYBE #FFE9C6 {
+    component "LLM\n**openai_compatible**" as LLMO #FFE9C6
+    component "ASR\n**openai**" as ASRC #FFE9C6
+    component "TTS\n**openai**" as TTSO #FFE9C6
+  }
+
+  rectangle "Sends session data away\negress = True" as PCLOUD #F4CCCC {
+    component "LLM\n**anthropic**" as LLMA #F4CCCC
+    component "TTS\n**elevenlabs**" as TTSE #F4CCCC
+  }
+}
+
+rectangle "Off the host" as EXT #FFF3CD {
+  component "**Anthropic API**" as ANTH #FFE082
+  component "**OpenAI-compatible endpoint**\na vendor, or your own Ollama\nor vLLM on localhost" as OAI #FFE082
+  component "**ElevenLabs API**" as ELV #FFE082
+  component "**MCP servers**\nstdio or streamable_http" as MCPS #FFE082
+}
+
+DISP -[hidden]right- DEVMCP
+DEVMCP -[hidden]right- NVS
+
+Human --> AUDIO : speaks, or\npresses the button
+
+NVS --> OTA : boot POST, system info
+OTA --> NVS : websocket url, device token,\nprotocol version, wall clock\n(never an activation section)
+
+AUDIO --> WS : **one WebSocket**\nbinary Opus frames + JSON control
+WS --> SESS
+SESS --> DISP : stt text, tts sentence_start
+SESS --> SIDE
+SESS --> TOOLS : one flat tool list per reply
+TOOLS --> DEVMCP : tools/list, tools/call\nover the same WebSocket
+
+PREG --> PROV : built once at startup,\nshared across sessions
+SESS --> PROV : PCM in, sentences of audio out
+
+LLMA --> ANTH
+TTSE --> ELV
+LLMO --> OAI
+ASRC --> OAI
+TTSO --> OAI
+TOOLS --> MCPS
+
+note bottom of PREG
+  `server.local_only` is checked at boot and never at
+  runtime: a server that started cannot later be talked
+  into leaking. The class marking is authoritative, and a
+  type that forgot to declare one counts as egress, so the
+  omission fails the boot instead of quietly sending audio
+  away.
+end note
+
+note bottom of PMAYBE
+  These types cannot know their own answer: a base_url may
+  name a vendor or `http://localhost:11434`. Under
+  local_only they demand an explicit `egress: false` on the
+  provider entry, the operator asserting that the endpoint
+  stays home.
+end note
+
+note bottom of DEV
+  The firmware's only tie to a backend is the OTA URL in NVS.
+  Endpoints, credentials, even the reply language are
+  delivered by your server at runtime, so customization lives
+  in Python and not in C++ you have to reflash.
+end note
+
+legend right
+|= Colour |= Meaning |
+|<#EEF3FF>    | Device: ESP32-S3, thin firmware |
+|<#EEF8EE>    | samtal-server core |
+|<#FFFBF0>    | Pluggable pipeline providers |
+|<#FFE082>    | Off the host |
+|<#D9EAD3>    | egress = False: stays on the machine |
+|<#FFE9C6>    | egress = None: the base_url decides |
+|<#F4CCCC>    | egress = True: sends session data away |
+endlegend
+
+@enduml

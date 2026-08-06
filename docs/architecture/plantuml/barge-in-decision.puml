@@ -1,0 +1,146 @@
+@startuml samtal-barge-in-decision
+' The gate an utterance must pass before it may cancel a reply already
+' streaming. This is a decision structure, not a flow, which is why it
+' gets its own picture: the conversation-turn diagram draws the happy
+' path and has nowhere to put branches.
+'
+' Source: Session._finish_utterance and Session._gate_barge_in, and the
+' ADR "replies cancel only on evidence of speech".
+
+title samtal: may this utterance cancel the reply in flight?
+
+skinparam shadowing false
+skinparam backgroundColor white
+skinparam defaultFontSize 12
+skinparam ActivityBorderThickness 1
+skinparam ArrowColor #555555
+
+start
+
+:An utterance ended while a reply is streaming;
+note right
+  The session marks activity first, whatever
+  follows: an utterance that ended is somebody
+  talking, whether or not it earns a reply.
+  That is what the idle timeout is specified by.
+end note
+
+if (server.barge_in enabled?) then (no)
+  :**Drop the utterance**, keep the reply;<<#F4CCCC>>
+  note right
+    For a board whose echo cancellation leaks its
+    own voice back. Mic frames are already filtered
+    upstream in _handle_audio, so what reaches here
+    is a manual `listen stop` mid-reply.
+  end note
+  stop
+else (yes)
+endif
+
+if (who decided the utterance ended?) then (manual `listen stop`)
+  :**Cancel the reply** unconditionally;<<#D9EAD3>>
+  note right
+    The user is holding the button and speaking.
+    That is a deliberate act, not an acoustic
+    guess, so no gate applies.
+    event: barge_in
+  end note
+  stop
+else (the endpointer, acoustically)
+endif
+
+partition "The gates, in order" {
+
+  if (classified speech >= server.barge_in_min_speech_ms?\n(500 ms by default)) then (no)
+    :**Drop it**, keep the reply;<<#F4CCCC>>
+    note right
+      A noise blip, not an interjection. Only the
+      endpointer can tell the two apart, which is
+      why it reports speech_ms at all.
+      event: barge_in_suppressed, reason = min_speech
+    end note
+    stop
+  else (yes)
+  endif
+
+  if (is the reply still inside ASR?\n(nothing has been spoken yet)) then (yes)
+    :Cancel the reply and **prepend its audio**;<<#FFE9C6>>
+    :Answer the merged utterance as one;
+    note right
+      The reply in flight was transcribing the head
+      of this same sentence. Merging means one reply
+      answers the whole thing rather than two replies
+      answering half each.
+      event: barge_in_merged
+    end note
+    stop
+  else (no, it is speaking)
+  endif
+
+  if (within server.barge_in_refractory_ms of\nthe reply's first audio frame?\n(1000 ms by default)) then (yes)
+    :**Drop it**, keep the reply;<<#F4CCCC>>
+    note right
+      What the microphone hears just after playback
+      starts is as likely the onset transient the
+      board's echo cancellation let through as it is
+      the user.
+      event: barge_in_suppressed, reason = refractory
+    end note
+    stop
+  else (no)
+  endif
+
+  :**Pause** the outgoing frame pacing;<<#FFE9C6>>
+  note right
+    A pause, not a stop. Audio ceases within a frame
+    either way; what pausing preserves is the option
+    of resuming where it left off.
+  end note
+
+  :Ask ASR to transcribe the interruption;
+
+  if (did the ASR call fail?) then (yes)
+    :Resume the paced stream, keep the reply;<<#F4CCCC>>
+    stop
+  else (no, it answered)
+  endif
+
+  if (is the transcript non-empty?) then (no)
+    :**Resume** the paced stream where it stopped;<<#F4CCCC>>
+    note right
+      The pacing clock is shifted by the pause, so the
+      stream picks up rather than bursting to catch up.
+      A wrong pause therefore costs one ASR latency,
+      not a reply.
+      event: barge_in_suppressed, reason = no_transcript
+    end note
+    stop
+  else (yes, the user said words)
+  endif
+
+  :**Cancel the reply** and answer the interruption;<<#D9EAD3>>
+  note right
+    Evidence of user speech, which is the whole rule:
+    acoustics alone can at most pause a reply, never
+    cancel it.
+    event: barge_in (with speech_ms and speaking_ms)
+  end note
+}
+
+stop
+
+legend right
+|<#D9EAD3> Colour |= Outcome |
+|<#D9EAD3> | The reply is cancelled, the user is answered |
+|<#FFE9C6> | Reversible: paused, or merged into one reply |
+|<#F4CCCC> | The utterance is dropped, the reply survives |
+
+Every branch emits a structured event. Those events are what
+the two thresholds get tuned from, and they are the decision
+track a session capture writes alongside the stereo WAV, where
+channel 0 is the microphone as received and channel 1 is what
+was paced out to the speaker. Echo leakage is then a
+measurement rather than a guess.
+endlegend
+
+@enduml
