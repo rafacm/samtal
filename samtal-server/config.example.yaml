@@ -253,6 +253,17 @@ providers:
       # proper noun is the failure this provider actually has ("samtal"
       # comes back as "sample" under noise, and as "Samtal" with this
       # set).
+      # Keep it to vocabulary. On short or low-content audio the model
+      # hands this string back as the transcript instead of hearing
+      # anything, which is reliable rather than rare: 45 of 45 clips of
+      # room tone under a second came back as the prompt word for word.
+      # Plain vocabulary makes that harmless noise. Agent names, wake
+      # words or anything imperative make it an instruction the model
+      # can act on, and in a field session an echo of the agent names
+      # triggered a handover nobody asked for. A transcript that is
+      # this string and nothing else is discarded, so the echo reaches
+      # nothing, but a prompt that cannot be acted on is the real
+      # protection.
       # prompt: samtal, Stockholm
       # Spoken language (ISO 639-1). SET THIS for any deployment that
       # is not English. On clean audio leaving it unset costs nothing,
