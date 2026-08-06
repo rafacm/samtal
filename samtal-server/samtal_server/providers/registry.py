@@ -208,8 +208,10 @@ def build_provider(
     stage: str, name: str, config: ProviderConfig, local_only: bool = False
 ) -> object:
     """Build the provider behind `providers.<stage>.<name>`, raising
-    ProviderError for unknown types, bad options, missing extras, or an
-    egress-marked provider under `local_only`."""
+    ProviderError for unknown types, bad options, missing extras, an
+    egress-marked provider under `local_only`, or anything the provider
+    itself raises while constructing. Every one of them names the
+    entry."""
     label = f"providers.{stage}.{name}"
     factory = _factories()[stage].get(config.type)
     if factory is None:
@@ -217,7 +219,26 @@ def build_provider(
         raise ProviderError(
             f'{label}: unknown {stage} provider type "{config.type}" (known types: {known})'
         )
-    provider = factory(label, config)
+    # Every other failure in this function names the entry that caused
+    # it, which is what makes a bad configuration a five-second fix.
+    # Construction was the exception: a local engine fetching its
+    # weights can fail on a blocked host, a full volume, a corrupt
+    # cache or a name the hub does not have, and each of those arrived
+    # as a traceback from inside somebody else's library with no
+    # mention of which entry was being built. Survivable while a
+    # configuration had one provider per stage; a deployment running
+    # language-locked personas has three ASR entries and three TTS
+    # entries that differ only in a pinned language and a voice.
+    #
+    # ProviderError passes through untouched, so the messages the rest
+    # of this module composes keep their exact wording, and `from exc`
+    # keeps the traceback for whoever wants it.
+    try:
+        provider = factory(label, config)
+    except ProviderError:
+        raise
+    except Exception as exc:
+        raise ProviderError(f"{label}: could not build {config.type} provider: {exc}") from exc
     _check_egress(label, config, provider, local_only)
     # Stamped here rather than in each factory: this is the one place
     # that knows the stage, the entry name and the type at once, and a

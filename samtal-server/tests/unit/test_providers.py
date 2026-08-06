@@ -41,6 +41,75 @@ def test_a_wrongly_typed_option_is_rejected_at_build_time() -> None:
     assert '"threshold"' in str(excinfo.value)
 
 
+def test_a_provider_that_fails_to_construct_names_the_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A local engine fetching its weights fails on a blocked host, a
+    full volume or a name the hub does not have, and each arrived as a
+    traceback from inside somebody else's library. With one entry per
+    stage there was only one candidate; a configuration with several
+    entries of a type left the operator to work out which."""
+    from samtal_server.providers import registry
+
+    def explode(label: str, config: ProviderConfig) -> object:
+        raise OSError("no space left on device")
+
+    monkeypatch.setattr(
+        registry, "_factories", lambda: {"asr": {"faster_whisper": explode}}
+    )
+    with pytest.raises(ProviderError) as excinfo:
+        build_provider("asr", "swedish", provider_config(type="faster_whisper"))
+    assert "providers.asr.swedish" in str(excinfo.value)
+    assert "faster_whisper" in str(excinfo.value)
+    # The reason survives in the message, and the original in the chain,
+    # so the traceback is not lost.
+    assert "no space left on device" in str(excinfo.value)
+    assert isinstance(excinfo.value.__cause__, OSError)
+
+
+def test_a_provider_error_raised_by_a_factory_is_left_exactly_as_it_is(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every existing message is composed by a factory, and tests assert
+    on their wording (the missing-extra one names the extra to install,
+    the local_only one names the type). Wrapping them would rewrite all
+    of it."""
+    from samtal_server.providers import registry
+
+    def refuse(label: str, config: ProviderConfig) -> object:
+        raise ProviderError(f'{label}: type "piper" needs the piper extra')
+
+    monkeypatch.setattr(registry, "_factories", lambda: {"tts": {"piper": refuse}})
+    with pytest.raises(ProviderError) as excinfo:
+        build_provider("tts", "voice", provider_config(type="piper"))
+    assert str(excinfo.value) == 'providers.tts.voice: type "piper" needs the piper extra'
+    assert excinfo.value.__cause__ is None
+
+
+def test_the_failing_entry_is_named_among_several_of_one_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The configuration this is about: language-locked personas, three
+    ASR entries differing only in a pinned language. A traceback from
+    inside a library leaves the operator to work out which of them it
+    was."""
+    from samtal_server.providers import registry
+
+    def only_swedish_fails(label: str, config: ProviderConfig) -> object:
+        if config.options.get("language") == "sv":
+            raise RuntimeError("could not fetch the model")
+        return MockAsr(text="hello")
+
+    monkeypatch.setattr(
+        registry, "_factories", lambda: {"asr": {"faster_whisper": only_swedish_fails}}
+    )
+    for language in ("en", "es"):
+        build_provider("asr", language, provider_config(type="faster_whisper", language=language))
+    with pytest.raises(ProviderError) as excinfo:
+        build_provider("asr", "sv", provider_config(type="faster_whisper", language="sv"))
+    assert str(excinfo.value).startswith("providers.asr.sv:")
+
+
 def test_the_boolean_reader_takes_only_true_or_false() -> None:
     from samtal_server.providers.registry import OptionsReader
 
