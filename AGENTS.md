@@ -35,6 +35,25 @@ CI (`.github/workflows/samtal-server.yml`) runs the same lint, unit, and
 integration steps, and only triggers on changes under `samtal-server/` or to
 the workflow file itself.
 
+### Restoring a file mid-experiment
+
+Two traps, neither guessable, both of which have already cost a session.
+
+- **Do not restore with `git checkout <file>`.** It restores the committed
+  version, which silently discards unrelated uncommitted edits to that file.
+  Copy the file aside first and copy it back.
+- **After restoring a file, `touch` it.** `mv` and `cp -p` carry the backup's
+  older mtime, so the source looks older than any cached bytecode of it and
+  the interpreter keeps running the pre-restore version. The test suite writes
+  no bytecode (`tests/conftest.py` sets `sys.dont_write_bytecode`), so pytest
+  is safe, but anything run outside it is not. Export
+  `PYTHONDONTWRITEBYTECODE=1` for those, or clear `__pycache__`.
+
+The same shape bites a revert-run-restore cycle that checks a regression test
+really fails without its fix: swapping two statements preserves the byte count,
+a scripted cycle finishes inside one second, and CPython's default `.pyc`
+validation looks at nothing else.
+
 ## Workflow
 
 - Before beginning any new work: verify the current branch is `main`
