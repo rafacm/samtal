@@ -9,6 +9,37 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- Two events that make a provider's behaviour visible, which is one
+  gap seen from two sides. `provider_failed` fires where an ASR, LLM
+  or TTS call fails, carrying `stage`, `provider`, `type`, `host`,
+  `error` and `duration_ms` alongside the `session` and `device` every
+  conversation event has. A failing provider was previously a
+  traceback under "reply failed" with no `event` to filter on, no
+  session to group by, and no host, which is the field an egress
+  allowlist is diagnosed from: the reported symptom was a pod that
+  boots healthy, answers, and is silent every reply until the
+  synthesis timeout expires, with nothing in the logs naming a network
+  policy. A timeout is worded as one, because where traffic is dropped
+  rather than refused the whole symptom is the wait, and the wait sits
+  at the provider's `timeout_s`, which is itself the diagnosis. The
+  human sentence and the traceback are unchanged.
+
+  `llm_round` fires per generation call with `duration_ms`,
+  `first_token_ms`, `turns`, `round`, the same provider fields, and
+  `prompt_tokens`/`completion_tokens` where the provider reports them.
+  Stage latency was otherwise inferred from the gaps between events,
+  and the gap between `heard` and `speaking_started` holds the LLM and
+  the TTS time to first byte with nothing separating them. A field
+  session lost 19.04 s inside that gap against a session median of
+  1.18 s and the logs could not say whether the payload or the vendor
+  was responsible; they now can. `round` counts the whole reply rather
+  than one agent's leg, so the generation after a handover is a round
+  of its own rather than another first round. Token counts are asked
+  for only where the endpoint is OpenAI itself, whose dialect needs
+  `stream_options`, and read wherever a server volunteers them; the
+  Anthropic API reports them unasked. Their absence is a fact about
+  the endpoint rather than an error.
+
 - A second published image variant, `slim`, for deployments whose ASR
   and TTS name external providers. It installs no optional extra, so it
   carries neither local engine and no GPL component at all, and it is
@@ -140,6 +171,23 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   cannot start on half a sentence.
 
 ### Changed
+
+- `tts start` now means "audio is about to play" and nothing else. It
+  went out as soon as transcription finished, before the LLM ran, so a
+  device entered its speaking state and displayed 说话中… for the whole
+  of a slow generation while playing nothing. Confirmed on the board:
+  with a generation stalled 20 s, the firmware's own state machine
+  logged `listening -> speaking` at the transcript, and a
+  conversation-button press 7.1 s into that silence produced
+  `Application: Abort speaking` on the device and `device aborted (no
+  reason)` on the server. That is the reasonless abort seen in the
+  field: a user interrupting a device that was not speaking. Moved,
+  the same stall passes with the board still listening, and it enters
+  `speaking` when the first sentence does. A reply that speaks nothing
+  at all still sends the pair, `start` immediately before `stop`,
+  because an auto-mode device re-arms its listening on `tts stop` and
+  a `stop` it was never told to expect is the one way this could
+  strand one. Recorded as an ADR.
 
 - The rules an `openai` provider derives from its `base_url` (whether
   a key is required, whether the type's model rules apply, the retry
