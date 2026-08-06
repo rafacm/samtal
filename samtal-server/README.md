@@ -40,17 +40,22 @@ token the OTA endpoint issued.
 Each pipeline stage is a named provider entry in the configuration, and
 each agent picks one provider per stage. The v1 set:
 
-| Stage | Type                | Runs       | Install                          |
-| ----- | ------------------- | ---------- | -------------------------------- |
-| vad   | `silero`            | locally    | core (pysilero-vad)              |
-| asr   | `faster_whisper`    | locally    | `uv sync --extra faster-whisper` |
-| asr   | `openai`            | OpenAI     | core                             |
-| llm   | `anthropic`         | Anthropic  | core                             |
-| llm   | `openai_compatible` | anywhere   | core                             |
-| tts   | `piper`             | locally    | `uv sync --extra piper`          |
-| tts   | `elevenlabs`        | ElevenLabs | core                             |
-| tts   | `openai`            | OpenAI     | core                             |
-| any   | `mock`              | in tests   | core (deterministic, keyless)    |
+| Stage | Type                | Runs               | Install                          |
+| ----- | ------------------- | ------------------ | -------------------------------- |
+| vad   | `silero`            | locally            | core (pysilero-vad)              |
+| asr   | `faster_whisper`    | locally            | `uv sync --extra faster-whisper` |
+| asr   | `openai`            | OpenAI or anywhere | core                             |
+| llm   | `anthropic`         | Anthropic          | core                             |
+| llm   | `openai_compatible` | anywhere           | core                             |
+| tts   | `piper`             | locally            | `uv sync --extra piper`          |
+| tts   | `elevenlabs`        | ElevenLabs         | core                             |
+| tts   | `openai`            | OpenAI or anywhere | core                             |
+| any   | `mock`              | in tests           | core (deterministic, keyless)    |
+
+"Anywhere" is a `base_url`: those three types speak a dialect rather
+than name a vendor, so each reaches a self-hosted server implementing
+the same endpoint. That is what keeps a fully local pipeline available
+through them, and it is why they cannot declare their own egress.
 
 Model weights are never shipped: faster-whisper models and Piper voices
 download at server startup into a local cache (`download_dir` on the
@@ -161,19 +166,26 @@ utterance and the LLM cannot start on half a sentence, so response
 deltas would arrive before anything could use them. The TTS stage is
 the opposite case and does stream.
 
-**Very short audio is answered empty without a request.** The API
+**Very short audio is answered empty without a request.** OpenAI
 refuses anything under 0.1 s, and the barge-in path is what would send
 it: a snippet classified as speech mid-reply gets transcribed to
 decide whether the interruption was real. That refusal would be logged
-as a failure rather than the non-answer it is.
+as a failure rather than the non-answer it is. The floor was measured
+against OpenAI and applies only there. A compatible endpoint that
+accepts shorter clips receives them, because suppressing one it would
+have answered would drop a barge-in it could have confirmed.
 
 `base_url` is the same door the `openai_compatible` LLM type and the
-`openai` TTS type open, with the same consequences: a self-hosted
-server implementing the endpoint needs no key, the host rather than
-the spelling decides whether an entry counts as OpenAI, a `base_url`
-that is not a URL fails the boot, and the endpoint rather than the
-type decides egress, so an entry under `server.local_only` carries its
-own `egress: false`.
+`openai` TTS type open, with the same consequences: the host rather
+than the spelling decides whether an entry counts as OpenAI, a
+`base_url` that is not a URL fails the boot, and the endpoint rather
+than the type decides egress, so an entry under `server.local_only`
+carries its own `egress: false`.
+
+Only OpenAI's own host *requires* a key. A keyless self-hosted server
+can leave `api_key_env` out, but a gateway or hosted endpoint that
+authenticates still names its variable there and the key is sent, so
+"compatible" does not mean "keyless".
 
 **It sends the microphone audio wherever `base_url` points**, which by
 default is OpenAI, and that is a stronger claim than the TTS types
@@ -329,8 +341,10 @@ voice copied from someone else's configuration works. Hear them in the
 
 `base_url` is the same door the `openai_compatible` LLM type opens.
 Several self-hosted speech servers implement this endpoint, so a fully
-local pipeline stays available through the same dialect, and such an
-entry needs no key. It is also what decides whether this type sends
+local pipeline stays available through the same dialect, and a keyless
+one of those can leave `api_key_env` out; an endpoint that
+authenticates still names its variable there, since only OpenAI's own
+host makes a key mandatory. It is also what decides whether this type sends
 anything off your host, which is why it cannot declare its own egress:
 under `server.local_only` the entry carries its own `egress: false` to
 assert the endpoint is local, exactly as `openai_compatible` does.

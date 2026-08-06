@@ -197,10 +197,14 @@ providers:
       # model: gpt-4o-transcribe
       # Any server implementing /v1/audio/transcriptions works here,
       # the same way openai_compatible opens the LLM stage to local
-      # models; a self-hosted one needs no api_key_env above. This is
-      # also what decides whether the audio leaves the host, so the
-      # type cannot declare its own egress: under server.local_only an
-      # entry carries `egress: false` to assert the endpoint is local.
+      # models. A keyless self-hosted one can leave api_key_env out;
+      # one that authenticates still names its variable there, since
+      # only OpenAI's own host makes a key mandatory. This is also what
+      # decides whether the audio leaves the host, so the type cannot
+      # declare its own egress: under server.local_only an entry
+      # carries `egress: false` to assert the endpoint is local. An
+      # endpoint that accepts audio shorter than OpenAI's 0.1 s minimum
+      # is sent it, since that floor was measured against OpenAI.
       # base_url: http://localhost:8000/v1
       # Words the engine would not otherwise guess: names, places, the
       # assistant's own name. Worth setting, because an unfamiliar
@@ -301,8 +305,10 @@ providers:
       voice: alloy
       api_key_env: OPENAI_API_KEY
       # Any server implementing /v1/audio/speech works here, the same
-      # way openai_compatible opens the LLM stage to local models; a
-      # self-hosted one needs no api_key_env above. This is also what
+      # way openai_compatible opens the LLM stage to local models. A
+      # keyless self-hosted one can leave api_key_env out; one that
+      # authenticates still names its variable there, since only
+      # OpenAI's own host makes a key mandatory. This is also what
       # decides whether replies leave the host, so the type cannot
       # declare its own egress: under server.local_only an entry
       # carries `egress: false` to assert the endpoint is local.
