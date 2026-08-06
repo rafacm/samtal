@@ -1509,13 +1509,14 @@ class Session:
                     providers.llm.stream(self._system_prompt(), working, tools, choice),
                 ):
                     if isinstance(event, TextDelta):
-                        # Speech only. Both providers assemble tool
+                        # Speech only, and speech that is not just
+                        # whitespace. Both providers assemble tool
                         # calls and usage after their stream has ended,
                         # so timing from those would report a whole
                         # generation as its own time to first token,
                         # and a round that only calls a tool has no
                         # first token to time.
-                        if first_token_at is None:
+                        if first_token_at is None and event.text.strip():
                             first_token_at = loop.time()
                         for sentence in splitter.push(event.text):
                             speaking = await self._speak_after(
