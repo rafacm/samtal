@@ -1074,6 +1074,12 @@ server and the wrong one to deploy from. The dated and SHA tags are
 never reused: several merges can land on one day, and each gets its own
 timestamp, so a rollback names the build it wants.
 
+**Pair the two variants by their SHA tag, not their dated one.** They
+are built by separate jobs that finish minutes apart, so one commit can
+produce `2026-08-06-1048` and `2026-08-06-1047-slim`. The dated tag is
+honest about when each image was built; `sha-<short>` is the one that
+says which commit, and it matches across both.
+
 The default image contains `piper-tts` (GPL-3.0) alongside the MIT
 server. That is aggregation, not a derived work; the slim variant
 contains no GPL component at all. See
