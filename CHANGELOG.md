@@ -213,6 +213,26 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Fixed
 
+- A provider that fails while constructing itself now says which
+  configuration entry it was. `build_provider` named the entry for
+  every other failure it raises (an unknown type, a bad option, a
+  missing extra, an egress-marked provider under `local_only`), which
+  is what makes a bad configuration a five-second fix, but the factory
+  call itself was unwrapped: a local engine fetching its weights can
+  fail on a blocked host, a full volume, a corrupt cache or a name the
+  hub does not have, and each of those arrived as a traceback from
+  inside `faster_whisper`, `httpx` or `huggingface_hub` with no
+  mention of what was being built. Survivable while a configuration
+  had one provider per stage, since there was only one candidate;
+  multi-entry configurations are now normal, and a deployment running
+  language-locked personas has three ASR entries and three TTS entries
+  differing only in a pinned language and a voice. `ProviderError`
+  passes through untouched, so every existing message keeps its exact
+  wording, and the original exception survives as `__cause__`, so the
+  traceback is still there. Not a reachability check and not a retry:
+  the boot fails at the same moment for the same reason, and only says
+  which entry it was.
+
 - An ASR transcript that comes back as the configured `prompt` is now
   discarded rather than answered. On short or low-content audio the
   transcription model hands the prompt back instead of hearing
