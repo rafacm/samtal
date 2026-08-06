@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from samtal_server.app import create_app
+from samtal_server.build_info import REVISION_ENV, revision
 from samtal_server.config import Config
 from samtal_server.logs import JsonFormatter
 from samtal_server.ota import OTA_PATH
@@ -96,9 +97,28 @@ def test_session_open_and_closed_bracket_the_conversation(
     assert opened.agent == "assistant"
     assert opened.agents == ["assistant"]
     assert opened.protocol == 1
+    assert opened.revision == revision()
     closed = only(caplog, "session_closed")
     assert closed.session == opened.session
     assert closed.duration_s >= 0
+
+
+def test_session_open_names_the_build_that_served_it(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#41: the logs already ship to a collector, so a revision here
+    makes every session attributable to a build, not only the ones
+    somebody thought to investigate. Two field sessions that behaved
+    differently were otherwise indistinguishable from one code change
+    and two different rooms."""
+    revision.cache_clear()
+    monkeypatch.setenv(REVISION_ENV, "5e6f7a8b")
+    try:
+        with caplog.at_level("INFO"):
+            hold_a_conversation(config_with_agent())
+    finally:
+        revision.cache_clear()
+    assert only(caplog, "session_open").revision == "5e6f7a8b"
 
 
 def test_a_device_with_no_agent_logs_a_rejection(caplog: pytest.LogCaptureFixture) -> None:

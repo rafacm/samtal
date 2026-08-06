@@ -10,7 +10,9 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from samtal_server import __version__
 from samtal_server.app import create_app
+from samtal_server.build_info import REVISION_ENV, revision
 from samtal_server.config import Config
 from samtal_server.ota import OTA_PATH
 
@@ -83,6 +85,25 @@ def test_firmware_section_says_up_to_date() -> None:
 def test_device_hiding_its_version_is_offered_no_update() -> None:
     response = post_system_info(client_for(), payload={"mac_address": DEVICE_MAC})
     assert response.json()["firmware"] == {"version": "0.0.0", "url": ""}
+
+
+def test_reply_names_the_server_build_the_device_will_talk_to(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The one place a device is told what is on the other end (#41).
+    # Additive: the firmware reads the keys it knows and ignores the
+    # rest, so this cannot disturb an existing board.
+    revision.cache_clear()
+    monkeypatch.setenv(REVISION_ENV, "1a2b3c4d")
+    try:
+        body = post_system_info(client_for()).json()
+    finally:
+        revision.cache_clear()
+    assert body["server"] == {
+        "name": "samtal-server",
+        "version": __version__,
+        "revision": "1a2b3c4d",
+    }
 
 
 def test_reply_never_asks_for_activation() -> None:
@@ -236,3 +257,6 @@ def test_get_describes_where_devices_are_sent() -> None:
     response = client_for(config).get(OTA_PATH)
     assert response.status_code == 200
     assert "ws://192.168.1.10:8003/xiaozhi/v1/" in response.text
+    # A human checking the endpoint is reachable is also a human who
+    # wants to know which build answered.
+    assert revision() in response.text

@@ -29,7 +29,9 @@ from typing import Any
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse, PlainTextResponse
 
+from samtal_server import __version__
 from samtal_server.auth import DeviceAuth
+from samtal_server.build_info import revision
 from samtal_server.config import Config
 from samtal_server.config.models import normalize_mac
 from samtal_server.ws import WEBSOCKET_PATH
@@ -178,6 +180,10 @@ async def check_version(request: Request) -> Response:
             # firmware reads "up to date", since it only updates for a
             # strictly newer one.
             "firmware": {"version": version, "url": ""},
+            # Ours, not the firmware's: the one place a device is told
+            # what it is about to talk to. The firmware reads the keys it
+            # knows and ignores the rest, so this is additive.
+            "server": {"name": "samtal-server", "version": __version__, "revision": revision()},
             "websocket": {
                 "url": websocket_url_for(config, request),
                 "token": token_for(request.app.state.device_auth, client_id, mac, agents),
@@ -192,7 +198,7 @@ async def describe(request: Request) -> Response:
     sensible. Devices only ever POST here."""
     config: Config = request.app.state.config
     return PlainTextResponse(
-        f"samtal-server OTA endpoint.\n"
+        f"samtal-server {__version__} (revision {revision()}) OTA endpoint.\n"
         f"Devices are sent to {websocket_url_for(config, request)} "
         f"(protocol version {config.server.protocol_version}).\n"
     )
