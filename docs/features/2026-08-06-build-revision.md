@@ -95,12 +95,16 @@ Against the issue's acceptance list:
 
 - [x] **A server run from a working tree reports a `git describe` value,
   and a dirty tree says so.** Verified by actually running the server,
-  not only in tests. With uncommitted changes present, `git describe
-  --always --dirty` printed `1272747-dirty` and the server agreed:
-  `{"status":"ok","version":"0.1.0","revision":"1272747-dirty"}`, with
-  the OTA GET reading `samtal-server 0.1.0 (revision 1272747-dirty) OTA
-  endpoint.` Re-run from the committed tree, the same server reported
-  the clean describe value.
+  not only in tests. All three sources, against a real process:
+
+  | tree | `git describe --always --dirty` | what `/healthz` returned |
+  |---|---|---|
+  | uncommitted changes present | `1272747-dirty` | `{"status":"ok","version":"0.1.0","revision":"1272747-dirty"}` |
+  | committed | `a14dd19` | `{"status":"ok","version":"0.1.0","revision":"a14dd19"}` |
+  | `SAMTAL_REVISION=sha-deadbee` set | `a14dd19` (ignored) | `{"status":"ok","version":"0.1.0","revision":"sha-deadbee"}` |
+
+  The OTA GET on the dirty run read `samtal-server 0.1.0 (revision
+  1272747-dirty) OTA endpoint.`
 - [x] **A `session_open` event carries the revision.** Unit test with the
   environment variable set, asserting the logged field.
 - [x] **A build with no build argument reports `unknown` rather than
