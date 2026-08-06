@@ -67,12 +67,15 @@ faster-whisper a constant encoder pass per utterance (#22); here
 detection happens inside the model at no measurable cost, so there is
 nothing to spare.
 
-**Audio under 0.1 s is answered empty without a round trip.** The
-barge-in path is what sends it: a snippet classified as speech during a
-reply is transcribed to decide whether the interruption was real (#28),
-and the shortest of those are tens of milliseconds. Verified against
-the real API rather than assumed, since the documented minimum and the
-observed one need not agree.
+**Audio under 0.1 s is answered empty without a round trip, on OpenAI.**
+The barge-in path is what sends it: a snippet classified as speech
+during a reply is transcribed to decide whether the interruption was
+real (#28), and the shortest of those are tens of milliseconds.
+Verified against the real API rather than assumed, since the documented
+minimum and the observed one need not agree. The floor is the
+endpoint's, not the type's, so a compatible server is sent everything
+and decides for itself: see the review round below, which is where that
+distinction was corrected.
 
 **Egress marking.** The type carries `egress = None` like the TTS type
 and `openai_compatible`, because `base_url` decides: a self-hosted
@@ -219,6 +222,53 @@ extension the endpoint reads the format from. Nothing is skipped, since
 there is no extra that might be absent. Full run: 612 passed, 2 skipped
 (both pre-existing), unit and integration together. `uv run ruff
 check .` clean.
+
+## Review round
+
+Three comments on PR #39, all from the reviewer, and all one root
+error seen from three angles: the change was written up as "OpenAI,
+with a compatible escape hatch" when the code implements "the dialect,
+defaulting to OpenAI". The code was right in two of the three; the
+framing around it was not.
+
+**The short-audio floor was applied to every endpoint.** The only
+behavioural defect of the three, and a contradiction of a principle
+this module states twice: `check_steering` and the `temperature` range
+are applied only when the host is OpenAI's, because they are facts
+about OpenAI's models rather than about the dialect. The 0.1 s minimum
+is exactly such a fact (it was measured against OpenAI's endpoint) and
+it was hardcoded as universal, so a compatible server that accepts
+shorter clips would never receive them and a barge-in it could have
+confirmed would read as silence.
+
+Fixed by making the floor a constructor parameter, `min_audio_s`, that
+`build` sets to `MIN_AUDIO_S` on OpenAI and `0.0` elsewhere. A
+parameter rather than an `is_openai` flag, because the class then
+expresses a property of its endpoint instead of the endpoint's
+identity, and because it is what a configurable minimum would already
+be plumbed through if a compatible server turns out to want one. The
+reviewer offered that option as the alternative; it was left out as
+surface for a hypothetical, and it is now a one-line change. Empty
+audio is still never sent anywhere, since there is nothing in the
+buffer to transcribe. Three tests added (32 in the file, 615 in the
+suite).
+
+**"Needs no key" was written as though compatible meant keyless.**
+Only the *requirement* for a key is specific to OpenAI's host:
+`endpoint_api_key` resolves and sends `api_key_env` whatever the
+`base_url`, which is what makes an authenticating gateway work. The
+changelog said the endpoint "needs no key" flatly, which points an
+operator at a configuration that fails at request time. Corrected
+there and in the README, and in the two places the `openai` TTS type
+made the same claim in #38, since leaving those to contradict the
+corrected ASR text would be worse than the wider diff.
+
+**The provider table said this type runs on "OpenAI".** True of the
+default and misleading about the type, and the table already had the
+right word one row down, where `openai_compatible` reads "anywhere".
+Both `openai` rows now read "OpenAI or anywhere", with a sentence under
+the table explaining that "anywhere" means a `base_url` and connecting
+it to why those types cannot declare their own egress.
 
 ## Files modified
 
