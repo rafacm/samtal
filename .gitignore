@@ -12,7 +12,18 @@ models/
 
 # Instance-specific configuration stays out of the repository
 *.local.yaml
+# The server reads .env itself (main.py calls load_dotenv), so these are
+# the secrets and nothing else needs to know about them.
 .env
+.env.local
+
+# Per-developer tooling. Nothing here is needed to run or test the
+# server: `uv sync` and `uv run` are the whole story, and a contributor
+# should not have to adopt somebody else's tools to work on this.
+mise.toml
+.mcp.json
+.claude/worktrees/
+.claude/settings.local.json
 
 # ESP-IDF build artifacts
 build/
