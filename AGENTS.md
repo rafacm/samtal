@@ -131,6 +131,21 @@ this before suspecting the code.
 
 ## GitHub API (`gh`) tips
 
+- **Always pass `--repo rafacm/samtal`.** `gh` infers the repository from
+  the working directory's git remote, and `vendor/` holds clones of the
+  upstream projects, so a `gh` command run from `vendor/xiaozhi-esp32`
+  targets `78/xiaozhi-esp32` instead. A `cd` into a vendor clone to read
+  firmware source is an ordinary thing to do mid-task, and it silently
+  redirects every `gh` call after it. This has already happened once: an
+  `issue edit` went to the upstream repository and failed only because
+  the account has no write access there. A `gh issue comment` would have
+  posted to a stranger's tracker instead of failing.
+  `export GH_REPO=rafacm/samtal` at the start of a session overrides the
+  inference for `issue`, `pr` and `api`, and is worth doing as well, not
+  instead: the flag is what makes the intent visible in the command that
+  gets reviewed. Do not check that it worked with `gh repo view`, which
+  reports the working directory's repository whatever `GH_REPO` says;
+  `gh issue list` is the honest test.
 - Wrap request bodies containing backticks in a `$(cat <<'EOF' ... EOF)`
   heredoc; bare backticks in `-f body="..."` are interpreted by zsh.
 - Reply to a PR review comment by POSTing to
