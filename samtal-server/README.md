@@ -876,6 +876,71 @@ filter on `event` in `heard`, `replied`, `agent_said` and group by
 `session`, and you have the transcript. Tokens are never logged, at any
 level.
 
+## Capturing a session
+
+**This records room audio to disk.** It is off unless a directory is
+named, there is no default that turns it on, and a warning at startup
+plus one line per recorded session say when it is on. Turn it off again
+once the recording has been taken.
+
+```yaml
+server:
+  capture:
+    dir: /data/captures
+    # stop capturing a session after this long
+    max_session_s: 900
+    # budget for the directory, oldest captures pruned first
+    max_total_mb: 2000
+    # refuse to start a capture below this much free space
+    min_free_mb: 1000
+```
+
+It exists because acoustic problems cannot be reproduced in any test
+lane. The unit lane feeds synthetic frames and the integration lane
+drives a simulator, and both bypass the microphone, the board's echo
+cancellation, and the room. Whether a reply interrupts itself turns on
+how much of the assistant's own voice survives the board's cancellation
+and reaches the endpointer, and no test can tell you that number.
+
+Three files per session, sharing one timeline:
+
+| File | What it holds |
+| --- | --- |
+| `<session>.wav` | Stereo 16 kHz s16le. Channel 0 is the microphone as decoded, channel 1 is what was paced out to the speaker. |
+| `<session>.jsonl` | Every structured event, plus a `t_ms` offset into the audio, plus dropped frames per second and the endpointer's opinion per frame. |
+| `<session>.json` | What the capture was made against: server revision, the firmware the device reported, the resolved providers verbatim, and the barge-in thresholds. |
+
+Stereo rather than two files is the whole point: sample N in both
+channels is the same instant, so echo leakage is a measurement (cross
+correlate the channels and read off gain and delay) rather than a
+guess, and the overlap is directly audible in any audio editor. A
+channel that goes quiet is filled with silence rather than compressed,
+so nothing slides against the events.
+
+The microphone is captured before the session's own guards, so the
+frames a configuration discards (not listening, or `barge_in: false`
+during a reply) are in the file anyway. Those are the frames that
+explain a misfire.
+
+Storage is 64 kB/s, so a fifteen minute session is about 58 MB and the
+2000 MB budget is around nine hours. Both bounds matter: agent memory
+and the model caches share the volume and grow underneath the budget,
+so capture declines to start and says why rather than being the thing
+that fills the disk.
+
+A capture cut off by a restart stays readable. The WAV header carries
+byte counts that are only patched on a clean close, so a truncated file
+claims zero length, but everything after the 44 byte header is raw
+interleaved PCM and the manifest's `complete: false` says the length has
+to come from the file size. Both files are flushed as they are written,
+so what is lost is at most the last fraction of a second.
+
+In the field: turn it on, hold sessions in the conditions that actually
+break things, and say a marker phrase aloud when something goes wrong.
+It lands in a `heard` transcript and points at the interesting twenty
+seconds instead of ten minutes of scrubbing. Copy the three files off
+after each session; a field recording is not repeatable.
+
 ## Which build is running
 
 `version` is the package version and has read `0.1.0` since the package
