@@ -202,6 +202,31 @@ def test_a_reply_still_speaking_is_not_an_idle_session() -> None:
     assert sentences(second) == LONG_REPLY.split()
 
 
+def test_going_realtime_late_gets_a_full_window_not_what_was_left() -> None:
+    # While a session is not realtime the timeout does not apply, which
+    # is implemented by pushing the deadline forward each time round. A
+    # session that turns realtime part-way through one of those rounds
+    # must not inherit the remainder: it would be hung up on seconds
+    # after the user started talking.
+    #
+    # Both sleeps are load-bearing. The first lands mid-round, so the
+    # inherited deadline is nearly up. The second is the gap between
+    # asking to listen and actually saying something, which is where the
+    # bug lives: speaking straight away would hide it, because an
+    # utterance ending pushes the deadline out on its own.
+    with TestClient(create_app(idle_config(1.0))) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            time.sleep(1.8)
+            listen_realtime(websocket)
+            time.sleep(0.4)
+            encoder = OpusEncoder()
+            send_pcm(websocket, speech_pcm(240), encoder)
+            endpoint_silence(websocket, encoder)
+            texts, _ = collect_reply(websocket)
+    assert sentences(texts) == ["You said hello."]
+
+
 def test_the_idle_close_is_logged_as_its_own_event(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

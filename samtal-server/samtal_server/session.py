@@ -616,6 +616,14 @@ class Session:
                 self._listen_mode = mode
                 self.listening = True
                 self._reset_utterance()
+                # Asking to listen is a conversational act, and it is
+                # also the moment this session can first become one the
+                # idle timeout applies to. Without the mark, a session
+                # that turns realtime late inherits whatever was left of
+                # a window that was being extended for free while it was
+                # not realtime, and can be hung up on seconds after the
+                # user starts talking.
+                self._mark_activity()
             case messages.ListenMessage(state="stop"):
                 self.listening = False
                 if self._utterance:
