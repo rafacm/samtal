@@ -35,10 +35,14 @@ hour, which costs four separate things:
   closure and the reason `idle timeout`, through the same
   `request_shutdown` the life cap and the shutdown drain use, so a reply
   already speaking finishes its sentence first.
-- The clock is written at two points, `_finish_utterance` and `_reply`'s
+- The clock is written at `_finish_utterance` and at `_reply`'s
   `finally`, so "the end of the last utterance or the end of the last
   reply, whichever is later" falls out of both writing the current time
-  rather than needing a comparison.
+  rather than needing a comparison. It is written on an accepted `listen
+  start` too, which a review found: while a session is not realtime the
+  deadline is pushed forward each round, and one that turns realtime
+  part-way through a round would otherwise inherit the remainder and be
+  hung up on seconds after the user started talking.
 - A distinct `session_idle` log event carrying `idle_s` and
   `duration_s`, so an operator can tell an abandoned conversation from
   one that ran out of its hour.
@@ -88,10 +92,10 @@ seconds, so even a monologue cannot starve the timer.
 
 ## Verification
 
-`uv run pytest tests/unit -q`: 595 passed, 2 skipped.
+`uv run pytest tests/unit -q`: 596 passed, 2 skipped.
 `uv run pytest tests/integration -q`: 27 passed. `ruff check` clean.
 
-Four of the new unit tests were each run against a control with the
+Five of the new unit tests were each run against a control with the
 relevant piece disabled, so none of them passes for the wrong reason:
 
 | Test | Control | Result without the change |
@@ -100,10 +104,14 @@ relevant piece disabled, so none of them passes for the wrong reason:
 | the idle close is logged as its own event | watchdog not started | fails: no `session_idle` record |
 | the timeout leaves a session that never went realtime alone | realtime scoping removed | fails: socket closed under a manual-mode turn |
 | a reply still speaking is not an idle session | `_replying()` guard removed | fails: socket closed the moment the first reply ended, so the second turn never happened |
+| going realtime late gets a full window | `listen start` mark removed | fails: socket closed in the gap between asking to listen and speaking |
 
-The last of those first passed against its own control, for the reason
-in the second decision above, and was rewritten to take a second turn.
-That is the behaviour actually at stake.
+Two of those first passed against their own controls and had to be
+rewritten. The reply one needed a second turn, for the reason in the
+second decision above. The late-realtime one needed a pause between
+asking to listen and speaking: an utterance ending pushes the deadline
+out by itself, so speaking straight away hid the very gap the test
+exists for.
 
 One thing no test covers, stated plainly rather than left to be
 discovered: the activity mark in `_finish_utterance` is presently
