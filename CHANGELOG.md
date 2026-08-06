@@ -51,6 +51,22 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   policy) moved to a shared `providers/openai_endpoint.py`, now that
   two stages decide them the same way. No behaviour changed.
 
+### Fixed
+
+- Documentation for the `openai` ASR provider told operators that
+  leaving `language` unset "costs nothing", which a device checkpoint
+  disproved: on far-field microphone audio through Opus, detection has
+  much less to go on than a clean file, and unpinned Swedish came back
+  as English-shaped nonsense ("Vad heter Sveriges huvudstad?" heard as
+  "Hat hetas verigezogistad."). Pinning fixed it outright, and `prompt`
+  does not compensate, since it fixes vocabulary rather than language.
+  The README and `config.example.yaml` now tell an operator to set
+  `language` for any non-English deployment. The accuracy comparison is
+  marked as holding only once the language is pinned, and the latency
+  tables gain the figures measured on the board, where the local engine
+  came in at 964 ms rather than the desk's 1688 to 1781 ms, so the gap
+  to the cloud is much narrower than first published. No code changed.
+
 ## 2026-08-05
 
 ### Added

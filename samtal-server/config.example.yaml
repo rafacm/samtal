@@ -212,12 +212,18 @@ providers:
       # comes back as "sample" under noise, and as "Samtal" with this
       # set).
       # prompt: samtal, Stockholm
-      # Spoken language (ISO 639-1). Unlike the local engine, leaving
-      # it unset costs nothing: recognition is multilingual either way
-      # and detection happens inside the model. Note that the gpt-4o
-      # models treat this as a hint and will still answer in the
-      # language they hear, so it is not the hard pin it is above.
-      # language: sv
+      # Spoken language (ISO 639-1). SET THIS for any deployment that
+      # is not English. On clean audio leaving it unset costs nothing,
+      # since detection happens inside the model, but a device
+      # checkpoint showed far-field mic audio through Opus gives
+      # detection far less to go on: unpinned, Swedish came back as
+      # English-shaped nonsense ("Vad heter Sveriges huvudstad?" as
+      # "Hat hetas verigezogistad."), and pinning fixed it outright.
+      # `prompt` above does not compensate; it fixes vocabulary, not
+      # language. The gpt-4o models still treat this as a hint and will
+      # answer in the language they hear, so a wrong value is fairly
+      # harmless and an empty one is what costs you.
+      language: sv
       # 0.0 to 1.0. Raise it only to loosen a decode that is stuck;
       # the default is the API's own.
       # temperature: 0.0

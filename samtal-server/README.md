@@ -94,9 +94,26 @@ column is an int8 CPU decode on a laptop, and a machine with a GPU
 would change the answer. The cloud column would not move much, since
 almost all of it is the round trip.
 
-Accuracy is the other half, and it separates them further. The same
-three utterances under white noise, standing in for a far-field
-microphone:
+**The same measurement on a real device narrows the gap a long way.**
+Taken from the server's own log on a Waveshare ESP32-S3, `heard` minus
+the end of the utterance, so it is the whole stage and not just the
+call:
+
+| | on the board | on the desk |
+| --- | --- | --- |
+| `gpt-4o-mini-transcribe` | 642, 647, 825 ms | 536 to 658 ms |
+| `faster_whisper` small | 964 ms (one sample) | 1688 to 1781 ms |
+
+The cloud figures held; the local one did not, which says the desk
+number for `faster_whisper` was measured under contention and flatters
+the cloud. Treat the first table's local column as a worst case and
+this one as the honest comparison, and measure your own either way.
+
+Accuracy is the other half, and it separates them further, *provided
+the language is pinned*. The caveat is not a footnote: see "Set
+`language`" below, because unpinned on a real device the cloud engine
+was the worse of the two. Synthesized speech under white noise,
+standing in for a far-field microphone:
 
 | Signal to noise | `faster_whisper` small | `gpt-4o-mini-transcribe` | `gpt-4o-transcribe` |
 | --- | --- | --- | --- |
@@ -110,6 +127,15 @@ gives up, turning "samtalsassistent" into "samhållssystem" at 10 dB
 and the whole sentence into unrelated English at 0 dB. A larger local
 model closes some of that, at a latency cost the table above already
 shows there is no room for.
+
+That table is synthesized speech, which is cleaner than a room. On the
+device, with both engines pinned to Swedish, the cloud engine was still
+the better of the two but neither was perfect:
+
+| Said to the board | `gpt-4o-mini-transcribe` | `faster_whisper` small |
+| --- | --- | --- |
+| "Vad heter Sveriges huvudstad?" | exact | "Vad heter Sveriges Hubbetsstad?" |
+| "Vad heter din samtalsassistent?" | "Vad hette ditt samtalsassistent?" | "Men hejter den samtalassistenten." |
 
 What the local engine still wins: it is the only one that keeps the
 audio on your host, and it is the only one that reports which language
@@ -135,22 +161,40 @@ Keys are named, never written, exactly as for the TTS types above.
 | `model` | `gpt-4o-mini-transcribe` | `gpt-4o-transcribe` is the larger sibling; `whisper-1` is the same Whisper V2 you could run locally |
 | `base_url` | `https://api.openai.com/v1` | Point it at any server implementing `/v1/audio/transcriptions` |
 | `prompt` | unset | Words the engine would not otherwise guess: names, places, the assistant's own |
-| `language` | unset | Spoken language (ISO 639-1). A hint, not a pin: see below |
+| `language` | unset | Spoken language (ISO 639-1). Set it for any non-English deployment: see below |
 | `temperature` | unset | 0.0 to 1.0, the API's own default when unset |
 | `timeout_s` | `30` | Seconds before a transcription is abandoned, and a real bound: retries are off |
 
 **Set `prompt`.** An unfamiliar proper noun is the one thing this type
 reliably gets wrong, and the prompt is what fixes it: under noise,
-"samtal" came back as "sample" without it and as "Samtal" with it.
+"samtal" came back as "sample" without it and as "Samtal" with it. It
+fixes vocabulary, not language, so it cannot compensate for the setting
+below: on the board, `prompt: samtal` still produced "samstal" until
+`language` was pinned, and produced "samtalsassistent" exactly once it
+was.
 
-**`language` behaves differently here than on the local engine.**
-Leaving it unset costs nothing, because recognition is multilingual
-either way and detection happens inside the model rather than as a
-separate pass you pay for. Setting it is a hint rather than a pin: a
-`gpt-4o` model given Swedish audio and `language: en` still answers in
-Swedish, where the local engine would have forced the wrong language
-and produced nonsense. That makes a wrong value harmless here, and a
-right one worth less.
+**Set `language` unless the household speaks English.** This is the
+one setting a device checkpoint changed our mind about. On clean audio,
+leaving it unset costs nothing: recognition is multilingual either way,
+and detection happens inside the model rather than as a separate pass
+you pay for. On a real board in a real room it is a different story.
+Unpinned, Swedish came back as English-shaped nonsense:
+
+| Said to the board | Unpinned | `language: sv` |
+| --- | --- | --- |
+| "Vad heter Sveriges huvudstad?" | "Hat hetas verigezogistad." | exact |
+| "Vad heter din samtalsassistent?" | "Wat hat er dien samstal asynstind?" | "Vad hette ditt samtalsassistent?" |
+
+The audio was not the problem; the language choice was. Far-field mic
+audio through Opus gives detection much less to go on than a clean
+file, and the model appears to fall back on English phonetics. Pinning
+fixed it outright, and no `prompt` rescued it while unpinned.
+
+Setting it is still a hint rather than a hard pin: a `gpt-4o` model
+given Swedish audio and `language: en` answers in Swedish anyway, where
+the local engine would have forced the wrong language and produced
+nonsense. So a wrong value is fairly harmless, and it is leaving it
+*empty* that costs you.
 
 **No language is reported back.** `AsrResult`'s language fields stay
 empty, so the `heard` log line carries no `language`, and there is no

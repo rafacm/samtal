@@ -205,13 +205,67 @@ Both transcripts exact, in two languages, with no `language` configured,
 which is the multilingual case working through the whole stack rather
 than in a script.
 
-**Not verified: the test board.** No device was attached to this
-session, so the Waveshare checkpoint that the last two provider PRs ran
-has not been done, and the PR leaves that box unchecked. It is the leg
-that matters most for an ASR change, because a real room and a real
-microphone are exactly what the synthesized audio above stands in for,
-and it is what found the per-sentence latency defect in #38. Worth
-running before this type is recommended to anyone.
+**The device checkpoint, run after the merge.** No board was attached
+while the PR was open, so it merged with that box unchecked. It was run
+straight afterwards on the Waveshare ESP32-S3, and it changed one piece
+of this document's advice, which is the argument for never letting that
+box stay unchecked: a real room and a real microphone are exactly what
+the synthesized audio above stands in for.
+
+Round one, nothing pinned, is the finding:
+
+| Said to the board | Heard |
+| --- | --- |
+| "What's the capital of Sweden?" | "What's the capital of Sweden?" |
+| "Vad heter Sveriges huvudstad?" | "Hat hetas verigezogistad." |
+| "Vad heter din samtalsassistent?" | "Wat hat er dien samstal asynstind?" |
+
+English exact, Swedish English-shaped nonsense, and the third reply
+came back in Dutch because the transcript had poisoned the history.
+`prompt: samtal` was set throughout and did not save it: it fixes
+vocabulary, not language.
+
+The local engine failed the same sentences the same way in the same
+room ("Wart Hetters Verges-Hubelsstaat"), which is what ruled out a
+defect in this provider and pointed at language detection instead.
+
+Round two pinned `language: sv` on both ears, and that settled it:
+
+| Said to the board | `gpt-4o-mini-transcribe` | `faster_whisper` small |
+| --- | --- | --- |
+| "Vad heter Sveriges huvudstad?" | exact | "Vad heter Sveriges Hubbetsstad?" |
+| "Vad heter din samtalsassistent?" | "Vad hette ditt samtalsassistent?" | "Men hejter den samtalassistenten." |
+
+So the ranking the desk predicted survives, but only once the language
+is pinned, and the claim that leaving it unset "costs nothing" does
+not. Far-field audio through Opus gives detection much less to go on
+than a clean file. The README and `config.example.yaml` were corrected
+to tell an operator to set `language` for any non-English deployment;
+that is the whole outcome of the checkpoint.
+
+**Latency on the board**, `heard` minus end of utterance, from the
+server's own log, so it covers the whole stage rather than the call:
+this provider at 642, 647 and 825 ms, against `faster_whisper` small at
+964 ms on one clean sample. The cloud figures match the desk; the local
+one does not, which says the desk's `faster_whisper` number was
+measured under contention and flattered the cloud. Both tables now say
+so.
+
+**Barge-in through a network ASR provider, which nothing had exercised
+before.** An interruption mid-reply logged `barge-in, cancelling the
+reply in flight`, then `utterance` and `heard` two milliseconds later:
+the confirmation ran ASR through this provider, the cancel followed
+from its transcript, and `_finish_utterance` reused the result, so ASR
+ran once and `heard` fired once. That is #28's contract holding with a
+round trip inside it. The short-audio guard correctly stayed out of the
+way, the interruptions being 2.7 and 2.8 seconds.
+
+**One operational note for the next checkpoint.** Restarting the server
+mints a new `SAMTAL_AUTH_SECRET` unless one is pinned, and the board
+only re-runs OTA on boot, so it presents the previous token and the
+handshake is refused with `bad_token` while the device plays an error
+tone. Either keep the secret stable across restarts or hard reset the
+board after one.
 
 **Test suite.** 29 unit tests against an `httpx.MockTransport`, driven
 through a real `AsyncOpenAI` client rather than a stub, so the
