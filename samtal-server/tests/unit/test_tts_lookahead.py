@@ -195,6 +195,79 @@ async def test_the_frame_cadence_stays_smooth() -> None:
     )
 
 
+async def test_the_first_sentence_does_not_wait_for_the_second() -> None:
+    # The trap in running ahead: if a sentence is only spoken once the
+    # next one has been written, the model's thinking time lands in
+    # front of the first word of every reply, and a one-sentence reply
+    # waits for the whole stream to end. Time to first audio is the
+    # latency a listener actually meets, so it must not move.
+    thinking_s = 1.0
+
+    class Dawdles(ScriptedLlm):
+        async def stream(self, *args: Any, **kwargs: Any) -> AsyncIterator[Any]:
+            from samtal_server.providers import TextDelta
+
+            yield TextDelta(SENTENCES[0] + " ")
+            await asyncio.sleep(thinking_s)
+            yield TextDelta(SENTENCES[1])
+
+    tts = SlowTts()
+    session, socket = slow_session([], tts)
+    assert session._providers is not None
+    session._providers = replace(session._providers, llm=Dawdles([]))
+
+    began = asyncio.get_running_loop().time()
+    await speak_a_reply(session)
+
+    first_audio = min(when for when, kind, _ in socket.events if kind == "audio")
+    assert first_audio - began < SYNTHESIS_LATENCY_S + thinking_s / 2, (
+        "the first sentence waited for the model to write the second"
+    )
+
+
+async def test_a_sentence_is_not_pulled_from_the_provider_faster_than_it_plays() -> None:
+    # Running ahead must not mean holding a whole sentence of audio.
+    # Playback consumes at realtime and a provider can produce far
+    # faster, so the buffer stays small and the provider feels the
+    # backpressure the paced consumer used to apply directly.
+    delivered = 0
+
+    class Torrent(SlowTts):
+        async def synthesize(self, text: str) -> AsyncIterator[bytes]:
+            nonlocal delivered
+            self.started[text] = asyncio.get_running_loop().time()
+            self.in_flight += 1
+            self.most_in_flight = max(self.most_in_flight, self.in_flight)
+            try:
+                await asyncio.sleep(self._latency_s)
+                # A hundred chunks of 60 ms, offered as fast as they are
+                # taken. Nothing here waits.
+                per_chunk = int(self.sample_rate * 0.06)
+                for _ in range(100):
+                    yield b"\x00\x00" * per_chunk
+                    delivered += 1
+                self.finished[text] = asyncio.get_running_loop().time()
+            except asyncio.CancelledError:
+                self.cancelled.append(text)
+                raise
+            finally:
+                self.in_flight -= 1
+
+    tts = Torrent()
+    session, socket = slow_session([SENTENCES[0]], tts)
+    reply = asyncio.create_task(speak_a_reply(session))
+    # A quarter of a second of playback in: a provider given free rein
+    # would have handed over all hundred chunks by now.
+    await asyncio.sleep(SYNTHESIS_LATENCY_S + 0.25)
+    taken = delivered
+    reply.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await reply
+
+    assert taken < 20, f"{taken} of 100 chunks were pulled in a quarter second of playback"
+    assert tts.in_flight == 0
+
+
 async def test_only_one_sentence_is_ever_run_ahead() -> None:
     # Lookahead of one, not of everything: more would mean more
     # concurrent requests to the provider and more audio held for a
@@ -279,7 +352,11 @@ async def test_a_failing_sentence_still_lets_the_earlier_ones_be_heard() -> None
     # The failing sentence produced no audio, and is recorded nowhere.
     assert socket.audio_times(SENTENCES[0])
     assert socket.audio_times(SENTENCES[1]) == []
-    assert SENTENCES[2] not in tts.started
+    # The third had been run ahead behind the failing one, as the bound
+    # allows, and is taken down with the reply rather than left running.
+    assert SENTENCES[2] in tts.cancelled
+    assert socket.audio_times(SENTENCES[2]) == []
+    assert tts.in_flight == 0
     # It was still announced first, which is what `sentence_start` has
     # always done and is not this change's to alter: the announcement
     # goes out when a sentence is about to be spoken, and whether the

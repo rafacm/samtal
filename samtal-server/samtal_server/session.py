@@ -156,11 +156,18 @@ class _Synthesis:
     in the assistant's voice". Starting the work early spends that time
     against playback that is already happening (#37).
 
-    The task drains the provider into a buffer as fast as the provider
-    will give it. `chunks()` then yields what has arrived and waits for
-    the rest, so the first sentence of a reply still streams (nothing is
-    held back waiting for a sentence to finish) while a sentence
-    synthesized ahead is simply already there.
+    A task pulls from the provider into a one-chunk buffer. `chunks()`
+    yields what has arrived and waits for the rest, so a sentence run
+    ahead has already paid its time to first byte by the time anyone
+    asks for it, while the first sentence of a reply still streams:
+    nothing is held back waiting for a sentence to finish.
+
+    The buffer holds one chunk, not the sentence. Playback consumes at
+    realtime and a provider can produce much faster than that, so an
+    unbounded buffer would hold a whole sentence of PCM per sentence run
+    ahead and remove the backpressure the paced consumer used to apply
+    to the provider. One chunk is all the lookahead needs, because what
+    it exists to absorb is the wait for the *first* chunk.
 
     A failure is held rather than raised where it happened, and re-raised
     from `chunks()` at the point the sentence would have been spoken.
@@ -171,6 +178,14 @@ class _Synthesis:
     def __init__(self, sentence: str, tts: TtsProvider, session_id: str) -> None:
         self.sentence = sentence
         self._buffer: asyncio.Queue[bytes | None] = asyncio.Queue()
+        # The backpressure. Held per chunk waiting to be spoken and
+        # released as each is taken, so the provider is asked for the
+        # next chunk only once the previous has been picked up. The
+        # bound is on data, not on the queue, so that the end-of-audio
+        # sentinel below can always be delivered: a bounded queue that
+        # is full when the consumer goes away leaves the drain task
+        # blocked forever on a sentinel nobody is waiting for.
+        self._room = asyncio.Semaphore(1)
         self._failure: BaseException | None = None
         self._session_id = session_id
         self._task = asyncio.create_task(self._drain(tts))
@@ -178,6 +193,7 @@ class _Synthesis:
     async def _drain(self, tts: TtsProvider) -> None:
         try:
             async for chunk in tts.synthesize(self.sentence):
+                await self._room.acquire()
                 self._buffer.put_nowait(chunk)
         except asyncio.CancelledError:
             raise
@@ -192,6 +208,7 @@ class _Synthesis:
             chunk = await self._buffer.get()
             if chunk is None:
                 break
+            self._room.release()
             yield chunk
         if self._failure is not None:
             raise self._failure
@@ -1092,42 +1109,44 @@ class Session:
             splitter = SentenceSplitter()
             leg: list[str] = []
             calls: list[ToolCall] = []
-            # The sentence being synthesized ahead of the one being
-            # spoken. One, not a queue: every sentence here plays for
-            # longer than the next takes to start, so a single sentence
-            # of lookahead closes the gap, and more would only mean more
-            # concurrent requests to the provider and more audio held
-            # for a reply a barge-in may cancel.
-            ahead: _Synthesis | None = None
+            # The sentence currently being spoken, which runs alongside
+            # the model still streaming. At most one sentence is ever
+            # run ahead of it: every sentence plays for longer than the
+            # next takes to start, so one closes the gap, and more would
+            # only mean more concurrent requests to the provider and
+            # more audio held for a reply a barge-in may throw away.
+            speaking: asyncio.Task[None] | None = None
             try:
                 async for event in providers.llm.stream(
                     self._system_prompt(), working, tools, choice
                 ):
                     if isinstance(event, TextDelta):
                         for sentence in splitter.push(event.text):
-                            ahead = await self._speak_after(
-                                ahead, sentence, providers.tts, resampler, leg, spoken
+                            speaking = await self._speak_after(
+                                speaking, sentence, providers.tts, resampler, leg, spoken
                             )
                     else:
                         calls.append(event)
                 tail = splitter.flush()
                 if tail is not None:
-                    ahead = await self._speak_after(
-                        ahead, tail, providers.tts, resampler, leg, spoken
+                    speaking = await self._speak_after(
+                        speaking, tail, providers.tts, resampler, leg, spoken
                     )
                 # The round ends here, so the lookahead stops here too:
                 # there is no next sentence to overlap with, and the
                 # tools below must not run over the top of speech.
-                if ahead is not None:
-                    await self._speak_and_record(ahead, resampler, leg, spoken)
-                    ahead = None
+                if speaking is not None:
+                    await speaking
+                    speaking = None
             finally:
                 # A barge-in cancels this coroutine anywhere above, and
-                # a sentence synthesized ahead of it must not outlive
-                # the reply it belonged to.
-                if ahead is not None:
-                    ahead.cancel()
-                    await ahead.wait_cancelled()
+                # the sentence being spoken must not outlive the reply it
+                # belonged to. `_speak` takes its own synthesis down with
+                # it, so cancelling the task is enough.
+                if speaking is not None:
+                    speaking.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await speaking
             if not calls:
                 break
             # Whatever preamble was spoken before the calls is part of
@@ -1282,33 +1301,40 @@ class Session:
 
     async def _speak_after(
         self,
-        ahead: _Synthesis | None,
+        speaking: asyncio.Task[None] | None,
         sentence: str,
         tts: TtsProvider,
         resampler: Resampler,
         leg: list[str],
         spoken: list[str],
-    ) -> _Synthesis:
-        """Start `sentence` synthesizing, then speak whatever was already
-        waiting. Answers the new sentence, now the one waiting.
+    ) -> asyncio.Task[None]:
+        """Start `sentence` synthesizing, wait for the sentence already
+        being spoken to finish, then start speaking this one. Answers the
+        task now speaking, for the next call to wait on.
 
-        The order of these two statements is the entire fix. Starting
-        first means the new sentence's time to first byte is spent
-        against the previous sentence's playback, which is already
-        happening; speaking first would spend it against silence, which
-        is what it used to do."""
+        The first statement before the first await is the entire fix:
+        the new sentence's time to first byte is spent against the
+        previous sentence's playback, which is already happening, rather
+        than against silence.
+
+        Speaking is a task rather than an await so that it overlaps the
+        model still streaming. Awaiting it here instead would mean a
+        sentence is not spoken until the *next* one has been written,
+        which would put the model's thinking time in front of the first
+        word of every reply and make a one-sentence reply wait for the
+        stream to end."""
         started = _Synthesis(sentence, tts, self.session_id)
-        if ahead is not None:
-            try:
-                await self._speak_and_record(ahead, resampler, leg, spoken)
-            except BaseException:
-                # The sentence just started will never be spoken now,
-                # whether this was a provider failure or a barge-in
-                # cancelling the reply.
-                started.cancel()
-                await started.wait_cancelled()
-                raise
-        return started
+        try:
+            if speaking is not None:
+                await speaking
+        except BaseException:
+            # The sentence just started will never be spoken now,
+            # whether this was a provider failure or a barge-in
+            # cancelling the reply.
+            started.cancel()
+            await started.wait_cancelled()
+            raise
+        return asyncio.create_task(self._speak_and_record(started, resampler, leg, spoken))
 
     async def _speak(
         self, synthesis: _Synthesis, resampler: Resampler, spoken: list[str]
@@ -1335,8 +1361,17 @@ class Session:
         await self.websocket.send_text(
             messages.tts_message(self.session_id, "sentence_start", text=synthesis.sentence)
         )
-        async for chunk in synthesis.chunks():
-            await self._send_frames(self._encoder.encode(resampler.process(chunk)))
+        try:
+            async for chunk in synthesis.chunks():
+                await self._send_frames(self._encoder.encode(resampler.process(chunk)))
+        finally:
+            # A barge-in cancels this coroutine mid-sentence, and the
+            # synthesis behind it is a separate task that would otherwise
+            # keep pulling from the provider for a sentence nobody will
+            # hear. After a sentence finishes normally this is a task
+            # that is already done, so cancelling costs nothing.
+            synthesis.cancel()
+            await synthesis.wait_cancelled()
         spoken.append(synthesis.sentence)
 
     async def _speak_and_record(
