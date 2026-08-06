@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-06
+
+### Added
+
+- New `openai` ASR provider type, transcribing an utterance through
+  the OpenAI transcription API. Like the `openai` TTS type it needs no
+  optional extra and adds no dependency, so one key now serves all
+  three network stages. Options: `api_key_env` (required for OpenAI
+  itself), `model` (default `gpt-4o-mini-transcribe`), `base_url`
+  (default `https://api.openai.com/v1`), `prompt`, `language`,
+  `temperature` and `timeout_s`. The stage's PCM goes up as WAV, whose
+  header carries whatever rate the pipeline is running at, so nothing
+  is re-encoded and no rate is pinned. `base_url` reaches any server
+  implementing `/v1/audio/transcriptions`, which needs no key, and the
+  endpoint rather than the type decides egress, so an entry under
+  `server.local_only` declares its own. Retries are off, so `timeout_s`
+  bounds a turn. Audio under the API's 0.1 s minimum is answered empty
+  without a round trip, which is the barge-in path: a snippet of tens
+  of milliseconds is transcribed to decide whether an interruption was
+  real, and the API's refusal would be logged as a failure rather than
+  the non-answer it is.
+  Unlike the TTS types, this one is usually the faster choice as well
+  as the more accurate: measured against local `faster_whisper` small
+  on an int8 CPU, 536 to 658 ms per utterance against 1688 to 1781 ms,
+  and it still transcribed Swedish exactly under white noise at 0 dB
+  where the local model returned an unrelated English sentence. It
+  reports no language and asks for no session language lock, because
+  the API returns neither a usable language nor a confidence; nothing
+  is lost, since the detection pass those exist to skip is free here.
+  It does not stream, which the module documents as a decision rather
+  than an omission: the stage takes a whole utterance and the LLM
+  cannot start on half a sentence.
+
+### Changed
+
+- The rules an `openai` provider derives from its `base_url` (whether
+  a key is required, whether the type's model rules apply, the retry
+  policy) moved to a shared `providers/openai_endpoint.py`, now that
+  two stages decide them the same way. No behaviour changed.
+
 ## 2026-08-05
 
 ### Added
