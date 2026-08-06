@@ -64,7 +64,11 @@ run ahead can fail long before the moment it would have been spoken.
 whole reply rather than one agent's leg, so the generation after a
 handover, which was the slow one in the report, is a round of its own
 rather than another first round. `turns` is the cheap proxy for a
-payload growing turn by turn.
+payload growing turn by turn. `first_token_ms` times the first spoken
+token and is absent from a round that only asked for a tool: both
+providers assemble tool calls after their stream has ended, so timing
+the first event instead would report a whole generation as its own
+time to first token, on exactly the rounds a handover is made of.
 
 **Token counts.** A new `Usage` variant on the LLM event stream, which
 providers yield last. The Anthropic API reports usage on every

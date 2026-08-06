@@ -901,7 +901,7 @@ and `device`, plus its own:
 | `barge_in`         | speech cuts a reply short       | `speech_ms`, plus `speaking_ms` when the reply had started speaking |
 | `barge_in_suppressed` | an interruption is dropped and the reply lives | `reason` (`min_speech`, `refractory`, `no_transcript`), `speech_ms` |
 | `barge_in_merged`  | an interruption merges with the utterance the reply was transcribing | `speech_ms` |
-| `llm_round`        | a generation call finishes      | `agent`, `round`, `turns`, `duration_ms`, `stage`, `provider`, `type`, `host`, `first_token_ms`, plus `prompt_tokens` and `completion_tokens` where the provider reports them |
+| `llm_round`        | a generation call finishes      | `agent`, `round`, `turns`, `duration_ms`, `stage`, `provider`, `type`, `host`, `first_token_ms` (the first spoken token, so a round that only called a tool carries none), plus `prompt_tokens` and `completion_tokens` where the provider reports them |
 | `provider_failed`  | an ASR, LLM or TTS call fails   | `stage`, `provider`, `type`, `host`, `error`, `duration_ms`, `agent` |
 | `tool_call`        | a tool returns                  | `agent`, `tool`, `duration_ms`, `is_error` |
 | `session_limit`    | the duration cap fires          | `duration_s`                       |

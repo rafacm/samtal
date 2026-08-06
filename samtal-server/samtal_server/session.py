@@ -478,7 +478,7 @@ class Session:
         provider: object,
         working: Sequence[Turn],
         began: float,
-        first_event_at: float | None,
+        first_token_at: float | None,
         usage: Usage | None,
     ) -> None:
         """One `llm_round` event, which is where a slow reply becomes
@@ -495,7 +495,13 @@ class Session:
         the whole reply rather than one agent's leg, so the generation
         after a handover is a round of its own rather than another
         first round. Token counts appear when the provider reported
-        them; their absence is a fact about the endpoint."""
+        them; their absence is a fact about the endpoint.
+
+        `first_token_ms` times the first spoken token, so a round that
+        only asked for a tool carries none: there was no token, and
+        timing the tool call instead would report the whole generation
+        as its own time to first token, since both providers assemble
+        calls after the stream has ended."""
         loop = asyncio.get_running_loop()
         elapsed = loop.time() - began
         tokens: dict[str, Any] = {}
@@ -503,8 +509,8 @@ class Session:
             tokens["prompt_tokens"] = usage.prompt_tokens
         if usage is not None and usage.completion_tokens is not None:
             tokens["completion_tokens"] = usage.completion_tokens
-        if first_event_at is not None:
-            tokens["first_token_ms"] = round((first_event_at - began) * 1000)
+        if first_token_at is not None:
+            tokens["first_token_ms"] = round((first_token_at - began) * 1000)
         logger.info(
             "session %s: %s round %d took %.2f s over %d turns",
             self.session_id,
@@ -1494,7 +1500,7 @@ class Session:
             speaking: asyncio.Task[None] | None = None
             loop = asyncio.get_running_loop()
             began = loop.time()
-            first_event_at: float | None = None
+            first_token_at: float | None = None
             usage: Usage | None = None
             self._llm_round += 1
             try:
@@ -1502,9 +1508,15 @@ class Session:
                     providers.llm,
                     providers.llm.stream(self._system_prompt(), working, tools, choice),
                 ):
-                    if first_event_at is None:
-                        first_event_at = loop.time()
                     if isinstance(event, TextDelta):
+                        # Speech only. Both providers assemble tool
+                        # calls and usage after their stream has ended,
+                        # so timing from those would report a whole
+                        # generation as its own time to first token,
+                        # and a round that only calls a tool has no
+                        # first token to time.
+                        if first_token_at is None:
+                            first_token_at = loop.time()
                         for sentence in splitter.push(event.text):
                             speaking = await self._speak_after(
                                 speaking, sentence, providers.tts, resampler, leg, spoken
@@ -1513,7 +1525,7 @@ class Session:
                         usage = event
                     else:
                         calls.append(event)
-                self._llm_round_done(providers.llm, working, began, first_event_at, usage)
+                self._llm_round_done(providers.llm, working, began, first_token_at, usage)
                 tail = splitter.flush()
                 if tail is not None:
                     speaking = await self._speak_after(
@@ -1757,7 +1769,18 @@ class Session:
 
         `sentence_start` goes out now rather than when synthesis began:
         it tells the device what is being said, and what is being said is
-        what is about to be heard."""
+        what is about to be heard.
+
+        This is also where the device is told speech is starting, which
+        leaves one window open: a TTS provider slow to its first byte
+        holds the device in its speaking state for that wait, and for a
+        host that drops traffic that is the synthesis `timeout_s`.
+        Closing it means holding `sentence_start` back until the first
+        chunk, which reverses a decision #37 made deliberately (the
+        announcement belongs to the sentence about to be spoken, and
+        whether its audio will arrive is not known then), and changes
+        the order of messages the firmware sees. Worth deciding on the
+        board rather than here."""
         await self._begin_speaking()
         await self.websocket.send_text(
             messages.tts_message(self.session_id, "sentence_start", text=synthesis.sentence)

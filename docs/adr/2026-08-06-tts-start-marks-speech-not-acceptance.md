@@ -75,6 +75,18 @@ never told to expect is the one way this change could strand a device.
 - Nothing acknowledges the turn between the transcript and the first
   sentence. The device already has its `stt` message with the
   transcript, which is what tells the user they were heard.
+- One window stays open, one stage later: a TTS provider slow to its
+  first byte holds the device in its speaking state for that wait,
+  which for a host that drops traffic is the synthesis `timeout_s`.
+  Measured time to first byte is 129 ms to 884 ms on the providers in
+  use, against the 19 s this decision is about, so the shape is the
+  same and the scale is not. Closing it means holding `sentence_start`
+  back until the first chunk arrives, which reverses a decision #37
+  made deliberately: the announcement belongs to the sentence about to
+  be spoken, and whether its audio will arrive is not known then. That
+  is another device-visible reordering, and belongs on the board
+  rather than in reasoning, so it is left open and written down.
+
 - The observability half of this is what makes a stall diagnosable at
   all: the `llm_round` event added alongside it carries `duration_ms`,
   `first_token_ms` and `turns`, which is what separates a slow vendor
