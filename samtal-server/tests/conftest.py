@@ -22,29 +22,46 @@ import shutil
 import sys
 from pathlib import Path
 
-# CPython validates a cached `.pyc` against the source's size and its
-# mtime truncated to whole seconds, so a rewrite that keeps the byte
-# count and lands inside the same second is invisible, and a file
-# restored with `mv` looks older than its own cache. Both shapes occur
-# here: checking that a regression test really fails without its fix
-# usually swaps two statements (same size, one scripted second), and
-# restoring a file from a backup carries the backup's mtime. The result
-# is a working tree that lies about what it is running.
+# A cached `.pyc` records the source's size and its mtime in whole
+# seconds, and CPython accepts the cache when both are *equal* to the
+# source's current values. So any edit that keeps the byte count and
+# leaves the mtime on the second it was compiled on is invisible. Two
+# ordinary operations here do exactly that:
 #
-# Writing no bytecode at all removes the cache, and with it the stale
-# cache. It covers pytest's assertion-rewritten test bytecode too, which
-# uses the same check and matters as much because test files are edited
-# constantly. Measured cost on this package is under 10 ms per run: the
-# expensive imports live in site-packages and keep their own bytecode.
+#   - Checking a regression test really fails without its fix. Reverting
+#     usually swaps two statements, which preserves the byte count, and
+#     a scripted revert-run-restore finishes inside one second.
+#   - Restoring a file from a backup, which carries the backup's mtime
+#     rather than the current time, landing back on the compiled second.
+#
+# The result is a tree that lies about what it is running. It cost half
+# an hour on #13, where a restored fix ran as its pre-fix version.
+#
+# Writing no bytecode removes the cache, and with it the stale cache. It
+# covers pytest's assertion-rewritten test bytecode too, which uses the
+# same check and matters as much because test files are edited
+# constantly. Measured cost is noise: the expensive imports live in
+# site-packages and keep their own bytecode.
 sys.dont_write_bytecode = True
 
-# The flag cannot cover this file: pytest writes a conftest's rewritten
-# bytecode before it executes the body that sets the flag, so this run
-# has already cached it. Removing the cache now means the next run finds
-# nothing to read and rewrites from source, which is the same guarantee
-# the flag gives everything else. Only ever this directory, and only
-# ever derived files.
-shutil.rmtree(Path(__file__).parent / "__pycache__", ignore_errors=True)
+# The flag stops writes, not reads: a cache that already exists is still
+# consulted, and is now never refreshed, which would leave a stale one
+# stale forever. Caches do get written outside pytest, by `uv run
+# samtal-server` or a bare `python -c "import samtal_server..."`, and
+# every tree that predates this file has a full set. So clear them, once,
+# before the first import of anything under test.
+#
+# This also covers the one file the flag cannot: pytest writes a
+# conftest's rewritten bytecode *before* it executes the body that sets
+# the flag, so by now this run has already cached this file. Clearing
+# leaves the next run nothing stale to read.
+#
+# Only these two trees, never `.venv`: site-packages bytecode is
+# legitimate, expensive to rebuild, and its sources do not get edited.
+_ROOT = Path(__file__).resolve().parent.parent
+for _tree in (_ROOT / "samtal_server", _ROOT / "tests"):
+    for _cache in _tree.rglob("__pycache__"):
+        shutil.rmtree(_cache, ignore_errors=True)
 
 AUTH_SECRET_ENV = "SAMTAL_AUTH_SECRET"
 

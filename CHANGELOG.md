@@ -67,21 +67,24 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   came in at 964 ms rather than the desk's 1688 to 1781 ms, so the gap
   to the cloud is much narrower than first published. No code changed.
 
-- The test suite no longer writes bytecode, so a working tree can no
-  longer lie about what it is running. CPython validates a cached
-  `.pyc` against the source's size and its mtime truncated to whole
-  seconds, which makes two ordinary operations here invisible: a
-  same-size edit inside one second (swapping two statements to check a
-  regression test really fails without its fix), and restoring a file
-  with `mv`, which carries the backup's older mtime so the source looks
-  older than its own cache. The second is how it bit while addressing
-  the review on #13, where a correct fix ran as its pre-fix version and
-  looked broken. `tests/conftest.py` now sets
+- The test suite no longer writes or reads bytecode, so a working tree
+  can no longer lie about what it is running. A cached `.pyc` records
+  the source's size and its mtime in whole seconds, and CPython accepts
+  the cache when both are equal to the source's current values, so any
+  edit that keeps the byte count and leaves the mtime on the second it
+  was compiled on is invisible. Two ordinary operations here do exactly
+  that: swapping two statements to check a regression test really fails
+  without its fix, and restoring a file from a backup, which carries
+  the backup's mtime rather than the current time. The second is how it
+  bit while addressing the review on #13, where a correct fix ran as
+  its pre-fix version and looked broken. `tests/conftest.py` now sets
   `sys.dont_write_bytecode`, which also covers pytest's
-  assertion-rewritten test bytecode, and CI exports
-  `PYTHONDONTWRITEBYTECODE` for the steps that are not pytest. The
-  container image is deliberately untouched: its sources never change
-  after the build, so timestamp validation is correct there and
+  assertion-rewritten test bytecode, and clears the existing caches
+  under `samtal_server/` and `tests/`, since the flag stops writes but
+  not reads and a cache left in place would never be refreshed. CI
+  exports `PYTHONDONTWRITEBYTECODE` for the steps that are not pytest.
+  The container image is deliberately untouched: its sources never
+  change after the build, so timestamp validation is correct there and
   `UV_COMPILE_BYTECODE=1` is worth keeping. `AGENTS.md` gains the two
   traps, since neither is guessable.
 
