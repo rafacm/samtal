@@ -27,7 +27,8 @@ token the OTA endpoint issued.
 - Configurable providers:
   - **LLM**: Anthropic, any OpenAI-compatible endpoint (Ollama, LM Studio,
     gateways)
-  - **ASR**: local (faster-whisper) or cloud
+  - **ASR**: local (faster-whisper) or cloud (OpenAI, and anything
+    speaking the same dialect)
   - **TTS**: pluggable engines as optional extras (Piper)
   - **MCP**: attach any MCP servers as tools for the assistant, alongside
     the device's own
@@ -43,6 +44,7 @@ each agent picks one provider per stage. The v1 set:
 | ----- | ------------------- | ---------- | -------------------------------- |
 | vad   | `silero`            | locally    | core (pysilero-vad)              |
 | asr   | `faster_whisper`    | locally    | `uv sync --extra faster-whisper` |
+| asr   | `openai`            | OpenAI     | core                             |
 | llm   | `anthropic`         | Anthropic  | core                             |
 | llm   | `openai_compatible` | anywhere   | core                             |
 | tts   | `piper`             | locally    | `uv sync --extra piper`          |
@@ -66,6 +68,117 @@ neither.
 Licensing note: `piper-tts` (piper1-gpl) is GPL-3.0, which is why it is an
 optional extra and never a core dependency of the MIT server. The same
 applies to any future `edge-tts` provider.
+
+### Choosing how it hears
+
+The ASR stage has two types, and the trade between them is not the one
+the voices have. Going to the cloud for a voice costs latency; going
+to the cloud to listen mostly saves it, because a transcription is one
+round trip against someone else's accelerator instead of a CPU decode
+on yours. Median of five per utterance, one machine and one network,
+so the columns are comparable:
+
+| Utterance | `faster_whisper` small | `gpt-4o-mini-transcribe` | `gpt-4o-transcribe` | `whisper-1` |
+| --- | --- | --- | --- | --- |
+| "The kitchen light is now off." (1.8 s) | 1688 ms | 536 ms | 627 ms | 1076 ms |
+| "Hello, I am your samtal assistant..." (3.6 s) | 1781 ms | 658 ms | 887 ms | 1177 ms |
+| "Hej, jag är din samtalsassistent." (2.1 s) | 1743 ms | 545 ms | 607 ms | 1101 ms |
+
+Read that against your own hardware before believing it: the local
+column is an int8 CPU decode on a laptop, and a machine with a GPU
+would change the answer. The cloud column would not move much, since
+almost all of it is the round trip.
+
+Accuracy is the other half, and it separates them further. The same
+three utterances under white noise, standing in for a far-field
+microphone:
+
+| Signal to noise | `faster_whisper` small | `gpt-4o-mini-transcribe` | `gpt-4o-transcribe` |
+| --- | --- | --- | --- |
+| clean | exact | exact | exact |
+| 10 dB | Swedish already wrong | exact | exact |
+| 5 dB | Swedish wrong | exact | exact |
+| 0 dB | Swedish is a different sentence | exact | exact |
+
+English survived everywhere; Swedish is where the local `small` model
+gives up, turning "samtalsassistent" into "samhållssystem" at 10 dB
+and the whole sentence into unrelated English at 0 dB. A larger local
+model closes some of that, at a latency cost the table above already
+shows there is no room for.
+
+What the local engine still wins: it is the only one that keeps the
+audio on your host, and it is the only one that reports which language
+it heard. It is also free per utterance, which a busy household
+notices.
+
+### OpenAI transcription
+
+```yaml
+providers:
+  asr:
+    ears:
+      type: openai
+      api_key_env: OPENAI_API_KEY
+      prompt: samtal
+```
+
+Keys are named, never written, exactly as for the TTS types above.
+
+| Option | Default | What it does |
+| ------ | ------- | ------------ |
+| `api_key_env` | required for OpenAI itself | Name of the variable holding the key |
+| `model` | `gpt-4o-mini-transcribe` | `gpt-4o-transcribe` is the larger sibling; `whisper-1` is the same Whisper V2 you could run locally |
+| `base_url` | `https://api.openai.com/v1` | Point it at any server implementing `/v1/audio/transcriptions` |
+| `prompt` | unset | Words the engine would not otherwise guess: names, places, the assistant's own |
+| `language` | unset | Spoken language (ISO 639-1). A hint, not a pin: see below |
+| `temperature` | unset | 0.0 to 1.0, the API's own default when unset |
+| `timeout_s` | `30` | Seconds before a transcription is abandoned, and a real bound: retries are off |
+
+**Set `prompt`.** An unfamiliar proper noun is the one thing this type
+reliably gets wrong, and the prompt is what fixes it: under noise,
+"samtal" came back as "sample" without it and as "Samtal" with it.
+
+**`language` behaves differently here than on the local engine.**
+Leaving it unset costs nothing, because recognition is multilingual
+either way and detection happens inside the model rather than as a
+separate pass you pay for. Setting it is a hint rather than a pin: a
+`gpt-4o` model given Swedish audio and `language: en` still answers in
+Swedish, where the local engine would have forced the wrong language
+and produced nonsense. That makes a wrong value harmless here, and a
+right one worth less.
+
+**No language is reported back.** `AsrResult`'s language fields stay
+empty, so the `heard` log line carries no `language`, and there is no
+`language_detect` option. The API returns a language only for
+`whisper-1` asked for a format the other models do not support, as an
+English name rather than an ISO code, and never a confidence. An empty
+field beats a guess, and nothing is lost: the local engine's
+`language_detect: once` exists to skip a detection pass that costs
+seconds of CPU, and here detection is free.
+
+**It does not stream, deliberately.** The stage hands over one whole
+utterance and the LLM cannot start on half a sentence, so response
+deltas would arrive before anything could use them. The TTS stage is
+the opposite case and does stream.
+
+**Very short audio is answered empty without a request.** The API
+refuses anything under 0.1 s, and the barge-in path is what would send
+it: a snippet classified as speech mid-reply gets transcribed to
+decide whether the interruption was real. That refusal would be logged
+as a failure rather than the non-answer it is.
+
+`base_url` is the same door the `openai_compatible` LLM type and the
+`openai` TTS type open, with the same consequences: a self-hosted
+server implementing the endpoint needs no key, the host rather than
+the spelling decides whether an entry counts as OpenAI, a `base_url`
+that is not a URL fails the boot, and the endpoint rather than the
+type decides egress, so an entry under `server.local_only` carries its
+own `egress: false`.
+
+**It sends the microphone audio wherever `base_url` points**, which by
+default is OpenAI, and that is a stronger claim than the TTS types
+make: what leaves is what was said in the room, not what the assistant
+answered. See Security below for how `server.local_only` treats it.
 
 ### Choosing a voice
 
@@ -537,9 +650,10 @@ whether it sends session data (audio, transcripts, replies) off the
 host, and with `server.local_only: true` the server refuses to boot any
 provider that does, naming the stage and provider. The local engines
 (Silero, faster-whisper, Piper) pass; an `anthropic` or `elevenlabs`
-entry fails. The two `base_url` types, `openai_compatible` for the LLM
-stage and `openai` for TTS, can each point at localhost or at a cloud
-vendor, so under `local_only` they must carry your own declaration:
+entry fails. The three `base_url` types, `openai_compatible` for the
+LLM stage and `openai` for both ASR and TTS, can each point at
+localhost or at a cloud vendor, so under `local_only` they must carry
+your own declaration:
 
 ```yaml
 providers:
