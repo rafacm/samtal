@@ -9,9 +9,11 @@ apply, and whether session data leaves the host. Keeping the answers
 here is what stops the two stages from drifting apart on a question
 neither of them owns.
 
-The LLM stage is deliberately not a caller. `openai_compatible` requires
-`base_url` rather than defaulting to OpenAI, and it has no rule that
-turns on the host, so it has nothing to share but a constant.
+The LLM stage joined late and shares less. `openai_compatible` requires
+`base_url` rather than defaulting to OpenAI and resolves its own key,
+so of the three answers it takes only the host: which host it reaches,
+for the event a failed call emits, and whether that host is OpenAI's,
+which decides whether the request may ask for token counts (#55).
 """
 
 from urllib.parse import urlsplit
@@ -61,6 +63,13 @@ def parse_base_url(label: str, base_url: str) -> bool:
             f'such as "{DEFAULT_BASE_URL}"; got "{base_url}"'
         )
     return parts.hostname == OPENAI_HOST
+
+
+def endpoint_host(base_url: str) -> str | None:
+    """The host an entry's `base_url` names, for the identity a
+    provider is stamped with. None only for a URL that has none, which
+    a built provider does not have: `parse_base_url` refuses those."""
+    return urlsplit(base_url).hostname
 
 
 def endpoint_api_key(label: str, type_name: str, api_key_env: str | None, is_openai: bool) -> str:

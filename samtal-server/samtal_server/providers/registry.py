@@ -16,7 +16,9 @@ from samtal_server.config.models import PROVIDER_STAGES, ProviderConfig
 from samtal_server.providers.base import (
     AsrProvider,
     LlmProvider,
+    Provider,
     ProviderError,
+    ProviderIdentity,
     TtsProvider,
     VadProvider,
 )
@@ -217,6 +219,14 @@ def build_provider(
         )
     provider = factory(label, config)
     _check_egress(label, config, provider, local_only)
+    # Stamped here rather than in each factory: this is the one place
+    # that knows the stage, the entry name and the type at once, and a
+    # provider that failed to describe itself in an event would be a
+    # provider the operator cannot map back to their configuration.
+    if isinstance(provider, Provider):
+        provider.identity = ProviderIdentity(
+            stage=stage, name=name, type=config.type, host=provider.host
+        )
     return provider
 
 

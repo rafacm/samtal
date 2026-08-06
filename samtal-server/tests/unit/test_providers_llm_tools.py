@@ -11,7 +11,7 @@ import contextlib
 from dataclasses import dataclass, field
 from typing import Any
 
-from samtal_server.providers import TextDelta, ToolCall, ToolDef, ToolResult, Turn
+from samtal_server.providers import TextDelta, ToolCall, ToolDef, ToolResult, Turn, Usage
 from samtal_server.providers.anthropic_llm import (
     AnthropicLlm,
     anthropic_messages,
@@ -103,8 +103,15 @@ class FakeBlock:
 
 
 @dataclass
+class FakeUsage:
+    input_tokens: int = 11
+    output_tokens: int = 7
+
+
+@dataclass
 class FakeMessage:
     content: list[FakeBlock]
+    usage: FakeUsage = field(default_factory=FakeUsage)
 
 
 class FakeStream:
@@ -160,6 +167,8 @@ async def test_anthropic_yields_speech_then_the_tool_calls_it_asked_for() -> Non
         TextDelta("Let me "),
         TextDelta("check."),
         ToolCall(id="t1", name="weather__forecast", arguments={"city": "Lund"}),
+        # This API reports what a generation cost without being asked.
+        Usage(prompt_tokens=11, completion_tokens=7),
     ]
     assert messages.request["tools"] == anthropic_tools([WEATHER])
     assert messages.request["tool_choice"] == {"type": "auto"}
@@ -172,7 +181,7 @@ async def test_anthropic_passes_a_forbidden_tool_choice_through() -> None:
         event
         async for event in llm.stream("", [Turn("user", "hi")], [WEATHER], tool_choice="none")
     ]
-    assert events == [TextDelta("Fine.")]
+    assert events == [TextDelta("Fine."), Usage(prompt_tokens=11, completion_tokens=7)]
     # The definitions still go out, so the conversation the model sees
     # does not change shape between rounds; only calling is forbidden.
     assert messages.request["tools"]
@@ -272,8 +281,15 @@ class FakeChoice:
 
 
 @dataclass
+class FakeChunkUsage:
+    prompt_tokens: int
+    completion_tokens: int
+
+
+@dataclass
 class FakeChunk:
     choices: list[FakeChoice]
+    usage: FakeChunkUsage | None = None
 
 
 class FakeCompletions:
@@ -368,6 +384,8 @@ async def test_openai_passes_a_forbidden_tool_choice_through() -> None:
         event
         async for event in llm.stream("", [Turn("user", "hi")], [WEATHER], tool_choice="none")
     ]
+    # No usage chunk from this endpoint, and no Usage event: what the
+    # server did not report is not invented.
     assert events == [TextDelta("Fine.")]
     assert completions.request["tools"]
     assert completions.request["tool_choice"] == "none"

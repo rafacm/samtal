@@ -22,8 +22,32 @@ class ProviderError(Exception):
     a bad option, or a missing optional dependency."""
 
 
+@dataclass(frozen=True)
+class ProviderIdentity:
+    """Which configuration entry a provider is, as an operator reading
+    the logs knows it.
+
+    A session holds provider objects, not the YAML they came from, so
+    without this a failing provider can only be described as "the TTS
+    one". The registry stamps it at build time, where the stage, the
+    entry name and the type are all in hand.
+
+    `host` is the one field the provider itself has to supply, since
+    only it knows whether its `base_url` points at a vendor or at
+    localhost, and it is the actionable half for anyone with an egress
+    allowlist: it turns "TTS is broken" into "TTS cannot reach
+    api.elevenlabs.io". It is None for an engine that runs in this
+    process and reaches nothing."""
+
+    stage: str
+    name: str
+    type: str
+    host: str | None = None
+
+
 class Provider:
-    """What every stage's provider type has in common: the egress marking.
+    """What every stage's provider type has in common: the egress
+    marking, the host it reaches, and the identity it is stamped with.
 
     `egress` declares whether providers of this type send session data
     (audio, transcripts, replies) off the host. True marks a cloud
@@ -34,9 +58,20 @@ class Provider:
 
     The default is True: a type that forgot to declare is treated as
     sending data away, so the omission fails a local_only boot instead
-    of quietly leaking."""
+    of quietly leaking.
+
+    `host` is what this entry talks to, set by providers that talk to
+    anything, and it is a fact about the built entry rather than about
+    the type: two `openai` entries can reach different hosts.
+
+    `identity` is None until `build_provider` stamps it, which is every
+    provider a running server holds. A hand-built one (a test, a
+    fixture) keeps None, and the events that describe it simply carry
+    fewer fields rather than inventing any."""
 
     egress: ClassVar[bool | None] = True
+    host: str | None = None
+    identity: ProviderIdentity | None = None
 
 
 @dataclass(frozen=True)
@@ -84,8 +119,27 @@ class TextDelta:
     text: str
 
 
-# What an LLM stream yields: speech, or a request to run a tool.
-LlmEvent = TextDelta | ToolCall
+@dataclass(frozen=True)
+class Usage:
+    """What one generation cost, as the provider reported it.
+
+    Yielded at most once per stream, and only when the API says: it is
+    what tells a slow round caused by a growing payload from a slow
+    round caused by the vendor (#55). A provider that is never told
+    yields nothing, which is a fact about the endpoint rather than a
+    failure, so the session's event carries the fields it has.
+
+    Counts, never content: tokens are a size, and the ADR on logging
+    keeps the text of a conversation out of everything but the events
+    that exist to carry it."""
+
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+
+
+# What an LLM stream yields: speech, a request to run a tool, or what
+# the generation cost.
+LlmEvent = TextDelta | ToolCall | Usage
 
 # Whether the model may call the tools it was given. "none" still sends
 # the definitions (so the conversation stays consistent) while forbidding

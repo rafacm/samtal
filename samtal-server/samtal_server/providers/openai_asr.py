@@ -51,6 +51,7 @@ from samtal_server.providers.openai_endpoint import (
     DEFAULT_BASE_URL,
     MAX_RETRIES,
     endpoint_api_key,
+    endpoint_host,
     parse_base_url,
 )
 from samtal_server.providers.registry import OptionsReader
@@ -147,6 +148,7 @@ class OpenAiAsr(AsrProvider):
         client: AsyncOpenAI | None = None,
     ) -> None:
         self._model = model
+        self.host = endpoint_host(base_url)
         self._language = language
         self._prompt = prompt
         self._temperature = temperature

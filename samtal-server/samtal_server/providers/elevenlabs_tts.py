@@ -27,6 +27,10 @@ logger = logging.getLogger(__name__)
 
 API_BASE_URL = "https://api.elevenlabs.io"
 
+# The one host this type reaches, and the one an egress allowlist is
+# most likely to be missing: no other provider type shares it.
+API_HOST = "api.elevenlabs.io"
+
 # Flash is the low-latency model (~75 ms to first byte, 32 languages
 # including Swedish). A voice assistant is the case it exists for; an
 # operator who would rather have Multilingual v2's fidelity than its
@@ -102,6 +106,7 @@ class ElevenLabsTts(TtsProvider):
     ) -> None:
         self._voice_id = voice_id
         self._model = model
+        self.host = API_HOST
         self._output_format = output_format
         self.sample_rate = sample_rate
         self._language_code = language_code
