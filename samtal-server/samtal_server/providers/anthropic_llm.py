@@ -21,11 +21,16 @@ from samtal_server.providers.base import (
     ToolChoice,
     ToolDef,
     Turn,
+    Usage,
 )
 from samtal_server.providers.registry import OptionsReader
 
 # Spoken replies are short; this caps runaways, not conversation.
 DEFAULT_MAX_TOKENS = 1024
+
+# The one host this type reaches; it has no base_url to point anywhere
+# else.
+API_HOST = "api.anthropic.com"
 
 
 def anthropic_messages(turns: Sequence[Turn]) -> list[dict[str, Any]]:
@@ -79,6 +84,7 @@ def anthropic_tools(tools: Sequence[ToolDef]) -> list[dict[str, Any]]:
 class AnthropicLlm(LlmProvider):
     # Every request carries the conversation to the vendor's API.
     egress = True
+    host = API_HOST
 
     def __init__(self, model: str, max_tokens: int, api_key: str | None) -> None:
         self._client = AsyncAnthropic(api_key=api_key) if api_key else AsyncAnthropic()
@@ -112,6 +118,13 @@ class AnthropicLlm(LlmProvider):
         for block in message.content:
             if block.type == "tool_use":
                 yield ToolCall(id=block.id, name=block.name, arguments=dict(block.input or {}))
+        # Last, so a round's event carries what the round cost. This
+        # API reports usage on every streamed message without being
+        # asked, which the OpenAI dialect does not.
+        yield Usage(
+            prompt_tokens=message.usage.input_tokens,
+            completion_tokens=message.usage.output_tokens,
+        )
 
 
 def resolve_api_key(label: str, api_key_env: str | None) -> str | None:

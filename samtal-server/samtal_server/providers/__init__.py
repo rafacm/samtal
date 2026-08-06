@@ -8,6 +8,7 @@ from samtal_server.providers.base import (
     LlmProvider,
     Provider,
     ProviderError,
+    ProviderIdentity,
     TextDelta,
     ToolCall,
     ToolChoice,
@@ -15,6 +16,7 @@ from samtal_server.providers.base import (
     ToolResult,
     TtsProvider,
     Turn,
+    Usage,
     VadProvider,
 )
 from samtal_server.providers.registry import (
@@ -32,6 +34,7 @@ __all__ = [
     "LlmProvider",
     "Provider",
     "ProviderError",
+    "ProviderIdentity",
     "TextDelta",
     "ToolCall",
     "ToolChoice",
@@ -39,6 +42,7 @@ __all__ = [
     "ToolResult",
     "TtsProvider",
     "Turn",
+    "Usage",
     "VadProvider",
     "build_agent_providers",
     "build_provider",

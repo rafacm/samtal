@@ -23,7 +23,9 @@ from samtal_server.providers.base import (
     ToolChoice,
     ToolDef,
     Turn,
+    Usage,
 )
+from samtal_server.providers.openai_endpoint import OPENAI_HOST, endpoint_host
 from samtal_server.providers.registry import OptionsReader
 
 
@@ -112,6 +114,15 @@ class OpenAiCompatibleLlm(LlmProvider):
         self._client = AsyncOpenAI(base_url=base_url, api_key=api_key or "unused")
         self._model = model
         self._max_tokens = max_tokens
+        self.host = endpoint_host(base_url)
+        # Whether to ask for token counts, rather than whether to read
+        # them. OpenAI sends usage on a streamed call only when asked,
+        # and `stream_options` is an OpenAI field that a compatible
+        # server is free not to know: sending it there could fail a
+        # conversation to enrich a log line, which is the wrong trade.
+        # A server that reports usage unasked is still read below, so a
+        # compatible endpoint that does gets its counts anyway.
+        self._ask_for_usage = self.host == OPENAI_HOST
 
     async def stream(
         self,
@@ -129,14 +140,24 @@ class OpenAiCompatibleLlm(LlmProvider):
         if tools:
             request["tools"] = chat_tools(tools)
             request["tool_choice"] = tool_choice
+        if self._ask_for_usage:
+            request["stream_options"] = {"include_usage": True}
         stream = await self._client.chat.completions.create(**request)
 
         # Tool calls stream as fragments identified by their position in
         # the call list, so they are accumulated by index and yielded
         # once the stream has ended.
         pending: dict[int, dict[str, str]] = {}
+        usage: Usage | None = None
         async for chunk in stream:
-            # Some servers interleave role-only or usage chunks.
+            # The usage chunk is the last one and carries no choices,
+            # which is why the guard below would otherwise skip it.
+            if chunk.usage is not None:
+                usage = Usage(
+                    prompt_tokens=chunk.usage.prompt_tokens,
+                    completion_tokens=chunk.usage.completion_tokens,
+                )
+            # Some servers interleave role-only chunks.
             if not chunk.choices or not chunk.choices[0].delta:
                 continue
             delta = chunk.choices[0].delta
@@ -155,6 +176,12 @@ class OpenAiCompatibleLlm(LlmProvider):
                         slot["arguments"] += fragment.function.arguments
         for index in sorted(pending):
             yield tool_call_from_fragments(pending[index], index)
+        # Last, so a round's event carries what the round cost. Absent
+        # from a compatible server that was not asked and does not
+        # volunteer, which is a fact about that endpoint rather than a
+        # failure.
+        if usage is not None:
+            yield usage
 
 
 def build(label: str, config: ProviderConfig) -> OpenAiCompatibleLlm:

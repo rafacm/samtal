@@ -33,6 +33,7 @@ from samtal_server.providers.openai_endpoint import (
     DEFAULT_BASE_URL,
     MAX_RETRIES,
     endpoint_api_key,
+    endpoint_host,
     parse_base_url,
 )
 from samtal_server.providers.registry import OptionsReader
@@ -89,6 +90,7 @@ class OpenAiTts(TtsProvider):
     ) -> None:
         self._voice = voice
         self._model = model
+        self.host = endpoint_host(base_url)
         self._instructions = instructions
         self._speed = speed
         # One client per provider entry, so its connection pool is
