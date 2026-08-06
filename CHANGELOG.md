@@ -9,6 +9,37 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- New `server.capture` section: recording a session to disk so a
+  real-world one can be analysed offline. Off unless a directory is
+  named, with no default that turns it on, because this writes room
+  audio to disk and that is the opposite of what the rest of the
+  project promises; a warning at startup and one line per recorded
+  session say when it is on. It exists because acoustic problems
+  cannot be reproduced in any test lane: both lanes bypass the
+  microphone, the board's echo cancellation, and the room, so how much
+  of the assistant's own voice reaches the endpointer is unknown and a
+  barge-in fix would be tuned against a guess. Three files per session
+  on one timeline: a stereo 16 kHz WAV with the microphone on channel
+  0 and what was paced out to the speaker on channel 1, so one sample
+  index is one instant in both and echo leakage becomes a measurement;
+  a JSONL decision track carrying every structured event with a `t_ms`
+  offset into the audio, plus frames dropped before decode aggregated
+  per second with their reason and the endpointer's `speech_ms`
+  sampled every frame rather than only where it decided something; and
+  a JSON manifest recording the server revision, the firmware the
+  device reported at OTA check-in, the resolved provider entries
+  verbatim, and the barge-in thresholds, because a capture outlives the
+  code that made it. The microphone is recorded before the session's
+  own guards, so the frames a configuration discards are in the file
+  anyway, those being the ones that explain a misfire. Options:
+  `dir` (required, and the only thing that turns it on),
+  `max_session_s` (default 900), `max_total_mb` (default 2000, whole
+  captures pruned oldest first) and `min_free_mb` (default 1000, below
+  which a capture declines to start and says so, since agent memory
+  and the model caches share the volume). A capture cut off by a
+  restart stays readable: both files are flushed as they are written,
+  and the manifest says whether the WAV header was ever patched.
+
 - The server can say which build it is running. `__version__` has read
   `0.1.0` since the package skeleton and answers a different question,
   so a separate `revision` now rides `/healthz`, every `session_open`

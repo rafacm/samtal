@@ -1,0 +1,173 @@
+# Capture a session to disk so a real one can be analysed offline
+
+## Problem
+
+Issue #42: `barge_in` misfiring (#28) is an acoustic defect. It was
+found on a moving device in traffic, 10 barge-ins across 12 turns with 5
+of those turns never producing a complete reply. Nothing in the test
+lanes can reproduce it: `tests/unit` feeds synthetic frames and
+`tests/integration` drives the xiaozhi-sdk simulator over a websocket,
+and both bypass the microphone, the board's echo cancellation, and the
+room. The one session that showed the defect was not recorded, so all
+that survives of it is an event timeline pasted into an issue.
+
+The consequence is that the fix has to be tuned against a guess. The
+parameter that decides whether the assistant interrupts itself is how
+much of its own voice survives the ES8311's echo cancellation and
+reaches the endpointer, and that number is unknown. Tune against an
+invented leakage figure and the fix tests clean and fails on the street;
+over-correct and barge-in stops working entirely, which no synthetic
+test notices, because synthetic audio never leaks.
+
+What was missing was not another test. It was the recording that lets
+the tests be written against reality.
+
+## Changes
+
+Three files per session, all stamped against `_opened_at`, the monotonic
+session origin the code already sets.
+
+**`<session>.wav`, stereo 16 kHz s16le.** Channel 0 is the decoded
+microphone as received, channel 1 is what `_send_frames` paced out,
+decoded back from the Opus that actually went to the device and
+resampled to the pipeline rate. Stereo rather than two files because
+alignment then costs nothing: sample N in both channels is the same
+instant, so echo leakage becomes a measurement (cross-correlate the
+channels, read off gain and delay) instead of a guess, and the file
+opens in any audio editor where the overlap is directly audible.
+
+Audio is placed by when it arrived rather than by how much came before
+it, so a channel that goes quiet becomes silence rather than sliding
+everything after it out of time with the other channel and with the
+events. This is the property the whole file exists for, and it has its
+own control below.
+
+**`<session>.jsonl`, the decision track.** Every `_event()` payload
+plus a `t_ms` offset that indexes into the WAV. Hooked at `_event()`
+itself, which every call site already goes through, so an event that is
+logged is an event that is recorded. Two things the logs do not carry
+are added:
+
+- Frames dropped before decode, with the reason (`not_listening`,
+  `barge_in_off`, `framing_error`, `not_opus`, `undecodable`),
+  aggregated per second rather than per frame, because the guards drop
+  whole seconds at a time and what explains a misfire is the rate.
+- The endpointer's `speech_ms` sampled every frame rather than only at
+  decision points. This is what turns "barge-in fired wrongly" into
+  "the endpointer classified 340 ms of the assistant's own voice as
+  speech starting at 12.7 s".
+
+**`<session>.json`, the manifest.** A capture outlives the code that
+made it. It records the server revision (#41), the firmware version the
+device reported at OTA check-in, the resolved agent and provider entries
+verbatim, every `barge_in_*` threshold rather than a config hash, the
+protocol version, and the wall-clock start. The thresholds matter most:
+an old capture analysed after they change is misleading unless it states
+its own. The provider entries are recorded verbatim because a hosted
+model can change behaviour with no version bump on this side, so the
+exact model string plus the capture date is the only handle on that.
+They hold environment variable names rather than secrets, which the
+config schema already enforces.
+
+**The microphone is hooked at the very top of `_handle_audio`, before
+every guard.** This is the point of the exercise. The session returns
+early when it is not listening and when the `barge_in: false` guard is
+closed, so capturing after the guards would discard precisely the frames
+that explain a misfire. It uses its own decoder, because that one sees
+every frame while the pipeline's sees only what got past the guards, and
+pushing the guarded frames through the pipeline decoder would change
+what the conversation hears.
+
+**Firmware plumbing.** The manifest's firmware version is arguably its
+most load-bearing field, since echo cancellation is firmware-side, and
+the websocket handshake never carries it. `ota.py` extracts it at
+check-in, so it is now kept against the MAC in a bounded `DeviceFacts`
+and read back when the session opens. A device that reached the
+websocket without checking in first, which a restarted server also
+produces, simply has no firmware field rather than no capture.
+
+## Key parameters
+
+| Key | Default | Meaning |
+|---|---|---|
+| `server.capture.dir` | unset | Where captures are written. Unset is what keeps capture off, and there is no other switch. |
+| `server.capture.max_session_s` | `900` | Stop recording a session after this long. The conversation carries on uncaptured. |
+| `server.capture.max_total_mb` | `2000` | Budget for the directory. Whole captures are pruned, oldest first; two thirds of a capture is not a capture. |
+| `server.capture.min_free_mb` | `1000` | Decline to start below this much free space, with a warning naming the reason. |
+
+Storage is 64 kB/s, so one minute is 3.8 MB, a fifteen minute session is
+58 MB, and the 2000 MB budget is around nine hours. Both bounds are
+needed: `/data` also holds agent memory, `HOME`, and the model caches,
+which grow underneath a byte budget, and filling it does not degrade
+capture, it breaks those. FLAC through PyAV would roughly halve the
+footprint and is not worth it at these volumes.
+
+## Verification
+
+`uv run pytest tests/unit -q`: 645 passed, 2 skipped.
+`uv run pytest tests/integration -q`: 27 passed. `ruff check` clean.
+
+Twenty-eight tests across two files: `test_capture.py` for what the
+format guarantees, `test_capture_session.py` for the wiring, driven
+through a real session over a websocket.
+
+The load-bearing claims were each run against a control with the
+relevant piece reverted:
+
+| Claim | Control | Result without it |
+|---|---|---|
+| the microphone is recorded before the guards | hook moved after them | 307 ms of microphone audio recorded out of 1200 ms spoken, the missing 900 ms being exactly what the guard discarded |
+| audio is placed by arrival, so a gap is silence | placed contiguously instead | three tests fail, including "the reply appears before the speech that prompted it" and a half-second offset between channels collapsing to zero |
+
+Against the issue's acceptance list:
+
+- [x] **A captured WAV has the microphone and the reply on separate
+  channels, and their overlap matches what was heard.** Read back
+  through the `wave` module: two channels, 16 kHz, the microphone
+  carrying audio where speech was sent and the reply carrying audio
+  where `speaking_started` says it began.
+- [x] **An event's `t_ms` lands on the corresponding audio to within one
+  frame.** The reply channel's first loud sample is within 200 ms of the
+  `speaking_started` event, and every event's offset lies inside the
+  recorded audio.
+- [x] **A capture interrupted by a pod stop is still readable, with the
+  audio up to the interruption intact.** Simulated by dropping the
+  descriptors without a clean close: the header still claims zero, the
+  manifest says `complete: false`, and the PCM after the 44 byte header
+  reads back with the right sample values. Writing this test is what
+  showed that a hard stop would otherwise have lost whatever was still
+  in a userspace buffer, so both files are now flushed as they go.
+- [x] **Capture declines to start, with a warning naming the reason,
+  when free space is below `min_free_mb`.**
+- [x] **The directory stays under `max_total_mb` across enough sessions
+  to trigger pruning,** and all three files of a pruned capture go
+  together.
+- [ ] **A real session recorded in a noisy environment,
+  cross-correlated to produce the echo leakage figure #28 needs.** This
+  is the entire point of the issue and it is not something a desk can
+  produce: it needs the board, a street, and traffic. Rafael's.
+
+Also verified: a conversation survives a capture directory it cannot
+use, and nothing is written at all unless a directory is configured.
+
+## On what this does not do
+
+It does not analyse anything. It produces the three files; reading a
+cross-correlation off them is a separate step, done off the server with
+whatever tool suits. Adding an analysis path here would mean guessing
+now at what the recording will turn out to show, which is the same
+mistake the issue exists to avoid.
+
+## Files modified
+
+- `samtal-server/samtal_server/capture.py` (new)
+- `samtal-server/samtal_server/session.py`
+- `samtal-server/samtal_server/app.py`
+- `samtal-server/samtal_server/ota.py`
+- `samtal-server/samtal_server/ws.py`
+- `samtal-server/samtal_server/config/models.py`
+- `samtal-server/tests/unit/test_capture.py` (new)
+- `samtal-server/tests/unit/test_capture_session.py` (new)
+- `samtal-server/config.example.yaml`
+- `samtal-server/README.md`
+- `CHANGELOG.md`
