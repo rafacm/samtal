@@ -24,7 +24,12 @@ from fastapi.testclient import TestClient
 import samtal_server.session as session_module
 from samtal_server.app import create_app
 from samtal_server.audio.opus import OpusEncoder
-from samtal_server.providers import AsrResult, Turn, build_agent_providers
+from samtal_server.providers import (
+    AsrResult,
+    ProviderIdentity,
+    Turn,
+    build_agent_providers,
+)
 from samtal_server.providers.mock import MockAsr
 from tests.unit.test_session import (
     LONG_REPLY,
@@ -319,6 +324,51 @@ async def test_an_unconfirmed_barge_in_pauses_and_resumes_the_reply(
         Turn("user", "the question"),
         Turn("assistant", "Hold the thought while this sentence finishes playing out loud."),
     ]
+
+
+async def test_a_failed_confirmation_is_reported_as_the_provider_failure_it_is(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The confirmation is a second, separate ASR call, and the reply
+    survives it failing: playback resumes and the user hears nothing
+    wrong. That makes it exactly the failure an operator would never
+    find without an event (#53)."""
+
+    class FailingConfirmation(ConfirmingAsr):
+        identity = ProviderIdentity(stage="asr", name="ears", type="openai", host="api.example.com")
+
+        async def transcribe(
+            self, pcm: bytes, sample_rate: int, language_hint: str | None = None
+        ) -> AsrResult:
+            self.calls += 1
+            if self.calls == 1:
+                return AsrResult(text="the question")
+            raise TimeoutError
+
+    config = config_with_agent(
+        llm_reply="Hold the thought while this sentence finishes playing out loud.",
+        server={"barge_in_refractory_ms": 0},
+    )
+    session, socket = realtime_session(config, FailingConfirmation(AsrResult(text="")))
+    session._endpointer = ScriptedEndpointer(speech_ms=600)
+
+    with caplog.at_level("INFO"):
+        session._reply_task = asyncio.create_task(session._reply(speech_pcm(600)))
+        reply = session._reply_task
+        while socket.frames < 3:
+            await asyncio.sleep(0.02)
+        session._utterance = bytearray(speech_pcm(600))
+        await session._finish_utterance(endpointed=True)
+        # The reply lives, which is why this needs saying out loud.
+        assert session._reply_task is reply
+        await reply
+
+    (failed,) = [r for r in caplog.records if getattr(r, "event", None) == "provider_failed"]
+    assert failed.stage == "asr"
+    assert failed.provider == "ears"
+    assert failed.host == "api.example.com"
+    assert failed.error == "TimeoutError"
+    assert "timed out" in failed.getMessage()
 
 
 async def test_a_confirmed_barge_in_reuses_the_transcript_and_the_lock(
