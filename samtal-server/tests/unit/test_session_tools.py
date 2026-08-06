@@ -275,6 +275,33 @@ async def test_a_switch_to_an_unbound_agent_is_refused_by_the_agent_talking() ->
     assert "poet" in result.content and "tutor" in result.content
 
 
+async def test_a_switch_to_the_agent_already_speaking_is_refused(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Naming the current persona mid-conversation used to hand over to
+    # it: a second LLM round that only greeted a user already talking.
+    poet = ScriptedLlm([[call("switch_agent", agent="poet")], "I am the poet already."])
+    session = session_for(base_config(), BOTH_MAC, {"poet": poet})
+
+    with caplog.at_level("INFO"):
+        assert await run_reply(session, "let me talk to the poet") == ["I am the poet already."]
+    assert session._agent == "poet"
+    # No handover was announced, and the second round continued the
+    # reply rather than greeting a user who is already mid-conversation.
+    assert not [record for record in caplog.records if getattr(record, "event", "") == "handover"]
+    assert all(
+        turn.content != session_module.SWITCH_GREETING
+        for turns, _, _ in poet.seen
+        for turn in turns
+    )
+
+    (result,) = [
+        result for turns, _, _ in poet.seen for turn in turns for result in turn.tool_results
+    ]
+    assert result.is_error
+    assert "already speaking as this assistant" in result.content
+
+
 async def test_only_one_handover_happens_per_reply() -> None:
     poet = ScriptedLlm([[call("switch_agent", agent="tutor")]])
     tutor = ScriptedLlm([[call("switch_agent", agent="poet")], "Staying put, then."])

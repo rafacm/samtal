@@ -1401,6 +1401,15 @@ class Session:
             )
         if target not in self._agents:
             return ToolResult(call.id, str(_not_allowed(target, self._agents)), is_error=True)
+        # Handing over to the agent already speaking is a pure cost: the
+        # leg ends, the same agent is re-activated, and a second round
+        # runs only to greet a user who is already mid-conversation.
+        if target == self._agent:
+            return ToolResult(
+                call.id,
+                "you are already speaking as this assistant; answer as yourself instead",
+                is_error=True,
+            )
         return None
 
     async def _run_one(self, call: ToolCall) -> ToolResult:
