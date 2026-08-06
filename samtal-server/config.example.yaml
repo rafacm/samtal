@@ -65,13 +65,20 @@ server:
     # token_expire_s: 2592000
 
   # What one server holds at once, and for how long. A device refused for
-  # capacity reconnects on its next wake word; one that hits the duration
-  # cap is closed cleanly and does the same, so neither is visible in
-  # normal use. There is no separate idle timeout: max_session_s bounds an
-  # idle session too.
+  # capacity reconnects on its next wake word; one closed by either time
+  # bound does the same, so none of this is visible in normal use.
   limits:
     max_sessions: 8
     max_session_s: 3600
+    # How long a realtime session may go without conversing before the
+    # server hangs up, counted from the end of the last utterance or the
+    # end of the last reply, whichever is later. Arriving audio does not
+    # reset it: a realtime device streams its mic continuously, silence
+    # included, and nothing in the firmware ever closes that channel, so
+    # this is what stops walking away from leaving a mic running for the
+    # rest of max_session_s. Realtime only; an auto-mode device re-arms
+    # per turn and is bounded by max_session_s as before.
+    idle_timeout_s: 120
 
   # Refuse to boot anything that sends session data off this host.
   # With this on, a provider entry of a cloud type (anthropic) fails at

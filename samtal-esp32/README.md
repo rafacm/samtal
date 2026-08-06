@@ -49,15 +49,16 @@ connection to the server at all.
 Once the wake word or a button press opens the audio channel, a device in
 realtime mode streams the microphone continuously to the server, silence
 included, until the channel closes. Nothing in the firmware closes it when
-you stop talking. The only things that do are a short press of the
-conversation button, losing the network, the server's configured session
-cap, or powering off.
+you stop talking. What does is the server's idle timeout, two minutes of
+no conversation by default, and that is the one you will normally meet.
+The others are a short press of the conversation button, losing the
+network, the server's session cap, and powering off.
 
-A conversation left open therefore keeps streaming the room, and holds one
-of the server's session slots until that cap expires, so ending
-conversations deliberately is the habit worth forming. A shorter
-server-side idle timeout is tracked in
-[issue #20](https://github.com/rafacm/samtal/issues/20).
+The idle timeout counts from the end of the last thing said, by either
+side, so it never interrupts a conversation with pauses in it; the
+server's `idle_timeout_s` sets it. Ending a conversation deliberately
+with the button is still worth doing when you are finished, because it
+stops the streaming now rather than in two minutes.
 
 There is no microphone mute, in hardware or firmware.
 
@@ -91,12 +92,14 @@ argument is `-1`, the dim step leaves the microphone and wake-word
 detection running, unlike boards that pass a real CPU frequency and shut
 the audio input down.
 
-Both timers only run while the audio channel is closed, so neither happens
-during an open conversation, however long the silence lasts. That is also
-why an abandoned conversation can flatten a battery that would otherwise
-have saved itself.
+Both timers only run while the audio channel is closed, so neither runs
+during an open conversation, however long the silence lasts. This is why
+the server's idle timeout matters to battery life and not just to
+privacy: an abandoned conversation used to hold the channel open for the
+whole session cap, and the board cannot start counting down to its own
+shutdown until the server hangs up. With the default two minutes, an
+abandoned board powers itself off about seven minutes after the last
+word rather than an hour after it.
 
 Automatic sleep can be disabled through the NVS flag `sleep_mode`
-(namespace `wifi`, default true). Leaving it enabled is recommended: the
-five-minute shutdown is currently the main protection against an abandoned
-open session.
+(namespace `wifi`, default true). Leaving it enabled is recommended.
