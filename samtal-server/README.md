@@ -160,18 +160,33 @@ Keys are named, never written, exactly as for the TTS types above.
 | `api_key_env` | required for OpenAI itself | Name of the variable holding the key |
 | `model` | `gpt-4o-mini-transcribe` | `gpt-4o-transcribe` is the larger sibling; `whisper-1` is the same Whisper V2 you could run locally |
 | `base_url` | `https://api.openai.com/v1` | Point it at any server implementing `/v1/audio/transcriptions` |
-| `prompt` | unset | Words the engine would not otherwise guess: names, places, the assistant's own |
+| `prompt` | unset | Vocabulary the engine would not otherwise guess: names, places, the assistant's own. Never agent names or anything imperative: see below |
 | `language` | unset | Spoken language (ISO 639-1). Set it for any non-English deployment: see below |
 | `temperature` | unset | 0.0 to 1.0, the API's own default when unset |
 | `timeout_s` | `30` | Seconds before a transcription is abandoned, and a real bound: retries are off |
 
-**Set `prompt`.** An unfamiliar proper noun is the one thing this type
-reliably gets wrong, and the prompt is what fixes it: under noise,
-"samtal" came back as "sample" without it and as "Samtal" with it. It
-fixes vocabulary, not language, so it cannot compensate for the setting
-below: on the board, `prompt: samtal` still produced "samstal" until
-`language` was pinned, and produced "samtalsassistent" exactly once it
-was.
+**Set `prompt`, and keep it to vocabulary.** An unfamiliar proper noun
+is the one thing this type reliably gets wrong, and the prompt is what
+fixes it: under noise, "samtal" came back as "sample" without it and as
+"Samtal" with it. It fixes vocabulary, not language, so it cannot
+compensate for the setting below: on the board, `prompt: samtal` still
+produced "samstal" until `language` was pinned, and produced
+"samtalsassistent" exactly once it was.
+
+**Never put anything the assistant could act on in it.** On short or
+low-content audio the model hands the prompt back as the transcript
+instead of hearing anything, reliably: 45 out of 45 clips of room tone
+under a second came back as the prompt word for word. A prompt of plain
+vocabulary makes that harmless noise. A prompt naming your agents makes
+it an instruction, and in a field session it was one: a 0.9 s utterance
+transcribed as `samtal, Oliver, Greta, Mateo`, and the model read the
+persona names as a request and handed over to an agent nobody had
+asked for. The server now discards a transcript that is the prompt and
+nothing else (trimmed, case-insensitive, and ignoring a full stop the
+model added), so the echo reaches nothing, but the rule stands anyway:
+wake words, agent names and anything imperative do not belong here.
+Recognising a persona's name when it is genuinely spoken is worth less
+than never acting on one that was not.
 
 **Set `language` unless the household speaks English.** This is the
 one setting a device checkpoint changed our mind about. On clean audio,
