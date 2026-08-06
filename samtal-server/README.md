@@ -839,7 +839,7 @@ and `device`, plus its own:
 | `event`            | when                            | fields                             |
 | ------------------ | ------------------------------- | ---------------------------------- |
 | `ota_check`        | a device checks in (no session) | `client`, `board`, `firmware`, `agents` |
-| `session_open`     | a conversation starts           | `client`, `agent`, `agents`, `protocol` |
+| `session_open`     | a conversation starts           | `client`, `agent`, `agents`, `protocol`, `revision` |
 | `heard`            | an utterance is transcribed     | `agent`, `text`, `duration_s`, plus `language` and `language_confidence` when the engine detected |
 | `speaking_started` | the reply's first audio frame goes out | `agent`                     |
 | `replied`          | a reply finishes                | `agent`, `text`                    |
@@ -850,6 +850,7 @@ and `device`, plus its own:
 | `barge_in_merged`  | an interruption merges with the utterance the reply was transcribing | `speech_ms` |
 | `tool_call`        | a tool returns                  | `agent`, `tool`, `duration_ms`, `is_error` |
 | `session_limit`    | the duration cap fires          | `duration_s`                       |
+| `session_idle`     | the idle timeout hangs up on a realtime session | `idle_s`, `duration_s`     |
 | `session_closed`   | a conversation ends             | `duration_s`                       |
 | `session_rejected` | a device is turned away         | `reason`                           |
 | `auth_rejected`    | a handshake is refused          | `reason`                           |
@@ -861,6 +862,42 @@ Retained JSON logs are the conversation store until v3 brings a real one:
 filter on `event` in `heard`, `replied`, `agent_said` and group by
 `session`, and you have the transcript. Tokens are never logged, at any
 level.
+
+## Which build is running
+
+`version` is the package version and has read `0.1.0` since the package
+skeleton. `revision` is which build of it, and it is the field that
+distinguishes one deploy from another.
+
+```console
+$ curl -s localhost:8003/healthz
+{"status":"ok","version":"0.1.0","revision":"a1b2c3d"}
+```
+
+It also rides every `session_open` event, which is the widest payoff for
+one field: the JSON logs already ship to a collector, so every session is
+attributable to a build rather than only the ones somebody thought to
+investigate. Two field recordings that behaved differently are otherwise
+indistinguishable from one code change and two different rooms. The OTA
+reply carries it too, under `server`, which is the one place a device is
+told what it is about to talk to.
+
+The value is resolved once at startup, in this order:
+
+1. `SAMTAL_REVISION`. The published image bakes in the commit its tags
+   are computed from, so `/healthz` and the image's `sha-` tag agree.
+2. `git describe --always --dirty`, which covers running from a working
+   tree. A tree with uncommitted changes reports `-dirty`, because a
+   build running code that is not any commit is exactly when knowing
+   matters.
+3. `unknown`. An image built with no build argument runs and says it does
+   not know; it never fails to start over it.
+
+Building an image yourself:
+
+```console
+docker build --build-arg SAMTAL_REVISION=$(git rev-parse HEAD) -t samtal-server .
+```
 
 ## Running in a container
 
