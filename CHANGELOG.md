@@ -148,6 +148,26 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Fixed
 
+- An ASR transcript that comes back as the configured `prompt` is now
+  discarded rather than answered. On short or low-content audio the
+  transcription model hands the prompt back instead of hearing
+  anything: provoked against `gpt-4o-mini-transcribe`, 45 of 45 clips
+  of room tone under a second returned the prompt word for word. That
+  is not a cosmetic artifact, because the transcript reaches the model
+  as something the user said. A field session set `prompt` to the
+  assistant's name and its three agent names, precisely so the personas
+  would be recognised when spoken, and a 0.9 s utterance came back as
+  that string and was read as a request to switch agents: a handover
+  nobody asked for. The provider knows what prompt it sent, so a
+  transcript equal to it (trimmed, case-insensitive, and ignoring a
+  full stop the model added, which one of the 45 carried) is now
+  treated as silence, the same as audio under the minimum length, and
+  logged as a warning so it is not a silent drop. Equality rather than
+  containment: someone can say the words in the prompt. An entry with
+  no `prompt` is unaffected. The README and `config.example.yaml` now
+  state the failure mode and the rule that follows from it: keep the
+  prompt to vocabulary, never to anything the assistant could act on.
+
 - `switch_agent` naming the agent that is already speaking is now
   refused instead of performed. It was reported twice in one field
   session: the user's utterance mentioned a persona by name while that
