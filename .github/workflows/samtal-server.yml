@@ -15,6 +15,16 @@ defaults:
   run:
     working-directory: samtal-server
 
+env:
+  # Timestamp-validated `.pyc` files can serve a stale module when a
+  # source keeps its byte count and its mtime rounds to the same second,
+  # which is a real hazard in a working tree and pure overhead on a
+  # runner that starts from a fresh checkout every time. tests/conftest.py
+  # sets the same flag for pytest; this covers everything that is not
+  # pytest. It does not reach the image build, whose sources never change
+  # after the build and which keeps `UV_COMPILE_BYTECODE=1` on purpose.
+  PYTHONDONTWRITEBYTECODE: "1"
+
 jobs:
   test:
     runs-on: ubuntu-latest
