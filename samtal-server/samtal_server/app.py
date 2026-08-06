@@ -68,21 +68,30 @@ def create_app(config: Config | None = None) -> FastAPI:
     # session that follows: a capture manifest needs the firmware
     # version, and the websocket handshake never carries it.
     app.state.device_facts = DeviceFacts()
-    # Absent unless a capture directory is configured, which is what
+    # Absent unless capture is configured and switched on, which is what
     # keeps recording something an operator has to ask for.
     capture = app.state.config.server.capture
     app.state.capture = (
         None
-        if capture is None
+        if capture is None or not capture.enabled
         else CaptureStore(
             capture.dir, capture.max_session_s, capture.max_total_mb, capture.min_free_mb
         )
     )
-    if capture is not None:
+    if app.state.capture is not None:
         logger.warning(
             "session capture is on: room audio and transcripts are being written to %s",
             capture.dir,
             extra={"event": "capture_enabled", "path": str(capture.dir)},
+        )
+    elif capture is not None:
+        # Said out loud, because a configured section that records
+        # nothing is otherwise a silence an operator has to debug.
+        logger.info(
+            "session capture is configured but off; set server.capture.enabled "
+            "to record to %s",
+            capture.dir,
+            extra={"event": "capture_disabled", "path": str(capture.dir)},
         )
 
     @app.get("/healthz")

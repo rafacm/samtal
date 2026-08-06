@@ -36,7 +36,9 @@ from tests.unit.test_session import (
 
 
 def capturing_config(tmp_path: Path, **kwargs: object):
-    server: dict[str, object] = {"capture": {"dir": str(tmp_path / "captures")}}
+    server: dict[str, object] = {
+        "capture": {"enabled": True, "dir": str(tmp_path / "captures")}
+    }
     server.update(kwargs)
     return config_with_agent(server=server)
 
@@ -64,7 +66,7 @@ def loudest(samples: list[int]) -> int:
     return max((abs(sample) for sample in samples), default=0)
 
 
-def test_nothing_is_recorded_unless_a_directory_is_configured(tmp_path: Path) -> None:
+def test_nothing_is_recorded_without_a_capture_section(tmp_path: Path) -> None:
     # Recording room audio is the opposite of what the rest of the
     # project promises, so it has to be asked for.
     with TestClient(create_app(config_with_agent())) as client:
@@ -72,6 +74,23 @@ def test_nothing_is_recorded_unless_a_directory_is_configured(tmp_path: Path) ->
             shake_hands(websocket)
             say_something(websocket)
     assert not (tmp_path / "captures").exists()
+
+
+def test_a_configured_section_records_nothing_until_it_is_enabled(
+    tmp_path: Path,
+) -> None:
+    # The switch is the flag, not the section, so that turning capture
+    # off does not mean deleting the directory and the budgets with it.
+    # A section left in a config file must record nothing.
+    config = config_with_agent(
+        server={"capture": {"dir": str(tmp_path / "captures")}}
+    )
+    with TestClient(create_app(config)) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            texts, _ = say_something(websocket)
+    assert texts, "the conversation did not run"
+    assert not (tmp_path / "captures").exists(), "a disabled section still recorded"
 
 
 def test_a_session_records_the_microphone_and_the_reply(tmp_path: Path) -> None:
@@ -248,7 +267,9 @@ def test_a_conversation_survives_a_capture_directory_it_cannot_use(
     # A recording is worth less than the conversation it is of.
     blocked = tmp_path / "blocked"
     blocked.write_text("not a directory")
-    config = config_with_agent(server={"capture": {"dir": str(blocked / "captures")}})
+    config = config_with_agent(
+        server={"capture": {"enabled": True, "dir": str(blocked / "captures")}}
+    )
     with TestClient(create_app(config)) as client:
         with connect(client) as websocket:
             shake_hands(websocket)

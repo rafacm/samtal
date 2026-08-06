@@ -113,10 +113,17 @@ class LimitsConfig(BaseModel):
 class CaptureConfig(BaseModel):
     """Recording sessions to disk for offline analysis.
 
-    Off unless a directory is named. This writes room audio to disk,
-    which is the opposite of what the rest of the project promises, so
-    there is no default that turns it on and no way to enable it by
-    accident: the whole section has to be added.
+    Off by default and off unless said otherwise, the same shape as
+    `auth.enabled`. This writes room audio to disk, which is the
+    opposite of what the rest of the project promises, so nothing here
+    can turn it on by accident: the section has to exist and the flag
+    has to say so.
+
+    The flag rather than the section's presence is what switches it,
+    because the field workflow is to record, then stop, and the
+    directory and the budgets are worth keeping in the file across that.
+    Turning capture off should not mean deleting the tuning that says
+    where captures go and how much room they may have.
 
     It exists because acoustic defects cannot be reproduced in any test
     lane. A recording of the microphone against what the speaker was
@@ -126,8 +133,14 @@ class CaptureConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # The switch. Off by default, so a section left in a config file
+    # records nothing until somebody says it should.
+    enabled: bool = False
+
     # Where captures are written. Must be on the data volume: a
-    # deployment's container root is read-only.
+    # deployment's container root is read-only. Required even when
+    # disabled, so turning capture on is one word rather than one word
+    # and remembering where it writes.
     dir: Path
 
     # Stop capturing a session after this many seconds. A bound on one
@@ -180,7 +193,8 @@ class ServerConfig(BaseModel):
     auth: AuthConfig = Field(default_factory=AuthConfig)
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
 
-    # Absent means no session is ever recorded, which is the default.
+    # Absent, or present with enabled off, means no session is ever
+    # recorded. Absent is the default.
     capture: CaptureConfig | None = None
 
     # Refuse to boot any provider that sends session data off this host.

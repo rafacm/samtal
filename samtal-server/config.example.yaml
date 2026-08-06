@@ -92,10 +92,10 @@ server:
   # default.
   # local_only: false
 
-  # RECORDS ROOM AUDIO TO DISK. Commented out, and there is no default
-  # that turns it on: the whole section has to be added deliberately.
-  # When it is on, every session writes three files, and a warning says
-  # so at startup and names the directory on every session recorded.
+  # RECORDS ROOM AUDIO TO DISK when enabled. Off here, and off by
+  # default: nothing below does anything until `enabled` says so.
+  # When it is on, every session writes three files, a warning says so
+  # at startup, and each recorded session names its file.
   #
   # It exists because acoustic problems cannot be reproduced in any test
   # lane. A recording of the microphone alongside what the speaker was
@@ -107,22 +107,25 @@ server:
   # JSONL decision track whose offsets index into it, and a JSON
   # manifest recording what the capture was made against.
   #
-  # Turn it off again when the recording has been taken.
-  # capture:
-  #   # Must be on the data volume: the container root is read-only.
-  #   dir: /data/captures
-  #   # Stop capturing a session after this many seconds. The
-  #   # conversation carries on; only the recording stops.
-  #   max_session_s: 900
-  #   # Total budget for the directory. Whole captures are pruned,
-  #   # oldest first, when it is exceeded. Stereo 16 kHz is 64 kB/s, so
-  #   # 2000 MB is around nine hours.
-  #   max_total_mb: 2000
-  #   # Refuse to start a capture when the volume has less free than
-  #   # this. The budget above does not protect the volume on its own:
-  #   # agent memory and the model caches share it and grow underneath,
-  #   # and capture must not be what fills it.
-  #   min_free_mb: 1000
+  # The flag is the switch, rather than the presence of this section, so
+  # that turning capture off again after a recording does not mean
+  # deleting the directory and the budgets along with it.
+  capture:
+    enabled: false
+    # Must be on the data volume: the container root is read-only.
+    dir: /data/captures
+    # Stop capturing a session after this many seconds. The
+    # conversation carries on; only the recording stops.
+    max_session_s: 900
+    # Total budget for the directory. Whole captures are pruned,
+    # oldest first, when it is exceeded. Stereo 16 kHz is 64 kB/s, so
+    # 2000 MB is around nine hours.
+    max_total_mb: 2000
+    # Refuse to start a capture when the volume has less free than
+    # this. The budget above does not protect the volume on its own:
+    # agent memory and the model caches share it and grow underneath,
+    # and capture must not be what fills it.
+    min_free_mb: 1000
 
   # Whether speech that arrives while a reply is playing interrupts it.
   # On by default: a device only keeps streaming its microphone through

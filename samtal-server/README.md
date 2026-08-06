@@ -878,14 +878,15 @@ level.
 
 ## Capturing a session
 
-**This records room audio to disk.** It is off unless a directory is
-named, there is no default that turns it on, and a warning at startup
-plus one line per recorded session say when it is on. Turn it off again
-once the recording has been taken.
+**This records room audio to disk.** It is off by default and off until
+`enabled` says otherwise, and a warning at startup plus one line per
+recorded session say when it is on. Turn it off again once the
+recording has been taken.
 
 ```yaml
 server:
   capture:
+    enabled: false
     dir: /data/captures
     # stop capturing a session after this long
     max_session_s: 900
@@ -894,6 +895,15 @@ server:
     # refuse to start a capture below this much free space
     min_free_mb: 1000
 ```
+
+The flag is the switch, rather than the presence of the section, so
+turning capture off again does not mean deleting the directory and the
+budgets along with it: the field workflow is to record, then stop, and
+the tuning is worth keeping across that. `dir` is required even while
+disabled, so switching on is one word rather than one word and
+remembering where it writes. A section that is present but off says so
+once at startup, because a configured capture that records nothing is
+otherwise a silence to debug.
 
 It exists because acoustic problems cannot be reproduced in any test
 lane. The unit lane feeds synthetic frames and the integration lane
