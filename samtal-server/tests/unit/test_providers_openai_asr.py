@@ -325,6 +325,58 @@ async def test_audio_under_the_api_minimum_is_answered_without_a_request() -> No
     assert calls == 1
 
 
+def test_the_minimum_belongs_to_the_endpoint_not_the_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The 0.1 s floor was measured against OpenAI, so it is applied
+    only there, like the model rules and the temperature range."""
+    monkeypatch.setenv("OPENAI_KEY", "secret")
+    openai = build_asr(type="openai", api_key_env="OPENAI_KEY")
+    compatible = build_asr(type="openai", base_url="http://localhost:8000/v1", egress=False)
+    assert isinstance(openai, OpenAiAsr)
+    assert isinstance(compatible, OpenAiAsr)
+    assert openai._min_audio_s == 0.1
+    assert compatible._min_audio_s == 0.0
+
+
+async def test_a_compatible_endpoint_receives_the_short_clip_openai_would_refuse() -> None:
+    """A self-hosted server may accept shorter audio, and dropping a clip
+    it would have answered would silently suppress a barge-in it could
+    have confirmed."""
+    seen: list[bytes] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.content)
+        return httpx.Response(200, json={"text": "ja"})
+
+    built = build_asr(type="openai", base_url="http://localhost:8000/v1", egress=False)
+    assert isinstance(built, OpenAiAsr)
+    built._client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))  # type: ignore[attr-defined]
+
+    # 50 ms: refused by OpenAI, and dropped by the guard against it.
+    result = await built.transcribe(b"\x00\x00" * 800, 16000)
+    assert len(seen) == 1
+    assert result.text == "ja"
+
+
+async def test_empty_audio_is_never_sent_anywhere() -> None:
+    """Not even to an endpoint that declared no minimum: there is
+    nothing in the buffer to transcribe."""
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"text": "should not be reached"})
+
+    built = build_asr(type="openai", base_url="http://localhost:8000/v1", egress=False)
+    assert isinstance(built, OpenAiAsr)
+    built._client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))  # type: ignore[attr-defined]
+
+    assert (await built.transcribe(b"", 16000)).text == ""
+    assert calls == 0
+
+
 async def test_the_minimum_follows_the_sample_rate() -> None:
     """Bytes are not milliseconds: the same buffer is long enough at
     16 kHz and too short at 48 kHz."""

@@ -74,13 +74,19 @@ DEFAULT_TIMEOUT_S = 30.0
 # The API's own range for `temperature`.
 TEMPERATURE_RANGE = (0.0, 1.0)
 
-# The API refuses audio shorter than this, and the barge-in path is
-# what would send it: a snippet classified as speech mid-reply is
+# OpenAI refuses audio shorter than this, and the barge-in path is what
+# would send it: a snippet classified as speech mid-reply is
 # transcribed to decide whether the interruption was real (#28), and
 # the shortest of those are tens of milliseconds. An HTTP 400 there
 # would be logged as a failed confirmation and suppress a barge-in that
 # was never going to be confirmed anyway, so the empty answer is given
 # here instead, without a round trip.
+#
+# Measured against OpenAI's endpoint, so it is applied only there. A
+# compatible server may accept shorter audio, and suppressing a clip it
+# would have answered would silently drop a barge-in it could have
+# confirmed; that endpoint decides its own minimum, the same way it
+# decides its own model rules and its own temperature range.
 MIN_AUDIO_S = 0.1
 
 # The API decides the format from the extension, so the name matters
@@ -122,12 +128,16 @@ class OpenAiAsr(AsrProvider):
         prompt: str | None = None,
         temperature: float | None = None,
         timeout_s: float = DEFAULT_TIMEOUT_S,
+        min_audio_s: float = MIN_AUDIO_S,
         client: AsyncOpenAI | None = None,
     ) -> None:
         self._model = model
         self._language = language
         self._prompt = prompt
         self._temperature = temperature
+        # Shortest audio worth sending. The endpoint sets it, so a
+        # compatible one that accepts anything gets 0: see MIN_AUDIO_S.
+        self._min_audio_s = min_audio_s
         # One client per provider entry, so its connection pool is
         # reused across turns and sessions: a fresh TLS handshake per
         # utterance would land squarely in the gap between the user
@@ -144,11 +154,11 @@ class OpenAiAsr(AsrProvider):
     async def transcribe(
         self, pcm: bytes, sample_rate: int, language_hint: str | None = None
     ) -> AsrResult:
-        if len(pcm) < int(MIN_AUDIO_S * sample_rate) * 2:
+        if not pcm or len(pcm) < int(self._min_audio_s * sample_rate) * 2:
             logger.debug(
                 "openai asr: %d bytes is under the %.2fs minimum, nothing to transcribe",
                 len(pcm),
-                MIN_AUDIO_S,
+                self._min_audio_s,
             )
             return AsrResult(text="")
         # A configured language always beats the hint, as elsewhere. The
@@ -197,4 +207,5 @@ def build(label: str, config: ProviderConfig) -> OpenAiAsr:
         prompt=prompt,
         temperature=temperature,
         timeout_s=timeout_s,
+        min_audio_s=MIN_AUDIO_S if is_openai else 0.0,
     )
