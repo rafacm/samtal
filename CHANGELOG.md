@@ -148,6 +148,25 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Fixed
 
+- Documentation gaps a deployment hit in the field, all of them cheap
+  to state and expensive to discover. The ElevenLabs stock voices are
+  recorded by English speakers, so a stock voice speaking Spanish
+  sounds like an American speaking fluent Spanish; the `voice_id`
+  comment now says to pin a native voice for a non-English agent, and
+  that a professional clone is fine-tuned per model, so one unavailable
+  on the configured model fails at synthesis rather than at boot and
+  presents as silence on the device. The `memory:` comment now says
+  that renaming an agent orphans its memory, since the key is the agent
+  name, and that conversation history carrying across a `switch_agent`
+  handover is not the same thing as agent memory: a persona that has
+  stored nothing can still greet the user by name the moment it takes
+  over, from the transcript rather than from its own file. And the
+  README's Security section gains a table of which hosts each provider
+  type reaches, because a blocked host does not announce itself, and
+  because an `openai` ASR shares `api.openai.com` with an
+  `openai_compatible` LLM while `elevenlabs` TTS needs a host of its
+  own, which is not obvious and is the one most likely to be missed.
+
 - A multi-sentence reply no longer stutters. Frames are paced to
   realtime, so sending a sentence takes about as long as hearing it,
   and each sentence used to be synthesized only once the previous one

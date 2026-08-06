@@ -657,6 +657,30 @@ for local experiments.
 
 ## Security
 
+**Which hosts a configuration reaches.** Worth reading before deploying
+anywhere with an egress allowlist, because a blocked host does not
+announce itself: the server boots healthy, other stages keep working,
+and the blocked stage waits out its `timeout_s` while the device plays
+silence.
+
+| Configured as | Reaches | Notes |
+| --- | --- | --- |
+| `llm: anthropic` | `api.anthropic.com` | |
+| `llm: openai_compatible` | whatever `base_url` names | `api.openai.com` when pointed at OpenAI, a host on your own network when pointed at Ollama or vLLM |
+| `asr: openai` | `api.openai.com` by default, else `base_url` | **Shares its host with an OpenAI LLM.** Adding cloud ASR to a deployment already using OpenAI for the LLM needs no new host |
+| `tts: openai` | `api.openai.com` by default, else `base_url` | Same |
+| `tts: elevenlabs` | `api.elevenlabs.io` | A separate host, and the one most likely to be missed |
+| `asr: faster_whisper` | `huggingface.co` at first start only | Model weights, downloaded once into `/data` |
+| `tts: piper` | the voice collection at first start only | Same |
+| `vad: silero` | nothing | Weights ship with the package |
+| `mcp_servers` (`streamable_http`) | whatever the entry's `url` names | Each entry is its own host |
+| `mcp_servers` (`stdio`) | wherever the command it runs goes | Not knowable from the configuration |
+
+The two local engines are the only entries that reach anything at
+startup and then stop, which is why a deployment that has been running
+for months can still be broken by an egress rule: nothing re-reaches
+those hosts until the volume is cleared.
+
 **Devices authenticate, by default.** The OTA endpoint issues each device
 a token, the firmware persists it to NVS, and the WebSocket handshake
 checks it before accepting the upgrade. A connection with no token, a

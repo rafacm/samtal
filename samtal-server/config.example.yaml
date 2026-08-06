@@ -312,6 +312,22 @@ providers:
       #     | jq -r '.voices[] | "\(.voice_id)  \(.name)"'
       # The current listing endpoint, with search and filtering:
       # https://elevenlabs.io/docs/api-reference/voices/search
+      # Two things the voice listing does not tell you, both found by
+      # a deployment that hit them.
+      #
+      # The stock voices are recorded by English speakers. The model is
+      # multilingual and any voice will speak any of its languages
+      # intelligibly, which reads as "any voice works for any
+      # language", but a stock voice speaking Spanish sounds like an
+      # American speaking fluent Spanish. Pin a native voice for any
+      # non-English agent; a professional clone in the target language
+      # is what fixes it.
+      #
+      # A professional clone is fine-tuned per model, and one that is
+      # not available on the model below fails at synthesis rather than
+      # at boot. On a deployment where nobody is watching the logs that
+      # presents as silence on the device, so validate a clone's ID
+      # with one throwaway synthesis call before shipping it.
       voice_id: PUT_YOUR_VOICE_ID_HERE
       api_key_env: ELEVENLABS_API_KEY
       # Default: eleven_flash_v2_5, the low-latency model (~75 ms to
@@ -451,6 +467,19 @@ mcp_servers:
 # injected into any prompt. One file per agent, created on first write,
 # read into the system prompt on every reply. Memory is keyed by agent
 # and not by device, because a persona is one entity across rooms.
+#
+# Keyed by agent name means **renaming an agent orphans its memory**.
+# The old file stays on disk and the renamed agent starts empty, which
+# costs nothing on a persona created this morning and loses everything
+# on one that has been accumulating facts for months. Rename the file
+# alongside the config, or do not rename the agent.
+#
+# Agent memory is also not the same thing as what an agent appears to
+# know inside one conversation. Conversation history carries across a
+# `switch_agent` handover, so a persona that has never stored a fact
+# can still greet the user by name the moment it takes over: it is
+# reading the transcript, not its own file. The two are easy to
+# conflate when a handover looks uncannily well informed.
 memory:
   dir: /var/lib/samtal/memory
 
