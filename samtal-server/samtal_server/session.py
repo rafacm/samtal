@@ -238,6 +238,12 @@ class Session:
         self._pace_resume = asyncio.Event()
         self._pace_resume.set()
         self._pace_paused_at: float | None = None
+        # When this session last did any conversing, which is what the
+        # idle timeout counts from. Set at the end of an utterance and at
+        # the end of a reply, so "whichever is later" needs no
+        # comparison: both just write the current time.
+        self._last_activity: float | None = None
+        self._idle_watchdog: asyncio.Task[None] | None = None
 
     @property
     def _realtime(self) -> bool:
@@ -324,11 +330,14 @@ class Session:
             ),
         )
         self._start_device_discovery(hello)
+        self._start_idle_watchdog()
 
         try:
-            # The cap on a session's total life, which is also what idles
-            # one out: a device that stopped talking hours ago holds a
-            # slot until this fires.
+            # The cap on a session's total life. The idle watchdog is
+            # what ends an abandoned realtime conversation long before
+            # this; what is left for the cap is the session that keeps
+            # talking, and the auto-mode device the watchdog leaves
+            # alone.
             async with asyncio.timeout(self.config.server.limits.max_session_s):
                 await self._serve()
         except TimeoutError:
@@ -345,6 +354,7 @@ class Session:
         except WebSocketDisconnect:
             pass
         finally:
+            await self._stop_idle_watchdog()
             await self._cancel_reply()
             await self._stop_device_discovery()
             logger.info(
@@ -393,6 +403,82 @@ class Session:
         if self._opened_at is None:
             return 0.0
         return round(asyncio.get_running_loop().time() - self._opened_at, 2)
+
+    def _start_idle_watchdog(self) -> None:
+        """Start the timer that hangs up on a conversation nobody is
+        having any more."""
+        self._mark_activity()
+        self._idle_watchdog = asyncio.create_task(self._watch_for_idle())
+
+    async def _stop_idle_watchdog(self) -> None:
+        if self._idle_watchdog is not None:
+            self._idle_watchdog.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._idle_watchdog
+            self._idle_watchdog = None
+
+    def _mark_activity(self) -> None:
+        """Record that the conversation is alive right now. Called at
+        both ends the idle timeout counts from, so "the last utterance or
+        the last reply, whichever is later" falls out of writing the
+        current time at each rather than having to compare them."""
+        self._last_activity = asyncio.get_running_loop().time()
+
+    async def _watch_for_idle(self) -> None:
+        """Close a realtime session that has stopped conversing.
+
+        Nothing on the device side ends a realtime session: the firmware
+        has no idle timeout, and its only closers are a button press,
+        losing the network, and powering off. So a user who simply walks
+        away leaves the mic streaming to the server, holding one of
+        `max_sessions`, keeping the board out of the sleep mode that
+        `CanEnterSleepMode` refuses while an audio channel is open, and
+        running Opus decode and VAD over the silence, until the hour of
+        `max_session_s` is up. This is the bound that makes that a
+        couple of minutes instead (#20).
+
+        Realtime only. An auto-mode device stops listening after each
+        reply and re-arms per turn, so it is not streaming a room to
+        anybody; realtime is the mode that asks once and then never
+        stops. The mode is not known until the device sends its `listen
+        start`, and it can in principle change, so this checks each time
+        round rather than deciding once.
+
+        Arriving audio is deliberately not activity. A realtime session
+        streams continuously, silence included, so counting frames would
+        mean the timer never fires, which is the bug. What counts is
+        conversation: an utterance ending, or a reply ending. A reply
+        still streaming counts too, and not because it would otherwise
+        be cut off (`request_shutdown` waits politely for one to finish
+        speaking) but because of what follows: a timer that came due
+        mid-reply has already decided to hang up, so the socket would
+        close the instant the reply ended and the user would get no
+        window at all to answer what they just heard.
+        """
+        timeout = self.config.server.limits.idle_timeout_s
+        loop = asyncio.get_running_loop()
+        while True:
+            now = loop.time()
+            if not self._realtime or self._replying():
+                self._mark_activity()
+            assert self._last_activity is not None
+            remaining = self._last_activity + timeout - now
+            if remaining > 0:
+                await asyncio.sleep(remaining)
+                continue
+            logger.info(
+                "session %s idle for %.0f s, hanging up",
+                self.session_id,
+                timeout,
+                extra=self._event(
+                    "session_idle", idle_s=timeout, duration_s=self._open_duration_s()
+                ),
+            )
+            # A normal closure rather than going away: the server is
+            # fine, this conversation is simply over. The firmware reads
+            # it as the end of one and reconnects on the next wake word.
+            await self.request_shutdown(NORMAL_CLOSURE, "idle timeout")
+            return
 
     def _start_device_discovery(self, hello: messages.DeviceHello) -> None:
         """Ask a device that advertised MCP for its tools. In the
@@ -577,6 +663,16 @@ class Session:
         cancellation wants; from the mic that case is already filtered
         in `_handle_audio`, so what reaches here is a manual `listen
         stop` mid-reply."""
+        # Before any of the gates below can drop it: an utterance that
+        # ended is somebody talking, whether or not it earns a reply.
+        #
+        # Today every path from here either starts a reply or leaves one
+        # already running, and a reply marks again when it ends, so this
+        # is always superseded and no test can tell it apart. It stays
+        # because the rule the timeout is specified by names both ends,
+        # and because the day an utterance stops implying a reply is not
+        # a day anyone will remember this.
+        self._mark_activity()
         speech_ms = round(self._endpointer.speech_ms()) if self._endpointer is not None else 0
         pcm = self._trimmed_utterance()
         self._reset_utterance()
@@ -833,6 +929,11 @@ class Session:
             logger.exception("session %s: reply failed", self.session_id)
         finally:
             self._reply_pcm = None
+            # The other end the idle timeout counts from. In the finally,
+            # so a reply that failed or was cancelled still resets the
+            # clock: the user is owed the full silence before being hung
+            # up on either way.
+            self._mark_activity()
             if spoken:
                 said = " ".join(spoken)
                 self._turns.append(Turn("assistant", said))
