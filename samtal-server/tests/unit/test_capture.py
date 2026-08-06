@@ -302,6 +302,96 @@ def test_device_facts_do_not_grow_without_bound() -> None:
     assert facts.get("aa:bb:cc:dd:ee:04") != {}
 
 
+def test_the_audio_covers_the_last_event_even_with_nothing_to_record(
+    tmp_path: Path,
+) -> None:
+    # A review finding. An offset that points past the end of the file
+    # is not an index into it, and a session can be open through
+    # stretches with no decodable audio at all: a device that connects,
+    # says nothing, and drops has only its own open and close events.
+    opened = time.monotonic()
+    capture = store(tmp_path).open("s1", opened, MANIFEST)
+    assert capture is not None
+    capture.event({"event": "session_open"}, opened)
+    capture.event({"event": "session_closed"}, opened + 3.0)
+    capture.close()
+
+    mic, reply = read_channels(capture.wav_path)
+    assert len(mic) == len(reply)
+    assert len(mic) >= 3 * CAPTURE_RATE - 2, "the audio stops before the last event"
+    assert set(mic) == {0}, "silence is what a session with no audio recorded"
+
+
+def test_padding_to_the_last_event_stops_at_the_session_limit(tmp_path: Path) -> None:
+    opened = time.monotonic()
+    capture = store(tmp_path, max_session_s=1.0).open("s1", opened, MANIFEST)
+    assert capture is not None
+    capture.event({"event": "session_open"}, opened)
+    capture.event({"event": "late"}, opened + 60.0)
+    capture.close()
+
+    mic, _ = read_channels(capture.wav_path)
+    assert len(mic) <= CAPTURE_RATE + 2, "a stray late event stretched the file"
+
+
+def test_a_capture_still_recording_is_never_pruned(tmp_path: Path) -> None:
+    # A review finding. Unlinking underneath an open descriptor leaves
+    # the session writing to a file nobody can find.
+    keeper = store(tmp_path, max_total_mb=0.01)
+    opened = time.monotonic()
+    live = keeper.open("live", opened, MANIFEST)
+    assert live is not None
+    # Two writes, the second past the flush lag, so there is really
+    # audio on disk for a prune to find.
+    live.microphone(tone(2000), opened)
+    live.microphone(tone(100), opened + 3.0)
+    assert live.wav_path.stat().st_size > 10_000, "nothing was flushed to prune"
+
+    later = keeper.open("later", opened, MANIFEST)
+    assert later is not None
+    assert live.wav_path.exists(), "a capture still recording was pruned"
+    live.close()
+    later.close()
+
+
+def test_the_budget_is_checked_again_when_a_capture_closes(tmp_path: Path) -> None:
+    # A review finding. Checking only at open leaves a session that
+    # overran sitting there until some later session happens to start.
+    keeper = store(tmp_path, max_total_mb=0.2)
+    opened = time.monotonic()
+    for index in range(3):
+        capture = keeper.open(f"s{index}", opened, MANIFEST)
+        assert capture is not None
+        capture.microphone(tone(3000), opened)
+        capture.close()
+        import os
+
+        for suffix in (".wav", ".jsonl", ".json"):
+            path = capture.wav_path.with_suffix(suffix)
+            if path.exists():
+                os.utime(path, (opened + index, opened + index))
+
+    # No new session opened after the last one, and the directory is
+    # still inside its budget.
+    left = sorted(path.stem for path in keeper.directory.glob("*.wav"))
+    assert left == ["s2"], f"the budget was not enforced on close: {left}"
+
+
+def test_the_newest_capture_survives_a_budget_smaller_than_a_session(
+    tmp_path: Path,
+) -> None:
+    # Deleting the recording somebody just went out to make, because it
+    # is bigger than a misconfigured budget, is the worst thing this
+    # could do.
+    keeper = store(tmp_path, max_total_mb=0.001)
+    opened = time.monotonic()
+    capture = keeper.open("only", opened, MANIFEST)
+    assert capture is not None
+    capture.microphone(tone(3000), opened)
+    capture.close()
+    assert capture.wav_path.exists(), "the only capture was pruned away"
+
+
 def test_a_capture_that_never_started_is_not_a_capture(tmp_path: Path) -> None:
     # SessionCapture is inert until start(), so a failure to open leaves
     # no half-written files behind.

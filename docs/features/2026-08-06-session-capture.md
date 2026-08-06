@@ -104,10 +104,10 @@ footprint and is not worth it at these volumes.
 
 ## Verification
 
-`uv run pytest tests/unit -q`: 645 passed, 2 skipped.
+`uv run pytest tests/unit -q`: 650 passed, 2 skipped.
 `uv run pytest tests/integration -q`: 27 passed. `ruff check` clean.
 
-Twenty-eight tests across two files: `test_capture.py` for what the
+Thirty-three tests across two files: `test_capture.py` for what the
 format guarantees, `test_capture_session.py` for the wiring, driven
 through a real session over a websocket.
 
@@ -118,6 +118,9 @@ relevant piece reverted:
 |---|---|---|
 | the microphone is recorded before the guards | hook moved after them | 307 ms of microphone audio recorded out of 1200 ms spoken, the missing 900 ms being exactly what the guard discarded |
 | audio is placed by arrival, so a gap is silence | placed contiguously instead | three tests fail, including "the reply appears before the speech that prompted it" and a half-second offset between channels collapsing to zero |
+| the audio covers the last event | padding removed | "the audio stops before the last event" |
+| a capture still recording is never pruned | protection removed | the live capture is unlinked from under its own writer |
+| the budget is enforced when a capture closes | prune-on-close removed | two over-budget captures left on disk |
 
 Against the issue's acceptance list:
 
@@ -149,6 +152,27 @@ Against the issue's acceptance list:
 
 Also verified: a conversation survives a capture directory it cannot
 use, and nothing is written at all unless a directory is configured.
+
+### Three review findings, all fixed
+
+`codex review` found three real defects in the first version, each with
+a test that fails without its fix:
+
+1. **Event offsets could point past the end of the audio.** A session
+   can be open through stretches with nothing decodable, and the
+   decision track's whole contract is that `t_ms` indexes into the WAV.
+   The file is now padded with silence out to the last event, bounded
+   by `max_session_s`.
+2. **Pruning could unlink a capture that was still being written.** Two
+   concurrent sessions and a tight budget were enough: the older live
+   one would be deleted from under its own open descriptors. Sessions
+   still recording are now protected, and so is the newest finished
+   capture, because a budget smaller than one session would otherwise
+   delete the recording somebody just went out to make.
+3. **The budget was only checked when a capture started.** A session
+   that overran sat there until some later session happened to begin.
+   Closing a capture now re-checks it, and says so in a warning when
+   nothing more can be pruned.
 
 ## On what this does not do
 

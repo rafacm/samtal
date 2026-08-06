@@ -42,6 +42,7 @@ import shutil
 import struct
 import time
 from collections import OrderedDict
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO, TextIO
 
@@ -159,6 +160,7 @@ class SessionCapture:
         opened_at: float,
         manifest: dict[str, Any],
         max_session_s: float,
+        on_close: "Callable[[str], None] | None" = None,
     ) -> None:
         self._session_id = session_id
         self._opened_at = opened_at
@@ -180,6 +182,10 @@ class SessionCapture:
         # would swamp the decision track.
         self._dropped: dict[str, int] = {}
         self._dropped_second = -1
+        # The furthest an event has landed, so the audio can be padded
+        # out to cover it rather than leaving offsets past the end.
+        self._event_frame = 0
+        self._on_close = on_close
 
     def start(self) -> None:
         self._wav = self.wav_path.open("wb")
@@ -275,6 +281,11 @@ class SessionCapture:
         if self._stopped or self._events is None:
             return
         record = {"t_ms": round(self._at(now) * 1000, 1), **payload}
+        # An event's offset is only useful if it indexes into the audio,
+        # and a session can be open through stretches with no decodable
+        # audio at all. Remembering where the last one landed is what
+        # lets close() pad the file out to cover it.
+        self._event_frame = max(self._event_frame, self._frame_of(now))
         try:
             self._events.write(json.dumps(record, default=str) + "\n")
             # For the same reason the audio is flushed: the events
@@ -331,6 +342,9 @@ class SessionCapture:
         still every byte of audio it managed to write, and the manifest
         says which it is."""
         if self._wav is None and self._events is None:
+            if self._on_close is not None:
+                self._on_close(self._session_id)
+                self._on_close = None
             return
         now = time.monotonic()
         with contextlib.suppress(Exception):
@@ -339,7 +353,15 @@ class SessionCapture:
         self._wav = self._events = None
         if wav is not None:
             with contextlib.suppress(Exception):
-                self._start_frame = max(self._mic.next_frame, self._reply.next_frame)
+                # Out to the furthest of the audio and the last event.
+                # An event's offset has to index into the file, and a
+                # session can be open through stretches with no
+                # decodable audio at all, so the quiet is written as
+                # silence rather than left as a timeline the events
+                # point past the end of. Bounded by the session limit,
+                # which is what already bounds one capture's size.
+                end = max(self._mic.next_frame, self._reply.next_frame, self._event_frame)
+                self._start_frame = min(end, int(self._max_session_s * CAPTURE_RATE))
                 frames = self._start_frame - (self._data_bytes // FRAME_BYTES)
                 if frames > 0:
                     block = interleave(self._mic.take(frames), self._reply.take(frames))
@@ -357,6 +379,12 @@ class SessionCapture:
                 complete=not self._stopped,
                 duration_s=self._data_bytes / FRAME_BYTES / CAPTURE_RATE,
             )
+        # The store stops protecting this capture from pruning, and
+        # checks the budget now that its final size is known.
+        if self._on_close is not None:
+            with contextlib.suppress(Exception):
+                self._on_close(self._session_id)
+            self._on_close = None
 
 
 class CaptureStore:
@@ -380,6 +408,9 @@ class CaptureStore:
         self._max_session_s = max_session_s
         self._max_total_mb = max_total_mb
         self._min_free_mb = min_free_mb
+        # Sessions recording right now. Pruning must not unlink a file
+        # that still has a writer behind it.
+        self._active: set[str] = set()
 
     def _free_mb(self) -> float:
         return shutil.disk_usage(self.directory).free / MB
@@ -397,11 +428,23 @@ class CaptureStore:
     def prune(self) -> list[str]:
         """Drop whole captures, oldest first, until the directory is
         inside its budget. All three files go together: two thirds of a
-        capture is not a capture."""
+        capture is not a capture.
+
+        Two are never dropped. A session still recording, because its
+        descriptors are open and unlinking underneath it would leave the
+        session writing to a file nobody can find. And the newest
+        finished one, because a budget smaller than a single session
+        would otherwise delete the recording that was just taken, which
+        is the one somebody went out to make.
+        """
         removed: list[str] = []
         captures = self._captures()
-        while captures and self._total_mb() > self._max_total_mb:
-            oldest = captures.pop(0)
+        protected = set(self._active)
+        if captures:
+            protected.add(captures[-1].stem)
+        candidates = [path for path in captures if path.stem not in protected]
+        while candidates and self._total_mb() > self._max_total_mb:
+            oldest = candidates.pop(0)
             for path in (oldest, oldest.with_suffix(".jsonl"), oldest.with_suffix(".json")):
                 with contextlib.suppress(OSError):
                     path.unlink()
@@ -414,7 +457,26 @@ class CaptureStore:
                 ", ".join(removed),
                 extra={"event": "capture_pruned", "sessions": removed},
             )
+        over = self._total_mb()
+        if over > self._max_total_mb:
+            logger.warning(
+                "capture: %.0f MB on disk is over the %.0f MB budget and "
+                "nothing more can be pruned; raise max_total_mb or lower "
+                "max_session_s",
+                over,
+                self._max_total_mb,
+                extra={"event": "capture_over_budget", "total_mb": round(over)},
+            )
         return removed
+
+    def finished(self, session_id: str) -> None:
+        """A capture closed. It stops being protected, and the budget is
+        checked now that its final size is known: without this a single
+        session that overran would sit there until some later session
+        happened to start."""
+        self._active.discard(session_id)
+        with contextlib.suppress(OSError):
+            self.prune()
 
     def open(
         self, session_id: str, opened_at: float, manifest: dict[str, Any]
@@ -453,11 +515,18 @@ class CaptureStore:
             )
             return None
         capture = SessionCapture(
-            self.directory, session_id, opened_at, manifest, self._max_session_s
+            self.directory,
+            session_id,
+            opened_at,
+            manifest,
+            self._max_session_s,
+            on_close=self.finished,
         )
+        self._active.add(session_id)
         try:
             capture.start()
         except OSError as exc:
+            self._active.discard(session_id)
             logger.warning(
                 "session %s: not capturing, could not open the files: %s",
                 session_id,
