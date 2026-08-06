@@ -969,6 +969,16 @@ $ curl -s localhost:8003/healthz
 {"status":"ok","version":"0.1.0","revision":"a1b2c3d"}
 ```
 
+**The format depends on where the revision came from, and the two are
+not interchangeable.** From a working tree it is `git describe`, which
+is short (`a1b2c3d`). From a published image it is whatever
+`SAMTAL_REVISION` was built with, and CI passes the full 40-character
+commit SHA, so a deployed container reports
+`9fd3de5be80244ddea00e3a304241254d0150350` while its image tag reads
+`sha-9fd3de5`. **Matching a running pod to its image tag is therefore a
+prefix check, not an equality check.** Scripting it as equality gives a
+false failure, which is exactly how this was found.
+
 It also rides every `session_open` event, which is the widest payoff for
 one field: the JSON logs already ship to a collector, so every session is
 attributable to a build rather than only the ones somebody thought to

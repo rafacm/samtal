@@ -103,6 +103,12 @@ Against the issue's acceptance list:
   | committed | `a14dd19` | `{"status":"ok","version":"0.1.0","revision":"a14dd19"}` |
   | `SAMTAL_REVISION=sha-deadbee` set | `a14dd19` (ignored) | `{"status":"ok","version":"0.1.0","revision":"sha-deadbee"}` |
 
+  Note the format differs by source: `git describe` is short, while CI
+  passes the full 40-character SHA, so a deployed pod reports 40
+  characters against a `sha-<short>` image tag. Matching them is a
+  prefix check. Found in the field by the infra team scripting it as
+  equality, which is the natural reading of what the docs said.
+
   The OTA GET on the dirty run read `samtal-server 0.1.0 (revision
   1272747-dirty) OTA endpoint.`
 - [x] **A `session_open` event carries the revision.** Unit test with the
