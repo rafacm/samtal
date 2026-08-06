@@ -91,6 +91,28 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Fixed
 
+- A multi-sentence reply no longer stutters. Frames are paced to
+  realtime, so sending a sentence takes about as long as hearing it,
+  and each sentence used to be synthesized only once the previous one
+  had finished playing. That put the next sentence's whole time to
+  first byte on the speaker as silence, once per sentence, for the
+  whole reply: measured against the real providers, 884 ms and 478 ms
+  between the sentences of a three-sentence reply through
+  `gpt-4o-mini-tts`, and 129 ms and 139 ms through
+  `eleven_flash_v2_5`. It was reported from a board session as hiccups
+  in the assistant's voice. It was also worse than a plain pause,
+  because the frame pacer's schedule is absolute from a reply's first
+  frame, so the frames after a stall burst out to catch up: a dropout
+  followed by a flood. A sentence now starts synthesizing before the
+  previous one is spoken rather than after, one sentence of lookahead,
+  so that latency is spent against playback that is already happening.
+  Measured again, every sentence boundary is a single 60 ms frame,
+  which is the cadence rather than a gap, and the catch-up bursts are
+  gone. A sentence run ahead and then cancelled by a barge-in is
+  neither spoken nor recorded as spoken, the lookahead stops at a tool
+  round's boundary, and a synthesis belongs to the agent leg that
+  started it, so a handover cannot speak in the wrong voice.
+
 - The server README's log event table was missing `session_idle`, added
   the same day the event was, and its `session_open` row did not list
   the new `revision` field. Both rows now match what the server emits.
