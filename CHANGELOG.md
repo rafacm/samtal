@@ -9,6 +9,23 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- The server can say which build it is running. `__version__` has read
+  `0.1.0` since the package skeleton and answers a different question,
+  so a separate `revision` now rides `/healthz`, every `session_open`
+  log event, and the OTA reply under a new `server` key. It is resolved
+  once at startup: `SAMTAL_REVISION` when set, else `git describe
+  --always --dirty` when there is a checkout to describe, else
+  `unknown`, which a build with neither reports rather than failing to
+  start. The image gained a `SAMTAL_REVISION` build argument that
+  becomes an environment variable, since a process cannot read its own
+  image's OCI labels, and CI passes the commit its `sha-` tag is
+  computed from, so a running container and its image tag agree. The
+  `session_open` field is the widest of these: the JSON logs already
+  ship to a collector, so every session becomes attributable to a
+  build, which is what makes two field recordings of different
+  behaviour tellable apart from one code change and two different
+  rooms.
+
 - New `server.limits.idle_timeout_s` (default 120): how long a realtime
   session may go without conversing before the server closes it,
   counted from the end of the last utterance or the end of the last
@@ -73,6 +90,10 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   two stages decide them the same way. No behaviour changed.
 
 ### Fixed
+
+- The server README's log event table was missing `session_idle`, added
+  the same day the event was, and its `session_open` row did not list
+  the new `revision` field. Both rows now match what the server emits.
 
 - Documentation for the `openai` ASR provider told operators that
   leaving `language` unset "costs nothing", which a device checkpoint
