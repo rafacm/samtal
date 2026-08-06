@@ -51,12 +51,35 @@ jobs:
   # The image is built and smoke-tested on every run, and published only
   # on a push to main. `needs: test` is what makes publishing conditional
   # on the suite: nothing reaches the registry that did not pass it.
+  #
+  # Two variants, from one Dockerfile so they cannot drift. `default`
+  # carries the local engines and keeps the unsuffixed tags every
+  # existing puller expects; `slim` carries neither and takes `-slim`
+  # ones, for a deployment whose ASR and TTS are external providers.
+  # Both run the whole smoke conversation, which is what makes them
+  # provably the same server rather than two that merely build.
   image:
     needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    strategy:
+      # Both variants are reported even when one fails: which of them
+      # broke is the first thing worth knowing.
+      fail-fast: false
+      matrix:
+        include:
+          # `moving` is the tag that follows main; `suffix` is what
+          # marks the dated and sha tags. The default variant's are
+          # unsuffixed on purpose, so `latest` keeps meaning what it
+          # has always meant.
+          - variant: default
+            moving: latest
+            suffix: ""
+          - variant: slim
+            moving: slim
+            suffix: "-slim"
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/samtal-server
       # Throwaway, and only ever inside this job: the smoke lane needs
@@ -84,12 +107,13 @@ jobs:
           platforms: linux/amd64
           load: true
           tags: samtal-server:ci-amd64
-          # The same argument the publish step passes, so the whole
+          # The same arguments the publish step passes, so the whole
           # route from build argument to what the server reports is
           # exercised by the smoke lane on every run, rather than first
           # being exercised by a publish to main.
           build-args: |
             SAMTAL_REVISION=${{ github.sha }}
+            SAMTAL_VARIANT=${{ matrix.variant }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -97,7 +121,25 @@ jobs:
       # the first to find out about, so both architectures are asked to
       # import the extras before anything is published.
       - name: Check the extras import (amd64)
+        if: matrix.variant == 'default'
         run: docker run --rm --entrypoint python samtal-server:ci-amd64 -c "import faster_whisper, piper"
+
+      # The slim variant's whole point is their absence, so it is
+      # asserted rather than assumed: an extra creeping back in would
+      # otherwise show up only as an image that quietly grew.
+      - name: Check the extras are absent (amd64)
+        if: matrix.variant == 'slim'
+        run: |
+          for module in faster_whisper piper; do
+            if docker run --rm --entrypoint python samtal-server:ci-amd64 \
+                -c "import $module" 2>/dev/null; then
+              echo "::error::$module is installed in the slim image"
+              exit 1
+            fi
+          done
+          # pysilero-vad is a core dependency, not an extra, and runs on
+          # every audio frame whichever ASR is configured.
+          docker run --rm --entrypoint python samtal-server:ci-amd64 -c "import pysilero_vad"
 
       - name: Build the arm64 image
         uses: docker/build-push-action@v6
@@ -108,11 +150,60 @@ jobs:
           tags: samtal-server:ci-arm64
           build-args: |
             SAMTAL_REVISION=${{ github.sha }}
+            SAMTAL_VARIANT=${{ matrix.variant }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Check the extras import (arm64, under QEMU)
+        if: matrix.variant == 'default'
         run: docker run --rm --platform linux/arm64 --entrypoint python samtal-server:ci-arm64 -c "import faster_whisper, piper"
+
+      # What the slim variant exists for, and what it must refuse. Both
+      # against the amd64 image, since this is about which packages are
+      # installed rather than about an architecture. The keys are
+      # throwaway and nothing here reaches a vendor: the assertion is
+      # that the providers are built and the server serves, not that a
+      # conversation runs, which the smoke suite below covers.
+      - name: Check the slim image boots on external providers
+        if: matrix.variant == 'slim'
+        run: |
+          docker run -d --name slim-boot -p 18003:8003 \
+            -e SAMTAL_AUTH_SECRET \
+            -e ANTHROPIC_API_KEY=not-a-real-key \
+            -e OPENAI_API_KEY=not-a-real-key \
+            -v "$PWD/tests/smoke/config.slim.yaml:/config/config.yaml:ro" \
+            samtal-server:ci-amd64
+          for _ in $(seq 45); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' slim-boot)
+            [ "$status" = "healthy" ] && break
+            [ "$status" = "unhealthy" ] && break
+            sleep 2
+          done
+          docker logs slim-boot
+          docker rm -f slim-boot
+          [ "$status" = "healthy" ] || { echo "::error::the slim image did not come up on an external-provider config"; exit 1; }
+
+      # The other half, and the more important one: an image that
+      # started and then broke on the first utterance would be far worse
+      # than one that will not start. The message is asserted, not just
+      # the exit code, so a refactor that turns this into a generic
+      # crash is caught.
+      - name: Check the slim image refuses local engines
+        if: matrix.variant == 'slim'
+        run: |
+          if docker run --rm --name slim-refuse \
+              -e SAMTAL_AUTH_SECRET \
+              -v "$PWD/tests/smoke/config.local-engines.yaml:/config/config.yaml:ro" \
+              samtal-server:ci-amd64 > refusal.log 2>&1; then
+            echo "::error::the slim image started on a config naming a local engine"
+            cat refusal.log
+            exit 1
+          fi
+          cat refusal.log
+          grep -q "needs the faster-whisper extra" refusal.log || {
+            echo "::error::the refusal did not name the missing extra"
+            exit 1
+          }
 
       # The milestone acceptance, encoded: one mounted YAML, one docker
       # run, one whole conversation.
@@ -179,8 +270,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Deliberately not gated on main, unlike the login and the publish
+      # below. Computing tags is free, and gating it meant the one step
+      # that decides what a variant is called was never exercised until
+      # after a merge, which is the worst place to find out an
+      # expression was wrong. The PR run prints exactly what would be
+      # pushed.
       - name: Tags
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -190,11 +286,12 @@ jobs:
           # everything a rollback needs. To the minute (UTC), not the
           # day: several merges land on a good day, and a tag a later
           # build can claim is a moving pointer wearing a release's
-          # clothes. `latest` is the only tag here that moves.
+          # clothes. The moving tag is the only one here that moves:
+          # `latest` for the default variant, `slim` for the slim one.
           tags: |
-            type=raw,value=latest
-            type=raw,value={{date 'YYYY-MM-DD-HHmm'}}
-            type=sha,format=short
+            type=raw,value=${{ matrix.moving }}
+            type=raw,value={{date 'YYYY-MM-DD-HHmm'}}${{ matrix.suffix }}
+            type=sha,format=short,suffix=${{ matrix.suffix }}
 
       - name: Publish
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -210,5 +307,6 @@ jobs:
           # and the image tag agree.
           build-args: |
             SAMTAL_REVISION=${{ github.sha }}
+            SAMTAL_VARIANT=${{ matrix.variant }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
