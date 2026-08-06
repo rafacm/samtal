@@ -24,13 +24,17 @@ The request carries the reply text, so the type marks egress.
 
 import logging
 from collections.abc import AsyncIterator
-from urllib.parse import urlsplit
 
 from openai import AsyncOpenAI, Omit
 
 from samtal_server.config.models import ProviderConfig
-from samtal_server.providers.anthropic_llm import resolve_api_key
 from samtal_server.providers.base import ProviderError, TtsProvider
+from samtal_server.providers.openai_endpoint import (
+    DEFAULT_BASE_URL,
+    MAX_RETRIES,
+    endpoint_api_key,
+    parse_base_url,
+)
 from samtal_server.providers.registry import OptionsReader
 
 logger = logging.getLogger(__name__)
@@ -43,31 +47,11 @@ SAMPLE_RATE = 24000
 # sets `model`.
 DEFAULT_MODEL = "gpt-4o-mini-tts"
 
-DEFAULT_BASE_URL = "https://api.openai.com/v1"
-
-# Whether an entry speaks to OpenAI is decided by the host, not by the
-# spelling of the URL. Two startup guarantees hang off that answer (the
-# key is required, and the model rules are enforced), and comparing the
-# raw string would hand both away to a trailing slash: an entry naming
-# `https://api.openai.com/v1/` would boot keyless and then fail on its
-# first synthesis, which is the per-conversation failure this module
-# builds providers at startup to avoid.
-OPENAI_HOST = "api.openai.com"
-
 # Long enough for a slow first byte, short enough that a hung request
 # does not hold a sentence open for the whole conversation. It is a
-# real bound only because retries are off: see MAX_RETRIES.
+# real bound only because retries are off, which is the shared
+# endpoint module's MAX_RETRIES.
 DEFAULT_TIMEOUT_S = 30.0
-
-# The SDK retries twice by default, which would make `timeout_s` a
-# third of the truth: three attempts plus backoff, all of it inside one
-# sentence of the serial TTS loop, with the device silent throughout.
-# A voice turn has no use for that. A sentence that fails should fail
-# now, so the reply handler can log it and the conversation moves on,
-# rather than the user waiting a minute and a half for audio that is
-# no longer wanted. The ElevenLabs provider speaks raw httpx and has
-# never retried, so this also makes the two cloud voices behave alike.
-MAX_RETRIES = 0
 
 # The API's own range for `speed`.
 SPEED_RANGE = (0.25, 4.0)
@@ -150,30 +134,6 @@ class OpenAiTts(TtsProvider):
                 )
 
 
-def parse_base_url(label: str, base_url: str) -> bool:
-    """Whether `base_url` names OpenAI itself, rejecting what is not a
-    URL at all.
-
-    The host decides, so every spelling of OpenAI's endpoint keeps the
-    same startup guarantees: a trailing slash, an uppercased host, an
-    explicit port. `urlsplit` lowercases the host for us and strips any
-    port and userinfo. Anything whose host is not OpenAI's is a
-    compatible endpoint, which is the safe direction to be wrong in:
-    it asks for no key and enforces no model rules, and the endpoint
-    answers for itself.
-
-    A base_url that is not a URL fails here rather than at the first
-    synthesis, for the same reason everything else in this factory
-    does."""
-    parts = urlsplit(base_url)
-    if not parts.scheme or not parts.hostname:
-        raise ProviderError(
-            f'{label}: option "base_url" must be a URL with a scheme and a host, '
-            f'such as "{DEFAULT_BASE_URL}"; got "{base_url}"'
-        )
-    return parts.hostname == OPENAI_HOST
-
-
 def check_steering(
     label: str, model: str, instructions: str | None, speed: float | None, is_openai: bool
 ) -> None:
@@ -218,20 +178,7 @@ def build(label: str, config: ProviderConfig) -> OpenAiTts:
     assert model is not None and base_url is not None  # defaults are strings
     is_openai = parse_base_url(label, base_url)
     check_steering(label, model, instructions, speed, is_openai)
-    api_key = resolve_api_key(label, config.api_key_env)
-    if api_key is None:
-        if is_openai:
-            # OpenAI itself always needs one, and an unset variable
-            # should fail the boot rather than every conversation.
-            raise ProviderError(
-                f'{label}: type "openai" needs an API key when it speaks to '
-                f"{OPENAI_HOST}; name the environment variable holding it "
-                f'with "api_key_env"'
-            )
-        # A self-hosted endpoint usually wants no key, but the SDK
-        # insists on one, so it gets the same placeholder the
-        # openai_compatible LLM type uses.
-        api_key = "unused"
+    api_key = endpoint_api_key(label, config.type, config.api_key_env, is_openai)
     return OpenAiTts(
         voice=voice,
         model=model,
