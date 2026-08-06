@@ -104,10 +104,10 @@ footprint and is not worth it at these volumes.
 
 ## Verification
 
-`uv run pytest tests/unit -q`: 650 passed, 2 skipped.
+`uv run pytest tests/unit -q`: 651 passed, 2 skipped.
 `uv run pytest tests/integration -q`: 27 passed. `ruff check` clean.
 
-Thirty-three tests across two files: `test_capture.py` for what the
+Thirty-four tests across two files: `test_capture.py` for what the
 format guarantees, `test_capture_session.py` for the wiring, driven
 through a real session over a websocket.
 
@@ -121,6 +121,7 @@ relevant piece reverted:
 | the audio covers the last event | padding removed | "the audio stops before the last event" |
 | a capture still recording is never pruned | protection removed | the live capture is unlinked from under its own writer |
 | the budget is enforced when a capture closes | prune-on-close removed | two over-budget captures left on disk |
+| events stop at the limit too | limit check on events removed | an event an hour past the end of the audio |
 
 Against the issue's acceptance list:
 
@@ -153,10 +154,10 @@ Against the issue's acceptance list:
 Also verified: a conversation survives a capture directory it cannot
 use, and nothing is written at all unless a directory is configured.
 
-### Three review findings, all fixed
+### Four review findings, all fixed
 
-`codex review` found three real defects in the first version, each with
-a test that fails without its fix:
+`codex review` found four real defects across two passes, each with a
+test that fails without its fix:
 
 1. **Event offsets could point past the end of the audio.** A session
    can be open through stretches with nothing decodable, and the
@@ -173,6 +174,11 @@ a test that fails without its fix:
    that overran sat there until some later session happened to begin.
    Closing a capture now re-checks it, and says so in a warning when
    nothing more can be pruned.
+4. **Events kept being written past `max_session_s`.** The audio is
+   clamped to the limit on close, so a silent session left open for an
+   hour would have written `session_closed` at 3600 s into a decision
+   track whose audio ended at 900 s. The limit now ends the recording
+   whichever way it is reached.
 
 ## On what this does not do
 
