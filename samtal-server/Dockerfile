@@ -1,13 +1,29 @@
-# samtal-server as a container image.
+# samtal-server as a container image, in two variants.
 #
-# Both local engines are baked in, because `docker run` with one mounted
-# YAML has to serve a conversation and piper is the only real TTS today.
-# They cost roughly 100 to 150 MB, since onnxruntime (the large wheel) is
-# already a core dependency through pysilero-vad.
+# `default` bakes in both local engines, because `docker run` with one
+# mounted YAML has to be able to serve a whole conversation with no
+# account anywhere. `slim` leaves them out, for the mirror-image
+# deployment whose ASR and TTS name external providers and which would
+# otherwise carry heavyweight, GPL-licensed libraries the server never
+# loads. Pick with `--build-arg SAMTAL_VARIANT=slim`.
 #
-# piper-tts is GPL-3.0. Shipping it alongside an MIT server in one image
-# is aggregation, not a derived work: the project stays MIT, and the
-# image's contents are noted in THIRD_PARTY_LICENSES.md.
+# One Dockerfile rather than two, so the variants cannot drift: they are
+# the same server, and the only difference is which optional extras are
+# installed.
+#
+# pysilero-vad stays in both. It is a core dependency, it is light, and
+# it runs on every audio frame whichever ASR provider is configured.
+#
+# Measured on arm64: 883 MB default against 494 MB slim. Most of the
+# difference is not piper but faster-whisper, which brings its own
+# inference stack rather than reusing the onnxruntime pysilero-vad
+# already pulls in.
+#
+# piper-tts is GPL-3.0, which is why it is an optional extra and why
+# only the default variant carries it. Shipping it alongside an MIT
+# server in one image is aggregation, not a derived work: the project
+# stays MIT, and the image's contents are noted in
+# THIRD_PARTY_LICENSES.md. The slim variant contains no GPL component.
 #
 # Model weights are never baked in, per the repository rule. HOME=/data
 # sends every engine's cache (Hugging Face for whisper models, piper's
@@ -16,6 +32,11 @@
 
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 
+# Which variant to build. Defaulted, so an unqualified `docker build`
+# still produces the batteries-included image every existing puller of
+# `latest` expects.
+ARG SAMTAL_VARIANT=default
+
 WORKDIR /app
 # Bytecode compiled at build time rather than on every cold start; copy
 # rather than hardlink, because the cache and the target are separate
@@ -23,16 +44,27 @@ WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
 
+# The extras each variant installs, resolved once and written down where
+# both sync steps read it. An unrecognised variant fails the build here:
+# a typo that silently produced a slim image would be found by an
+# operator whose local engines had vanished, which is much too late.
+RUN set -eu; \
+    case "$SAMTAL_VARIANT" in \
+      default) echo "--extra faster-whisper --extra piper" > /tmp/extras ;; \
+      slim) : > /tmp/extras ;; \
+      *) echo "unknown SAMTAL_VARIANT '$SAMTAL_VARIANT'; expected default or slim" >&2; \
+         exit 1 ;; \
+    esac; \
+    echo "building the $SAMTAL_VARIANT variant with extras: $(cat /tmp/extras)"
+
 # Dependencies first, from the lockfile alone, so editing the server does
 # not re-resolve or re-download a single wheel.
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-install-project --no-dev --no-editable \
-    --extra faster-whisper --extra piper
+RUN uv sync --frozen --no-install-project --no-dev --no-editable $(cat /tmp/extras)
 
 COPY samtal_server ./samtal_server
 COPY README.md ./
-RUN uv sync --frozen --no-dev --no-editable \
-    --extra faster-whisper --extra piper
+RUN uv sync --frozen --no-dev --no-editable $(cat /tmp/extras)
 
 
 FROM python:3.12-slim-bookworm
