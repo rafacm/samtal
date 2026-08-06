@@ -9,6 +9,7 @@ the message text, which is also what these tests pin: the human sentence
 did not change when the fields arrived.
 """
 
+import asyncio
 import json
 from dataclasses import replace
 from typing import Any, cast
@@ -26,6 +27,7 @@ from samtal_server.providers import (
     AsrProvider,
     AsrResult,
     ProviderIdentity,
+    TextDelta,
     Usage,
 )
 from tests.unit.test_session import (
@@ -358,6 +360,51 @@ async def test_the_generation_after_a_handover_is_a_round_of_its_own(
     first, second = events(caplog, "llm_round")
     assert (first.agent, first.round) == ("poet", 1)
     assert (second.agent, second.round) == ("tutor", 2)
+
+
+async def test_the_device_is_told_speech_starts_only_when_it_does() -> None:
+    """`tts start` puts the device into its speaking state, which is
+    what its display shows and what makes a button press an abort of
+    speech. Sent when transcription finished, it made a board claim to
+    be speaking for the whole of a slow generation (#55), so it waits
+    for the first sentence.
+
+    The model appends its own marker at the moment it produces the
+    first token, which is what makes the order provable rather than
+    incidental."""
+    order: list[str] = []
+
+    class Recorder:
+        async def send_text(self, text: str) -> None:
+            message = json.loads(text)
+            order.append(f"{message['type']} {message.get('state', '')}".strip())
+
+        async def send_bytes(self, data: bytes) -> None:
+            return None
+
+    class Thinking(ScriptedLlm):
+        async def stream(self, *args: Any, **kwargs: Any) -> Any:
+            order.append("model thinking")
+            await asyncio.sleep(0)
+            order.append("first token")
+            yield TextDelta("Stockholm.")
+
+    session = session_for(base_config(), POET_MAC, {"poet": cast(Any, Thinking([]))})
+    session.websocket = cast(Any, Recorder())
+    session._send_frames = _nothing  # type: ignore[method-assign]
+    await session._reply(b"\x00\x00" * 320)
+
+    assert order.index("model thinking") < order.index("tts start")
+    assert order.index("first token") < order.index("tts start")
+    # And it still brackets the speech, in the order the device expects.
+    assert [step for step in order if step.startswith("tts")] == [
+        "tts start",
+        "tts sentence_start",
+        "tts stop",
+    ]
+    # The transcript still goes out first: that is what tells the user
+    # they were heard while the model is thinking.
+    assert order[0] == "stt"
 
 
 class Unreachable:

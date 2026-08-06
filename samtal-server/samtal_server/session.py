@@ -374,6 +374,10 @@ class Session:
         # When this reply's first frame went out, for the barge-in
         # refractory gate and the barge_in event's speaking_ms.
         self._speaking_started_at: float | None = None
+        # Whether this reply has told the device it is speaking. The
+        # `tts start` it stands for is sent once per reply, and never
+        # before there is something to say.
+        self._tts_started = False
         # The PCM the reply task in flight was handed, held until its
         # ASR call returns. Still being set is the mid-ASR marker: a
         # barge-in landing then killed the head of the user's own
@@ -1327,12 +1331,14 @@ class Session:
         spoken: list[str] = []
         self._speaking_started = False
         self._speaking_started_at = None
+        self._tts_started = False
         heard_s = round(len(pcm) / 2 / PIPELINE_SAMPLE_RATE, 2)
         try:
             if result is None:
-                result = await providers.asr.transcribe(
-                    pcm, PIPELINE_SAMPLE_RATE, language_hint=self._asr_language
-                )
+                async with self._watching("asr", providers.asr):
+                    result = await providers.asr.transcribe(
+                        pcm, PIPELINE_SAMPLE_RATE, language_hint=self._asr_language
+                    )
             # ASR is done, so the mid-ASR marker comes down: from here a
             # barge-in has nothing of the user's left to destroy.
             self._reply_pcm = None
@@ -1364,7 +1370,6 @@ class Session:
                 )
             else:
                 logger.info("session %s: nothing transcribed", self.session_id)
-            await self.websocket.send_text(messages.tts_message(self.session_id, "start"))
             if transcript:
                 self._turns.append(Turn("user", transcript))
                 await self._speak_reply(transcript, spoken)
@@ -1389,7 +1394,28 @@ class Session:
                     extra=self._event("replied", agent=self._agent, text=said),
                 )
             with contextlib.suppress(WebSocketDisconnect, RuntimeError):
+                # A reply that never spoke still sends the pair. The
+                # device leaves its speaking state on `tts stop`, and in
+                # auto mode that is what re-arms its listening, so a
+                # `stop` it was never told to expect is the one way this
+                # could strand a device.
+                await self._begin_speaking()
                 await self.websocket.send_text(messages.tts_message(self.session_id, "stop"))
+
+    async def _begin_speaking(self) -> None:
+        """Tell the device a reply is starting, once per reply.
+
+        Sent when the first sentence is about to be spoken rather than
+        when transcription finished. It puts the device into its
+        speaking state, and the state is what the display shows and
+        what decides that a conversation-button press means "stop
+        talking": sent before the model has answered, it makes the
+        board claim to be speaking through the whole of a slow
+        generation (#55)."""
+        if self._tts_started:
+            return
+        self._tts_started = True
+        await self.websocket.send_text(messages.tts_message(self.session_id, "start"))
 
     async def _speak_reply(self, transcript: str, spoken: list[str]) -> None:
         """One reply, which may be spoken by more than one agent.
@@ -1731,6 +1757,7 @@ class Session:
         `sentence_start` goes out now rather than when synthesis began:
         it tells the device what is being said, and what is being said is
         what is about to be heard."""
+        await self._begin_speaking()
         await self.websocket.send_text(
             messages.tts_message(self.session_id, "sentence_start", text=synthesis.sentence)
         )
