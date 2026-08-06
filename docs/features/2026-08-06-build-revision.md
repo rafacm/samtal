@@ -108,6 +108,8 @@ Against the issue's acceptance list:
   characters against a `sha-<short>` image tag. Matching them is a
   prefix check. Found in the field by the infra team scripting it as
   equality, which is the natural reading of what the docs said.
+  (Superseded: CI now passes the short SHA, so the two are equal. See
+  [#57](https://github.com/rafacm/samtal/issues/57).)
 
   The OTA GET on the dirty run read `samtal-server 0.1.0 (revision
   1272747-dirty) OTA endpoint.`
