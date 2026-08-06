@@ -377,6 +377,50 @@ def test_every_offset_indexes_into_the_audio_even_at_the_limit(tmp_path: Path) -
         )
 
 
+def test_the_audio_covers_the_frame_an_event_lands_on(tmp_path: Path) -> None:
+    """The off-by-one under the guarantee, pinned without a clock.
+
+    A sample at index N only exists once N+1 frames are written, and
+    `t_ms` is rounded to a tenth of a millisecond, which can round up.
+    An event landing on what was the last frame therefore pointed one
+    sample past the end. This drives `now` explicitly and writes no
+    dropped-frame aggregate, so it does not depend on how long the test
+    itself took to run, which is how the original slipped through.
+    """
+    # The origin is zero rather than a clock reading on purpose. Adding
+    # a fraction of a millisecond to a monotonic value in the tens of
+    # thousands loses the last bit, so `now - opened` comes back a
+    # hair short and the frame floors one low. That wobble is harmless
+    # in a 16 kHz recording and fatal to an exact assertion, and it is
+    # what made the first version of this test pass or fail on what the
+    # machine clock happened to read.
+    opened = 0.0
+    at_frame = 7
+    capture = store(tmp_path).open("s1", opened, MANIFEST)
+    assert capture is not None
+    capture.event({"event": "only"}, at_frame / CAPTURE_RATE)
+    capture.close()
+
+    mic, reply = read_channels(capture.wav_path)
+    assert len(mic) == at_frame + 1, "the audio stops on the frame the event is at"
+    assert len(mic) == len(reply)
+
+    (record,) = [json.loads(line) for line in capture.jsonl_path.read_text().splitlines()]
+    audio_ms = len(mic) / CAPTURE_RATE * 1000
+    assert record["t_ms"] <= audio_ms
+
+
+def test_a_capture_with_no_events_is_not_padded(tmp_path: Path) -> None:
+    # The other side of it: covering the last event must not invent a
+    # frame for a capture that never had one.
+    opened = time.monotonic()
+    capture = store(tmp_path).open("s1", opened, MANIFEST)
+    assert capture is not None
+    capture.close()
+    mic, _ = read_channels(capture.wav_path)
+    assert mic == []
+
+
 def test_a_capture_still_recording_is_never_pruned(tmp_path: Path) -> None:
     # A review finding. Unlinking underneath an open descriptor leaves
     # the session writing to a file nobody can find.

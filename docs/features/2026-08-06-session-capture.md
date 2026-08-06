@@ -105,10 +105,10 @@ footprint and is not worth it at these volumes.
 
 ## Verification
 
-`uv run pytest tests/unit -q`: 652 passed, 2 skipped.
+`uv run pytest tests/unit -q`: 658 passed, 2 skipped.
 `uv run pytest tests/integration -q`: 27 passed. `ruff check` clean.
 
-Thirty-five tests across two files: `test_capture.py` for what the
+Thirty-seven tests across two files: `test_capture.py` for what the
 format guarantees, `test_capture_session.py` for the wiring, driven
 through a real session over a websocket.
 
@@ -156,9 +156,9 @@ Against the issue's acceptance list:
 Also verified: a conversation survives a capture directory it cannot
 use, and nothing is written at all unless a directory is configured.
 
-### Five review findings, all fixed
+### Six findings, all fixed
 
-`codex review` found five real defects across three passes, each with a
+`codex review` found five real defects across three passes, and CI later found a sixth, each with a
 test that fails without its fix. Three of them were the same guarantee
 leaking in different places, which is why the last fix moves it into the
 write path rather than patching another call site:
@@ -183,7 +183,16 @@ write path rather than patching another call site:
    hour would have written `session_closed` at 3600 s into a decision
    track whose audio ended at 900 s. The limit now ends the recording
    whichever way it is reached.
-5. **The aggregate flushed on close could still land past the audio.**
+5. **An event landing on the last frame pointed one sample past it.**
+   Found by CI rather than by the review, and only after merging: the
+   test asserting the guarantee passed locally in the full suite and
+   failed deterministically when run alone, because it depended on what
+   the machine clock happened to read. A sample at index N exists only
+   once N+1 frames are written, and `t_ms` rounds up to a tenth of a
+   millisecond. The audio is padded one frame past the last event now,
+   which covers both, and the test drives its own origin from zero
+   rather than a clock reading.
+6. **The aggregate flushed on close could still land past the audio.**
    The general form of the previous two. An event's offset is now
    derived from a frame index clamped to the same limit the audio is
    clamped to, so both halves come from one number and every record
