@@ -88,6 +88,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The seven characters `docker/metadata-action`'s
+      # `type=sha,format=short` puts in the image tag, computed once so
+      # every place below agrees with the tag by construction. What a
+      # container reports and what its tag says are then the same
+      # string, which is what a post-deploy check compares.
+      #
+      # Deliberately not `git rev-parse --short`, whose length git
+      # widens as the object count grows: what this has to agree with
+      # is the tag, and the tag is seven characters whatever git would
+      # rather abbreviate to.
+      - name: The revision this build is
+        run: echo "REVISION=${GITHUB_SHA:0:7}" >> "$GITHUB_ENV"
+
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
@@ -112,7 +125,7 @@ jobs:
           # exercised by the smoke lane on every run, rather than first
           # being exercised by a publish to main.
           build-args: |
-            SAMTAL_REVISION=${{ github.sha }}
+            SAMTAL_REVISION=${{ env.REVISION }}
             SAMTAL_VARIANT=${{ matrix.variant }}
           # Scoped per variant. The two carry different dependency
           # layers, and an unscoped gha cache is one namespace, so
@@ -155,7 +168,7 @@ jobs:
           load: true
           tags: samtal-server:ci-arm64
           build-args: |
-            SAMTAL_REVISION=${{ github.sha }}
+            SAMTAL_REVISION=${{ env.REVISION }}
             SAMTAL_VARIANT=${{ matrix.variant }}
           # Scoped per variant. The two carry different dependency
           # layers, and an unscoped gha cache is one namespace, so
@@ -246,7 +259,7 @@ jobs:
           # check that a container can name its own build. Unset when
           # somebody runs this against a container they started by hand,
           # and the check skips rather than guesses.
-          SAMTAL_SMOKE_REVISION: ${{ github.sha }}
+          SAMTAL_SMOKE_REVISION: ${{ env.REVISION }}
         run: uv run pytest tests/smoke -v
 
       # `docker stop` is what sends SIGTERM and waits; -t is above
@@ -305,6 +318,29 @@ jobs:
             type=raw,value={{date 'YYYY-MM-DD-HHmm'}}${{ matrix.suffix }}
             type=sha,format=short,suffix=${{ matrix.suffix }}
 
+      # The agreement this is all for, checked rather than assumed:
+      # `type=sha,format=short` decides the tag's length, and if it ever
+      # stopped being the seven characters computed above, a container
+      # would go back to reporting something its tag does not say, which
+      # is the defect and not a detail. Runs on a PR like the tags
+      # themselves do, so a change in either is caught before a merge.
+      - name: Check the sha tag carries the revision
+        run: |
+          tag=$(printf '%s\n' "${{ steps.meta.outputs.tags }}" | grep ':sha-' || true)
+          if [ -z "$tag" ]; then
+            echo "no sha- tag was computed"
+            exit 1
+          fi
+          echo "tag: $tag"
+          echo "revision: $REVISION"
+          case "$tag" in
+            *":sha-${REVISION}${{ matrix.suffix }}") ;;
+            *)
+              echo "the sha- tag does not end in the revision this build reports"
+              exit 1
+              ;;
+          esac
+
       - name: Publish
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v6
@@ -315,10 +351,11 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           # What makes a running container able to name its own build.
-          # The same commit the `sha-` tag is computed from, so /healthz
-          # and the image tag agree.
+          # The same seven characters the `sha-` tag carries, so
+          # /healthz and the image tag are equal rather than one being
+          # a prefix of the other.
           build-args: |
-            SAMTAL_REVISION=${{ github.sha }}
+            SAMTAL_REVISION=${{ env.REVISION }}
             SAMTAL_VARIANT=${{ matrix.variant }}
           # Scoped per variant. The two carry different dependency
           # layers, and an unscoped gha cache is one namespace, so
