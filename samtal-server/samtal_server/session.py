@@ -50,7 +50,7 @@ import asyncio
 import contextlib
 import logging
 import uuid
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -82,6 +82,7 @@ from samtal_server.providers import (
     ToolResult,
     TtsProvider,
     Turn,
+    Usage,
 )
 from samtal_server.text import SentenceSplitter
 from samtal_server.tools import builtin, names
@@ -149,6 +150,38 @@ SWITCH_GREETING = (
 )
 
 
+def provider_fields(stage: str, provider: object) -> dict[str, Any]:
+    """Which configuration entry a provider is, for an event that names
+    it: the stage it serves, the entry an operator wrote in the YAML,
+    its type, and the host it reaches.
+
+    `host` is omitted for an engine that runs in this process, and the
+    rest for a provider the registry did not build (a test's, a
+    fixture's): an event that cannot name the entry says less rather
+    than guessing."""
+    identity = getattr(provider, "identity", None)
+    fields: dict[str, Any] = {"stage": stage}
+    if identity is None:
+        return fields
+    fields["provider"] = identity.name
+    fields["type"] = identity.type
+    if identity.host is not None:
+        fields["host"] = identity.host
+    return fields
+
+
+def is_timeout(exc: BaseException) -> bool:
+    """Whether a provider failure was a wait rather than an answer.
+
+    Decided by class name as well as by type, because every SDK has its
+    own: `asyncio.TimeoutError` is the builtin `TimeoutError`, but
+    `openai.APITimeoutError` is an `APIConnectionError` and
+    `httpx.TimeoutException` inherits from neither. Nothing hangs on
+    getting it right beyond the wording of one sentence, since the
+    event carries the exact class either way."""
+    return isinstance(exc, TimeoutError) or "Timeout" in type(exc).__name__
+
+
 class _Synthesis:
     """One sentence being turned into audio, started before the moment it
     is needed.
@@ -182,7 +215,12 @@ class _Synthesis:
     failing one are spoken, and the reply fails where it would have.
     """
 
-    def __init__(self, sentence: str, tts: TtsProvider, session_id: str) -> None:
+    def __init__(
+        self,
+        sentence: str,
+        tts: TtsProvider,
+        report_failure: Callable[[BaseException, float], None],
+    ) -> None:
         self.sentence = sentence
         self._buffer: asyncio.Queue[bytes | None] = asyncio.Queue()
         # The backpressure. Held per chunk waiting to be spoken and
@@ -194,10 +232,11 @@ class _Synthesis:
         # blocked forever on a sentinel nobody is waiting for.
         self._room = asyncio.Semaphore(1)
         self._failure: BaseException | None = None
-        self._session_id = session_id
+        self._report_failure = report_failure
         self._task = asyncio.create_task(self._drain(tts))
 
     async def _drain(self, tts: TtsProvider) -> None:
+        started = asyncio.get_running_loop().time()
         try:
             async for chunk in tts.synthesize(self.sentence):
                 await self._room.acquire()
@@ -206,6 +245,12 @@ class _Synthesis:
             raise
         except Exception as exc:  # noqa: BLE001 - re-raised in chunks()
             self._failure = exc
+            # Reported here rather than where it is re-raised: a
+            # sentence run ahead can fail long before the moment it
+            # would have been spoken, and the event an operator
+            # correlates with a network policy should carry the time
+            # the call actually failed at.
+            self._report_failure(exc, asyncio.get_running_loop().time() - started)
         finally:
             self._buffer.put_nowait(None)
 
@@ -291,6 +336,10 @@ class Session:
         self._agents: list[str] = []
         self._agent: str | None = None
         self._providers: AgentProviders | None = None
+        # Generation calls in the reply being spoken, counted across
+        # its agents rather than per leg, so the one after a handover
+        # is a round of its own in the logs.
+        self._llm_round = 0
         self._decoder = OpusDecoder(sample_rate=PIPELINE_SAMPLE_RATE)
         self._encoder = OpusEncoder(
             sample_rate=OUTPUT_AUDIO.sample_rate,
@@ -372,6 +421,131 @@ class Session:
         if self._capture is not None:
             self._capture.event(payload, asyncio.get_running_loop().time())
         return payload
+
+    @contextlib.asynccontextmanager
+    async def _watching(self, stage: str, provider: object) -> AsyncIterator[None]:
+        """Report a provider that fails, then let the failure carry on
+        as before.
+
+        A failing ASR, LLM or TTS call used to reach the operator as a
+        traceback under "reply failed", with none of the fields every
+        other conversation record is queried by: no `event`, no
+        `session`, no provider, and above all no host, which is the one
+        an egress policy is diagnosed from. The reply still ends the
+        same way, and the traceback is still logged where it was; this
+        adds the structured half the observability ADR says is the
+        surface (#53)."""
+        started = asyncio.get_running_loop().time()
+        try:
+            yield
+        except Exception as exc:
+            self._provider_failed(
+                stage, provider, exc, asyncio.get_running_loop().time() - started
+            )
+            raise
+
+    async def _watched_stream(
+        self, provider: object, events: AsyncIterator[Any]
+    ) -> AsyncIterator[Any]:
+        """An LLM stream, with a failure raised by the stream itself
+        reported as that provider's.
+
+        A plain `async with` around the consuming loop would blame the
+        LLM for a TTS failure raised while speaking what the model had
+        already said, and report one failure twice. Pulling the stream
+        by hand is what separates the two: what the consumer raises
+        closes this generator rather than passing through the guard."""
+        started = asyncio.get_running_loop().time()
+        iterator = events.__aiter__()
+        while True:
+            try:
+                event = await iterator.__anext__()
+            except StopAsyncIteration:
+                return
+            except Exception as exc:
+                self._provider_failed(
+                    "llm", provider, exc, asyncio.get_running_loop().time() - started
+                )
+                raise
+            yield event
+
+    def _llm_round_done(
+        self,
+        provider: object,
+        working: Sequence[Turn],
+        began: float,
+        first_event_at: float | None,
+        usage: Usage | None,
+    ) -> None:
+        """One `llm_round` event, which is where a slow reply becomes
+        attributable.
+
+        Stage latency was otherwise inferred from the gaps between
+        events, and the gap between `heard` and `speaking_started`
+        holds the LLM and the TTS time to first byte with nothing
+        between them. A field session lost 19.04 s inside that gap
+        against a session median of 1.18 s, and the logs could not say
+        whether the payload or the vendor was responsible (#55).
+
+        `turns` is the cheap proxy for payload size, and `round` counts
+        the whole reply rather than one agent's leg, so the generation
+        after a handover is a round of its own rather than another
+        first round. Token counts appear when the provider reported
+        them; their absence is a fact about the endpoint."""
+        loop = asyncio.get_running_loop()
+        elapsed = loop.time() - began
+        tokens: dict[str, Any] = {}
+        if usage is not None and usage.prompt_tokens is not None:
+            tokens["prompt_tokens"] = usage.prompt_tokens
+        if usage is not None and usage.completion_tokens is not None:
+            tokens["completion_tokens"] = usage.completion_tokens
+        if first_event_at is not None:
+            tokens["first_token_ms"] = round((first_event_at - began) * 1000)
+        logger.info(
+            "session %s: %s round %d took %.2f s over %d turns",
+            self.session_id,
+            self._agent,
+            self._llm_round,
+            elapsed,
+            len(working),
+            extra=self._event(
+                "llm_round",
+                agent=self._agent,
+                round=self._llm_round,
+                turns=len(working),
+                duration_ms=round(elapsed * 1000),
+                **provider_fields("llm", provider),
+                **tokens,
+            ),
+        )
+
+    def _provider_failed(
+        self, stage: str, provider: object, exc: BaseException, elapsed: float
+    ) -> None:
+        """One `provider_failed` event, and the sentence that goes with
+        it. A timeout is worded as one, because where traffic is
+        dropped rather than refused the whole symptom is a wait."""
+        fields = provider_fields(stage, provider)
+        named = f' "{fields["provider"]}"' if "provider" in fields else ""
+        where = f" reaching {fields['host']}" if "host" in fields else ""
+        logger.warning(
+            "session %s: %s provider%s %s after %.2f s%s: %s: %s",
+            self.session_id,
+            stage,
+            named,
+            "timed out" if is_timeout(exc) else "failed",
+            elapsed,
+            where,
+            type(exc).__name__,
+            exc,
+            extra=self._event(
+                "provider_failed",
+                agent=self._agent,
+                error=type(exc).__name__,
+                duration_ms=round(elapsed * 1000),
+                **fields,
+            ),
+        )
 
     async def run(self) -> None:
         device_id = self.websocket.headers.get("device-id", "").strip()
@@ -1230,6 +1404,7 @@ class Session:
         two agents cannot ping-pong."""
         switches_left = 1
         greeting: Turn | None = None
+        self._llm_round = 0
         while True:
             target = await self._tool_loop(spoken, greeting, switches_left)
             if target is None:
@@ -1290,17 +1465,28 @@ class Session:
             # only mean more concurrent requests to the provider and
             # more audio held for a reply a barge-in may throw away.
             speaking: asyncio.Task[None] | None = None
+            loop = asyncio.get_running_loop()
+            began = loop.time()
+            first_event_at: float | None = None
+            usage: Usage | None = None
+            self._llm_round += 1
             try:
-                async for event in providers.llm.stream(
-                    self._system_prompt(), working, tools, choice
+                async for event in self._watched_stream(
+                    providers.llm,
+                    providers.llm.stream(self._system_prompt(), working, tools, choice),
                 ):
+                    if first_event_at is None:
+                        first_event_at = loop.time()
                     if isinstance(event, TextDelta):
                         for sentence in splitter.push(event.text):
                             speaking = await self._speak_after(
                                 speaking, sentence, providers.tts, resampler, leg, spoken
                             )
+                    elif isinstance(event, Usage):
+                        usage = event
                     else:
                         calls.append(event)
+                self._llm_round_done(providers.llm, working, began, first_event_at, usage)
                 tail = splitter.flush()
                 if tail is not None:
                     speaking = await self._speak_after(
@@ -1506,7 +1692,11 @@ class Session:
         which would put the model's thinking time in front of the first
         word of every reply and make a one-sentence reply wait for the
         stream to end."""
-        started = _Synthesis(sentence, tts, self.session_id)
+        started = _Synthesis(
+            sentence,
+            tts,
+            lambda exc, elapsed: self._provider_failed("tts", tts, exc, elapsed),
+        )
         try:
             if speaking is not None:
                 await speaking
