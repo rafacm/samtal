@@ -56,6 +56,14 @@ sys.dont_write_bytecode = True
 # the flag, so by now this run has already cached this file. Clearing
 # leaves the next run nothing stale to read.
 #
+# That leaves one residual, which cannot be closed from inside the file
+# that would have to close it: a run whose *own* conftest cache was
+# already stale on entry reads it before reaching this line. It is one
+# run wide and self-healing, because from here on no run ever ends with
+# a conftest cache on disk to go stale. Closing it properly would mean
+# clearing before pytest starts, which means a wrapper everyone has to
+# remember, which is the thing this file exists to avoid.
+#
 # Only these two trees, never `.venv`: site-packages bytecode is
 # legitimate, expensive to rebuild, and its sources do not get edited.
 _ROOT = Path(__file__).resolve().parent.parent

@@ -51,6 +51,14 @@ version before it.
   next run nothing stale to read. `.venv` is deliberately excluded:
   site-packages bytecode is legitimate, expensive to rebuild, and its
   sources do not get edited.
+  One residual is accepted and documented in place: a run whose own
+  conftest cache was already stale on entry reads it before reaching the
+  clearing line. It cannot be closed from inside the file that would
+  have to close it, it is one run wide, and it is self-healing, because
+  from here on no run ends with a conftest cache on disk to go stale.
+  Closing it properly would mean clearing before pytest starts, which
+  means a wrapper script everyone has to remember to use, which is the
+  thing a conftest exists to avoid.
 - `PYTHONDONTWRITEBYTECODE: "1"` as a workflow-level `env` on
   `.github/workflows/samtal-server.yml`, for the steps that are not
   pytest. A runner starts from a fresh checkout every time, so the
