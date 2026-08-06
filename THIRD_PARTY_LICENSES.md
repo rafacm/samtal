@@ -72,12 +72,19 @@ SOFTWARE.
 
 ## The published container image
 
-`ghcr.io/rafacm/samtal-server` bundles samtal-server with both of its
+`ghcr.io/rafacm/samtal-server` is published in two variants. The
+**default** one (unsuffixed tags) bundles samtal-server with both of its
 optional local engines, so that one `docker run` serves a conversation
-without a cloud account. Two of its contents carry copyleft terms:
+without a cloud account. Everything in this section describes that
+variant. The **slim** one (`-slim` tags) installs no optional extra, and
+so contains neither of the copyleft components below except PyAV, which
+is a core dependency.
 
-- **piper-tts** (piper1-gpl) is **GPL-3.0**. It is installed in the image
-  as an independent, unmodified package that samtal-server calls through
+Two of the default variant's contents carry copyleft terms:
+
+- **piper-tts** (piper1-gpl) is **GPL-3.0**. It is installed in the
+  default image as an independent, unmodified package that
+  samtal-server calls through
   its ordinary Python API; the two are aggregated on one filesystem, not
   combined into a derived work. samtal-server itself remains MIT and does
   not depend on piper outside the optional `piper` extra. Corresponding
@@ -92,6 +99,7 @@ Model weights are never included in the image. Whisper models and Piper
 voices download at first start into the mounted `/data` volume, under
 their own licenses.
 
-An image without the GPL engine is a reasonable thing to want; a
-core-only variant is noted as a possible follow-up rather than shipped
-today.
+An image without the GPL engine is a reasonable thing to want, and the
+`slim` variant is it: no optional extras, so no piper-tts and no
+GPL-3.0 component. PyAV and its bundled FFmpeg remain, being a core
+dependency of the server itself.
