@@ -79,11 +79,19 @@ def test_limits_have_defaults() -> None:
     limits = load_config().server.limits
     assert limits.max_sessions == 8
     assert limits.max_session_s == 3600
+    assert limits.idle_timeout_s == 120
 
 
 @pytest.mark.parametrize(
     ("key", "value"),
-    [("max_sessions", 0), ("max_sessions", -1), ("max_session_s", 0), ("max_session_s", -5)],
+    [
+        ("max_sessions", 0),
+        ("max_sessions", -1),
+        ("max_session_s", 0),
+        ("max_session_s", -5),
+        ("idle_timeout_s", 0),
+        ("idle_timeout_s", -5),
+    ],
 )
 def test_limits_below_one_session_or_second_are_rejected(key: str, value: int) -> None:
     with pytest.raises(ConfigError):
