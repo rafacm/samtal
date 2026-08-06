@@ -17,6 +17,13 @@ models/
 .env
 .env.local
 
+# Correspondence with the infrastructure side, which is a private
+# repository. These carry hostnames, device identifiers and deployment
+# detail that must not land in a public one, and they arrive in the
+# working tree as ordinary files, one `git add -A` away from being
+# committed.
+*deploy-brief*.md
+
 # Per-developer tooling. Nothing here is needed to run or test the
 # server: `uv sync` and `uv run` are the whole story, and a contributor
 # should not have to adopt somebody else's tools to work on this.
