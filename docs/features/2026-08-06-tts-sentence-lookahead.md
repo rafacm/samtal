@@ -66,14 +66,14 @@ is the first one slow enough for the existing gap to become audible.
 The four things the issue said the design had to keep working:
 
 **Barge-in cancels mid-reply.** `_speak` still counts a sentence only
-after its audio has gone out, and now also takes its own synthesis down
-with it, so a sentence cut off stops pulling from the provider rather
-than running on behind a reply that no longer exists. A sentence run ahead and then cancelled
-is counted nowhere, in neither the turn the model is shown nor the
-persisted history. The round's `finally` cancels a synthesis still in
-flight, and `_speak_after` cancels the one it just started if speaking
-the previous sentence raises. Tested, including that nothing is left
-running behind a reply that no longer exists.
+after its audio has gone out, so a sentence run ahead and then cancelled
+is counted nowhere: neither in the turn the model is shown nor in the
+persisted history. The round's `finally` cancels the sentence being
+spoken, `_speak` takes its own synthesis down with it so a sentence cut
+off stops pulling from the provider, and `_speak_after` cancels the one
+it just started if speaking the previous sentence raises. Tested,
+including that nothing is left running behind a reply that no longer
+exists.
 
 **Tool rounds.** The lookahead is drained at the end of each round
 before the tools run, so it cannot run past the end of a round into text
@@ -116,21 +116,19 @@ three-sentence reply, same machine, same network.
 
 Zero means the next sentence's first frame arrived exactly one frame
 after the previous sentence's last, 60 ms, which is the cadence rather
-than a gap. The control is this branch with the two statements in
-`_speak_after` swapped back, so it is the old behaviour rather than a
-recollection of it.
+than a gap. The control is this branch with the sequential order put
+back, so it is the old behaviour rather than a recollection of it.
 
 ### Why total playing time is not the measure
 
-Both OpenAI runs played for about the same wall time, 10.14 s for the
-control against 10.38 s with the fix, despite the control having 1.36 s
-of dead air in it. That is the pacer catching up: its schedule is
+Both OpenAI runs played for the same wall time, 10.14 s, despite the
+control having 1.36 s of dead air in it. That is the pacer catching up: its schedule is
 absolute, so after each stall the following frames have target times
 already in the past and go out back to back. The defect hides entirely
 in the total and shows only per frame, which is why the tests measure
 per gap and per interval. It is also the clearest evidence for the
 issue's "dropout followed by a flood": 41 of 169 frames left faster than
-half the cadence in the control, against 4 of 173 with the fix.
+half the cadence in the control, against 5 of 169 with the fix.
 
 ### Tests
 
