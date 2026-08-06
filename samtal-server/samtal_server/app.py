@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from samtal_server import __version__, ota, ws
 from samtal_server.auth import build_device_auth
+from samtal_server.build_info import revision
 from samtal_server.config import Config, load_config
 from samtal_server.providers import build_agent_providers
 from samtal_server.registry import SessionRegistry
@@ -62,7 +63,10 @@ def create_app(config: Config | None = None) -> FastAPI:
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
-        return {"status": "ok", "version": __version__}
+        # `version` is what this is, `revision` is which build of it.
+        # A pod reporting only the former cannot be matched to the image
+        # tag that produced it without going and asking the cluster.
+        return {"status": "ok", "version": __version__, "revision": revision()}
 
     # The OTA router is built here rather than imported ready-made: its
     # path is configuration, and a module-level router would have been

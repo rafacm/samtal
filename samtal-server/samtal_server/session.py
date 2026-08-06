@@ -59,6 +59,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 from samtal_server import __version__
 from samtal_server.audio.opus import OpusDecoder, OpusEncoder
 from samtal_server.audio.resample import Resampler
+from samtal_server.build_info import revision
 from samtal_server.config import Config
 from samtal_server.config.models import normalize_mac
 from samtal_server.protocol import framing, messages
@@ -327,6 +328,11 @@ class Session:
                 agent=self._agent,
                 agents=list(self._agents),
                 protocol=self.protocol_version,
+                # The widest payoff for one field: the JSON logs already
+                # ship to a collector, so every session from here on is
+                # attributable to a build, not only the ones somebody
+                # thought to investigate.
+                revision=revision(),
             ),
         )
         self._start_device_discovery(hello)
