@@ -905,6 +905,12 @@ remembering where it writes. A section that is present but off says so
 once at startup, because a configured capture that records nothing is
 otherwise a silence to debug.
 
+Because it is one flag, the env layer can do the flip on its own:
+`SAMTAL_SERVER__CAPTURE__ENABLED=true` turns it on for one run without
+editing the config the deployment mounts, and dropping the variable
+turns it off again. That is usually the least disruptive way to take a
+field recording.
+
 It exists because acoustic problems cannot be reproduced in any test
 lane. The unit lane feeds synthetic frames and the integration lane
 drives a simulator, and both bypass the microphone, the board's echo
