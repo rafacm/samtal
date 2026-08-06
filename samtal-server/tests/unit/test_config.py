@@ -98,6 +98,29 @@ def test_limits_below_one_session_or_second_are_rejected(key: str, value: int) -
         load_config_from_data({"server": {"limits": {key: value}}})
 
 
+def test_capture_is_off_until_it_is_enabled() -> None:
+    # The example config ships the section so the field workflow is one
+    # word, which only works if the section on its own records nothing.
+    capture = load_config_from_data(
+        {"server": {"capture": {"dir": "/tmp/captures"}}}
+    ).server.capture
+    assert capture is not None
+    assert capture.enabled is False
+
+
+def test_the_example_config_ships_capture_switched_off() -> None:
+    capture = load_config(EXAMPLE_CONFIG).server.capture
+    assert capture is not None, "the example lost its capture section"
+    assert capture.enabled is False, "the example config would record room audio"
+
+
+def test_capture_needs_somewhere_to_write_even_when_disabled() -> None:
+    # Turning it on should be one word, not one word and remembering
+    # where it writes.
+    with pytest.raises(ConfigError):
+        load_config_from_data({"server": {"capture": {"enabled": False}}})
+
+
 def test_ota_path_defaults_to_the_documented_one() -> None:
     assert load_config().server.ota_path == "/xiaozhi/ota/"
 

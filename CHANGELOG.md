@@ -10,11 +10,16 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 ### Added
 
 - New `server.capture` section: recording a session to disk so a
-  real-world one can be analysed offline. Off unless a directory is
-  named, with no default that turns it on, because this writes room
-  audio to disk and that is the opposite of what the rest of the
-  project promises; a warning at startup and one line per recorded
-  session say when it is on. It exists because acoustic problems
+  real-world one can be analysed offline. Off by default and off until
+  `enabled` says otherwise, because this writes room audio to disk and
+  that is the opposite of what the rest of the project promises; a
+  warning at startup and one line per recorded session say when it is
+  on, and a section that is present but off says so once, since a
+  configured capture that records nothing is otherwise a silence to
+  debug. The flag is the switch rather than the presence of the
+  section, so turning capture off after a recording does not mean
+  deleting the directory and the budgets with it; `dir` stays required
+  even while disabled, so switching on is one word. It exists because acoustic problems
   cannot be reproduced in any test lane: both lanes bypass the
   microphone, the board's echo cancellation, and the room, so how much
   of the assistant's own voice reaches the endpointer is unknown and a
@@ -32,7 +37,7 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   code that made it. The microphone is recorded before the session's
   own guards, so the frames a configuration discards are in the file
   anyway, those being the ones that explain a misfire. Options:
-  `dir` (required, and the only thing that turns it on),
+  `enabled` (default false), `dir` (required),
   `max_session_s` (default 900), `max_total_mb` (default 2000, whole
   captures pruned oldest first) and `min_free_mb` (default 1000, below
   which a capture declines to start and says so, since agent memory

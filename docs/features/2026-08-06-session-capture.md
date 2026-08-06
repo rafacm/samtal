@@ -90,7 +90,8 @@ produces, simply has no firmware field rather than no capture.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `server.capture.dir` | unset | Where captures are written. Unset is what keeps capture off, and there is no other switch. |
+| `server.capture.enabled` | `false` | The switch. Off by default, and the section on its own records nothing. |
+| `server.capture.dir` | required | Where captures are written. Required even while disabled, so switching on is one word rather than one word and remembering where it writes. |
 | `server.capture.max_session_s` | `900` | Stop recording a session after this long. The conversation carries on uncaptured. |
 | `server.capture.max_total_mb` | `2000` | Budget for the directory. Whole captures are pruned, oldest first; two thirds of a capture is not a capture. |
 | `server.capture.min_free_mb` | `1000` | Decline to start below this much free space, with a warning naming the reason. |
@@ -188,6 +189,24 @@ write path rather than patching another call site:
    clamped to, so both halves come from one number and every record
    indexes into the WAV by construction rather than by each caller
    remembering to.
+
+## A note on the switch
+
+The first version made the presence of the section the switch, on the
+grounds that capture should be impossible to enable by accident. Rafael
+asked for an explicit `enabled: false` instead, and he was right on two
+counts. The schema already works that way for `auth.enabled`, so a
+reader has a precedent to expect. And the field workflow is to record,
+then stop: with the section as the switch, stopping means deleting the
+directory and the budgets along with it, and starting again means
+restoring them. A flag makes it one word and keeps the tuning.
+
+It is not weaker: the section still has to exist *and* the flag has to
+say so, which is two deliberate acts rather than one. `dir` stays
+required even while disabled, so there is no state where capture is on
+with nowhere to write, and a section that is present but off says so
+once at startup, because a configured capture that records nothing is
+otherwise a silence to debug.
 
 ## On what this does not do
 
