@@ -27,6 +27,7 @@ from samtal_server.providers import (
     ToolChoice,
     ToolDef,
     Turn,
+    Usage,
     build_agent_providers,
 )
 from samtal_server.tools.builtin import switch_agent_tool
@@ -46,13 +47,14 @@ POET_MAC = "aa:bb:cc:dd:ee:01"
 BOTH_MAC = "aa:bb:cc:dd:ee:03"
 
 
-Step = str | list[str | ToolCall]
+Step = str | list[str | ToolCall | Usage]
 
 
 class ScriptedLlm(LlmProvider):
     """A model whose every round is written down in advance. A round is
-    a sentence to speak, or a list mixing sentences and the tool calls
-    to ask for; the last round repeats if the loop asks for more."""
+    a sentence to speak, or a list mixing sentences, the tool calls to
+    ask for, and the usage a provider that reports one would end with;
+    the last round repeats if the loop asks for more."""
 
     def __init__(self, rounds: Sequence[Step]) -> None:
         self._rounds = list(rounds)
@@ -110,6 +112,9 @@ def session_for(
     directly and never speak."""
     providers = build_agent_providers(config)
     for agent, script in (scripts or {}).items():
+        # The entry the script stands in for, so the events a session
+        # emits about its LLM carry what a real one's would.
+        script.identity = providers[agent].llm.identity
         providers[agent] = type(providers[agent])(
             prompt=providers[agent].prompt,
             llm=script,

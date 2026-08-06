@@ -22,7 +22,12 @@ from samtal_server.build_info import REVISION_ENV, revision
 from samtal_server.config import Config
 from samtal_server.logs import JsonFormatter
 from samtal_server.ota import OTA_PATH
-from samtal_server.providers import AsrProvider, AsrResult
+from samtal_server.providers import (
+    AsrProvider,
+    AsrResult,
+    ProviderIdentity,
+    Usage,
+)
 from tests.unit.test_session import (
     DEVICE_MAC,
     DEVICE_UUID,
@@ -280,6 +285,184 @@ async def test_a_handover_logs_what_each_agent_said(
     assert handover.from_agent == "poet"
     assert handover.to_agent == "tutor"
     assert handover.session == said.session
+
+
+async def test_an_llm_round_is_logged_with_what_it_cost(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The gap between `heard` and `speaking_started` holds the LLM and
+    the TTS time to first byte with nothing between them, so a slow
+    reply used to be attributable to neither (#55)."""
+    script = ScriptedLlm([["Two words.", Usage(prompt_tokens=140, completion_tokens=12)]])
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    with caplog.at_level("INFO"):
+        await run_reply(session, "say something")
+
+    round_one = only(caplog, "llm_round")
+    assert round_one.agent == "poet"
+    assert round_one.round == 1
+    assert round_one.stage == "llm"
+    assert round_one.provider == "mock"
+    assert round_one.type == "mock"
+    assert round_one.duration_ms >= 0
+    assert round_one.first_token_ms >= 0
+    # The history the round was given, which is the cheap proxy for a
+    # payload growing turn by turn.
+    assert round_one.turns == 1
+    assert round_one.prompt_tokens == 140
+    assert round_one.completion_tokens == 12
+
+
+async def test_a_provider_that_reports_no_usage_is_not_an_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    session = session_for(base_config(), POET_MAC, {"poet": ScriptedLlm(["Nothing to add."])})
+    with caplog.at_level("INFO"):
+        await run_reply(session, "say something")
+
+    logged = only(caplog, "llm_round")
+    assert not hasattr(logged, "prompt_tokens")
+    assert not hasattr(logged, "completion_tokens")
+    assert logged.duration_ms >= 0
+
+
+async def test_every_round_of_a_reply_is_its_own_event(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    script = ScriptedLlm([[call("ghost_tool")], "It did not work."])
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    with caplog.at_level("INFO"):
+        await run_reply(session, "do it")
+
+    first, second = events(caplog, "llm_round")
+    assert (first.round, second.round) == (1, 2)
+    # The second round saw the first round's call and its result, so
+    # the payload grew, which is what `turns` is there to show.
+    assert second.turns > first.turns
+
+
+async def test_the_generation_after_a_handover_is_a_round_of_its_own(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The slow call in the field report was the post-handover one. It
+    starts a new agent's leg, so a per-leg counter would have called it
+    another first round; the count is per reply."""
+    scripts = {
+        "poet": ScriptedLlm([[call("switch_agent", agent="tutor")]]),
+        "tutor": ScriptedLlm(["Tutor here."]),
+    }
+    session = session_for(base_config(), BOTH_MAC, scripts)
+    with caplog.at_level("INFO"):
+        await run_reply(session, "get me the tutor")
+
+    first, second = events(caplog, "llm_round")
+    assert (first.agent, first.round) == ("poet", 1)
+    assert (second.agent, second.round) == ("tutor", 2)
+
+
+class Unreachable:
+    """A provider entry whose host cannot be reached, for all three
+    stages. Stamped with an identity the way the registry stamps a real
+    one, since that is what the events are supposed to carry."""
+
+    def __init__(self, stage: str, exc: BaseException) -> None:
+        self._exc = exc
+        self.identity = ProviderIdentity(
+            stage=stage, name="cloud", type="openai", host="api.example.com"
+        )
+        self.sample_rate = 16000
+
+    async def transcribe(self, *args: object, **kwargs: object) -> AsrResult:
+        raise self._exc
+
+    async def stream(self, *args: object, **kwargs: object) -> Any:
+        raise self._exc
+        yield  # pragma: no cover - never reached, makes this a generator
+
+    async def synthesize(self, text: str) -> Any:
+        raise self._exc
+        yield  # pragma: no cover - never reached, makes this a generator
+
+
+async def reply_with(
+    provider_stage: str, exc: BaseException, caplog: pytest.LogCaptureFixture
+) -> Any:
+    """One reply against a provider that fails, answering the event it
+    produced. The reply ends where it always did; what is new is that
+    the failure is on the record as more than a traceback."""
+
+    class TextSink:
+        async def send_text(self, text: str) -> None:
+            return None
+
+    session = session_for(base_config(), POET_MAC, {"poet": ScriptedLlm(["One sentence."])})
+    assert session._providers is not None
+    session._providers = replace(
+        session._providers, **{provider_stage: cast(Any, Unreachable(provider_stage, exc))}
+    )
+    session.websocket = cast(Any, TextSink())
+    session._mac = POET_MAC
+    session._send_frames = _nothing  # type: ignore[method-assign]
+    with caplog.at_level("INFO"):
+        await session._reply(b"\x00\x00" * 320)
+    return only(caplog, "provider_failed")
+
+
+async def test_a_failing_asr_provider_says_what_it_could_not_reach(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    failed = await reply_with("asr", ConnectionRefusedError("no route"), caplog)
+    assert failed.stage == "asr"
+    assert failed.provider == "cloud"
+    assert failed.type == "openai"
+    assert failed.host == "api.example.com"
+    assert failed.error == "ConnectionRefusedError"
+    assert failed.duration_ms >= 0
+    assert failed.agent == "poet"
+    # The fields every conversation event carries, which is what made
+    # this findable at all.
+    assert failed.session and failed.device
+
+
+async def test_a_failing_llm_provider_is_reported_as_the_llm(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    failed = await reply_with("llm", ConnectionRefusedError("no route"), caplog)
+    assert failed.stage == "llm"
+    assert failed.error == "ConnectionRefusedError"
+
+
+async def test_a_failing_tts_provider_is_reported_as_the_tts(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    failed = await reply_with("tts", ConnectionRefusedError("no route"), caplog)
+    assert failed.stage == "tts"
+    assert failed.error == "ConnectionRefusedError"
+
+
+async def test_a_timeout_is_distinguishable_from_a_refusal(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A blocked host that drops rather than rejects shows up as a wait,
+    and the wait is the diagnosis. The class is in `error`, and the
+    sentence says which kind of failure it was."""
+    failed = await reply_with("tts", TimeoutError(), caplog)
+    assert failed.error == "TimeoutError"
+    assert "timed out" in failed.getMessage()
+
+    caplog.clear()
+    refused = await reply_with("tts", ConnectionRefusedError("no route"), caplog)
+    assert "failed" in refused.getMessage()
+
+
+async def test_a_failing_tts_is_reported_once_and_not_blamed_on_the_llm(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The stream is watched around its own iteration rather than
+    around the loop that consumes it, so a sentence that fails to
+    synthesize is one failure, not two."""
+    await reply_with("tts", ConnectionRefusedError("no route"), caplog)
+    assert [record.stage for record in events(caplog, "provider_failed")] == ["tts"]
 
 
 async def test_a_tool_call_is_logged_with_its_duration(
