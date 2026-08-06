@@ -9,6 +9,27 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- New `server.limits.idle_timeout_s` (default 120): how long a realtime
+  session may go without conversing before the server closes it,
+  counted from the end of the last utterance or the end of the last
+  reply, whichever is later. A realtime device asks to listen once and
+  then streams its mic for the rest of the connection, and nothing in
+  the firmware ever closes that channel, so until now walking away
+  mid-conversation left the mic running until `max_session_s`, an hour
+  in a typical deployment: room audio reaching the server, one of
+  `max_sessions` held, Opus decode and VAD running over the silence,
+  and the board unable to reach the sleep mode `CanEnterSleepMode`
+  refuses while an audio channel is open. Arriving audio deliberately
+  does not reset the clock, since a realtime session streams silence
+  too; a reply still speaking does, so a timer coming due mid-reply
+  cannot leave the user without a window to answer. Realtime only: an
+  auto-mode device stops listening after each reply and re-arms per
+  turn, and `max_session_s` remains its bound. The close is a 1000
+  normal closure, which the firmware reads as the end of a conversation
+  and answers by reconnecting on the next wake word, and it is logged
+  as its own `session_idle` event so an abandoned conversation can be
+  told from one that ran out of its hour.
+
 - New `openai` ASR provider type, transcribing an utterance through
   the OpenAI transcription API. Like the `openai` TTS type it needs no
   optional extra and adds no dependency, so one key now serves all

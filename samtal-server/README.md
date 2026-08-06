@@ -776,21 +776,38 @@ user holding the button and speaking, so it cancels unconditionally.
 
 ## Limits
 
-Two numbers bound what one server holds, and neither is visible in normal
-use: a device refused a slot or closed by the duration cap reconnects on
-its next wake word.
+Three numbers bound what one server holds, and none is visible in normal
+use: a device refused a slot, or closed by either time bound, reconnects
+on its next wake word.
 
 ```yaml
 server:
   limits:
-    max_sessions: 8       # concurrent conversations
-    max_session_s: 3600   # one session's maximum life
+    # concurrent conversations
+    max_sessions: 8
+    # one session's maximum life
+    max_session_s: 3600
+    # how long a realtime session may go without conversing
+    idle_timeout_s: 120
   drain_s: 20             # how long a shutdown waits for replies to finish
 ```
 
-There is deliberately no idle timeout: `max_session_s` bounds an idle
-session too, and a device that stopped talking hours ago is exactly what
-it is for. `max_sessions` is a count with no queue behind it, because a
+`idle_timeout_s` is the one users actually meet. A realtime device asks
+to listen once and then streams its mic for the rest of the connection,
+and nothing in the firmware ever closes that channel, so walking away
+mid-conversation used to leave a mic running until the hour was up. The
+clock counts from the end of the last utterance or the end of the last
+reply, whichever is later; arriving audio does not reset it, because a
+realtime session streams silence too. Two minutes by default: long
+enough to think, read something out, or answer the door.
+
+It applies to realtime sessions only. An auto-mode device stops
+listening after each reply and re-arms per turn, so it is not streaming
+a room to anybody, and `max_session_s` is its bound. There is no off
+switch; a deployment that wants none sets `idle_timeout_s` near
+`max_session_s`.
+
+`max_sessions` is a count with no queue behind it, because a
 conversation waiting in line is worse than one that never started.
 
 **Shutting down drains.** On SIGTERM the server stops admitting sessions,
