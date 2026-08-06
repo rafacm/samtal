@@ -148,6 +148,21 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Fixed
 
+- `switch_agent` naming the agent that is already speaking is now
+  refused instead of performed. It was reported twice in one field
+  session: the user's utterance mentioned a persona by name while that
+  persona was already active, the model called `switch_agent` on it,
+  and the session ended the leg, re-activated the same agent and ran a
+  second LLM round (2.82 s and 1.70 s) whose only product was the
+  assistant introducing itself to someone it was already talking to. A
+  handover to the current agent is a pure cost with no possible effect,
+  so it now comes back as a tool error the current agent phrases in its
+  own voice and language, like the other refusals, and the reply
+  continues rather than stopping. A string comparison, made before the
+  round is committed. Switching to a different bound agent is
+  unaffected, and a device bound to one agent still gets no
+  `switch_agent` tool at all.
+
 - Documentation gaps a deployment hit in the field, all of them cheap
   to state and expensive to discover. The ElevenLabs stock voices are
   recorded by English speakers, so a stock voice speaking Spanish
