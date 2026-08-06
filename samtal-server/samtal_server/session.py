@@ -1217,9 +1217,10 @@ class Session:
         try:
             # In the receive path on purpose: incoming frames buffer in
             # the socket for the duration, so ordering is unaffected.
-            result = await self._providers.asr.transcribe(
-                pcm, PIPELINE_SAMPLE_RATE, language_hint=self._asr_language
-            )
+            async with self._watching("asr", self._providers.asr):
+                result = await self._providers.asr.transcribe(
+                    pcm, PIPELINE_SAMPLE_RATE, language_hint=self._asr_language
+                )
         except Exception:
             logger.exception("session %s: barge-in confirmation failed", self.session_id)
             self._resume_speaking()
