@@ -110,6 +110,40 @@ class LimitsConfig(BaseModel):
     idle_timeout_s: float = Field(default=120.0, gt=0)
 
 
+class CaptureConfig(BaseModel):
+    """Recording sessions to disk for offline analysis.
+
+    Off unless a directory is named. This writes room audio to disk,
+    which is the opposite of what the rest of the project promises, so
+    there is no default that turns it on and no way to enable it by
+    accident: the whole section has to be added.
+
+    It exists because acoustic defects cannot be reproduced in any test
+    lane. A recording of the microphone against what the speaker was
+    playing is what lets echo leakage be measured rather than guessed
+    (#28).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Where captures are written. Must be on the data volume: a
+    # deployment's container root is read-only.
+    dir: Path
+
+    # Stop capturing a session after this many seconds. A bound on one
+    # file, not on the conversation, which carries on uncaptured.
+    max_session_s: float = Field(default=900.0, gt=0)
+
+    # Total budget for the directory. Whole captures are pruned, oldest
+    # first, when it is exceeded.
+    max_total_mb: float = Field(default=2000.0, gt=0)
+
+    # Refuse to start a capture when the volume has less free than this.
+    # The byte budget above does not protect the volume on its own: the
+    # model caches and agent memory share it and grow underneath.
+    min_free_mb: float = Field(default=1000.0, ge=0)
+
+
 class ServerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -145,6 +179,9 @@ class ServerConfig(BaseModel):
 
     auth: AuthConfig = Field(default_factory=AuthConfig)
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
+
+    # Absent means no session is ever recorded, which is the default.
+    capture: CaptureConfig | None = None
 
     # Refuse to boot any provider that sends session data off this host.
     # Running without a cloud dependency is otherwise a documentation
