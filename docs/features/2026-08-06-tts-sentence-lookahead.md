@@ -33,9 +33,24 @@ is the first one slow enough for the existing gap to become audible.
   has arrived and waits for the rest, so the first sentence of a reply
   still streams (nothing is held back waiting for a sentence to finish)
   while a sentence run ahead is simply already there.
-- `_speak_after` starts the next sentence synthesizing and *then* speaks
-  the one already waiting. The order of those two statements is the
-  entire fix.
+- `_speak_after` starts the next sentence synthesizing and *then* waits
+  for the sentence already being spoken. The first statement coming
+  before the first await is the entire fix.
+- Speaking is a task rather than an inline await, so it overlaps the
+  model still streaming. This was a review finding and it mattered: the
+  first attempt awaited inline, which meant a sentence was not spoken
+  until the *next* one had been written, putting the model's thinking
+  time in front of the first word of every reply and making a
+  one-sentence reply wait for the whole stream to end. Time to first
+  audio is the latency a listener actually meets and must not move.
+- The synthesis buffer holds one chunk, not a sentence. Also a review
+  finding: unbounded, a provider producing faster than realtime hands
+  over a whole sentence of PCM at once and the paced consumer stops
+  applying any backpressure. The bound is a semaphore over outstanding
+  chunks rather than a `maxsize` on the queue, which was the first
+  attempt and deadlocked: a full queue leaves the drain task blocked
+  forever on an end-of-audio sentinel nobody is waiting for, because
+  the consumer that would unblock it is the one that went away.
 - One sentence of lookahead, not a queue. Every sentence here plays for
   longer than the next takes to start, so one closes the gap, and more
   would only mean more concurrent requests to the provider and more
@@ -51,7 +66,9 @@ is the first one slow enough for the existing gap to become audible.
 The four things the issue said the design had to keep working:
 
 **Barge-in cancels mid-reply.** `_speak` still counts a sentence only
-after its audio has gone out, so a sentence run ahead and then cancelled
+after its audio has gone out, and now also takes its own synthesis down
+with it, so a sentence cut off stops pulling from the provider rather
+than running on behind a reply that no longer exists. A sentence run ahead and then cancelled
 is counted nowhere, in neither the turn the model is shown nor the
 persisted history. The round's `finally` cancels a synthesis still in
 flight, and `_speak_after` cancels the one it just started if speaking
@@ -80,7 +97,7 @@ value that wants tuning per deployment.
 
 ## Verification
 
-`uv run pytest tests/unit -q`: 615 passed, 2 skipped.
+`uv run pytest tests/unit -q`: 617 passed, 2 skipped.
 `uv run pytest tests/integration -q`: 27 passed. `ruff check` clean.
 
 ### Against the real providers
@@ -92,10 +109,10 @@ three-sentence reply, same machine, same network.
 |---|---|---|---|---|---|
 | `gpt-4o-mini-tts` | issue's figures | 617 ms | 520 ms | 1138 ms | not measured |
 | | control here | 884 ms | 478 ms | 1362 ms | 41 of 169 |
-| | **with lookahead** | **0** | **0** | **0** | **4 of 173** |
+| | **with lookahead** | **0** | **0** | **0** | **5 of 169** |
 | `eleven_flash_v2_5` | issue's figures | 131 ms | 111 ms | 242 ms | not measured |
 | | control here | 129 ms | 139 ms | 268 ms | 2 of 139 |
-| | **with lookahead** | **0** | **0** | **0** | **0 of 139** |
+| | **with lookahead** | **0** | **0** | **0** | **0 of 138** |
 
 Zero means the next sentence's first frame arrived exactly one frame
 after the previous sentence's last, 60 ms, which is the cadence rather
@@ -117,8 +134,8 @@ half the cadence in the control, against 4 of 173 with the fix.
 
 ### Tests
 
-Eight unit tests against a provider that is slow on purpose. Each was
-run against a control with the old sequential order:
+Ten unit tests against a provider that is slow on purpose. Each was run
+against a control with the relevant piece reverted:
 
 | Test | Result without the change |
 |---|---|
@@ -130,10 +147,14 @@ run against a control with the old sequential order:
 | lookahead stops at the end of a round | passes either way (guards what must not change) |
 | a failing sentence still lets the earlier ones be heard | passes either way (guards what must not change) |
 | a handover speaks in the new agent's voice | passes either way (guards what must not change) |
+| the first sentence does not wait for the second | fails: "the first sentence waited for the model to write the second" |
+| a sentence is not pulled from the provider faster than it plays | fails: 100 of 100 chunks pulled within a quarter second of playback |
 
-The last three are invariant tests rather than defect tests, which is
-why they pass against the control; they exist to catch what this change
-could have broken.
+Three of them are invariant tests rather than defect tests, which is why
+they pass against the sequential control; they exist to catch what this
+change could have broken. The last two came from the review and are
+run against their own controls: the inline-await structure for the
+first, and an unbounded buffer for the second.
 
 One pre-existing behaviour is asserted rather than changed: a sentence
 whose synthesis fails is still announced with `sentence_start` before
