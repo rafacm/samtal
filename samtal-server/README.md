@@ -258,31 +258,44 @@ their figure is flat and a longer sentence starts no later than a
 short one. Past a long enough sentence Piper is the slower of the two
 to start speaking, even though it is local.
 
-**The number above is only the start of the reply, and that is not
-the whole cost.** A reply is spoken sentence by sentence, and each
-sentence is synthesized only once the previous one has finished
-playing, so the same wait falls at every sentence boundary too. On a
-three-sentence reply:
+**The number above is only the start of the reply, and it used to not
+be the whole cost.** A reply is spoken sentence by sentence, and each
+sentence used to be synthesized only once the previous one had
+finished playing, so the same wait fell at every sentence boundary
+too. On a three-sentence reply:
 
 | | Gap at each sentence boundary | Total dead air mid-reply |
 | --- | --- | --- |
 | Piper | 40 to 80 ms | negligible |
-| ElevenLabs | 111 to 131 ms | 242 ms |
-| OpenAI | 520 to 617 ms | 1138 ms |
+| ElevenLabs | 129 to 139 ms | 268 ms |
+| OpenAI | 478 to 884 ms | 1362 ms |
 
-Around 130 ms passes unnoticed. Around 600 ms does not: it is audible
-as the voice stuttering every few seconds through a long reply, and it
-is the reason to think twice before putting OpenAI on an agent that
-tells stories rather than answering in a sentence. The fix is to
-synthesize the next sentence while the current one is still playing,
-which would close the gap for every engine here; it is not done yet.
+Around 130 ms passed unnoticed. Around 600 ms did not: it was audible
+as the voice stuttering every few seconds through a long reply, and
+worse than a plain pause, because the frame pacer's schedule is
+absolute from the reply's first frame, so the frames after a stall
+burst out to catch up. The device got a dropout followed by a flood.
+
+The server now synthesizes the next sentence while the current one is
+still playing, so that latency is spent against playback that is
+already happening. The same replies, measured again: every
+boundary is one frame, 60 ms, which is the cadence rather than a gap.
+The table above is what it cost before, kept because it is what the
+start-of-reply figure has to be weighed against if a provider ever
+becomes slower than a sentence is long.
+
+This leaves the start of the reply as the only latency a listener
+meets, which is a one-time delay a person tolerates rather than a
+defect they notice every few seconds. It is why the recommendation
+below no longer bounds a cloud provider on latency alone.
 
 So: **Piper** if it must stay on your host or cost nothing per
-character, **ElevenLabs** for the best voice per millisecond and the
-only cloud type comfortable with long replies today, and **OpenAI**
-when the deployment is already on OpenAI, one key is worth more to you
-than 700 ms, and replies are short. Each type's own section below has
-its options and the details behind its number.
+character, **ElevenLabs** for the best voice per millisecond, and
+**OpenAI** when the deployment is already on OpenAI and one key is
+worth more to you than 700 ms at the start of a reply. Reply length no
+longer picks between them, which it did while every sentence boundary
+cost what the first one did. Each type's own section below has its
+options and the details behind its number.
 
 These are one machine on one day from one network, not a benchmark.
 Your ratios should hold; your absolute numbers will not. (The
