@@ -13,11 +13,13 @@ persist what OTA gave it, send it as a bearer token on the handshake.
 import asyncio
 import json
 import math
+import os
 import struct
 import urllib.error
 import urllib.request
 
 import numpy as np
+import pytest
 from xiaozhi_sdk import XiaoZhiWebsocket
 
 from tests.smoke.conftest import DEVICE_MAC
@@ -67,6 +69,23 @@ def test_the_server_is_alive(wait_for_server, base_url: str) -> None:
         body = json.loads(response.read())
     assert body["status"] == "ok"
     assert body["version"]
+    assert body["revision"]
+
+
+def test_the_container_knows_which_build_it_is(wait_for_server, base_url: str) -> None:
+    """#41: the route from build argument to ARG to ENV to what the
+    server reports exists only inside a real image, so this is the one
+    lane that can exercise it. Skipped when nothing said what to expect,
+    which is how a container someone started by hand behaves."""
+    expected = os.environ.get("SAMTAL_SMOKE_REVISION", "").strip()
+    if not expected:
+        pytest.skip("SAMTAL_SMOKE_REVISION is unset: nothing to compare against")
+    with urllib.request.urlopen(f"{base_url}/healthz", timeout=10) as response:
+        body = json.loads(response.read())
+    assert body["revision"] == expected
+
+    ota = check_version(os.environ["SAMTAL_SMOKE_OTA_URL"])
+    assert ota["server"]["revision"] == expected
 
 
 def test_the_ota_reply_carries_everything_a_device_needs(

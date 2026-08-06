@@ -45,10 +45,18 @@ RUN useradd --uid 1000 --home-dir /data --no-create-home samtal \
 
 COPY --from=builder /app/.venv /app/.venv
 
+# Which build this is. There is no `.git` in the image and no git to
+# read it with, and OCI labels are image metadata a process cannot read
+# its own copy of, so the only route in is a build argument becoming an
+# environment variable. Defaulted rather than required: an image built
+# without one runs and reports `unknown`, which is the honest answer.
+ARG SAMTAL_REVISION=unknown
+
 ENV PATH=/app/.venv/bin:$PATH \
     HOME=/data \
     SAMTAL_CONFIG=/config/config.yaml \
-    SAMTAL_SERVER__LOG_FORMAT=json
+    SAMTAL_SERVER__LOG_FORMAT=json \
+    SAMTAL_REVISION=$SAMTAL_REVISION
 
 USER samtal
 VOLUME /data
