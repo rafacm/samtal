@@ -114,8 +114,14 @@ jobs:
           build-args: |
             SAMTAL_REVISION=${{ github.sha }}
             SAMTAL_VARIANT=${{ matrix.variant }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Scoped per variant. The two carry different dependency
+          # layers, and an unscoped gha cache is one namespace, so
+          # without this they overwrite each other's manifests every
+          # run and each variant pays for the other's churn. Not a
+          # correctness risk (BuildKit cache is content addressed), a
+          # hit-rate one.
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
 
       # A wheel with no aarch64 variant is a thing a user should never be
       # the first to find out about, so both architectures are asked to
@@ -151,8 +157,14 @@ jobs:
           build-args: |
             SAMTAL_REVISION=${{ github.sha }}
             SAMTAL_VARIANT=${{ matrix.variant }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Scoped per variant. The two carry different dependency
+          # layers, and an unscoped gha cache is one namespace, so
+          # without this they overwrite each other's manifests every
+          # run and each variant pays for the other's churn. Not a
+          # correctness risk (BuildKit cache is content addressed), a
+          # hit-rate one.
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
 
       - name: Check the extras import (arm64, under QEMU)
         if: matrix.variant == 'default'
@@ -308,5 +320,11 @@ jobs:
           build-args: |
             SAMTAL_REVISION=${{ github.sha }}
             SAMTAL_VARIANT=${{ matrix.variant }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Scoped per variant. The two carry different dependency
+          # layers, and an unscoped gha cache is one namespace, so
+          # without this they overwrite each other's manifests every
+          # run and each variant pays for the other's churn. Not a
+          # correctness risk (BuildKit cache is content addressed), a
+          # hit-rate one.
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
