@@ -94,17 +94,50 @@ image behaviour was verified locally rather than through CI.
   CI-set variable.
 - [x] `uv run pytest tests/unit -q`: 658 passed, 2 skipped;
   `tests/integration`: 27 passed; `ruff check` clean.
-- [ ] **CI builds and boot-checks both variants.** The workflow is
-  written and parses, and every check it runs was run by hand here
-  first, but the matrix itself is only exercised by CI.
-- [ ] **The README's image-choice note matches the tags actually
-  pushed.** The tag step now runs on pull requests, so this PR's own run
-  prints exactly what would be pushed and the note can be checked
-  against it before merging. Until that run exists the note states an
-  intention.
+- [x] **CI builds and boot-checks both variants.** Confirmed on the
+  merge to main: `test`, `image (default, latest)` and
+  `image (slim, slim, -slim)` all green, the two image jobs starting at
+  the same second and so running in parallel.
+- [x] **The README's image-choice note matches the tags actually
+  pushed.** The first publish from main produced exactly:
 
-Not verified, and not verifiable here: the amd64 half of the matrix.
-Local builds are arm64 native. CI covers both.
+  ```
+  ghcr.io/rafacm/samtal-server:latest
+  ghcr.io/rafacm/samtal-server:2026-08-06-1110
+  ghcr.io/rafacm/samtal-server:sha-9fd3de5
+  ghcr.io/rafacm/samtal-server:slim
+  ghcr.io/rafacm/samtal-server:2026-08-06-1107-slim
+  ghcr.io/rafacm/samtal-server:sha-9fd3de5-slim
+  ```
+
+  All six resolve in the registry, each for `linux/amd64` and
+  `linux/arm64` with distinct digests per variant.
+- [x] **The published slim image really is slim.** Pulled back from
+  GHCR rather than inferred from the build: `faster_whisper` absent,
+  `piper` absent, `pysilero_vad` present. This is the whole chain, from
+  build argument through the matrix to what an operator would actually
+  run.
+- [x] **The amd64 half of the matrix,** which local builds could not
+  cover, is green on the same run.
+
+Two things the run itself taught, both now in the README:
+
+- **The dated tags do not pair.** The variants are built by separate
+  jobs finishing minutes apart, so one commit produced
+  `2026-08-06-1110` and `2026-08-06-1107-slim`. Accurate, since they
+  really were built three minutes apart, and misleading to anyone
+  pairing variants by date during a rollback. `sha-<short>` matches
+  across both and is the handle to use. Documented rather than papered
+  over with a job to share one timestamp, which would make two honest
+  numbers look identical.
+- **The variants were sharing one build cache.** Both wrote
+  `type=gha` with no scope, which is a single namespace, so each run
+  they overwrote each other's manifests. A problem this change created
+  rather than one that predates it; now scoped per variant. Not a
+  correctness risk, since BuildKit's cache is content addressed, but a
+  hit-rate one. Reasoned rather than measured: showing it needs two
+  runs after the scopes exist, because the first pays a one-time full
+  miss.
 
 ## A gap this creates
 
