@@ -9,6 +9,27 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- A second published image variant, `slim`, for deployments whose ASR
+  and TTS name external providers. It installs no optional extra, so it
+  carries neither local engine and no GPL component at all, and it is
+  494 MB against the default's 883 MB, a saving of 389 MB. Most of that
+  is not piper but `faster-whisper`, which brings its own inference
+  stack rather than reusing the onnxruntime `pysilero-vad` already
+  pulls in, so the reduction is far larger than the size of the engines
+  themselves. Tags follow the Docker convention where the unsuffixed
+  name is the batteries-included image: the default variant keeps
+  `latest`, the dated tag and `sha-<short>` exactly as before, and slim
+  takes `slim`, `<date>-slim` and `sha-<short>-slim`. Nothing changes
+  for an existing puller of `latest`. Both are built from one
+  Dockerfile, selected with `--build-arg SAMTAL_VARIANT=slim`, so they
+  cannot drift, and an unrecognised variant fails the build rather than
+  silently producing the smaller image. `silero` VAD is in both, being
+  a core dependency rather than an extra. A slim image given a config
+  that names `faster_whisper` or `piper` refuses to start and names the
+  extra it lacks, which is checked in CI along with the absence of the
+  packages themselves; both variants run the same whole-conversation
+  smoke test, which is what makes them provably the same server.
+
 - New `server.capture` section: recording a session to disk so a
   real-world one can be analysed offline. Off by default and off until
   `enabled` says otherwise, because this writes room audio to disk and

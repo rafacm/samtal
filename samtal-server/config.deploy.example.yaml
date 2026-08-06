@@ -10,6 +10,12 @@
 # its logs to the json format, so none of that appears here. Secrets
 # never live in this file: the keys below name environment variables,
 # and the deployment provides them.
+#
+# This file assumes the DEFAULT image variant, the unsuffixed tags: it
+# configures faster_whisper for ASR and piper for TTS, and the slim
+# variant carries neither and would refuse to start on it. A deployment
+# whose ASR and TTS both name external providers can use the slim
+# variant instead and save about 390 MB.
 
 server:
   host: 0.0.0.0
