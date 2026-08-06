@@ -128,6 +128,15 @@ def _faster_whisper(label: str, config: ProviderConfig) -> object:
     return faster_whisper.build(label, config)
 
 
+def _openai_asr(label: str, config: ProviderConfig) -> object:
+    # No extra to guard, for the reason the openai TTS type has none:
+    # the openai client is a core dependency and transcription is a
+    # method on it.
+    from samtal_server.providers import openai_asr
+
+    return openai_asr.build(label, config)
+
+
 def _anthropic(label: str, config: ProviderConfig) -> object:
     from samtal_server.providers import anthropic_llm
 
@@ -178,7 +187,11 @@ def _factories() -> dict[str, dict[str, Factory]]:
             "anthropic": _anthropic,
             "openai_compatible": _openai_compatible,
         },
-        "asr": {"mock": mock.build_asr, "faster_whisper": _faster_whisper},
+        "asr": {
+            "mock": mock.build_asr,
+            "faster_whisper": _faster_whisper,
+            "openai": _openai_asr,
+        },
         "tts": {
             "mock": mock.build_tts,
             "elevenlabs": _elevenlabs,
