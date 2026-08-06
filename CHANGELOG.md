@@ -25,7 +25,8 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   human sentence and the traceback are unchanged.
 
   `llm_round` fires per generation call with `duration_ms`,
-  `first_token_ms`, `turns`, `round`, the same provider fields, and
+  `first_token_ms` (of the first spoken token, so a round that only
+  asked for a tool carries none), `turns`, `round`, the same fields, and
   `prompt_tokens`/`completion_tokens` where the provider reports them.
   Stage latency was otherwise inferred from the gaps between events,
   and the gap between `heard` and `speaking_started` holds the LLM and

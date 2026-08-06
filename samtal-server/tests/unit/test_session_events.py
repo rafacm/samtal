@@ -328,6 +328,23 @@ async def test_a_provider_that_reports_no_usage_is_not_an_error(
     assert logged.duration_ms >= 0
 
 
+async def test_a_round_that_only_called_a_tool_times_no_first_token(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Both providers assemble tool calls after their stream has ended,
+    so timing the first event rather than the first token would report
+    a whole generation as its own time to first token, on exactly the
+    rounds a handover is made of."""
+    script = ScriptedLlm([[call("ghost_tool")], "It did not work."])
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    with caplog.at_level("INFO"):
+        await run_reply(session, "do it")
+
+    tool_round, speaking_round = events(caplog, "llm_round")
+    assert not hasattr(tool_round, "first_token_ms")
+    assert speaking_round.first_token_ms >= 0
+
+
 async def test_every_round_of_a_reply_is_its_own_event(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
