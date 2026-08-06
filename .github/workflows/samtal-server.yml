@@ -84,6 +84,12 @@ jobs:
           platforms: linux/amd64
           load: true
           tags: samtal-server:ci-amd64
+          # The same argument the publish step passes, so the whole
+          # route from build argument to what the server reports is
+          # exercised by the smoke lane on every run, rather than first
+          # being exercised by a publish to main.
+          build-args: |
+            SAMTAL_REVISION=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -100,6 +106,8 @@ jobs:
           platforms: linux/arm64
           load: true
           tags: samtal-server:ci-arm64
+          build-args: |
+            SAMTAL_REVISION=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -131,6 +139,11 @@ jobs:
       - name: Smoke tests
         env:
           SAMTAL_SMOKE_OTA_URL: http://127.0.0.1:8003/xiaozhi/ota/
+          # What the image above was built with, so the smoke lane can
+          # check that a container can name its own build. Unset when
+          # somebody runs this against a container they started by hand,
+          # and the check skips rather than guesses.
+          SAMTAL_SMOKE_REVISION: ${{ github.sha }}
         run: uv run pytest tests/smoke -v
 
       # `docker stop` is what sends SIGTERM and waits; -t is above
@@ -192,5 +205,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # What makes a running container able to name its own build.
+          # The same commit the `sha-` tag is computed from, so /healthz
+          # and the image tag agree.
+          build-args: |
+            SAMTAL_REVISION=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
