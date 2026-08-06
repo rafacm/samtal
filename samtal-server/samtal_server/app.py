@@ -1,4 +1,5 @@
 import contextlib
+import logging
 from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
@@ -6,11 +7,14 @@ from fastapi import FastAPI
 from samtal_server import __version__, ota, ws
 from samtal_server.auth import build_device_auth
 from samtal_server.build_info import revision
+from samtal_server.capture import CaptureStore, DeviceFacts
 from samtal_server.config import Config, load_config
 from samtal_server.providers import build_agent_providers
 from samtal_server.registry import SessionRegistry
 from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
+
+logger = logging.getLogger(__name__)
 
 
 @contextlib.asynccontextmanager
@@ -60,6 +64,26 @@ def create_app(config: Config | None = None) -> FastAPI:
     # injection; the directory itself is created on the first write.
     memory = app.state.config.memory
     app.state.memory = None if memory is None else MemoryStore(memory.dir)
+    # What a device says about itself at OTA check-in, kept for the
+    # session that follows: a capture manifest needs the firmware
+    # version, and the websocket handshake never carries it.
+    app.state.device_facts = DeviceFacts()
+    # Absent unless a capture directory is configured, which is what
+    # keeps recording something an operator has to ask for.
+    capture = app.state.config.server.capture
+    app.state.capture = (
+        None
+        if capture is None
+        else CaptureStore(
+            capture.dir, capture.max_session_s, capture.max_total_mb, capture.min_free_mb
+        )
+    )
+    if capture is not None:
+        logger.warning(
+            "session capture is on: room audio and transcripts are being written to %s",
+            capture.dir,
+            extra={"event": "capture_enabled", "path": str(capture.dir)},
+        )
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
