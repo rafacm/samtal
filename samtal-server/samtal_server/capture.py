@@ -184,7 +184,9 @@ class SessionCapture:
         self._dropped_second = -1
         # The furthest an event has landed, so the audio can be padded
         # out to cover it rather than leaving offsets past the end.
-        self._event_frame = 0
+        # Starts below zero to mean "no events yet", so that a capture
+        # with none is not padded to cover an event it never had.
+        self._event_frame = -1
         self._on_close = on_close
         # Guards close() against being re-entered from an event written
         # while it is closing.
@@ -396,7 +398,16 @@ class SessionCapture:
                 # silence rather than left as a timeline the events
                 # point past the end of. Bounded by the session limit,
                 # which is what already bounds one capture's size.
-                end = max(self._mic.next_frame, self._reply.next_frame, self._event_frame)
+                # `_event_frame + 1`, not `_event_frame`: a sample at
+                # index N only exists once N+1 frames are written, and
+                # `t_ms` is rounded to a tenth of a millisecond, which
+                # can round up. One frame at this rate is 0.0625 ms
+                # against a worst-case rounding of 0.05 ms, so the extra
+                # frame covers both. Without it an event landing on the
+                # last frame pointed one sample past the end.
+                end = max(
+                    self._mic.next_frame, self._reply.next_frame, self._event_frame + 1
+                )
                 self._start_frame = min(end, int(self._max_session_s * CAPTURE_RATE))
                 frames = self._start_frame - (self._data_bytes // FRAME_BYTES)
                 if frames > 0:
