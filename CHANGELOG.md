@@ -9,6 +9,33 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- A survey of the neighbouring projects, `docs/related-projects.md`, in
+  two registers. Alternatives, the projects someone could choose instead
+  of samtal, each answering the same four questions: what it is, where it
+  overlaps, where samtal is deliberately different, and what samtal
+  borrows. Rhasspy shares the premise (thin listening endpoints, a server
+  you run, nothing leaving the house) and not the goal, matching a
+  template grammar and emitting an intent where samtal puts a language
+  model. Its successor line matters more than the archived 2.5 most links
+  point at, because Wyoming and Home Assistant's Assist pipeline reach
+  nearly samtal's picture from the other direction, differing in assuming
+  a hub and in owning the wire protocol where samtal implements one it
+  does not control. ElatoAI is the closest match to samtal's physical
+  shape, same chip family and codec and transport, and the strongest
+  argument for the road not taken: one vendor's realtime
+  speech-to-speech API and a hosted account, against a staged pipeline
+  that can run with no account at all. Hermes Agent is in the document
+  because "voice" means voice messaging there, no wake word and no
+  hardware, which makes it a candidate brain a layer above samtal rather
+  than a rival beside it. The second register is what samtal is built
+  from, saying what each dependency is and why samtal touches it, with
+  the terms left in `THIRD_PARTY_LICENSES.md`: the upstream pair, the
+  pipeline components, the `xiaozhi-sdk` device simulator the tests run
+  on, and the wake word models on the device. Writing it turned up that
+  samtal depends on the Rhasspy organisation twice over, for Piper voices
+  and for `pysilero-vad`, while running none of Rhasspy. A closing list
+  names the projects not yet read, so they are not rediscovered from
+  scratch, and makes no claims about them.
 - The research notes record what running stock firmware costs the
   server, as the list to work from when the device side is tackled.
   samtal-server implements the server half of the xiaozhi protocol and

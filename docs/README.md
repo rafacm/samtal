@@ -10,6 +10,13 @@ READMEs: [the project overview](../README.md),
 - [**xiaozhi-notes.md**](xiaozhi-notes.md): the upstream architecture, the
   device↔server protocol, ports, configuration keys, and the validated
   end-to-end demo procedure. Read this first for anything protocol-related.
+- [**related-projects.md**](related-projects.md): the neighbouring voice
+  assistant and agent projects, and the projects samtal is built from.
+  For an alternative: what it is, where it overlaps, where samtal is
+  deliberately different, and what samtal borrows. For a dependency: what
+  it is and why samtal touches it, with the license terms left in
+  [`THIRD_PARTY_LICENSES.md`](../THIRD_PARTY_LICENSES.md). Entries are
+  added as a project is actually read, never assumed.
 
 ## Plans
 
@@ -29,8 +36,7 @@ section, so a fresh session can resume from the repository alone.
 `features/` holds a doc per significant change made outside any active plan,
 same date-prefix naming, covering Problem, Changes, Key parameters,
 Verification, and Files modified. Milestone work under a plan is documented
-by that plan's implementation doc and its pull request instead. Empty for
-now.
+by that plan's implementation doc and its pull request instead.
 
 ## Decisions
 
