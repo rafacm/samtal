@@ -12,6 +12,10 @@ models/
 
 # Instance-specific configuration stays out of the repository
 *.local.yaml
+# Anything a local run writes beside the code names itself `.local`, and
+# a memory directory left over from a manual checkpoint has already been
+# committed once this way.
+*.local
 # The server reads .env itself (main.py calls load_dotenv), so these are
 # the secrets and nothing else needs to know about them.
 .env
