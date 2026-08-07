@@ -9,6 +9,20 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- The four stage acronyms are expanded where the server README first
+  uses them. It opened by describing the pipeline as VAD, ASR, LLM and
+  TTS without ever saying what any of them stand for, though those four
+  names are the vocabulary of the whole configuration file. A table
+  gives each in full with what it decides, and notes that they run
+  strictly in order, which is why any one of them is latency the user
+  hears. Separately, two unrelated options are both called `prompt`: a
+  list of words the transcriber should expect, and the persona
+  instruction sent to the LLM. The ASR one is a hint about vocabulary
+  rather than a request for behaviour, which is exactly what makes an
+  echoed prompt becoming an actionable utterance surprising, so both
+  the README and `config.example.yaml` now tell them apart where
+  somebody editing the value will be looking.
+
 - A survey of the neighbouring projects, `docs/related-projects.md`, in
   two registers. Alternatives, the projects someone could choose instead
   of samtal, each answering the same four questions: what it is, where it
