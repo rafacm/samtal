@@ -36,8 +36,36 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   and for `pysilero-vad`, while running none of Rhasspy. A closing list
   names the projects not yet read, so they are not rediscovered from
   scratch, and makes no claims about them.
-- Architecture diagrams, and a walkthrough that teaches them. `docs/architecture/excalidraw/` holds a high-level overview, now embedded in the root README, and a detailed picture of one conversation turn across four lanes (human, device, server, external services); the editable originals are scenes in the team Excalidraw workspace and the committed files are their exports. `docs/architecture/README.md` embeds both and walks the detailed one step by numbered step, explaining each concept and the problem it solves and expanding every acronym (AEC, VAD, ASR, LLM, TTS, MCP) before using it, then closes by naming the two things a happy-path picture cannot show, interrupting a reply and which stages leave the host, pointing at the diagram for each.
-- Three PlantUML diagrams under `docs/architecture/plantuml/`, whose source is text in the repository rather than an export of a hosted scene, so a pipeline change and the picture of it move in the same commit and a reviewer reads the diff. `architecture-overview` colours every provider by its `egress` class marking, which is the thing `server.local_only` is checked against at boot, so the picture answers "what leaves this host" from the same source the enforcement reads. `conversation-turn` is a sequence diagram, chosen because what matters in a turn is ordering and overlap: the tool loop's rounds and its final `tool_choice: none`, the next sentence being synthesized while the current one plays, and which listening mode re-arms the microphone. `barge-in-decision` is an activity diagram of the gates an utterance passes before it may cancel a reply, which is branches rather than flow and so could not be grafted onto the conversation diagram's happy path; it names both thresholds and the structured event every branch emits, those being what the thresholds get tuned from. Rendering is a local `plantuml` invocation documented beside them; the Excalidraw pair stays for the README's front door.
+- Architecture diagrams, and a walkthrough that teaches them.
+  `docs/architecture/excalidraw/` holds a high-level overview, now
+  embedded in the root README, and a detailed picture of one
+  conversation turn across four lanes (human, device, server, external
+  services); the editable originals are scenes in the team Excalidraw
+  workspace and the committed files are their exports.
+  `docs/architecture/README.md` embeds both and walks the detailed one
+  step by numbered step, explaining each concept and the problem it
+  solves and expanding every acronym (AEC, VAD, ASR, LLM, TTS, MCP)
+  before using it, then closes by naming the two things a happy-path
+  picture cannot show, interrupting a reply and which stages leave the
+  host, pointing at the diagram for each.
+- Three PlantUML diagrams under `docs/architecture/plantuml/`, whose
+  source is text in the repository rather than an export of a hosted
+  scene, so a pipeline change and the picture of it move in the same
+  commit and a reviewer reads the diff. `architecture-overview` colours
+  every provider by its `egress` class marking, which is the thing
+  `server.local_only` is checked against at boot, so the picture
+  answers "what leaves this host" from the same source the enforcement
+  reads. `conversation-turn` is a sequence diagram, chosen because what
+  matters in a turn is ordering and overlap: the tool loop's rounds and
+  its final `tool_choice: none`, the next sentence being synthesized
+  while the current one plays, and which listening mode re-arms the
+  microphone. `barge-in-decision` is an activity diagram of the gates
+  an utterance passes before it may cancel a reply, which is branches
+  rather than flow and so could not be grafted onto the conversation
+  diagram's happy path; it names both thresholds and the structured
+  event every branch emits, those being what the thresholds get tuned
+  from. Rendering is a local `plantuml` invocation documented beside
+  them; the Excalidraw pair stays for the README's front door.
 - The research notes record what running stock firmware costs the
   server, as the list to work from when the device side is tackled.
   samtal-server implements the server half of the xiaozhi protocol and
@@ -540,7 +568,6 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   the secret `ota_path` segment is injected from the environment
   rather than committed; and agent memory sits on the data volume. A
   unit test keeps it parsing and pins the allowlist posture.
-
 
 - A language surface for multilingual deployments that cannot pin
   `language`: `language_detect: once` detects until one confident
