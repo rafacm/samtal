@@ -248,6 +248,9 @@ providers:
       # endpoint that accepts audio shorter than OpenAI's 0.1 s minimum
       # is sent it, since that floor was measured against OpenAI.
       # base_url: http://localhost:8000/v1
+      # A list of words the transcriber should expect. Not the agent's
+      # prompt: that one is the persona instruction under `agents:`
+      # below, and these two unrelated options happen to share a name.
       # Words the engine would not otherwise guess: names, places, the
       # assistant's own name. Worth setting, because an unfamiliar
       # proper noun is the failure this provider actually has ("samtal"

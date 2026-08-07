@@ -17,6 +17,19 @@ sentence by sentence, every stage a pluggable provider chosen per agent.
 Agents reach tools over MCP, both their own servers and the device's own
 controls.
 
+Those four acronyms are the vocabulary of the whole configuration, so in
+full:
+
+| Stage | | What it does |
+| ----- | - | ------------ |
+| `vad` | voice activity detection | Decides where speech starts and when the user has stopped, so the rest of the pipeline runs on an utterance rather than on a stream |
+| `asr` | automatic speech recognition | Turns that utterance into text. Also called speech to text |
+| `llm` | large language model | Writes the reply, and asks for tools |
+| `tts` | text to speech | Turns each sentence of the reply back into audio |
+
+They run strictly in that order, each waiting on the one before it, which
+is why the latency of any one of them is latency the user hears.
+
 Those two paths, plus `/healthz`, are everything the server exposes: the
 interactive API docs are turned off, and the WebSocket requires a device
 token the OTA endpoint issued.
@@ -164,6 +177,12 @@ Keys are named, never written, exactly as for the TTS types above.
 | `language` | unset | Spoken language (ISO 639-1). Set it for any non-English deployment: see below |
 | `temperature` | unset | 0.0 to 1.0, the API's own default when unset |
 | `timeout_s` | `30` | Seconds before a transcription is abandoned, and a real bound: retries are off |
+
+**This `prompt` is not the agent's prompt.** Two unrelated options share
+the name: the one here is a list of words the transcriber should expect,
+and the one under `agents:` is the persona instruction sent to the LLM.
+This one is a hint about vocabulary, not a request for behaviour, which
+is exactly what makes the failure below surprising.
 
 **Set `prompt`, and keep it to vocabulary.** An unfamiliar proper noun
 is the one thing this type reliably gets wrong, and the prompt is what
