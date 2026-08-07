@@ -62,11 +62,11 @@ rectangle "Pipeline providers, one set per agent\ncolour = the type's egress mar
   }
 }
 
-rectangle "Off the host" as EXT #FFF3CD {
+rectangle "What the server talks to\ncolour = whether it leaves the host" as EXT #FFF3CD {
   component "**Anthropic API**" as ANTH #FFE082
-  component "**OpenAI-compatible endpoint**\na vendor, or your own Ollama\nor vLLM on localhost" as OAI #FFE082
   component "**ElevenLabs API**" as ELV #FFE082
-  component "**MCP servers**\nstdio or streamable_http" as MCPS #FFE082
+  component "**OpenAI-compatible endpoint**\na vendor, or your own Ollama\nor vLLM on localhost" as OAI #FFE9C6
+  component "**MCP tool servers**\na stdio child process,\nor a URL that may be localhost" as MCPS #FFE9C6
 }
 
 DISP -[hidden]right- DEVMCP
@@ -109,6 +109,11 @@ note bottom of PMAYBE
   local_only they demand an explicit `egress: false` on the
   provider entry, the operator asserting that the endpoint
   stays home.
+
+  An `mcp_servers` entry is the same case and carries the
+  same field: tool arguments are conversation-derived, and
+  neither transport settles it, since a stdio command may
+  proxy anywhere and a URL may name localhost.
 end note
 
 note bottom of DEV
@@ -123,10 +128,10 @@ legend right
 |<#EEF3FF>    | Device: ESP32-S3, thin firmware |
 |<#EEF8EE>    | samtal-server core |
 |<#FFFBF0>    | Pluggable pipeline providers |
-|<#FFE082>    | Off the host |
 |<#D9EAD3>    | egress = False: stays on the machine |
-|<#FFE9C6>    | egress = None: the base_url decides |
+|<#FFE9C6>    | egress = None: the configuration decides, and must say so under local_only |
 |<#F4CCCC>    | egress = True: sends session data away |
+|<#FFE082>    | An endpoint that is always off the host |
 endlegend
 
 @enduml
