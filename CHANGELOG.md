@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-07
+
+### Added
+
+- The research notes record what running stock firmware costs the
+  server, as the list to work from when the device side is tackled.
+  samtal-server implements the server half of the xiaozhi protocol and
+  changes nothing about it, which is the right trade for v1 and is paid
+  for in machinery that exists only because the device cannot be asked
+  to behave differently: barge-in reaching only realtime mode because
+  the device owns the listening mode, `idle_timeout_s` existing because
+  nothing in the firmware closes a realtime channel, and the whole
+  barge-in gate stack existing because echo cancellation quality is
+  invisible from here. One entry turned out to be an unclaimed
+  capability rather than a constraint, and has its own section: the
+  firmware update channel is fully built on the device, with A/B
+  partitions already in the layout, a boot path and a `self.upgrade_firmware`
+  MCP path (kept out of the model's tool list), and rollback already
+  enabled, so what is missing before anything ships is signing rather
+  than plumbing. The v1 plan's device-side line now points at it.
+
 ## 2026-08-06
 
 ### Added

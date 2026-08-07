@@ -179,4 +179,8 @@ the [implementation notes](2026-08-02-samtal-server-v1-implementation.md).
 v2: richer interruption handling, more providers, possibly a pipeline
 orchestration framework. v3: SQLite persistence, users/families/budgets, admin API and UI,
 voiceprint for shared devices. Device side: `esp_xiaozhi` component spike for
-a no-fork custom firmware.
+a no-fork custom firmware. Start that one from [what running stock firmware
+costs the server](../xiaozhi-notes.md#what-running-stock-firmware-costs-the-server),
+which collects the server-side machinery that exists only because the device
+cannot be asked to behave differently, and is therefore the list of what
+owning the firmware would buy.

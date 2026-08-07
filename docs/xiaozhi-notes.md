@@ -155,6 +155,111 @@ wants an interactive terminal). The port is `/dev/cu.usbmodem101` at
   (emotion), `mcp` (tool calls), `system`, `alert`. Documented upstream in
   `docs/websocket.md` and `docs/mcp-protocol.md`.
 
+## What running stock firmware costs the server
+
+samtal-server implements the server half of the protocol above and changes
+nothing about it: the device runs stock xiaozhi firmware, `samtal-esp32/`
+ships no code, and every message named above is upstream's. That is the
+right trade for v1, and it has a price, paid in server-side machinery that
+exists only because the device cannot be asked to behave differently.
+
+This is the list to revisit when the device side is tackled (the
+`esp_xiaozhi` component spike under "Later versions" in the v1 plan). Each
+entry is a constraint, the workaround it forced, and what owning the
+firmware would change. Add to it whenever a feature turns out to be shaped
+by the device rather than by the problem.
+
+- **The device owns the listening mode, and the server cannot change it.**
+  `listen` travels device to server only; samtal-server sends none. Manual
+  mode ends an utterance with `listen stop`, auto mode re-arms itself after
+  each `tts stop`, and realtime mode asks once and then streams for the rest
+  of the connection. Barge-in therefore exists only in realtime, because
+  that is the only mode where the microphone is still open during a reply.
+  Owning the firmware would let the mode be a server or per-agent decision
+  instead of a build-time one.
+
+- **Nothing in the firmware ever closes a realtime audio channel.** This is
+  the whole reason for `server.limits.idle_timeout_s`. Worse, the board
+  cannot sleep while an audio channel is open (`CanEnterSleepMode` refuses),
+  so an abandoned realtime conversation keeps the microphone streaming and
+  the board awake until a server-side timer guesses that nobody is there.
+  A device that noticed its own silence would not need the guess.
+
+- **Echo cancellation is the device's, and its quality is invisible from
+  here.** How much of the assistant's own voice survives the board's AEC and
+  reaches the endpointer is the number the entire barge-in gate stack is
+  built around: the minimum speech floor, the refractory window, the
+  transcribe-to-confirm step, and the `server.barge_in` off switch for
+  boards that leak too much. It is also why session capture exists at all,
+  since no test lane can produce the number. Owning the firmware means the
+  playback reference is available on the device side, where cancelling it is
+  a signal-processing problem rather than a statistical one.
+
+- **The wake word is spotted on the chip and never reaches the server.**
+  ESP-SR decides; the server learns only that a session opened. The planned
+  English wake word (`wn9_hiesp`) is a custom build and nothing else, so no
+  amount of server work substitutes for it.
+
+- **The device is the MCP server, and discovery is a race.** Tools are
+  fetched in a background task after `hello`, so a first utterance that
+  beats discovery runs without device tools and the next one has them. A
+  device that declared its tools in `hello` would remove the race.
+
+- **We serve configuration through OTA and never images**, but that is our
+  choice rather than a limit: the update channel is fully built on the
+  device and merely unused. See the next section, which is the one entry
+  here that is an unclaimed capability instead of a constraint.
+
+### Updating firmware over the air, once there is firmware
+
+The endpoint samtal-server calls "the OTA endpoint" is an over-the-air
+*update* endpoint that xiaozhi also overloads for configuration. We use
+only the configuration half. Everything needed for the other half is
+already on the board, so the work when the device side starts is signing
+and hosting, not plumbing.
+
+- **The partition layout is already A/B.** `partitions/v2/16m.csv`, the
+  default for our board, carries `otadata` plus `ota_0` and `ota_1` at
+  about 4 MB each (and an 8 MB `assets` SPIFFS). Nothing has to be
+  reflashed later to enable updates; the slots are sitting there unused.
+
+- **Path one, at boot.** If the OTA reply carries `firmware: {version,
+  url}`, the device compares the offered version against its own
+  (`ParseVersion` splits on dots into integers) and, when the offer is
+  newer, closes the audio channel and streams the URL straight into the
+  inactive slot through `esp_ota_begin`/`write`/`end`, sets the boot
+  partition and reboots. `firmware.force = 1` skips the comparison
+  entirely, which is the downgrade and re-pin escape hatch. The version it
+  compares against is `app_desc->version`, the ESP-IDF project version
+  baked into the app descriptor, so shipping an update means bumping that.
+
+- **Path two, mid-session.** The device registers an
+  `self.upgrade_firmware(url)` MCP tool, so an upgrade can be triggered
+  over the live WebSocket without waiting for a reboot. It is registered
+  with `AddUserOnlyTool`, and `GetToolsList` takes a separate
+  `list_user_only_tools` flag, so it is kept out of the tool list handed to
+  the model: the server can call it deliberately, but no language model can
+  decide to reflash a board. Preserve that separation.
+
+- **Rollback is already enabled.** `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`
+  is in `sdkconfig.defaults`, and a new image is marked valid only once it
+  has booted *and* completed an OTA check that found nothing newer
+  (`esp_ota_mark_app_valid_cancel_rollback`). An image that cannot get that
+  far is rolled back by the bootloader, so a bad build costs a reboot
+  rather than a bricked board.
+
+- **Nothing verifies who built the image.** This is the part to get right
+  before anything ships. `esp_ota_end` validates the image's integrity, its
+  checksum and magic, and says nothing about its authorship; the download
+  is a plain HTTP GET into the OTA partition, and neither Secure Boot nor
+  flash encryption appears in `sdkconfig.defaults`. It matters more here
+  than in most projects because the endpoint that would name the firmware
+  URL is also the token issuer, and is deliberately protected by nothing
+  but a secret path segment. Anyone who can reach it and answer with a
+  `firmware.url` owns the board. Serve images over HTTPS at the very least,
+  and turn on Secure Boot v2 with signed images before a device leaves a
+  network you control.
+
 ## Server (xinnan-tech/xiaozhi-esp32-server)
 
 - Components: `xiaozhi-server` (Python 3.10, the conversation core) plus an
