@@ -11,7 +11,15 @@ import contextlib
 from dataclasses import dataclass, field
 from typing import Any
 
-from samtal_server.providers import TextDelta, ToolCall, ToolDef, ToolResult, Turn, Usage
+from samtal_server.providers import (
+    StreamStarted,
+    TextDelta,
+    ToolCall,
+    ToolDef,
+    ToolResult,
+    Turn,
+    Usage,
+)
 from samtal_server.providers.anthropic_llm import (
     AnthropicLlm,
     anthropic_messages,
@@ -114,17 +122,34 @@ class FakeMessage:
     usage: FakeUsage = field(default_factory=FakeUsage)
 
 
+@dataclass
+class FakeTextDelta:
+    text: str
+    type: str = "text_delta"
+
+
+@dataclass
+class FakeStreamEvent:
+    type: str
+    delta: FakeTextDelta | None = None
+
+
 class FakeStream:
-    """The pieces of the SDK's streaming interface the provider uses."""
+    """The pieces of the SDK's streaming interface the provider uses:
+    iterating yields the stream's events, opening with the
+    message_start every real stream begins with."""
 
     def __init__(self, texts: list[str], message: FakeMessage) -> None:
         self._texts = texts
         self._message = message
 
-    @property
-    async def text_stream(self):
+    def __aiter__(self):
+        return self._events()
+
+    async def _events(self):
+        yield FakeStreamEvent(type="message_start")
         for text in self._texts:
-            yield text
+            yield FakeStreamEvent(type="content_block_delta", delta=FakeTextDelta(text))
 
     async def get_final_message(self) -> FakeMessage:
         return self._message
@@ -164,6 +189,8 @@ async def test_anthropic_yields_speech_then_the_tool_calls_it_asked_for() -> Non
         event async for event in llm.stream("be brief", [Turn("user", "rain?")], [WEATHER])
     ]
     assert events == [
+        # The first chunk off the wire, announced whatever it holds.
+        StreamStarted(),
         TextDelta("Let me "),
         TextDelta("check."),
         ToolCall(id="t1", name="weather__forecast", arguments={"city": "Lund"}),
@@ -181,11 +208,31 @@ async def test_anthropic_passes_a_forbidden_tool_choice_through() -> None:
         event
         async for event in llm.stream("", [Turn("user", "hi")], [WEATHER], tool_choice="none")
     ]
-    assert events == [TextDelta("Fine."), Usage(prompt_tokens=11, completion_tokens=7)]
+    assert events == [
+        StreamStarted(),
+        TextDelta("Fine."),
+        Usage(prompt_tokens=11, completion_tokens=7),
+    ]
     # The definitions still go out, so the conversation the model sees
     # does not change shape between rounds; only calling is forbidden.
     assert messages.request["tools"]
     assert messages.request["tool_choice"] == {"type": "none"}
+
+
+async def test_anthropic_announces_the_wire_before_a_tool_only_round() -> None:
+    """A round that streams only a tool call yields no text and its
+    call only after the stream ends, so the announcement is the one
+    event that tells the session's watchdog this stream is alive."""
+    llm, _ = anthropic_with(
+        [],
+        [FakeBlock(type="tool_use", id="t1", name="weather__forecast", input={"city": "Lund"})],
+    )
+    events = [event async for event in llm.stream("", [Turn("user", "rain?")], [WEATHER])]
+    assert events == [
+        StreamStarted(),
+        ToolCall(id="t1", name="weather__forecast", arguments={"city": "Lund"}),
+        Usage(prompt_tokens=11, completion_tokens=7),
+    ]
 
 
 async def test_anthropic_sends_no_tool_fields_when_there_are_no_tools() -> None:
@@ -370,12 +417,47 @@ async def test_openai_yields_speech_then_the_accumulated_tool_calls() -> None:
         event async for event in llm.stream("be brief", [Turn("user", "rain?")], [WEATHER])
     ]
     assert events == [
+        # The first chunk off the wire, announced whatever it holds.
+        StreamStarted(),
         TextDelta("Let me "),
         TextDelta("check."),
         ToolCall(id="call_a", name="weather__forecast", arguments={"city": "Lund"}),
     ]
     assert completions.request["tools"] == chat_tools([WEATHER])
     assert completions.request["tool_choice"] == "auto"
+
+
+async def test_openai_announces_the_wire_before_a_tool_only_round() -> None:
+    """The same guarantee for the other dialect: fragments are buffered
+    until the stream ends, and the announcement is what proves the
+    stream was delivering all along."""
+    llm, _ = openai_with(
+        [
+            FakeChunk(
+                [
+                    FakeChoice(
+                        FakeDelta(
+                            tool_calls=[
+                                FakeFragment(
+                                    index=0,
+                                    id="call_a",
+                                    function=FakeFunction(
+                                        name="weather__forecast",
+                                        arguments='{"city": "Lund"}',
+                                    ),
+                                )
+                            ]
+                        )
+                    )
+                ]
+            ),
+        ]
+    )
+    events = [event async for event in llm.stream("", [Turn("user", "rain?")], [WEATHER])]
+    assert events == [
+        StreamStarted(),
+        ToolCall(id="call_a", name="weather__forecast", arguments={"city": "Lund"}),
+    ]
 
 
 async def test_openai_passes_a_forbidden_tool_choice_through() -> None:
@@ -386,7 +468,7 @@ async def test_openai_passes_a_forbidden_tool_choice_through() -> None:
     ]
     # No usage chunk from this endpoint, and no Usage event: what the
     # server did not report is not invented.
-    assert events == [TextDelta("Fine.")]
+    assert events == [StreamStarted(), TextDelta("Fine.")]
     assert completions.request["tools"]
     assert completions.request["tool_choice"] == "none"
 

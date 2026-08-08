@@ -16,6 +16,7 @@ from samtal_server.providers.base import (
     LlmEvent,
     LlmProvider,
     ProviderError,
+    StreamStarted,
     TextDelta,
     ToolCall,
     ToolChoice,
@@ -109,8 +110,20 @@ class AnthropicLlm(LlmProvider):
             request["tools"] = anthropic_tools(tools)
             request["tool_choice"] = {"type": tool_choice}
         async with self._client.messages.stream(**request) as stream:
-            async for text in stream.text_stream:
-                yield TextDelta(text)
+            # The stream's own events rather than its text_stream view,
+            # because text_stream hides everything that is not a text
+            # delta: a round streaming only tool-call fragments would
+            # yield nothing at all until the end, and the session's
+            # first-token watchdog could not tell it from a request the
+            # API never answered (#68). The first event off the wire is
+            # announced whatever it holds.
+            started = False
+            async for event in stream:
+                if not started:
+                    started = True
+                    yield StreamStarted()
+                if event.type == "content_block_delta" and event.delta.type == "text_delta":
+                    yield TextDelta(event.delta.text)
             # Tool calls come from the assembled message rather than the
             # deltas: their arguments arrive as JSON fragments, and the
             # SDK has already stitched them together by this point.

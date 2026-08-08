@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from samtal_server.config.models import ProviderConfig
 from samtal_server.providers import (
     ProviderError,
+    StreamStarted,
     TextDelta,
     ToolCall,
     ToolResult,
@@ -44,7 +45,10 @@ async def test_the_trigger_phrase_asks_for_the_scripted_tool() -> None:
     )
     collected = await events(llm, [Turn("user", "tell me the secret")])
     assert collected == [
-        ToolCall(id="call_1", name="tools__secret_word", arguments={"loudly": True})
+        # The mock announces its first chunk the way the real adapters
+        # do, so the tool loop in CI sees the same event flow.
+        StreamStarted(),
+        ToolCall(id="call_1", name="tools__secret_word", arguments={"loudly": True}),
     ]
 
 

@@ -19,6 +19,7 @@ from samtal_server.providers.base import (
     Endpointer,
     LlmEvent,
     LlmProvider,
+    StreamStarted,
     TextDelta,
     ToolCall,
     ToolChoice,
@@ -169,6 +170,10 @@ class MockLlm(LlmProvider):
         tools: Sequence[ToolDef] = (),
         tool_choice: ToolChoice = "auto",
     ) -> AsyncIterator[LlmEvent]:
+        # What the real adapters yield first: proof the wire is live,
+        # so the integration lane exercises the same event flow the
+        # session sees from a cloud provider.
+        yield StreamStarted()
         last_user = next((turn.content for turn in reversed(turns) if turn.role == "user"), "")
         results = [result for turn in turns for result in turn.tool_results]
 

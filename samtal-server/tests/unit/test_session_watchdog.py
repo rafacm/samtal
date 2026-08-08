@@ -23,7 +23,9 @@ import pytest
 from samtal_server.providers import (
     LlmEvent,
     LlmProvider,
+    StreamStarted,
     TextDelta,
+    ToolCall,
     ToolChoice,
     ToolDef,
     Turn,
@@ -163,6 +165,51 @@ async def test_a_slow_generation_that_is_streaming_is_not_killed(
 
     assert spoken == ["A slow but healthy story."]
     assert llm.calls == 1
+    assert events(caplog, "llm_retry") == []
+    assert events(caplog, "provider_failed") == []
+
+
+class ToolOnlyLlm(LlmProvider):
+    """A first round shaped like a handover: the first chunk off the
+    wire is announced promptly, then nothing but a buffered tool call
+    until several watchdog windows later. The second round speaks."""
+
+    def __init__(self, gap_s: float) -> None:
+        self._gap_s = gap_s
+        self.calls = 0
+
+    async def stream(
+        self,
+        system: str,
+        turns: Sequence[Turn],
+        tools: Sequence[ToolDef] = (),
+        tool_choice: ToolChoice = "auto",
+    ) -> AsyncIterator[LlmEvent]:
+        self.calls += 1
+        yield StreamStarted()
+        if self.calls == 1:
+            await asyncio.sleep(self._gap_s)
+            yield ToolCall(id="c-1", name="ghost_tool", arguments={})
+        else:
+            yield TextDelta("Done anyway.")
+
+
+async def test_a_tool_only_round_that_announced_the_wire_is_not_killed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Both adapters buffer tool-call fragments until the stream ends,
+    so a round streaming only a tool call yields no content while
+    healthily delivering. Its StreamStarted is what the watchdog
+    accepts as the first token; without it the round would be cancelled
+    at the timeout and the tool dropped on a slow second attempt."""
+    llm = ToolOnlyLlm(gap_s=TIMEOUT_S * 4)
+    session = session_for(watchdog_config(), POET_MAC, {"poet": cast(Any, llm)})
+    with caplog.at_level("INFO"):
+        spoken = await run_reply(session, "do the thing")
+
+    assert spoken == ["Done anyway."]
+    # Two rounds of one reply, not a retry of the first.
+    assert llm.calls == 2
     assert events(caplog, "llm_retry") == []
     assert events(caplog, "provider_failed") == []
 
