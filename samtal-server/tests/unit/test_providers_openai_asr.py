@@ -431,6 +431,30 @@ async def test_a_transcript_that_is_not_the_prompt_is_never_retried(
     assert not [r for r in caplog.records if getattr(r, "event", None) == "asr_prompt_echo"]
 
 
+async def test_every_timeout_reaching_the_transport_is_a_real_number() -> None:
+    """The per-request timeout is a client option, not a form field, so
+    it may never carry the Omit serialization sentinel the neighbouring
+    fields use: Omit is not a NotGiven to the SDK, so it flows through
+    to httpx as the literal connect timeout and fails every ordinary
+    call at connect time. A mock transport never connects, which is how
+    the suite missed it and the deployment did not (#75); what the
+    transport CAN see is the request's timeout extension, so this pins
+    every phase of it to a real number or None, on the ordinary path
+    where no per-request timeout is given at all."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"text": "Hej hej"})
+
+    asr = provider(handler)
+    await asr.transcribe(ONE_SECOND, 16000)
+
+    (request,) = seen
+    for phase, value in request.extensions["timeout"].items():
+        assert value is None or isinstance(value, (int, float)), (phase, value)
+
+
 async def test_the_retry_lives_on_what_the_first_request_left_of_the_timeout() -> None:
     """Client retries are off so timeout_s bounds the user's wait, and
     a retry with a fresh timeout of its own would quietly double that
