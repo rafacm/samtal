@@ -281,9 +281,11 @@ providers:
       # words or anything imperative make it an instruction the model
       # can act on, and in a field session an echo of the agent names
       # triggered a handover nobody asked for. A transcript that is
-      # this string and nothing else is discarded, so the echo reaches
-      # nothing, but a prompt that cannot be acted on is the real
-      # protection.
+      # this string and nothing else never reaches the model as if
+      # spoken: the clip is transcribed once more without the prompt,
+      # a real short answer survives that retry, and an echo that
+      # persists or comes back empty is discarded. A prompt that
+      # cannot be acted on is still the real protection.
       # prompt: samtal, Stockholm
       # Spoken language (ISO 639-1). SET THIS for any deployment that
       # is not English. On clean audio leaving it unset costs nothing,

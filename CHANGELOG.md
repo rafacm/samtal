@@ -30,6 +30,29 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   as before. The retry is its own structured event, `llm_retry`,
   documented in the server README's event table.
 
+### Fixed
+
+- An ASR transcript that comes back as the configured prompt is no
+  longer taken as proof of silence (#69). The #54 guard discarded the
+  echo outright, and the #48 field test showed it swallowing real
+  speech: nine echoes in two days, every one on a clip of 0.78 to
+  1.92 s, two of them a user answering "yes, please" to an offer and
+  being ignored. The guard itself stands, an exact echo of the prompt
+  is still never handed to the LLM as if spoken, but the clip is now
+  transcribed once more with the prompt withheld: a real short answer
+  transcribes fine without the prompt's help and is heard normally,
+  while a retry that comes back empty or as the prompt again is
+  discarded as before. Only the tripped guard pays for the second
+  round trip; the normal path is one request per utterance, exactly as
+  it was. Each trip logs one `asr_prompt_echo` event (in the server
+  README's event table) whose `outcome` tells `recovered` apart from
+  `confirmed_empty` and `confirmed_echo` and whose `retry_ms` carries
+  what the retry cost, so future field data can measure how often the
+  guard was swallowing real speech. The old warning line ("treating
+  N s of audio as nothing said") now appears only when the retry
+  confirms there was nothing, so a log search for it keeps meaning
+  what it meant.
+
 ## 2026-08-07
 
 ### Added
