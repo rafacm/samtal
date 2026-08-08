@@ -44,11 +44,18 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   while a retry that comes back empty or as the prompt again is
   discarded as before. Only the tripped guard pays for the second
   round trip; the normal path is one request per utterance, exactly as
-  it was. Each trip logs one `asr_prompt_echo` event (in the server
-  README's event table) whose `outcome` tells `recovered` apart from
-  `confirmed_empty` and `confirmed_echo` and whose `retry_ms` carries
-  what the retry cost, so future field data can measure how often the
-  guard was swallowing real speech. The old warning line ("treating
+  it was. The retry lives on what the first request left of the
+  provider's `timeout_s` rather than getting a fresh timeout of its
+  own, which would have quietly doubled the bounded wait that
+  disabling client retries exists to keep: with under a second of
+  budget left no retry is sent at all, and a retry the deadline cuts
+  off discards the clip rather than surfacing an error. Each trip
+  logs one `asr_prompt_echo` event (in the server README's event
+  table) whose `outcome` tells `recovered` apart from
+  `confirmed_empty`, `confirmed_echo`, `timed_out` and `skipped`, and
+  whose `retry_ms` carries what the retry cost, so future field data
+  can measure how often the guard was swallowing real speech. The old
+  warning line ("treating
   N s of audio as nothing said") now appears only when the retry
   confirms there was nothing, so a log search for it keeps meaning
   what it meant.
