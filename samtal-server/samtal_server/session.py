@@ -76,6 +76,7 @@ from samtal_server.providers import (
     AgentProviders,
     AsrResult,
     Endpointer,
+    StreamStarted,
     TextDelta,
     ToolCall,
     ToolChoice,
@@ -496,6 +497,15 @@ class Session:
         a long generation that is delivering is healthy: a 17.7 s story
         round with a 635 ms first token is fine.
 
+        "First token" is the stream's first event of any kind. The
+        adapters announce their first raw chunk off the wire as a
+        `StreamStarted`, because both buffer tool-call fragments until
+        the stream has ended: without the announcement a round that
+        streams only a tool call (a handover does) would look exactly
+        like a stalled request and be cancelled at the timeout while
+        healthily delivering. The announcement is consumed here, being
+        evidence rather than content, so nothing downstream sees it.
+
         One timeout cancels the request and retries the round once,
         since the field data says the retry answers quickly (6.16 s
         total against the 17 s stall it replaced). A second timeout
@@ -545,7 +555,8 @@ class Session:
                     ),
                 )
                 continue
-            yield first
+            if not isinstance(first, StreamStarted):
+                yield first
             async for event in events:
                 yield event
             return
@@ -1587,6 +1598,11 @@ class Session:
                         providers.llm.stream, self._system_prompt(), working, tools, choice
                     ),
                 ):
+                    if isinstance(event, StreamStarted):
+                        # Liveness, not content. The watchdog consumes
+                        # the one the adapters yield; this keeps the
+                        # loop indifferent should one arrive anyway.
+                        continue
                     if isinstance(event, TextDelta):
                         # Speech only, and speech that is not just
                         # whitespace. Both providers assemble tool

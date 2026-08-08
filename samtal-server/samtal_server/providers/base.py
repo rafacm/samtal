@@ -113,6 +113,23 @@ class ToolResult:
 
 
 @dataclass(frozen=True)
+class StreamStarted:
+    """The stream's first raw chunk arrived from the wire, whatever it
+    held.
+
+    It exists for the session's first-token watchdog. Both adapters
+    buffer tool-call fragments until their stream has ended, so a round
+    that streams only a tool call yields no other event while healthily
+    delivering, and without this signal the watchdog could not tell
+    that round from a request the provider never answered (#68).
+
+    Yielded at most once, before anything else, and it carries nothing:
+    it is evidence of liveness, not content. The session consumes it in
+    the watchdog and it reaches nothing downstream; consumers of the
+    stream must nevertheless tolerate and ignore it."""
+
+
+@dataclass(frozen=True)
 class TextDelta:
     """A piece of the spoken reply, as it streams."""
 
@@ -137,9 +154,9 @@ class Usage:
     completion_tokens: int | None = None
 
 
-# What an LLM stream yields: speech, a request to run a tool, or what
-# the generation cost.
-LlmEvent = TextDelta | ToolCall | Usage
+# What an LLM stream yields: proof the wire is live, speech, a request
+# to run a tool, or what the generation cost.
+LlmEvent = StreamStarted | TextDelta | ToolCall | Usage
 
 # Whether the model may call the tools it was given. "none" still sends
 # the definitions (so the conversation stays consistent) while forbidding
