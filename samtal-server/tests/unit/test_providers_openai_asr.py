@@ -27,6 +27,10 @@ def provider(handler: object, **overrides: object) -> OpenAiAsr:
     """A provider wired to a mock transport, so nothing leaves the test."""
     client = AsyncOpenAI(
         api_key="test-key",
+        # As the provider constructs its own: without this the SDK's
+        # default of two retries would triple a deliberately failing
+        # request and hide how many the provider itself sends.
+        max_retries=0,
         http_client=httpx.AsyncClient(
             transport=httpx.MockTransport(handler),  # type: ignore[arg-type]
         ),
@@ -424,6 +428,79 @@ async def test_a_transcript_that_is_not_the_prompt_is_never_retried(
     assert result.text == "Hej hej"
     assert len(seen) == 1
     assert not [r for r in caplog.records if getattr(r, "event", None) == "asr_prompt_echo"]
+
+
+async def test_the_retry_lives_on_what_the_first_request_left_of_the_timeout() -> None:
+    """Client retries are off so timeout_s bounds the user's wait, and
+    a retry with a fresh timeout of its own would quietly double that
+    bound. The retry request therefore carries the remaining budget as
+    its own deadline."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        text = "samtal, Oliver" if len(seen) == 1 else "Yes, please."
+        return httpx.Response(200, json={"text": text})
+
+    asr = provider(handler, prompt="samtal, Oliver", timeout_s=30.0)
+    result = await asr.transcribe(ONE_SECOND, 16000)
+
+    assert result.text == "Yes, please."
+    # httpx carries the per-request override in the request extensions,
+    # which is where the far end of the mock transport can see it.
+    assert seen[1].extensions["timeout"]["read"] <= 30.0
+
+
+async def test_an_echo_with_no_budget_left_is_not_retried(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A first request that ate nearly the whole timeout leaves the
+    retry more likely to be cut off than to answer, so it is skipped
+    and the clip discarded directly rather than making the user wait
+    out a request that was never going to land."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"text": "samtal, Oliver"})
+
+    # The budget is below the one-second retry floor before the first
+    # request even starts, which stands in for a first request that
+    # consumed almost all of a real timeout without a slow test.
+    asr = provider(handler, prompt="samtal, Oliver", timeout_s=0.5)
+    with caplog.at_level("INFO"):
+        result = await asr.transcribe(ONE_SECOND, 16000)
+
+    assert result.text == ""
+    assert len(seen) == 1
+    (event,) = [r for r in caplog.records if getattr(r, "event", None) == "asr_prompt_echo"]
+    assert event.outcome == "skipped"  # type: ignore[attr-defined]
+    assert not hasattr(event, "retry_ms")
+
+
+async def test_a_retry_cut_off_by_the_deadline_discards_rather_than_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The reply a timed-out retry would end is one the guard was about
+    to end anyway, so the timeout is the discarding outcome rather than
+    an error surfaced to the session."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if len(seen) == 1:
+            return httpx.Response(200, json={"text": "samtal, Oliver"})
+        raise httpx.ReadTimeout("the deadline came first", request=request)
+
+    asr = provider(handler, prompt="samtal, Oliver")
+    with caplog.at_level("INFO"):
+        result = await asr.transcribe(ONE_SECOND, 16000)
+
+    assert result.text == ""
+    assert len(seen) == 2
+    (event,) = [r for r in caplog.records if getattr(r, "event", None) == "asr_prompt_echo"]
+    assert event.outcome == "timed_out"  # type: ignore[attr-defined]
+    assert event.retry_ms >= 0  # type: ignore[attr-defined]
 
 
 async def test_no_language_is_reported_and_no_session_lock_is_asked_for() -> None:
