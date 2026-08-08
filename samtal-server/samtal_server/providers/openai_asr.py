@@ -44,7 +44,7 @@ import io
 import logging
 import wave
 
-from openai import AsyncOpenAI, Omit
+from openai import APITimeoutError, AsyncOpenAI, Omit
 
 from samtal_server.config.models import ProviderConfig
 from samtal_server.providers.base import AsrProvider, AsrResult, ProviderError
@@ -94,6 +94,15 @@ MIN_AUDIO_S = 0.1
 # The API decides the format from the extension, so the name matters
 # even though there is no file.
 UPLOAD_NAME = "utterance.wav"
+
+# The least of the shared timeout worth spending on the echo retry.
+# The retry answers to the same timeout_s as the request that tripped
+# the guard (see transcribe), so a first request that ate nearly the
+# whole budget leaves the retry more likely to be cut off than to
+# answer: field round trips on the short clips that echo ran about
+# half a second, so under a second of remaining budget the retry
+# would mostly buy a longer wait for the same discard.
+RETRY_FLOOR_S = 1.0
 
 # Sentence-final punctuation an echoed prompt can come back wearing:
 # the model is transcribing, so it writes what it returns as a
@@ -153,6 +162,9 @@ class OpenAiAsr(AsrProvider):
         self._language = language
         self._prompt = prompt
         self._temperature = temperature
+        # Kept for the echo retry's deadline: the whole transcribe call,
+        # retry included, answers to this one budget (see transcribe).
+        self._timeout_s = timeout_s
         # Shortest audio worth sending. The endpoint sets it, so a
         # compatible one that accepts anything gets 0: see MIN_AUDIO_S.
         self._min_audio_s = min_audio_s
@@ -184,14 +196,25 @@ class OpenAiAsr(AsrProvider):
         # never does, so in practice it is the configured language or
         # nothing.
         pinned = self._language or language_hint
+        # One deadline for the whole call, echo retry included. The
+        # client's retries are off (MAX_RETRIES) precisely so timeout_s
+        # bounds what a user can be left waiting on one utterance, and
+        # a retry with a fresh timeout of its own would quietly double
+        # that bound.
+        deadline = asyncio.get_running_loop().time() + self._timeout_s
         text = await self._request(pcm, sample_rate, pinned, self._prompt)
         if self._is_echoed_prompt(text):
-            text = await self._retry_without_prompt(pcm, sample_rate, pinned)
+            text = await self._retry_without_prompt(pcm, sample_rate, pinned, deadline)
         # Language fields stay empty: this provider does not detect.
         return AsrResult(text=text)
 
     async def _request(
-        self, pcm: bytes, sample_rate: int, pinned: str | None, prompt: str | None
+        self,
+        pcm: bytes,
+        sample_rate: int,
+        pinned: str | None,
+        prompt: str | None,
+        timeout_s: float | None = None,
     ) -> str:
         response = await self._client.audio.transcriptions.create(
             file=(UPLOAD_NAME, wav_bytes(pcm, sample_rate), "audio/wav"),
@@ -204,11 +227,14 @@ class OpenAiAsr(AsrProvider):
             language=pinned if pinned else Omit(),
             prompt=prompt if prompt else Omit(),
             temperature=self._temperature if self._temperature is not None else Omit(),
+            # The client's own timeout, unless this request is a retry
+            # living on what the first request left of it.
+            timeout=timeout_s if timeout_s is not None else Omit(),
         )
         return response.text.strip()
 
     async def _retry_without_prompt(
-        self, pcm: bytes, sample_rate: int, pinned: str | None
+        self, pcm: bytes, sample_rate: int, pinned: str | None, deadline: float
     ) -> str:
         """A second hearing for a clip whose transcript was the prompt
         handed back.
@@ -226,17 +252,48 @@ class OpenAiAsr(AsrProvider):
         cost of the first one; the normal path is one request, as
         before.
 
+        The retry lives on what the first request left of the shared
+        deadline, and is skipped outright when less than RETRY_FLOOR_S
+        remains: timeout_s is the bound on what a user can be left
+        waiting, and a retry outliving it would break that promise. A
+        retry the deadline cuts off is the discarding outcome rather
+        than an error, since the reply it would have ended is one the
+        guard was about to end anyway.
+
         The #54 rationale stands: an exact echo of the prompt is never
         handed to the session as an utterance, retried or not."""
         duration_s = round(len(pcm) / 2 / sample_rate, 2)
+        loop = asyncio.get_running_loop()
+        remaining_s = deadline - loop.time()
+        if remaining_s < RETRY_FLOOR_S:
+            logger.warning(
+                "openai asr: the transcript came back as the configured prompt "
+                "with %.1f s of the timeout left, too little to retry, "
+                "treating %.2f s of audio as nothing said",
+                remaining_s,
+                duration_s,
+                extra=self._echo_event("skipped", duration_s),
+            )
+            return ""
         logger.warning(
             "openai asr: the transcript came back as the configured prompt, "
             "retrying %.2f s of audio without it",
             duration_s,
         )
-        started = asyncio.get_running_loop().time()
-        retry = await self._request(pcm, sample_rate, pinned, None)
-        retry_ms = round((asyncio.get_running_loop().time() - started) * 1000)
+        started = loop.time()
+        try:
+            retry = await self._request(pcm, sample_rate, pinned, None, timeout_s=remaining_s)
+        except APITimeoutError:
+            retry_ms = round((loop.time() - started) * 1000)
+            logger.warning(
+                "openai asr: the retry outran the timeout's remaining %.1f s, "
+                "treating %.2f s of audio as nothing said",
+                remaining_s,
+                duration_s,
+                extra=self._echo_event("timed_out", duration_s, retry_ms),
+            )
+            return ""
+        retry_ms = round((loop.time() - started) * 1000)
         if self._is_echoed_prompt(retry):
             logger.warning(
                 "openai asr: the retry came back as the prompt again, "
@@ -262,20 +319,25 @@ class OpenAiAsr(AsrProvider):
         )
         return retry
 
-    def _echo_event(self, outcome: str, duration_s: float, retry_ms: int) -> dict[str, object]:
+    def _echo_event(
+        self, outcome: str, duration_s: float, retry_ms: int | None = None
+    ) -> dict[str, object]:
         """The structured half of a tripped guard's outcome: exactly one
         `asr_prompt_echo` event per trip, so retained logs can say how
         often the guard was swallowing real speech and what each retry
-        cost. No `session` or `device`: providers are shared singletons
-        with no session identity, so the event names the host instead,
-        like the entry it belongs to."""
-        return {
+        cost. `retry_ms` is absent when no retry was sent, which is what
+        a skip is. No `session` or `device`: providers are shared
+        singletons with no session identity, so the event names the
+        host instead, like the entry it belongs to."""
+        fields: dict[str, object] = {
             "event": "asr_prompt_echo",
             "outcome": outcome,
             "duration_s": duration_s,
-            "retry_ms": retry_ms,
             "host": self.host,
         }
+        if retry_ms is not None:
+            fields["retry_ms"] = retry_ms
+        return fields
 
     def _is_echoed_prompt(self, text: str) -> bool:
         """Whether the model handed the prompt back instead of hearing
