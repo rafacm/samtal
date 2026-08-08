@@ -48,6 +48,7 @@ transcript store until v3 brings a real one.
 
 import asyncio
 import contextlib
+import functools
 import logging
 import uuid
 from collections.abc import AsyncIterator, Callable, Sequence
@@ -276,6 +277,14 @@ class _Synthesis:
             await self._task
 
 
+class FirstTokenTimeout(TimeoutError):
+    """The LLM produced nothing within the first-token watchdog window,
+    twice in a row. The class name is what the `provider_failed` event
+    carries in `error`, which is what makes a provider that stalls
+    before answering distinguishable in the retained logs from one
+    whose own SDK timed out."""
+
+
 class AgentNotAllowed(ValueError):
     """Something asked a session to become an agent its device is not
     bound to. The switch_agent tool turns this into a spoken refusal,
@@ -472,6 +481,74 @@ class Session:
                 )
                 raise
             yield event
+
+    async def _watchdog_stream(
+        self, provider: object, make_stream: Callable[[], AsyncIterator[Any]]
+    ) -> AsyncIterator[Any]:
+        """An LLM stream whose wait for the first event is bounded.
+
+        Nothing used to bound the gap between sending the request and
+        the first byte of the answer, so a provider that stalled there
+        froze the pipeline: a 17 s stall held the session in replying,
+        deaf to a user who politely waits, until a barge-in rescued it
+        (#68). The bound covers only that gap. Once anything has
+        arrived the stream is streaming and no timeout applies, because
+        a long generation that is delivering is healthy: a 17.7 s story
+        round with a 635 ms first token is fine.
+
+        One timeout cancels the request and retries the round once,
+        since the field data says the retry answers quickly (6.16 s
+        total against the 17 s stall it replaced). A second timeout
+        gives up: the failure is reported as the provider's, with
+        `FirstTokenTimeout` telling it apart from the provider's own
+        classes, and the reply ends the way any provider failure ends
+        it, so the failure mode is a silent turn rather than a wedged
+        session. Barge-in keeps working through the whole window: it
+        cancels the reply task, and that cancellation lands in the wait
+        here like in any other await.
+
+        The provider's own timeout classes pass through untouched: the
+        `expired()` check is what keeps an SDK timeout raised just
+        before the watchdog's deadline from being retried as if the
+        watchdog had fired."""
+        timeout_s = self.config.server.llm_first_token_timeout_s
+        loop = asyncio.get_running_loop()
+        for attempt in ("first", "retry"):
+            events = self._watched_stream(provider, make_stream())
+            started = loop.time()
+            try:
+                async with asyncio.timeout(timeout_s) as watchdog:
+                    first = await events.__anext__()
+            except StopAsyncIteration:
+                return
+            except TimeoutError as exc:
+                if not watchdog.expired():
+                    raise
+                elapsed = loop.time() - started
+                if attempt == "retry":
+                    failure = FirstTokenTimeout(
+                        f"no first token within {timeout_s:.0f} s, twice"
+                    )
+                    self._provider_failed("llm", provider, failure, elapsed)
+                    raise failure from exc
+                logger.warning(
+                    "session %s: no first token after %.1f s, retrying round %d",
+                    self.session_id,
+                    elapsed,
+                    self._llm_round,
+                    extra=self._event(
+                        "llm_retry",
+                        agent=self._agent,
+                        round=self._llm_round,
+                        duration_ms=round(elapsed * 1000),
+                        **provider_fields("llm", provider),
+                    ),
+                )
+                continue
+            yield first
+            async for event in events:
+                yield event
+            return
 
     def _llm_round_done(
         self,
@@ -1504,9 +1581,11 @@ class Session:
             usage: Usage | None = None
             self._llm_round += 1
             try:
-                async for event in self._watched_stream(
+                async for event in self._watchdog_stream(
                     providers.llm,
-                    providers.llm.stream(self._system_prompt(), working, tools, choice),
+                    functools.partial(
+                        providers.llm.stream, self._system_prompt(), working, tools, choice
+                    ),
                 ):
                     if isinstance(event, TextDelta):
                         # Speech only, and speech that is not just
