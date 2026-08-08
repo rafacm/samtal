@@ -18,6 +18,17 @@ READMEs: [the project overview](../README.md),
   [`THIRD_PARTY_LICENSES.md`](../THIRD_PARTY_LICENSES.md). Entries are
   added as a project is actually read, never assumed.
 
+## Reference
+
+- [**conversational-quality-regression-suite.md**](conversational-quality-regression-suite.md):
+  why field tests exist, the shape of a conversation turn, what a test
+  round needs before anyone leaves the desk and what it yields, and the
+  three layers findings age in (instrument, interaction, calibration).
+  The starting point for setting up and analyzing a field-test round.
+- [**glossary.md**](glossary.md): the concepts, techniques, and
+  technologies the project is built on, one short definition each with
+  pointers for going deeper.
+
 ## Architecture diagrams
 
 [**architecture/**](architecture/README.md) embeds the hand-drawn diagrams and walks through them: the high-level overview the root README leads with, and a step-by-step teaching tour of one conversation turn, from wake word to spoken reply, that explains each concept and the problem it solves before using its acronym. A directory per authoring tool sits under it. `architecture/excalidraw/` holds those two, whose editable originals are scenes of the same names in the team workspace and whose committed files are exports kept in sync by hand, so flag them when a pipeline change makes them stale. `architecture/plantuml/` holds three whose source is text here and whose renders come from a command, so they cannot drift unnoticed: what leaves the host, the ordering inside one turn, and the barge-in decision.

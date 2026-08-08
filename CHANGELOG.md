@@ -9,6 +9,20 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- Two reference pages in `docs/`, distilled from the first field-test
+  rounds (#48, #73). The
+  [regression suite for conversational quality](docs/conversational-quality-regression-suite.md)
+  explains why field tests exist, the shape of a conversation turn
+  with the event each step emits, the preflight and artifacts of a
+  test round, and the three layers findings age in: the instrument
+  (stack-independent), the interaction layer (survives provider
+  swaps), and the calibration (the stack-specific constants worth
+  optimizing once a deployment settles). The
+  [glossary](docs/glossary.md) gives one short definition per
+  concept, technique, and technology the project is built on, with
+  pointers for going deeper. Both are indexed from
+  [docs/README.md](docs/README.md).
+
 - A first-token watchdog on the LLM round (#68). Nothing used to bound
   the gap between sending a chat request and the first byte of the
   answer, so a provider that stalled there froze the session in
