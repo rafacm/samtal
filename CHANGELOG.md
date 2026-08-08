@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-08
+
+### Added
+
+- A first-token watchdog on the LLM round (#68). Nothing used to bound
+  the gap between sending a chat request and the first byte of the
+  answer, so a provider that stalled there froze the session in
+  `replying`, not listening, for as long as it cared to take: a field
+  test saw a 17 s stall that only a barge-in rescued. The watchdog
+  cancels a round whose first token has not arrived within
+  `server.llm_first_token_timeout_s` (default 10 s, chosen against the
+  field data: healthy first tokens cluster at 500 to 800 ms, the worst
+  spike that still answered was 8.9 s) and retries it once, which the
+  same field data says answers quickly; a second stall gives the round
+  up as a `provider_failed` event with `error: FirstTokenTimeout` and
+  the session returns to listening, so the failure mode is a silent
+  turn rather than a wedged session. Only the wait for the first token
+  is bounded: a long generation that is already streaming is healthy
+  and runs to the end, and barge-in keeps working through the whole
+  watchdog window exactly as before. The retry is its own structured
+  event, `llm_retry`, documented in the server README's event table.
+
 ## 2026-08-07
 
 ### Added
