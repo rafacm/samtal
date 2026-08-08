@@ -23,6 +23,28 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- Latency masking with pre-synthesized conversational fillers (#74).
+  When a reply's first audio has not started within a configured
+  delay of the utterance being transcribed (default 1800 ms, above
+  the roughly 1.2 s a healthy reply takes to its first audio and
+  below the 2 to 3 s of dead air field round 1 measured on ordinary
+  turns), the session plays a short filled pause ("Hmm, let me
+  see...") in the active agent's own voice, and the real reply queues
+  behind the clip's tail. The clips are synthesized once at boot and
+  cached as PCM, so the mask costs nothing at the moment it masks and
+  keeps working when the TTS provider is the thing being slow; a
+  synthesis failure logs a warning and leaves the feature off for
+  that agent rather than failing the boot. The filler is honest
+  assistant speech: it moves the device into its speaking state,
+  counts as the turn's `speaking_started`, lands on capture channel
+  1, and enters the barge-in gates like any reply audio. One filler
+  per turn, logged as a `filler_played` event with the measured delay
+  and the phrase index, and composed with the first-token watchdog:
+  the filler is the soft early threshold, the watchdog the hard late
+  one. Off by default, configured per agent (or in `agent_defaults`)
+  as `filler: {enabled, delay_ms, phrases}` with the phrases written
+  in each agent's own language.
+
 - Two reference pages in `docs/`, distilled from the first field-test
   rounds (#48, #73). The
   [regression suite for conversational quality](docs/conversational-quality-regression-suite.md)

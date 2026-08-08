@@ -854,6 +854,46 @@ Every one of these decisions is a structured log event, which is what
 the thresholds are tuned from. A manual `listen stop` mid-reply is the
 user holding the button and speaking, so it cancels unconditionally.
 
+## Masking reply latency
+
+The silence between the end of an utterance and the first audio of the
+reply is where the assistant feels dead: healthy field turns run 1.5
+to 3 s of it, and a slow provider stretches it well past the point
+where users ask "are you there?". Humans hold exactly this gap with a
+filled pause, and an agent can too:
+
+```yaml
+agent_defaults:
+  filler:
+    enabled: true        # off by default
+    delay_ms: 1800
+    phrases:
+      - "Hmm, let me see..."
+      - "Good question..."
+```
+
+When a reply's first audio has not started within `delay_ms` of the
+utterance being transcribed, the session plays one of the phrases,
+rotating through them, and the real reply queues behind the clip's
+tail. The clips are synthesized once at boot in each agent's own voice
+and cached as PCM, never at fire time: synthesis at the moment of
+masking would add TTS latency to the exact gap being masked, and a
+cached clip keeps working when the TTS provider is the thing being
+slow. A synthesis failure at boot logs a warning and leaves the
+feature off for that agent rather than failing the boot.
+
+The filler is honest assistant speech: it moves the device into its
+speaking state, counts as the turn's `speaking_started`, lands on
+capture channel 1, and enters the barge-in gates like any reply audio,
+so talking over it interrupts the reply, which is the correct reading.
+One filler per turn, logged as a `filler_played` event; a turn that
+outlives both the filler and the first-token watchdog resolves through
+the watchdog's give-up path (see below), the filler being the soft
+early threshold and the watchdog the hard late one. Write the phrases
+in each agent's own language; an agent's own `filler` section replaces
+the inherited one wholly, like the stage fields, and the reasoning
+behind the default delay is in `config.example.yaml`.
+
 ## Limits
 
 Three numbers bound what one server holds, and none is visible in normal
@@ -933,6 +973,7 @@ and `device`, plus its own:
 | `ota_check`        | a device checks in (no session) | `client`, `board`, `firmware`, `agents` |
 | `session_open`     | a conversation starts           | `client`, `agent`, `agents`, `protocol`, `revision` |
 | `heard`            | an utterance is transcribed     | `agent`, `text`, `duration_s`, plus `language` and `language_confidence` when the engine detected |
+| `filler_played`    | the reply was slow, so a pre-synthesized filler clip masked the wait (its first frame is the turn's `speaking_started`) | `agent`, `delay_ms` (measured, from the transcription to the fire), `phrase_index` |
 | `speaking_started` | the reply's first audio frame goes out | `agent`                     |
 | `replied`          | a reply finishes                | `agent`, `text`                    |
 | `agent_said`       | one agent's part of a reply     | `agent`, `text`                    |

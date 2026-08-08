@@ -74,7 +74,9 @@ linguistics, a filled pause; in voice interfaces the technique is
 latency masking: playing a filler when the reply is slow so the
 silence reads as thinking rather than deafness. Distinct from a
 backchannel, which is the listener's feedback ("mm-hm") while the
-other party speaks. Not implemented in samtal today.
+other party speaks. Implemented in samtal as optional per-agent
+latency masking, configured under an agent's (or `agent_defaults`')
+`filler` section.
 More: [filled pause](https://en.wikipedia.org/wiki/Filler_(linguistics)),
 [backchannel](https://en.wikipedia.org/wiki/Backchannel_(linguistics)).
 
