@@ -447,6 +447,44 @@ class MemoryConfig(BaseModel):
     dir: Path
 
 
+class FillerConfig(BaseModel):
+    """Masking reply latency with a pre-synthesized filled pause.
+
+    Off by default. When enabled, the phrases are synthesized in the
+    agent's own voice at boot and cached as PCM; a reply whose first
+    audio has not started within `delay_ms` of the utterance being
+    transcribed plays one, and the real reply queues behind its tail.
+    A synthesis failure at boot logs a warning and leaves the feature
+    off for that agent rather than failing the boot.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+
+    # How long the user hears silence before the filler starts, counted
+    # from the transcription (the `heard` event). Healthy replies get
+    # their first audio out around 1.2 s in the field data, so 1800 ms
+    # keeps ordinary turns filler-free while landing well before the
+    # 2 to 3 s of dead air where users start asking whether anyone is
+    # there.
+    delay_ms: float = Field(default=1800.0, gt=0)
+
+    # One or more phrases in the agent's own language; the player
+    # rotates through them rather than always playing the same one.
+    # Required when enabled: there is nothing to say otherwise.
+    phrases: list[NonBlankStr] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check_phrases(self) -> "FillerConfig":
+        if self.enabled and not self.phrases:
+            raise ValueError(
+                "filler.enabled is on with no phrases; add at least one, "
+                'for example "Hmm, let me see..."'
+            )
+        return self
+
+
 class AgentDefaults(BaseModel):
     """Provider references every agent inherits unless it names its own.
 
@@ -465,6 +503,12 @@ class AgentDefaults(BaseModel):
     # replaces rather than extends the inherited one, like the stage
     # fields, so an agent naming an empty list opts out of tools.
     mcp: list[NonBlankStr] | None = None
+
+    # Latency masking with a pre-synthesized filler clip. None means
+    # inherit; a section replaces the inherited one wholly, like the
+    # stage fields, so an agent naming its own phrases names all of
+    # them, and `filler: {enabled: false}` opts an agent out.
+    filler: FillerConfig | None = None
 
 
 class AgentConfig(AgentDefaults):
@@ -636,6 +680,15 @@ class Config(BaseSettings):
         if own is not None:
             return list(own)
         return list(self.agent_defaults.mcp or [])
+
+    def filler_for_agent(self, agent: str) -> FillerConfig | None:
+        """The filler section that applies to an agent: its own when it
+        names one, agent_defaults otherwise. A section replaces rather
+        than merges, so an agent's own phrases are all of its phrases."""
+        own = self.agents[agent].filler
+        if own is not None:
+            return own
+        return self.agent_defaults.filler
 
     def referenced_mcp_servers(self) -> set[str]:
         """The entries some agent actually uses. Only these are
