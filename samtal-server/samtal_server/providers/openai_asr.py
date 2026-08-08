@@ -44,7 +44,7 @@ import io
 import logging
 import wave
 
-from openai import APITimeoutError, AsyncOpenAI, Omit
+from openai import NOT_GIVEN, APITimeoutError, AsyncOpenAI, Omit
 
 from samtal_server.config.models import ProviderConfig
 from samtal_server.providers.base import AsrProvider, AsrResult, ProviderError
@@ -228,8 +228,12 @@ class OpenAiAsr(AsrProvider):
             prompt=prompt if prompt else Omit(),
             temperature=self._temperature if self._temperature is not None else Omit(),
             # The client's own timeout, unless this request is a retry
-            # living on what the first request left of it.
-            timeout=timeout_s if timeout_s is not None else Omit(),
+            # living on what the first request left of it. NOT_GIVEN,
+            # not Omit(): Omit is a serialization sentinel for request
+            # fields, and timeout is a client option, so an Omit here
+            # flows through the SDK into httpx as the literal connect
+            # timeout and fails every call at connect time (#75).
+            timeout=timeout_s if timeout_s is not None else NOT_GIVEN,
         )
         return response.text.strip()
 
