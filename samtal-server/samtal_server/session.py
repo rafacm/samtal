@@ -70,6 +70,7 @@ from samtal_server.capture import (
 )
 from samtal_server.config import Config
 from samtal_server.config.models import normalize_mac
+from samtal_server.filler import FillerClips
 from samtal_server.protocol import framing, messages
 from samtal_server.protocol import mcp as mcp_protocol
 from samtal_server.providers import (
@@ -314,6 +315,7 @@ class Session:
         memory: MemoryStore | None = None,
         captures: CaptureStore | None = None,
         device_facts: DeviceFacts | None = None,
+        fillers: dict[str, FillerClips] | None = None,
     ) -> None:
         self.websocket = websocket
         self.config = config
@@ -402,6 +404,16 @@ class Session:
         self._pace_resume = asyncio.Event()
         self._pace_resume.set()
         self._pace_paused_at: float | None = None
+        # The pre-synthesized filler clips, keyed by agent; empty means
+        # no agent masks its latency. One timer per turn, armed at the
+        # transcription: `_filler_sounding` flips the moment it fires,
+        # which is what lets the real reply's audio queue behind the
+        # clip's tail rather than interleave with it, and the fire
+        # counter is what rotates the phrase variants.
+        self._fillers = fillers if fillers is not None else {}
+        self._filler_task: asyncio.Task[None] | None = None
+        self._filler_sounding = False
+        self._filler_fires = 0
         # When this session last did any conversing, which is what the
         # idle timeout counts from. Set at the end of an utterance and at
         # the end of a reply, so "whichever is later" needs no
@@ -1467,12 +1479,25 @@ class Session:
                 logger.info("session %s: nothing transcribed", self.session_id)
             if transcript:
                 self._turns.append(Turn("user", transcript))
+                self._arm_filler()
                 await self._speak_reply(transcript, spoken)
         except (WebSocketDisconnect, RuntimeError):
             return  # the device went away mid-reply
+        except asyncio.CancelledError:
+            # A barge-in or an abort is cancelling this reply, and the
+            # filler is reply audio: it dies with the reply rather than
+            # being waited out. The settle below still awaits the
+            # cancellation through.
+            if self._filler_task is not None:
+                self._filler_task.cancel()
+            raise
         except Exception:
             logger.exception("session %s: reply failed", self.session_id)
         finally:
+            # Before the closing tts stop: an unfired timer is stood
+            # down, and a clip already sounding finishes rather than
+            # being cut mid-word by the stop.
+            await self._settle_filler()
             self._reply_pcm = None
             # The other end the idle timeout counts from. In the finally,
             # so a reply that failed or was cancelled still resets the
@@ -1511,6 +1536,113 @@ class Session:
             return
         self._tts_started = True
         await self.websocket.send_text(messages.tts_message(self.session_id, "start"))
+
+    def _arm_filler(self) -> None:
+        """Start this turn's latency mask, when the active agent has
+        one: a timer from the transcription that plays a cached filler
+        clip if the reply's first audio has not started in time.
+
+        Armed once per turn and never re-armed, so a first-token
+        watchdog retry does not earn a second filler: the filler is the
+        soft early threshold, the watchdog the hard late one, and a
+        stalled round hears one "let me see" before the watchdog gives
+        the round up."""
+        clips = self._fillers.get(self._agent or "")
+        if clips is None:
+            return
+        self._filler_sounding = False
+        armed_at = asyncio.get_running_loop().time()
+        self._filler_task = asyncio.create_task(
+            self._run_filler(clips.delay_ms / 1000, armed_at)
+        )
+
+    async def _run_filler(self, delay_s: float, armed_at: float) -> None:
+        """Wait out the delay, then mask the silence, unless the reply's
+        first audio arrived first.
+
+        The clip is chosen from the agent active at fire time, so a
+        handover already made is spoken in the voice now talking. It
+        goes out through the normal paced path: `_begin_speaking` moves
+        the device into its speaking state (once per reply, so the real
+        sentence that follows sends no second one), the frames land on
+        capture channel 1, and `speaking_started` fires on the clip's
+        first frame and counts as the turn's. No `sentence_start` is
+        sent: the filler is a noise that buys time, not a sentence of
+        the reply, and it stays out of the transcript everywhere.
+
+        A device that went away mid-clip ends the clip, not the
+        session; anything else unexpected is logged and swallowed,
+        because a broken mask must never break the reply it masks."""
+        await asyncio.sleep(delay_s)
+        if self._speaking_started:
+            return
+        clips = self._fillers.get(self._agent or "")
+        if clips is None:
+            return
+        # Claimed synchronously between the checks above and the first
+        # await below: from here `_filler_tail` waits for the clip's
+        # tail instead of cancelling the timer.
+        self._filler_sounding = True
+        index = self._filler_fires % len(clips.clips)
+        self._filler_fires += 1
+        elapsed_ms = round((asyncio.get_running_loop().time() - armed_at) * 1000)
+        logger.info(
+            "session %s: no reply audio after %d ms, playing filler %d",
+            self.session_id,
+            elapsed_ms,
+            index,
+            extra=self._event(
+                "filler_played",
+                agent=self._agent,
+                delay_ms=elapsed_ms,
+                phrase_index=index,
+            ),
+        )
+        try:
+            await self._begin_speaking()
+            resampler = Resampler(clips.sample_rate, OUTPUT_AUDIO.sample_rate)
+            packets = (
+                self._encoder.encode(resampler.process(clips.clips[index]))
+                + self._encoder.encode(resampler.flush())
+                + self._encoder.flush()
+            )
+            await self._send_frames(packets, from_filler=True)
+        except (WebSocketDisconnect, RuntimeError):
+            return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("session %s: filler playback failed", self.session_id)
+
+    async def _filler_tail(self) -> None:
+        """The reply's own audio is ready: an unfired timer loses (the
+        silence it was going to mask is over), and a clip already
+        sounding is waited out, so the first real sentence queues
+        behind its tail rather than interleaving with it or cutting it
+        mid-word."""
+        task = self._filler_task
+        if task is None or task.done():
+            return
+        if not self._filler_sounding:
+            task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    async def _settle_filler(self) -> None:
+        """End-of-reply cleanup, whatever path ended it: stand down an
+        unfired timer, wait out a clip still sounding (a reply that
+        failed silently still finishes its "let me see" before the
+        closing tts stop), and see a cancellation through so nothing
+        of this turn's filler outlives the turn."""
+        task = self._filler_task
+        self._filler_task = None
+        if task is None:
+            return
+        if not self._filler_sounding:
+            task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        self._filler_sounding = False
 
     async def _speak_reply(self, transcript: str, spoken: list[str]) -> None:
         """One reply, which may be spoken by more than one agent.
@@ -1909,12 +2041,19 @@ class Session:
         await self._speak(synthesis, resampler, leg)
         spoken.append(synthesis.sentence)
 
-    async def _send_frames(self, packets: list[bytes]) -> None:
+    async def _send_frames(self, packets: list[bytes], from_filler: bool = False) -> None:
         """Send Opus frames paced at the frame cadence, so a long reply
         cannot flood the device's playback queue. The clock starts at the
-        first frame of the reply, not at ASR time."""
+        first frame of the reply, not at ASR time.
+
+        Reply audio first yields to a filler in flight (`_filler_tail`),
+        so a clip that started sounding finishes and the reply queues
+        behind its tail; the filler's own frames skip the gate, which is
+        what keeps this from waiting on itself."""
         if not packets:
             return
+        if not from_filler:
+            await self._filler_tail()
         loop = asyncio.get_running_loop()
         if not self._speaking_started:
             # The `replied` event marks the last frame of a reply, so on
