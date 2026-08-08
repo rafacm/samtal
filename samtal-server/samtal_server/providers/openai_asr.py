@@ -39,6 +39,7 @@ exists to spare faster-whisper a constant encoder pass per utterance
 so there is nothing to spare.
 """
 
+import asyncio
 import io
 import logging
 import wave
@@ -183,6 +184,15 @@ class OpenAiAsr(AsrProvider):
         # never does, so in practice it is the configured language or
         # nothing.
         pinned = self._language or language_hint
+        text = await self._request(pcm, sample_rate, pinned, self._prompt)
+        if self._is_echoed_prompt(text):
+            text = await self._retry_without_prompt(pcm, sample_rate, pinned)
+        # Language fields stay empty: this provider does not detect.
+        return AsrResult(text=text)
+
+    async def _request(
+        self, pcm: bytes, sample_rate: int, pinned: str | None, prompt: str | None
+    ) -> str:
         response = await self._client.audio.transcriptions.create(
             file=(UPLOAD_NAME, wav_bytes(pcm, sample_rate), "audio/wav"),
             model=self._model,
@@ -192,19 +202,80 @@ class OpenAiAsr(AsrProvider):
             # docstring on language.
             response_format="json",
             language=pinned if pinned else Omit(),
-            prompt=self._prompt if self._prompt else Omit(),
+            prompt=prompt if prompt else Omit(),
             temperature=self._temperature if self._temperature is not None else Omit(),
         )
-        text = response.text.strip()
-        if self._is_echoed_prompt(text):
+        return response.text.strip()
+
+    async def _retry_without_prompt(
+        self, pcm: bytes, sample_rate: int, pinned: str | None
+    ) -> str:
+        """A second hearing for a clip whose transcript was the prompt
+        handed back.
+
+        The guard used to treat the echo as proof of silence, and the
+        field data says it is not: nine echoes in two days of testing,
+        every one on a clip of 0.78 to 1.92 s, two of them a user
+        answering "yes, please" and being ignored (#69). Short
+        acknowledgements are exactly the clips the model is most likely
+        to echo the prompt on, so the same audio is transcribed once
+        more with the prompt withheld: real speech transcribes fine
+        without the prompt's help, and real silence comes back empty
+        (or as another hallucination the guard still catches). Only
+        this suspicious path pays the second round trip, at roughly the
+        cost of the first one; the normal path is one request, as
+        before.
+
+        The #54 rationale stands: an exact echo of the prompt is never
+        handed to the session as an utterance, retried or not."""
+        duration_s = round(len(pcm) / 2 / sample_rate, 2)
+        logger.warning(
+            "openai asr: the transcript came back as the configured prompt, "
+            "retrying %.2f s of audio without it",
+            duration_s,
+        )
+        started = asyncio.get_running_loop().time()
+        retry = await self._request(pcm, sample_rate, pinned, None)
+        retry_ms = round((asyncio.get_running_loop().time() - started) * 1000)
+        if self._is_echoed_prompt(retry):
             logger.warning(
-                "openai asr: the transcript came back as the configured prompt, "
+                "openai asr: the retry came back as the prompt again, "
                 "treating %.2f s of audio as nothing said",
-                len(pcm) / 2 / sample_rate,
+                duration_s,
+                extra=self._echo_event("confirmed_echo", duration_s, retry_ms),
             )
-            return AsrResult(text="")
-        # Language fields stay empty: this provider does not detect.
-        return AsrResult(text=text)
+            return ""
+        if not retry:
+            logger.warning(
+                "openai asr: the retry came back empty, "
+                "treating %.2f s of audio as nothing said",
+                duration_s,
+                extra=self._echo_event("confirmed_empty", duration_s, retry_ms),
+            )
+            return ""
+        logger.info(
+            'openai asr: the retry recovered "%s" from %.2f s of audio '
+            "the echo guard would have discarded",
+            retry,
+            duration_s,
+            extra=self._echo_event("recovered", duration_s, retry_ms),
+        )
+        return retry
+
+    def _echo_event(self, outcome: str, duration_s: float, retry_ms: int) -> dict[str, object]:
+        """The structured half of a tripped guard's outcome: exactly one
+        `asr_prompt_echo` event per trip, so retained logs can say how
+        often the guard was swallowing real speech and what each retry
+        cost. No `session` or `device`: providers are shared singletons
+        with no session identity, so the event names the host instead,
+        like the entry it belongs to."""
+        return {
+            "event": "asr_prompt_echo",
+            "outcome": outcome,
+            "duration_s": duration_s,
+            "retry_ms": retry_ms,
+            "host": self.host,
+        }
 
     def _is_echoed_prompt(self, text: str) -> bool:
         """Whether the model handed the prompt back instead of hearing
