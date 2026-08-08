@@ -18,6 +18,7 @@ from samtal_server.providers.anthropic_llm import DEFAULT_MAX_TOKENS, resolve_ap
 from samtal_server.providers.base import (
     LlmEvent,
     LlmProvider,
+    StreamStarted,
     TextDelta,
     ToolCall,
     ToolChoice,
@@ -146,10 +147,17 @@ class OpenAiCompatibleLlm(LlmProvider):
 
         # Tool calls stream as fragments identified by their position in
         # the call list, so they are accumulated by index and yielded
-        # once the stream has ended.
+        # once the stream has ended. That buffering is why the first
+        # chunk off the wire is announced below: a round that streams
+        # only fragments would otherwise look, from outside, exactly
+        # like a request the server never answered (#68).
         pending: dict[int, dict[str, str]] = {}
         usage: Usage | None = None
+        started = False
         async for chunk in stream:
+            if not started:
+                started = True
+                yield StreamStarted()
             # The usage chunk is the last one and carries no choices,
             # which is why the guard below would otherwise skip it.
             if chunk.usage is not None:
