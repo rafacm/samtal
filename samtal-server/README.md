@@ -200,9 +200,17 @@ vocabulary makes that harmless noise. A prompt naming your agents makes
 it an instruction, and in a field session it was one: a 0.9 s utterance
 transcribed as `samtal, Oliver, Greta, Mateo`, and the model read the
 persona names as a request and handed over to an agent nobody had
-asked for. The server now discards a transcript that is the prompt and
+asked for. The server never hands a transcript that is the prompt and
 nothing else (trimmed, case-insensitive, and ignoring a full stop the
-model added), so the echo reaches nothing, but the rule stands anyway:
+model added) to the LLM as if spoken. Nor does it treat the echo as
+proof of silence, because a field test caught that reading swallowing
+real speech: nine echoes in two days of testing, every one on a clip
+under two seconds, two of them a user saying "yes, please" and being
+ignored.
+An echoed clip is transcribed once more with the prompt withheld; a
+real short answer survives that retry and is heard normally, genuine
+silence comes back empty and is discarded, and each trip logs one
+`asr_prompt_echo` event saying which it was. The rule stands anyway:
 wake words, agent names and anything imperative do not belong here.
 Recognising a persona's name when it is genuinely spoken is worth less
 than never acting on one that was not.
@@ -934,6 +942,7 @@ and `device`, plus its own:
 | `barge_in_merged`  | an interruption merges with the utterance the reply was transcribing | `speech_ms` |
 | `llm_round`        | a generation call finishes      | `agent`, `round`, `turns`, `duration_ms`, `stage`, `provider`, `type`, `host`, `first_token_ms` (the first spoken token, so a round that only called a tool carries none), plus `prompt_tokens` and `completion_tokens` where the provider reports them |
 | `llm_retry`        | the first-token watchdog cancels a stalled generation and retries the round once | `agent`, `round`, `duration_ms`, `stage`, `provider`, `type`, `host` |
+| `asr_prompt_echo`  | a transcript came back as the ASR prompt and the clip was retried once without it (no session or device: providers serve them all) | `outcome` (`recovered`: the retry's transcript is heard, `confirmed_empty`: the retry heard nothing, `confirmed_echo`: the prompt again), `duration_s`, `retry_ms`, `host` |
 | `provider_failed`  | an ASR, LLM or TTS call fails; a round whose retry also stalled carries `error: FirstTokenTimeout` | `stage`, `provider`, `type`, `host`, `error`, `duration_ms`, `agent` |
 | `tool_call`        | a tool returns                  | `agent`, `tool`, `duration_ms`, `is_error` |
 | `session_limit`    | the duration cap fires          | `duration_s`                       |
