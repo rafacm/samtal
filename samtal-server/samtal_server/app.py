@@ -9,6 +9,7 @@ from samtal_server.auth import build_device_auth
 from samtal_server.build_info import revision
 from samtal_server.capture import CaptureStore, DeviceFacts
 from samtal_server.config import Config, load_config
+from samtal_server.filler import build_agent_fillers
 from samtal_server.providers import build_agent_providers
 from samtal_server.registry import SessionRegistry
 from samtal_server.tools.mcp import McpServers
@@ -21,7 +22,16 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Connect the configured MCP servers while the app runs, and close
     them on the way out so stdio child processes do not outlive the
-    server. A server that will not connect only logs a warning."""
+    server. A server that will not connect only logs a warning.
+
+    The filler clips are synthesized here rather than in create_app
+    because synthesis is async and create_app is not: startup is still
+    before the first conversation, which is what "at boot" is for. An
+    agent whose synthesis fails runs with the feature off rather than
+    failing the boot."""
+    app.state.agent_fillers.update(
+        await build_agent_fillers(app.state.config, app.state.agent_providers)
+    )
     await app.state.mcp_servers.start_all()
     try:
         yield
@@ -59,6 +69,9 @@ def create_app(config: Config | None = None) -> FastAPI:
     # reference or an unset secret is a boot failure, being unreachable
     # is not.
     app.state.agent_providers = build_agent_providers(app.state.config)
+    # Filled at startup by the lifespan above, since synthesis is async;
+    # empty means no agent masks its latency, which is the default.
+    app.state.agent_fillers = {}
     app.state.mcp_servers = McpServers.build(app.state.config)
     # Absent memory configuration means no remember tool and no
     # injection; the directory itself is created on the first write.
