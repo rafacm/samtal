@@ -7,6 +7,20 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-08-08
 
+### Fixed
+
+- Every cloud ASR call failing at connect time on the build carrying
+  the echo retry (#75). The retry work passed `Omit()` as the
+  per-request timeout on the ordinary path, matching the idiom of the
+  neighbouring form fields; but timeout is a client option, `Omit` is
+  not a `NotGiven` to the SDK, and the sentinel instance reached httpx
+  as the literal connect timeout, failing every transcription in
+  milliseconds. The fix is the SDK's `NOT_GIVEN` sentinel, plus a
+  regression test pinning that every timeout value reaching the
+  transport layer is a real number, which is the class of check a mock
+  transport can actually make (it never connects, which is how the
+  suite and a green deploy verification both missed the bug).
+
 ### Added
 
 - Two reference pages in `docs/`, distilled from the first field-test
