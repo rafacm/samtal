@@ -894,6 +894,17 @@ budget its socket is still closed politely, but the drain logs
 `drain_incomplete` with `cut_mid_reply`, which is the signal that
 `drain_s` is too short for the replies this server gives.
 
+**A stalled generation is retried, then dropped.** An LLM that produces
+no first token within `llm_first_token_timeout_s` (ten seconds by
+default) has its request cancelled and the round retried once, logged
+as `llm_retry`; a second stall gives the round up as a
+`provider_failed` with `error: FirstTokenTimeout` and the session goes
+back to listening, so the worst a stalled provider can cost is one
+silent turn. Only the wait for the first token is bounded: a long reply
+that is already streaming runs to the end, and barging in still cancels
+a stalled round the way it cancels anything else. The reasoning behind
+the default is in `config.example.yaml`.
+
 ## Logging
 
 Two formats, one handler:
@@ -921,7 +932,8 @@ and `device`, plus its own:
 | `barge_in_suppressed` | an interruption is dropped and the reply lives | `reason` (`min_speech`, `refractory`, `no_transcript`), `speech_ms` |
 | `barge_in_merged`  | an interruption merges with the utterance the reply was transcribing | `speech_ms` |
 | `llm_round`        | a generation call finishes      | `agent`, `round`, `turns`, `duration_ms`, `stage`, `provider`, `type`, `host`, `first_token_ms` (the first spoken token, so a round that only called a tool carries none), plus `prompt_tokens` and `completion_tokens` where the provider reports them |
-| `provider_failed`  | an ASR, LLM or TTS call fails   | `stage`, `provider`, `type`, `host`, `error`, `duration_ms`, `agent` |
+| `llm_retry`        | the first-token watchdog cancels a stalled generation and retries the round once | `agent`, `round`, `duration_ms`, `stage`, `provider`, `type`, `host` |
+| `provider_failed`  | an ASR, LLM or TTS call fails; a round whose retry also stalled carries `error: FirstTokenTimeout` | `stage`, `provider`, `type`, `host`, `error`, `duration_ms`, `agent` |
 | `tool_call`        | a tool returns                  | `agent`, `tool`, `duration_ms`, `is_error` |
 | `session_limit`    | the duration cap fires          | `duration_s`                       |
 | `session_idle`     | the idle timeout hangs up on a realtime session | `idle_s`, `duration_s`     |
