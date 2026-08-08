@@ -330,6 +330,102 @@ async def test_an_entry_with_no_prompt_suppresses_nothing() -> None:
     assert (await asr.transcribe(ONE_SECOND, 16000)).text == "samtal"
 
 
+# --- the retry behind the echo guard (#69) ---------------------------
+
+
+async def test_an_echo_is_retried_without_the_prompt_and_the_retry_is_heard(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The field test behind #69: a user answers "yes, please", the
+    model echoes the prompt, and the guard used to treat the echo as
+    proof of silence. The same clip transcribes fine without the
+    prompt's help, so the retry's transcript is the one the session
+    hears."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        text = "samtal, Oliver" if len(seen) == 1 else "Yes, please."
+        return httpx.Response(200, json={"text": text})
+
+    asr = provider(handler, prompt="samtal, Oliver", language="sv", temperature=0.2)
+    with caplog.at_level("INFO"):
+        result = await asr.transcribe(ONE_SECOND, 16000)
+
+    assert result.text == "Yes, please."
+    assert len(seen) == 2
+    # The retry withholds only the prompt; the pinned language and the
+    # temperature still steer the second hearing like the first.
+    assert form_field(seen[0], "prompt") == "samtal, Oliver"
+    assert form_field(seen[1], "prompt") is None
+    assert form_field(seen[1], "language") == "sv"
+    assert form_field(seen[1], "temperature") == "0.2"
+    (event,) = [r for r in caplog.records if getattr(r, "event", None) == "asr_prompt_echo"]
+    assert event.outcome == "recovered"  # type: ignore[attr-defined]
+    assert event.duration_s == 1.0  # type: ignore[attr-defined]
+
+
+async def test_a_retry_that_echoes_again_confirms_nothing_was_said(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"text": "samtal, Oliver"})
+
+    asr = provider(handler, prompt="samtal, Oliver")
+    with caplog.at_level("INFO"):
+        result = await asr.transcribe(ONE_SECOND, 16000)
+
+    assert result.text == ""
+    assert len(seen) == 2
+    (event,) = [r for r in caplog.records if getattr(r, "event", None) == "asr_prompt_echo"]
+    assert event.outcome == "confirmed_echo"  # type: ignore[attr-defined]
+
+
+async def test_a_retry_that_comes_back_empty_confirms_the_silence(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Genuine silence or noise transcribes to nothing once the prompt
+    is withheld, which is the guard's original story confirmed."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        text = "samtal, Oliver" if len(seen) == 1 else ""
+        return httpx.Response(200, json={"text": text})
+
+    asr = provider(handler, prompt="samtal, Oliver")
+    with caplog.at_level("INFO"):
+        result = await asr.transcribe(ONE_SECOND, 16000)
+
+    assert result.text == ""
+    assert len(seen) == 2
+    (event,) = [r for r in caplog.records if getattr(r, "event", None) == "asr_prompt_echo"]
+    assert event.outcome == "confirmed_empty"  # type: ignore[attr-defined]
+
+
+async def test_a_transcript_that_is_not_the_prompt_is_never_retried(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Only the tripped guard pays for a second round trip; the normal
+    path stays one request per utterance."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"text": "Hej hej"})
+
+    asr = provider(handler, prompt="samtal, Oliver")
+    with caplog.at_level("INFO"):
+        result = await asr.transcribe(ONE_SECOND, 16000)
+
+    assert result.text == "Hej hej"
+    assert len(seen) == 1
+    assert not [r for r in caplog.records if getattr(r, "event", None) == "asr_prompt_echo"]
+
+
 async def test_no_language_is_reported_and_no_session_lock_is_asked_for() -> None:
     """The response carries no usable language and no confidence at all,
     so the fields stay empty rather than echoing the configuration back
