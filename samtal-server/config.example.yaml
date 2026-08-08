@@ -157,7 +157,9 @@ server:
   # round up cleanly: the failure is a silent turn, never a session
   # stuck in replying. Only the wait for the first token is bounded;
   # a long reply that is already streaming is healthy and runs as long
-  # as it runs. The default is set against field data: healthy first
+  # as it runs, and any sign of the stream delivering counts, so a
+  # round that streams nothing but a tool call is not mistaken for a
+  # stall. The default is set against field data: healthy first
   # tokens cluster at 500 to 800 ms, the worst spike that still
   # answered was 8.9 s, and the one pathological stall observed sat at
   # 17 s with nothing on the wire. Ten seconds clears every healthy

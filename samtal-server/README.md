@@ -894,16 +894,17 @@ budget its socket is still closed politely, but the drain logs
 `drain_incomplete` with `cut_mid_reply`, which is the signal that
 `drain_s` is too short for the replies this server gives.
 
-**A stalled generation is retried, then dropped.** An LLM that produces
-no first token within `llm_first_token_timeout_s` (ten seconds by
-default) has its request cancelled and the round retried once, logged
-as `llm_retry`; a second stall gives the round up as a
+**A stalled generation is retried, then dropped.** An LLM whose stream
+shows no sign of life within `llm_first_token_timeout_s` (ten seconds
+by default) has its request cancelled and the round retried once,
+logged as `llm_retry`; a second stall gives the round up as a
 `provider_failed` with `error: FirstTokenTimeout` and the session goes
 back to listening, so the worst a stalled provider can cost is one
-silent turn. Only the wait for the first token is bounded: a long reply
-that is already streaming runs to the end, and barging in still cancels
-a stalled round the way it cancels anything else. The reasoning behind
-the default is in `config.example.yaml`.
+silent turn. Only the wait for the stream to begin is bounded: a long
+reply that is already streaming runs to the end, a round that streams
+nothing but a tool call counts as delivering too, and barging in still
+cancels a stalled round the way it cancels anything else. The
+reasoning behind the default is in `config.example.yaml`.
 
 ## Logging
 

@@ -233,7 +233,10 @@ class ServerConfig(BaseModel):
     # How long the LLM may take to its first token before the round is
     # cancelled and retried once; a second timeout gives the round up.
     # Only the wait for the first token is bounded, because a long
-    # generation that is streaming is healthy. The default is chosen
+    # generation that is streaming is healthy. Any stream activity
+    # stops the clock: the adapters announce their first chunk off the
+    # wire, so a round that streams only a buffered tool call is not
+    # mistaken for a stall. The default is chosen
     # against field data: healthy first tokens cluster at 500 to 800 ms,
     # the worst spike that still answered sat at 8.9 s, and the stall
     # this exists for held the session for 17 s with nothing on the

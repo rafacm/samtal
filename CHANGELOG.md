@@ -21,11 +21,14 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   same field data says answers quickly; a second stall gives the round
   up as a `provider_failed` event with `error: FirstTokenTimeout` and
   the session returns to listening, so the failure mode is a silent
-  turn rather than a wedged session. Only the wait for the first token
-  is bounded: a long generation that is already streaming is healthy
-  and runs to the end, and barge-in keeps working through the whole
-  watchdog window exactly as before. The retry is its own structured
-  event, `llm_retry`, documented in the server README's event table.
+  turn rather than a wedged session. Only the wait for the stream to
+  begin is bounded: a long generation that is already streaming is
+  healthy and runs to the end, the provider adapters announce their
+  first chunk off the wire so a round that streams nothing but a
+  buffered tool call (a handover does) is not mistaken for a stall,
+  and barge-in keeps working through the whole watchdog window exactly
+  as before. The retry is its own structured event, `llm_retry`,
+  documented in the server README's event table.
 
 ## 2026-08-07
 
