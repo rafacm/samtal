@@ -1,0 +1,189 @@
+"""The first-token watchdog on the LLM round.
+
+A provider that stalls before its first token used to freeze the
+pipeline for as long as it cared to take: nothing bounded the gap
+between sending the request and the first byte of the answer, so a 17 s
+stall held the session in replying, deaf to a user who politely waits,
+until a barge-in rescued it (#68). The watchdog bounds only that gap:
+one timeout cancels the request and retries the round once, a second
+gives the round up as a silent turn, and a generation that is already
+streaming is never touched, however long it runs.
+
+These tests drive the reply directly against an LLM whose first-token
+delay is written down per call, with the timeout shrunk to test scale.
+"""
+
+import asyncio
+import json
+from collections.abc import AsyncIterator, Sequence
+from typing import Any, cast
+
+import pytest
+
+from samtal_server.providers import (
+    LlmEvent,
+    LlmProvider,
+    TextDelta,
+    ToolChoice,
+    ToolDef,
+    Turn,
+)
+from tests.unit.test_session import RecordingSocket
+from tests.unit.test_session_events import events, only
+from tests.unit.test_session_tools import POET_MAC, base_config, run_reply, session_for
+
+# Well past the test-scale timeout below, never actually waited out:
+# the watchdog cancels the sleep.
+STALL_S = 30.0
+
+TIMEOUT_S = 0.05
+
+
+class StallingLlm(LlmProvider):
+    """A model whose first token takes a scripted time to arrive, per
+    call: the delays list is consumed one per stream, the last entry
+    repeating. What follows the delay is a healthy one-sentence
+    reply."""
+
+    def __init__(self, delays: Sequence[float], reply: str = "Recovered now.") -> None:
+        self.delays = list(delays)
+        self.calls = 0
+        self._reply = reply
+
+    async def stream(
+        self,
+        system: str,
+        turns: Sequence[Turn],
+        tools: Sequence[ToolDef] = (),
+        tool_choice: ToolChoice = "auto",
+    ) -> AsyncIterator[LlmEvent]:
+        delay = self.delays[min(self.calls, len(self.delays) - 1)]
+        self.calls += 1
+        await asyncio.sleep(delay)
+        for index, word in enumerate(self._reply.split(" ")):
+            yield TextDelta(word if index == 0 else " " + word)
+
+
+class DribblingLlm(LlmProvider):
+    """A model whose first token is instant and whose later tokens each
+    take several watchdog windows: the healthy long generation the
+    timeout must not kill."""
+
+    def __init__(self, words: Sequence[str], gap_s: float) -> None:
+        self._words = list(words)
+        self._gap_s = gap_s
+        self.calls = 0
+
+    async def stream(
+        self,
+        system: str,
+        turns: Sequence[Turn],
+        tools: Sequence[ToolDef] = (),
+        tool_choice: ToolChoice = "auto",
+    ) -> AsyncIterator[LlmEvent]:
+        self.calls += 1
+        yield TextDelta(self._words[0])
+        for word in self._words[1:]:
+            await asyncio.sleep(self._gap_s)
+            yield TextDelta(" " + word)
+
+
+def watchdog_config(timeout_s: float = TIMEOUT_S):
+    return base_config(server={"llm_first_token_timeout_s": timeout_s})
+
+
+async def test_a_stalled_first_token_is_retried_and_the_retry_answers(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The gap A shape: the first request stalls, the retry answers with
+    a healthy first token, and the user hears the reply late rather
+    than never."""
+    llm = StallingLlm(delays=[STALL_S, 0.0])
+    session = session_for(watchdog_config(), POET_MAC, {"poet": cast(Any, llm)})
+    with caplog.at_level("INFO"):
+        spoken = await run_reply(session, "are you there")
+
+    assert spoken == ["Recovered now."]
+    assert llm.calls == 2
+    retried = only(caplog, "llm_retry")
+    assert retried.agent == "poet"
+    assert retried.round == 1
+    assert retried.stage == "llm"
+    assert retried.provider == "mock"
+    assert retried.duration_ms >= TIMEOUT_S * 1000
+    assert events(caplog, "provider_failed") == []
+    # One llm_round for the whole retried round, its duration carrying
+    # the wasted first attempt.
+    assert only(caplog, "llm_round").round == 1
+
+
+async def test_a_second_stall_gives_the_round_up_and_the_session_keeps_listening(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Both attempts stall: the round is given up as the provider's
+    failure, the reply still closes with its tts stop (which is what
+    re-arms an auto-mode device), and a realtime session is still
+    listening. A silent turn, not a wedged session."""
+    llm = StallingLlm(delays=[STALL_S])
+    session = session_for(watchdog_config(), POET_MAC, {"poet": cast(Any, llm)})
+    socket = RecordingSocket()
+    session.websocket = cast(Any, socket)
+    session._listen_mode = "realtime"
+    session.listening = True
+
+    with caplog.at_level("INFO"):
+        session._reply_task = asyncio.create_task(session._reply(b"\x00\x00" * 320))
+        await session._reply_task
+
+    assert llm.calls == 2
+    assert only(caplog, "llm_retry").round == 1
+    failed = only(caplog, "provider_failed")
+    assert failed.stage == "llm"
+    assert failed.error == "FirstTokenTimeout"
+    assert failed.agent == "poet"
+    assert "timed out" in failed.getMessage()
+    # The reply ended cleanly: not replying, still listening, and the
+    # closing tts stop went out for the device that waits on it.
+    assert not session._replying()
+    assert session.listening is True
+    last = json.loads(socket.texts[-1])
+    assert (last["type"], last["state"]) == ("tts", "stop")
+
+
+async def test_a_slow_generation_that_is_streaming_is_not_killed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The timeout covers only time to first token. A reply whose every
+    later token takes several watchdog windows is healthy (the observed
+    17.7 s story round had a 635 ms first token) and runs to the end."""
+    llm = DribblingLlm(["A", "slow", "but", "healthy", "story."], gap_s=TIMEOUT_S * 4)
+    session = session_for(watchdog_config(), POET_MAC, {"poet": cast(Any, llm)})
+    with caplog.at_level("INFO"):
+        spoken = await run_reply(session, "tell me a story")
+
+    assert spoken == ["A slow but healthy story."]
+    assert llm.calls == 1
+    assert events(caplog, "llm_retry") == []
+    assert events(caplog, "provider_failed") == []
+
+
+async def test_a_cancel_during_the_watchdog_window_still_lands(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Barge-in is the rescue path the field incident actually used, and
+    it must keep working while the watchdog waits: cancelling the reply
+    task ends the wait at once, with no retry and no failure event."""
+    llm = StallingLlm(delays=[STALL_S])
+    session = session_for(watchdog_config(timeout_s=30.0), POET_MAC, {"poet": cast(Any, llm)})
+    socket = RecordingSocket()
+    session.websocket = cast(Any, socket)
+
+    with caplog.at_level("INFO"):
+        session._reply_task = asyncio.create_task(session._reply(b"\x00\x00" * 320))
+        await asyncio.sleep(0.05)
+        await session._cancel_reply()
+
+    assert llm.calls == 1
+    assert not session._replying()
+    assert events(caplog, "llm_retry") == []
+    assert events(caplog, "provider_failed") == []
