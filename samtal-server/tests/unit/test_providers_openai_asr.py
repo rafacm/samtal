@@ -8,6 +8,7 @@ how well it hears and what the round trip costs, which is the PR's
 real-API verification step.
 """
 
+import asyncio
 import io
 import wave
 
@@ -16,7 +17,7 @@ import pytest
 from openai import APIStatusError, AsyncOpenAI
 
 from samtal_server.config.models import ProviderConfig
-from samtal_server.providers import ProviderError, build_provider
+from samtal_server.providers import ProviderError, build_provider, openai_asr
 from samtal_server.providers.openai_asr import OpenAiAsr
 
 # One 16 kHz second of s16le silence, comfortably over the API minimum.
@@ -478,12 +479,54 @@ async def test_an_echo_with_no_budget_left_is_not_retried(
     assert not hasattr(event, "retry_ms")
 
 
+async def test_the_deadline_is_absolute_rather_than_per_connection_phase(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The SDK's timeout argument is an httpx timeout, which is per
+    phase: passed alone, the retry could spend the remaining budget on
+    each of connect, write and read. The asyncio deadline around the
+    request is what makes the budget end to end, so a retry that keeps
+    one phase alive without answering is still cut off when the shared
+    budget runs out. The mock transport enforces no httpx timeout at
+    all, so this test hangs for the whole sleep if the absolute
+    deadline is ever removed."""
+    calls = 0
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(200, json={"text": "samtal, Oliver"})
+        # Far longer than the whole budget, inside what would be a
+        # single read phase.
+        await asyncio.sleep(30)
+        return httpx.Response(200, json={"text": "never delivered"})
+
+    # A tiny budget keeps the test fast; the floor comes down with it
+    # so the retry is still sent rather than skipped.
+    monkeypatch.setattr(openai_asr, "RETRY_FLOOR_S", 0.0)
+    asr = provider(handler, prompt="samtal, Oliver", timeout_s=0.05)
+    loop = asyncio.get_running_loop()
+    with caplog.at_level("INFO"):
+        started = loop.time()
+        result = await asr.transcribe(ONE_SECOND, 16000)
+        elapsed = loop.time() - started
+
+    assert result.text == ""
+    assert calls == 2
+    assert elapsed < 1.0
+    (event,) = [r for r in caplog.records if getattr(r, "event", None) == "asr_prompt_echo"]
+    assert event.outcome == "timed_out"  # type: ignore[attr-defined]
+
+
 async def test_a_retry_cut_off_by_the_deadline_discards_rather_than_fails(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """The reply a timed-out retry would end is one the guard was about
     to end anyway, so the timeout is the discarding outcome rather than
-    an error surfaced to the session."""
+    an error surfaced to the session. Raised by the transport here, so
+    this pins the SDK's own timeout class beside the asyncio deadline
+    the test above pins."""
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
