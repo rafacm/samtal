@@ -282,8 +282,19 @@ class OpenAiAsr(AsrProvider):
         )
         started = loop.time()
         try:
-            retry = await self._request(pcm, sample_rate, pinned, None, timeout_s=remaining_s)
-        except APITimeoutError:
+            # The asyncio deadline is what makes the budget absolute.
+            # The SDK's timeout argument is an httpx timeout, which is
+            # per phase: remaining_s passed there alone would let the
+            # retry spend that long on each of connect, write and read,
+            # exceeding the shared budget end to end. The per-request
+            # override is still passed as belt and braces, so the
+            # request machinery gives up on its own where it can rather
+            # than being cancelled mid-phase.
+            async with asyncio.timeout(remaining_s):
+                retry = await self._request(
+                    pcm, sample_rate, pinned, None, timeout_s=remaining_s
+                )
+        except (TimeoutError, APITimeoutError):
             retry_ms = round((loop.time() - started) * 1000)
             logger.warning(
                 "openai asr: the retry outran the timeout's remaining %.1f s, "
