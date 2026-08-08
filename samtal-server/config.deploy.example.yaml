@@ -68,6 +68,16 @@ server:
   # barge_in_min_speech_ms: 500
   # barge_in_refractory_ms: 1000
 
+  # How long the LLM may take to its first token before the round is
+  # cancelled and retried once; a second timeout ends the round as a
+  # silent turn instead of a session stuck in replying. Only the wait
+  # for the first token is bounded; a long reply already streaming is
+  # healthy. The default clears every healthy round measured in the
+  # field (first tokens cluster at 500 to 800 ms, worst spike 8.9 s)
+  # and cuts the 17 s stalls this exists for. The reasoning behind the
+  # number is in config.example.yaml.
+  # llm_first_token_timeout_s: 10
+
   # Minutes east of UTC, for devices that should show local time. A
   # fixed offset, not a zone: it goes stale at every DST change.
   # Unset, the server's own current offset applies.

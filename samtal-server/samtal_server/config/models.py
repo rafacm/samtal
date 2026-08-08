@@ -230,6 +230,16 @@ class ServerConfig(BaseModel):
     # dropped before transcription (#14).
     utterance_pre_roll_ms: float = Field(default=300.0, ge=0)
 
+    # How long the LLM may take to its first token before the round is
+    # cancelled and retried once; a second timeout gives the round up.
+    # Only the wait for the first token is bounded, because a long
+    # generation that is streaming is healthy. The default is chosen
+    # against field data: healthy first tokens cluster at 500 to 800 ms,
+    # the worst spike that still answered sat at 8.9 s, and the stall
+    # this exists for held the session for 17 s with nothing on the
+    # wire (#68).
+    llm_first_token_timeout_s: float = Field(default=10.0, gt=0)
+
     # How long a shutdown waits for conversations in flight to finish
     # speaking before the process goes. Twenty seconds sits inside the
     # thirty an orchestrator commonly allows between SIGTERM and SIGKILL;
