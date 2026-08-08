@@ -1538,22 +1538,37 @@ class Session:
         await self.websocket.send_text(messages.tts_message(self.session_id, "start"))
 
     def _arm_filler(self) -> None:
-        """Start this turn's latency mask, when the active agent has
-        one: a timer from the transcription that plays a cached filler
-        clip if the reply's first audio has not started in time.
+        """Start this turn's latency mask, when any agent this session
+        could become has one: a timer from the transcription that plays
+        a cached filler clip if the reply's first audio has not started
+        in time.
+
+        Any bound agent, not just the active one, because a handover
+        mid-turn can move the conversation to an agent with fillers
+        before the reply first speaks: armed only for the starting
+        agent, a filler-less receptionist handing over to a masked
+        specialist would leave the specialist's slow greeting unmasked
+        even though the fire-time lookup already resolves the active
+        agent. The delay is the active agent's own where it has one,
+        and the earliest configured among the bound agents otherwise;
+        at fire time an active agent with no clip quietly plays
+        nothing. A session bound only to filler-less agents still
+        skips the timer entirely.
 
         Armed once per turn and never re-armed, so a first-token
         watchdog retry does not earn a second filler: the filler is the
         soft early threshold, the watchdog the hard late one, and a
         stalled round hears one "let me see" before the watchdog gives
         the round up."""
-        clips = self._fillers.get(self._agent or "")
-        if clips is None:
+        reachable = [self._fillers[name] for name in self._agents if name in self._fillers]
+        if not reachable:
             return
+        own = self._fillers.get(self._agent or "")
+        delay_ms = own.delay_ms if own is not None else min(c.delay_ms for c in reachable)
         self._filler_sounding = False
         armed_at = asyncio.get_running_loop().time()
         self._filler_task = asyncio.create_task(
-            self._run_filler(clips.delay_ms / 1000, armed_at)
+            self._run_filler(delay_ms / 1000, armed_at)
         )
 
     async def _run_filler(self, delay_s: float, armed_at: float) -> None:
@@ -1561,7 +1576,9 @@ class Session:
         first audio arrived first.
 
         The clip is chosen from the agent active at fire time, so a
-        handover already made is spoken in the voice now talking. It
+        handover already made is spoken in the voice now talking, and
+        an active agent with no clips of its own plays nothing,
+        quietly: no event, no state, the turn proceeds unmasked. It
         goes out through the normal paced path: `_begin_speaking` moves
         the device into its speaking state (once per reply, so the real
         sentence that follows sends no second one), the frames land on

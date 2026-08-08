@@ -192,6 +192,69 @@ async def test_the_filler_speaks_in_the_active_agents_voice_after_a_handover(
     assert played.phrase_index % len(fillers["tutor"].clips) == 0
 
 
+def half_masked_config(delay_ms: float = DELAY_MS) -> Config:
+    """The asymmetric shape the arming rule exists for: the poet has no
+    filler, the tutor does."""
+    config = masked_config(delay_ms)
+    return base_config(
+        providers=config.providers.model_dump(exclude_none=True),
+        agents={
+            "poet": {"prompt": "POET", "tts": "tenor"},
+            "tutor": {
+                "prompt": "TUTOR",
+                "tts": "alto",
+                "filler": {
+                    "enabled": True,
+                    "delay_ms": delay_ms,
+                    "phrases": ["Hmm, mal überlegen..."],
+                },
+            },
+        },
+    )
+
+
+async def test_a_handover_from_a_fillerless_agent_still_masks_the_new_voice(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The timer is armed when any bound agent has fillers, not just
+    the starting one: a filler-less poet hands over immediately, the
+    tutor's greeting stalls, and the fire finds the tutor active and
+    plays its clip."""
+    config = half_masked_config()
+    scripts = {
+        "poet": ScriptedLlm([[call("switch_agent", agent="tutor")]]),
+        "tutor": StallingLlm([STALL_S]),
+    }
+    session = await masked_session(config, BOTH_MAC, cast(Any, scripts))
+    with caplog.at_level("INFO"):
+        await session._reply(UTTERANCE)
+
+    played = only(caplog, "filler_played")
+    assert played.agent == "tutor"
+    only(caplog, "speaking_started")
+    assert only(caplog, "replied").text == "Recovered now."
+
+
+async def test_a_fire_on_an_agent_without_clips_quietly_plays_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The tutor being bound arms the timer, but the poet stays active
+    and has no clip, so the fire does nothing: no audio, no event, no
+    state left behind, and the turn proceeds normally."""
+    session = await masked_session(
+        half_masked_config(), BOTH_MAC, {"poet": StallingLlm([STALL_S])}
+    )
+    with caplog.at_level("INFO"):
+        await session._reply(UTTERANCE)
+
+    assert events(caplog, "filler_played") == []
+    only(caplog, "speaking_started")
+    assert only(caplog, "replied").text == "Recovered now."
+    assert session._filler_task is None
+    assert session._filler_sounding is False
+    assert session._filler_fires == 0
+
+
 async def test_the_feature_is_off_by_default(caplog: pytest.LogCaptureFixture) -> None:
     """A config with no filler section builds no clips, and a session
     without any masks nothing however slow the reply."""
