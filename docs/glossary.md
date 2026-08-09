@@ -1,6 +1,6 @@
 # Glossary
 
-**Date:** 2026-08-08
+**Date:** 2026-08-09
 
 The concepts, techniques, and technologies this project is built on:
 a short definition of each as samtal uses it, with pointers for going
@@ -66,6 +66,15 @@ track (JSONL), and a manifest (JSON). Off by default; recording room
 audio is a deliberate, temporary state. See
 [the regression suite page](conversational-quality-regression-suite.md).
 
+### Continuation
+
+The rest of a user's sentence, arriving after the endpointer
+wrongly declared the sentence over at a thinking pause. By the time
+it arrives, a reply to the fragment is already in flight, so the
+pipeline can only see the continuation as a barge-in attempt against
+that reply; whether it survives the gate ladder decides whether the
+user gets to finish their own thought.
+
 ### Conversational filler
 
 A short utterance that buys time in a
@@ -114,6 +123,20 @@ to the full generation time. A round that streams nothing at all is
 a stall; the first-token watchdog bounds that wait, retries once,
 and gives the round up as a silent turn rather than a wedged
 session.
+
+### Gate ladder
+
+The ordered checks an endpointed utterance passes before it may
+cancel a reply in flight: minimum classified speech (a noise blip
+cancels nothing), a merge when the reply is still inside ASR (that
+reply was transcribing the head of the user's own sentence), the
+refractory period, and transcript confirmation (pause the outgoing
+frames, run ASR, cancel only on a non-empty transcript). Each
+suppressed attempt logs which gate stopped it (`barge_in_suppressed`
+with a reason). The ladder enforces
+[the barge-in ADR](adr/2026-08-05-replies-cancel-only-on-evidence-of-speech.md):
+acoustics alone can at most pause a reply; only evidence of user
+speech cancels it.
 
 ### Handover
 
@@ -187,6 +210,18 @@ Raw uncompressed audio samples, the working format between
 pipeline stages once Opus is decoded: 16-bit mono, 16 kHz on the
 input side.
 
+### Premature endpoint
+
+The endpointer declaring an utterance over at a pause that was
+thinking rather than turn-yielding. Visible in the logs as `heard`
+transcripts that trail off ("I'm here with my..."): the ASR itself
+marks the trail-off with an ellipsis. Each one starts a reply to a
+fragment and turns the user's continuation into a barge-in attempt
+against it. Dictation-style speech (telling an agent things to
+remember) pauses longer between clauses than question-answer
+exchanges do, which is what makes the trailing-silence bound a
+per-conversation tradeoff rather than a constant.
+
 ### Pre-roll
 
 A short stretch of audio kept from before the VAD's
@@ -205,7 +240,9 @@ short utterance was behind it (issues #54, #69).
 
 The window right after the assistant starts
 speaking during which barge-in attempts are suppressed, absorbing
-the acoustic aftermath of the user's own previous utterance.
+the acoustic aftermath of the user's own previous utterance. One
+rung of the gate ladder; its cost is that a continuation which
+endpoints inside the window is discarded with it.
 
 ### Sentence lookahead
 
@@ -214,6 +251,15 @@ current one plays, removing the dead air that otherwise appears at
 every sentence boundary of a multi-sentence reply (issue #37). The
 subtlety is ownership: a synthesized-ahead sentence belongs to the
 agent leg that started it, which matters across a handover.
+
+### Structured event
+
+A named JSONL record the server emits at each conversational
+decision point (`heard`, `barge_in`, `barge_in_suppressed`,
+`filler_played`, `llm_round`, ...), carrying the numbers behind the
+decision (`speech_ms`, `delay_ms`, a suppression's reason). The
+event stream is what field analysis reconstructs timelines from; a
+capture's event track is the same stream scoped to one session.
 
 ### Trailing silence
 

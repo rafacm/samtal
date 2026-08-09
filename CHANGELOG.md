@@ -9,6 +9,11 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- Five turn-taking entries in the glossary (continuation, gate
+  ladder, premature endpoint, structured event, and a sharpened
+  refractory period), extracted from the field analysis of the
+  latency-masking deployment so the vocabulary the analysis leans on
+  is addressable from issues and PRs.
 - The echo leakage measurement as committed tooling
   (`scripts/echo_leakage.py` and `scripts/echo_leakage_control.py`),
   so the analysis that settled #48's headline question can be re-run
