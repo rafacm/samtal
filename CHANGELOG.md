@@ -7,6 +7,21 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-08-09
 
+### Fixed
+
+- The conversational filler talking over the user. The filler timer
+  checked only whether reply audio had started before playing its
+  clip, never whether the user was speaking, so when the endpointer
+  ended a turn at a mid-sentence thinking pause (common in
+  dictation-style turns: "guarda en la memoria que...") the clip
+  fired into the user's continuation. Field round 2 measured 4 of 20
+  fires landing 1.4 to 1.8 s into speech already underway, one of
+  them 52 ms before the barge-in it was firing into cancelled the
+  reply it masked. The timer now stands down at fire time, with a
+  `filler_skipped` event, when the endpointer holds unresolved speech
+  or a barge-in confirmation has the outgoing frames paused
+  (`docs/features/2026-08-09-filler-yields-to-live-speech.md`).
+
 ### Added
 
 - Five turn-taking entries in the glossary (continuation, gate
