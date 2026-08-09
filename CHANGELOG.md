@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-09
+
+### Added
+
+- The echo leakage measurement as committed tooling
+  (`scripts/echo_leakage.py` and `scripts/echo_leakage_control.py`),
+  so the analysis that settled #48's headline question can be re-run
+  on any future captures instead of living in a session's scratch
+  space. The measurement cross-correlates a capture's microphone
+  channel against its paced-reply channel over windows where the
+  assistant plays and the user is silent, reporting the leakage and
+  path delay per session and per voice, and the detectability bound
+  where nothing is found; the control injects a known synthetic echo
+  and refuses a passing verdict unless the measurement recovers it,
+  which is the condition for trusting any null result. Both verified
+  to reproduce round 1's figures from the original captures.
+
 ## 2026-08-08
 
 ### Fixed
