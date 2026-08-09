@@ -45,6 +45,10 @@ STALL_S = 0.5
 
 UTTERANCE = b"\x00\x00" * 320
 
+# 20 ms the mock energy endpointer classifies as speech: constant
+# amplitude 10000, far over its RMS threshold of 500.
+SPEECH = b"\x10\x27" * 320
+
 
 def masked_config(
     delay_ms: float = DELAY_MS, server: dict[str, object] | None = None
@@ -252,6 +256,56 @@ async def test_a_fire_on_an_agent_without_clips_quietly_plays_nothing(
     assert only(caplog, "replied").text == "Recovered now."
     assert session._filler_task is None
     assert session._filler_sounding is False
+    assert session._filler_fires == 0
+
+
+async def test_a_fire_into_live_user_speech_is_skipped(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The endpointer holds unresolved speech at fire time, which is a
+    user mid-continuation after a premature endpoint: the timer stands
+    down with a filler_skipped event instead of talking over them, and
+    the reply proceeds unmasked (field round 2 measured 4 of 20 fires
+    landing 1.4 to 1.8 s into speech already underway)."""
+    session = await masked_session(masked_config(), POET_MAC, {"poet": StallingLlm([STALL_S])})
+    with caplog.at_level("INFO"):
+        session._reply_task = asyncio.create_task(session._reply(UTTERANCE))
+        await asyncio.sleep(DELAY_MS / 1000 / 3)
+        assert session._endpointer is not None
+        session._endpointer.feed(SPEECH)
+        await session._reply_task
+
+    skipped = only(caplog, "filler_skipped")
+    assert skipped.reason == "user_speaking"
+    assert skipped.speech_ms > 0
+    assert events(caplog, "filler_played") == []
+    assert only(caplog, "replied").text == "Recovered now."
+    # The skip consumed no phrase and left no state behind.
+    assert session._filler_task is None
+    assert session._filler_fires == 0
+
+
+async def test_a_fire_during_a_barge_in_confirmation_is_skipped(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A barge-in confirmation has the outgoing frames paused at fire
+    time: the endpointed continuation already emptied the endpointer,
+    but the pause means the reply in flight is about to be cancelled,
+    so the timer stands down rather than masking a doomed turn."""
+    session = await masked_session(masked_config(), POET_MAC, {"poet": StallingLlm([STALL_S])})
+    with caplog.at_level("INFO"):
+        session._reply_task = asyncio.create_task(session._reply(UTTERANCE))
+        await asyncio.sleep(DELAY_MS / 1000 / 3)
+        session._pause_speaking()
+        await asyncio.sleep(DELAY_MS / 1000)
+        session._resume_speaking()
+        await session._reply_task
+
+    skipped = only(caplog, "filler_skipped")
+    assert skipped.reason == "barge_in_pending"
+    assert events(caplog, "filler_played") == []
+    assert only(caplog, "replied").text == "Recovered now."
+    assert session._filler_task is None
     assert session._filler_fires == 0
 
 
