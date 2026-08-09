@@ -73,7 +73,10 @@ wrongly declared the sentence over at a thinking pause. By the time
 it arrives, a reply to the fragment is already in flight, so the
 pipeline can only see the continuation as a barge-in attempt against
 that reply; whether it survives the gate ladder decides whether the
-user gets to finish their own thought.
+user gets to finish their own thought. Example from field round 2:
+"I'm here with my..." endpointed, drew the reply "Take your time!",
+and the continuation "I'm here with my kids." then had to fight
+that reply to be heard.
 
 ### Conversational filler
 
@@ -107,13 +110,29 @@ expressed in dB relative to the played signal. The number barge-in
 thresholds would have to defend against; field measurement found it
 below the ambient floor on the primary board (issue #48).
 
+### End-of-turn detection
+
+The general problem the endpointer is
+one answer to: deciding whether a pause means "your turn" or "still
+thinking". Human listeners read three signal families at once, and
+the same 700 ms pause reads differently under each: silence duration
+(all samtal's endpointer uses today), prosodic cues, and semantic
+completeness. After "...y toca el piano muy bien." the pause yields
+the turn; after "guarda en la memòria que..." the same pause holds
+it, and only the last two signal families can tell those apart.
+Pretrained models exist for exactly this judgment; smart-turn is the
+openly licensed one (BSD-2-Clause, audio-native, CPU inference).
+More: [smart-turn](https://github.com/pipecat-ai/smart-turn).
+
 ### Endpointer
 
 The logic that decides where an utterance ends:
 accumulates VAD evidence per frame and declares the turn over after
 enough trailing silence. Its trailing-silence bound is a
 conversation-design tradeoff: too short chops sentences at thinking
-pauses, too long makes every reply feel late.
+pauses, too long makes every reply feel late. Silence duration is
+the only signal it reads; end-of-turn detection is the general
+problem, with the other two signal families.
 
 ### First token
 
@@ -133,7 +152,10 @@ reply was transcribing the head of the user's own sentence), the
 refractory period, and transcript confirmation (pause the outgoing
 frames, run ASR, cancel only on a non-empty transcript). Each
 suppressed attempt logs which gate stopped it (`barge_in_suppressed`
-with a reason). The ladder enforces
+with a reason). In practice: a 32 ms noise blip dies at the speech
+floor and costs nothing, while a real continuation that endpoints
+inside the refractory window dies with it, which is the ladder's
+known cost. The ladder enforces
 [the barge-in ADR](adr/2026-08-05-replies-cancel-only-on-evidence-of-speech.md):
 acoustics alone can at most pause a reply; only evidence of user
 speech cancels it.
@@ -236,6 +258,20 @@ short clips. The guard discards an exact echo rather than acting on
 it, and a retry without the prompt recovers the cases where a real
 short utterance was behind it (issues #54, #69).
 
+### Prosodic cues
+
+How speech sounds as it approaches a pause,
+independent of the words: the melody and rhythm that tell a listener
+whether the speaker is done. A finished turn typically ends with
+falling pitch (or a rise for a yes/no question) and a stretched
+final syllable; a thinking pause cuts off with the pitch left
+suspended, which any listener hears as "more coming". Filled pauses
+are prosody too, and explicitly turn-keeping: "um..." means the
+speaker is holding the floor, yet a silence-only endpointer
+transcribes it as a complete utterance and the assistant answers it
+("Take your time!"), which field round 2 recorded verbatim.
+More: [prosody](https://en.wikipedia.org/wiki/Prosody_(linguistics)).
+
 ### Refractory period
 
 The window right after the assistant starts
@@ -243,6 +279,19 @@ speaking during which barge-in attempts are suppressed, absorbing
 the acoustic aftermath of the user's own previous utterance. One
 rung of the gate ladder; its cost is that a continuation which
 endpoints inside the window is discarded with it.
+
+### Semantic completeness
+
+Whether the words heard so far form a
+finished thought. "I'm here with my kids." stands alone; "I'm here
+with my" ends on a possessive with no noun and no fluent listener
+would treat it as finished, yet a silence-only endpointer cannot
+tell the two apart. The pipeline already gets one semantic signal
+for free: Whisper-family ASR marks a trail-off with a trailing
+ellipsis in the transcript, which is how field round 2 counted 18
+premature endpoints without listening to a single recording.
+Transcript-based turn models make the same judgment with a
+classifier instead of a heuristic.
 
 ### Sentence lookahead
 
@@ -266,7 +315,10 @@ capture's event track is the same stream scoped to one session.
 The stretch of non-speech the endpointer
 requires before declaring an utterance over. The single most
 consequential conversational constant: it sets where the system
-believes a sentence ends.
+believes a sentence ends. At the 700 ms default, question-answer
+turns end cleanly but dictation ("remember that...") pauses longer
+than that between clauses, so the same bound that feels responsive
+in one conversation manufactures premature endpoints in the other.
 
 ### TTS (text-to-speech)
 

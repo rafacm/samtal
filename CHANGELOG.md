@@ -29,6 +29,11 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   refractory period), extracted from the field analysis of the
   latency-masking deployment so the vocabulary the analysis leans on
   is addressable from issues and PRs.
+- Three end-of-turn entries in the glossary (end-of-turn detection,
+  prosodic cues, semantic completeness) with worked examples, and
+  examples added to the continuation, gate ladder, endpointer, and
+  trailing silence entries, so the turn-taking discussion in the
+  issues reads without a linguistics background.
 - The echo leakage measurement as committed tooling
   (`scripts/echo_leakage.py` and `scripts/echo_leakage_control.py`),
   so the analysis that settled #48's headline question can be re-run
