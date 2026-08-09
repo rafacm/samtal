@@ -55,6 +55,9 @@ rotation, and the arming rule are unchanged.
   (live speech at fire time, paused pacing at fire time), plus the
   existing eleven filler tests unchanged. Full unit and integration
   suites pass (710 + 27).
+- Review: `codex exec review --base main` returned no findings; it
+  re-ran lint and the filler suite itself and confirmed the checks
+  affect neither cleanup nor phrase rotation.
 - Field: needs a deploy and a dictation-style session; the signature
   of success is `filler_skipped` events where round 2 produced the
   overlapping `filler_played` ones.
