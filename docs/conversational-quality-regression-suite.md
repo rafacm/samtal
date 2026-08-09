@@ -132,7 +132,10 @@ provider and device choice:
 - The analysis methods, with their validation. The echo measurement
   is the model: cross-correlation over windows where the assistant
   plays and the user is silent, proven against a synthetic injected
-  echo before its null result was believed.
+  echo before its null result was believed. Both live in
+  [`scripts/`](../scripts/): `echo_leakage.py` is the measurement,
+  `echo_leakage_control.py` the positive control that must pass
+  before any null result is trusted.
 - The failure taxonomy: pipeline wedged on a provider, speech never
   detected, speech detected but transcribed to nothing. Any stack
   can fail in these ways; tests that probe them are permanent.
