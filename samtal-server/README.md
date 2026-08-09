@@ -894,6 +894,15 @@ in each agent's own language; an agent's own `filler` section replaces
 the inherited one wholly, like the stage fields, and the reasoning
 behind the default delay is in `config.example.yaml`.
 
+The mask yields to the user. At fire time the timer stands down, with
+a `filler_skipped` event, when the endpointer holds unresolved speech
+or a barge-in confirmation has the outgoing frames paused. Both mean
+the turn ended at a premature endpoint and the user is already mid
+continuation: the reply in flight is about to be cancelled, and a
+clip played into that would talk over them (field round 2 measured
+exactly this on dictation-style turns). The skip consumes no phrase,
+and the reply that answers the completed sentence arms its own timer.
+
 ## Limits
 
 Three numbers bound what one server holds, and none is visible in normal
@@ -974,6 +983,7 @@ and `device`, plus its own:
 | `session_open`     | a conversation starts           | `client`, `agent`, `agents`, `protocol`, `revision` |
 | `heard`            | an utterance is transcribed     | `agent`, `text`, `duration_s`, plus `language` and `language_confidence` when the engine detected |
 | `filler_played`    | the reply was slow, so a pre-synthesized filler clip masked the wait (its first frame is the turn's `speaking_started`) | `agent`, `delay_ms` (measured, from the transcription to the fire), `phrase_index` |
+| `filler_skipped`   | the timer fired but the user was there first, so no clip played | `agent`, `reason` (`user_speaking`, `barge_in_pending`), plus `speech_ms` when the endpointer held speech |
 | `speaking_started` | the reply's first audio frame goes out | `agent`                     |
 | `replied`          | a reply finishes                | `agent`, `text`                    |
 | `agent_said`       | one agent's part of a reply     | `agent`, `text`                    |
