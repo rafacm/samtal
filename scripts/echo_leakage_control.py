@@ -37,9 +37,17 @@ def main() -> None:
 
     mic, ref, _ = load(args.captures, args.session)
     delay = int(args.delay_ms / 1000 * RATE)
+    if not 0 < delay < len(ref):
+        raise SystemExit(
+            f"--delay-ms {args.delay_ms:.0f} is outside this capture "
+            f"({len(ref) / RATE:.1f} s)"
+        )
     gain = 10 ** (args.gain_db / 20)
     mic = mic.copy()
     mic[delay:] += gain * ref[: len(ref) - delay]
+    # The analysis must search at least past the injected delay, or
+    # the control would report a working measurement as broken.
+    max_lag_s = max(1.2, args.delay_ms / 1000 + 0.2)
 
     with tempfile.TemporaryDirectory() as tmp:
         injected = Path(tmp)
@@ -55,7 +63,7 @@ def main() -> None:
             args.captures / f"{args.session}.jsonl",
             injected / "control.jsonl",
         )
-        rows = analyze(injected, "control", 2.0, 1.0, 1.2)
+        rows = analyze(injected, "control", 2.0, 1.0, max_lag_s)
 
     hits = [r for r in rows if abs(r["r"]) >= args.r_floor]
     lags = np.array([r["lag_ms"] for r in hits])
