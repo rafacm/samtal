@@ -1589,9 +1589,46 @@ class Session:
 
         A device that went away mid-clip ends the clip, not the
         session; anything else unexpected is logged and swallowed,
-        because a broken mask must never break the reply it masks."""
+        because a broken mask must never break the reply it masks.
+
+        The mask yields to the user. A fire-time check skips the clip
+        when the endpointer holds unresolved speech (the user is
+        talking, or just trailed off into silence the endpointer has
+        not yet resolved) and when a barge-in confirmation has the
+        outgoing frames paused. Both mean the silence the timer set
+        out to mask is not silence: the turn it would mask belongs to
+        a premature endpoint, the reply in flight is about to be
+        cancelled, and a clip played now talks over the user's own
+        continuation. Field round 2 measured exactly this: 4 of 20
+        fires landed 1.4 to 1.8 s into speech already underway, all
+        in dictation-style turns. Skipped, not deferred: one filler
+        per turn stays the rule, and the cancelled reply's successor
+        arms its own timer."""
         await asyncio.sleep(delay_s)
         if self._speaking_started:
+            return
+        speech_ms = round(self._endpointer.speech_ms()) if self._endpointer is not None else 0
+        if speech_ms > 0:
+            logger.info(
+                "session %s: filler skipped, the user is speaking (%d ms heard)",
+                self.session_id,
+                speech_ms,
+                extra=self._event(
+                    "filler_skipped",
+                    agent=self._agent,
+                    reason="user_speaking",
+                    speech_ms=speech_ms,
+                ),
+            )
+            return
+        if self._pace_paused_at is not None:
+            logger.info(
+                "session %s: filler skipped, a barge-in is being confirmed",
+                self.session_id,
+                extra=self._event(
+                    "filler_skipped", agent=self._agent, reason="barge_in_pending"
+                ),
+            )
             return
         clips = self._fillers.get(self._agent or "")
         if clips is None:
