@@ -84,7 +84,18 @@ def user_mask(events: list[dict], n: int) -> np.ndarray:
             block(t - e.get("duration_s", 2.0) * 1000 - 2000, t + 300)
         elif kind in ("barge_in", "barge_in_suppressed", "utterance"):
             block(t - e.get("speech_ms", 500) - 1500, t + 500)
-        elif kind == "vad" and e.get("speech_ms", 0) > 0:
+        elif (
+            kind == "vad"
+            and e.get("speech_ms", 0) > 0
+            and not e.get("replying", False)
+        ):
+            # VAD speech counts as user-speech evidence only outside a
+            # reply. During playback the endpointer's speech is exactly
+            # the thing under measurement on a leaky device: masking it
+            # would remove the leakage windows and manufacture a null
+            # result. Real user speech during a reply is masked by the
+            # heard/barge_in/barge_in_suppressed events instead, which
+            # the gate ladder emits for every attempt.
             block(t - e["speech_ms"] - 300, t + 300)
     return mask
 
