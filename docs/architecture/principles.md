@@ -149,8 +149,9 @@ session truncates its own reply on interruption. Modeling that as
 three providers glued together produces an abstraction that is leaky
 on day one and false by design.
 
-Evidence and tradeoffs:
-[issue #84](https://github.com/rafacm/samtal/issues/84).
+Decision:
+[ADR](../adr/2026-08-10-normalize-the-hardware-edge.md). Evidence and
+tradeoffs: [issue #84](https://github.com/rafacm/samtal/issues/84).
 
 ### The internal boundary is device-facing
 
@@ -183,8 +184,9 @@ conversational consequences, and they belong to the runtime; owning
 them in the device layer is how a transport grows back into a
 framework.
 
-Evidence and tradeoffs:
-[issue #84](https://github.com/rafacm/samtal/issues/84).
+Decision:
+[ADR](../adr/2026-08-10-normalize-the-hardware-edge.md). Evidence and
+tradeoffs: [issue #84](https://github.com/rafacm/samtal/issues/84).
 
 ### Runtimes are siblings, not providers
 
@@ -210,8 +212,9 @@ starts as `send_audio()` and `events()`, then sprouts
 `set_turn_detection()`, until samtal maintains its own slightly
 different version of everyone's realtime protocol.
 
-Evidence and tradeoffs:
-[issue #84](https://github.com/rafacm/samtal/issues/84).
+Decision:
+[ADR](../adr/2026-08-10-normalize-the-hardware-edge.md). Evidence and
+tradeoffs: [issue #84](https://github.com/rafacm/samtal/issues/84).
 
 ### Own the decision sites, and give every decision a reason
 
