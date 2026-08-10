@@ -29,6 +29,15 @@ READMEs: [the project overview](../README.md),
   technologies the project is built on, one short definition each with
   pointers for going deeper.
 
+## Principles
+
+- [**architecture/principles.md**](architecture/principles.md): the
+  standing fundamentals: samtal's identity, its boundaries, and what it
+  must not become, each principle with an example and a counterexample.
+  Read this before designing a feature or deciding direction. Issues
+  hold evidence, ADRs hold decisions, plans hold execution, principles
+  hold direction.
+
 ## Architecture diagrams
 
 [**architecture/**](architecture/README.md) embeds the hand-drawn diagrams and walks through them: the high-level overview the root README leads with, and a step-by-step teaching tour of one conversation turn, from wake word to spoken reply, that explains each concept and the problem it solves before using its acronym. A directory per authoring tool sits under it. `architecture/excalidraw/` holds those two, whose editable originals are scenes of the same names in the team workspace and whose committed files are exports kept in sync by hand, so flag them when a pipeline change makes them stale. `architecture/plantuml/` holds three whose source is text here and whose renders come from a command, so they cannot drift unnoticed: what leaves the host, the ordering inside one turn, and the barge-in decision.
@@ -59,7 +68,9 @@ by that plan's implementation doc and its pull request instead.
 to reverse, surprising without context, and the result of a real
 trade-off. Records are immutable and date-prefixed; conventions are in
 [`adr/README.md`](adr/README.md). Issues hold evidence, ADRs hold
-decisions, plans hold execution.
+decisions, plans hold execution, and
+[`architecture/principles.md`](architecture/principles.md) holds
+direction.
 
 ## Conventions
 

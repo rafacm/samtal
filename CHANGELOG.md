@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-10
+
+### Added
+
+- The standing architecture principles as
+  `docs/architecture/principles.md`: samtal's identity (own the
+  appliance, let conversation runtimes stay themselves), the
+  device-facing boundary with its phone-call litmus test, the
+  runtimes-are-siblings rule with the universal-abstraction
+  anti-goal, thin device smart server, reason-annotated decision
+  sites, and the declared-egress guarantee, each principle with an
+  example and a counterexample. Pointers added from `AGENTS.md`, the
+  docs index, and the ADR README, whose division of labor gains a
+  fourth clause: issues hold evidence, ADRs hold decisions, plans
+  hold execution, principles hold direction.
+
 ## 2026-08-09
 
 ### Fixed

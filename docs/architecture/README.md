@@ -1,5 +1,7 @@
 # Architecture diagrams
 
+The one file here that is not a diagram is [`principles.md`](principles.md): the standing architecture principles (identity, boundaries, anti-goals), each with an example and a counterexample, to be read before designing a feature or deciding direction.
+
 Diagrams live in a directory per authoring tool, so a second tool can join without either one's files having to be picked out of a shared folder.
 
 [`excalidraw/`](excalidraw/) holds the hand-drawn pair below, which describe the system at two altitudes. Their editable originals are scenes of the same names in the team Excalidraw workspace (samtal collection); the committed `.excalidraw` files are those scenes' exports and the `.png` files their renders, kept in sync by hand. That last part is the catch: nothing in the repository can tell you an export has drifted from its scene, so flag them when a pipeline change makes them stale.

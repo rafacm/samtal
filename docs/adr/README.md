@@ -32,7 +32,10 @@ repository uses date prefixes instead, matching `docs/plans/` and
 
 ## Relationship to the rest of the repository
 
-Issues hold evidence, ADRs hold decisions, plans hold execution. A
+Issues hold evidence, ADRs hold decisions, plans hold execution, and
+[`../architecture/principles.md`](../architecture/principles.md) holds
+direction: the standing principles distilled from these records. A
 record cites the issues and measurements that motivated it; the plan or
 feature doc that implements a change links back to the records it rests
-on.
+on; a record that establishes or reverses a principle is cited from the
+principles page in the same change.
