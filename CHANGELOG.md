@@ -9,6 +9,26 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- The device edge and the conversation runtime are now separate
+  packages with an explicit interface pair between them (#85). What was
+  one 2,138-line `session.py` owning both sides is
+  `samtal_server/device/` (the xiaozhi handshake, Opus codecs, framing,
+  frame pacing, capture, the device MCP transport, session limits and
+  the idle watchdog) and `samtal_server/runtime/` (endpointing, the
+  barge-in gate ladder, the filler, ASR, the LLM tool loop, sentence
+  splitting, speech synthesis and its lookahead, history and agent
+  handover). They meet at `device/boundary.py`: a `SessionInput` the
+  edge feeds and a `DeviceOutput` the runtime drives, both described in
+  device terms, with reply audio crossing as an opaque batch so the
+  runtime never learns Opus. The bespoke pipeline is built for each
+  connection by a factory assembled at startup, which is the seam a
+  second runtime plugs into.
+
+  A pure refactor: no event name, field, reason or ordering changes, no
+  wire bytes change, and the `logger` field stays `samtal_server.session`
+  on every conversation record, which a characterization test now pins.
+  The whole integration lane passes with a single import line changed.
+
 - The principles page now separates product promises (falsifiable
   commitments to the person running samtal) from the architecture
   principles that keep them, with an explicit precedence rule: when
@@ -18,6 +38,15 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- An ADR recording the device-facing boundary decision
+  (`docs/adr/2026-08-10-normalize-the-hardware-edge.md`): interfaces at
+  samtal's core describe device capabilities, the xiaozhi edge is
+  normalized once, runtimes stay themselves behind it, there is no
+  universal `ConversationBackend`, and the decision sites keep their
+  reasoned events. The three architecture principles it supports now
+  cite it.
+- The implementation doc for that extraction
+  (`docs/plans/2026-08-10-device-facing-session-boundary-implementation.md`).
 - The accepted plan for extracting a device-facing session boundary
   (`docs/plans/2026-08-10-device-facing-session-boundary.md`): the
   interface pair, ownership map, and ten-commit sequence for splitting

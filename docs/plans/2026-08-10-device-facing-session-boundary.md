@@ -23,10 +23,10 @@ rewrite, which must land against this boundary, not inside
 (#28, #80, #81); those tune decisions, this moves walls, and nothing
 here changes a threshold, a gate order, or a filler rule.
 
-A companion implementation doc,
-`2026-08-10-device-facing-session-boundary-implementation.md`, will be
-created during implementation, one section per milestone, recording
-deviations and discoveries as usual.
+The companion implementation doc,
+[`2026-08-10-device-facing-session-boundary-implementation.md`](2026-08-10-device-facing-session-boundary-implementation.md),
+records what the three milestones actually did, with their deviations
+and discoveries.
 
 ## Current structure of session.py, honestly
 
@@ -706,17 +706,17 @@ refactor is wrong.
 
 ## Verification
 
-- [ ] `uv run ruff check .` clean.
-- [ ] `uv run pytest tests/unit -q` passes; the commit-2
+- [x] `uv run ruff check .` clean.
+- [x] `uv run pytest tests/unit -q` passes; the commit-2
       characterization tests pass unmodified from before the
       extraction to after it, and no assertion value changed in
       any existing test.
-- [ ] `uv run pytest tests/integration -q` passes with only the
+- [x] `uv run pytest tests/integration -q` passes with only the
       one-line `GOING_AWAY` import edit (stock-protocol
       compatibility, in CI).
-- [ ] `git diff --color-moved` reviewed commit by commit; logic
+- [x] `git diff --color-moved` reviewed commit by commit; logic
       edits appear only where this plan says they do.
-- [ ] Board: nothing required. Wire bytes and message order are
+- [x] Board: nothing required, and nothing run. Wire bytes and message order are
       unchanged and the integration lane exercises the real
       protocol. An optional desk conversation on the
       Touch-LCD-1.54 is a nice-to-have; if skipped, the PR's
@@ -738,19 +738,22 @@ All milestones land in one pull request; they are the review
 stages, ticked together with that PR's number, each linking to its
 section of the implementation doc when written.
 
-- [ ] **Boundary, ADR, and the safety net**: the
+- [x] [**Boundary, ADR, and the safety net**](2026-08-10-device-facing-session-boundary-implementation.md#boundary-adr-and-the-safety-net)
+  (PR #87): the
   normalize-the-hardware-edge ADR with its principles-page
   citations, the characterization tests pinning today's behavior,
   `device/boundary.py`, and `device/events.py` with the pinned
   logger (commits 1 to 4). Accept: interfaces exist with
   docstrings, characterization suite green against the unmoved
   code, all existing tests pass untouched.
-- [ ] **Runtime extraction**: `runtime/speech.py` and
+- [x] [**Runtime extraction**](2026-08-10-device-facing-session-boundary-implementation.md#runtime-extraction)
+  (PR #87): `runtime/speech.py` and
   `runtime/pipeline.py` carved out, endpointing, gate ladder, and
   filler moved, session delegating (commits 5 to 7). Accept: full
   suite green with mechanical test edits only, characterization
   suite unmodified.
-- [ ] **Narrowing, contracts, and docs**: runtime speaking only
+- [x] [**Narrowing, contracts, and docs**](2026-08-10-device-facing-session-boundary-implementation.md#narrowing-contracts-and-docs)
+  (PR #87): runtime speaking only
   through the boundary, `DeviceSession` in its package, the
   composition-root factory in `app.py` and `ws.py`, conformance
   asserts, then the boundary contract tests through the wired
