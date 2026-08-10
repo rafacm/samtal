@@ -12,6 +12,7 @@ from samtal_server.config import Config, load_config
 from samtal_server.filler import build_agent_fillers
 from samtal_server.providers import build_agent_providers
 from samtal_server.registry import SessionRegistry
+from samtal_server.runtime.pipeline import bespoke_runtime_factory
 from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
 
@@ -77,6 +78,19 @@ def create_app(config: Config | None = None) -> FastAPI:
     # injection; the directory itself is created on the first write.
     memory = app.state.config.memory
     app.state.memory = None if memory is None else MemoryStore(memory.dir)
+    # How one conversation is built for one connection, closed over
+    # once here: the providers, the MCP servers, the memory store and
+    # the filler clips all outlive any single websocket, and a device
+    # session should not have to name them to get a conversation. Built
+    # after all four exist, and after the mutable fillers dict, which
+    # the lifespan fills at startup and this closure sees fill.
+    app.state.runtime_factory = bespoke_runtime_factory(
+        app.state.config,
+        app.state.agent_providers,
+        app.state.mcp_servers,
+        app.state.memory,
+        app.state.agent_fillers,
+    )
     # What a device says about itself at OTA check-in, kept for the
     # session that follows: a capture manifest needs the firmware
     # version, and the websocket handshake never carries it.

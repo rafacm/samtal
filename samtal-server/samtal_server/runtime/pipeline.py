@@ -40,14 +40,18 @@ import functools
 from collections.abc import AsyncIterator, Callable, Sequence
 from typing import Any
 
-from starlette.websockets import WebSocketDisconnect
-
 from samtal_server.audio.resample import Resampler
 from samtal_server.config import Config
-from samtal_server.device.boundary import PIPELINE_SAMPLE_RATE, PlayableAudio
+from samtal_server.device.boundary import (
+    PIPELINE_SAMPLE_RATE,
+    DeviceGone,
+    DeviceOutput,
+    PlayableAudio,
+    RuntimeFactory,
+    SessionInput,
+)
 from samtal_server.device.events import SessionEvents, logger
 from samtal_server.filler import FillerClips
-from samtal_server.protocol import messages
 from samtal_server.providers import (
     AgentProviders,
     AsrResult,
@@ -156,32 +160,33 @@ def _not_allowed(name: str, agents: Sequence[str]) -> AgentNotAllowed:
 class PipelineRuntime:
     """One conversation, for one connection, behind the device edge.
 
-    `session` is the device it speaks through. It is still the concrete
-    session while the extraction is in flight; the narrowing commit
-    replaces it with the `DeviceOutput` half of the boundary, which is
-    all that is left of it by then.
+    `output` is the device it speaks through, and it is the whole of
+    what this runtime knows about the far end: no socket, no protocol,
+    no codec. Built by `bespoke_runtime_factory` below, which is what
+    the composition root hands the device edge.
     """
 
     def __init__(
         self,
-        session: Any,
+        output: DeviceOutput,
         config: Config,
         events: SessionEvents,
         agent_providers: dict[str, AgentProviders],
         mcp_servers: McpServers,
         memory: MemoryStore | None,
-        fillers: dict[str, FillerClips] | None = None,
+        fillers: dict[str, FillerClips] | None,
+        agents: Sequence[str],
     ) -> None:
-        self._session = session
+        self._output = output
         self._config = config
         self._events = events
         self.session_id = events.session_id
         self._agent_providers = agent_providers
         self._mcp_servers = mcp_servers
         self._memory = memory
-        # The agents this device may talk to, and the one it is talking
-        # to now. The active one lives on the events object, because
-        # both sides of the boundary attribute events to it.
+        # The agents this device may talk to. The one it is talking to
+        # now lives on the events object, because both sides of the
+        # boundary attribute events to it.
         self._agents: list[str] = []
         self._providers: AgentProviders | None = None
         self._turns: list[Turn] = []
@@ -224,6 +229,18 @@ class PipelineRuntime:
         self._filler_task: asyncio.Task[None] | None = None
         self._filler_sounding = False
         self._filler_fires = 0
+        self._agents = list(agents)
+        # The activation the connect used to do by hand, and the MCP
+        # revive that followed it, in that order. No task is spawned
+        # here: the reply task is created on the first utterance, and
+        # discovery belongs to the edge.
+        self._activate_agent(self._agents[0])
+        # A server that was down at boot, or that dropped since, gets a
+        # background reconnect now, so it is picked up by the time this
+        # conversation needs it rather than at the next server restart.
+        self._mcp_servers.revive(
+            entry for agent in self._agents for entry in config.mcp_for_agent(agent)
+        )
 
     @property
     def _agent(self) -> str | None:
@@ -311,15 +328,15 @@ class PipelineRuntime:
         if not batch:
             return
         await self._filler_tail()
-        await self._session.send_audio(batch)
+        await self._output.send_audio(batch)
 
     def _pause_output(self) -> None:
         self._output_paused = True
-        self._session.pause_output()
+        self._output.pause_output()
 
     def _resume_output(self) -> None:
         self._output_paused = False
-        self._session.resume_output()
+        self._output.resume_output()
 
     @contextlib.asynccontextmanager
     async def _watching(self, stage: str, provider: object) -> AsyncIterator[None]:
@@ -565,7 +582,7 @@ class PipelineRuntime:
         assert self._providers is not None
         providers = self._providers
         spoken: list[str] = []
-        self._session.reply_started()
+        self._output.reply_started()
         heard_s = round(len(pcm) / 2 / PIPELINE_SAMPLE_RATE, 2)
         try:
             if result is None:
@@ -580,9 +597,7 @@ class PipelineRuntime:
                 self._asr_language = result.lock_language
             transcript = result.text.strip()
             if transcript:
-                await self._session.websocket.send_text(
-                    messages.stt_message(self.session_id, transcript)
-                )
+                await self._output.show_transcript(transcript)
                 # Only engines that detected carry these; a mock or a
                 # pinned language adds no noise to the record.
                 language_fields: dict[str, Any] = {}
@@ -610,7 +625,7 @@ class PipelineRuntime:
                 self._turns.append(Turn("user", transcript))
                 self._arm_filler()
                 await self._speak_reply(transcript, spoken)
-        except (WebSocketDisconnect, RuntimeError):
+        except (DeviceGone, RuntimeError):
             return  # the device went away mid-reply
         except asyncio.CancelledError:
             # A barge-in or an abort is cancelling this reply, and the
@@ -632,7 +647,6 @@ class PipelineRuntime:
             # so a reply that failed or was cancelled still resets the
             # clock: the user is owed the full silence before being hung
             # up on either way.
-            self._session._mark_activity()
             if spoken:
                 said = " ".join(spoken)
                 self._turns.append(Turn("assistant", said))
@@ -642,16 +656,13 @@ class PipelineRuntime:
                     said,
                     extra=self._events.event("replied", agent=self._agent, text=said),
                 )
-            with contextlib.suppress(WebSocketDisconnect, RuntimeError):
+            with contextlib.suppress(DeviceGone, RuntimeError):
                 # A reply that never spoke still sends the pair. The
                 # device leaves its speaking state on `tts stop`, and in
                 # auto mode that is what re-arms its listening, so a
                 # `stop` it was never told to expect is the one way this
                 # could strand a device.
-                await self._session._begin_speaking()
-                await self._session.websocket.send_text(
-                    messages.tts_message(self.session_id, "stop")
-                )
+                await self._output.finish_speaking()
 
     async def _speak_reply(self, transcript: str, spoken: list[str]) -> None:
         """One reply, which may be spoken by more than one agent.
@@ -710,8 +721,8 @@ class PipelineRuntime:
         working = list(self._turns)
         if greeting is not None:
             working.append(greeting)
-        resampler = Resampler(providers.tts.sample_rate, self._session.output_sample_rate)
-        self._session.restart_pacing()
+        resampler = Resampler(providers.tts.sample_rate, self._output.output_sample_rate)
+        self._output.restart_pacing()
 
         switch_to: str | None = None
         for round_index in range(MAX_TOOL_ROUNDS):
@@ -794,7 +805,7 @@ class PipelineRuntime:
 
         # Drain the resampler's interpolation tail and the encoder's
         # partial frame, which flushing pads with silence.
-        batch = self._session.encode_audio(resampler.flush()) + self._session.flush_encoder()
+        batch = self._output.encode_audio(resampler.flush()) + self._output.flush_encoder()
         await self._send_reply_audio(batch)
         return switch_to
 
@@ -814,8 +825,7 @@ class PipelineRuntime:
             tools.append(builtin.switch_agent_tool(self._agents))
         if self._memory is not None:
             tools.append(builtin.remember_tool())
-        if self._session._device_tools is not None:
-            tools.extend(self._session._device_tools.tools())
+        tools.extend(self._output.device_tools())
         tools.extend(self._mcp_servers.tools_for(self._config.mcp_for_agent(self._agent)))
         return tools
 
@@ -921,8 +931,8 @@ class PipelineRuntime:
         if call.name == names.REMEMBER and self._memory is not None:
             assert self._agent is not None
             return await builtin.remember(self._memory, self._agent, call.arguments), False
-        if self._session._device_tools is not None and self._session._device_tools.knows(call.name):
-            return await self._session._device_tools.call(call.name, call.arguments)
+        if any(tool.name == call.name for tool in self._output.device_tools()):
+            return await self._output.call_device_tool(call.name, call.arguments)
         split = names.split_qualified(call.name)
         if split is not None and split[0] in self._mcp_servers:
             return await self._mcp_servers.call(call.name, call.arguments)
@@ -995,14 +1005,12 @@ class PipelineRuntime:
         whether its audio will arrive is not known then), and changes
         the order of messages the firmware sees. Worth deciding on the
         board rather than here."""
-        await self._session._begin_speaking()
-        await self._session.websocket.send_text(
-            messages.tts_message(self.session_id, "sentence_start", text=synthesis.sentence)
-        )
+        await self._output.begin_speaking()
+        await self._output.sentence_started(synthesis.sentence)
         try:
             async for chunk in synthesis.chunks():
                 await self._send_reply_audio(
-                    self._session.encode_audio(resampler.process(chunk))
+                    self._output.encode_audio(resampler.process(chunk))
                 )
         finally:
             # A barge-in cancels this coroutine mid-sentence, and the
@@ -1060,11 +1068,10 @@ class PipelineRuntime:
         # because the rule the timeout is specified by names both ends,
         # and because the day an utterance stops implying a reply is not
         # a day anyone will remember this.
-        self._session._mark_activity()
         speech_ms = round(self._endpointer.speech_ms()) if self._endpointer is not None else 0
         pcm = self._trimmed_utterance()
         self._reset_utterance()
-        self._session.user_turn_ended()
+        self._output.user_turn_ended()
         result: AsrResult | None = None
         if self.replying():
             if not self._config.server.barge_in:
@@ -1138,8 +1145,8 @@ class PipelineRuntime:
             return head + pcm, None
         loop = asyncio.get_running_loop()
         if (
-            self._session.speaking_started_at() is not None
-            and (loop.time() - self._session.speaking_started_at()) * 1000
+            self._output.speaking_started_at() is not None
+            and (loop.time() - self._output.speaking_started_at()) * 1000
             < server.barge_in_refractory_ms
         ):
             logger.info(
@@ -1190,9 +1197,9 @@ class PipelineRuntime:
         """The barge_in event's speaking_ms: milliseconds from
         speaking_started to the cancel decision, absent when the reply
         had not yet spoken."""
-        if self._session.speaking_started_at() is None:
+        if self._output.speaking_started_at() is None:
             return {}
-        elapsed = asyncio.get_running_loop().time() - self._session.speaking_started_at()
+        elapsed = asyncio.get_running_loop().time() - self._output.speaking_started_at()
         return {"speaking_ms": round(elapsed * 1000)}
 
     def _trimmed_utterance(self) -> bytes:
@@ -1299,7 +1306,7 @@ class PipelineRuntime:
         per turn stays the rule, and the cancelled reply's successor
         arms its own timer."""
         await asyncio.sleep(delay_s)
-        if self._session.speaking_started_at() is not None:
+        if self._output.speaking_started_at() is not None:
             return
         speech_ms = round(self._endpointer.speech_ms()) if self._endpointer is not None else 0
         if speech_ms > 0:
@@ -1347,19 +1354,19 @@ class PipelineRuntime:
             ),
         )
         try:
-            await self._session._begin_speaking()
-            resampler = Resampler(clips.sample_rate, self._session.output_sample_rate)
+            await self._output.begin_speaking()
+            resampler = Resampler(clips.sample_rate, self._output.output_sample_rate)
             # Encoded whole before the first await, and sent once. The
             # reply task feeds the same encoder between its own awaits,
             # so a flush split off after an await could carry out audio
             # that belongs to the reply.
             batch = (
-                self._session.encode_audio(resampler.process(clips.clips[index]))
-                + self._session.encode_audio(resampler.flush())
-                + self._session.flush_encoder()
+                self._output.encode_audio(resampler.process(clips.clips[index]))
+                + self._output.encode_audio(resampler.flush())
+                + self._output.flush_encoder()
             )
-            await self._session.send_audio(batch)
-        except (WebSocketDisconnect, RuntimeError):
+            await self._output.send_audio(batch)
+        except (DeviceGone, RuntimeError):
             return
         except asyncio.CancelledError:
             raise
@@ -1395,3 +1402,34 @@ class PipelineRuntime:
         with contextlib.suppress(asyncio.CancelledError):
             await task
         self._filler_sounding = False
+
+
+def bespoke_runtime_factory(
+    config: Config,
+    agent_providers: dict[str, AgentProviders],
+    mcp_servers: McpServers,
+    memory: MemoryStore | None,
+    fillers: dict[str, FillerClips],
+) -> RuntimeFactory:
+    """The composition root's half of the seam: everything this runtime
+    needs that outlives one connection, closed over once at startup.
+
+    The device edge calls what comes back with a device to speak
+    through, the session's observability, and the agents the device is
+    bound to, and never learns what an LLM is. `fillers` is the mutable
+    dict the boot fills once synthesis has run, so a factory built
+    before the clips exist still sees them.
+
+    Deliberately one function rather than a config-selectable registry:
+    one runtime exists, and a selection mechanism with one option is
+    surface without a reader. This is the seam a second runtime plugs
+    into."""
+
+    def build(
+        output: DeviceOutput, events: SessionEvents, agents: Sequence[str]
+    ) -> SessionInput:
+        return PipelineRuntime(
+            output, config, events, agent_providers, mcp_servers, memory, fillers, agents
+        )
+
+    return build

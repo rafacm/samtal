@@ -16,7 +16,7 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # the session imports nothing from here
-    from samtal_server.session import Session
+    from samtal_server.device.session import DeviceSession
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class SessionRegistry:
 
     def __init__(self, max_sessions: int) -> None:
         self._max_sessions = max_sessions
-        self._sessions: set[Session] = set()
+        self._sessions: set[DeviceSession] = set()
         self._draining = False
 
     def __len__(self) -> int:
@@ -44,7 +44,7 @@ class SessionRegistry:
     def draining(self) -> bool:
         return self._draining
 
-    def try_add(self, session: "Session") -> bool:
+    def try_add(self, session: "DeviceSession") -> bool:
         """Take a slot for this session, or answer False when the server
         is full or on its way out. Deliberately not a coroutine: an
         admission decision that can await is one that can race another
@@ -54,7 +54,7 @@ class SessionRegistry:
         self._sessions.add(session)
         return True
 
-    def remove(self, session: "Session") -> None:
+    def remove(self, session: "DeviceSession") -> None:
         """Give the slot back. Idempotent, because this runs in a
         session's `finally` and nothing guarantees it ran only once."""
         self._sessions.discard(session)

@@ -22,8 +22,8 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+import samtal_server.device.session as session_module
 import samtal_server.runtime.pipeline as pipeline_module
-import samtal_server.session as session_module
 from samtal_server.app import create_app
 from samtal_server.audio import rms
 from samtal_server.audio.opus import OpusDecoder, OpusEncoder
@@ -31,8 +31,9 @@ from samtal_server.audio.resample import Resampler
 from samtal_server.config import Config
 from samtal_server.protocol import framing
 from samtal_server.providers import Turn, build_agent_providers
-from samtal_server.runtime.pipeline import AgentNotAllowed
+from samtal_server.runtime.pipeline import AgentNotAllowed, bespoke_runtime_factory
 from samtal_server.runtime.speech import _Synthesis
+from samtal_server.tools.mcp import McpServers
 from samtal_server.ws import WEBSOCKET_PATH, signed_device_id
 
 DEVICE_MAC = "AA:BB:CC:DD:EE:FF"
@@ -552,6 +553,32 @@ def test_auto_mode_still_requires_a_new_listen_start_after_the_reply() -> None:
     assert_endpointed_speech(texts, 240)
 
 
+def device_session(
+    config: Config,
+    mac: str,
+    providers: dict[str, Any] | None = None,
+    memory: Any = None,
+    fillers: dict[str, Any] | None = None,
+    websocket: Any = None,
+) -> session_module.DeviceSession:
+    """A device session with a real bespoke runtime behind it, built the
+    way `run` builds one: the agents resolved from the binding, then the
+    factory called with them. Every test that drives a session below the
+    websocket goes through here, so the composition root has one shape
+    in the tests as well as in the server."""
+    factory = bespoke_runtime_factory(
+        config,
+        providers if providers is not None else build_agent_providers(config),
+        McpServers({}),
+        memory,
+        fillers if fillers is not None else {},
+    )
+    session = session_module.DeviceSession(cast(Any, websocket), config, factory)
+    session._agents = config.agents_for_device(mac)
+    session.runtime = factory(session, session._events, session._agents)
+    return session
+
+
 class RecordingSocket:
     """Just enough websocket for `_speak`: it counts what went out."""
 
@@ -573,9 +600,7 @@ async def test_a_barge_in_keeps_the_sentences_the_user_heard() -> None:
     # the reply that answers the interruption is written against it.
     config = config_with_agent(asr_text="hello", llm_reply=f"Ready. {LONG_REPLY}")
     socket = RecordingSocket()
-    session = session_module.Session(cast(Any, socket), config, build_agent_providers(config))
-    session._agents = ["assistant"]
-    session.runtime._activate_agent("assistant")
+    session = device_session(config, DEVICE_MAC, websocket=socket)
 
     reply = asyncio.create_task(session.runtime._reply(speech_pcm(600)))
     await asyncio.sleep(0.6)
@@ -598,9 +623,7 @@ async def test_only_a_sentence_whose_audio_finished_counts_as_spoken() -> None:
     # seconds apart.
     config = two_persona_config()
     socket = RecordingSocket()
-    session = session_module.Session(cast(Any, socket), config, build_agent_providers(config))
-    session._agents = ["tutor"]
-    session.runtime._activate_agent("tutor")
+    session = device_session(config, TUTOR_MAC, websocket=socket)
     assert session.runtime._providers is not None
     resampler = Resampler(
         session.runtime._providers.tts.sample_rate, session_module.OUTPUT_AUDIO.sample_rate
@@ -638,9 +661,7 @@ async def test_the_utterance_buffer_keeps_only_a_bounded_tail(
     cap = SAMPLE_RATE * 2 * 2  # two seconds
     monkeypatch.setattr(pipeline_module, "UTTERANCE_TAIL_BYTES", cap)
     config = two_persona_config()
-    session = session_module.Session(cast(Any, None), config, build_agent_providers(config))
-    session._agents = ["tutor"]
-    session.runtime._activate_agent("tutor")
+    session = device_session(config, TUTOR_MAC)
     session._listen_mode = "realtime"
     session.listening = True
 
@@ -751,11 +772,7 @@ def test_a_session_refuses_an_agent_its_device_is_not_bound_to() -> None:
     # M6's switch_agent passes this a name a model chose, and an agent
     # that merely exists on the server is not one this device may reach.
     config = two_persona_config()
-    session = session_module.Session(
-        cast(Any, None), config, build_agent_providers(config)
-    )
-    session._agents = ["tutor"]
-    session.runtime._activate_agent("tutor")
+    session = device_session(config, TUTOR_MAC)
 
     with pytest.raises(AgentNotAllowed, match="poet"):
         session.runtime._activate_agent("poet")

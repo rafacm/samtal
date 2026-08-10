@@ -1,7 +1,8 @@
 """The device websocket endpoint.
 
 The path devices are sent to by the OTA reply; each accepted upgrade
-becomes one `Session`, served with the providers built at startup.
+becomes one `DeviceSession`, served with a conversation built by the
+runtime factory the composition root assembled at startup.
 
 Before any of that, the handshake is gated on the device token the OTA
 reply issued. A connection that fails the gate is closed without ever
@@ -21,7 +22,7 @@ from starlette.websockets import WebSocket
 
 from samtal_server.auth import DeviceAuth
 from samtal_server.config.models import normalize_mac
-from samtal_server.session import Session
+from samtal_server.device.session import DeviceSession
 
 logger = logging.getLogger(__name__)
 
@@ -93,15 +94,12 @@ async def conversation(websocket: WebSocket) -> None:
         await websocket.close()
         return
 
-    session = Session(
+    session = DeviceSession(
         websocket,
         state.config,
-        state.agent_providers,
-        state.mcp_servers,
-        state.memory,
+        state.runtime_factory,
         state.capture,
         state.device_facts,
-        fillers=state.agent_fillers,
     )
     # Capacity is checked after the token, so a full server still answers a
     # bad token with a refusal about the token.

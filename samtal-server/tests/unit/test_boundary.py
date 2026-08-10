@@ -18,6 +18,7 @@ from samtal_server.device.boundary import (
     PlayableAudio,
     SessionInput,
 )
+from tests.unit.test_session import DEVICE_MAC, config_with_agent, device_session
 
 
 @pytest.mark.parametrize("protocol", [SessionInput, DeviceOutput])
@@ -66,3 +67,17 @@ def test_a_batch_is_not_a_queue() -> None:
 
 def test_the_pipeline_rate_is_the_rate_devices_send() -> None:
     assert PIPELINE_SAMPLE_RATE == 16000
+
+
+def test_a_device_session_is_a_device_output() -> None:
+    """Conformance, asserted rather than assumed: the edge is what the
+    runtime is handed, and a method missing from it would otherwise
+    surface as an AttributeError mid-conversation."""
+    session = device_session(config_with_agent(), DEVICE_MAC)
+    assert isinstance(session, DeviceOutput)
+
+
+def test_the_bespoke_runtime_is_a_session_input() -> None:
+    """The other half: what the factory builds is what the edge feeds."""
+    session = device_session(config_with_agent(), DEVICE_MAC)
+    assert isinstance(session.runtime, SessionInput)
