@@ -124,7 +124,7 @@ def realtime_session(config, asr) -> tuple[session_module.Session, RecordingSock
     socket = RecordingSocket()
     session = session_module.Session(cast(Any, socket), config, build_agent_providers(config))
     session._agents = ["assistant"]
-    session._activate_agent("assistant")
+    session.runtime._activate_agent("assistant")
     session._listen_mode = "realtime"
     session.listening = True
     assert session._providers is not None
@@ -271,7 +271,7 @@ async def test_a_barge_in_during_transcription_merges_the_sentence(
     assert heard.duration_s == 0.8
     merged = only(caplog, "barge_in_merged")
     assert merged.speech_ms == 600
-    assert session._turns == [Turn("user", "800 ms"), Turn("assistant", "You said 800 ms.")]
+    assert session.runtime._turns == [Turn("user", "800 ms"), Turn("assistant", "You said 800 ms.")]
 
 
 async def test_an_unconfirmed_barge_in_pauses_and_resumes_the_reply(
@@ -290,7 +290,7 @@ async def test_an_unconfirmed_barge_in_pauses_and_resumes_the_reply(
     session._endpointer = ScriptedEndpointer(speech_ms=600)
 
     with caplog.at_level("INFO"):
-        session._reply_task = asyncio.create_task(session._reply(speech_pcm(600)))
+        session._reply_task = asyncio.create_task(session.runtime._reply(speech_pcm(600)))
         reply = session._reply_task
         while socket.frames < 3:
             await asyncio.sleep(0.02)
@@ -320,7 +320,7 @@ async def test_an_unconfirmed_barge_in_pauses_and_resumes_the_reply(
     assert suppressed.speech_ms == 600
     assert events(caplog, "barge_in") == []
     assert asr.calls == 2
-    assert session._turns == [
+    assert session.runtime._turns == [
         Turn("user", "the question"),
         Turn("assistant", "Hold the thought while this sentence finishes playing out loud."),
     ]
@@ -353,7 +353,7 @@ async def test_a_failed_confirmation_is_reported_as_the_provider_failure_it_is(
     session._endpointer = ScriptedEndpointer(speech_ms=600)
 
     with caplog.at_level("INFO"):
-        session._reply_task = asyncio.create_task(session._reply(speech_pcm(600)))
+        session._reply_task = asyncio.create_task(session.runtime._reply(speech_pcm(600)))
         reply = session._reply_task
         while socket.frames < 3:
             await asyncio.sleep(0.02)
@@ -395,7 +395,7 @@ async def test_a_confirmed_barge_in_reuses_the_transcript_and_the_lock(
     session._endpointer = ScriptedEndpointer(speech_ms=700)
 
     with caplog.at_level("INFO"):
-        session._reply_task = asyncio.create_task(session._reply(speech_pcm(600)))
+        session._reply_task = asyncio.create_task(session.runtime._reply(speech_pcm(600)))
         while socket.frames < 3:
             await asyncio.sleep(0.02)
         session._utterance = bytearray(speech_pcm(600))
@@ -415,7 +415,7 @@ async def test_a_confirmed_barge_in_reuses_the_transcript_and_the_lock(
     assert barged.speaking_ms >= 0
     # The cut sentence never finished sending, so it is not history;
     # the answer to the confirmed transcript is.
-    assert session._turns == [
+    assert session.runtime._turns == [
         Turn("user", "the question"),
         Turn("user", "stop and listen"),
         Turn("assistant", "Answering stop and listen."),
