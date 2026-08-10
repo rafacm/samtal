@@ -28,6 +28,7 @@ All PCM crossing it is s16le mono.
 from collections.abc import Callable, Sequence
 from typing import Any, Protocol, runtime_checkable
 
+from samtal_server.device.events import SessionEvents
 from samtal_server.providers.base import ToolDef
 
 # The rate the input side of the pipeline runs at: what devices send,
@@ -219,13 +220,12 @@ class DeviceOutput(Protocol):
         """Invoke one device tool; `(content, is_error)`."""
 
 
-# How one conversation runtime is built for one connection. The second
-# argument is the session's `SessionEvents`, which arrives with
-# `device/events.py` in the next commit and narrows this alias then; the
-# third is the agent names the device is bound to.
+# How one conversation runtime is built for one connection: the device
+# to speak through, the session's observability, and the agent names the
+# device is bound to.
 #
 # Deliberately not a config-selectable registry: one runtime exists, and
 # a selection mechanism with one option is surface without a reader.
 # This is the seam a second runtime plugs into, and what selection needs
 # to express is decided when there is a second one.
-RuntimeFactory = Callable[[DeviceOutput, Any, Sequence[str]], SessionInput]
+RuntimeFactory = Callable[[DeviceOutput, SessionEvents, Sequence[str]], SessionInput]
