@@ -1,6 +1,6 @@
 # Architecture diagrams
 
-The one file here that is not a diagram is [`principles.md`](principles.md): the standing architecture principles (identity, boundaries, anti-goals), each with an example and a counterexample, to be read before designing a feature or deciding direction.
+The one file here that is not a diagram is [`principles.md`](principles.md): samtal's product promises and the architecture principles that keep them, each with an example and a counterexample, to be read before designing a feature or deciding direction.
 
 Diagrams live in a directory per authoring tool, so a second tool can join without either one's files having to be picked out of a shared folder.
 

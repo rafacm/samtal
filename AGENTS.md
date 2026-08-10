@@ -15,10 +15,10 @@ display) talk to a Python conversation server over WebSocket. It builds on
 - `docs/xiaozhi-notes.md`: research notes on the upstream architecture, the
   device↔server protocol, ports, configuration keys, and the validated
   end-to-end demo procedure. Read this first for anything protocol-related.
-- `docs/architecture/principles.md`: the standing architecture principles
-  (identity, boundaries, anti-goals), each with an example and a
-  counterexample. Read this before designing a feature or deciding
-  direction.
+- `docs/architecture/principles.md`: the standing product promises and the
+  architecture principles that keep them, each with an example and a
+  counterexample; promises take precedence. Read this before designing a
+  feature or deciding direction.
 - `vendor/`: reference clones of the upstream repos. Not committed; recreate
   with the clone commands at the top of `docs/xiaozhi-notes.md`.
 

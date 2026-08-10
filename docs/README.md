@@ -32,11 +32,12 @@ READMEs: [the project overview](../README.md),
 ## Principles
 
 - [**architecture/principles.md**](architecture/principles.md): the
-  standing fundamentals: samtal's identity, its boundaries, and what it
-  must not become, each principle with an example and a counterexample.
-  Read this before designing a feature or deciding direction. Issues
-  hold evidence, ADRs hold decisions, plans hold execution, principles
-  hold direction.
+  standing fundamentals: samtal's identity, its product promises, and
+  the architecture principles that keep them, each with an example and
+  a counterexample. Promises take precedence over architecture. Read
+  this before designing a feature or deciding direction. Issues hold
+  evidence, ADRs hold decisions, plans hold execution, principles hold
+  direction.
 
 ## Architecture diagrams
 
