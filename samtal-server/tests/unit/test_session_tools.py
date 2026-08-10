@@ -141,7 +141,7 @@ async def run_reply(session: Session, said: str) -> list[str]:
         into.append(synthesis.sentence)
 
     session.runtime._speak = speak  # type: ignore[method-assign]
-    session._send_frames = _nothing  # type: ignore[method-assign]
+    session.send_audio = _nothing  # type: ignore[method-assign]
     session.runtime._turns.append(Turn("user", said))
     await session.runtime._speak_reply(said, spoken)
     if spoken:
@@ -164,8 +164,8 @@ def start_reply(session: Session, pcm: bytes) -> asyncio.Task[None]:
     """A reply in flight, registered the way an utterance registers one,
     so that everything asking whether this session is replying (the idle
     watchdog, the shutdown, the barge-in gates) sees it."""
-    session._reply_task = asyncio.create_task(session.runtime._reply(pcm))
-    return session._reply_task
+    session.runtime._reply_task = asyncio.create_task(session.runtime._reply(pcm))
+    return session.runtime._reply_task
 
 
 async def _nothing(*args: object, **kwargs: object) -> None:
@@ -258,8 +258,8 @@ async def test_a_successful_switch_hands_over_to_the_other_agent() -> None:
 
     assert await run_reply(session, "get me the tutor") == ["Tutor here, hello."]
     assert session._agent == "tutor"
-    assert session._providers is not None
-    assert session._providers.prompt == "TUTOR"
+    assert session.runtime._providers is not None
+    assert session.runtime._providers.prompt == "TUTOR"
 
     # The new agent saw the conversation so far plus an ephemeral turn
     # telling it to greet, and that turn is not in the history.

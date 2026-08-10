@@ -144,7 +144,7 @@ async def test_a_fast_reply_plays_no_filler(caplog: pytest.LogCaptureFixture) ->
     only(caplog, "speaking_started")
     assert only(caplog, "replied").text == "POET heard hello."
     # The timer was stood down with the reply, not left running.
-    assert session._filler_task is None
+    assert session.runtime._filler_task is None
 
 
 async def test_one_filler_per_turn_and_the_variants_rotate(
@@ -254,9 +254,9 @@ async def test_a_fire_on_an_agent_without_clips_quietly_plays_nothing(
     assert events(caplog, "filler_played") == []
     only(caplog, "speaking_started")
     assert only(caplog, "replied").text == "Recovered now."
-    assert session._filler_task is None
-    assert session._filler_sounding is False
-    assert session._filler_fires == 0
+    assert session.runtime._filler_task is None
+    assert session.runtime._filler_sounding is False
+    assert session.runtime._filler_fires == 0
 
 
 async def test_a_fire_into_live_user_speech_is_skipped(
@@ -269,11 +269,11 @@ async def test_a_fire_into_live_user_speech_is_skipped(
     landing 1.4 to 1.8 s into speech already underway)."""
     session = await masked_session(masked_config(), POET_MAC, {"poet": StallingLlm([STALL_S])})
     with caplog.at_level("INFO"):
-        session._reply_task = asyncio.create_task(session.runtime._reply(UTTERANCE))
+        session.runtime._reply_task = asyncio.create_task(session.runtime._reply(UTTERANCE))
         await asyncio.sleep(DELAY_MS / 1000 / 3)
-        assert session._endpointer is not None
-        session._endpointer.feed(SPEECH)
-        await session._reply_task
+        assert session.runtime._endpointer is not None
+        session.runtime._endpointer.feed(SPEECH)
+        await session.runtime._reply_task
 
     skipped = only(caplog, "filler_skipped")
     assert skipped.reason == "user_speaking"
@@ -281,8 +281,8 @@ async def test_a_fire_into_live_user_speech_is_skipped(
     assert events(caplog, "filler_played") == []
     assert only(caplog, "replied").text == "Recovered now."
     # The skip consumed no phrase and left no state behind.
-    assert session._filler_task is None
-    assert session._filler_fires == 0
+    assert session.runtime._filler_task is None
+    assert session.runtime._filler_fires == 0
 
 
 async def test_a_fire_during_a_barge_in_confirmation_is_skipped(
@@ -294,19 +294,19 @@ async def test_a_fire_during_a_barge_in_confirmation_is_skipped(
     so the timer stands down rather than masking a doomed turn."""
     session = await masked_session(masked_config(), POET_MAC, {"poet": StallingLlm([STALL_S])})
     with caplog.at_level("INFO"):
-        session._reply_task = asyncio.create_task(session.runtime._reply(UTTERANCE))
+        session.runtime._reply_task = asyncio.create_task(session.runtime._reply(UTTERANCE))
         await asyncio.sleep(DELAY_MS / 1000 / 3)
-        session._pause_speaking()
+        session.runtime._pause_output()
         await asyncio.sleep(DELAY_MS / 1000)
-        session._resume_speaking()
-        await session._reply_task
+        session.runtime._resume_output()
+        await session.runtime._reply_task
 
     skipped = only(caplog, "filler_skipped")
     assert skipped.reason == "barge_in_pending"
     assert events(caplog, "filler_played") == []
     assert only(caplog, "replied").text == "Recovered now."
-    assert session._filler_task is None
-    assert session._filler_fires == 0
+    assert session.runtime._filler_task is None
+    assert session.runtime._filler_fires == 0
 
 
 async def test_the_feature_is_off_by_default(caplog: pytest.LogCaptureFixture) -> None:
@@ -370,8 +370,8 @@ async def test_the_filler_composes_with_the_first_token_watchdog(
     config = masked_config(delay_ms=50.0, server={"llm_first_token_timeout_s": 0.15})
     session = await masked_session(config, POET_MAC, {"poet": StallingLlm([30.0])})
     with caplog.at_level("INFO"):
-        session._reply_task = asyncio.create_task(session.runtime._reply(UTTERANCE))
-        await session._reply_task
+        session.runtime._reply_task = asyncio.create_task(session.runtime._reply(UTTERANCE))
+        await session.runtime._reply_task
 
     only(caplog, "filler_played")
     only(caplog, "speaking_started")
@@ -381,11 +381,11 @@ async def test_the_filler_composes_with_the_first_token_watchdog(
     assert events(caplog, "replied") == []
     # The turn is over and the session is healthy: not replying, still
     # listening, the device told speech ended, and no filler left over.
-    assert not session._replying()
+    assert not session.runtime.replying()
     assert session.listening is True
     socket = cast(Any, session.websocket)
     assert '"stop"' in socket.texts[-1]
-    assert session._filler_task is None
+    assert session.runtime._filler_task is None
 
 
 def test_an_enabled_filler_with_no_phrases_is_refused() -> None:

@@ -260,7 +260,7 @@ def session_with(reply: asyncio.Task[None] | None = None) -> tuple[Session, Fake
     config = config_with_agent()
     websocket = FakeWebsocket()
     session = Session(cast(Any, websocket), config, build_agent_providers(config))
-    session._reply_task = reply
+    session.runtime._reply_task = reply
     return session, websocket
 
 

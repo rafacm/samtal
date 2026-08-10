@@ -134,8 +134,8 @@ async def test_a_second_stall_gives_the_round_up_and_the_session_keeps_listening
     session.listening = True
 
     with caplog.at_level("INFO"):
-        session._reply_task = asyncio.create_task(session.runtime._reply(b"\x00\x00" * 320))
-        await session._reply_task
+        session.runtime._reply_task = asyncio.create_task(session.runtime._reply(b"\x00\x00" * 320))
+        await session.runtime._reply_task
 
     assert llm.calls == 2
     assert only(caplog, "llm_retry").round == 1
@@ -146,7 +146,7 @@ async def test_a_second_stall_gives_the_round_up_and_the_session_keeps_listening
     assert "timed out" in failed.getMessage()
     # The reply ended cleanly: not replying, still listening, and the
     # closing tts stop went out for the device that waits on it.
-    assert not session._replying()
+    assert not session.runtime.replying()
     assert session.listening is True
     last = json.loads(socket.texts[-1])
     assert (last["type"], last["state"]) == ("tts", "stop")
@@ -226,11 +226,11 @@ async def test_a_cancel_during_the_watchdog_window_still_lands(
     session.websocket = cast(Any, socket)
 
     with caplog.at_level("INFO"):
-        session._reply_task = asyncio.create_task(session.runtime._reply(b"\x00\x00" * 320))
+        session.runtime._reply_task = asyncio.create_task(session.runtime._reply(b"\x00\x00" * 320))
         await asyncio.sleep(0.05)
-        await session._cancel_reply()
+        await session.runtime._cancel_reply()
 
     assert llm.calls == 1
-    assert not session._replying()
+    assert not session.runtime.replying()
     assert events(caplog, "llm_retry") == []
     assert events(caplog, "provider_failed") == []

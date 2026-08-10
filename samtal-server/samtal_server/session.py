@@ -67,12 +67,12 @@ from samtal_server.capture import (
 )
 from samtal_server.config import Config
 from samtal_server.config.models import normalize_mac
-from samtal_server.device.boundary import PIPELINE_SAMPLE_RATE
+from samtal_server.device.boundary import PIPELINE_SAMPLE_RATE, PlayableAudio
 from samtal_server.device.events import SessionEvents, logger
 from samtal_server.filler import FillerClips
 from samtal_server.protocol import framing, messages
 from samtal_server.protocol import mcp as mcp_protocol
-from samtal_server.providers import AgentProviders, AsrResult, Endpointer
+from samtal_server.providers import AgentProviders
 from samtal_server.runtime.pipeline import PipelineRuntime
 from samtal_server.tools.device import DeviceToolClient
 from samtal_server.tools.mcp import McpServers
@@ -81,14 +81,6 @@ from samtal_server.tools.memory import MemoryStore
 # How long to wait for the device hello; the firmware gives the server
 # hello the same ten seconds.
 HELLO_TIMEOUT_S = 10.0
-
-# How much recent mic audio the utterance buffer keeps. A realtime
-# session listens through the silences too, so without a bound the
-# buffer would grow for the whole session (about 115 MB at the one-hour
-# cap). Well above the endpointer's 10 s `max_utterance_ms`, so what a
-# trim can ever drop is silence nobody is going to transcribe.
-UTTERANCE_TAIL_S = 30
-UTTERANCE_TAIL_BYTES = UTTERANCE_TAIL_S * PIPELINE_SAMPLE_RATE * 2
 
 # What the server speaks: TTS output is resampled to this rate, encoded
 # in 60 ms Opus frames, and announced in the server hello.
@@ -153,6 +145,7 @@ class Session:
             agent_providers,
             self._mcp_servers,
             memory,
+            fillers,
         )
         self.protocol_version = 1
         self.listening = False
@@ -170,14 +163,6 @@ class Session:
             sample_rate=OUTPUT_AUDIO.sample_rate,
             frame_duration_ms=OUTPUT_AUDIO.frame_duration,
         )
-        self._endpointer: Endpointer | None = None
-        self._utterance = bytearray()
-        # How much the tail cap has cut from the front of `_utterance`
-        # since the last reset, which is what maps the endpointer's
-        # speech-start offset (counted over everything fed) onto a
-        # position in the buffer that remains.
-        self._utterance_dropped = 0
-        self._reply_task: asyncio.Task[None] | None = None
         # The device's own tools, when it said it has any. Discovery runs
         # in the background, so an early utterance simply runs without
         # them rather than waiting.
@@ -197,12 +182,6 @@ class Session:
         # `tts start` it stands for is sent once per reply, and never
         # before there is something to say.
         self._tts_started = False
-        # The PCM the reply task in flight was handed, held until its
-        # ASR call returns. Still being set is the mid-ASR marker: a
-        # barge-in landing then killed the head of the user's own
-        # sentence, so this is also the merge source that reconstitutes
-        # it in front of the continuation.
-        self._reply_pcm: bytes | None = None
         # The frame pacer waits on this before each send. The
         # transcript-confirmation gate clears it to hold playback while
         # ASR decides whether anything was said; resuming shifts the
@@ -211,16 +190,6 @@ class Session:
         self._pace_resume = asyncio.Event()
         self._pace_resume.set()
         self._pace_paused_at: float | None = None
-        # The pre-synthesized filler clips, keyed by agent; empty means
-        # no agent masks its latency. One timer per turn, armed at the
-        # transcription: `_filler_sounding` flips the moment it fires,
-        # which is what lets the real reply's audio queue behind the
-        # clip's tail rather than interleave with it, and the fire
-        # counter is what rotates the phrase variants.
-        self._fillers = fillers if fillers is not None else {}
-        self._filler_task: asyncio.Task[None] | None = None
-        self._filler_sounding = False
-        self._filler_fires = 0
         # When this session last did any conversing, which is what the
         # idle timeout counts from. Set at the end of an utterance and at
         # the end of a reply, so "whichever is later" needs no
@@ -244,20 +213,6 @@ class Session:
     @_agents.setter
     def _agents(self, agents: list[str]) -> None:
         self.runtime._agents = agents
-
-    @property
-    def _providers(self) -> AgentProviders | None:
-        """The active agent's providers. The barge-in confirmation still
-        runs ASR from the edge until the gate ladder moves."""
-        return self.runtime._providers
-
-    @_providers.setter
-    def _providers(self, providers: AgentProviders | None) -> None:
-        self.runtime._providers = providers
-
-    @property
-    def _asr_language(self) -> str | None:
-        return self.runtime._asr_language
 
     @property
     def _mac(self) -> str | None:
@@ -391,7 +346,7 @@ class Session:
             pass
         finally:
             await self._stop_idle_watchdog()
-            await self._cancel_reply()
+            await self.runtime.close()
             await self._stop_device_discovery()
             logger.info(
                 "session %s closed (device %s)",
@@ -429,14 +384,7 @@ class Session:
         than waited on, and the False that comes back is what lets the
         caller say so instead of reporting a clean drain.
         """
-        finished = True
-        reply = self._reply_task
-        if reply is not None and not reply.done():
-            # asyncio.wait rather than await: a reply that failed is a
-            # reply that finished, and its exception is not this method's
-            # to raise.
-            done, _ = await asyncio.wait([reply], timeout=grace_s)
-            finished = bool(done)
+        finished = await self.runtime.drain(grace_s)
         await self._close(code, reason)
         return finished
 
@@ -574,7 +522,7 @@ class Session:
         loop = asyncio.get_running_loop()
         while True:
             now = loop.time()
-            if not self._realtime or self._replying():
+            if not self._realtime or self.runtime.replying():
                 self._mark_activity()
             assert self._last_activity is not None
             remaining = self._last_activity + timeout - now
@@ -670,10 +618,10 @@ class Session:
         # misfire, so a capture taken after them would be missing the
         # evidence it exists for (#42).
         self._capture_microphone(data)
-        if not self.listening or self._endpointer is None:
+        if not self.listening:
             self._note_dropped("not_listening")
             return
-        if not self.config.server.barge_in and self._replying():
+        if not self.config.server.barge_in and self.runtime.replying():
             # Barge-in off: this is a board whose echo cancellation is
             # not trusted, so what arrives while the server speaks may be
             # the server. Dropped here, before the decode, and nothing
@@ -696,25 +644,10 @@ class Session:
             logger.warning("session %s: undecodable Opus packet: %s", self.session_id, exc)
             self._note_dropped("undecodable")
             return
-        self._utterance.extend(pcm)
-        if len(self._utterance) > UTTERANCE_TAIL_BYTES:
-            excess = len(self._utterance) - UTTERANCE_TAIL_BYTES
-            del self._utterance[:excess]
-            self._utterance_dropped += excess
-        endpointed = self._endpointer.feed(pcm)
-        # After the feed, so the sample is the endpointer's opinion of
-        # the audio just recorded rather than of the frame before it.
-        self._capture_vad()
-        if endpointed:
-            await self._finish_utterance(endpointed=True)
+        await self.runtime.audio(pcm)
 
     def _note_dropped(self, reason: str) -> None:
         self._events.dropped(reason)
-
-    def _capture_vad(self) -> None:
-        if self._endpointer is None:
-            return
-        self._events.vad(self._endpointer.speech_ms(), self.listening, self._replying())
 
     def _capture_microphone(self, data: bytes) -> None:
         """Decode a mic frame for the capture, whatever the session then
@@ -772,7 +705,7 @@ class Session:
                 logger.info("session %s: listening (%s mode)", self.session_id, mode)
                 self._listen_mode = mode
                 self.listening = True
-                self._reset_utterance()
+                await self.runtime.listen_started()
                 # Asking to listen is a conversational act, and it is
                 # also the moment this session can first become one the
                 # idle timeout applies to. Without the mark, a session
@@ -783,16 +716,11 @@ class Session:
                 self._mark_activity()
             case messages.ListenMessage(state="stop"):
                 self.listening = False
-                if self._utterance:
-                    await self._finish_utterance()
+                await self.runtime.listen_stopped()
             case messages.ListenMessage(state="detect", text=word):
                 logger.debug("session %s: wake word reported: %s", self.session_id, word)
             case messages.AbortMessage(reason=reason):
-                logger.info(
-                    "session %s: device aborted (%s)", self.session_id, reason or "no reason"
-                )
-                await self._cancel_reply()
-                self._reset_utterance()
+                await self.runtime.device_aborted(reason)
             case messages.McpMessage(payload=payload):
                 if self._device_tools is None:
                     logger.debug(
@@ -806,173 +734,7 @@ class Session:
                     "session %s: ignoring %s message", self.session_id, message.type
                 )
 
-    async def _finish_utterance(self, endpointed: bool = False) -> None:
-        """Hand the buffered utterance to the reply task. Listening then
-        stops until the device asks again, which auto mode does by
-        sending `listen start` after the reply's `tts stop`. Not in
-        realtime mode: that device asked once and is still streaming, so
-        stopping here would leave nobody to re-arm it and the session
-        would answer one utterance and go deaf.
-
-        An utterance that ends while a reply is still streaming is the
-        user cutting in, so the reply in flight is cancelled and this one
-        answered instead. Cancelling sends the old reply's `tts stop`
-        before the new reply's `tts start`, because `_cancel_reply` waits
-        for the task it cancelled. When the endpointer decided the end,
-        the cancel first has to pass the gates in `_gate_barge_in`,
-        because that decision is acoustic and acoustics mid-reply are as
-        often noise or playback bleed as the user; a manual `listen
-        stop` is the user holding the button and speaking, so it stays
-        unconditional. With `server.barge_in` off the utterance is
-        dropped instead, which is what a board with leaky echo
-        cancellation wants; from the mic that case is already filtered
-        in `_handle_audio`, so what reaches here is a manual `listen
-        stop` mid-reply."""
-        # Before any of the gates below can drop it: an utterance that
-        # ended is somebody talking, whether or not it earns a reply.
-        #
-        # Today every path from here either starts a reply or leaves one
-        # already running, and a reply marks again when it ends, so this
-        # is always superseded and no test can tell it apart. It stays
-        # because the rule the timeout is specified by names both ends,
-        # and because the day an utterance stops implying a reply is not
-        # a day anyone will remember this.
-        self._mark_activity()
-        speech_ms = round(self._endpointer.speech_ms()) if self._endpointer is not None else 0
-        pcm = self._trimmed_utterance()
-        self._reset_utterance()
-        if not self._realtime:
-            self.listening = False
-        result: AsrResult | None = None
-        if self._replying():
-            if not self.config.server.barge_in:
-                logger.warning(
-                    "session %s: dropping an utterance, a reply is already streaming",
-                    self.session_id,
-                )
-                return
-            if endpointed:
-                gated = await self._gate_barge_in(pcm, speech_ms)
-                if gated is None:
-                    return
-                pcm, result = gated
-            else:
-                logger.info(
-                    "session %s: barge-in, cancelling the reply in flight",
-                    self.session_id,
-                    extra=self._event(
-                        "barge_in", speech_ms=speech_ms, **self._speaking_ms_field()
-                    ),
-                )
-                await self._cancel_reply()
-        logger.info(
-            "session %s: utterance of %.1f s",
-            self.session_id,
-            len(pcm) / 2 / PIPELINE_SAMPLE_RATE,
-        )
-        self._reply_pcm = pcm if result is None else None
-        self._reply_task = asyncio.create_task(self.runtime._reply(pcm, result))
-
-    async def _gate_barge_in(
-        self, pcm: bytes, speech_ms: int
-    ) -> tuple[bytes, AsrResult | None] | None:
-        """Decide what an endpointed utterance may do to the reply in
-        flight: None to drop it and let the reply live, or the PCM to
-        answer (with its transcription, when confirming it already ran
-        ASR). The gates exist because a reply is only cancelled on
-        evidence of user speech; acoustics alone can at most pause it
-        (see the ADR of that name).
-
-        In order: too little classified speech is a noise blip and is
-        dropped; a reply still inside ASR was transcribing the head of
-        the user's own sentence, so it is cancelled and its audio
-        prepended, one reply answering the whole sentence; right after
-        playback starts, the onset transient the device's echo
-        cancellation lets through is dropped; anything else pauses the
-        outgoing frames and asks ASR, and only a non-empty transcript
-        cancels. An empty one resumes the paced stream where it
-        stopped, so a wrong pause costs one ASR latency, not a reply."""
-        server = self.config.server
-        if speech_ms < server.barge_in_min_speech_ms:
-            logger.info(
-                "session %s: barge-in suppressed, %d ms of speech is under the "
-                "%.0f ms floor",
-                self.session_id,
-                speech_ms,
-                server.barge_in_min_speech_ms,
-                extra=self._event(
-                    "barge_in_suppressed", reason="min_speech", speech_ms=speech_ms
-                ),
-            )
-            return None
-        if self._reply_pcm is not None:
-            head = self._reply_pcm
-            logger.info(
-                "session %s: barge-in mid-transcription, merging the utterances",
-                self.session_id,
-                extra=self._event("barge_in_merged", speech_ms=speech_ms),
-            )
-            await self._cancel_reply()
-            return head + pcm, None
-        loop = asyncio.get_running_loop()
-        if (
-            self._speaking_started_at is not None
-            and (loop.time() - self._speaking_started_at) * 1000
-            < server.barge_in_refractory_ms
-        ):
-            logger.info(
-                "session %s: barge-in suppressed inside the refractory window",
-                self.session_id,
-                extra=self._event(
-                    "barge_in_suppressed", reason="refractory", speech_ms=speech_ms
-                ),
-            )
-            return None
-        assert self._providers is not None
-        self._pause_speaking()
-        try:
-            # In the receive path on purpose: incoming frames buffer in
-            # the socket for the duration, so ordering is unaffected.
-            async with self.runtime._watching("asr", self._providers.asr):
-                result = await self._providers.asr.transcribe(
-                    pcm, PIPELINE_SAMPLE_RATE, language_hint=self._asr_language
-                )
-        except Exception:
-            logger.exception("session %s: barge-in confirmation failed", self.session_id)
-            self._resume_speaking()
-            return None
-        if not result.text.strip():
-            logger.info(
-                "session %s: barge-in suppressed, nothing transcribed",
-                self.session_id,
-                extra=self._event(
-                    "barge_in_suppressed", reason="no_transcript", speech_ms=speech_ms
-                ),
-            )
-            self._resume_speaking()
-            return None
-        logger.info(
-            "session %s: barge-in, cancelling the reply in flight",
-            self.session_id,
-            extra=self._event("barge_in", speech_ms=speech_ms, **self._speaking_ms_field()),
-        )
-        await self._cancel_reply()
-        # The pause belonged to the cancelled reply; the one about to
-        # answer starts with the frames flowing.
-        self._pace_paused_at = None
-        self._pace_resume.set()
-        return pcm, result
-
-    def _speaking_ms_field(self) -> dict[str, int]:
-        """The barge_in event's speaking_ms: milliseconds from
-        speaking_started to the cancel decision, absent when the reply
-        had not yet spoken."""
-        if self._speaking_started_at is None:
-            return {}
-        elapsed = asyncio.get_running_loop().time() - self._speaking_started_at
-        return {"speaking_ms": round(elapsed * 1000)}
-
-    def _pause_speaking(self) -> None:
+    def pause_output(self) -> None:
         """Hold the outgoing frame pacing before the next send. Audio
         stops within a frame either way; what a pause preserves is the
         option of resuming."""
@@ -981,7 +743,7 @@ class Session:
         self._pace_paused_at = asyncio.get_running_loop().time()
         self._pace_resume.clear()
 
-    def _resume_speaking(self) -> None:
+    def resume_output(self) -> None:
         """Let the frames flow again, with the pacing clock shifted by
         the pause so the stream picks up where it stopped rather than
         bursting to catch up on the frames the pause displaced."""
@@ -991,47 +753,6 @@ class Session:
             self._pace_start += asyncio.get_running_loop().time() - self._pace_paused_at
         self._pace_paused_at = None
         self._pace_resume.set()
-
-    def _replying(self) -> bool:
-        """Whether a reply is streaming right now, which is what both
-        halves of the barge-in decision turn on."""
-        return self._reply_task is not None and not self._reply_task.done()
-
-    def _trimmed_utterance(self) -> bytes:
-        """The buffered utterance, cut down to the speech plus a short
-        pre-roll. A continuously listening session buffers everything
-        between utterances (the reply's own playback time, the pause
-        while the user thinks), and the endpointer rightly ignores that
-        silence, so it would otherwise all ride along to ASR (#14). The
-        pre-roll keeps the first phoneme intact; the trailing silence
-        the endpointer sat through stays, since it is bounded and ASR
-        needs the end of the speech anyway."""
-        speech_start = self._endpointer.speech_start() if self._endpointer is not None else None
-        if speech_start is None:
-            return bytes(self._utterance)
-        pre_roll = int(self.config.server.utterance_pre_roll_ms / 1000 * PIPELINE_SAMPLE_RATE) * 2
-        start = speech_start - self._utterance_dropped - pre_roll
-        if start <= 0:
-            return bytes(self._utterance)
-        start -= start % 2  # never split a 16-bit sample
-        return bytes(self._utterance[start:])
-
-    def _reset_utterance(self) -> None:
-        self._utterance.clear()
-        self._utterance_dropped = 0
-        if self._endpointer is not None:
-            self._endpointer.reset()
-
-    async def _cancel_reply(self) -> None:
-        """Cancel a reply in flight and see the cancellation through.
-        Waiting matters: a fire-and-forget cancel leaves the task not yet
-        done, and an utterance finishing in that window would be dropped."""
-        if self._reply_task is None:
-            return
-        self._reply_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await self._reply_task
-        self._reply_task = None
 
     async def _begin_speaking(self) -> None:
         """Tell the device a reply is starting, once per reply.
@@ -1048,180 +769,54 @@ class Session:
         self._tts_started = True
         await self.websocket.send_text(messages.tts_message(self.session_id, "start"))
 
-    def _arm_filler(self) -> None:
-        """Start this turn's latency mask, when any agent this session
-        could become has one: a timer from the transcription that plays
-        a cached filler clip if the reply's first audio has not started
-        in time.
+    def encode_audio(self, pcm: bytes) -> PlayableAudio:
+        """Feed reply PCM at `output_sample_rate` into the encoder; the
+        batch holds every packet that filled, possibly none. Synchronous,
+        and sends nothing."""
+        return PlayableAudio(self._encoder.encode(pcm))
 
-        Any bound agent, not just the active one, because a handover
-        mid-turn can move the conversation to an agent with fillers
-        before the reply first speaks: armed only for the starting
-        agent, a filler-less receptionist handing over to a masked
-        specialist would leave the specialist's slow greeting unmasked
-        even though the fire-time lookup already resolves the active
-        agent. The delay is the active agent's own where it has one,
-        and the earliest configured among the bound agents otherwise;
-        at fire time an active agent with no clip quietly plays
-        nothing. A session bound only to filler-less agents still
-        skips the timer entirely.
+    def flush_encoder(self) -> PlayableAudio:
+        """Pad the encoder's pending partial frame with silence and
+        encode it. The codec object itself is never reset between
+        replies: its few milliseconds of lookahead staying inside is what
+        keeps it reusable."""
+        return PlayableAudio(self._encoder.flush())
 
-        Armed once per turn and never re-armed, so a first-token
-        watchdog retry does not earn a second filler: the filler is the
-        soft early threshold, the watchdog the hard late one, and a
-        stalled round hears one "let me see" before the watchdog gives
-        the round up."""
-        reachable = [self._fillers[name] for name in self._agents if name in self._fillers]
-        if not reachable:
+    def reply_started(self) -> None:
+        """A new reply: nothing has been spoken and the device has not
+        been told anything is coming. The encoder is deliberately left
+        alone."""
+        self._speaking_started = False
+        self._speaking_started_at = None
+        self._tts_started = False
+
+    def restart_pacing(self) -> None:
+        """A new agent leg: the pacing clock starts again at its first
+        frame."""
+        self._pace_start = None
+        self._pace_count = 0
+
+    def speaking_started_at(self) -> float | None:
+        """When this reply's first frame was stamped, or None before it.
+        Read by the barge-in refractory gate and by the filler."""
+        return self._speaking_started_at
+
+    def user_turn_ended(self) -> None:
+        """The runtime decided the utterance ended. Whether the mic stays
+        armed is protocol, not conversation: auto mode stops listening
+        until the device sends a fresh `listen start` after the reply's
+        `tts stop`, while a realtime device asked once and is still
+        streaming, so stopping here would leave nobody to re-arm it and
+        the session would answer one utterance and go deaf."""
+        if not self._realtime:
+            self.listening = False
+
+    async def send_audio(self, batch: PlayableAudio) -> None:
+        """Send a batch of Opus frames paced at the frame cadence, so a
+        long reply cannot flood the device's playback queue. The clock
+        starts at the first frame of the reply, not at ASR time."""
+        if not batch:
             return
-        own = self._fillers.get(self._agent or "")
-        delay_ms = own.delay_ms if own is not None else min(c.delay_ms for c in reachable)
-        self._filler_sounding = False
-        armed_at = asyncio.get_running_loop().time()
-        self._filler_task = asyncio.create_task(
-            self._run_filler(delay_ms / 1000, armed_at)
-        )
-
-    async def _run_filler(self, delay_s: float, armed_at: float) -> None:
-        """Wait out the delay, then mask the silence, unless the reply's
-        first audio arrived first.
-
-        The clip is chosen from the agent active at fire time, so a
-        handover already made is spoken in the voice now talking, and
-        an active agent with no clips of its own plays nothing,
-        quietly: no event, no state, the turn proceeds unmasked. It
-        goes out through the normal paced path: `_begin_speaking` moves
-        the device into its speaking state (once per reply, so the real
-        sentence that follows sends no second one), the frames land on
-        capture channel 1, and `speaking_started` fires on the clip's
-        first frame and counts as the turn's. No `sentence_start` is
-        sent: the filler is a noise that buys time, not a sentence of
-        the reply, and it stays out of the transcript everywhere.
-
-        A device that went away mid-clip ends the clip, not the
-        session; anything else unexpected is logged and swallowed,
-        because a broken mask must never break the reply it masks.
-
-        The mask yields to the user. A fire-time check skips the clip
-        when the endpointer holds unresolved speech (the user is
-        talking, or just trailed off into silence the endpointer has
-        not yet resolved) and when a barge-in confirmation has the
-        outgoing frames paused. Both mean the silence the timer set
-        out to mask is not silence: the turn it would mask belongs to
-        a premature endpoint, the reply in flight is about to be
-        cancelled, and a clip played now talks over the user's own
-        continuation. Field round 2 measured exactly this: 4 of 20
-        fires landed 1.4 to 1.8 s into speech already underway, all
-        in dictation-style turns. Skipped, not deferred: one filler
-        per turn stays the rule, and the cancelled reply's successor
-        arms its own timer."""
-        await asyncio.sleep(delay_s)
-        if self._speaking_started:
-            return
-        speech_ms = round(self._endpointer.speech_ms()) if self._endpointer is not None else 0
-        if speech_ms > 0:
-            logger.info(
-                "session %s: filler skipped, the user is speaking (%d ms heard)",
-                self.session_id,
-                speech_ms,
-                extra=self._event(
-                    "filler_skipped",
-                    agent=self._agent,
-                    reason="user_speaking",
-                    speech_ms=speech_ms,
-                ),
-            )
-            return
-        if self._pace_paused_at is not None:
-            logger.info(
-                "session %s: filler skipped, a barge-in is being confirmed",
-                self.session_id,
-                extra=self._event(
-                    "filler_skipped", agent=self._agent, reason="barge_in_pending"
-                ),
-            )
-            return
-        clips = self._fillers.get(self._agent or "")
-        if clips is None:
-            return
-        # Claimed synchronously between the checks above and the first
-        # await below: from here `_filler_tail` waits for the clip's
-        # tail instead of cancelling the timer.
-        self._filler_sounding = True
-        index = self._filler_fires % len(clips.clips)
-        self._filler_fires += 1
-        elapsed_ms = round((asyncio.get_running_loop().time() - armed_at) * 1000)
-        logger.info(
-            "session %s: no reply audio after %d ms, playing filler %d",
-            self.session_id,
-            elapsed_ms,
-            index,
-            extra=self._event(
-                "filler_played",
-                agent=self._agent,
-                delay_ms=elapsed_ms,
-                phrase_index=index,
-            ),
-        )
-        try:
-            await self._begin_speaking()
-            resampler = Resampler(clips.sample_rate, OUTPUT_AUDIO.sample_rate)
-            packets = (
-                self._encoder.encode(resampler.process(clips.clips[index]))
-                + self._encoder.encode(resampler.flush())
-                + self._encoder.flush()
-            )
-            await self._send_frames(packets, from_filler=True)
-        except (WebSocketDisconnect, RuntimeError):
-            return
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("session %s: filler playback failed", self.session_id)
-
-    async def _filler_tail(self) -> None:
-        """The reply's own audio is ready: an unfired timer loses (the
-        silence it was going to mask is over), and a clip already
-        sounding is waited out, so the first real sentence queues
-        behind its tail rather than interleaving with it or cutting it
-        mid-word."""
-        task = self._filler_task
-        if task is None or task.done():
-            return
-        if not self._filler_sounding:
-            task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
-
-    async def _settle_filler(self) -> None:
-        """End-of-reply cleanup, whatever path ended it: stand down an
-        unfired timer, wait out a clip still sounding (a reply that
-        failed silently still finishes its "let me see" before the
-        closing tts stop), and see a cancellation through so nothing
-        of this turn's filler outlives the turn."""
-        task = self._filler_task
-        self._filler_task = None
-        if task is None:
-            return
-        if not self._filler_sounding:
-            task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
-        self._filler_sounding = False
-
-    async def _send_frames(self, packets: list[bytes], from_filler: bool = False) -> None:
-        """Send Opus frames paced at the frame cadence, so a long reply
-        cannot flood the device's playback queue. The clock starts at the
-        first frame of the reply, not at ASR time.
-
-        Reply audio first yields to a filler in flight (`_filler_tail`),
-        so a clip that started sounding finishes and the reply queues
-        behind its tail; the filler's own frames skip the gate, which is
-        what keeps this from waiting on itself."""
-        if not packets:
-            return
-        if not from_filler:
-            await self._filler_tail()
         loop = asyncio.get_running_loop()
         if not self._speaking_started:
             # The `replied` event marks the last frame of a reply, so on
@@ -1238,7 +833,7 @@ class Session:
         frame_s = OUTPUT_AUDIO.frame_duration / 1000
         if self._pace_start is None:
             self._pace_start = loop.time()
-        for packet in packets:
+        for packet in batch.packets:
             await asyncio.sleep(self._pace_start + self._pace_count * frame_s - loop.time())
             # A barge-in being confirmed holds the stream here; resuming
             # shifts `_pace_start`, so the cadence survives the pause.
