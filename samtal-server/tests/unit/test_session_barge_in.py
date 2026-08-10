@@ -127,8 +127,8 @@ def realtime_session(config, asr) -> tuple[session_module.Session, RecordingSock
     session.runtime._activate_agent("assistant")
     session._listen_mode = "realtime"
     session.listening = True
-    assert session._providers is not None
-    session._providers = replace(session._providers, asr=asr)
+    assert session.runtime._providers is not None
+    session.runtime._providers = replace(session.runtime._providers, asr=asr)
     return session, socket
 
 
@@ -251,19 +251,19 @@ async def test_a_barge_in_during_transcription_merges_the_sentence(
     # exactly: 320 ms of head plus 480 ms of tail is 800 ms.
     asr = GatedAsr()
     session, _ = realtime_session(config_with_agent(), asr)
-    session._endpointer = ScriptedEndpointer(speech_ms=600)
+    session.runtime._endpointer = ScriptedEndpointer(speech_ms=600)
     head = speech_pcm(320)
     tail = speech_pcm(480)
 
     with caplog.at_level("INFO"):
-        session._utterance = bytearray(head)
-        await session._finish_utterance(endpointed=True)
+        session.runtime._utterance = bytearray(head)
+        await session.runtime._finish_utterance(endpointed=True)
         await asyncio.sleep(0.05)  # the reply is now held inside ASR
-        session._utterance = bytearray(tail)
-        await session._finish_utterance(endpointed=True)
+        session.runtime._utterance = bytearray(tail)
+        await session.runtime._finish_utterance(endpointed=True)
         asr.release.set()
-        assert session._reply_task is not None
-        await session._reply_task
+        assert session.runtime._reply_task is not None
+        await session.runtime._reply_task
 
     assert asr.pcms == [head, head + tail]
     heard = only(caplog, "heard")
@@ -287,17 +287,17 @@ async def test_an_unconfirmed_barge_in_pauses_and_resumes_the_reply(
     )
     asr = ConfirmingAsr(AsrResult(text=""))
     session, socket = realtime_session(config, asr)
-    session._endpointer = ScriptedEndpointer(speech_ms=600)
+    session.runtime._endpointer = ScriptedEndpointer(speech_ms=600)
 
     with caplog.at_level("INFO"):
-        session._reply_task = asyncio.create_task(session.runtime._reply(speech_pcm(600)))
-        reply = session._reply_task
+        session.runtime._reply_task = asyncio.create_task(session.runtime._reply(speech_pcm(600)))
+        reply = session.runtime._reply_task
         while socket.frames < 3:
             await asyncio.sleep(0.02)
         pace_before = session._pace_start
 
-        session._utterance = bytearray(speech_pcm(600))
-        finish = asyncio.create_task(session._finish_utterance(endpointed=True))
+        session.runtime._utterance = bytearray(speech_pcm(600))
+        finish = asyncio.create_task(session.runtime._finish_utterance(endpointed=True))
         await asyncio.sleep(0.05)
         # Paused: the confirmation is in flight and no frames move.
         assert not session._pace_resume.is_set()
@@ -312,7 +312,7 @@ async def test_an_unconfirmed_barge_in_pauses_and_resumes_the_reply(
         assert pace_before is not None and session._pace_start is not None
         assert session._pace_start - pace_before >= 0.3
         # The same reply, never cancelled, plays to the end.
-        assert session._reply_task is reply
+        assert session.runtime._reply_task is reply
         await reply
 
     suppressed = only(caplog, "barge_in_suppressed")
@@ -350,17 +350,17 @@ async def test_a_failed_confirmation_is_reported_as_the_provider_failure_it_is(
         server={"barge_in_refractory_ms": 0},
     )
     session, socket = realtime_session(config, FailingConfirmation(AsrResult(text="")))
-    session._endpointer = ScriptedEndpointer(speech_ms=600)
+    session.runtime._endpointer = ScriptedEndpointer(speech_ms=600)
 
     with caplog.at_level("INFO"):
-        session._reply_task = asyncio.create_task(session.runtime._reply(speech_pcm(600)))
-        reply = session._reply_task
+        session.runtime._reply_task = asyncio.create_task(session.runtime._reply(speech_pcm(600)))
+        reply = session.runtime._reply_task
         while socket.frames < 3:
             await asyncio.sleep(0.02)
-        session._utterance = bytearray(speech_pcm(600))
-        await session._finish_utterance(endpointed=True)
+        session.runtime._utterance = bytearray(speech_pcm(600))
+        await session.runtime._finish_utterance(endpointed=True)
         # The reply lives, which is why this needs saying out loud.
-        assert session._reply_task is reply
+        assert session.runtime._reply_task is reply
         await reply
 
     (failed,) = [r for r in caplog.records if getattr(r, "event", None) == "provider_failed"]
@@ -392,19 +392,19 @@ async def test_a_confirmed_barge_in_reuses_the_transcript_and_the_lock(
     )
     asr.release.set()
     session, socket = realtime_session(config, asr)
-    session._endpointer = ScriptedEndpointer(speech_ms=700)
+    session.runtime._endpointer = ScriptedEndpointer(speech_ms=700)
 
     with caplog.at_level("INFO"):
-        session._reply_task = asyncio.create_task(session.runtime._reply(speech_pcm(600)))
+        session.runtime._reply_task = asyncio.create_task(session.runtime._reply(speech_pcm(600)))
         while socket.frames < 3:
             await asyncio.sleep(0.02)
-        session._utterance = bytearray(speech_pcm(600))
-        await session._finish_utterance(endpointed=True)
-        assert session._reply_task is not None
-        await session._reply_task
+        session.runtime._utterance = bytearray(speech_pcm(600))
+        await session.runtime._finish_utterance(endpointed=True)
+        assert session.runtime._reply_task is not None
+        await session.runtime._reply_task
 
     assert asr.calls == 2
-    assert session._asr_language == "es"
+    assert session.runtime._asr_language == "es"
     first, second = events(caplog, "heard")
     assert first.text == "the question"
     assert second.text == "stop and listen"

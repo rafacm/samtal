@@ -126,8 +126,8 @@ def slow_session(
 ) -> tuple[session_module.Session, TimedSocket]:
     script = ScriptedLlm(rounds)
     session = session_for(config or base_config(), "aa:bb:cc:dd:ee:01", {"poet": script})
-    assert session._providers is not None
-    session._providers = replace(session._providers, tts=tts)
+    assert session.runtime._providers is not None
+    session.runtime._providers = replace(session.runtime._providers, tts=tts)
     socket = TimedSocket()
     session.websocket = cast(Any, socket)
     return session, socket
@@ -213,8 +213,8 @@ async def test_the_first_sentence_does_not_wait_for_the_second() -> None:
 
     tts = SlowTts()
     session, socket = slow_session([], tts)
-    assert session._providers is not None
-    session._providers = replace(session._providers, llm=Dawdles([]))
+    assert session.runtime._providers is not None
+    session.runtime._providers = replace(session.runtime._providers, llm=Dawdles([]))
 
     began = asyncio.get_running_loop().time()
     await speak_a_reply(session)

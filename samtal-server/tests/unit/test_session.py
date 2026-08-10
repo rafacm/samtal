@@ -22,6 +22,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+import samtal_server.runtime.pipeline as pipeline_module
 import samtal_server.session as session_module
 from samtal_server.app import create_app
 from samtal_server.audio import rms
@@ -600,13 +601,13 @@ async def test_only_a_sentence_whose_audio_finished_counts_as_spoken() -> None:
     session = session_module.Session(cast(Any, socket), config, build_agent_providers(config))
     session._agents = ["tutor"]
     session.runtime._activate_agent("tutor")
-    assert session._providers is not None
+    assert session.runtime._providers is not None
     resampler = Resampler(
-        session._providers.tts.sample_rate, session_module.OUTPUT_AUDIO.sample_rate
+        session.runtime._providers.tts.sample_rate, session_module.OUTPUT_AUDIO.sample_rate
     )
 
     spoken: list[str] = []
-    tts = session._providers.tts
+    tts = session.runtime._providers.tts
     await session.runtime._speak(
         _Synthesis("Short and finished.", tts, session.session_id),
         resampler,
@@ -635,7 +636,7 @@ async def test_the_utterance_buffer_keeps_only_a_bounded_tail(
     # Always listening means buffering the silences too, so the buffer
     # keeps a bounded tail of recent audio rather than the whole session.
     cap = SAMPLE_RATE * 2 * 2  # two seconds
-    monkeypatch.setattr(session_module, "UTTERANCE_TAIL_BYTES", cap)
+    monkeypatch.setattr(pipeline_module, "UTTERANCE_TAIL_BYTES", cap)
     config = two_persona_config()
     session = session_module.Session(cast(Any, None), config, build_agent_providers(config))
     session._agents = ["tutor"]
@@ -649,7 +650,7 @@ async def test_the_utterance_buffer_keeps_only_a_bounded_tail(
 
     # Trimmed to the cap, give or take the frame that crossed it, and
     # the quiet room never looked like an utterance.
-    assert cap - FRAME_BYTES <= len(session._utterance) <= cap + FRAME_BYTES
+    assert cap - FRAME_BYTES <= len(session.runtime._utterance) <= cap + FRAME_BYTES
 
 
 def test_version_2_framing_round_trips() -> None:
@@ -760,8 +761,8 @@ def test_a_session_refuses_an_agent_its_device_is_not_bound_to() -> None:
         session.runtime._activate_agent("poet")
     # Refused, and nothing swapped: the session still talks as the tutor.
     assert session._agent == "tutor"
-    assert session._providers is not None
-    assert session._providers.prompt == "TUTOR"
+    assert session.runtime._providers is not None
+    assert session.runtime._providers.prompt == "TUTOR"
 
 
 def test_a_device_with_no_agent_is_turned_away() -> None:

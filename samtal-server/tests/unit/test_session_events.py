@@ -21,6 +21,7 @@ from starlette.websockets import WebSocketDisconnect
 from samtal_server.app import create_app
 from samtal_server.build_info import REVISION_ENV, revision
 from samtal_server.config import Config
+from samtal_server.device.boundary import PlayableAudio
 from samtal_server.logs import JsonFormatter
 from samtal_server.ota import OTA_PATH
 from samtal_server.providers import (
@@ -204,9 +205,9 @@ async def test_a_reply_starts_speaking_only_once(
     session = session_for(base_config(), POET_MAC)
     session.websocket = cast(Any, Sink())
     with caplog.at_level("INFO"):
-        await session._send_frames([b"frame"])
+        await session.send_audio(PlayableAudio([b"frame"]))
         session._pace_start = None
-        await session._send_frames([b"frame"])
+        await session.send_audio(PlayableAudio([b"frame"]))
 
     started = only(caplog, "speaking_started")
     assert started.agent == "poet"
@@ -243,9 +244,9 @@ async def test_the_session_hands_a_locked_language_back_as_a_hint(
             return None
 
     session = session_for(base_config(), BOTH_MAC)
-    assert session._providers is not None
+    assert session.runtime._providers is not None
     asr = LockingAsr()
-    session._providers = replace(session._providers, asr=asr)
+    session.runtime._providers = replace(session.runtime._providers, asr=asr)
     session.websocket = cast(Any, TextSink())
 
     async def speak(synthesis: Any, resampler: Any, into: list[str]) -> None:
@@ -255,7 +256,7 @@ async def test_the_session_hands_a_locked_language_back_as_a_hint(
         into.append(synthesis.sentence)
 
     session.runtime._speak = speak  # type: ignore[method-assign]
-    session._send_frames = _nothing  # type: ignore[method-assign]
+    session.send_audio = _nothing  # type: ignore[method-assign]
 
     with caplog.at_level("INFO"):
         await session.runtime._reply(b"\x00\x00" * 320)
@@ -408,7 +409,7 @@ async def test_the_device_is_told_speech_starts_only_when_it_does() -> None:
 
     session = session_for(base_config(), POET_MAC, {"poet": cast(Any, Thinking([]))})
     session.websocket = cast(Any, Recorder())
-    session._send_frames = _nothing  # type: ignore[method-assign]
+    session.send_audio = _nothing  # type: ignore[method-assign]
     await session.runtime._reply(b"\x00\x00" * 320)
 
     assert order.index("model thinking") < order.index("tts start")
@@ -460,13 +461,13 @@ async def reply_with(
             return None
 
     session = session_for(base_config(), POET_MAC, {"poet": ScriptedLlm(["One sentence."])})
-    assert session._providers is not None
-    session._providers = replace(
-        session._providers, **{provider_stage: cast(Any, Unreachable(provider_stage, exc))}
+    assert session.runtime._providers is not None
+    session.runtime._providers = replace(
+        session.runtime._providers, **{provider_stage: cast(Any, Unreachable(provider_stage, exc))}
     )
     session.websocket = cast(Any, TextSink())
     session._mac = POET_MAC
-    session._send_frames = _nothing  # type: ignore[method-assign]
+    session.send_audio = _nothing  # type: ignore[method-assign]
     with caplog.at_level("INFO"):
         await session.runtime._reply(b"\x00\x00" * 320)
     return only(caplog, "provider_failed")
