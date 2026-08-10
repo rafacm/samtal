@@ -1059,18 +1059,12 @@ class PipelineRuntime:
         cancellation wants; from the mic that case is already filtered
         in `_handle_audio`, so what reaches here is a manual `listen
         stop` mid-reply."""
-        # Before any of the gates below can drop it: an utterance that
-        # ended is somebody talking, whether or not it earns a reply.
-        #
-        # Today every path from here either starts a reply or leaves one
-        # already running, and a reply marks again when it ends, so this
-        # is always superseded and no test can tell it apart. It stays
-        # because the rule the timeout is specified by names both ends,
-        # and because the day an utterance stops implying a reply is not
-        # a day anyone will remember this.
         speech_ms = round(self._endpointer.speech_ms()) if self._endpointer is not None else 0
         pcm = self._trimmed_utterance()
         self._reset_utterance()
+        # Reported before any of the gates below can drop the utterance:
+        # somebody talked, whether or not it earns a reply, and the edge
+        # counts the idle timeout from both ends of a turn.
         self._output.user_turn_ended()
         result: AsrResult | None = None
         if self.replying():

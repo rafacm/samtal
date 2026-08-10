@@ -823,12 +823,23 @@ class DeviceSession:
         return self._speaking_started_at
 
     def user_turn_ended(self) -> None:
-        """The runtime decided the utterance ended. Whether the mic stays
-        armed is protocol, not conversation: auto mode stops listening
-        until the device sends a fresh `listen start` after the reply's
-        `tts stop`, while a realtime device asked once and is still
-        streaming, so stopping here would leave nobody to re-arm it and
-        the session would answer one utterance and go deaf."""
+        """The runtime decided the utterance ended.
+
+        Somebody was talking, whether or not it earns a reply, so this
+        is one of the two ends the idle timeout counts from. Marked here
+        rather than inside a runtime because the timeout is the
+        appliance's policy: every runtime behind this boundary inherits
+        it by reporting the turn, and one that answers nothing (an empty
+        transcript, an utterance its gates dropped) cannot leave the
+        watchdog counting from before the user last spoke.
+
+        Whether the mic stays armed is protocol, not conversation: auto
+        mode stops listening until the device sends a fresh `listen
+        start` after the reply's `tts stop`, while a realtime device
+        asked once and is still streaming, so stopping here would leave
+        nobody to re-arm it and the session would answer one utterance
+        and go deaf."""
+        self._mark_activity()
         if not self._realtime:
             self.listening = False
 
