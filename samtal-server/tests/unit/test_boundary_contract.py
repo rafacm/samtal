@@ -1,0 +1,413 @@
+"""The boundary as a contract, exercised from both sides of the seam.
+
+The point of #85 is that the device edge and a conversation runtime can
+be reasoned about, and replaced, one at a time. Two suites prove it,
+and they are deliberately small: what the pipeline decides is covered
+by the pipeline's own tests, and re-testing it through the boundary
+would be scope growth.
+
+Downwards: a stub runtime, injected through the factory the composition
+root normally fills, holds a whole turn over a real websocket. Nothing
+of the pipeline is involved, so what the assertions see is the edge
+alone, and the fact that the turn happens at all is the demonstration
+that a second runtime can exist.
+
+Upwards: a fake device, which is not a socket and knows no Opus, drives
+the real bespoke runtime through a turn and an interruption. Nothing of
+the wire is involved, so what the assertions see is the runtime alone.
+"""
+
+import asyncio
+import json
+import time
+from collections.abc import AsyncIterator, Sequence
+from typing import Any, cast
+
+from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
+
+from samtal_server.app import create_app
+from samtal_server.audio.opus import OpusEncoder
+from samtal_server.config import Config
+from samtal_server.device.boundary import (
+    DeviceGone,
+    DeviceOutput,
+    PlayableAudio,
+    SessionInput,
+)
+from samtal_server.device.events import SessionEvents
+from samtal_server.providers import (
+    LlmEvent,
+    LlmProvider,
+    TextDelta,
+    ToolChoice,
+    ToolDef,
+    Turn,
+    build_agent_providers,
+)
+from samtal_server.runtime.pipeline import bespoke_runtime_factory
+from samtal_server.tools.mcp import McpServers
+from tests.unit.test_session import (
+    DEVICE_MAC,
+    config_with_agent,
+    connect,
+    send_pcm,
+    shake_hands,
+    speech_pcm,
+)
+
+OUTPUT_RATE = 24000
+FRAME_BYTES = OUTPUT_RATE * 60 // 1000 * 2
+
+# A quarter second of reply audio at the output rate, which is four
+# whole Opus frames and a bit.
+REPLY_PCM = b"\x11\x22" * (OUTPUT_RATE // 4)
+
+
+class StubRuntime:
+    """A conversation runtime that is not a pipeline at all.
+
+    It has no VAD, no ASR, no model and no voice: it answers whatever it
+    is handed with one fixed sentence and a burst of tone. Everything it
+    needs to do that, it does through `DeviceOutput`, which is the
+    claim under test."""
+
+    def __init__(
+        self, output: DeviceOutput, events: SessionEvents, agents: Sequence[str]
+    ) -> None:
+        self.output = output
+        self.events = events
+        self.agents = list(agents)
+        self.heard = bytearray()
+        self.closed = False
+        self.aborts: list[str | None] = []
+        self._replying = False
+
+    async def audio(self, pcm: bytes) -> None:
+        self.heard.extend(pcm)
+
+    async def listen_started(self) -> None:
+        self.heard.clear()
+
+    async def listen_stopped(self) -> None:
+        await self._answer()
+
+    async def device_aborted(self, reason: str | None) -> None:
+        self.aborts.append(reason)
+
+    def replying(self) -> bool:
+        return self._replying
+
+    async def drain(self, grace_s: float) -> bool:
+        return True
+
+    async def close(self) -> None:
+        self.closed = True
+
+    async def _answer(self) -> None:
+        self._replying = True
+        self.output.reply_started()
+        self.output.restart_pacing()
+        try:
+            await self.output.show_transcript("the stub heard something")
+            await self.output.begin_speaking()
+            await self.output.sentence_started("This is not a pipeline.")
+            batch = self.output.encode_audio(REPLY_PCM) + self.output.flush_encoder()
+            await self.output.send_audio(batch)
+        finally:
+            self._replying = False
+            await self.output.finish_speaking()
+
+
+def app_with_a_stub(built: list[StubRuntime], config: Config | None = None) -> Any:
+    """The app, with the composition root's factory swapped for one that
+    builds stubs. This is the whole of what plugging in a second runtime
+    takes."""
+    app = create_app(config if config is not None else config_with_agent())
+
+    def factory(
+        output: DeviceOutput, events: SessionEvents, agents: Sequence[str]
+    ) -> SessionInput:
+        runtime = StubRuntime(output, events, agents)
+        built.append(runtime)
+        return cast(SessionInput, runtime)
+
+    app.state.runtime_factory = factory
+    return app
+
+
+def test_a_stub_runtime_holds_a_turn_over_the_real_wire() -> None:
+    """Handshake, transcript, speaking state, sentence, paced frames and
+    the closing stop, with no pipeline anywhere: every message here was
+    produced by the edge, on the runtime's instruction."""
+    built: list[StubRuntime] = []
+    received: list[Any] = []
+    with TestClient(app_with_a_stub(built)) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            websocket.send_text(json.dumps({"type": "listen", "state": "start", "mode": "manual"}))
+            send_pcm(websocket, speech_pcm(200), OpusEncoder())
+            websocket.send_text(json.dumps({"type": "listen", "state": "stop"}))
+            while True:
+                message = websocket.receive()
+                if message.get("text") is None:
+                    received.append("frame")
+                    continue
+                parsed = json.loads(message["text"])
+                if parsed["type"] == "mcp":
+                    continue
+                received.append(f"{parsed['type']} {parsed.get('state', '')}".strip())
+                if received[-1] == "tts stop":
+                    break
+
+    assert received[:3] == ["stt", "tts start", "tts sentence_start"]
+    assert received[-1] == "tts stop"
+    assert set(received[3:-1]) == {"frame"}
+    # The mic audio arrived decoded, at the pipeline rate, and only
+    # while the device was listening.
+    (runtime,) = built
+    assert len(runtime.heard) > 0
+    assert runtime.closed
+
+
+def test_the_factory_is_handed_the_device_it_speaks_for() -> None:
+    """What crosses at construction: the device to speak through, the
+    session's observability with its identity already on it, and the
+    agents this device is bound to. Nothing else."""
+    built: list[StubRuntime] = []
+    with TestClient(app_with_a_stub(built)) as client:
+        with connect(client) as websocket:
+            hello = shake_hands(websocket)
+
+    (runtime,) = built
+    assert isinstance(runtime.output, DeviceOutput)
+    assert runtime.agents == ["assistant"]
+    assert runtime.events.session_id == hello["session_id"]
+    assert runtime.events.device == DEVICE_MAC.lower()
+    # Activation is the runtime's, so a stub that never activates leaves
+    # the attribution field alone rather than inheriting one.
+    assert runtime.events.agent is None
+
+
+def test_frames_that_arrive_before_a_listen_never_reach_the_runtime() -> None:
+    """The mic guards stay on the edge, before the decode, because the
+    frames they drop are the evidence a capture exists for."""
+    built: list[StubRuntime] = []
+    with TestClient(app_with_a_stub(built)) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            send_pcm(websocket, speech_pcm(200), OpusEncoder())
+            websocket.send_text(json.dumps({"type": "listen", "state": "start", "mode": "manual"}))
+            # A listen is answered by nothing, so an abort follows it as
+            # a marker: once the runtime has seen that, it has seen
+            # everything sent before it.
+            websocket.send_text(json.dumps({"type": "abort", "reason": "sync"}))
+            deadline = time.monotonic() + 5
+            while not built[0].aborts and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert built[0].aborts == ["sync"]
+
+    (runtime,) = built
+    assert runtime.heard == b""
+
+
+class VanishedSocket:
+    """A device that has already gone away."""
+
+    async def send_text(self, text: str) -> None:
+        raise WebSocketDisconnect(1006)
+
+    async def send_bytes(self, data: bytes) -> None:
+        raise WebSocketDisconnect(1006)
+
+
+async def test_a_vanished_device_reaches_the_runtime_as_device_gone() -> None:
+    """The transport's disconnect is translated at the boundary, so a
+    runtime never imports starlette to catch one. It subclasses
+    RuntimeError on purpose, which is what lets every site that already
+    swallowed a vanished device keep its catch."""
+    from tests.unit.test_session import device_session
+
+    session = device_session(config_with_agent(), DEVICE_MAC, websocket=VanishedSocket())
+    for call in (
+        session.show_transcript("anything"),
+        session.begin_speaking(),
+        session.sentence_started("anything"),
+        session.send_audio(PlayableAudio([b"packet"])),
+        session.finish_speaking(),
+    ):
+        try:
+            await call
+        except DeviceGone as exc:
+            assert isinstance(exc.__cause__, WebSocketDisconnect)
+        else:  # pragma: no cover - the assertion below reports it
+            raise AssertionError("a vanished device went unreported")
+
+
+class FakeDevice:
+    """A device that is not a socket: no protocol, no codec, no clock.
+
+    Its encoder is the one fact the boundary insists on, because the
+    filler arbitration turns on it: PCM accumulates until a whole frame
+    is there, so a chunk shorter than a frame produces nothing to play.
+    """
+
+    output_sample_rate = OUTPUT_RATE
+
+    def __init__(self) -> None:
+        self.calls: list[Any] = []
+        self.sent: list[bytes] = []
+        self.turn_ends = 0
+        self.paused = False
+        self._pending = b""
+        self._frames = 0
+        self._speaking_at: float | None = None
+
+    async def show_transcript(self, text: str) -> None:
+        self.calls.append(("transcript", text))
+
+    async def begin_speaking(self) -> None:
+        self.calls.append(("begin",))
+
+    async def sentence_started(self, text: str) -> None:
+        self.calls.append(("sentence", text))
+
+    def encode_audio(self, pcm: bytes) -> PlayableAudio:
+        self._pending += pcm
+        packets = []
+        while len(self._pending) >= FRAME_BYTES:
+            self._pending = self._pending[FRAME_BYTES:]
+            packets.append(f"frame-{self._frames}".encode())
+            self._frames += 1
+        return PlayableAudio(packets)
+
+    def flush_encoder(self) -> PlayableAudio:
+        if not self._pending:
+            return PlayableAudio()
+        self._pending = b""
+        packets = [f"frame-{self._frames}".encode()]
+        self._frames += 1
+        return PlayableAudio(packets)
+
+    async def send_audio(self, batch: PlayableAudio) -> None:
+        if not batch:
+            return
+        if self._speaking_at is None:
+            self._speaking_at = asyncio.get_running_loop().time()
+        self.sent.extend(batch.packets)
+
+    async def finish_speaking(self) -> None:
+        self.calls.append(("finish",))
+
+    def reply_started(self) -> None:
+        self.calls.append(("reply_started",))
+        self._speaking_at = None
+
+    def restart_pacing(self) -> None:
+        pass
+
+    def pause_output(self) -> None:
+        self.paused = True
+
+    def resume_output(self) -> None:
+        self.paused = False
+
+    def speaking_started_at(self) -> float | None:
+        return self._speaking_at
+
+    def user_turn_ended(self) -> None:
+        self.turn_ends += 1
+
+    def device_tools(self) -> Sequence[ToolDef]:
+        return ()
+
+    async def call_device_tool(self, name: str, arguments: dict[str, Any]) -> tuple[str, bool]:
+        raise AssertionError("this device has no tools")
+
+
+class SlowLlm(LlmProvider):
+    """A model that takes long enough to answer for an interruption to
+    land while it is still generating."""
+
+    def __init__(self, delay_s: float, reply: str) -> None:
+        self._delay_s = delay_s
+        self._reply = reply
+
+    async def stream(
+        self,
+        system: str,
+        turns: Sequence[Turn],
+        tools: Sequence[ToolDef] = (),
+        tool_choice: ToolChoice = "auto",
+    ) -> AsyncIterator[LlmEvent]:
+        await asyncio.sleep(self._delay_s)
+        yield TextDelta(self._reply)
+
+
+def runtime_for(config: Config, device: FakeDevice, llm: Any = None) -> Any:
+    providers = build_agent_providers(config)
+    if llm is not None:
+        agent = providers["assistant"]
+        providers["assistant"] = type(agent)(
+            prompt=agent.prompt, llm=llm, asr=agent.asr, tts=agent.tts, vad=agent.vad
+        )
+    factory = bespoke_runtime_factory(config, providers, McpServers({}), None, {})
+    return factory(cast(DeviceOutput, device), SessionEvents("contract"), ["assistant"])
+
+
+async def test_the_bespoke_runtime_holds_a_turn_against_a_fake_device() -> None:
+    """One utterance in, one spoken reply out, with nothing on the other
+    side that knows what a websocket is."""
+    device = FakeDevice()
+    assert isinstance(device, DeviceOutput)
+    runtime = runtime_for(config_with_agent(asr_text="what time is it"), device)
+
+    await runtime.listen_started()
+    await runtime.audio(speech_pcm(300))
+    await runtime.listen_stopped()
+    assert await runtime.drain(5.0) is True
+
+    assert device.calls[:4] == [
+        ("reply_started",),
+        ("transcript", "what time is it"),
+        ("begin",),
+        ("sentence", "You said what time is it."),
+    ]
+    assert device.calls[-1] == ("finish",)
+    assert device.sent, "the reply was never spoken"
+    # The runtime reported the end of the user's turn; what to do about
+    # the microphone was left to the device.
+    assert device.turn_ends == 1
+
+
+async def test_an_interruption_cancels_the_reply_and_answers_the_new_one() -> None:
+    """A manual stop mid-reply is a deliberate act, so it cancels
+    unconditionally. The runtime cancels its own reply, which is the
+    conversational consequence; the device is told a new reply started
+    and is never asked to flush a queue it does not have."""
+    device = FakeDevice()
+    runtime = runtime_for(
+        config_with_agent(asr_text="hello"),
+        device,
+        llm=SlowLlm(0.3, "A slow answer nobody will hear the end of."),
+    )
+
+    await runtime.listen_started()
+    await runtime.audio(speech_pcm(300))
+    await runtime.listen_stopped()
+    await asyncio.sleep(0.05)
+    assert runtime.replying()
+
+    await runtime.audio(speech_pcm(300))
+    await runtime.listen_stopped()
+    assert await runtime.drain(5.0) is True
+
+    # Two replies were started and two turns ended; the interrupted one
+    # never reached the history, because it never spoke.
+    assert [call for call in device.calls if call == ("reply_started",)] == [
+        ("reply_started",),
+        ("reply_started",),
+    ]
+    assert device.turn_ends == 2
+    assert [turn.role for turn in runtime._turns] == ["user", "user", "assistant"]
+    assert not device.paused, "a manual stop needs no confirmation, so nothing was held"
