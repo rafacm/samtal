@@ -49,7 +49,6 @@ transcript store until v3 brings a real one.
 import asyncio
 import contextlib
 import functools
-import logging
 import uuid
 from collections.abc import AsyncIterator, Callable, Sequence
 from datetime import UTC, datetime
@@ -71,6 +70,7 @@ from samtal_server.capture import (
 from samtal_server.config import Config
 from samtal_server.config.models import normalize_mac
 from samtal_server.device.boundary import PIPELINE_SAMPLE_RATE
+from samtal_server.device.events import SessionEvents, logger
 from samtal_server.filler import FillerClips
 from samtal_server.protocol import framing, messages
 from samtal_server.protocol import mcp as mcp_protocol
@@ -93,8 +93,6 @@ from samtal_server.tools import builtin, names
 from samtal_server.tools.device import DeviceToolClient
 from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
-
-logger = logging.getLogger(__name__)
 
 # How long to wait for the device hello; the firmware gives the server
 # hello the same ten seconds.
@@ -327,23 +325,23 @@ class Session:
         self._mcp_servers = mcp_servers if mcp_servers is not None else McpServers({})
         self._memory = memory
         self.session_id = uuid.uuid4().hex
+        # Created at construction with the session id and no device
+        # identity yet, so the bad-Device-Id rejection carries
+        # `device: None` the way it does today; the edge writes the MAC
+        # onto it as soon as one is understood.
+        self._events = SessionEvents(self.session_id)
         self.protocol_version = 1
         self.listening = False
         # The mode the last `listen start` asked for, kept because it
         # decides who re-arms the listening after an utterance: the
         # device, or nobody.
         self._listen_mode: str | None = None
-        # The device's MAC, set before anything can reject the connection so
-        # a rejection names the device it turned away. Unknown until the
-        # handshake headers are read.
-        self._mac: str | None = None
         self._opened_at: float | None = None
         self._agent_providers = agent_providers
         # The agents this device may talk to, and the one it is talking to
         # now. M5 activates the first at connect and never switches; M6's
         # switch_agent tool moves between them.
         self._agents: list[str] = []
-        self._agent: str | None = None
         self._providers: AgentProviders | None = None
         # Generation calls in the reply being spoken, counted across
         # its agents rather than per leg, so the one after a handover
@@ -419,6 +417,29 @@ class Session:
         self._idle_watchdog: asyncio.Task[None] | None = None
 
     @property
+    def _mac(self) -> str | None:
+        """The device's MAC, set before anything can reject the
+        connection so a rejection names the device it turned away.
+        Unknown until the handshake headers are read. It lives on the
+        events object because every event carries it."""
+        return self._events.device
+
+    @_mac.setter
+    def _mac(self, mac: str | None) -> None:
+        self._events.device = mac
+
+    @property
+    def _agent(self) -> str | None:
+        """The agent talking right now. It lives on the events object
+        because both sides of the split attribute events to it, and
+        they have to see the same activation at the same moment."""
+        return self._events.agent
+
+    @_agent.setter
+    def _agent(self, name: str | None) -> None:
+        self._events.agent = name
+
+    @property
     def _realtime(self) -> bool:
         """Whether the device is streaming its mic continuously, which is
         what realtime mode means. It sends `listen start` once and never
@@ -427,23 +448,7 @@ class Session:
         return self._listen_mode == "realtime"
 
     def _event(self, event: str, **fields: Any) -> dict[str, Any]:
-        """The structured half of a log line: what every conversation
-        event carries, plus this event's own fields. Passed as `extra=`,
-        so it is invisible in the text format and top-level keys in the
-        JSON one.
-
-        Every event goes through here, which is why the capture's
-        decision track is hooked here too rather than at each call
-        site: an event that is logged is an event that is recorded."""
-        payload = {
-            "event": event,
-            "session": self.session_id,
-            "device": self._mac,
-            **fields,
-        }
-        if self._capture is not None:
-            self._capture.event(payload, asyncio.get_running_loop().time())
-        return payload
+        return self._events.event(event, **fields)
 
     @contextlib.asynccontextmanager
     async def _watching(self, stage: str, provider: object) -> AsyncIterator[None]:
@@ -764,6 +769,7 @@ class Session:
             # decision track and the WAV header is patched with a length
             # covering everything.
             if self._capture is not None:
+                self._events.detach_capture()
                 self._capture.close()
                 self._capture = None
 
@@ -816,6 +822,7 @@ class Session:
         )
         if self._capture is None:
             return
+        self._events.attach_capture(self._capture)
         self._capture_decoder = OpusDecoder(sample_rate=PIPELINE_SAMPLE_RATE)
         self._capture_reply_decoder = OpusDecoder(sample_rate=OUTPUT_AUDIO.sample_rate)
         self._capture_resampler = Resampler(OUTPUT_AUDIO.sample_rate, CAPTURE_RATE)
@@ -1090,18 +1097,12 @@ class Session:
             await self._finish_utterance(endpointed=True)
 
     def _note_dropped(self, reason: str) -> None:
-        if self._capture is not None:
-            self._capture.dropped(reason, asyncio.get_running_loop().time())
+        self._events.dropped(reason)
 
     def _capture_vad(self) -> None:
-        if self._capture is None or self._endpointer is None:
+        if self._endpointer is None:
             return
-        self._capture.vad(
-            self._endpointer.speech_ms(),
-            self.listening,
-            self._replying(),
-            asyncio.get_running_loop().time(),
-        )
+        self._events.vad(self._endpointer.speech_ms(), self.listening, self._replying())
 
     def _capture_microphone(self, data: bytes) -> None:
         """Decode a mic frame for the capture, whatever the session then
