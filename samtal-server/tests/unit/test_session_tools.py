@@ -148,6 +148,25 @@ async def run_reply(session: session_module.Session, said: str) -> list[str]:
     return spoken
 
 
+async def drive_reply(session: session_module.Session, pcm: bytes) -> None:
+    """One whole reply, audio and all, run to completion.
+
+    The two helpers below exist so that the characterization suite,
+    which pins today's behavior from outside, names the reply entry
+    point in one place instead of thirty. When the reply moves behind
+    the device-facing boundary, these lines move with it and the tests
+    that use them do not change."""
+    await session._reply(pcm)
+
+
+def start_reply(session: session_module.Session, pcm: bytes) -> asyncio.Task[None]:
+    """A reply in flight, registered the way an utterance registers one,
+    so that everything asking whether this session is replying (the idle
+    watchdog, the shutdown, the barge-in gates) sees it."""
+    session._reply_task = asyncio.create_task(session._reply(pcm))
+    return session._reply_task
+
+
 async def _nothing(*args: object, **kwargs: object) -> None:
     return None
 
