@@ -1,17 +1,27 @@
-# Architecture principles
+# Principles
 
-The standing fundamentals of samtal's architecture: what the project
-is, where its boundaries lie, and what it must not become. Read this
-before designing a feature or deciding direction, so a boundary is
-never crossed one reasonable-looking pull request at a time.
+The standing fundamentals of samtal: what the project promises, where
+its boundaries lie, and what it must not become. Read this before
+designing a feature or deciding direction, so a boundary is never
+crossed one reasonable-looking pull request at a time.
+
+The page holds two kinds of principle, and the distinction carries a
+precedence rule. **Product promises** are commitments to the person
+running samtal, falsifiable from outside; breaking one does not
+refactor samtal, it changes what samtal is. **Architecture
+principles** are how the code keeps those promises; given new
+evidence, any of them can be revised, provided the promises still
+hold. When the two conflict, the promise wins.
 
 Issues hold evidence, ADRs hold decisions, plans hold execution, and
 this page holds direction. It is an index, not a replacement: each
 principle cites the decision record or issue where its reasoning
 lives, and a principle whose supporting decision has not been recorded
-yet cites the issue that tracks it. A principle changes the way any
-hard-to-reverse decision does, through a new record in
-[`../adr/`](../adr/README.md), and this page updates to cite it.
+yet cites the issue that tracks it. An architecture principle changes
+the way any hard-to-reverse decision does, through a new record in
+[`../adr/`](../adr/README.md); a product promise changes the same way,
+but only as a deliberate product decision, and rarely. This page
+updates to cite the record in the same change.
 
 ## Identity
 
@@ -29,7 +39,93 @@ taught which concerns are inherently samtal's and which are generic
 conversational infrastructure. That knowledge, not the pipeline, is
 the durable asset.
 
-## Principles
+## Product promises
+
+### Stock xiaozhi firmware is the compatibility floor
+
+An ESP32-S3 board running upstream xiaozhi firmware, pointed at a
+samtal server, holds a conversation without a reflash. If samtal
+ships its own firmware one day, that raises the ceiling, never the
+floor: protocol extensions are additive and negotiated, the server
+never requires samtal firmware for ordinary conversation, and samtal
+firmware never drifts into a private dialect a stock board cannot
+join.
+
+The promise is bounded three ways, and the bounds are part of it:
+
+- It covers the transport samtal implements: the WebSocket channel.
+  Upstream also speaks an MQTT-plus-UDP pairing; samtal does not
+  promise every transport upstream carries.
+- Its version target is the firmware actually running on boards in
+  the field. Upstream protocol changes are absorbed as shipped
+  devices adopt them, not chased at upstream's commit log.
+- It is a floor, not a ceiling: ordinary conversation, not every
+  samtal feature.
+
+**Example.** Onboarding a stock board is repointing one NVS
+`ota_url` entry at the samtal server
+([xiaozhi-notes](../xiaozhi-notes.md)); everything after that is the
+standard OTA fetch and hello exchange.
+
+**Counterexample.** "Cleaning up" the hello exchange in a way stock
+firmware does not parse; or a samtal-firmware-only message becoming
+load-bearing for ordinary conversation, so stock boards quietly stop
+being full citizens.
+
+The promise has a named cost, paid knowingly: server features are
+constrained to what stock firmware can express, and some rough edges
+(onboarding a device by typing a long OTA URL on a phone) are the
+price of meeting devices where they are.
+
+Evidence and tradeoffs:
+[issue #84](https://github.com/rafacm/samtal/issues/84).
+
+### A fully local deployment is first-class
+
+Every core conversational capability is reachable with local
+providers; a cloud provider is an upgrade, never a requirement. A
+`server.local_only: true` server that starts can hold a complete
+conversation, the way the original all-local chain (Silero,
+faster-whisper, Ollama, Piper) did from the beginning.
+
+The enforcement mechanism is declared egress: every provider declares
+whether it sends session data off the host, and `local_only` refuses
+at startup to build one that does. A provider type that cannot answer
+for itself must say so explicitly (an OpenAI-compatible base URL is
+equally a vendor or an Ollama on localhost, so the configuration
+states which). The guarantee is enforced, not documented.
+
+**Example.** An inherently-cloud runtime (a native realtime session)
+arriving as a sibling runtime is fine and expected; the local
+pipeline remains complete without it.
+
+**Counterexample.** A core capability (memory, end-of-turn detection,
+barge-in quality) implemented only against a cloud API, so local
+deployments drift into the second-class configuration nobody chose to
+demote. Nobody would delete the local path; features would just stop
+landing on it. Also: assuming locality from a provider's shape, or a
+new provider type skipping the egress declaration because it is
+"obviously" local; an undeclared provider is a hole in the guarantee.
+
+### Thin device, smart server
+
+The intelligence lives server-side, so behavior improves without
+reflashing boards and cheap stock hardware stays sufficient. The
+boards run upstream xiaozhi firmware with `samtal-esp32` as a thin
+customization. Firmware work is undertaken when it enables something
+samtal-specific, never because samtal happens to own the server.
+Firmware has a proven ability to consume all available project time.
+
+**Example.** Protocol extensions the server-side experience actually
+needs: richer device events, better provisioning, display semantics,
+latency instrumentation.
+
+**Counterexample.** Taking over board support or the device audio
+pipeline from upstream because owning more of the stack feels tidier.
+That trades upstream's maintenance of dozens of boards for no
+user-visible gain.
+
+## Architecture principles
 
 ### Normalize the hardware edge, not the AI middle
 
@@ -117,23 +213,6 @@ different version of everyone's realtime protocol.
 Evidence and tradeoffs:
 [issue #84](https://github.com/rafacm/samtal/issues/84).
 
-### Thin device, smart server
-
-The boards run upstream xiaozhi firmware with `samtal-esp32` as a
-thin customization, and the server carries the intelligence. Firmware
-work is undertaken when it enables something samtal-specific, never
-because samtal happens to own the server. Firmware has a proven
-ability to consume all available project time.
-
-**Example.** Protocol extensions the server-side experience actually
-needs: richer device events, better provisioning, display semantics,
-latency instrumentation.
-
-**Counterexample.** Taking over board support or the device audio
-pipeline from upstream because owning more of the stack feels tidier.
-That trades upstream's maintenance of dozens of boards for no
-user-visible gain.
-
 ### Own the decision sites, and give every decision a reason
 
 The most diagnostic events in the system exist because samtal owns
@@ -154,19 +233,3 @@ decision that will someday need field diagnosis. An observer sees the
 frames a component emits; a decision that emits no frame is
 invisible, and "it interrupted, reason unknown" is not a debuggable
 event.
-
-### What leaves the host is declared
-
-Every provider declares whether it sends session data off the host,
-and `server.local_only` refuses at startup to build one that does. A
-server that starts is a server that keeps the conversation home; the
-guarantee is enforced, not documented.
-
-**Example.** A provider type that cannot answer for itself must say
-so explicitly: an OpenAI-compatible base URL is equally a vendor or
-an Ollama on localhost, so the configuration states which.
-
-**Counterexample.** Assuming locality from a provider's shape, or
-letting a new provider type skip the declaration because it is
-"obviously" local. The declaration is the mechanism; an undeclared
-provider is a hole in the guarantee.

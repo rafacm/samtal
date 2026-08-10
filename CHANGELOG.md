@@ -7,7 +7,24 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-08-10
 
+### Changed
+
+- The principles page now separates product promises (falsifiable
+  commitments to the person running samtal) from the architecture
+  principles that keep them, with an explicit precedence rule: when
+  the two conflict, the promise wins. Thin device smart server moved
+  to the promises, and the declared-egress principle folded into the
+  local-first promise as its enforcement mechanism.
+
 ### Added
+
+- Two product promises in `docs/architecture/principles.md`: stock
+  xiaozhi firmware is the compatibility floor (a stock board holds a
+  conversation without a reflash, bounded to the WebSocket transport,
+  versioned by the firmware in the field, and a floor rather than a
+  ceiling), and a fully local deployment is first-class (every core
+  capability reachable with local providers, enforced by declared
+  egress and `local_only`).
 
 - The standing architecture principles as
   `docs/architecture/principles.md`: samtal's identity (own the
