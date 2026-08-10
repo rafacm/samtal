@@ -26,6 +26,7 @@ from typing import Any, cast
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from samtal_server import __version__
 from samtal_server.app import create_app
 from samtal_server.audio.opus import OpusEncoder
 from samtal_server.config import Config
@@ -46,6 +47,7 @@ from samtal_server.providers import (
     build_agent_providers,
 )
 from samtal_server.runtime.pipeline import bespoke_runtime_factory
+from samtal_server.tools.device import DeviceToolClient
 from samtal_server.tools.mcp import McpServers
 from tests.unit.test_session import (
     DEVICE_MAC,
@@ -435,3 +437,63 @@ async def test_the_end_of_a_user_turn_counts_as_activity() -> None:
 
         assert session._last_activity is not None
         assert session._last_activity > before, mode
+
+
+class ScriptedMcpSocket:
+    """A device that answers the MCP handshake over the websocket, and
+    can be told to disappear afterwards."""
+
+    def __init__(self) -> None:
+        self.gone = False
+        self.client: Any = None
+
+    async def send_text(self, text: str) -> None:
+        if self.gone:
+            raise WebSocketDisconnect(1006)
+        payload = json.loads(text)["payload"]
+        method = payload.get("method")
+        if method is None or method.startswith("notifications/"):
+            return
+        asyncio.get_running_loop().call_soon(self._answer, payload)
+
+    def _answer(self, payload: dict[str, Any]) -> None:
+        if payload["method"] == "initialize":
+            result: dict[str, Any] = {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "board", "version": "2.4.0"},
+            }
+        else:
+            result = {
+                "tools": [
+                    {
+                        "name": "self.audio_speaker.set_volume",
+                        "description": "Set the speaker volume",
+                        "inputSchema": {"type": "object", "properties": {}},
+                    }
+                ]
+            }
+        self.client.handle({"jsonrpc": "2.0", "id": payload["id"], "result": result})
+
+
+async def test_a_device_that_vanishes_mid_tool_call_reports_device_gone() -> None:
+    """The device tool transport is the edge's, and it writes to the
+    same socket as everything else, so it owes the same promise: a
+    runtime calling a device tool must not have to catch the
+    transport's own exception to notice the device left."""
+    socket = ScriptedMcpSocket()
+    session = device_session(config_with_agent(), DEVICE_MAC, websocket=socket)
+    session._device_tools = DeviceToolClient(
+        session._send_mcp, "contract", "samtal-server", __version__
+    )
+    socket.client = session._device_tools
+    await session._device_tools.discover()
+    (tool,) = session.device_tools()
+
+    socket.gone = True
+    try:
+        await session.call_device_tool(tool.name, {"volume": 50})
+    except DeviceGone as exc:
+        assert isinstance(exc.__cause__, WebSocketDisconnect)
+    else:  # pragma: no cover - the assertion below reports it
+        raise AssertionError("a vanished device went unreported")

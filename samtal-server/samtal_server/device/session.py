@@ -549,7 +549,12 @@ class DeviceSession:
             self._discovery = None
 
     async def _send_mcp(self, payload: dict[str, Any]) -> None:
-        await self.websocket.send_text(mcp_protocol.envelope(self.session_id, payload))
+        """One MCP envelope out to the device. Through the translating
+        helper like every other outgoing message, so that a device that
+        vanishes mid-call reaches `call_device_tool`'s caller as the
+        `DeviceGone` the boundary promises rather than as the
+        transport's own exception."""
+        await self._send_text(mcp_protocol.envelope(self.session_id, payload))
 
     async def _receive_hello(self) -> messages.DeviceHello | None:
         """The device speaks first; anything but a timely, well-formed
