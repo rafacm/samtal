@@ -18,6 +18,13 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- The accepted plan for extracting a device-facing session boundary
+  (`docs/plans/2026-08-10-device-facing-session-boundary.md`): the
+  interface pair, ownership map, and ten-commit sequence for splitting
+  `session.py` into a device edge and a pipeline runtime with no
+  behavior change. Reviewed adversarially in three rounds before
+  acceptance; the review settled the send-path batch surface, event
+  attribution, the pinned logger identity, and the commit ordering.
 - Two product promises in `docs/architecture/principles.md`: stock
   xiaozhi firmware is the compatibility floor (a stock board holds a
   conversation without a reflash, bounded to the WebSocket transport,
