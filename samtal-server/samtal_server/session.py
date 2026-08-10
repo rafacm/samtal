@@ -70,6 +70,7 @@ from samtal_server.capture import (
 )
 from samtal_server.config import Config
 from samtal_server.config.models import normalize_mac
+from samtal_server.device.boundary import PIPELINE_SAMPLE_RATE
 from samtal_server.filler import FillerClips
 from samtal_server.protocol import framing, messages
 from samtal_server.protocol import mcp as mcp_protocol
@@ -98,10 +99,6 @@ logger = logging.getLogger(__name__)
 # How long to wait for the device hello; the firmware gives the server
 # hello the same ten seconds.
 HELLO_TIMEOUT_S = 10.0
-
-# The rate the input side of the pipeline runs at: what devices send,
-# and what the endpointer and ASR are fed.
-PIPELINE_SAMPLE_RATE = 16000
 
 # How much recent mic audio the utterance buffer keeps. A realtime
 # session listens through the silences too, so without a bound the
