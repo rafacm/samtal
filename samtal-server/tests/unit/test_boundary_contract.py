@@ -51,6 +51,7 @@ from tests.unit.test_session import (
     DEVICE_MAC,
     config_with_agent,
     connect,
+    device_session,
     send_pcm,
     shake_hands,
     speech_pcm,
@@ -226,8 +227,6 @@ async def test_a_vanished_device_reaches_the_runtime_as_device_gone() -> None:
     runtime never imports starlette to catch one. It subclasses
     RuntimeError on purpose, which is what lets every site that already
     swallowed a vanished device keep its catch."""
-    from tests.unit.test_session import device_session
-
     session = device_session(config_with_agent(), DEVICE_MAC, websocket=VanishedSocket())
     for call in (
         session.show_transcript("anything"),
@@ -411,3 +410,28 @@ async def test_an_interruption_cancels_the_reply_and_answers_the_new_one() -> No
     assert device.turn_ends == 2
     assert [turn.role for turn in runtime._turns] == ["user", "user", "assistant"]
     assert not device.paused, "a manual stop needs no confirmation, so nothing was held"
+
+
+async def test_the_end_of_a_user_turn_counts_as_activity() -> None:
+    """The idle timeout counts from both ends of a turn, and the end of
+    the user's is one of them.
+
+    A runtime that reports a turn and then answers nothing (an empty
+    transcript, an utterance its own gates dropped) still had somebody
+    talking into the microphone. The mark belongs to the edge, at the
+    boundary method, so every runtime inherits it by reporting the turn
+    rather than by remembering to ask; a runtime that forgot would
+    otherwise leave the watchdog counting from before the user last
+    spoke and hang up on a live conversation."""
+    for mode in ("realtime", "auto"):
+        session = device_session(config_with_agent(), DEVICE_MAC)
+        session._listen_mode = mode
+        session._mark_activity()
+        before = session._last_activity
+        assert before is not None
+        await asyncio.sleep(0.01)
+
+        session.user_turn_ended()
+
+        assert session._last_activity is not None
+        assert session._last_activity > before, mode
