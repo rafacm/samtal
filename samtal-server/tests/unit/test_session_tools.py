@@ -11,7 +11,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 import samtal_server.runtime.pipeline as pipeline_module
 from samtal_server.app import create_app
 from samtal_server.config import Config
+from samtal_server.device.session import DeviceSession
 from samtal_server.providers import (
     LlmEvent,
     LlmProvider,
@@ -30,7 +31,6 @@ from samtal_server.providers import (
     Usage,
     build_agent_providers,
 )
-from samtal_server.session import Session
 from samtal_server.tools.builtin import switch_agent_tool
 from samtal_server.tools.memory import MemoryStore
 from tests.unit.test_session import (
@@ -38,6 +38,7 @@ from tests.unit.test_session import (
     POET_TONE,
     TUTOR_TONE,
     connect,
+    device_session,
     say_something,
     sentences,
     shake_hands,
@@ -106,10 +107,16 @@ def base_config(**overrides: object) -> Config:
 
 
 def session_for(
-    config: Config, mac: str, scripts: dict[str, ScriptedLlm] | None = None, **kwargs: object
-) -> Session:
-    """A session wired to real providers, with the named agents' LLMs
-    replaced by scripts. No websocket: these tests drive the loop
+    config: Config,
+    mac: str,
+    scripts: dict[str, ScriptedLlm] | None = None,
+    memory: MemoryStore | None = None,
+    fillers: dict[str, Any] | None = None,
+    websocket: Any = None,
+) -> DeviceSession:
+    """A device session with a real bespoke runtime behind it, built the
+    way `run` builds one, with the named agents' LLMs replaced by
+    scripts. No websocket by default: these tests drive the loop
     directly and never speak."""
     providers = build_agent_providers(config)
     for agent, script in (scripts or {}).items():
@@ -123,13 +130,10 @@ def session_for(
             tts=providers[agent].tts,
             vad=providers[agent].vad,
         )
-    session = Session(cast(Any, None), config, providers, **kwargs)  # type: ignore[arg-type]
-    session._agents = config.agents_for_device(mac)
-    session.runtime._activate_agent(session._agents[0])
-    return session
+    return device_session(config, mac, providers, memory, fillers, websocket)
 
 
-async def run_reply(session: Session, said: str) -> list[str]:
+async def run_reply(session: DeviceSession, said: str) -> list[str]:
     """One reply, with speaking stubbed out: what the loop decides is
     what these tests are about, not the audio."""
     spoken: list[str] = []
@@ -149,7 +153,7 @@ async def run_reply(session: Session, said: str) -> list[str]:
     return spoken
 
 
-async def drive_reply(session: Session, pcm: bytes) -> None:
+async def drive_reply(session: DeviceSession, pcm: bytes) -> None:
     """One whole reply, audio and all, run to completion.
 
     The two helpers below exist so that the characterization suite,
@@ -160,7 +164,7 @@ async def drive_reply(session: Session, pcm: bytes) -> None:
     await session.runtime._reply(pcm)
 
 
-def start_reply(session: Session, pcm: bytes) -> asyncio.Task[None]:
+def start_reply(session: DeviceSession, pcm: bytes) -> asyncio.Task[None]:
     """A reply in flight, registered the way an utterance registers one,
     so that everything asking whether this session is replying (the idle
     watchdog, the shutdown, the barge-in gates) sees it."""

@@ -17,18 +17,18 @@ to it.
 import asyncio
 import json
 import time
-from typing import Any, cast
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-import samtal_server.session as session_module
+import samtal_server.device.session as session_module
 from samtal_server.app import create_app
 from samtal_server.audio.opus import OpusEncoder
-from samtal_server.providers import build_agent_providers
-from samtal_server.session import GOING_AWAY, NORMAL_CLOSURE, Session
+from samtal_server.device.session import GOING_AWAY, NORMAL_CLOSURE, DeviceSession
 from tests.unit.test_session import (
+    DEVICE_MAC,
     collect_reply,
     config_with_agent,
     connect,
@@ -39,6 +39,7 @@ from tests.unit.test_session import (
     shake_hands,
     speech_pcm,
 )
+from tests.unit.test_session_tools import session_for
 
 
 def capped_config(seconds: float):
@@ -256,10 +257,12 @@ class FakeWebsocket:
         self.closed = (code, reason)
 
 
-def session_with(reply: asyncio.Task[None] | None = None) -> tuple[Session, FakeWebsocket]:
+def session_with(
+    reply: asyncio.Task[None] | None = None,
+) -> tuple[DeviceSession, FakeWebsocket]:
     config = config_with_agent()
     websocket = FakeWebsocket()
-    session = Session(cast(Any, websocket), config, build_agent_providers(config))
+    session = session_for(config, DEVICE_MAC, websocket=websocket)
     session.runtime._reply_task = reply
     return session, websocket
 

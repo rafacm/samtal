@@ -25,7 +25,7 @@ from typing import Any, cast
 
 import pytest
 
-import samtal_server.session as session_module
+import samtal_server.device.session as session_module
 from samtal_server.config import Config
 from samtal_server.providers import ToolCall, TtsProvider, build_agent_providers
 from tests.unit.test_session_tools import ScriptedLlm, base_config, session_for
@@ -123,7 +123,7 @@ class TimedSocket:
 
 def slow_session(
     rounds: Sequence[Any], tts: SlowTts, config: Config | None = None
-) -> tuple[session_module.Session, TimedSocket]:
+) -> tuple[session_module.DeviceSession, TimedSocket]:
     script = ScriptedLlm(rounds)
     session = session_for(config or base_config(), "aa:bb:cc:dd:ee:01", {"poet": script})
     assert session.runtime._providers is not None
@@ -133,7 +133,7 @@ def slow_session(
     return session, socket
 
 
-async def speak_a_reply(session: session_module.Session) -> list[str]:
+async def speak_a_reply(session: session_module.DeviceSession) -> list[str]:
     spoken: list[str] = []
     await session.runtime._speak_reply("anything", spoken)
     return spoken
@@ -386,7 +386,7 @@ async def test_a_handover_speaks_the_new_agents_voice() -> None:
         )
         for name, providers in fresh.items()
     }
-    session._agents = ["poet", "tutor"]
+    session.runtime._agents = ["poet", "tutor"]
 
     await speak_a_reply(session)
 

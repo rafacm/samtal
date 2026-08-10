@@ -1,54 +1,47 @@
-"""One conversation session per device websocket connection.
+"""One device connection: the xiaozhi edge, and nothing behind it.
 
-The session owns the handshake and the conversation loop. It talks as
-one agent at a time, the active agent, picked at connect from the agents
-the device is bound to; prompt, providers, and endpointer all come from
-that agent, so swapping it swaps all three.
+The session owns the handshake, the wire, and the appliance. It accepts
+the socket, checks the device's identity and its agent binding, exchanges
+hellos, decodes mic Opus, encodes and paces reply Opus, frames both,
+carries the device's own MCP tool transport, records the capture,
+enforces the session limits and the idle timeout, and closes politely.
 
-While the device listens, decoded mic audio feeds the agent's
-endpointer; when the utterance ends, ASR transcribes it, the LLM streams
-a reply into sentences, and TTS speaks each sentence back as paced Opus
-frames, framed by `tts start`/`sentence_start`/`stop` with the
-transcript announced in an `stt` message. Conversation history lives
-here, one list of turns per connection.
-
-The reply is a tool loop, and the loop lives here rather than in a
-provider because only the session can change agents between rounds.
-Per reply it snapshots the tools the active agent may use, streams,
-executes whatever the model asked for, feeds the results back, and
-streams again, up to a small cap whose last round forbids calling so a
-reply always ends in speech. History stays text-only: the structured
-tool turns exist in a working copy inside one reply, and what survives
-is what was actually said aloud.
+What is said in the conversation it does not own. Behind it sits one
+conversation runtime, built for this connection by the factory the
+composition root handed in, reached only through the two protocols in
+[`boundary`](boundary.py): this class is the `DeviceOutput` the runtime
+speaks through, and the runtime is the `SessionInput` this class feeds.
+The runtime is built after the device's agents resolve and before the
+hello, which is where the first agent used to be activated by hand; a
+connection turned away before that point never has one.
 
 Two end-of-utterance triggers coexist because the firmware's listening
 modes differ: manual mode sends `listen stop`, while auto and realtime
-modes stream mic audio until the server decides the user finished,
-which is what the endpointer is for. The modes also differ in who
-re-arms the listening: auto mode sends a fresh `listen start` after
-each reply, while a realtime device asks once and then streams
-continuously, so a realtime session here never stops listening. It
-therefore hears the user through its own speech, and an utterance that
-ends while a reply is streaming cancels that reply and is answered,
-which is what barge-in is. An endpointer-driven cancel is gated: a
-reply is only cancelled on evidence of user speech (enough classified
-speech, a transcript when in doubt), because acoustics alone are as
-often noise or the reply's own bleed as the user (#28). A manual
-`listen stop` mid-reply is a deliberate act and cancels
-unconditionally. `server.barge_in` turns all of it off for a board
-whose echo cancellation leaks its own voice back: those frames are
-then dropped, and the conversation stays multi-turn regardless.
+modes stream mic audio until the runtime decides the user finished. The
+modes also differ in who re-arms the listening, and that is the one
+turn-taking fact this side keeps: `user_turn_ended` stops the listening
+in auto mode, where the device sends a fresh `listen start` after each
+reply, and leaves it alone in realtime, where the device asked once and
+is still streaming. A realtime session therefore hears the user through
+its own speech, which is what makes barge-in possible; what an
+interruption then does to the reply is the runtime's decision.
+`server.barge_in` turns all of it off for a board whose echo
+cancellation leaks its own voice back: those frames are dropped here,
+before the decode, so the capture still records the evidence.
 
 What happens in a conversation is logged twice over: as a human
 sentence, and as structured `extra=` fields (`event`, `session`,
 `device`, and whatever the event carries) that the JSON log format
 emits as top-level keys. Retained JSON logs are therefore the
-transcript store until v3 brings a real one.
+transcript store until v3 brings a real one. Both sides log through the
+session's `SessionEvents`, so which module a line came from is not
+visible in the record.
 """
 
 import asyncio
 import contextlib
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -67,16 +60,18 @@ from samtal_server.capture import (
 )
 from samtal_server.config import Config
 from samtal_server.config.models import normalize_mac
-from samtal_server.device.boundary import PIPELINE_SAMPLE_RATE, PlayableAudio
+from samtal_server.device.boundary import (
+    PIPELINE_SAMPLE_RATE,
+    DeviceGone,
+    PlayableAudio,
+    RuntimeFactory,
+    SessionInput,
+)
 from samtal_server.device.events import SessionEvents, logger
-from samtal_server.filler import FillerClips
 from samtal_server.protocol import framing, messages
 from samtal_server.protocol import mcp as mcp_protocol
-from samtal_server.providers import AgentProviders
-from samtal_server.runtime.pipeline import PipelineRuntime
+from samtal_server.providers.base import ToolDef
 from samtal_server.tools.device import DeviceToolClient
-from samtal_server.tools.mcp import McpServers
-from samtal_server.tools.memory import MemoryStore
 
 # How long to wait for the device hello; the firmware gives the server
 # hello the same ten seconds.
@@ -103,19 +98,21 @@ NORMAL_CLOSURE = 1000
 # stricter in practice.
 SHUTDOWN_REPLY_GRACE_S = 10.0
 
-class Session:
-    """The server side of one device connection."""
+class DeviceSession:
+    """The server side of one device connection: everything that would
+    still exist if the backend were a telephone call to a human.
+
+    It implements the `DeviceOutput` half of the boundary, and feeds the
+    `SessionInput` half a runtime built for this connection by the
+    factory the composition root handed it."""
 
     def __init__(
         self,
         websocket: WebSocket,
         config: Config,
-        agent_providers: dict[str, AgentProviders],
-        mcp_servers: McpServers | None = None,
-        memory: MemoryStore | None = None,
+        runtime_factory: RuntimeFactory,
         captures: CaptureStore | None = None,
         device_facts: DeviceFacts | None = None,
-        fillers: dict[str, FillerClips] | None = None,
     ) -> None:
         self.websocket = websocket
         self.config = config
@@ -127,26 +124,18 @@ class Session:
         self._capture_decoder: OpusDecoder | None = None
         self._capture_reply_decoder: OpusDecoder | None = None
         self._capture_resampler: Resampler | None = None
-        self._mcp_servers = mcp_servers if mcp_servers is not None else McpServers({})
         self.session_id = uuid.uuid4().hex
         # Created at construction with the session id and no device
         # identity yet, so the bad-Device-Id rejection carries
         # `device: None` the way it does today; the edge writes the MAC
         # onto it as soon as one is understood.
         self._events = SessionEvents(self.session_id)
-        # The conversation behind this connection. Built here while the
-        # extraction is in flight; the wiring commit hands the session a
-        # factory instead, so the edge stops naming the providers, the
-        # MCP servers and the memory store at all.
-        self.runtime = PipelineRuntime(
-            self,
-            config,
-            self._events,
-            agent_providers,
-            self._mcp_servers,
-            memory,
-            fillers,
-        )
+        # The conversation behind this connection, built once the device
+        # has proved which agents it may talk to. Until then there is
+        # nothing to build one for: the rejections in `run` happen
+        # first, and no runtime ever exists on those paths.
+        self._runtime_factory = runtime_factory
+        self.runtime: SessionInput | None = None
         self.protocol_version = 1
         self.listening = False
         # The mode the last `listen start` asked for, kept because it
@@ -154,10 +143,9 @@ class Session:
         # device, or nobody.
         self._listen_mode: str | None = None
         self._opened_at: float | None = None
-        # Which agents exist at all, for the binding check below. The
-        # runtime owns the providers themselves; the edge only needs to
-        # know that a bound agent was actually built.
-        self._agent_providers = agent_providers
+        # The agents this device may talk to, resolved at connect and
+        # kept for the handshake log line and the capture manifest.
+        self._agents: list[str] = []
         self._decoder = OpusDecoder(sample_rate=PIPELINE_SAMPLE_RATE)
         self._encoder = OpusEncoder(
             sample_rate=OUTPUT_AUDIO.sample_rate,
@@ -205,16 +193,6 @@ class Session:
         return int(OUTPUT_AUDIO.sample_rate)
 
     @property
-    def _agents(self) -> list[str]:
-        """The agents this device may talk to. Owned by the runtime,
-        read here for the handshake log line and the capture manifest."""
-        return self.runtime._agents
-
-    @_agents.setter
-    def _agents(self, agents: list[str]) -> None:
-        self.runtime._agents = agents
-
-    @property
     def _mac(self) -> str | None:
         """The device's MAC, set before anything can reject the
         connection so a rejection names the device it turned away.
@@ -248,6 +226,11 @@ class Session:
     def _event(self, event: str, **fields: Any) -> dict[str, Any]:
         return self._events.event(event, **fields)
 
+    def _replying(self) -> bool:
+        """Whether the conversation behind this connection is mid-answer.
+        A connection with no runtime yet is not."""
+        return self.runtime is not None and self.runtime.replying()
+
     async def run(self) -> None:
         device_id = self.websocket.headers.get("device-id", "").strip()
         client_id = self.websocket.headers.get("client-id", "").strip()
@@ -266,8 +249,12 @@ class Session:
             await self._close(POLICY_VIOLATION, "Device-Id must be the device MAC")
             return
 
+        # Filtered against the configured agents rather than against
+        # built providers: the registry builds exactly one entry per
+        # `agents` key, so the two sets are the same, and which agents
+        # exist is configuration the edge may read.
         agents = [
-            name for name in self.config.agents_for_device(mac) if name in self._agent_providers
+            name for name in self.config.agents_for_device(mac) if name in self.config.agents
         ]
         if not agents:
             logger.warning(
@@ -280,13 +267,10 @@ class Session:
             await self._close(POLICY_VIOLATION, "no agent is configured for this device")
             return
         self._agents = agents
-        self.runtime._activate_agent(agents[0])
-        # A server that was down at boot, or that dropped since, gets a
-        # background reconnect now, so it is picked up by the time this
-        # conversation needs it rather than at the next server restart.
-        self._mcp_servers.revive(
-            entry for agent in agents for entry in self.config.mcp_for_agent(agent)
-        )
+        # Where the first agent used to be activated by hand: the
+        # runtime's constructor does that, and the MCP revive after it,
+        # in that order, and spawns nothing.
+        self.runtime = self._runtime_factory(self, self._events, agents)
 
         hello = await self._receive_hello()
         if hello is None:
@@ -346,7 +330,8 @@ class Session:
             pass
         finally:
             await self._stop_idle_watchdog()
-            await self.runtime.close()
+            if self.runtime is not None:
+                await self.runtime.close()
             await self._stop_device_discovery()
             logger.info(
                 "session %s closed (device %s)",
@@ -384,7 +369,7 @@ class Session:
         than waited on, and the False that comes back is what lets the
         caller say so instead of reporting a clean drain.
         """
-        finished = await self.runtime.drain(grace_s)
+        finished = True if self.runtime is None else await self.runtime.drain(grace_s)
         await self._close(code, reason)
         return finished
 
@@ -522,7 +507,7 @@ class Session:
         loop = asyncio.get_running_loop()
         while True:
             now = loop.time()
-            if not self._realtime or self.runtime.replying():
+            if not self._realtime or self._replying():
                 self._mark_activity()
             assert self._last_activity is not None
             remaining = self._last_activity + timeout - now
@@ -621,7 +606,7 @@ class Session:
         if not self.listening:
             self._note_dropped("not_listening")
             return
-        if not self.config.server.barge_in and self.runtime.replying():
+        if not self.config.server.barge_in and self._replying():
             # Barge-in off: this is a board whose echo cancellation is
             # not trusted, so what arrives while the server speaks may be
             # the server. Dropped here, before the decode, and nothing
@@ -644,6 +629,7 @@ class Session:
             logger.warning("session %s: undecodable Opus packet: %s", self.session_id, exc)
             self._note_dropped("undecodable")
             return
+        assert self.runtime is not None
         await self.runtime.audio(pcm)
 
     def _note_dropped(self, reason: str) -> None:
@@ -705,6 +691,7 @@ class Session:
                 logger.info("session %s: listening (%s mode)", self.session_id, mode)
                 self._listen_mode = mode
                 self.listening = True
+                assert self.runtime is not None
                 await self.runtime.listen_started()
                 # Asking to listen is a conversational act, and it is
                 # also the moment this session can first become one the
@@ -716,10 +703,12 @@ class Session:
                 self._mark_activity()
             case messages.ListenMessage(state="stop"):
                 self.listening = False
+                assert self.runtime is not None
                 await self.runtime.listen_stopped()
             case messages.ListenMessage(state="detect", text=word):
                 logger.debug("session %s: wake word reported: %s", self.session_id, word)
             case messages.AbortMessage(reason=reason):
+                assert self.runtime is not None
                 await self.runtime.device_aborted(reason)
             case messages.McpMessage(payload=payload):
                 if self._device_tools is None:
@@ -754,7 +743,39 @@ class Session:
         self._pace_paused_at = None
         self._pace_resume.set()
 
-    async def _begin_speaking(self) -> None:
+    async def show_transcript(self, text: str) -> None:
+        """The `stt` message: what the user was heard to say."""
+        await self._send_text(messages.stt_message(self.session_id, text))
+
+    async def sentence_started(self, text: str) -> None:
+        """The `tts sentence_start`: what is about to be heard."""
+        await self._send_text(messages.tts_message(self.session_id, "sentence_start", text=text))
+
+    async def finish_speaking(self) -> None:
+        """End of reply. The pair goes out even for a reply that never
+        spoke: the device leaves its speaking state on `tts stop`, and
+        in auto mode that is what re-arms its listening, so a stop it
+        was never told to expect is the one way this could strand a
+        device.
+
+        The activity mark comes first, so a device that has already gone
+        away still resets the idle clock on its way out."""
+        self._mark_activity()
+        await self.begin_speaking()
+        await self._send_text(messages.tts_message(self.session_id, "stop"))
+
+    def device_tools(self) -> Sequence[ToolDef]:
+        """The device's own tools, once discovery has finished. Empty
+        while it runs, and for a device that advertised none."""
+        return () if self._device_tools is None else self._device_tools.tools()
+
+    async def call_device_tool(self, name: str, arguments: dict[str, Any]) -> tuple[str, bool]:
+        """Invoke one of them over the MCP envelope transport, which is
+        the edge's: the runtime sees a name, arguments and an answer."""
+        assert self._device_tools is not None
+        return await self._device_tools.call(name, arguments)
+
+    async def begin_speaking(self) -> None:
         """Tell the device a reply is starting, once per reply.
 
         Sent when the first sentence is about to be spoken rather than
@@ -767,7 +788,7 @@ class Session:
         if self._tts_started:
             return
         self._tts_started = True
-        await self.websocket.send_text(messages.tts_message(self.session_id, "start"))
+        await self._send_text(messages.tts_message(self.session_id, "start"))
 
     def encode_audio(self, pcm: bytes) -> PlayableAudio:
         """Feed reply PCM at `output_sample_rate` into the encoder; the
@@ -838,9 +859,24 @@ class Session:
             # A barge-in being confirmed holds the stream here; resuming
             # shifts `_pace_start`, so the cadence survives the pause.
             await self._pace_resume.wait()
-            await self.websocket.send_bytes(framing.wrap(self.protocol_version, packet))
+            await self._send_frame(framing.wrap(self.protocol_version, packet))
             self._capture_reply(packet)
             self._pace_count += 1
+
+    async def _send_text(self, text: str) -> None:
+        """One outgoing message, with a device that has gone away
+        reported as the boundary's own failure rather than as
+        starlette's, so no runtime imports a transport to catch one."""
+        try:
+            await self.websocket.send_text(text)
+        except WebSocketDisconnect as exc:
+            raise DeviceGone("the device disconnected") from exc
+
+    async def _send_frame(self, data: bytes) -> None:
+        try:
+            await self.websocket.send_bytes(data)
+        except WebSocketDisconnect as exc:
+            raise DeviceGone("the device disconnected") from exc
 
     async def _close(self, code: int, reason: str) -> None:
         with contextlib.suppress(RuntimeError):

@@ -15,8 +15,8 @@ import websockets
 from samtal_server.audio.opus import OpusEncoder
 from samtal_server.auth import build_device_auth
 from samtal_server.config import Config
+from samtal_server.device.session import GOING_AWAY
 from samtal_server.protocol import framing
-from samtal_server.session import GOING_AWAY
 from samtal_server.ws import WEBSOCKET_PATH
 from tests.integration.conftest import running_app, speech_pcm
 

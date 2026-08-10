@@ -16,22 +16,21 @@ windows a real socket cannot time.
 import asyncio
 import json
 from dataclasses import replace
-from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
 
-import samtal_server.session as session_module
+import samtal_server.device.session as session_module
 from samtal_server.app import create_app
 from samtal_server.audio.opus import OpusEncoder
 from samtal_server.providers import (
     AsrResult,
     ProviderIdentity,
     Turn,
-    build_agent_providers,
 )
 from samtal_server.providers.mock import MockAsr
 from tests.unit.test_session import (
+    DEVICE_MAC,
     LONG_REPLY,
     RecordingSocket,
     assert_endpointed_speech,
@@ -39,6 +38,7 @@ from tests.unit.test_session import (
     collect_until,
     config_with_agent,
     connect,
+    device_session,
     endpoint_silence,
     heard_ms,
     is_reply_start,
@@ -118,13 +118,11 @@ class ConfirmingAsr:
         return self._confirmation
 
 
-def realtime_session(config, asr) -> tuple[session_module.Session, RecordingSocket]:
+def realtime_session(config, asr) -> tuple[session_module.DeviceSession, RecordingSocket]:
     """A session mid-conversation on a realtime device, its ASR swapped
     for the test's."""
     socket = RecordingSocket()
-    session = session_module.Session(cast(Any, socket), config, build_agent_providers(config))
-    session._agents = ["assistant"]
-    session.runtime._activate_agent("assistant")
+    session = device_session(config, DEVICE_MAC, websocket=socket)
     session._listen_mode = "realtime"
     session.listening = True
     assert session.runtime._providers is not None
