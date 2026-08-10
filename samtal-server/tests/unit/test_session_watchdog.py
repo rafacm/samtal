@@ -134,7 +134,7 @@ async def test_a_second_stall_gives_the_round_up_and_the_session_keeps_listening
     session.listening = True
 
     with caplog.at_level("INFO"):
-        session._reply_task = asyncio.create_task(session._reply(b"\x00\x00" * 320))
+        session._reply_task = asyncio.create_task(session.runtime._reply(b"\x00\x00" * 320))
         await session._reply_task
 
     assert llm.calls == 2
@@ -226,7 +226,7 @@ async def test_a_cancel_during_the_watchdog_window_still_lands(
     session.websocket = cast(Any, socket)
 
     with caplog.at_level("INFO"):
-        session._reply_task = asyncio.create_task(session._reply(b"\x00\x00" * 320))
+        session._reply_task = asyncio.create_task(session.runtime._reply(b"\x00\x00" * 320))
         await asyncio.sleep(0.05)
         await session._cancel_reply()
 

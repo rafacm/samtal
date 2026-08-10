@@ -27,7 +27,7 @@ import pytest
 
 import samtal_server.session as session_module
 from samtal_server.config import Config
-from samtal_server.providers import TtsProvider, build_agent_providers
+from samtal_server.providers import ToolCall, TtsProvider, build_agent_providers
 from tests.unit.test_session_tools import ScriptedLlm, base_config, session_for
 
 # One sentence's audio plays for longer than the next takes to start,
@@ -135,7 +135,7 @@ def slow_session(
 
 async def speak_a_reply(session: session_module.Session) -> list[str]:
     spoken: list[str] = []
-    await session._speak_reply("anything", spoken)
+    await session.runtime._speak_reply("anything", spoken)
     return spoken
 
 
@@ -286,7 +286,7 @@ async def test_a_sentence_run_ahead_and_never_spoken_is_not_recorded() -> None:
     tts = SlowTts()
     session, socket = slow_session([" ".join(SENTENCES)], tts)
     spoken: list[str] = []
-    reply = asyncio.create_task(session._speak_reply("anything", spoken))
+    reply = asyncio.create_task(session.runtime._speak_reply("anything", spoken))
     # Long enough for the first sentence to be playing and the second to
     # be in flight behind it, short enough that neither has finished.
     await asyncio.sleep(SYNTHESIS_LATENCY_S + SENTENCE_AUDIO_S / 2)
@@ -308,7 +308,7 @@ async def test_lookahead_stops_at_the_end_of_a_round() -> None:
     # that boundary, and the tools must not run over the top of speech.
     tts = SlowTts()
     session, socket = slow_session(
-        [[SENTENCES[0], session_module.ToolCall("1", "remember", {"text": "x"})], SENTENCES[1]],
+        [[SENTENCES[0], ToolCall("1", "remember", {"text": "x"})], SENTENCES[1]],
         tts,
         config=base_config(),
     )
@@ -319,7 +319,7 @@ async def test_lookahead_stops_at_the_end_of_a_round() -> None:
         ran_at.append(asyncio.get_running_loop().time())
         return [], None
 
-    session._run_tools = run_tools  # type: ignore[method-assign]
+    session.runtime._run_tools = run_tools  # type: ignore[method-assign]
     await speak_a_reply(session)
 
     # The first round's only sentence had finished being spoken before
@@ -346,7 +346,7 @@ async def test_a_failing_sentence_still_lets_the_earlier_ones_be_heard() -> None
     session, socket = slow_session([" ".join(SENTENCES)], tts)
     spoken: list[str] = []
     with pytest.raises(RuntimeError, match="the voice went away"):
-        await session._speak_reply("anything", spoken)
+        await session.runtime._speak_reply("anything", spoken)
 
     assert spoken == [SENTENCES[0]]
     # The failing sentence produced no audio, and is recorded nowhere.
@@ -372,13 +372,13 @@ async def test_a_handover_speaks_the_new_agents_voice() -> None:
     config = base_config()
     first = SlowTts()
     session, socket = slow_session(
-        [[SENTENCES[0], session_module.ToolCall("1", "switch_agent", {"agent": "tutor"})]],
+        [[SENTENCES[0], ToolCall("1", "switch_agent", {"agent": "tutor"})]],
         first,
         config=config,
     )
     fresh = build_agent_providers(config)
     second = SlowTts()
-    session._agent_providers = {
+    session.runtime._agent_providers = {
         name: replace(
             providers,
             tts=second if name == "tutor" else first,

@@ -16,7 +16,7 @@ from typing import Any, cast
 import pytest
 from fastapi.testclient import TestClient
 
-import samtal_server.session as session_module
+import samtal_server.runtime.pipeline as pipeline_module
 from samtal_server.app import create_app
 from samtal_server.config import Config
 from samtal_server.providers import (
@@ -30,6 +30,7 @@ from samtal_server.providers import (
     Usage,
     build_agent_providers,
 )
+from samtal_server.session import Session
 from samtal_server.tools.builtin import switch_agent_tool
 from samtal_server.tools.memory import MemoryStore
 from tests.unit.test_session import (
@@ -106,7 +107,7 @@ def base_config(**overrides: object) -> Config:
 
 def session_for(
     config: Config, mac: str, scripts: dict[str, ScriptedLlm] | None = None, **kwargs: object
-) -> session_module.Session:
+) -> Session:
     """A session wired to real providers, with the named agents' LLMs
     replaced by scripts. No websocket: these tests drive the loop
     directly and never speak."""
@@ -122,13 +123,13 @@ def session_for(
             tts=providers[agent].tts,
             vad=providers[agent].vad,
         )
-    session = session_module.Session(cast(Any, None), config, providers, **kwargs)  # type: ignore[arg-type]
+    session = Session(cast(Any, None), config, providers, **kwargs)  # type: ignore[arg-type]
     session._agents = config.agents_for_device(mac)
-    session._activate_agent(session._agents[0])
+    session.runtime._activate_agent(session._agents[0])
     return session
 
 
-async def run_reply(session: session_module.Session, said: str) -> list[str]:
+async def run_reply(session: Session, said: str) -> list[str]:
     """One reply, with speaking stubbed out: what the loop decides is
     what these tests are about, not the audio."""
     spoken: list[str] = []
@@ -139,16 +140,16 @@ async def run_reply(session: session_module.Session, said: str) -> list[str]:
         synthesis.cancel()
         into.append(synthesis.sentence)
 
-    session._speak = speak  # type: ignore[method-assign]
+    session.runtime._speak = speak  # type: ignore[method-assign]
     session._send_frames = _nothing  # type: ignore[method-assign]
-    session._turns.append(Turn("user", said))
-    await session._speak_reply(said, spoken)
+    session.runtime._turns.append(Turn("user", said))
+    await session.runtime._speak_reply(said, spoken)
     if spoken:
-        session._turns.append(Turn("assistant", " ".join(spoken)))
+        session.runtime._turns.append(Turn("assistant", " ".join(spoken)))
     return spoken
 
 
-async def drive_reply(session: session_module.Session, pcm: bytes) -> None:
+async def drive_reply(session: Session, pcm: bytes) -> None:
     """One whole reply, audio and all, run to completion.
 
     The two helpers below exist so that the characterization suite,
@@ -156,14 +157,14 @@ async def drive_reply(session: session_module.Session, pcm: bytes) -> None:
     point in one place instead of thirty. When the reply moves behind
     the device-facing boundary, these lines move with it and the tests
     that use them do not change."""
-    await session._reply(pcm)
+    await session.runtime._reply(pcm)
 
 
-def start_reply(session: session_module.Session, pcm: bytes) -> asyncio.Task[None]:
+def start_reply(session: Session, pcm: bytes) -> asyncio.Task[None]:
     """A reply in flight, registered the way an utterance registers one,
     so that everything asking whether this session is replying (the idle
     watchdog, the shutdown, the barge-in gates) sees it."""
-    session._reply_task = asyncio.create_task(session._reply(pcm))
+    session._reply_task = asyncio.create_task(session.runtime._reply(pcm))
     return session._reply_task
 
 
@@ -193,7 +194,7 @@ async def test_an_unknown_tool_comes_back_as_an_error_result() -> None:
 async def test_a_tool_that_never_answers_becomes_a_timeout_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(session_module, "DEFAULT_TOOL_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(pipeline_module, "DEFAULT_TOOL_TIMEOUT_S", 0.05)
     script = ScriptedLlm([[call("remember", text="a fact")], "Sorry, that took too long."])
     session = session_for(base_config(), POET_MAC, {"poet": script}, memory=_HangingStore())
     assert await run_reply(session, "remember this") == ["Sorry, that took too long."]
@@ -225,7 +226,7 @@ async def test_the_round_cap_ends_the_reply_in_speech() -> None:
 
     choices = [choice for _, _, choice in script.seen]
     assert choices == ["auto", "auto", "auto", "none"]
-    assert len(script.seen) == session_module.MAX_TOOL_ROUNDS
+    assert len(script.seen) == pipeline_module.MAX_TOOL_ROUNDS
 
 
 async def test_history_keeps_the_speech_and_not_the_tool_exchange() -> None:
@@ -233,7 +234,7 @@ async def test_history_keeps_the_speech_and_not_the_tool_exchange() -> None:
     session = session_for(base_config(), POET_MAC, {"poet": script})
     await run_reply(session, "do it")
 
-    assert session._turns == [Turn("user", "do it"), Turn("assistant", "It did not work.")]
+    assert session.runtime._turns == [Turn("user", "do it"), Turn("assistant", "It did not work.")]
     # The structured turns existed, but only inside the reply.
     assert any(turn.tool_calls for turns, _, _ in script.seen for turn in turns)
 
@@ -241,11 +242,11 @@ async def test_history_keeps_the_speech_and_not_the_tool_exchange() -> None:
 async def test_switch_agent_is_offered_only_where_there_is_somewhere_to_go() -> None:
     one = session_for(base_config(), POET_MAC)
     both = session_for(base_config(), BOTH_MAC)
-    assert [tool.name for tool in one._tool_snapshot()] == []
-    assert [tool.name for tool in both._tool_snapshot()] == ["switch_agent"]
+    assert [tool.name for tool in one.runtime._tool_snapshot()] == []
+    assert [tool.name for tool in both.runtime._tool_snapshot()] == ["switch_agent"]
     # The enum carries the device's full bound list, which is what lets
     # the agent answer "who can I talk to?".
-    (tool,) = both._tool_snapshot()
+    (tool,) = both.runtime._tool_snapshot()
     assert tool.input_schema["properties"]["agent"]["enum"] == ["poet", "tutor"]
     assert switch_agent_tool(["poet", "tutor"]).description.count("poet") == 1
 
@@ -264,8 +265,8 @@ async def test_a_successful_switch_hands_over_to_the_other_agent() -> None:
     # telling it to greet, and that turn is not in the history.
     (turns, _, _) = tutor.seen[0]
     assert turns[0] == Turn("user", "get me the tutor")
-    assert turns[-1].content == session_module.SWITCH_GREETING
-    assert all(turn.content != session_module.SWITCH_GREETING for turn in session._turns)
+    assert turns[-1].content == pipeline_module.SWITCH_GREETING
+    assert all(turn.content != pipeline_module.SWITCH_GREETING for turn in session.runtime._turns)
 
 
 async def test_the_old_agents_words_stay_its_own_turn() -> None:
@@ -275,7 +276,7 @@ async def test_the_old_agents_words_stay_its_own_turn() -> None:
     tutor = ScriptedLlm(["Tutor here."])
     session = session_for(base_config(), BOTH_MAC, {"poet": poet, "tutor": tutor})
     assert await run_reply(session, "the tutor please") == ["Tutor here."]
-    assert [turn.content for turn in session._turns] == [
+    assert [turn.content for turn in session.runtime._turns] == [
         "the tutor please",
         "One moment.",
         "Tutor here.",
@@ -314,7 +315,7 @@ async def test_a_switch_to_the_agent_already_speaking_is_refused(
     # reply rather than greeting a user who is already mid-conversation.
     assert not [record for record in caplog.records if getattr(record, "event", "") == "handover"]
     assert all(
-        turn.content != session_module.SWITCH_GREETING
+        turn.content != pipeline_module.SWITCH_GREETING
         for turns, _, _ in poet.seen
         for turn in turns
     )
@@ -359,7 +360,7 @@ async def test_remembering_is_offered_and_executed_when_memory_is_configured(
     )
     session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
 
-    assert [tool.name for tool in session._tool_snapshot()] == ["remember"]
+    assert [tool.name for tool in session.runtime._tool_snapshot()] == ["remember"]
     assert await run_reply(session, "remember I am vegetarian") == ["I will keep that in mind."]
     assert "the user is vegetarian" in store.read("poet")
 
@@ -373,8 +374,8 @@ async def test_a_remembered_fact_is_in_the_next_replys_prompt(tmp_path: Path) ->
     store = MemoryStore(tmp_path)
     await store.remember("poet", "the user is vegetarian")
     session = session_for(base_config(), POET_MAC, memory=store)
-    assert "the user is vegetarian" in session._system_prompt()
-    assert session._system_prompt().startswith("POET")
+    assert "the user is vegetarian" in session.runtime._system_prompt()
+    assert session.runtime._system_prompt().startswith("POET")
 
 
 async def test_malformed_arguments_come_back_as_an_error_result() -> None:

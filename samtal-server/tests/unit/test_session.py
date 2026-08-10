@@ -30,6 +30,8 @@ from samtal_server.audio.resample import Resampler
 from samtal_server.config import Config
 from samtal_server.protocol import framing
 from samtal_server.providers import Turn, build_agent_providers
+from samtal_server.runtime.pipeline import AgentNotAllowed
+from samtal_server.runtime.speech import _Synthesis
 from samtal_server.ws import WEBSOCKET_PATH, signed_device_id
 
 DEVICE_MAC = "AA:BB:CC:DD:EE:FF"
@@ -572,9 +574,9 @@ async def test_a_barge_in_keeps_the_sentences_the_user_heard() -> None:
     socket = RecordingSocket()
     session = session_module.Session(cast(Any, socket), config, build_agent_providers(config))
     session._agents = ["assistant"]
-    session._activate_agent("assistant")
+    session.runtime._activate_agent("assistant")
 
-    reply = asyncio.create_task(session._reply(speech_pcm(600)))
+    reply = asyncio.create_task(session.runtime._reply(speech_pcm(600)))
     await asyncio.sleep(0.6)
     heard_frames = socket.frames
     reply.cancel()
@@ -583,7 +585,7 @@ async def test_a_barge_in_keeps_the_sentences_the_user_heard() -> None:
 
     # "Ready." was spoken in full and survives; the long sentence was
     # audible, interrupted, and left out.
-    assert session._turns == [Turn("user", "hello"), Turn("assistant", "Ready.")]
+    assert session.runtime._turns == [Turn("user", "hello"), Turn("assistant", "Ready.")]
     assert heard_frames > TTS_MIN_MS // FRAME_MS
 
 
@@ -597,7 +599,7 @@ async def test_only_a_sentence_whose_audio_finished_counts_as_spoken() -> None:
     socket = RecordingSocket()
     session = session_module.Session(cast(Any, socket), config, build_agent_providers(config))
     session._agents = ["tutor"]
-    session._activate_agent("tutor")
+    session.runtime._activate_agent("tutor")
     assert session._providers is not None
     resampler = Resampler(
         session._providers.tts.sample_rate, session_module.OUTPUT_AUDIO.sample_rate
@@ -605,16 +607,16 @@ async def test_only_a_sentence_whose_audio_finished_counts_as_spoken() -> None:
 
     spoken: list[str] = []
     tts = session._providers.tts
-    await session._speak(
-        session_module._Synthesis("Short and finished.", tts, session.session_id),
+    await session.runtime._speak(
+        _Synthesis("Short and finished.", tts, session.session_id),
         resampler,
         spoken,
     )
     finished_frames = socket.frames
 
     cut = asyncio.create_task(
-        session._speak(
-            session_module._Synthesis(LONG_REPLY, tts, session.session_id), resampler, spoken
+        session.runtime._speak(
+            _Synthesis(LONG_REPLY, tts, session.session_id), resampler, spoken
         )
     )
     await asyncio.sleep(0.1)
@@ -637,7 +639,7 @@ async def test_the_utterance_buffer_keeps_only_a_bounded_tail(
     config = two_persona_config()
     session = session_module.Session(cast(Any, None), config, build_agent_providers(config))
     session._agents = ["tutor"]
-    session._activate_agent("tutor")
+    session.runtime._activate_agent("tutor")
     session._listen_mode = "realtime"
     session.listening = True
 
@@ -752,10 +754,10 @@ def test_a_session_refuses_an_agent_its_device_is_not_bound_to() -> None:
         cast(Any, None), config, build_agent_providers(config)
     )
     session._agents = ["tutor"]
-    session._activate_agent("tutor")
+    session.runtime._activate_agent("tutor")
 
-    with pytest.raises(session_module.AgentNotAllowed, match="poet"):
-        session._activate_agent("poet")
+    with pytest.raises(AgentNotAllowed, match="poet"):
+        session.runtime._activate_agent("poet")
     # Refused, and nothing swapped: the session still talks as the tutor.
     assert session._agent == "tutor"
     assert session._providers is not None

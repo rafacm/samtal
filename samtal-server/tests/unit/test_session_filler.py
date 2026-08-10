@@ -120,7 +120,7 @@ async def test_a_slow_reply_is_masked_at_the_threshold(
     second one), and the reply then arrives normally."""
     session = await masked_session(masked_config(), POET_MAC, {"poet": StallingLlm([STALL_S])})
     with caplog.at_level("INFO"):
-        await session._reply(UTTERANCE)
+        await session.runtime._reply(UTTERANCE)
 
     played = only(caplog, "filler_played")
     assert played.agent == "poet"
@@ -138,7 +138,7 @@ async def test_a_slow_reply_is_masked_at_the_threshold(
 async def test_a_fast_reply_plays_no_filler(caplog: pytest.LogCaptureFixture) -> None:
     session = await masked_session(masked_config(delay_ms=500.0), POET_MAC)
     with caplog.at_level("INFO"):
-        await session._reply(UTTERANCE)
+        await session.runtime._reply(UTTERANCE)
 
     assert events(caplog, "filler_played") == []
     only(caplog, "speaking_started")
@@ -154,8 +154,8 @@ async def test_one_filler_per_turn_and_the_variants_rotate(
     the next turn's filler is the next phrase."""
     session = await masked_session(masked_config(), POET_MAC, {"poet": StallingLlm([STALL_S])})
     with caplog.at_level("INFO"):
-        await session._reply(UTTERANCE)
-        await session._reply(UTTERANCE)
+        await session.runtime._reply(UTTERANCE)
+        await session.runtime._reply(UTTERANCE)
 
     played = events(caplog, "filler_played")
     assert [record.phrase_index for record in played] == [0, 1]
@@ -182,13 +182,13 @@ async def test_the_filler_speaks_in_the_active_agents_voice_after_a_handover(
     # The handover turn, driven below the reply layer so no timer is
     # armed for it; the tutor's first (instant) call answers it.
     spoken: list[str] = []
-    session._turns.append(Turn("user", "get me the tutor"))
-    await session._speak_reply("get me the tutor", spoken)
-    session._turns.append(Turn("assistant", " ".join(spoken)))
+    session.runtime._turns.append(Turn("user", "get me the tutor"))
+    await session.runtime._speak_reply("get me the tutor", spoken)
+    session.runtime._turns.append(Turn("assistant", " ".join(spoken)))
     assert session._agent == "tutor"
 
     with caplog.at_level("INFO"):
-        await session._reply(UTTERANCE)
+        await session.runtime._reply(UTTERANCE)
 
     played = only(caplog, "filler_played")
     assert played.agent == "tutor"
@@ -231,7 +231,7 @@ async def test_a_handover_from_a_fillerless_agent_still_masks_the_new_voice(
     }
     session = await masked_session(config, BOTH_MAC, cast(Any, scripts))
     with caplog.at_level("INFO"):
-        await session._reply(UTTERANCE)
+        await session.runtime._reply(UTTERANCE)
 
     played = only(caplog, "filler_played")
     assert played.agent == "tutor"
@@ -249,7 +249,7 @@ async def test_a_fire_on_an_agent_without_clips_quietly_plays_nothing(
         half_masked_config(), BOTH_MAC, {"poet": StallingLlm([STALL_S])}
     )
     with caplog.at_level("INFO"):
-        await session._reply(UTTERANCE)
+        await session.runtime._reply(UTTERANCE)
 
     assert events(caplog, "filler_played") == []
     only(caplog, "speaking_started")
@@ -269,7 +269,7 @@ async def test_a_fire_into_live_user_speech_is_skipped(
     landing 1.4 to 1.8 s into speech already underway)."""
     session = await masked_session(masked_config(), POET_MAC, {"poet": StallingLlm([STALL_S])})
     with caplog.at_level("INFO"):
-        session._reply_task = asyncio.create_task(session._reply(UTTERANCE))
+        session._reply_task = asyncio.create_task(session.runtime._reply(UTTERANCE))
         await asyncio.sleep(DELAY_MS / 1000 / 3)
         assert session._endpointer is not None
         session._endpointer.feed(SPEECH)
@@ -294,7 +294,7 @@ async def test_a_fire_during_a_barge_in_confirmation_is_skipped(
     so the timer stands down rather than masking a doomed turn."""
     session = await masked_session(masked_config(), POET_MAC, {"poet": StallingLlm([STALL_S])})
     with caplog.at_level("INFO"):
-        session._reply_task = asyncio.create_task(session._reply(UTTERANCE))
+        session._reply_task = asyncio.create_task(session.runtime._reply(UTTERANCE))
         await asyncio.sleep(DELAY_MS / 1000 / 3)
         session._pause_speaking()
         await asyncio.sleep(DELAY_MS / 1000)
@@ -317,7 +317,7 @@ async def test_the_feature_is_off_by_default(caplog: pytest.LogCaptureFixture) -
     session = session_for(base_config(), POET_MAC, {"poet": cast(Any, StallingLlm([0.3]))})
     session.websocket = cast(Any, RecordingSocket())
     with caplog.at_level("INFO"):
-        await session._reply(UTTERANCE)
+        await session.runtime._reply(UTTERANCE)
 
     assert events(caplog, "filler_played") == []
     only(caplog, "speaking_started")
@@ -370,7 +370,7 @@ async def test_the_filler_composes_with_the_first_token_watchdog(
     config = masked_config(delay_ms=50.0, server={"llm_first_token_timeout_s": 0.15})
     session = await masked_session(config, POET_MAC, {"poet": StallingLlm([30.0])})
     with caplog.at_level("INFO"):
-        session._reply_task = asyncio.create_task(session._reply(UTTERANCE))
+        session._reply_task = asyncio.create_task(session.runtime._reply(UTTERANCE))
         await session._reply_task
 
     only(caplog, "filler_played")

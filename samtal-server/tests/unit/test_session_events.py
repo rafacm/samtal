@@ -254,12 +254,12 @@ async def test_the_session_hands_a_locked_language_back_as_a_hint(
         synthesis.cancel()
         into.append(synthesis.sentence)
 
-    session._speak = speak  # type: ignore[method-assign]
+    session.runtime._speak = speak  # type: ignore[method-assign]
     session._send_frames = _nothing  # type: ignore[method-assign]
 
     with caplog.at_level("INFO"):
-        await session._reply(b"\x00\x00" * 320)
-        await session._reply(b"\x00\x00" * 320)
+        await session.runtime._reply(b"\x00\x00" * 320)
+        await session.runtime._reply(b"\x00\x00" * 320)
 
     assert asr.hints == [None, "es"]
     first, second = events(caplog, "heard")
@@ -409,7 +409,7 @@ async def test_the_device_is_told_speech_starts_only_when_it_does() -> None:
     session = session_for(base_config(), POET_MAC, {"poet": cast(Any, Thinking([]))})
     session.websocket = cast(Any, Recorder())
     session._send_frames = _nothing  # type: ignore[method-assign]
-    await session._reply(b"\x00\x00" * 320)
+    await session.runtime._reply(b"\x00\x00" * 320)
 
     assert order.index("model thinking") < order.index("tts start")
     assert order.index("first token") < order.index("tts start")
@@ -468,7 +468,7 @@ async def reply_with(
     session._mac = POET_MAC
     session._send_frames = _nothing  # type: ignore[method-assign]
     with caplog.at_level("INFO"):
-        await session._reply(b"\x00\x00" * 320)
+        await session.runtime._reply(b"\x00\x00" * 320)
     return only(caplog, "provider_failed")
 
 
