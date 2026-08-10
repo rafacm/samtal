@@ -24,10 +24,22 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   connection by a factory assembled at startup, which is the seam a
   second runtime plugs into.
 
-  A pure refactor: no event name, field, reason or ordering changes, no
-  wire bytes change, and the `logger` field stays `samtal_server.session`
-  on every conversation record, which a characterization test now pins.
-  The whole integration lane passes with a single import line changed.
+  A pure refactor, with one deliberate exception stated in the
+  implementation doc: no event name, field, reason or ordering changes,
+  no wire bytes change, and the `logger` field stays
+  `samtal_server.session` on every conversation record, which a
+  characterization test now pins. The whole integration lane passes
+  with a single import line changed.
+
+### Fixed
+
+- A device that disconnects while one of its own MCP tools is being
+  called now reaches the conversation runtime as the boundary's
+  `DeviceGone` rather than as the websocket transport's exception,
+  which is what every other outgoing message already did (#85). The
+  runtime's observable behavior is unchanged: `DeviceGone` subclasses
+  `RuntimeError`, so the tool loop turns it into the same error result
+  and the same `tool_call` event as before.
 
 - The principles page now separates product promises (falsifiable
   commitments to the person running samtal) from the architecture

@@ -82,7 +82,8 @@ is where `_mark_activity` used to be called directly at those two
 sites. `finish_speaking` marks before it sends anything, so a device
 that has already gone away still resets the idle clock on its way out,
 which is what the unconditional call before the suppressed send used to
-guarantee.
+guarantee. (The `user_turn_ended` half of this was claimed here before
+it was true; see the review round below.)
 
 **The VAD capture sample records `listening` as true without asking.**
 It is fed from the runtime's `audio()`, which the edge only calls after
@@ -120,13 +121,85 @@ provider LLM, ASR or TTS type (only `ToolDef`, which is a tool
 definition and part of the boundary). The whole integration lane passes
 with a single import line changed, which is the stock-protocol
 compatibility floor demonstrated in CI rather than asserted. The
-characterization suite (commit 2) and the contract suite (commit 9) are
-unmodified from the commit that introduced them.
+characterization suite (commit 2) is unmodified from the commit that
+introduced it, and so is the contract suite (commit 9) apart from the
+two tests the review round below added to it.
 
 **Sizes.** `session.py` was 2,138 lines in one class. It is now
 `device/session.py` at 883, `device/boundary.py` at 231,
 `device/events.py` at 111, `runtime/pipeline.py` at 1,435, and
 `runtime/speech.py` at 144.
+
+## Codex review round
+
+One external review of PR #87 (gpt-5.6-terra, against the diff to
+`main`), two P2 findings, both on `device/session.py`. Each was first
+checked against pre-refactor `main` to decide whether it was a
+regression this branch introduced or a pre-existing behavior the new
+contract exposes, because the two call for different answers and the
+pure-refactor claim should not be blurred either way.
+
+### Finding 1: the end of a user turn stopped marking activity
+
+**A regression, and parity is restored.** Pre-refactor,
+`_finish_utterance` called `_mark_activity()` as its first statement,
+unconditionally, ahead of every gate, with a comment saying so: an
+utterance that ended is somebody talking, whether or not it earns a
+reply. Commit 8 deleted that line in the belief that the mark had moved
+into `user_turn_ended`. It had not; it had only been added to
+`finish_speaking`. So a realtime turn that produced no reply (the
+min-speech gate dropping it, an empty confirmation transcript) left
+`_last_activity` at whatever the previous reply set, and the idle
+watchdog could hang up on a conversation the user was still having.
+
+The mark now lives in `user_turn_ended`, which the runtime calls at the
+same point the deleted line sat at, three non-awaiting statements later
+and still ahead of every gate, so the restored behavior is exactly the
+old one. The review's own argument for that site holds independently
+and is worth keeping: the idle timeout is the appliance's policy, so
+putting the mark at the boundary method means every runtime inherits it
+by reporting the turn rather than by remembering to ask. The
+explanatory comment followed the line to the edge.
+
+Pinned by `test_the_end_of_a_user_turn_counts_as_activity`, which
+covers both listening modes because the mark is unconditional where the
+listening policy is not, and which fails on the code as the review
+found it.
+
+### Finding 2: a device tool call could leak the transport's exception
+
+**A pre-existing behavior the new contract exposes, so fixing it is a
+deliberate change, stated here.** `_send_mcp` was byte-identical to
+`main`: it wrote to the socket directly, so a device that vanished
+while a `tools/call` was going out raised starlette's
+`WebSocketDisconnect` out of `DeviceToolClient.call`. That was true
+before this branch and is not a regression. What is new is the promise
+in `boundary.py` that a `DeviceOutput` method reaching the socket
+reports a vanished device as `DeviceGone`, and `call_device_tool` was
+the one method not keeping it.
+
+`_send_mcp` now goes through `_send_text` like every other outgoing
+message. **Old behavior:** a disconnect mid-tool-call raised
+`WebSocketDisconnect`. **New behavior:** it raises `DeviceGone`. For
+the bespoke runtime the observable outcome is unchanged, which is why
+this was the fix chosen: `DeviceGone` subclasses `RuntimeError`, so the
+tool loop's broad `except Exception` still catches it, still produces
+an error result, and still emits the same `tool_call` event with the
+same `is_error`. The only difference is the text of the result handed
+to the model, from an empty exception string to "the device
+disconnected", in a session whose device has already left. Discovery's
+control flow is likewise unchanged, since it already swallows every
+exception and reports "no device tools"; its warning now names the
+disconnect instead of interpolating an empty string.
+
+The edge's own handshake sends are deliberately left raw. The server
+hello is written before the region that catches a disconnect, so
+translating it would change how that failure leaves `run`, and it is
+not a boundary method.
+
+Pinned by `test_a_device_that_vanishes_mid_tool_call_reports_device_gone`,
+which runs a real MCP discovery handshake over a scripted socket, then
+makes the device vanish and calls the tool.
 
 ## Open questions from the plan
 
@@ -144,10 +217,13 @@ Both stand as the plan left them, and neither was forced by the work.
 ## Verification
 
 - `uv run ruff check .` clean.
-- `uv run pytest tests/unit -q`: 736 passed, 2 skipped.
+- `uv run pytest tests/unit -q`: 738 passed, 2 skipped.
 - `uv run pytest tests/integration -q`: 27 passed.
 - Both lanes run after every commit in the sequence; ruff and both
-  lanes after commits 2, 4, 7, 8, 9 and 10.
+  lanes after commits 2, 4, 7, 8, 9 and 10, and after each of the two
+  review-round commits.
+- Both review-round fixes were checked against a deliberate regression:
+  reverting either one fails exactly the test that covers it.
 - The moves were checked as moves. `git diff --color-moved` sees very
   little here, because a moved body also changes receiver
   (`self._encoder` becomes `self._session.encode_audio`, `self.config`
