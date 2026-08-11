@@ -19,6 +19,11 @@ prompt: >
 # default recognizer with a voice of its own.
 tts: eleven
 
+# The model overrides the same way: naming an llm entry runs this agent
+# on that provider instead of the default, which is how one agent runs
+# on the local model while its siblings stay on the cloud one.
+# llm: local
+
 # Naming a list replaces the inherited one rather than extending it,
 # like the stage fields above. An empty list (`mcp: []`) is how an agent
 # opts out of tools its siblings have.

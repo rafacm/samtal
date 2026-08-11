@@ -612,7 +612,7 @@ is what it is went to a description and to a fragment.
 | 20 | 567-569 | agents header: prompt plus one provider per stage, every stage must resolve | `DOMAIN_DESCRIPTIONS["agents"]`, reference "Agent" purpose, `agent.yaml` header |
 | 21 | 572-573 | state the reply language explicitly, or a model picks by training bias | `AgentConfig.prompt` description; verbatim in `agent.yaml` |
 | 22 | 579-580 | naming a list replaces the inherited one | `AgentDefaults.mcp` description, the reference's agent-defaults notes; verbatim in `agent.yaml` |
-| 23 | 589 | "overriding a default: this one runs on the local model" | `agent.yaml`, as the note on the one overridden stage |
+| 23 | 589 | "overriding a default: this one runs on the local model" | `agent.yaml`, as a commented `llm: local` override with its explanation (restored by the PR #99 review round; the first pass had covered only the tts override and the audit overclaimed) |
 | 24 | 592 | an empty list opts an agent out of its siblings' tools | `AgentDefaults.mcp` description; verbatim in `agent.yaml` and `agent-defaults.yaml` |
 | 25 | 595-598 | devices are bound by MAC, first entry starts the conversation, unknown devices get default_agent | `DOMAIN_DESCRIPTIONS["devices"]` and `["default_agent"]`, reference "Devices" and "Default agent" sections |
 
