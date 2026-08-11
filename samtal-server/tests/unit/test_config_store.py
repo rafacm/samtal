@@ -398,6 +398,67 @@ def test_a_row_that_is_not_loadable_is_reported_as_a_config_error(
         engine.dispose()
 
 
+CORRUPTIONS = [
+    ("providers", "options", "not an object"),
+    ("providers", "secrets", "not an object"),
+    ("mcp_servers", "args", "not an array"),
+    ("mcp_servers", "env", ["not", "an", "object"]),
+    ("mcp_servers", "headers", "not an object"),
+    ("mcp_servers", "secrets", "not an object"),
+    ("agents", "mcp", "not an array"),
+    ("agents", "filler", ["not", "an", "object"]),
+    ("agent_defaults", "mcp", "not an array"),
+    ("agent_defaults", "filler", "not an object"),
+    ("devices", "agents", "sam"),
+    ("domain_settings", "value", {"not": "a string"}),
+]
+
+
+@pytest.mark.parametrize(("table", "column", "written"), CORRUPTIONS)
+def test_a_json_column_of_the_wrong_shape_is_a_config_error(
+    store: ConfigStore, table: str, column: str, written: object
+) -> None:
+    """SQLite enforces no shape on a JSON column, so a hand-edited or
+    half-restored row can hold a string where a mapping belongs. Every
+    reader would then raise a TypeError or an AttributeError, which is
+    neither a database error nor a validation error, and would travel
+    straight through the sanitized boundary as a traceback.
+
+    The devices case is the one that fails silently rather than loudly
+    without this: iterating a string succeeds and binds the device to
+    one agent per character."""
+    _populate(store)
+    store.set_agent("poet", {"prompt": "p", "mcp": [], "filler": {"enabled": False}})
+
+    with store._engine.begin() as connection:
+        connection.execute(update(getattr(schema, table)).values(**{column: written}))
+
+    with pytest.raises(ConfigError) as caught:
+        store.load()
+
+    message = str(caught.value)
+    assert column in message
+    assert str(written) not in message
+    assert caught.value.__cause__ is None
+
+
+def test_a_corrupt_json_column_does_not_stop_a_secret_being_cleared(
+    store: ConfigStore,
+) -> None:
+    """The recovery direction: a secrets column that is not an object
+    still refuses in words rather than in a traceback."""
+    _populate(store)
+
+    with store._engine.begin() as connection:
+        connection.execute(update(schema.providers).values(secrets="not an object"))
+
+    with pytest.raises(ConfigError) as caught:
+        store.clear_secret(CLAUDE)
+
+    assert "secrets" in str(caught.value)
+    assert caught.value.__cause__ is None
+
+
 def test_two_concurrent_writers_serialize(
     tmp_path: Path, keys: MultiFernet, monkeypatch: pytest.MonkeyPatch
 ) -> None:

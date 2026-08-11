@@ -352,29 +352,40 @@ def _read_domain(connection: Connection) -> DomainConfig:
             row.name: _agent_from_row(row) for row in connection.execute(select(schema.agents))
         },
         devices={
-            row.mac: list(row.agents) for row in connection.execute(select(schema.devices))
+            row.mac: _list(f"devices.{row.mac}", "agents", row.agents)
+            for row in connection.execute(select(schema.devices))
         },
     )
     defaults = connection.execute(select(schema.agent_defaults)).first()
     if defaults is not None:
-        domain.agent_defaults = _load(AgentDefaults, "agent_defaults", _layer_data(defaults))
+        domain.agent_defaults = _load(
+            AgentDefaults, "agent_defaults", _layer_data("agent_defaults", defaults)
+        )
     default_agent = connection.execute(
         select(schema.domain_settings.c.value).where(
             schema.domain_settings.c.key == schema.DEFAULT_AGENT_KEY
         )
     ).scalar()
     if default_agent is not None:
-        domain.default_agent = str(default_agent)
+        if not isinstance(default_agent, str):
+            raise ConfigError(
+                f"domain_settings.{schema.DEFAULT_AGENT_KEY}: the value column does not "
+                f"hold a string; the row cannot be read as configuration"
+            )
+        domain.default_agent = default_agent
     return domain
 
 
 def _read_secrets(connection: Connection, keys: MultiFernet | None) -> SecretStore:
     envelopes: dict[SecretLocation, object] = {}
     for row in connection.execute(select(schema.providers)):
-        for slot, envelope in (row.secrets or {}).items():
+        location = f"providers.{row.stage}.{row.name}"
+        for slot, envelope in _mapping(location, "secrets", row.secrets).items():
             envelopes[SecretLocation.provider(row.stage, row.name, slot)] = envelope
     for row in connection.execute(select(schema.mcp_servers)):
-        for slot, envelope in (row.secrets or {}).items():
+        for slot, envelope in _mapping(
+            f"mcp_servers.{row.name}", "secrets", row.secrets
+        ).items():
             envelopes[SecretLocation.mcp_server(row.name, slot)] = envelope
     return SecretStore(envelopes, keys)
 
@@ -382,10 +393,15 @@ def _read_secrets(connection: Connection, keys: MultiFernet | None) -> SecretSto
 def _provider_from_row(row: Row) -> ProviderConfig:
     # api_key_env is a declared model field with its own column, never
     # an options key: options holds exactly the model extras.
-    data: dict[str, object] = {"type": row.type, "egress": row.egress, **(row.options or {})}
+    location = f"providers.{row.stage}.{row.name}"
+    data: dict[str, object] = {
+        "type": row.type,
+        "egress": row.egress,
+        **_mapping(location, "options", row.options),
+    }
     if row.api_key_env is not None:
         data["api_key_env"] = row.api_key_env
-    return _load(ProviderConfig, f"providers.{row.stage}.{row.name}", data)
+    return _load(ProviderConfig, location, data)
 
 
 def _mcp_from_row(row: Row) -> McpServerConfig:
@@ -393,33 +409,78 @@ def _mcp_from_row(row: Row) -> McpServerConfig:
     # loaded as None or empty: McpServerConfig reads model_fields_set to
     # tell "my headers are ignored" from "my headers are wrong", so
     # naming them would make every stdio row fail its own validator.
+    location = f"mcp_servers.{row.name}"
     data: dict[str, object] = {"transport": row.transport, "tool_timeout_s": row.tool_timeout_s}
     if row.egress is not None:
         data["egress"] = row.egress
     for key, value in (("command", row.command), ("url", row.url)):
         if value is not None:
             data[key] = value
-    for key, value in (("args", row.args), ("env", row.env), ("headers", row.headers)):
-        if value:
-            data[key] = value
-    return _load(McpServerConfig, f"mcp_servers.{row.name}", data)
+    args = _list(location, "args", row.args)
+    if args:
+        data["args"] = args
+    for key, value in (("env", row.env), ("headers", row.headers)):
+        mapping = _mapping(location, key, value)
+        if mapping:
+            data[key] = mapping
+    return _load(McpServerConfig, location, data)
 
 
 def _agent_from_row(row: Row) -> AgentConfig:
-    data = {"prompt": row.prompt or "", **_layer_data(row)}
-    return _load(AgentConfig, f"agents.{row.name}", data)
+    location = f"agents.{row.name}"
+    data = {"prompt": row.prompt or "", **_layer_data(location, row)}
+    return _load(AgentConfig, location, data)
 
 
-def _layer_data(row: Row) -> dict[str, object]:
+def _layer_data(location: str, row: Row) -> dict[str, object]:
     """The override columns agent_defaults and agents share."""
     data: dict[str, object] = {
         stage: getattr(row, stage) for stage in PROVIDER_STAGES if getattr(row, stage) is not None
     }
+    # None means inherit and an empty list opts out, so neither column
+    # can be normalized through the missing-value default: only their
+    # container shape is checked.
     if row.mcp is not None:
-        data["mcp"] = list(row.mcp)
+        data["mcp"] = _list(location, "mcp", row.mcp)
     if row.filler is not None:
-        data["filler"] = dict(row.filler)
+        data["filler"] = _mapping(location, "filler", row.filler)
     return data
+
+
+def _mapping(location: str, column: str, value: object) -> dict[str, object]:
+    """A JSON column that has to hold an object.
+
+    SQLite enforces no shape on a JSON column, so a hand-edited or
+    half-restored row can hold a string or a list where a mapping
+    belongs. Every reader below would then raise a TypeError or an
+    AttributeError, which is not a database error and not a validation
+    error, so it would travel straight through the sanitized boundary
+    and reach the operator as a traceback."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
+        raise ConfigError(_shape_problem(location, column, "an object with string keys"))
+    return dict(value)
+
+
+def _list(location: str, column: str, value: object) -> list[object]:
+    """A JSON column that has to hold an array. A string here is the
+    dangerous one: iterating it succeeds and yields its characters."""
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ConfigError(_shape_problem(location, column, "an array"))
+    return list(value)
+
+
+def _shape_problem(location: str, column: str, expected: str) -> str:
+    # The column and the row, never the value: a column that holds the
+    # wrong shape may hold anything, including something secret that
+    # was pasted into it.
+    return (
+        f"{location}: the {column} column does not hold {expected}; the row cannot be "
+        f"read as configuration"
+    )
 
 
 # Writing rows
@@ -480,7 +541,7 @@ def _upsert(
 def _stored_secrets(connection: Connection, location: SecretLocation) -> Mapping[str, object]:
     table, where = _secret_row(location)
     stored = connection.execute(select(table.c.secrets).where(*where)).scalar()
-    return stored or {}
+    return _mapping(f"{location.kind} {location.identity}", "secrets", stored)
 
 
 def _write_secrets(
