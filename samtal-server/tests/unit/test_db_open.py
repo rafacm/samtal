@@ -75,32 +75,71 @@ def test_an_already_migrated_database_reopens(tmp_path: Path) -> None:
         second.dispose()
 
 
-def test_concurrent_openers_do_not_race_the_baseline_migration(tmp_path: Path) -> None:
-    """Both openers see an empty file and both decide to migrate it. The
-    write lock the upgrade takes before it reads the version table is
-    what makes the loser find the schema already current instead of
-    creating the same tables twice."""
+def test_concurrent_openers_serialize_on_the_migration_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The first opener is held inside the migration after its
+    transaction has taken the write lock; the second is started and
+    must not reach the migration until the first commits. That pins
+    the serialization property directly, rather than hoping the
+    scheduler produces the race: BEGIN IMMEDIATE precedes Alembic's
+    version-table read, so the loser reads the schema the winner
+    committed and finds it current instead of creating the same
+    tables twice. Without the lock, the second opener enters the
+    migration while the first still holds it, and the ordering
+    assertion below fails."""
+    from samtal_server import db as db_module
+
     directory = tmp_path / "db"
-    start = threading.Barrier(2)
+    real_upgrade = db_module.command.upgrade
+    first_inside = threading.Event()
+    release_first = threading.Event()
+    entered: list[int] = []
+    entered_lock = threading.Lock()
     failures: list[BaseException] = []
     engines = []
 
+    def gated_upgrade(config, revision) -> None:
+        with entered_lock:
+            ordinal = len(entered)
+            entered.append(ordinal)
+        if ordinal == 0:
+            first_inside.set()
+            assert release_first.wait(timeout=30), "the first opener was never released"
+        real_upgrade(config, revision)
+
+    monkeypatch.setattr(db_module.command, "upgrade", gated_upgrade)
+
     def opener() -> None:
-        start.wait(timeout=10)
         try:
             engines.append(open_database(directory))
         except BaseException as exc:  # noqa: BLE001 - reported, not swallowed
             failures.append(exc)
 
-    threads = [threading.Thread(target=opener) for _ in range(2)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(timeout=60)
+    first = threading.Thread(target=opener)
+    first.start()
+    assert first_inside.wait(timeout=30), "the first opener never reached the migration"
+
+    second = threading.Thread(target=opener)
+    second.start()
+    # The second opener must park on the write lock, outside the
+    # migration, for as long as the first holds it. The window is long
+    # enough to catch an unserialized entry and far inside the busy
+    # timeout, so a correctly parked opener neither enters nor fails.
+    second.join(timeout=1.0)
+    assert second.is_alive(), "the second opener finished while the first held the lock"
+    with entered_lock:
+        assert entered == [0], "the second opener entered the migration behind the lock"
+
+    release_first.set()
+    first.join(timeout=60)
+    second.join(timeout=60)
 
     try:
+        assert not first.is_alive() and not second.is_alive()
         assert not failures, failures
         assert len(engines) == 2
+        assert len(entered) == 2
         for engine in engines:
             assert EXPECTED_TABLES <= _tables(engine)
             assert len(_version(engine)) == 1
