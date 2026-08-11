@@ -22,6 +22,7 @@ def upgrade() -> None:
         sa.Column("stage", sa.Text(), nullable=False),
         sa.Column("name", sa.Text(), nullable=False),
         sa.Column("type", sa.Text(), nullable=False),
+        sa.Column("api_key_env", sa.Text(), nullable=True),
         sa.Column("egress", sa.Boolean(), nullable=True),
         sa.Column("options", sa.JSON(), nullable=False),
         sa.Column("secrets", sa.JSON(), nullable=False),

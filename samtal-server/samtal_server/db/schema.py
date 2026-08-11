@@ -55,6 +55,12 @@ providers = Table(
     Column("stage", Text, primary_key=True),
     Column("name", Text, primary_key=True),
     Column("type", Text, nullable=False),
+    # The environment-reference credential form, carried over verbatim.
+    # A declared model field, so it is excluded from options (which
+    # holds exactly the model extras) and needs its own column, or a
+    # repository written against these definitions would silently drop
+    # every provider's credential reference.
+    Column("api_key_env", Text, nullable=True),
     # The operator's egress assertion. Null means unstated, which is
     # what most types want, so it cannot be a boolean with a default.
     Column("egress", Boolean, nullable=True),
