@@ -9,6 +9,40 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- The repository and the write path for the DB-backed domain
+  configuration (#86): `samtal_server/config/store.py` reads the
+  database into the existing pydantic models and writes fragments back
+  through them, and `samtal-server config <command>` is the CLI in
+  front of it. **The server does not read the database yet**: it still
+  boots its whole configuration from the YAML file, so every mutating
+  command prints a staging notice saying that this write takes effect
+  at the switchover and changes nothing about the running server.
+
+  The grammar covers one noun per entity kind: `set` and `delete` for
+  providers, MCP servers, agents and agent-defaults, `bind-device`,
+  `set-default-agent` and `clear-default-agent`, `set-secret` and
+  `clear-secret`, `list`, and `show` with every stored secret masked and
+  every environment reference it shadows marked. A fragment is the same
+  YAML shape the section has in the file today, read from a path or
+  from stdin, and `set` replaces the entity without touching its stored
+  secrets. A secret never passes through an argument: `set-secret`
+  reads stdin, without echo at a terminal, or names the variable
+  holding the value with `--from-env`.
+
+  Every write validates the resulting snapshot's references inside one
+  `BEGIN IMMEDIATE` transaction, so an agent naming an unknown
+  provider, a device bound to an unknown agent, or deleting something
+  still referenced is refused, and two concurrent writers cannot each
+  validate against the state before the other's change. Completeness
+  rules stay at boot, so a deployment can be built up from an empty
+  database in the natural order without wedging.
+
+  `server.database.dir` (`SAMTAL_SERVER__DATABASE__DIR`, default
+  `/var/lib/samtal`) is where the database lives, read by the CLI
+  through the same settings machinery the server reads its own
+  configuration with. `verify_secrets` is implemented and tested but
+  not yet called: the switchover is what puts it on the boot path.
+
 - The storage foundation for the DB-backed domain configuration (#86):
   `samtal_server/db/` opens, configures and migrates a SQLite database
   holding the domain half of the configuration, and
