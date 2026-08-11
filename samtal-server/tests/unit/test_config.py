@@ -17,6 +17,7 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "SAMTAL_CONFIG",
         "SAMTAL_SERVER__HOST",
         "SAMTAL_SERVER__PORT",
+        "SAMTAL_SERVER__DATABASE__DIR",
         "SAMTAL_DEFAULT_AGENT",
     ):
         monkeypatch.delenv(var, raising=False)
@@ -214,6 +215,20 @@ def test_config_path_from_environment(
     path = write_config(tmp_path, "server:\n  port: 9000\n")
     monkeypatch.setenv("SAMTAL_CONFIG", str(path))
     assert load_config().server.port == 9000
+
+
+def test_the_database_directory_defaults_and_is_overridable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The CLI reads this key through the same settings machinery the
+    server does, so a deployment names its database directory once."""
+    assert load_config().server.database.dir == Path("/var/lib/samtal")
+
+    path = write_config(tmp_path, "server:\n  database:\n    dir: /data/db\n")
+    assert load_config(path).server.database.dir == Path("/data/db")
+
+    monkeypatch.setenv("SAMTAL_SERVER__DATABASE__DIR", str(tmp_path / "var"))
+    assert load_config(path).server.database.dir == tmp_path / "var"
 
 
 def test_env_overrides_beat_the_file(
