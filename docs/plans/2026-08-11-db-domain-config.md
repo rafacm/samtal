@@ -612,10 +612,14 @@ YAML-backed models, after 4 the issue is done.
   nowhere; a needed assertion change means the switchover changed
   behavior and is wrong.
 - **Alembic packaged in the wheel.** Migration discovery must work
-  from an installed package, not a source tree. Mitigation: the
-  migrations directory lives inside `samtal_server/`, hatchling
-  packages it, and the open-and-migrate unit test runs against
-  the packaged layout in CI.
+  from an installed package, not a source tree, and a unit test
+  run from the editable checkout proves nothing about that: the
+  source tree makes every file discoverable. Mitigation: the
+  migrations directory lives inside `samtal_server/` and
+  hatchling packages it, and PR 1 adds a CI step that builds the
+  wheel (`uv build`), installs it into a scratch environment, and
+  migrates a fresh database using only the installed artifact,
+  with the source tree off `sys.path`.
 - **Secrets leaking through logs or output.** Mitigation: the
   verification pass discards plaintext, materialization happens
   at the point of use only, tests assert masked output and
@@ -806,6 +810,11 @@ addressing it lands.
     discoverable in a built wheel. PR 1 must build the wheel,
     install it into an isolated environment, and migrate a fresh
     database using only the installed artifact.
+    *Resolution*: PR 1 and milestone 1 now include a CI step that
+    builds the wheel with `uv build`, installs it into a scratch
+    environment, and migrates a fresh database from the installed
+    artifact alone with the source tree off `sys.path`; the risk
+    entry states why the editable-checkout test proves nothing.
 11. **P2: PR 2 exposes a CLI whose writes the server never
     reads.** During PRs 2 and 3, `config set` succeeds (and may
     print a restart reminder) but restarting still boots from
@@ -857,8 +866,10 @@ its section of the implementation doc when written.
   key parsing, and masking. Accept: a fresh directory gains a
   migrated `samtal.db` on open and an already-migrated file
   reopens cleanly; envelope round trips, rotation order, and
-  wrong-key refusal are unit-tested; both test lanes and lint
-  green; no server behavior change.
+  wrong-key refusal are unit-tested; a CI step builds the wheel,
+  installs it into a scratch environment, and migrates a fresh
+  database from the installed artifact alone; both test lanes and
+  lint green; no server behavior change.
 - [ ] **Repository and write path** (PR TBD): `config/store.py`
   loading rows into the existing pydantic models and writing
   fragments through them with the write-time validation set;
