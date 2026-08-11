@@ -84,9 +84,15 @@ COPY --from=builder /app/.venv /app/.venv
 # without one runs and reports `unknown`, which is the honest answer.
 ARG SAMTAL_REVISION=unknown
 
+# The domain half of the configuration lives in a SQLite database, and
+# SAMTAL_SERVER__DATABASE__DIR is where this image keeps it: on the
+# mounted volume, the one place an unprivileged user with a read-only
+# root filesystem can write. The model default (/var/lib/samtal) is the
+# generic one and is neither created nor writable here.
 ENV PATH=/app/.venv/bin:$PATH \
     HOME=/data \
     SAMTAL_CONFIG=/config/config.yaml \
+    SAMTAL_SERVER__DATABASE__DIR=/data/db \
     SAMTAL_SERVER__LOG_FORMAT=json \
     SAMTAL_REVISION=$SAMTAL_REVISION
 
