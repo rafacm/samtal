@@ -24,9 +24,9 @@
 #   SAMTAL_API_SECRET=... sh config.deploy.example.sh
 #
 # The token grants everything the API can do, so the client refuses a
-# plain http:// connection to anything but this machine: reach it over
-# TLS, through a tunnel that terminates TLS, or on loopback from inside
-# the container.
+# plain http:// connection to a host that is not a loopback address:
+# reach it over TLS, through a tunnel that terminates TLS, or on
+# loopback from inside the container.
 #
 # Each write applies at the next server start, so restart the server when
 # this finishes. The order matters: a write whose references do not

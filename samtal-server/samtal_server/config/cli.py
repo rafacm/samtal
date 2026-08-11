@@ -15,8 +15,8 @@ variable, because arguments land in shell history and in the process
 list. It then crosses the connection in a request body, which is why the
 transport policy below is a refusal rather than a recommendation: the
 bearer token rides on every request and grants everything the API can
-do, so a plain http:// connection to anything but this machine is not
-made at all.
+do, so a plain http:// connection to anything but a loopback address is
+not made at all.
 
 `--local` is the break-glass path, for a database whose server will not
 start. It covers four commands (show, delete, clear-secret, set-secret),
@@ -70,12 +70,12 @@ from samtal_server.config.writes import (
 )
 from samtal_server.db import open_database
 
-# Where the API is, when nothing says otherwise: this machine, on the
-# port the server half of the configuration names, under the prefix the
-# sub-application is mounted at. The port is read through the same
-# machinery the server reads it with, so the two cannot disagree about it
-# any more than they can about the database directory, and the prefix
-# comes from the same constant the server mounts on.
+# Where the API is, when nothing says otherwise: the loopback address of
+# this machine, on the port the server half of the configuration names,
+# under the prefix the sub-application is mounted at. The port is read
+# through the same machinery the server reads it with, so the two cannot
+# disagree about it any more than they can about the database directory,
+# and the prefix comes from the same constant the server mounts on.
 API_URL_ENV = "SAMTAL_API_URL"
 
 # The client's timeouts, explicit because the defaults would lie. The
@@ -486,10 +486,11 @@ def _permitted(url: str, source: str) -> str:
     if parsed.scheme == "http" and not _loopback(parsed.hostname):
         raise ConfigError(
             f"{source} names {shown}, a plain http:// connection to a host that is not "
-            f"this machine, and the bearer token would cross it in clear along with "
-            f"anything set-secret sends. Use https://, put a TLS-terminating tunnel in "
-            f"front, or exec into the running container and reach the API on loopback. "
-            f"There is deliberately no flag to override this."
+            f"a loopback address (127.0.0.1, ::1 or localhost), and the bearer token "
+            f"would cross it in clear along with anything set-secret sends. Use "
+            f"https://, put a TLS-terminating tunnel in front, or exec into the "
+            f"running container and reach the API on loopback. There is deliberately "
+            f"no flag to override this."
         )
     return url.rstrip("/")
 

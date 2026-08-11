@@ -778,11 +778,17 @@ def test_a_plain_connection_to_another_host_is_refused(
     """The bearer token rides on every request and grants everything the
     API can do, so loopback-or-TLS is the rule for the whole client
     rather than a set-secret footnote, and there is deliberately no flag
-    to override it."""
+    to override it.
+
+    The refusal says "loopback address", which is what the check
+    actually tests: the documentation says the same words, and the two
+    describing the same rule differently is how a reader concludes that
+    the machine's own network address would have been allowed."""
     assert run("--api-url", "http://config.example.invalid/api", "list") == 1
 
     captured = capsys.readouterr()
     assert "no flag to override" in captured.err
+    assert "loopback" in captured.err
     assert "https://" in captured.err
     assert run.reached == []
 
