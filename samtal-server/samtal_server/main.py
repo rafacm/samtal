@@ -41,6 +41,9 @@ PING_TIMEOUT_S = 20.0
 # wait for but sockets that would not go.
 UVICORN_GRACEFUL_SHUTDOWN_S = 5
 
+# The first word that means "configure, do not serve".
+CONFIG_COMMAND = "config"
+
 
 class DrainingServer(uvicorn.Server):
     """A uvicorn server that lets conversations finish before it stops.
@@ -113,6 +116,17 @@ def main() -> None:
     # Real environment variables keep priority over .env values. usecwd makes
     # the search start from the invocation directory, not this file's.
     load_dotenv(find_dotenv(usecwd=True))
+
+    if sys.argv[1:2] == [CONFIG_COMMAND]:
+        # `samtal-server config ...` configures and exits; anything else
+        # is the server, parsed exactly as it was before this existed. A
+        # word check rather than an argparse subparser, so that adding
+        # the command group cannot change how `samtal-server --config
+        # path` parses. Imported here because the command group pulls in
+        # the database machinery, which serving does not need yet.
+        from samtal_server.config import cli
+
+        raise SystemExit(cli.main(sys.argv[2:]))
 
     parser = argparse.ArgumentParser(prog="samtal-server")
     parser.add_argument(
