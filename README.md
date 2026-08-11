@@ -73,16 +73,33 @@ server:
 
 Start from [`samtal-server/config.example.yaml`](samtal-server/config.example.yaml), which documents every key of it, or from [`samtal-server/config.deploy.example.yaml`](samtal-server/config.deploy.example.yaml), a ready-to-adapt profile for the container image behind a proxy on a small CPU quota, whose domain half is the runnable [`config.deploy.example.sh`](samtal-server/config.deploy.example.sh) beside it.
 
-**2. Say what the assistant is.** The other half of the configuration (which engines, which persona, which devices) lives in a database on the data volume, written with `samtal-server config`, the CLI the image ships. Seed it before the first start, and the server comes up with an assistant ready to talk. This one is fully local and needs no account anywhere: Silero, faster-whisper, [Ollama](https://ollama.com) and Piper.
+**2. Start the server.** An empty database is a valid state to start on: the server comes up serving no agents, and the next step configures it over the API it serves. Generate the secrets **once** and keep them somewhere you can read them back:
 
 ```bash
-# The CLI, from the same image, against the volume the server will read.
-samtal() {
-  docker run --rm -i \
-    -v samtal-data:/data \
-    -v /path/to/config.yaml:/config/config.yaml:ro \
-    --entrypoint samtal-server ghcr.io/rafacm/samtal-server:latest "$@"
-}
+openssl rand -hex 32 > ~/.samtal-api-secret       # once, ever
+openssl rand -hex 32 > ~/.samtal-auth-secret      # once, ever
+
+export SAMTAL_API_SECRET=$(cat ~/.samtal-api-secret)
+export SAMTAL_AUTH_SECRET=$(cat ~/.samtal-auth-secret)
+docker run -d --name samtal -p 8003:8003 \
+  -e SAMTAL_API_SECRET \
+  -e SAMTAL_AUTH_SECRET \
+  -v /path/to/config.yaml:/config/config.yaml:ro \
+  -v samtal-data:/data \
+  ghcr.io/rafacm/samtal-server:latest
+```
+
+`SAMTAL_API_SECRET` is the bearer token for the configuration API the next step writes through; it is always required, and the server refuses to start without it. `SAMTAL_AUTH_SECRET` signs the device tokens and is required whenever device authentication is on, which it is by default and which the trial file above turns off.
+
+Generating either one inline in the `docker run` would mint a new secret on every restart. For the device secret that is worse than inconvenient: each new one invalidates the token every device has stored, and a device that has one is then refused until its next OTA check, which it only makes on boot, so it sits there playing an error tone at you.
+
+This start is quick: with nothing configured there is no engine to build. Speech models download into the `/data` volume when the providers naming them are first built, which is the restart in step 4, so that one takes a few minutes and later ones take seconds.
+
+**3. Say what the assistant is.** The other half of the configuration (which engines, which persona, which devices) lives in a database on the data volume, written with `samtal-server config`, the CLI the image ships. It writes through the configuration API on the running server, so run it inside the container, where the token and the loopback address are already in its environment. This assistant is fully local and needs no account anywhere: Silero, faster-whisper, [Ollama](https://ollama.com) and Piper.
+
+```bash
+# The CLI, inside the container started above.
+samtal() { docker exec -i samtal samtal-server "$@"; }
 
 samtal config set provider vad ears -f - <<'YAML'
 type: silero
@@ -96,7 +113,8 @@ YAML
 samtal config set provider llm local -f - <<'YAML'
 type: openai_compatible
 # Ollama on the host. On Linux, add
-# --add-host=host.docker.internal:host-gateway to the docker run above.
+# --add-host=host.docker.internal:host-gateway to the docker run in
+# step 2.
 base_url: http://host.docker.internal:11434/v1
 model: qwen3:8b
 YAML
@@ -128,37 +146,17 @@ samtal config list
 
 The order matters: a write whose references do not resolve is refused, so the providers come first and the agent that names them second. Every field is documented in [`docs/reference/domain-config.md`](docs/reference/domain-config.md), generated from the models, and [`samtal-server/examples/`](samtal-server/examples/) holds a commented fragment per entity and provider type to copy from, cloud engines included. A credential is never written into a fragment: it names the environment variable holding it, or is stored encrypted with `config set-secret` under a `SAMTAL_MASTER_KEY` you generate once and keep.
 
-**3. Run the server.** For a trial on a network you trust, with the file from step 1:
+**4. Restart the server.** The configuration is a boot-time snapshot: it is read once at start, which is why every write above said it applies at the next one. This is that next one, and it is the last step that needs doing again after any later change:
 
 ```bash
-docker run -d --name samtal -p 8003:8003 \
-  -v /path/to/config.yaml:/config/config.yaml:ro \
-  -v samtal-data:/data \
-  ghcr.io/rafacm/samtal-server:latest
+docker restart samtal
 ```
 
-For anything that outlives an afternoon, leave authentication on (it is the default) and give it a secret. Generate the secret **once** and keep it somewhere you can read it back:
+**5. Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`.
 
-```bash
-openssl rand -hex 32 > ~/.samtal-secret          # once, ever
+**6. Point** the device at your server by writing one NVS key (`wifi/ota_url` = `http://<server-host>:8003/xiaozhi/ota/`) over USB.
 
-export SAMTAL_AUTH_SECRET=$(cat ~/.samtal-secret)
-docker run -d --name samtal -p 8003:8003 \
-  -e SAMTAL_AUTH_SECRET \
-  -v /path/to/config.yaml:/config/config.yaml:ro \
-  -v samtal-data:/data \
-  ghcr.io/rafacm/samtal-server:latest
-```
-
-Generating it inline in the `docker run` would mint a new secret on every restart, and each new secret invalidates the token every device has stored. A device that has one then gets refused until its next OTA check, which it only makes on boot, so it sits there playing an error tone at you.
-
-Speech models download into the `/data` volume at first start, so the first run takes a few minutes and later ones take seconds. The configuration is read once at boot, so anything written with `samtal config ...` after this point applies when the container is restarted.
-
-**4. Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`.
-
-**5. Point** the device at your server by writing one NVS key (`wifi/ota_url` = `http://<server-host>:8003/xiaozhi/ota/`) over USB.
-
-**6. Provision WiFi** from the device's captive portal, press the button, and talk.
+**7. Provision WiFi** from the device's captive portal, press the button, and talk.
 
 The complete procedure, including a fully local zero-API-key pipeline and every serial gotcha, is in [`docs/xiaozhi-notes.md`](docs/xiaozhi-notes.md); the server's own options, security defaults, and container details are in [`samtal-server/README.md`](samtal-server/README.md). samtal has no versioned releases yet: images are tagged `latest`, the build time (`2026-08-03-1200`, UTC), and the commit SHA (`sha-3f9362a`). Only `latest` moves; deploy from one of the other two.
 
