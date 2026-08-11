@@ -36,7 +36,9 @@ token the OTA endpoint issued.
 
 ## Goals
 
-- Python-only, no database required for the core loop
+- Python-only, and no database server to run: the domain half of the
+  configuration lives in an embedded SQLite file on the data volume,
+  and a conversation needs no store at all
 - Configurable providers:
   - **LLM**: Anthropic, any OpenAI-compatible endpoint (Ollama, LM Studio,
     gateways)
@@ -157,13 +159,12 @@ notices.
 
 ### OpenAI transcription
 
-```yaml
-providers:
-  asr:
-    ears:
-      type: openai
-      api_key_env: OPENAI_API_KEY
-      prompt: samtal
+```bash
+samtal-server config set provider asr ears -f - <<'YAML'
+type: openai
+api_key_env: OPENAI_API_KEY
+prompt: samtal
+YAML
 ```
 
 Keys are named, never written, exactly as for the TTS types above.
@@ -351,13 +352,12 @@ The reason to reach for the `elevenlabs` TTS type is that it sounds
 markedly better than Piper. It needs two things: a key, and a voice
 id.
 
-```yaml
-providers:
-  tts:
-    eleven:
-      type: elevenlabs
-      voice_id: PUT_YOUR_VOICE_ID_HERE
-      api_key_env: ELEVENLABS_API_KEY
+```bash
+samtal-server config set provider tts eleven -f - <<'YAML'
+type: elevenlabs
+voice_id: PUT_YOUR_VOICE_ID_HERE
+api_key_env: ELEVENLABS_API_KEY
+YAML
 ```
 
 The key is named, never written. `api_key_env` gives the name of an
@@ -412,13 +412,12 @@ The `openai` TTS type is the one to reach for if the deployment is
 already on OpenAI: the same key serves the LLM stage, and the voices
 are the stock ones, so there is nothing to pick out of a library.
 
-```yaml
-providers:
-  tts:
-    openai_voice:
-      type: openai
-      voice: alloy
-      api_key_env: OPENAI_API_KEY
+```bash
+samtal-server config set provider tts openai_voice -f - <<'YAML'
+type: openai
+voice: alloy
+api_key_env: OPENAI_API_KEY
+YAML
 ```
 
 Keys are named, never written, exactly as for ElevenLabs above.
@@ -522,20 +521,22 @@ its siblings have. Each server's tools are offered under its entry name
 `[A-Za-z0-9_-]+` name and cannot be `self`, `switch_agent`, or
 `remember`. Both transports the specification defines are supported:
 
-```yaml
-mcp_servers:
-  home:
-    transport: stdio
-    command: mcp-proxy
-    args: ["http://homeassistant.local:8123/mcp_server/sse"]
-    env:
-      API_ACCESS_TOKEN: $HOME_ASSISTANT_TOKEN
-  weather:
-    transport: streamable_http
-    url: http://localhost:8000/mcp
-    headers:
-      Authorization: $WEATHER_TOKEN
-    tool_timeout_s: 15
+```bash
+samtal-server config set mcp-server home -f - <<'YAML'
+transport: stdio
+command: mcp-proxy
+args: ["http://homeassistant.local:8123/mcp_server/sse"]
+env:
+  API_ACCESS_TOKEN: $HOME_ASSISTANT_TOKEN
+YAML
+
+samtal-server config set mcp-server weather -f - <<'YAML'
+transport: streamable_http
+url: http://localhost:8000/mcp
+headers:
+  Authorization: $WEATHER_TOKEN
+tool_timeout_s: 15
+YAML
 ```
 
 Secrets follow the same rule as everywhere else: a value of `$NAME` is
@@ -579,8 +580,11 @@ by default).
 ## Stack
 
 Python 3.12 with [FastAPI](https://fastapi.tiangolo.com), managed with
-[uv](https://docs.astral.sh/uv/). Pydantic models validate the YAML
-configuration; the same types back the future admin API. Integration tests
+[uv](https://docs.astral.sh/uv/). Pydantic models validate both halves
+of the configuration, the YAML file and the rows of the SQLite database
+behind `samtal-server config` (SQLAlchemy Core, Alembic migrations run
+on open); the same types and the same repository back the future admin
+API, which is what the command grammar is a rehearsal of. Integration tests
 drive the server with the [xiaozhi-sdk](https://pypi.org/project/xiaozhi-sdk/)
 device simulator, so CI holds real conversations without hardware. The wire
 protocol is kept isolated behind a small interface, separate from the
@@ -638,14 +642,25 @@ and can take a few minutes; later runs finish in seconds. Without
 A fourth lane runs nothing itself. It points at a server that is already
 up and holds one whole conversation with it: healthz, an OTA check whose
 token it verifies, and a full utterance-to-audio exchange through the
-device simulator. CI runs it against the image it just built, which is
-what turns "`docker run` with one mounted YAML serves a conversation"
-into something checked rather than remembered.
+device simulator. CI runs it against the image it just built, seeding
+that image's own CLI into the volume it then reads, which is what turns
+"a seeded volume and one `docker run` serve a conversation" into
+something checked rather than remembered.
 
 ```bash
 docker build -t samtal-server:local .
+
+# The domain half first, written by the CLI from the image itself into
+# the volume the server then reads. tests/smoke/seed.sh is what CI runs.
+docker run --rm \
+  -v smoke-data:/data \
+  -v "$PWD/tests/smoke:/smoke:ro" \
+  -v "$PWD/tests/smoke/config.yaml:/config/config.yaml:ro" \
+  --entrypoint sh samtal-server:local /smoke/seed.sh
+
 docker run -d --name samtal-smoke -p 8003:8003 \
   -e SAMTAL_AUTH_SECRET=smoke-secret \
+  -v smoke-data:/data \
   -v "$PWD/tests/smoke/config.yaml:/config/config.yaml:ro" \
   samtal-server:local
 
@@ -661,20 +676,63 @@ and it works against any reachable server, not only a container.
 
 ## Configuration
 
-Configuration is handled by
+Configuration comes in two halves, kept in two places for one reason:
+how the process runs is decided when it is deployed, and what it says
+and to whom is decided while it runs.
+
+**The server half is one YAML file.** `server:` (host, port, auth,
+limits, logging, capture, where the database lives) and an optional
+`memory:`. It is passed as `--config /path/to/config.yaml` or through
+the `SAMTAL_CONFIG` environment variable; with neither set, defaults
+apply, and it is handled by
 [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/).
-The server reads one YAML file, passed as `--config /path/to/config.yaml` or
-via the `SAMTAL_CONFIG` environment variable; with neither set, defaults
-apply. [`config.example.yaml`](config.example.yaml) documents every key,
+[`config.example.yaml`](config.example.yaml) documents every key of it,
 and [`config.deploy.example.yaml`](config.deploy.example.yaml) is a
 ready-to-adapt profile for the container image behind a proxy on a small
 CPU quota, holding values validated by latency measurements from a live
-deployment. The reference file covers:
-`server` (host/port), named `providers` per stage (`llm`, `asr`, `tts`,
-`vad`), named `mcp_servers`, `agent_defaults` holding what every agent
-uses unless it says otherwise, `agents` combining a prompt with provider
-and MCP references, `devices` binding MAC addresses to agents,
-`default_agent` for unknown devices, and an optional `memory` section.
+deployment.
+
+**The domain half lives in a database**, one SQLite file under
+`server.database.dir`, written with `samtal-server config`: named
+`providers` per stage (`llm`, `asr`, `tts`, `vad`), named `mcp_servers`,
+`agent_defaults` holding what every agent uses unless it says otherwise,
+`agents` combining a prompt with provider and MCP references, `devices`
+binding MAC addresses to agents, and `default_agent` for unknown
+devices. A whole deployment, from an empty database:
+
+```bash
+samtal-server config set provider llm claude -f examples/llm-anthropic.yaml
+samtal-server config set provider asr ears -f examples/asr-openai.yaml
+samtal-server config set provider tts voice -f examples/tts-piper.yaml
+samtal-server config set provider vad silero -f examples/vad-silero.yaml
+samtal-server config set agent-defaults -f examples/agent-defaults.yaml
+samtal-server config set agent assistant -f examples/agent.yaml
+samtal-server config bind-device aa:bb:cc:dd:ee:ff assistant
+samtal-server config set-default-agent assistant
+samtal-server config list
+```
+
+That order is not a style: a write whose references do not resolve is
+refused, so providers and MCP servers come first, then the agents, then
+the bindings. The rules about a runnable server (every stage of every
+agent resolving, a default agent when nothing is bound) are checked at
+boot instead, so a half-built database is a legitimate state to be in
+and an illegitimate one to serve from.
+
+Every field of the domain half is documented in
+[`../docs/reference/domain-config.md`](../docs/reference/domain-config.md),
+generated from the models: `samtal-server config reference` prints that
+same document, and `samtal-server config schema [entity]` prints the JSON
+Schema behind it. [`examples/`](examples/) holds a commented fragment per
+entity and provider type, each naming the command that installs it, and
+that is where the measured numbers and the field findings behind each
+provider option are kept. `config list` and `config show` read back what
+is stored, with every secret masked.
+
+**A change applies at the next server start.** The configuration is read
+once at boot, so an edit made while the server runs is picked up when it
+is restarted, and every mutating command says so. Hot apply is what the
+admin API will bring; until then, restart.
 
 Since a voice is a `tts` provider entry, two agents that should sound
 different reference two entries, and a typical agent is a prompt plus a
@@ -683,19 +741,64 @@ that agent. A device is bound to one agent or to a list of them; with a
 list, the first entry is the agent a conversation starts on, and the
 rest are the ones `switch_agent` can reach.
 
-Every key can be overridden with a `SAMTAL_`-prefixed environment variable,
-nested keys joined with `__`: `SAMTAL_SERVER__PORT=9000`,
-`SAMTAL_DEFAULT_AGENT=assistant`. Environment variables beat the YAML file,
-and a `.env` file in the directory the server is started from is read at
-startup (real environment variables beat `.env` too). This layering matches
-container deployments: the YAML arrives as a mounted file, overrides and
-secrets as environment variables.
+Every key of the file half can be overridden with a `SAMTAL_`-prefixed
+environment variable, nested keys joined with `__`:
+`SAMTAL_SERVER__PORT=9000`, `SAMTAL_SERVER__DATABASE__DIR=./var`.
+Environment variables beat the YAML file, and a `.env` file in the
+directory the server is started from is read at startup (real
+environment variables beat `.env` too). This layering matches container
+deployments: the YAML arrives as a mounted file, overrides and secrets
+as environment variables. The domain half has no environment layer: a
+`SAMTAL_` variable naming one of its sections, like a section left in
+the file, refuses the boot and names the command that writes it now,
+because a configuration that quietly stopped applying is worse than one
+that will not start.
 
-Secrets never live in the file: a provider names the environment variable
-that holds its key (for example `api_key_env: ANTHROPIC_API_KEY`), and an
-MCP server writes `$NAME` where the secret goes. Instance
-configs stay out of the repository; `*.local.yaml` and `.env` are gitignored
-for local experiments.
+`server.database.dir` defaults to `/var/lib/samtal`, which is the
+generic answer rather than any deployment's: the container image points
+it at its volume, and a development machine that cannot write there gets
+an error naming the key. Point it somewhere writable for local work:
+
+```bash
+SAMTAL_SERVER__DATABASE__DIR=./var uv run samtal-server config list
+```
+
+### Secrets
+
+A credential is never written in the configuration, in either half. Two
+forms are supported:
+
+- **An environment reference**, which is the only form a fragment may
+  carry: a provider names the variable holding its key (`api_key_env:
+  ANTHROPIC_API_KEY`), an MCP server writes `$NAME` where the secret
+  goes. The server reads the variable at startup and fails the boot when
+  it is unset, rather than failing every conversation later.
+- **A value encrypted in the database**, written with `config
+  set-secret`, which reads it from stdin (not echoed at a terminal) or
+  from a named variable with `--from-env`, and never from an argument:
+
+  ```bash
+  samtal-server config set-secret provider llm claude api_key
+  ```
+
+  Encryption uses `SAMTAL_MASTER_KEY`, one or more Fernet keys, newest
+  first, comma separated. Generate one with:
+
+  ```bash
+  python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+  ```
+
+  A stored secret takes precedence over an environment reference for the
+  same slot, and `config show` marks the reference it displaces. With
+  ciphertext stored and no key configured, or a key that does not open
+  it, the server refuses to start naming the entity and the slot; the
+  CLI keeps working without a key, which is what makes it the tool that
+  repairs exactly that condition.
+
+Instance configs stay out of the repository; `*.local.yaml` and `.env`
+are gitignored for local experiments, and the domain half of a local
+experiment is a short script of `config set` calls against a database
+directory of its own.
 
 ## Security
 
@@ -793,15 +896,14 @@ LLM stage and `openai` for both ASR and TTS, can each point at
 localhost or at a cloud vendor, so under `local_only` they must carry
 your own declaration:
 
-```yaml
-providers:
-  llm:
-    local:
-      type: openai_compatible
-      base_url: http://localhost:11434/v1
-      model: qwen3:8b
-      # Your assertion that this endpoint stays on this host.
-      egress: false
+```bash
+samtal-server config set provider llm local -f - <<'YAML'
+type: openai_compatible
+base_url: http://localhost:11434/v1
+model: qwen3:8b
+# Your assertion that this endpoint stays on this host.
+egress: false
+YAML
 ```
 
 MCP servers sit inside the same boundary, because tool arguments carry
@@ -862,14 +964,16 @@ to 3 s of it, and a slow provider stretches it well past the point
 where users ask "are you there?". Humans hold exactly this gap with a
 filled pause, and an agent can too:
 
-```yaml
-agent_defaults:
-  filler:
-    enabled: true        # off by default
-    delay_ms: 1800
-    phrases:
-      - "Hmm, let me see..."
-      - "Good question..."
+```bash
+samtal-server config set agent-defaults -f - <<'YAML'
+filler:
+  # off by default
+  enabled: true
+  delay_ms: 1800
+  phrases:
+    - "Hmm, let me see..."
+    - "Good question..."
+YAML
 ```
 
 When a reply's first audio has not started within `delay_ms` of the
@@ -892,7 +996,8 @@ the watchdog's give-up path (see below), the filler being the soft
 early threshold and the watchdog the hard late one. Write the phrases
 in each agent's own language; an agent's own `filler` section replaces
 the inherited one wholly, like the stage fields, and the reasoning
-behind the default delay is in `config.example.yaml`.
+behind the default delay is in
+[`examples/agent-defaults.yaml`](examples/agent-defaults.yaml).
 
 The mask yields to the user. At fire time the timer stands down, with
 a `filler_skipped` event, when the endpointer holds unresolved speech
@@ -1137,10 +1242,19 @@ docker build --build-arg SAMTAL_REVISION=$(git rev-parse --short HEAD) -t samtal
 
 ## Running in a container
 
-The default image carries both local engines, so one `docker run` with
-one mounted YAML serves a conversation:
+The default image carries both local engines, so one mounted YAML and
+one seeded database serve a conversation. The domain half is written
+first, with the CLI from the same image, against the volume the server
+then reads:
 
 ```bash
+docker run --rm \
+  -v samtal-data:/data \
+  -v /path/to/config.yaml:/config/config.yaml:ro \
+  -v /path/to/fragments:/fragments:ro \
+  --entrypoint samtal-server ghcr.io/rafacm/samtal-server:latest \
+  config set provider llm claude -f /fragments/llm-anthropic.yaml
+
 docker run -d --name samtal \
   -p 8003:8003 \
   -e SAMTAL_AUTH_SECRET \
@@ -1149,12 +1263,17 @@ docker run -d --name samtal \
   ghcr.io/rafacm/samtal-server:latest
 ```
 
-- `/config/config.yaml` is where `SAMTAL_CONFIG` points. Mount it
-  read-only; override any key with a `SAMTAL_`-prefixed environment
-  variable.
+- `/config/config.yaml` is where `SAMTAL_CONFIG` points, and it is the
+  server half. Mount it read-only; override any key of it with a
+  `SAMTAL_`-prefixed environment variable.
 - `/data` is the volume every engine caches into (`HOME` points there):
   whisper models and Piper voices download at first start and survive a
   new image. Model weights are never baked in.
+- The configuration database lives on that volume too: the image sets
+  `SAMTAL_SERVER__DATABASE__DIR=/data/db`, since the volume is the only
+  place an unprivileged user with a read-only root filesystem can
+  write. It is created and migrated on first open, so there is no init
+  command to forget.
 - Logs default to `json` in the image, which is the only default that
   differs from running it directly. Override with
   `SAMTAL_SERVER__LOG_FORMAT=text`.
@@ -1168,6 +1287,65 @@ docker run -d --name samtal \
 Behind a TLS-terminating proxy, either set `server.websocket_url`
 explicitly or pass the proxy's address in `FORWARDED_ALLOW_IPS`, which
 uvicorn honours from the environment.
+
+### The configuration database in a deployment
+
+Five things a deployment has to get right about it, none of which the
+server can decide for you.
+
+**The master key is generated once and escrowed.** Set
+`SAMTAL_MASTER_KEY` wherever the deployment keeps its environment
+secrets, alongside `SAMTAL_AUTH_SECRET`:
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+It is only needed once a credential is stored encrypted; a deployment
+whose keys are all environment references never needs one. Once
+ciphertext exists, losing the key means losing those credentials: the
+server refuses to start with a stored secret it cannot open, naming the
+entity and the slot, and the way out is `config set-secret` with the
+value again.
+
+**Rotation adds a key, and this release cannot retire one.**
+`SAMTAL_MASTER_KEY` holds a comma-separated list, newest first;
+encryption always uses the newest and decryption tries them in order. A
+new key therefore only affects secrets written after it, so every old
+key must stay in the list for as long as any token written under it
+remains in the database. Re-running `config set-secret` for each stored
+secret rewrites it under the newest key, which is the interim path
+until a re-encrypt command exists.
+
+**Backups use SQLite's own mechanisms, never a plain copy of a live
+file.** The database runs in WAL mode, where a copy of `samtal.db` on
+its own can miss committed data still sitting in the `-wal` file:
+
+```bash
+sqlite3 /data/db/samtal.db "VACUUM INTO '/backup/samtal-$(date +%F).db'"
+```
+
+`.backup` does the same job through the backup API. A plain `cp` is
+only safe against a stopped, checkpointed database. Back it up with the
+memory directory, which is ordinary files on the same volume.
+
+**A restore needs both halves of the secret.** The backup file, and
+every master key still required to decrypt what it holds, which is why
+the keys are escrowed with the deployment's other environment secrets
+and separately from the backup itself. A restored database with no key
+is a configuration whose credentials will not open.
+
+**What a copy of the file exposes.** No stored plaintext secret: the
+encrypted values are ciphertext and the environment references are
+variable names rather than values. It does expose the rest of the
+domain configuration, which is to say the prompts, the endpoints and
+the variable names, so the file belongs on the data volume and in
+access-controlled backups, not in a repository.
+
+And the operational one, said again because it is the trap of a
+boot-time snapshot: **an edit applies at the next server start.** A
+`config set` against a running deployment changes nothing until the
+process restarts, which the command says every time it writes.
 
 ### Choosing an image
 

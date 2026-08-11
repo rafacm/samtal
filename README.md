@@ -86,13 +86,25 @@ docker run -d --name samtal -p 8003:8003 \
 
 Generating it inline in the `docker run` would mint a new secret on every restart, and each new secret invalidates the token every device has stored. A device that has one then gets refused until its next OTA check, which it only makes on boot, so it sits there playing an error tone at you.
 
-Start from [`samtal-server/config.example.yaml`](samtal-server/config.example.yaml), which documents every key, or from [`samtal-server/config.deploy.example.yaml`](samtal-server/config.deploy.example.yaml), a ready-to-adapt profile for the container image behind a proxy on a small CPU quota. Speech models download into the `/data` volume at first start, so the first run takes a few minutes and later ones take seconds.
+The mounted YAML is the server half of the configuration: how the process runs. Start from [`samtal-server/config.example.yaml`](samtal-server/config.example.yaml), which documents every key of it, or from [`samtal-server/config.deploy.example.yaml`](samtal-server/config.deploy.example.yaml), a ready-to-adapt profile for the container image behind a proxy on a small CPU quota. Speech models download into the `/data` volume at first start, so the first run takes a few minutes and later ones take seconds.
 
-**2. Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`.
+**2. Tell it what to say and to whom.** The domain half (providers, MCP servers, agents, device bindings) lives in a database on the same volume, written with `samtal-server config`, which is the CLI the image ships:
 
-**3. Point** the device at your server by writing one NVS key (`wifi/ota_url` = `http://<server-host>:8003/xiaozhi/ota/`) over USB.
+```bash
+docker run --rm -v samtal-data:/data \
+  -v /path/to/config.yaml:/config/config.yaml:ro \
+  -v /path/to/fragments:/fragments:ro \
+  --entrypoint samtal-server ghcr.io/rafacm/samtal-server:latest \
+  config set provider llm claude -f /fragments/llm-anthropic.yaml
+```
 
-**4. Provision WiFi** from the device's captive portal, press the button, and talk.
+Every field of it is documented in [`docs/reference/domain-config.md`](docs/reference/domain-config.md), generated from the models, and [`samtal-server/examples/`](samtal-server/examples/) holds a commented fragment per entity and provider type to copy from. A credential is never written into a fragment: it names the environment variable holding it, or is stored encrypted with `config set-secret` under a `SAMTAL_MASTER_KEY` you generate once and keep. Configuration is read once at boot, so a change applies when the server is restarted.
+
+**3. Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`.
+
+**4. Point** the device at your server by writing one NVS key (`wifi/ota_url` = `http://<server-host>:8003/xiaozhi/ota/`) over USB.
+
+**5. Provision WiFi** from the device's captive portal, press the button, and talk.
 
 The complete procedure, including a fully local zero-API-key pipeline and every serial gotcha, is in [`docs/xiaozhi-notes.md`](docs/xiaozhi-notes.md); the server's own options, security defaults, and container details are in [`samtal-server/README.md`](samtal-server/README.md). samtal has no versioned releases yet: images are tagged `latest`, the build time (`2026-08-03-1200`, UTC), and the commit SHA (`sha-3f9362a`). Only `latest` moves; deploy from one of the other two.
 

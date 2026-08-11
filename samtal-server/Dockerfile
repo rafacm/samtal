@@ -1,7 +1,7 @@
 # samtal-server as a container image, in two variants.
 #
-# `default` bakes in both local engines, because `docker run` with one
-# mounted YAML has to be able to serve a whole conversation with no
+# `default` bakes in both local engines, because a mounted YAML and a
+# seeded database have to be able to serve a whole conversation with no
 # account anywhere. `slim` leaves them out, for the mirror-image
 # deployment whose ASR and TTS name external providers and which would
 # otherwise carry heavyweight, GPL-licensed libraries the server never
