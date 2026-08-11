@@ -216,9 +216,11 @@ The composer then writes a samtal-format capture pair:
 
 - `<session>.wav`, stereo 16 kHz s16le: channel 0 (mic) is the
   simulator's utterance audio as received, on the shared epoch,
-  with low-level noise added so the channel is not digitally
-  silent; channel 1 (ref) is the buffer recording's bot track,
-  resampled to 16 kHz as samtal's capture does.
+  otherwise untouched (no added noise: the injection is what
+  makes the channel non-silent, and synthetic noise would only
+  obscure what the normalization guards already handle); channel
+  1 (ref) is the buffer recording's bot track, resampled to
+  16 kHz as samtal's capture does.
 - `<session>.jsonl`: the minimal event track the analysis reads,
   on the same epoch: `session_open`, one `heard` per utterance
   (with `duration_s`, so the user-speech mask excludes it), and
@@ -255,12 +257,23 @@ The composer then writes a samtal-format capture pair:
    gain; a constant lag bias names a fixed offset (buffering
    between TTS output and transport send, epoch error), lag
    scatter or detection loss names drift or jitter.
-3. **Both delays, and enough audio.** Run 2 executes at 250 ms and
-   1500 ms injected delay, the two points where samtal's own
-   capture passes, over an exchange totalling at least two minutes
-   of reply audio (several turns, or a long canned clip; the round
-   1 reference had 116 windows). Two minutes also gives resampling
-   drift room to accumulate to where the lag bar would see it.
+3. **Both delays, over the same pair, with enough windows.**
+   Run 2 executes at 250 ms and 1500 ms injected delay, the two
+   points where samtal's own capture passes, and both injections
+   run offline over the same captured pair, so the two verdicts
+   differ only in the injection. The floor is stated in windows,
+   not minutes, because windowing, the discarded lag-search
+   prefix, the reply-level threshold, and the user mask all eat
+   candidates: at least 100 candidate windows per delay, the
+   round 1 scale. That implies on the order of two minutes of
+   reply audio, preferably one long non-repeating speech-like
+   clip rather than many short turns (repetition creates
+   correlation ambiguity, and turn boundaries multiply masked
+   stretches), and long audio also gives resampling drift room
+   to accumulate to where the drift statistic can see it. The
+   findings report candidate windows, hits, and how much audio
+   the mask and thresholds discarded, so a thin result cannot
+   pass silently.
 
 ### The bar
 
@@ -343,10 +356,11 @@ processors.
   counted as adapter glue, or the absence recorded as gate
   evidence. The simulator buffering the result proves receipt,
   not a playback clock, so it settles nothing.
-- Whether one long canned reply or many shorter turns is the
-  better window source. Implementation picks whichever the
-  simulator sustains; the two-minute reply-audio floor stands
-  either way.
+- How many turns the simulator sustains in one connection, and
+  whether the 100-window floor is met by one long reply or a few
+  long ones. The floor is in candidate windows and the source is
+  preferably one long non-repeating clip; within that, the
+  implementation picks what the simulator sustains.
 
 ## Plan review round
 
@@ -418,6 +432,12 @@ each carries its resolution once the amendment addressing it lands.
    prefix, the level threshold, and the user mask; and the added
    mic noise was unspecified where it should be either dropped or
    pinned.
+   *Resolution*: the floor is now at least 100 candidate windows
+   per delay (the round 1 scale) rather than a clock figure, both
+   injections run offline over the same captured pair, one long
+   non-repeating clip is preferred, the findings report windows,
+   hits, and discarded audio, and the added noise is dropped
+   (the injection already makes the channel non-silent).
 6. **P2: resampling and drift need an explicit method.** The tap
    must also be resampled to 16 kHz, through the same stateful
    resampler as the buffer track; a drift statistic was promised
@@ -445,8 +465,9 @@ of the implementation doc.
   `echo_leakage_control.py` reports PASSED on the pair,
   unmodified scripts.
 - [ ] **The alignment verdict**: tap injection at 250 and
-  1500 ms over at least two minutes of reply audio, numbers
-  against the bar. Accept: both runs executed and recorded,
+  1500 ms over the same captured pair, at least 100 candidate
+  windows per delay, numbers against the bar. Accept: both runs
+  executed and recorded,
   verdict stated with the measured lag bias, IQR, and detection
   rate, whichever way it goes.
 - [ ] **The size verdict and the paper trail**: serializer and
