@@ -355,13 +355,13 @@ through. So the fail-closed masking tests use a name-shaped sentinel:
 the earlier draft's plainly-pasted one made the row unloadable and
 tested nothing.
 
-**A stored row that fails model validation answers 422.** `_read_domain`
-loads each row through its entity model, and `_load` raises plain
-`ConfigError`, which the API maps to 422: the caller's mistake, which it
-is not. Only the JSON-column shape refusals are typed `StorageError` and
-answer 500. Nothing in this milestone depends on it and no wording
-changes, but the honest mapping for an unloadable row is 500, and the
-change belongs where the boot path can be considered with it.
+**A stored row that fails model validation answered 422.**
+`_read_domain` loaded each row through its entity model, and `_load`
+raises plain `ConfigError`, which the API maps to 422: the caller's
+mistake, which it is not. Only the JSON-column shape refusals were typed
+`StorageError` and answered 500. This was first recorded here as a
+deferred question; the PR review below insisted on it, correctly, and it
+is fixed in 28d1585.
 
 **A response model with `extra="forbid"` is the check that views and
 the transport agree.** FastAPI validates what a handler returns through
@@ -383,3 +383,110 @@ extras makes that a failure in the suite instead.
 - The repository's reads are what `--local show` consumes: it needs no
   new existence logic, only the same methods against a locally opened
   store.
+
+### PR #105 review round
+
+One external review of the pull request's diff: codex CLI 0.147.0,
+model gpt-5.6-sol, read-only, 2026-08-11, posted on the PR by the
+review run itself. Verdict: mergeable after the listed fixes. Seven
+findings, five P1 and two P2; six accepted in full, one accepted in
+part with the reasoning recorded below.
+
+1. **P1: a secret nested inside a provider option was accepted and
+   published.** The inline-secret rule looked only at the top level of
+   an entry, and options are passed through to the implementation, so
+   `connection: {api_key: ...}` was a fragment the models accepted, the
+   repository stored, and every read form returned verbatim: the entity
+   GET, the listing, `/config` and `config show` alike. Fixed in
+   007796e: the rule is recursive over mappings and lists, naming the
+   dotted path and never the value, and the display path masks a
+   secret-shaped key at any depth as well. The mask does not lean on
+   the validator having run, and it earns its place after the fix too:
+   a nested reference key still accepts anything shaped like a variable
+   name, which a credential can be. Being honest about the behavior
+   change: a fragment that nested such a key was never usable, nothing
+   resolved it, and a stored row holding one now reports that it cannot
+   be read rather than showing what it holds.
+2. **P1: sanitization gaps around the identity refusals**, in three
+   parts, two fixed and one declined. Fixed in 143355f: `_mac` (and the
+   binding and entry-name refusals beside it, and the CLI's YAML and
+   file refusals) raised inside their handlers, so the exception they
+   were built from stayed attached as `__context__` and travelled out
+   with them, a PyYAML mark holding the whole fragment among them; and
+   the error shape's schema description promised that a refusal never
+   quotes what was sent, which overstates what holds. It now says what
+   does: a refusal names the entity the request addressed and the rule
+   it broke, and never quotes a secret or a rejected configuration
+   value.
+   *Declined, deliberately*: the demand to strip the identity from the
+   "no such X" sentences and the offending value from the pre-existing
+   stage and MAC refusals. Those exact sentences are the CLI contract
+   reviewed under #86, and issue #101's decision 6 freezes them so that
+   an operator meets one vocabulary whichever way they reached a
+   refusal; they predate this PR and nothing here changed them.
+   Echoing a requester's own addressing back to the requester is also
+   not the leak class the no-leak contract targets: its targets are
+   secrets and rejected configuration values, which findings 1 and 3
+   cover. Changing them is a contract change, not a fix, and it belongs
+   in a change that says so.
+3. **P1: the per-request read path retained library exceptions.**
+   Opening the database is on every API request and chained
+   SQLAlchemy's exception into its refusal, message included, and a
+   SQLAlchemy error holds the statement it failed on with the
+   parameters bound to it; the key loader, the repository's
+   transaction, and the encrypt and decrypt paths raised inside their
+   handlers too, where the library had been handed the key or the
+   plaintext; and the storage 500 logged the exception object as a
+   record argument, which hands its message and its whole chain to
+   anything that walks the record. Fixed in 4d504ea: every one of them
+   builds its sentence in the handler and raises outside it, the
+   migration failure embeds the driver's own line rather than
+   SQLAlchemy's wrapper, and the log line names the exception's class
+   and nothing else.
+4. **P1: the plan's addressability rule belonged in this milestone.**
+   The reads address an entity by putting its identity in a path, so a
+   name or a slot holding a slash could not be fetched at all, and
+   deferring the rule to the write milestone would have shipped a read
+   surface that cannot reach part of what the repository accepts. Fixed
+   in 497d5f8, at write time only: names and provider slots must be one
+   URL path segment (no slash, no control characters; spaces, percent
+   signs and non-ASCII stay legal), and an MCP slot's key half must
+   name what the value would otherwise have referenced, a variable
+   after `env.` or a header after `headers.`. The load path is
+   untouched, so a row written before the rule still boots, still reads
+   back in the whole configuration, and is still deletable.
+5. **P1: a stored row failing model validation answered 422.** This
+   milestone had recorded the mapping as a known wrong answer and
+   deferred it; the review insisted, correctly, since 422 tells a
+   caller it sent something wrong about a row it cannot influence.
+   Fixed in 28d1585: the row loaders and the assembly that turns the
+   rows into one configuration raise the storage refusal, naming the
+   row and the fields that failed and never their values, built inside
+   the handler and raised outside it because a ValidationError holds
+   the whole row. Fragments keep the 422 they had. Boot is unchanged by
+   construction, the storage type being a `ConfigError`, and a test
+   pins it.
+6. **P2: nullable response fields were also optional.** `shadows` and
+   the default agent's `name` carried a `None` default, which marks
+   them optional in the schema, so a generated client had three states
+   to handle where the server produces two. Fixed in 3fb1436: required
+   and nullable, which is what every response already was, with the
+   document regenerated and the required entries asserted.
+7. **P2: a stored non-finite float changed the configuration
+   silently.** YAML spells `.nan` and `.inf`, JSON has no spelling for
+   either, and the serializer answers null, so the option disappears
+   and the provider falls back to its own default. Fixed in 550dde9 in
+   the semantics layer: every fragment is walked when it is written, at
+   any depth and for every entity kind, and a stored value that is not
+   finite makes the row report that it cannot be read.
+
+Findings 1, 3 and 5 share a shape worth naming: each is a place where
+the sanitized boundary was drawn around the case that was thought of
+(a top-level key, a repository write, a fragment) while the same data
+reached the same reader by another route. The rule the milestone 1
+review left behind, build the refusal inside the handler and raise it
+outside, now holds across the config package rather than in the two
+places that pass looked at.
+
+Full lanes after the fixes: ruff clean, both suites green and both
+drift checks clean (counts in the PR's verification section).
