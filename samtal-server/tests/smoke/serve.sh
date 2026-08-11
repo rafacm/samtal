@@ -82,12 +82,40 @@ stop_server() {
     SAMTAL_SEED_PID=""
 }
 
+# Cleanup runs once, on EXIT, and is the only handler that touches the
+# server. The signal handlers exist to give EXIT a status to work with:
+# a script killed by a signal has no exit status of its own until
+# something sets one, and `$?` inside a handler shared between EXIT and
+# a signal reads whatever the last command happened to return, which for
+# an interrupt during a successful write is zero. A seeding step that
+# was interrupted must not look like one that finished.
+#
+# The traps are cleared before the final exit, so a handler cannot run
+# twice and the cleanup cannot be re-entered while it is running.
 on_exit() {
     status=$?
+    trap - EXIT INT TERM
     stop_server
     if [ "$status" -ne 0 ]; then
         echo "seeding failed (exit $status); the server log follows" >&2
         cat "$SAMTAL_SEED_LOG" >&2
     fi
     exit "$status"
+}
+
+# 128 + the signal number, which is the status a shell reports for a
+# process a signal ended, so an interrupted seeding is nonzero and says
+# which signal did it.
+on_interrupt() {
+    trap - EXIT INT TERM
+    stop_server
+    echo "seeding was interrupted" >&2
+    exit 130
+}
+
+on_terminate() {
+    trap - EXIT INT TERM
+    stop_server
+    echo "seeding was terminated" >&2
+    exit 143
 }

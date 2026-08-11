@@ -23,7 +23,9 @@ set -eu
 # so seeding a database means having a server to write to. serve.sh says
 # how, and its exit trap prints the server's log if anything here fails.
 . "$(dirname "$0")/serve.sh"
-trap on_exit EXIT INT TERM
+trap on_exit EXIT
+trap on_interrupt INT
+trap on_terminate TERM
 start_server
 
 samtal-server config set provider llm claude -f - <<'YAML'

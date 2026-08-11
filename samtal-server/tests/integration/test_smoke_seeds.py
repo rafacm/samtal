@@ -19,8 +19,11 @@ exactly as CI runs them, unmodified, with no fixture serving them.
 """
 
 import os
+import signal
 import socket
 import subprocess
+import time
+import urllib.request
 from pathlib import Path
 
 import pytest
@@ -121,6 +124,70 @@ def test_a_seed_ignores_an_ambient_api_url(
     assert domain.default_agent == "assistant"
     assert _domain(decoy).agents == {}
     assert _domain(decoy).default_agent is None
+
+
+def test_an_interrupted_seeding_fails_and_leaves_no_server_behind(
+    tmp_path: Path,
+) -> None:
+    """A seeding step that was interrupted must not look like one that
+    finished, and must not leave the server it started running: CI would
+    then hold a port and a data volume open for the container that comes
+    next."""
+    environment = {
+        key: value for key, value in os.environ.items() if key != "SAMTAL_CONFIG"
+    }
+    port = _free_port()
+    environment["SAMTAL_SERVER__DATABASE__DIR"] = str(tmp_path / "db")
+    environment["SAMTAL_SERVER__PORT"] = str(port)
+
+    seeding = subprocess.Popen(
+        ["sh", str(SMOKE / "seed.sh")],
+        env=environment,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        # Its own process group, so the signal reaches the script the way
+        # a shell would send it and not this test runner as well.
+        start_new_session=True,
+    )
+    try:
+        _wait_for(lambda: _ready(port), "the seeding server never became ready")
+        seeding.send_signal(signal.SIGINT)
+        _, errors = seeding.communicate(timeout=60)
+    finally:
+        if seeding.poll() is None:  # pragma: no cover, only on a failure
+            seeding.kill()
+            seeding.communicate(timeout=30)
+
+    assert seeding.returncode != 0
+    assert "interrupted" in errors
+    # And the server it started is gone with it.
+    _wait_for(lambda: not _listening(port), "the seeding server outlived the script")
+
+
+def _ready(port: int) -> bool:
+    """The server answering, which is when the script starts writing: an
+    interrupt landing before that would prove less than this needs to."""
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/healthz", timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def _listening(port: int) -> bool:
+    with socket.socket() as probe:
+        probe.settimeout(1)
+        return probe.connect_ex(("127.0.0.1", port)) == 0
+
+
+def _wait_for(ready, complaint: str, timeout: float = 60.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if ready():
+            return
+        time.sleep(0.1)
+    raise AssertionError(complaint)
 
 
 def test_a_seeding_script_reports_a_server_that_will_not_start(
