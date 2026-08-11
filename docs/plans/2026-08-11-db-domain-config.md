@@ -688,9 +688,10 @@ mistake a staged write for an applied one.
   capture log records on the boot path.
 - **A CLI edit that silently waits for a restart.** By design
   (boot-time snapshot, decision 5), but a known operational trap.
-  Mitigation: the deployment notes state it explicitly, and
-  `config set` prints a reminder when it can see the change is
-  against the deployed database.
+  Mitigation: the deployment notes state it explicitly, and every
+  mutating command prints "applies at the next server start" once
+  the switchover has landed (before it, the staging notice from
+  the PR-structure section prints instead).
 - **The dev-machine default path.** `/var/lib/samtal` is not
   writable on a laptop. Mitigation: the open error names
   `server.database.dir` and the env override for it; the README
