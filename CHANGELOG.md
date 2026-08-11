@@ -18,11 +18,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   command prints a staging notice saying that this write takes effect
   at the switchover and changes nothing about the running server.
 
-  The grammar covers one noun per entity kind: `set` and `delete` for
-  providers, MCP servers, agents and agent-defaults, `bind-device`,
-  `set-default-agent` and `clear-default-agent`, `set-secret` and
-  `clear-secret`, `list`, and `show` with every stored secret masked and
-  every environment reference it shadows marked. A fragment is the same
+  The grammar covers one noun per entity kind: `set` for providers, MCP
+  servers, agents and agent-defaults, `delete` for providers, MCP
+  servers, agents and devices, `bind-device`, `set-default-agent` and
+  `clear-default-agent`, `set-secret` and `clear-secret`, `list`, and
+  `show` with every stored secret masked and every environment
+  reference it shadows marked. A fragment is the same
   YAML shape the section has in the file today, read from a path or
   from stdin, and `set` replaces the entity without touching its stored
   secrets. A secret never passes through an argument: `set-secret`
