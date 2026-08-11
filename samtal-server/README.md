@@ -690,7 +690,10 @@ apply, and it is handled by
 and [`config.deploy.example.yaml`](config.deploy.example.yaml) is a
 ready-to-adapt profile for the container image behind a proxy on a small
 CPU quota, holding values validated by latency measurements from a live
-deployment.
+deployment. That profile's domain half is the runnable script beside it,
+[`config.deploy.example.sh`](config.deploy.example.sh), which the test
+suite runs against a scratch database, so its measured values are
+checked rather than merely written down.
 
 **The domain half lives in a database**, one SQLite file under
 `server.database.dir`, written with `samtal-server config`: named
