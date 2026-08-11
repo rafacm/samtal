@@ -1,0 +1,33 @@
+# One persona. An agent combines a prompt with one provider per stage,
+# and every stage must resolve to a provider (here or in agent_defaults)
+# for the server to start, so a typical agent is a prompt and a voice.
+#
+#   samtal-server config set agent assistant -f examples/agent.yaml
+#
+# The same file installed under a second name is a second persona; edit
+# the prompt and the voice and nothing else has to move.
+
+# State the reply language explicitly: models otherwise pick one by
+# their training bias (the reference server's default is Chinese).
+prompt: >
+  You are a helpful voice assistant. Keep replies short, plain, and
+  speakable: one or two sentences, no lists, no markdown. Always reply
+  in the language the user spoke.
+
+# Overriding one stage: everything unnamed here is inherited from
+# agent_defaults, so this agent runs on the default model and the
+# default recognizer with a voice of its own.
+tts: eleven
+
+# Naming a list replaces the inherited one rather than extending it,
+# like the stage fields above. An empty list (`mcp: []`) is how an agent
+# opts out of tools its siblings have.
+mcp:
+  - home
+  - weather
+
+# An agent may name its own filler section, which replaces the inherited
+# one wholly rather than merging with it. See examples/agent-defaults.yaml
+# for what the section holds.
+# filler:
+#   enabled: false

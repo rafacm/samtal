@@ -1,0 +1,32 @@
+# An MCP server reached over HTTP rather than spawned. The transport is
+# what decides which fields apply, and naming one of the other
+# transport's fields (a `command` here) is an error rather than a
+# silently ignored key.
+#
+#   samtal-server config set mcp-server weather -f examples/mcp-server-streamable-http.yaml
+#
+# The entry name is what its tools are prefixed with in the merged tool
+# list (`weather__forecast`), so it must be a plain [A-Za-z0-9_-]+ name
+# and cannot be `self`, `switch_agent`, or `remember`.
+
+transport: streamable_http
+
+url: http://localhost:8000/mcp
+
+# A value of $NAME is read from that environment variable at startup,
+# and any secret-bearing key must use that form. The encrypted
+# alternative addresses the same slot by its dotted path:
+#
+#   samtal-server config set-secret mcp-server weather headers.Authorization
+#
+headers:
+  Authorization: $WEATHER_TOKEN
+
+# A url may name localhost and it may name a vendor, so the transport
+# cannot tell: under server.local_only every referenced entry declares
+# it. This one is a local endpoint.
+egress: false
+
+# How long one call may take before the model is told it timed out. The
+# device hears silence meanwhile, so keep it short.
+# tool_timeout_s: 15
