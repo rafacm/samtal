@@ -36,13 +36,16 @@ document it failed on, which in this module is the decrypted plaintext.
 import json
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Literal
 
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 
 from samtal_server.config.loader import ConfigError
+from samtal_server.config.models import resolve_env_references
 
 MASTER_KEY_ENV = "SAMTAL_MASTER_KEY"
 
@@ -263,14 +266,149 @@ def _unwrap(location: SecretLocation, payload: bytes) -> str:
     return secret
 
 
+class SecretStore:
+    """The stored envelopes of one loaded snapshot, and the keys that
+    open them.
+
+    It rides beside the domain models and never inside them: a pydantic
+    model carries neither an envelope nor a decrypted value, which is
+    what lets the existing validators keep rejecting inline secrets
+    exactly as they do for the YAML file. Nothing here holds plaintext
+    either; a secret is decrypted when a provider or an MCP server is
+    being built, and goes straight into the client or the child
+    process.
+    """
+
+    def __init__(
+        self,
+        envelopes: Mapping[SecretLocation, object] | None = None,
+        keys: MultiFernet | None = None,
+    ) -> None:
+        self._envelopes: dict[SecretLocation, object] = dict(envelopes or {})
+        self._keys = keys
+
+    def __len__(self) -> int:
+        return len(self._envelopes)
+
+    def __contains__(self, location: object) -> bool:
+        return location in self._envelopes
+
+    def locations(self) -> list[SecretLocation]:
+        """Every stored slot, in a fixed order so output and error
+        reporting do not depend on insertion."""
+        return sorted(self._envelopes, key=lambda where: (where.kind, where.identity, where.slot))
+
+    def slots_for(self, kind: EntityKind, identity: str) -> list[str]:
+        """The slots stored for one entity, which is what `show` renders
+        as masks and what MCP value resolution walks."""
+        return [
+            where.slot
+            for where in self.locations()
+            if where.kind == kind and where.identity == identity
+        ]
+
+    def secret(self, location: SecretLocation) -> str | None:
+        """The plaintext for a slot, or None when nothing is stored for
+        it. Decrypts on demand, and every failure names the location
+        without carrying the value."""
+        envelope = self._envelopes.get(location)
+        if envelope is None:
+            return None
+        return decrypt(location, envelope, self._keys)
+
+
+@dataclass(frozen=True)
+class ProviderSecrets:
+    """The stored secrets of one provider entry, resolved on demand.
+
+    A provider is identified by its stage and its name, which the
+    factory building it does not know: it is handed a label and its
+    configuration entry. So the identity is bound here, where the
+    registry does know it."""
+
+    stage: str
+    name: str
+    store: SecretStore | None = None
+
+    def secret(self, slot: str) -> str | None:
+        if self.store is None:
+            return None
+        return self.store.secret(SecretLocation.provider(self.stage, self.name, slot))
+
+
+# The provider whose factory is running, if any. A context variable
+# rather than a factory argument for the reason models.py has one for
+# the YAML path: every provider factory has the same two-argument
+# signature, the credential is needed inside one of them, and threading
+# an argument through all twelve to be ignored by most would make the
+# seam wider than it is. It is set for the duration of one construction
+# call by build_provider and read only by the resolvers below.
+_provider_secrets: ContextVar[ProviderSecrets | None] = ContextVar(
+    "samtal_provider_secrets", default=None
+)
+
+
+@contextmanager
+def provider_secrets_in_force(secrets: ProviderSecrets | None) -> Iterator[None]:
+    """Make `secrets` the stored credentials for whatever is built
+    inside the block."""
+    token = _provider_secrets.set(secrets)
+    try:
+        yield
+    finally:
+        _provider_secrets.reset(token)
+
+
+def stored_provider_secret(slot: str) -> str | None:
+    """The stored credential for one slot of the provider being built,
+    or None when there is none (which is every provider a deployment
+    configures with environment references, the default)."""
+    secrets = _provider_secrets.get()
+    return None if secrets is None else secrets.secret(slot)
+
+
+def resolve_mcp_values(
+    server: str, group: str, values: Mapping[str, str], store: SecretStore | None
+) -> dict[str, str]:
+    """One MCP server's `env` or `headers`, as the spawned process or the
+    request should see it.
+
+    Literal values pass through and a `$VAR` is read from the server's
+    own environment, exactly as before. A slot with a stored secret
+    takes precedence over the reference written for the same key,
+    because set-secret is the later and more deliberate act, and a slot
+    with no key in the entity at all is added: a fragment cannot carry
+    the value, so requiring it to carry a placeholder would mean
+    inventing an environment variable nobody sets.
+    """
+    stored: dict[str, str] = {}
+    if store is not None:
+        for slot in store.slots_for("mcp_server", server):
+            written_group, _, key = slot.partition(".")
+            if written_group != group or not key:
+                continue
+            secret = store.secret(SecretLocation.mcp_server(server, slot))
+            if secret is not None:
+                stored[key] = secret
+    references = {key: value for key, value in values.items() if key not in stored}
+    resolved = resolve_env_references(f"mcp_servers.{server}.{group}", references)
+    resolved.update(stored)
+    return resolved
+
+
 __all__ = [
     "MASK",
     "MASTER_KEY_ENV",
+    "ProviderSecrets",
     "SecretLocation",
+    "SecretStore",
     "decrypt",
     "encrypt",
     "generate_key",
     "is_envelope",
     "load_keys",
     "mask",
+    "provider_secrets_in_force",
+    "resolve_mcp_values",
+    "stored_provider_secret",
 ]
