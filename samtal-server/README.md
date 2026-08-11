@@ -651,8 +651,13 @@ something checked rather than remembered.
 docker build -t samtal-server:local .
 
 # The domain half first, written by the CLI from the image itself into
-# the volume the server then reads. tests/smoke/seed.sh is what CI runs.
+# the volume the server then reads. tests/smoke/seed.sh is what CI runs:
+# it starts a server of its own inside this container, configures it over
+# loopback, and stops it again, which is why the container gets what a
+# server needs.
 docker run --rm \
+  -e SAMTAL_AUTH_SECRET=smoke-secret \
+  -e SAMTAL_API_SECRET=smoke-api-token \
   -v smoke-data:/data \
   -v "$PWD/tests/smoke:/smoke:ro" \
   -v "$PWD/tests/smoke/config.yaml:/config/config.yaml:ro" \
@@ -660,6 +665,7 @@ docker run --rm \
 
 docker run -d --name samtal-smoke -p 8003:8003 \
   -e SAMTAL_AUTH_SECRET=smoke-secret \
+  -e SAMTAL_API_SECRET=smoke-api-token \
   -v smoke-data:/data \
   -v "$PWD/tests/smoke/config.yaml:/config/config.yaml:ro" \
   samtal-server:local
@@ -692,8 +698,8 @@ ready-to-adapt profile for the container image behind a proxy on a small
 CPU quota, holding values validated by latency measurements from a live
 deployment. That profile's domain half is the runnable script beside it,
 [`config.deploy.example.sh`](config.deploy.example.sh), which the test
-suite runs against a scratch database, so its measured values are
-checked rather than merely written down.
+suite runs against a real server, so its measured values are checked
+rather than merely written down.
 
 **The domain half lives in a database**, one SQLite file under
 `server.database.dir`, written with `samtal-server config`: named
@@ -701,7 +707,14 @@ checked rather than merely written down.
 `agent_defaults` holding what every agent uses unless it says otherwise,
 `agents` combining a prompt with provider and MCP references, `devices`
 binding MAC addresses to agents, and `default_agent` for unknown
-devices. A whole deployment, from an empty database:
+devices.
+
+The CLI writes it through the configuration API on the running server,
+so these commands need one to be up, and an empty database is a valid
+state for it to be up on. From inside the container the token and the
+loopback address are already in the environment; from outside, name the
+API with `--api-url` (or `SAMTAL_API_URL`) and carry the token yourself.
+A whole deployment, from an empty database:
 
 ```bash
 samtal-server config set provider llm claude -f examples/llm-anthropic.yaml
@@ -721,6 +734,14 @@ the bindings. The rules about a runnable server (every stage of every
 agent resolving, a default agent when nothing is bound) are checked at
 boot instead, so a half-built database is a legitimate state to be in
 and an illegitimate one to serve from.
+
+**When the server will not start**, there is nothing to write through,
+which is what `--local` is for: `show`, `delete`, `clear-secret` and
+`set-secret` against the database directly, the four commands that get a
+deployment out of a state its own server refuses. Every `--local`
+invocation says on stderr that it bypasses the API and that a running
+server will not observe the change until its next start; every other
+command refuses `--local` by naming the four.
 
 Every field of the domain half is documented in
 [`../docs/reference/domain-config.md`](../docs/reference/domain-config.md),
@@ -763,7 +784,14 @@ it at its volume, and a development machine that cannot write there gets
 an error naming the key. Point it somewhere writable for local work:
 
 ```bash
-SAMTAL_SERVER__DATABASE__DIR=./var uv run samtal-server config list
+SAMTAL_SERVER__DATABASE__DIR=./var uv run samtal-server
+```
+
+The reading commands take the same key, through `--local`, which is what
+lets one be run without a server on the other side:
+
+```bash
+SAMTAL_SERVER__DATABASE__DIR=./var uv run samtal-server config --local show
 ```
 
 ### Secrets
@@ -1246,24 +1274,25 @@ docker build --build-arg SAMTAL_REVISION=$(git rev-parse --short HEAD) -t samtal
 ## Running in a container
 
 The default image carries both local engines, so one mounted YAML and
-one seeded database serve a conversation. The domain half is written
-first, with the CLI from the same image, against the volume the server
-then reads:
+one seeded database serve a conversation. The server starts first, on
+whatever the database holds (nothing, the first time, which is a valid
+state to serve), and the domain half is written into it with the CLI
+inside the running container, where the API token and the loopback
+address are already in the environment:
 
 ```bash
-docker run --rm \
-  -v samtal-data:/data \
-  -v /path/to/config.yaml:/config/config.yaml:ro \
-  -v /path/to/fragments:/fragments:ro \
-  --entrypoint samtal-server ghcr.io/rafacm/samtal-server:latest \
-  config set provider llm claude -f /fragments/llm-anthropic.yaml
-
 docker run -d --name samtal \
   -p 8003:8003 \
+  -e SAMTAL_API_SECRET \
   -e SAMTAL_AUTH_SECRET \
   -v /path/to/config.yaml:/config/config.yaml:ro \
   -v samtal-data:/data \
   ghcr.io/rafacm/samtal-server:latest
+
+docker exec -i samtal samtal-server \
+  config set provider llm claude -f - < examples/llm-anthropic.yaml
+
+docker restart samtal
 ```
 
 - `/config/config.yaml` is where `SAMTAL_CONFIG` points, and it is the
@@ -1347,8 +1376,9 @@ access-controlled backups, not in a repository.
 
 And the operational one, said again because it is the trap of a
 boot-time snapshot: **an edit applies at the next server start.** A
-`config set` against a running deployment changes nothing until the
-process restarts, which the command says every time it writes.
+`config set` against a running deployment is accepted by that server and
+changes nothing it is doing until the process restarts, which both the
+command and the API's answer say every time they write.
 
 ### Choosing an image
 
