@@ -46,6 +46,11 @@ _MCP_SECRET_KEY_FRAGMENTS = (*_SECRET_KEY_FRAGMENTS, "auth")
 # boot. A value that must begin with a literal $ is not supported.
 _ENV_REFERENCE_RE = re.compile(r"^\$([A-Za-z_][A-Za-z0-9_]*)$")
 
+# What a key ending in _env may hold: the name of an environment
+# variable, and nothing else. The same shape as the reference above
+# without its $, since both name a variable the server looks up.
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 PROVIDER_STAGES = ("llm", "asr", "tts", "vad")
 
 # The logging level names, most to least verbose. NOTSET is left out: on
@@ -318,6 +323,19 @@ def is_secret_option(name: str) -> bool:
     return any(fragment in lowered for fragment in _SECRET_KEY_FRAGMENTS)
 
 
+def is_env_name(value: object) -> bool:
+    """Whether a value is the name of an environment variable rather
+    than something else, which for a key ending in _env is the only
+    thing it may be.
+
+    The check exists because nothing else stops a credential from being
+    pasted where its variable name belongs: the value would then sit
+    unencrypted in the configuration, and it never worked either, since
+    the name is looked up in the environment and no lookup of a pasted
+    key succeeds."""
+    return isinstance(value, str) and _ENV_NAME_RE.match(value) is not None
+
+
 def is_mcp_secret_key(name: str) -> bool:
     """The same question for an MCP server's env and headers, where the
     key carrying a secret is as often called Authorization as token."""
@@ -343,8 +361,24 @@ class ProviderConfig(BaseModel):
 
     @model_validator(mode="after")
     def _reject_inline_secrets(self) -> "ProviderConfig":
-        for key in self.model_extra or {}:
+        # The declared field and the pass-through extras are the same
+        # question: a key ending in _env names a variable, and any other
+        # secret-shaped key is a value that does not belong here.
+        entries: list[tuple[str, object]] = [("api_key_env", self.api_key_env)]
+        entries += list((self.model_extra or {}).items())
+        for key, value in entries:
             if key.lower().endswith("_env"):
+                if value is not None and not is_env_name(value):
+                    # Never the value: a key that fails this check most
+                    # likely holds the credential itself, so the message
+                    # says what the key must hold and shows an example
+                    # rather than quoting what was written.
+                    raise ValueError(
+                        f'"{key}" must hold the name of an environment variable, and '
+                        f"what it holds does not look like one; a pasted value belongs "
+                        f"nowhere in this file, so name the variable holding it, for "
+                        f"example {key}: MY_PROVIDER_KEY"
+                    )
                 continue
             if is_secret_option(key):
                 raise ValueError(
