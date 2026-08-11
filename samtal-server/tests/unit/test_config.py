@@ -394,6 +394,33 @@ def test_secret_like_option_names_are_rejected(key: str) -> None:
         load_config_from_data(data)
 
 
+def test_a_pasted_value_in_an_env_key_is_rejected_without_quoting_it() -> None:
+    """Nothing else stops a credential from being pasted where its
+    variable name belongs, and the value would then sit unencrypted in
+    the file. It never worked either: the name is looked up in the
+    environment, and no lookup of a pasted key succeeds."""
+    pasted = "sk-live-4f8b2c9e-never-a-real-credential"
+
+    for entry in (
+        {"type": "anthropic", "api_key_env": pasted},
+        {"type": "openai_compatible", "client_secret_env": pasted},
+        # Padding is refused for the same reason: os.environ is not
+        # asked about a name with spaces around it.
+        {"type": "anthropic", "api_key_env": " ANTHROPIC_API_KEY "},
+    ):
+        with pytest.raises(ConfigError) as excinfo:
+            load_config_from_data({"providers": {"llm": {"claude": entry}}})
+        message = str(excinfo.value)
+        assert "name of an environment variable" in message
+        assert pasted not in message
+
+    # A value that is not a string at all is refused the same way.
+    with pytest.raises(ConfigError):
+        load_config_from_data(
+            {"providers": {"llm": {"claude": {"type": "anthropic", "token_env": 7}}}}
+        )
+
+
 def test_env_reference_options_are_allowed() -> None:
     data = {
         "providers": {

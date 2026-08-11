@@ -273,25 +273,28 @@ def test_show_and_list_mask_stored_secrets_and_mark_what_they_shadow(
     assert SECRET not in listed and OTHER_SECRET not in listed
 
 
-def test_a_secret_shaped_key_holding_something_else_is_masked(
-    run, capsys: pytest.CaptureFixture[str]
+def test_a_pasted_credential_in_a_reference_field_is_refused(
+    run, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Nothing validates the shape of an api_key_env value, so an
-    operator can paste the key where its variable name belongs. The
-    command they would run to find that mistake must not read it back
-    out, which is what masking everything that is not a syntactic
-    reference means here."""
+    """An api_key_env holding the credential instead of its variable
+    name would be written to the row unencrypted, and it never worked
+    either. The write is refused, and the value the fragment carried
+    goes nowhere: not to stdout, stderr or a log record."""
     fragment = f"type: anthropic\nmodel: m\napi_key_env: {SECRET}\n"
-    assert run("set", "provider", "llm", "claude", "-f", "-", stdin=fragment) == 0
-    capsys.readouterr()
 
-    run("show", "provider", "llm", "claude")
-    shown = capsys.readouterr().out
-    assert SECRET not in shown
-    assert f"api_key_env: '{MASK}'" in shown
+    with caplog.at_level(logging.DEBUG):
+        assert run("set", "provider", "llm", "claude", "-f", "-", stdin=fragment) == 1
 
-    run("show")
-    assert SECRET not in capsys.readouterr().out
+    captured = capsys.readouterr()
+    assert "name of an environment variable" in captured.err
+    assert SECRET not in captured.err
+    assert SECRET not in captured.out
+    assert SECRET not in caplog.text
+    assert "Traceback" not in captured.err
+
+    # And nothing was written: the entity does not exist.
+    assert run("show", "provider", "llm", "claude") == 1
+    assert "no such provider" in capsys.readouterr().err
 
 
 def test_an_mcp_reference_shows_and_anything_else_in_its_place_does_not(
