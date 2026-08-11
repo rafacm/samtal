@@ -787,13 +787,15 @@ reread since.
 
 ### What landed
 
-**The server README's API section
-(`samtal-server/README.md`, under Configuration).** What mounts at
-`/api` and that the committed OpenAPI document is the contract; the
-bearer token, where its value comes from, how to generate one, and that
-a caller without it meets 401 whichever path it asked for; the surface
-listed one noun at a time; what a masked read adds to the entity (the
-slots holding a stored secret and the key each displaces) and that a
+**The server README's API section (`samtal-server/README.md`, under
+Configuration).** What mounts at `/api` and that the committed OpenAPI
+document is the contract; the bearer token, where its value comes from,
+how to generate one, and that a caller without it meets 401 whichever
+path it asked for; one curl request, because a section that describes a
+header without showing one leaves a reader who is not using the CLI to
+assemble it from prose; the surface listed one noun at a time; what a
+masked read adds to the entity (the slots holding a stored secret and
+the key each displaces) and that a
 stored secret is read back by nothing; PUT as create-or-replace with the
 three argument-shaped bodies named; the acknowledgement and its restart
 notice, which is the boot-time snapshot said in the one place an
