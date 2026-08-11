@@ -58,7 +58,7 @@ from samtal_server.config.models import (
     normalize_device_bindings,
     normalize_mac,
 )
-from samtal_server.config.secrets import SecretLocation, SecretStore, encrypt
+from samtal_server.config.secrets import EntityKind, SecretLocation, SecretStore, encrypt
 from samtal_server.db import schema
 
 # The two groups of an MCP server's dotted secret slots. A slot is
@@ -118,6 +118,35 @@ class Snapshot:
     secrets: SecretStore
 
 
+@dataclass(frozen=True)
+class StoredSecret:
+    """One stored secret, named rather than read: where it is, and what
+    its presence displaces.
+
+    `shadows` is the precedence rule made visible. A stored secret wins
+    over a reference written for the same slot, and a read that showed
+    only the reference would say the opposite of what the server does,
+    so the read names the key the ciphertext takes the place of.
+    """
+
+    location: SecretLocation
+    shadows: str | None
+
+
+@dataclass(frozen=True)
+class Entity[Entry]:
+    """One entity as a read returns it: its model-shaped half, and the
+    slots holding a stored secret beside it.
+
+    Never the secrets themselves. A read is masked by design, and what a
+    caller needs that the entity cannot carry is which slots are filled
+    from the database rather than from the environment.
+    """
+
+    entry: Entry
+    secrets: tuple[StoredSecret, ...]
+
+
 def verify_secrets(secrets: SecretStore) -> None:
     """Every stored secret opens under the configured keys, or the
     server refuses to start naming the entity and the slot.
@@ -152,6 +181,69 @@ class ConfigStore:
                 domain=_read_domain(connection),
                 secrets=_read_secrets(connection, self._keys),
             )
+
+    # Reading one entity
+    #
+    # Existence is semantics, so it is decided here and not by each
+    # caller: `config show`, the API's GET and the recovery path all meet
+    # the same refusal in the same words, and a caller that answers with
+    # a status code can tell it from the others by its type. What each
+    # read returns beside the entity is its stored-secret slots, which is
+    # the one fact a masked read exists to convey and the one thing the
+    # model-shaped half can never carry.
+
+    def read_provider(self, stage: str, name: str) -> Entity[ProviderConfig]:
+        stage = _stage(stage)
+        with self._transaction() as connection:
+            entry = getattr(_read_domain(connection).providers, stage).get(name)
+            if entry is None:
+                raise UnknownEntityError(f"providers.{stage}.{name}: no such provider")
+            return self._with_secrets(connection, entry, "provider", f"{stage}.{name}")
+
+    def read_mcp_server(self, name: str) -> Entity[McpServerConfig]:
+        with self._transaction() as connection:
+            entry = _read_domain(connection).mcp_servers.get(name)
+            if entry is None:
+                raise UnknownEntityError(f"mcp_servers.{name}: no such MCP server")
+            return self._with_secrets(connection, entry, "mcp_server", name)
+
+    def read_agent(self, name: str) -> Entity[AgentConfig]:
+        with self._transaction() as connection:
+            entry = _read_domain(connection).agents.get(name)
+            if entry is None:
+                raise UnknownEntityError(f"agents.{name}: no such agent")
+            # An agent holds no credential of its own: it references
+            # providers and MCP servers, and theirs are stored on them.
+            return Entity(entry=entry, secrets=())
+
+    def read_agent_defaults(self) -> Entity[AgentDefaults]:
+        """The singleton, which always exists: an unwritten one is the
+        empty entry rather than a missing entity."""
+        with self._transaction() as connection:
+            return Entity(entry=_read_domain(connection).agent_defaults, secrets=())
+
+    def read_device(self, mac: str) -> Entity[list[str]]:
+        """One device's binding, keyed by the canonical form of its MAC,
+        so `AA-BB-...` and `aa:bb:...` read the same row."""
+        normalized = _mac(mac)
+        with self._transaction() as connection:
+            bound = _read_domain(connection).devices.get(normalized)
+            if bound is None:
+                raise UnknownEntityError(f"devices.{normalized}: no such device")
+            return Entity(entry=list(bound), secrets=())
+
+    def read_default_agent(self) -> str | None:
+        """The agent an unbound device reaches, or None. Unset is a
+        configuration rather than a missing entity, so there is nothing
+        here to refuse."""
+        with self._transaction() as connection:
+            return _read_domain(connection).default_agent
+
+    def _with_secrets[Entry](
+        self, connection: Connection, entry: Entry, kind: EntityKind, identity: str
+    ) -> Entity[Entry]:
+        secrets = _read_secrets(connection, self._keys)
+        return Entity(entry=entry, secrets=_stored_slots(entry, kind, identity, secrets))
 
     # Entities
 
@@ -338,6 +430,63 @@ class ConfigStore:
             raise
         except SQLAlchemyError as exc:
             raise _database_problem(exc) from None
+
+
+def stored_secrets(snapshot: Snapshot) -> tuple[StoredSecret, ...]:
+    """Every stored secret in one snapshot, each with the key it
+    displaces, in the fixed order the store lists its locations in.
+
+    The whole-configuration read's half of what the entity reads return
+    one entity at a time, through the same rule, so a slot cannot be
+    said to shadow one key in a listing and another in a single read.
+    """
+    entries: dict[tuple[str, str], object] = {
+        ("provider", f"{stage}.{name}"): entry
+        for stage in PROVIDER_STAGES
+        for name, entry in getattr(snapshot.domain.providers, stage).items()
+    }
+    entries.update(
+        (("mcp_server", name), entry) for name, entry in snapshot.domain.mcp_servers.items()
+    )
+    return tuple(
+        StoredSecret(
+            location=location,
+            shadows=_shadowed(entries.get((location.kind, location.identity)), location.slot),
+        )
+        for location in snapshot.secrets.locations()
+    )
+
+
+def _stored_slots(
+    entry: object, kind: EntityKind, identity: str, secrets: SecretStore
+) -> tuple[StoredSecret, ...]:
+    return tuple(
+        StoredSecret(
+            location=SecretLocation(kind=kind, identity=identity, slot=slot),
+            shadows=_shadowed(entry, slot),
+        )
+        for slot in secrets.slots_for(kind, identity)
+    )
+
+
+def _shadowed(entry: object, slot: str) -> str | None:
+    """The entity key a stored secret in this slot displaces, or None
+    when the entity writes no reference for it.
+
+    A provider's reference key is `<slot>_env`, an MCP server's is the
+    dotted slot itself: both name where the value would have been
+    written as an environment reference had it not been stored.
+    """
+    if isinstance(entry, McpServerConfig):
+        group, _, key = slot.partition(".")
+        written = getattr(entry, group, None) if group in MCP_SECRET_GROUPS else None
+        return slot if isinstance(written, Mapping) and key in written else None
+    if isinstance(entry, ProviderConfig):
+        key = f"{slot}_env"
+        if key == "api_key_env":
+            return key if entry.api_key_env is not None else None
+        return key if key in entry.options else None
+    return None
 
 
 def _database_problem(exc: SQLAlchemyError) -> ConfigError:
@@ -705,6 +854,9 @@ def _refuse_unresolved(domain: DomainConfig) -> None:
 __all__ = [
     "ConfigStore",
     "DomainConfig",
+    "Entity",
     "Snapshot",
+    "StoredSecret",
+    "stored_secrets",
     "verify_secrets",
 ]
