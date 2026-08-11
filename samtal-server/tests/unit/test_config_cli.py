@@ -15,9 +15,11 @@ from pathlib import Path
 
 import pytest
 import yaml
+from sqlalchemy import update
 
 from samtal_server.config import cli
 from samtal_server.config.secrets import MASK, MASTER_KEY_ENV, generate_key
+from samtal_server.db import open_database, schema
 
 # Not real credentials, and shaped so a substring check for one cannot
 # match by accident.
@@ -444,6 +446,29 @@ def test_an_unusable_key_names_its_position_and_not_its_material(
     assert "not-a-fernet-key" not in captured.err
     assert SECRET not in captured.err
     assert "Traceback" not in captured.err
+
+
+def test_a_row_of_the_wrong_shape_is_reported_rather_than_raised(
+    run, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The reading commands are what an operator reaches for when
+    something is wrong with the database, so a row that cannot be read
+    has to come back as a sentence rather than as a traceback."""
+    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    capsys.readouterr()
+
+    engine = open_database(tmp_path / "db")
+    try:
+        with engine.begin() as connection:
+            connection.execute(update(schema.providers).values(options="not an object"))
+    finally:
+        engine.dispose()
+
+    for argv in (("list",), ("show",), ("show", "provider", "llm", "claude")):
+        assert run(*argv) == 1
+        captured = capsys.readouterr()
+        assert "options" in captured.err
+        assert "Traceback" not in captured.err
 
 
 def test_a_database_that_cannot_be_opened_names_the_key(
