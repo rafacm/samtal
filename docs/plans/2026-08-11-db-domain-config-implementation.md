@@ -203,3 +203,213 @@ Three findings, each fixed with its own commit:
 
 Full lanes after the fixes: ruff clean, unit and integration suites
 green (counts in the PR's verification section).
+
+## Milestone 2: repository and write path
+
+`config/store.py`, the write-time validation set, `config/cli.py` with
+the command group, the point-of-use secret resolvers, and
+`verify_secrets` implemented and tested but called by nothing. The
+server's boot path is untouched: it still loads the YAML file, builds
+providers with no secret store, and knows nothing about the database.
+
+### What landed
+
+**The validation split.** `Config._check_references` became two module
+functions over a domain snapshot, `check_references` (agents and
+agent_defaults to providers and MCP servers, device bindings to agents,
+default_agent to an agent) and `check_completeness` (default_agent is
+required when agents are defined and no device is bound). The model
+validator now runs completeness then references and joins the problems,
+which is the order and the wording it produced before, so no boot
+message moved. The `mcp_servers` and `devices` field validators moved
+out the same way, into `check_mcp_entry_names` and
+`normalize_device_bindings`, so a snapshot that is not a `Config` can
+apply them.
+
+**`server.database.dir`.** A `DatabaseConfig` on `ServerConfig`,
+defaulting to `/var/lib/samtal`, with a commented block in
+`config.example.yaml`. Nothing reads it except the CLI.
+
+**`config/store.py`.** `DomainConfig` holds the six domain sections in
+the existing entity models; `Snapshot` pairs it with the `SecretStore`.
+`ConfigStore` owns every write, each one a single transaction that
+reads the snapshot, applies the change in the model layer, runs
+`check_references`, and only then persists. Rows carry the
+model-shaped half only: `set` updates those columns and never the
+`secrets` column, deleting an entity deletes its secrets with it, and
+`set_secret` and `clear_secret` are the only writes that touch them.
+Database failures are normalized to `ConfigError`, with a lock that
+could not be taken inside the busy timeout reported as a retryable
+"nothing was changed, run it again".
+
+**`verify_secrets`.** Enumerates the stored envelopes and decrypts each
+one, so ciphertext with no key, a wrong key, or a corrupt token is a
+`ConfigError` naming the entity and the slot. Startup-only by design,
+and startup does not call it yet.
+
+**The resolver seam.** `resolve_api_key` answers from the stored
+credential for the entry's `api_key` slot before it looks at
+`api_key_env`, and `resolve_mcp_values` resolves an MCP server's env
+and headers with a stored slot shadowing the `$VAR` written for the
+same key. Ciphertext wins in both, and the reference it shadows is not
+read at all, so an unset variable behind it cannot fail the boot the
+stored secret was set to fix. `build_provider`, `build_agent_providers`
+and `McpServers.build` take the store as an optional argument that
+defaults to None, which is what every caller passes today.
+
+**`config/cli.py`** and the dispatch in `main.py`. The grammar from the
+plan minus `schema` and `reference`, which are milestone 3. Secrets are
+read from stdin (`getpass` at a terminal) or `--from-env`, never from
+an argument. Every failure is a sanitized `ConfigError` on stderr with
+exit code 1, and every mutating command prints the staging notice.
+
+**Tests.** `test_config_checks.py` (the two phases in isolation),
+`test_config_store.py` (round trips, the whole refusal matrix, the
+natural-order buildup, `verify_secrets`, two concurrent writers),
+`test_secret_resolution.py` (a real Anthropic client, a real
+openai_compatible client and a real spawned MCP server built from
+encrypted credentials), `test_config_cli.py` (the acceptance case
+end to end, masking, the staging notice, and the leak surfaces), plus
+`SecretStore` cases added to `test_config_secrets.py`.
+
+### Deviations from the plan
+
+**`check_completeness` holds one rule, not two.** The plan's strictness
+section lists "every agent stage resolving to a provider through the
+defaults" alongside the default_agent rule, but that check does not
+exist in `_check_references`: it is enforced by `build_agent_providers`,
+which the same section says nothing here moves, and moving it would
+have changed a boot message. So completeness is today's default_agent
+rule, and the stage rule stays in provider construction. Milestone 4
+composes `Config` from the snapshot and runs both, exactly as boot does
+now.
+
+**The provider credential seam is ambient, not an argument.** Every
+provider factory has the signature `(label, config)`, and the
+credential is needed inside five of the twelve. Threading an argument
+through all of them to be ignored by most would have made the seam
+wider than it is, so `build_provider` puts a `ProviderSecrets` value
+(stage, name, store) in force for the duration of the one construction
+call, in a context variable, the same shape `models.py` already uses
+for the YAML path. `resolve_api_key` reads it. The MCP side did not
+need this: `McpServerManager` is constructed directly and takes the
+store as an argument.
+
+**`ConfigError` joins `ProviderError` as a pass-through in
+`build_provider`.** A stored credential that will not decrypt already
+raises a message naming the entity and the slot to set again, and the
+generic wrapper would have re-labelled it "could not build anthropic
+provider".
+
+**`server.database.dir` had to be a real model field.** The plan does
+not say whether the CLI could read the key without the server model
+knowing it. It could not: `ServerConfig` forbids extra keys, so a
+database directory written into the config file would make the server
+refuse to boot on the very file that configures its CLI.
+`config.example.yaml` gained the commented block in the same commit.
+
+**`show` renders stored secrets as comment lines**, not as a `secrets:`
+mapping. A mapping would look like something that could be written
+back, and a fragment carrying `secrets:` is refused by the model
+anyway (the key is secret-shaped).
+
+**A stored MCP slot with no key in the entity is injected.** The plan
+defines slots as `env.<KEY>` and `headers.<KEY>` without saying whether
+the key must also exist in the entity. Requiring it would mean writing
+a placeholder `$VAR` nobody sets, so a stored slot is added to the
+resolved mapping whether or not the entity names it.
+
+**`--config` is accepted before and after the command.** The server
+takes it before (`samtal-server --config path`), and every subcommand
+convention puts options after. The per-command copy suppresses its
+default so the earlier one is not overwritten.
+
+### Resolutions of the plan's open questions
+
+**`config show --json`: no.** The plan asks for a decision in this
+milestone if a concrete consumer appears. None did. `show` emits YAML
+in the shape the configuration file already has, which is what a person
+reads and what a fragment is written in, and the REST API is the
+machine interface.
+
+**Read-only loads keep the write lock.** Every transaction on this
+engine is `BEGIN IMMEDIATE`, milestone 1's discovery, and the load path
+was left on it rather than given a deferred connection of its own. A
+load is a handful of small selects; the only readers are a booting
+server and a CLI invocation; and a second connection configuration
+would be a second thing to keep true (and to reason about at the next
+concurrency question) in exchange for contention these never produce.
+If a future reader is long-running (a REST API serving reads under
+load), that is the moment to revisit it, and the change is local to
+`ConfigStore._transaction`.
+
+### Discoveries
+
+**Under WAL, a deferred read-modify-write does not silently lose.**
+Swapping the immediate begin for a deferred one and running the
+concurrency test, the loser fails immediately with SQLite's
+`database is locked` rather than committing a stale-validated write:
+in WAL a read transaction that tries to upgrade after another
+connection committed is refused outright, and the busy handler does not
+run for it. So `BEGIN IMMEDIATE` buys the right behavior rather than
+the only safe one: the loser waits, re-reads, and is refused for the
+reference it would have left unresolved instead of for a lock. The test
+asserts exactly that distinction, and fails on most runs without it.
+
+**Two libraries quote the rejected input back.** `str(ValidationError)`
+renders `input_value=...` for every error, and PyYAML's
+`MarkedYAMLError.__str__` includes a snippet of the offending source
+line. Both are exactly the fragment content that must not be echoed
+when the fragment carried an inline secret. Everything here renders
+from the parts (`error["loc"]`, `error["msg"]`, `exc.problem` and the
+mark) and raises with `from None`. Milestone 3 and 4 surface both
+libraries again and have to keep doing the same.
+
+**`McpServerConfig` reads `model_fields_set`**, to tell "my headers are
+ignored" from "my headers are wrong". A row therefore has to be loaded
+with the other transport's fields omitted rather than passed as None or
+empty, or every stdio row fails its own validator.
+
+**SQLAlchemy's error strings carry the statement and its parameters.**
+`DBAPIError.__str__` appends `[SQL: ...] [parameters: ...]`, so the
+repository never quotes it: the message comes from `exc.orig` (the
+sqlite3 text, which is short and parameter-free) or the exception class
+name. No plaintext can reach a parameter today (only envelopes are
+stored), which is why `hide_parameters` was not turned on as well;
+that stays available if a future column ever holds something raw.
+
+**`samtal_server.config` still does not import the database.**
+`config/__init__.py` exports neither `store` nor `cli`, and `main.py`
+imports the command group inside the branch that dispatches to it, so
+serving pulls in neither SQLAlchemy nor Alembic. Worth keeping when
+milestone 4 wires the boot path: import the store where boot needs it,
+not at package import.
+
+### For the milestones that follow
+
+- The switchover's boot order is already implementable: load the file
+  half, `open_database(config.server.database.dir)`, `store.load()`,
+  `verify_secrets(snapshot.secrets)`, compose `Config` from the file
+  half plus `snapshot.domain`, validate, then pass `snapshot.secrets`
+  into `build_agent_providers` and `McpServers.build`. Those two
+  arguments are the whole wiring; both already exist and default to
+  None.
+- The staging notice is `cli.STAGING_NOTICE`, printed by `cli._wrote`,
+  and `test_config_cli.py` pins it on writes and its absence on reads.
+  Milestone 4 removes the constant, the call and that test together,
+  and replaces them with the "applies at the next server start" line.
+- The CLI resolves its database directory with `load_config`, so today
+  a YAML file whose domain half is invalid also blocks the CLI. That
+  converges at the switchover, when the domain half leaves the file;
+  until then it is a wrinkle worth knowing if a checkpoint script fails
+  in a surprising place.
+- `DomainConfig` deliberately duplicates `Config`'s domain fields
+  rather than being mixed into it. Milestone 4 decides whether `Config`
+  composes from a `DomainConfig` instance or copies its fields across;
+  the shared field validators (`check_mcp_entry_names`,
+  `normalize_device_bindings`) already make either safe.
+- Milestone 3's `--help` text is meant to come from the model field
+  descriptions. The CLI's argument help strings are hand-written
+  placeholders today (`"the option it fills, such as api_key"`), and
+  the fragment-shaped commands (`set ...`) are the ones the plan says
+  must derive theirs.

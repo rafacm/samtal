@@ -969,7 +969,8 @@ its section of the implementation doc when written.
   installs it into a scratch environment, and migrates a fresh
   database from the installed artifact alone; both test lanes and
   lint green; no server behavior change.
-- [ ] **Repository and write path** (PR TBD): `config/store.py`
+- [x] **[Repository and write path](2026-08-11-db-domain-config-implementation.md#milestone-2-repository-and-write-path)**
+  (PR TBD): `config/store.py`
   loading rows into the existing pydantic models and writing
   fragments through them with the write-time validation set;
   `config/cli.py` with set, delete, bind-device,
