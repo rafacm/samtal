@@ -31,7 +31,7 @@ from samtal_server.config.loader import (
     StorageError,
     UnknownEntityError,
 )
-from samtal_server.config.secrets import SecretLocation, generate_key
+from samtal_server.config.secrets import SecretLocation, generate_key, load_keys
 from samtal_server.config.store import ConfigStore
 from samtal_server.db import DATABASE_FILENAME, open_database, schema
 
@@ -165,6 +165,54 @@ def test_a_write_that_cannot_take_the_lock_is_a_busy_error(
     # The retryable sentence, unchanged: it is what the CLI prints and
     # what the API's 409 carries.
     assert "Nothing was changed; run the command again." in str(caught.value)
+
+
+def test_no_database_refusal_carries_the_library_exception(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both phases of a request's database access, and both links of the
+    chain. A SQLAlchemy error holds the statement it failed on together
+    with the parameters bound to it, so a refusal that kept it attached
+    would carry them wherever it went: `from exc` says so outright, and
+    `from None` only stops the default traceback printer from saying
+    it."""
+    monkeypatch.setattr(db_module, "BUSY_TIMEOUT_MS", SHORT_BUSY_MS)
+    directory = tmp_path / "db"
+    engine = open_database(directory)
+    holder = _hold_the_write_lock(directory)
+    try:
+        with pytest.raises(ConfigError) as write:
+            ConfigStore(engine).set_agent("sam", {"prompt": "hello"})
+        with pytest.raises(ConfigError) as opening:
+            open_database(directory)
+    finally:
+        holder.close()
+        engine.dispose()
+
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("", encoding="utf-8")
+    with pytest.raises(ConfigError) as unwritable:
+        open_database(blocker / "db")
+
+    for caught in (write, opening, unwritable):
+        assert caught.value.__cause__ is None, caught.value
+        assert caught.value.__context__ is None, caught.value
+    # And the statement the driver was running is not in the message
+    # either, only the driver's own line about what went wrong.
+    assert "BEGIN IMMEDIATE" not in str(opening.value)
+    assert "[SQL:" not in str(opening.value)
+
+
+def test_an_unusable_key_carries_no_library_exception(monkeypatch: pytest.MonkeyPatch) -> None:
+    """What the library was handed is the key material."""
+    monkeypatch.setenv("SAMTAL_MASTER_KEY", "not-a-fernet-key")
+
+    with pytest.raises(ConfigError) as caught:
+        load_keys()
+
+    assert "not-a-fernet-key" not in str(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_an_open_that_cannot_take_the_lock_is_a_busy_error(

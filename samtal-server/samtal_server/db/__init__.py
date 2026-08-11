@@ -50,6 +50,11 @@ def open_database(directory: str | Path) -> Engine:
     ones this has always raised."""
     path = _database_path(Path(directory))
     engine = _create_engine(path)
+    # Built inside the handler and raised outside it: `from exc` (and
+    # `from None`) leave the library's exception reachable from the one
+    # that travels out, and a SQLAlchemy error holds the statement it
+    # failed on together with its bound parameters.
+    problem: ConfigError | None = None
     try:
         _upgrade_to_head(engine)
     except ConfigError:
@@ -57,20 +62,28 @@ def open_database(directory: str | Path) -> Engine:
         raise
     except Exception as exc:
         engine.dispose()
-        raise _failure(
-            exc,
-            f"cannot migrate the database at {path}: {exc}; "
-            f"server.database.dir names the directory it lives in",
-        ) from exc
+        problem = _failure(exc, path)
+    if problem is not None:
+        raise problem
     return engine
 
 
-def _failure(exc: Exception, problem: str) -> ConfigError:
+def _failure(exc: Exception, path: Path) -> ConfigError:
     """The lock that did not arrive inside the busy timeout, told from
     everything else. The distinction is the only one a caller answering
     with a status code needs, and it is made on the driver's own message
-    rather than on ours, which never changes."""
-    detail = str(getattr(exc, "orig", "")) or str(exc)
+    rather than on ours, which never changes.
+
+    That same driver line is what the message carries, deliberately:
+    "database is locked" and "unable to open database file" are what
+    tell an operator which problem this is. Never SQLAlchemy's own text,
+    which wraps the line in the statement and the parameters bound to
+    it."""
+    detail = str(getattr(exc, "orig", "")) or type(exc).__name__
+    problem = (
+        f"cannot migrate the database at {path}: {detail}; "
+        f"server.database.dir names the directory it lives in"
+    )
     if isinstance(exc, OperationalError) and ("locked" in detail or "busy" in detail):
         return DatabaseBusyError(problem)
     return StorageError(problem)
@@ -82,14 +95,17 @@ def _database_path(directory: Path) -> Path:
     than the path alone: the default is /var/lib/samtal, which a
     development machine is not going to let anybody write to, and what
     the reader needs is which key to move."""
+    problem: str | None = None
     try:
         directory.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        raise StorageError(
+        problem = (
             f"cannot create the database directory {directory}: {exc.strerror}; "
             f"set server.database.dir (or SAMTAL_SERVER__DATABASE__DIR) to a "
             f"writable path"
-        ) from None
+        )
+    if problem is not None:
+        raise StorageError(problem)
     # mkdir(exist_ok=True) says nothing about an existing directory being
     # writable, and the first write would otherwise fail somewhere deep
     # inside a migration.

@@ -637,11 +637,15 @@ def _refusal(status: int) -> Callable[[Request, Exception], Any]:
 
     async def handler(request: Request, exc: Exception) -> JSONResponse:
         if status >= 500:
-            # The caller is told nothing beyond the sentence; the
-            # operator needs to know their stored state is unreadable.
+            # One fixed line naming the exception's class, and never the
+            # exception itself: a record's args hold whatever is passed
+            # to them, and an exception object carries its message and
+            # its chain to anything that walks it. The sentence goes to
+            # the caller, which is the channel that was sanitized for
+            # it.
             logger.error(
-                "the configuration API met unreadable stored state: %s",
-                exc,
+                "the configuration API met unreadable stored state (%s)",
+                type(exc).__name__,
                 extra={"event": "api_storage_error"},
             )
         return JSONResponse({"detail": str(exc)}, status_code=status)
