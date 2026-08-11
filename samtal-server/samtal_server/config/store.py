@@ -320,18 +320,16 @@ class ConfigStore:
     def delete_provider(self, stage: str, name: str) -> None:
         stage = _stage(stage)
         with self._transaction() as connection:
-            domain = _read_domain(connection)
-            entries = getattr(domain.providers, stage)
-            if name not in entries:
-                raise UnknownEntityError(f"providers.{stage}.{name}: no such provider")
-            del entries[name]
-            _refuse_unresolved(domain)
             # The row carries its own secrets column, so deleting the
             # entity deletes its stored secrets with it.
-            connection.execute(
-                delete(schema.providers).where(
-                    schema.providers.c.stage == stage, schema.providers.c.name == name
-                )
+            _delete_row(
+                connection,
+                schema.providers,
+                (
+                    schema.providers.c.stage == stage,
+                    schema.providers.c.name == name,
+                ),
+                f"providers.{stage}.{name}: no such provider",
             )
 
     def set_mcp_server(self, name: str, fragment: object) -> None:
@@ -352,13 +350,11 @@ class ConfigStore:
 
     def delete_mcp_server(self, name: str) -> None:
         with self._transaction() as connection:
-            domain = _read_domain(connection)
-            if name not in domain.mcp_servers:
-                raise UnknownEntityError(f"mcp_servers.{name}: no such MCP server")
-            del domain.mcp_servers[name]
-            _refuse_unresolved(domain)
-            connection.execute(
-                delete(schema.mcp_servers).where(schema.mcp_servers.c.name == name)
+            _delete_row(
+                connection,
+                schema.mcp_servers,
+                (schema.mcp_servers.c.name == name,),
+                f"mcp_servers.{name}: no such MCP server",
             )
 
     def set_agent(self, name: str, fragment: object) -> None:
@@ -379,12 +375,12 @@ class ConfigStore:
         """Refused while a device binding or default_agent still names
         it, by the same reference pass every other write runs."""
         with self._transaction() as connection:
-            domain = _read_domain(connection)
-            if name not in domain.agents:
-                raise UnknownEntityError(f"agents.{name}: no such agent")
-            del domain.agents[name]
-            _refuse_unresolved(domain)
-            connection.execute(delete(schema.agents).where(schema.agents.c.name == name))
+            _delete_row(
+                connection,
+                schema.agents,
+                (schema.agents.c.name == name,),
+                f"agents.{name}: no such agent",
+            )
 
     def set_agent_defaults(self, fragment: object) -> None:
         entry = _parse(AgentDefaults, "agent_defaults", fragment)
@@ -413,12 +409,12 @@ class ConfigStore:
     def delete_device(self, mac: str) -> None:
         normalized = _mac(mac)
         with self._transaction() as connection:
-            domain = _read_domain(connection)
-            if normalized not in domain.devices:
-                raise UnknownEntityError(f"devices.{normalized}: no such device")
-            del domain.devices[normalized]
-            _refuse_unresolved(domain)
-            connection.execute(delete(schema.devices).where(schema.devices.c.mac == normalized))
+            _delete_row(
+                connection,
+                schema.devices,
+                (schema.devices.c.mac == normalized,),
+                f"devices.{normalized}: no such device",
+            )
 
     def set_default_agent(self, name: str) -> None:
         name = _identifier("default_agent", name)
@@ -761,6 +757,61 @@ def _layer_values(entry: AgentDefaults) -> dict[str, object]:
     values["mcp"] = list(entry.mcp) if entry.mcp is not None else None
     values["filler"] = entry.filler.model_dump() if entry.filler is not None else None
     return values
+
+
+def _delete_row(
+    connection: Connection,
+    table: Table,
+    where: Sequence[ColumnElement[bool]],
+    missing: str,
+) -> None:
+    """Delete one entity, then check what is left.
+
+    The order is the point, and it is not an optimization. Reading the
+    whole domain first meant validating every row before deleting any,
+    so a row that cannot be loaded (a hand-edited JSON column, a value
+    its model refuses) could not be deleted at all: the load failed on
+    the way to removing the very thing that was failing. That turns the
+    break-glass path into one that cannot open the glass, in exactly the
+    situation it exists for.
+
+    So the row goes first, by identity, and what is validated afterwards
+    is the configuration that remains. Both happen inside the one BEGIN
+    IMMEDIATE this runs in, so a deletion the remaining references refuse
+    is rolled back with the row still there: the check has the same force
+    it had, and the difference is only which state it is asked about.
+
+    Deleting by identity is also what keeps a name no new write could
+    create deletable, since nothing about the row has to be understood to
+    remove it.
+
+    When the remaining configuration cannot be read at all, the check is
+    skipped rather than turned into a refusal, and the reason it is safe
+    is an ordering one: a delete removes a row and can never make a
+    readable domain unreadable, so an unreadable remainder was already
+    unreadable before this delete. The invariant the check protects (a
+    server can always load what is stored) is broken by that other row,
+    not by this deletion, and refusing here would only mean that one
+    unreadable row makes every other entity undeletable, which is the
+    deadlock the break-glass path exists to avoid.
+    """
+    deleted = connection.execute(delete(table).where(*where))
+    if deleted.rowcount == 0:
+        raise UnknownEntityError(missing)
+    remaining = _readable_domain(connection)
+    if remaining is not None:
+        _refuse_unresolved(remaining)
+
+
+def _readable_domain(connection: Connection) -> DomainConfig | None:
+    """The remaining configuration, or None when it cannot be read as
+    configuration at all. Every such failure is a StorageError by
+    construction, which is what makes "cannot be read" a condition this
+    can ask about rather than a guess."""
+    try:
+        return _read_domain(connection)
+    except StorageError:
+        return None
 
 
 def _upsert(

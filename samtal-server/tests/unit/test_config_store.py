@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 from cryptography.fernet import Fernet, MultiFernet
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from samtal_server.config import ConfigError
 from samtal_server.config.loader import StorageError
@@ -410,6 +410,102 @@ def test_a_number_that_is_not_finite_is_refused(store: ConfigStore) -> None:
     # A finite one is exactly as acceptable as it was.
     store.set_provider("llm", "claude", {"type": "anthropic", "temperature": 0.7})
     assert store.read_provider("llm", "claude").entry.options == {"temperature": 0.7}
+
+
+# Deleting what will not load
+#
+# The break-glass case: a row the loader refuses is the row that is
+# keeping the server from starting, so it is the one that has to be
+# removable. A delete that read and validated the whole domain first
+# could not remove it, because the read failed on the way there.
+
+
+def _corrupt_provider(store: ConfigStore, name: str) -> None:
+    """A row whose JSON column holds something no model will load."""
+    with store._engine.begin() as connection:
+        connection.execute(
+            update(schema.providers)
+            .where(schema.providers.c.name == name)
+            .values(options="not an object")
+        )
+
+
+def test_a_row_that_cannot_be_loaded_can_still_be_deleted(store: ConfigStore) -> None:
+    store.set_provider("llm", "claude", {"type": "anthropic", "model": "m"})
+    _corrupt_provider(store, "claude")
+    # It is unreadable, which is what makes this the case that matters.
+    with pytest.raises(ConfigError):
+        store.load()
+
+    store.delete_provider("llm", "claude")
+
+    assert store.load().domain.providers.llm == {}
+
+
+def test_a_row_that_cannot_be_loaded_is_deletable_for_every_kind(
+    store: ConfigStore,
+) -> None:
+    store.set_mcp_server("home", {"transport": "stdio", "command": "uvx"})
+    store.set_agent("sam", {"prompt": "You are Sam."})
+    store.bind_device("aa:bb:cc:dd:ee:ff", ["sam"])
+    with store._engine.begin() as connection:
+        connection.execute(update(schema.mcp_servers).values(env="not an object"))
+        connection.execute(update(schema.agents).values(mcp="not an array"))
+        connection.execute(update(schema.devices).values(agents="not an array"))
+    with pytest.raises(ConfigError):
+        store.load()
+
+    store.delete_device("aa:bb:cc:dd:ee:ff")
+    store.delete_agent("sam")
+    store.delete_mcp_server("home")
+
+    domain = store.load().domain
+    assert domain.mcp_servers == {}
+    assert domain.agents == {}
+    assert domain.devices == {}
+
+
+def test_one_unreadable_row_does_not_make_everything_else_undeletable(
+    store: ConfigStore,
+) -> None:
+    """The deadlock the tolerant check avoids. The reference pass runs on
+    what remains, so an unreadable neighbour would otherwise refuse every
+    delete, including the ones that would clear the way to removing it."""
+    store.set_provider("llm", "claude", {"type": "anthropic", "model": "m"})
+    store.set_agent("sam", {"prompt": "You are Sam.", "llm": "claude"})
+    _corrupt_provider(store, "claude")
+    # Refused while it is still referenced, as it should be.
+    with pytest.raises(ConfigError, match="references unresolved"):
+        store.delete_provider("llm", "claude")
+
+    # The referrer comes out even though its neighbour will not load,
+    # because that neighbour was already unreadable before this delete.
+    store.delete_agent("sam")
+    store.delete_provider("llm", "claude")
+
+    assert store.load().domain.providers.llm == {}
+    assert store.load().domain.agents == {}
+
+
+def test_a_corrupt_row_something_still_references_is_refused(store: ConfigStore) -> None:
+    """The reference check keeps the force it had. The deletion happens
+    first inside the transaction and the check runs on what remains, so a
+    refusal rolls the row back rather than leaving it half removed."""
+    store.set_provider("llm", "claude", {"type": "anthropic", "model": "m"})
+    store.set_agent("sam", {"prompt": "You are Sam.", "llm": "claude"})
+    _corrupt_provider(store, "claude")
+
+    with pytest.raises(ConfigError) as caught:
+        store.delete_provider("llm", "claude")
+
+    assert "references unresolved" in str(caught.value)
+    # Nothing changed: the row is still there, still unreadable, which is
+    # the rollback doing its work inside the one transaction.
+    with store._engine.begin() as connection:
+        rows = connection.execute(select(schema.providers.c.name)).scalars().all()
+        options = connection.execute(select(schema.providers.c.options)).scalars().all()
+    assert list(rows) == ["claude"]
+    assert list(options) == ["not an object"]
 
 
 def test_a_value_json_cannot_carry_is_refused(store: ConfigStore) -> None:
