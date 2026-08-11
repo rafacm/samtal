@@ -303,10 +303,21 @@ moved (`providers: moved to the database; write it with
 samtal-server config set provider ...`), raised from the loader's
 existing pre-flight check where the parsed top level is already in
 hand. A `SAMTAL_`-prefixed environment override for a domain key
-gets the same treatment: the file-half settings model rejects
-unknown keys, and the loader maps the rejection for known domain
-names onto the same moved-to-the-database wording, so a stale
-deployment variable fails loudly instead of silently not applying.
+gets the same treatment, and not through pydantic:
+pydantic-settings' environment source looks up known fields and
+ignores unmatched prefixed variables even under `extra="forbid"`,
+so a stale `SAMTAL_DEFAULT_AGENT` would silently stop applying.
+The loader therefore scans `os.environ` itself for the removed
+domain names under the `SAMTAL_` prefix, bare and in their
+`__`-nested forms (`SAMTAL_PROVIDERS__...`, `SAMTAL_AGENTS__...`,
+`SAMTAL_MCP_SERVERS__...`, `SAMTAL_AGENT_DEFAULTS__...`,
+`SAMTAL_DEVICES__...`, `SAMTAL_DEFAULT_AGENT`), and raises the
+same moved-to-the-database error naming the variable. Reserved
+non-config variables (`SAMTAL_CONFIG`, `SAMTAL_MASTER_KEY`, and
+value-carrying variables a config key references by name, such as
+`SAMTAL_AUTH_SECRET`) are outside the scan by construction, since
+the scan matches domain key names only. One test per removed
+domain prefix pins the scan.
 
 The `local_only` egress check, provider building, MCP connection,
 and everything downstream read the composed `Config` exactly as
@@ -551,6 +562,12 @@ addressing it lands.
    scan `os.environ` for the removed domain prefixes, including
    nested `__` forms, while allowing reserved variables, with one
    test per removed prefix.
+   *Resolution*: the composition section no longer relies on
+   `extra="forbid"` for environment variables; the loader scans
+   `os.environ` for the six removed domain names, bare and
+   `__`-nested, and raises the moved-to-the-database error naming
+   the variable, with reserved variables outside the scan by
+   construction and one test per removed prefix.
 3. **P1: the switchover cannot keep the current container and
    smoke CI green.** The image runs as an unprivileged user with
    `/data` as its writable volume; `/var/lib/samtal` is neither
