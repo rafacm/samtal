@@ -1,9 +1,17 @@
-"""Pydantic models for the samtal-server YAML configuration.
+"""Pydantic models for the samtal-server configuration.
 
-Top-level keys: server, providers, mcp_servers, agent_defaults, agents,
-devices, default_agent, memory. Secrets are referenced by environment
-variable name (for example api_key_env, or a $VAR value in an MCP
-server's env and headers), never written inline.
+The configuration has two halves. `FileConfig` is the half the YAML file
+holds, `server` and `memory`, with the SAMTAL_ environment overrides
+pydantic-settings gives it. The domain half (providers, mcp_servers,
+agent_defaults, agents, devices, default_agent) lives in the database
+and is written with `samtal-server config`. `Config` is the composition
+of the two, which is what the server boots from and what every call site
+reads.
+
+Secrets are referenced by environment variable name (for example
+api_key_env, or a $VAR value in an MCP server's env and headers), never
+written inline; the other form is a value encrypted in the database,
+which no model here ever carries.
 """
 
 import os
@@ -845,6 +853,12 @@ DOMAIN_DESCRIPTIONS: dict[str, str] = {
     ),
 }
 
+# The six sections that live in the database rather than in the file, in
+# the order they are written and read. Derived from the descriptions
+# above rather than restated, so a section cannot be documented and then
+# forgotten by the composition (or the other way round).
+DOMAIN_KEYS: tuple[str, ...] = tuple(DOMAIN_DESCRIPTIONS)
+
 
 class DomainSnapshot(Protocol):
     """The domain half of a configuration, whatever is holding it.
@@ -944,13 +958,33 @@ def check_completeness(snapshot: DomainSnapshot) -> list[str]:
     return problems
 
 
+def domain_fields(snapshot: DomainSnapshot) -> dict[str, object]:
+    """The six domain sections of a snapshot, by name.
+
+    What composition passes to `Config`: the models themselves rather
+    than a dump of them, because a round trip through a dump would set
+    fields the entity deliberately left unset (an McpServerConfig reads
+    `model_fields_set` to tell "my headers are ignored" from "my headers
+    are wrong")."""
+    return {key: getattr(snapshot, key) for key in DOMAIN_KEYS}
+
+
 # The YAML file the settings source should read, set by the loader around
 # instantiation. pydantic-settings has no init kwarg for a runtime-chosen
 # path yet (pydantic-settings#259).
 yaml_file_var: ContextVar[Path | None] = ContextVar("samtal_yaml_file", default=None)
 
 
-class Config(BaseSettings):
+class FileConfig(BaseSettings):
+    """The half of the configuration the YAML file holds.
+
+    `server` and `memory` only: the domain half moved to the database,
+    and a file that still names it is refused by the loader with the
+    command that writes it instead. The SAMTAL_ environment overrides are
+    unchanged for what is left (SAMTAL_SERVER__PORT keeps working), which
+    is why this is still a settings model and `Config` is not.
+    """
+
     model_config = SettingsConfigDict(
         extra="forbid",
         env_prefix="SAMTAL_",
@@ -972,6 +1006,23 @@ class Config(BaseSettings):
             YamlConfigSettingsSource(settings_cls, yaml_file=yaml_file_var.get()),
             file_secret_settings,
         )
+
+    server: ServerConfig = Field(default_factory=ServerConfig)
+    memory: MemoryConfig | None = None
+
+
+class Config(BaseModel):
+    """The whole configuration one server boots on: the file half plus
+    the domain half the database holds.
+
+    Composed rather than loaded, since its two halves come from two
+    places, and it keeps its name, its attribute paths, its helper
+    methods and its boot-time validator so that everything downstream of
+    it reads the configuration exactly as it did when one file held all
+    of it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     server: ServerConfig = Field(default_factory=ServerConfig)
     providers: ProvidersConfig = Field(

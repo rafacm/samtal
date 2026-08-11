@@ -4,12 +4,20 @@ Every test here runs a real server on an ephemeral port and talks to it
 with xiaozhi-sdk as the device, on mock providers, so the lane needs no
 keys, no models, and no network. The pieces two or more test modules
 need live here as fixtures rather than being imported across modules.
+
+A test writes the configuration it is about as a `Config`, and the
+server it gets is booted the way a deployment boots: the domain half is
+written into a scratch database through the repository, read back, and
+composed onto the file half again. So every scenario in this lane also
+covers the round trip through the database, and a test says what it is
+about rather than how the configuration is stored.
 """
 
 import asyncio
 import contextlib
 import math
 import struct
+import tempfile
 from collections.abc import Sequence
 from typing import Any
 
@@ -19,11 +27,71 @@ import uvicorn
 from xiaozhi_sdk import XiaoZhiWebsocket
 
 from samtal_server.app import create_app
-from samtal_server.config import Config
+from samtal_server.config import Config, FileConfig, compose_config
+from samtal_server.config.models import (
+    PROVIDER_STAGES,
+    AgentConfig,
+    AgentDefaults,
+    McpServerConfig,
+    ProviderConfig,
+    domain_fields,
+)
+from samtal_server.config.store import ConfigStore, Snapshot
+from samtal_server.db import open_database
 
 SAMPLE_RATE = 16000
 FRAME_MS = 60
 FRAME_BYTES = SAMPLE_RATE * FRAME_MS // 1000 * 2
+
+
+def booted(config: Config):
+    """The app the server would serve, from the same configuration after
+    a round trip through a database of this test's own.
+
+    The fragments are the entities the test wrote, dumped as the fields
+    it set, which is exactly what a fragment is. The order is the one
+    the write-time reference checks require. The database is gone by the
+    time the app exists, which is true of a real boot too: the
+    configuration is read once and the file is not consulted again."""
+    with tempfile.TemporaryDirectory() as directory:
+        engine = open_database(directory)
+        try:
+            snapshot = _seeded(ConfigStore(engine), config)
+        finally:
+            engine.dispose()
+    composed = compose_config(
+        FileConfig(server=config.server, memory=config.memory),
+        domain_fields(snapshot.domain),
+        "the test's scratch database",
+    )
+    return create_app(composed, snapshot.secrets)
+
+
+def _seeded(store: ConfigStore, config: Config) -> Snapshot:
+    for stage in PROVIDER_STAGES:
+        for name, entry in getattr(config.providers, stage).items():
+            store.set_provider(stage, name, _fragment(entry))
+    for name, server in config.mcp_servers.items():
+        store.set_mcp_server(name, _fragment(server))
+    store.set_agent_defaults(_fragment(config.agent_defaults))
+    for name, agent in config.agents.items():
+        store.set_agent(name, _fragment(agent))
+    for mac, bound in config.devices.items():
+        store.bind_device(mac, bound)
+    if config.default_agent is not None:
+        store.set_default_agent(config.default_agent)
+    return store.load()
+
+
+def _fragment(
+    entry: ProviderConfig | McpServerConfig | AgentConfig | AgentDefaults,
+) -> dict[str, Any]:
+    """One entity as the document that writes it: the fields it set and
+    nothing else. Never a full dump, which would name the fields the
+    entity deliberately left unset and fail its own validator (an MCP
+    server reads `model_fields_set` to tell "my headers are ignored"
+    from "my headers are wrong")."""
+    return entry.model_dump(exclude_unset=True)
 
 
 @contextlib.asynccontextmanager
@@ -32,7 +100,7 @@ async def running_app(config: Config):
     it serves, torn down on the way out. The app is what a test needs
     when it has to reach server-side state (the session registry) that a
     device could not."""
-    app = create_app(config)
+    app = booted(config)
     server = uvicorn.Server(
         uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning")
     )

@@ -33,7 +33,7 @@ from typing import NoReturn
 import yaml
 
 from samtal_server.config import docgen
-from samtal_server.config.loader import CONFIG_ENV_VAR, ConfigError, load_config
+from samtal_server.config.loader import CONFIG_ENV_VAR, ConfigError, load_file_config
 from samtal_server.config.models import (
     PROVIDER_STAGES,
     AgentDefaults,
@@ -582,7 +582,7 @@ def _database_dir(args: argparse.Namespace) -> Path:
     settings machinery the server reads it with, so the two cannot
     disagree. No configuration file has to exist: without one the field
     default and the SAMTAL_ environment are the whole answer."""
-    return load_config(args.config).server.database.dir
+    return load_file_config(args.config).server.database.dir
 
 
 def _provider_entry(domain: DomainConfig, stage: str, name: str) -> ProviderConfig:

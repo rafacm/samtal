@@ -1,10 +1,17 @@
-"""Configuration: pydantic models loaded from one YAML file plus env overrides."""
+"""Configuration: the file half's models, and the composition of the whole.
 
-from samtal_server.config.loader import ConfigError, load_config
+Deliberately without the boot path (`samtal_server.config.boot`) and the
+repository behind it: importing this package pulls in neither the
+database driver nor the migrations, so a command that only renders the
+models keeps needing neither.
+"""
+
+from samtal_server.config.loader import ConfigError, compose_config, load_file_config
 from samtal_server.config.models import (
     AgentConfig,
     AgentDefaults,
     Config,
+    FileConfig,
     McpServerConfig,
     MemoryConfig,
     ProviderConfig,
@@ -18,11 +25,13 @@ __all__ = [
     "AgentDefaults",
     "Config",
     "ConfigError",
+    "FileConfig",
     "McpServerConfig",
     "MemoryConfig",
     "ProviderConfig",
     "ProvidersConfig",
     "ServerConfig",
-    "load_config",
+    "compose_config",
+    "load_file_config",
     "resolve_env_references",
 ]

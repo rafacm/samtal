@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from samtal_server.config import Config, ConfigError, load_config
-from samtal_server.config.models import normalize_mac
+from samtal_server.config import Config, ConfigError, compose_config, load_file_config
+from samtal_server.config.models import DOMAIN_KEYS, normalize_mac
 
 EXAMPLE_CONFIG = Path(__file__).parents[2] / "config.example.yaml"
 DEPLOY_EXAMPLE_CONFIG = Path(__file__).parents[2] / "config.deploy.example.yaml"
@@ -30,79 +30,46 @@ def write_config(tmp_path: Path, text: str) -> Path:
 
 
 def test_example_config_parses() -> None:
-    config = load_config(EXAMPLE_CONFIG)
-    assert config.default_agent == "assistant"
-    assert config.providers.llm["claude"].type == "anthropic"
-    assert config.providers.llm["claude"].api_key_env == "ANTHROPIC_API_KEY"
-    # The assistant inherits its LLM and overrides its voice; the
-    # storyteller overrides both.
-    assert config.provider_for_agent("assistant", "llm") == ("claude", "agent_defaults.llm")
-    assert config.provider_for_agent("assistant", "tts") == ("piper", "agents.assistant.tts")
-    assert config.provider_for_agent("storyteller", "llm") == ("local", "agents.storyteller.llm")
-    assert config.devices["aa:bb:cc:dd:ee:ff"] == ["assistant"]
-    assert config.agents_for_device("11:22:33:44:55:66") == ["storyteller", "assistant"]
-
-
-SMOKE_SLIM_CONFIG = Path(__file__).parents[1] / "smoke" / "config.slim.yaml"
-SMOKE_LOCAL_ENGINES_CONFIG = Path(__file__).parents[1] / "smoke" / "config.local-engines.yaml"
-
-
-def test_the_slim_boot_config_names_no_local_engine() -> None:
-    """The slim image's boot check is only a check if its config would
-    actually fail on an image without the extras. A local engine
-    creeping in here would make it pass for the wrong reason."""
-    config = load_config(SMOKE_SLIM_CONFIG)
-    local = {"faster_whisper", "piper"}
-    for stage in ("asr", "tts", "llm"):
-        for name, entry in getattr(config.providers, stage).items():
-            assert entry.type not in local, f"{stage}.{name} is a local engine"
-    # silero is the deliberate exception: a core dependency, in both
-    # variants, running on every frame whichever ASR is configured.
-    assert config.providers.vad["silero"].type == "silero"
-
-
-def test_the_local_engine_config_really_names_one() -> None:
-    """And the negative check is only a check if its config would boot
-    on the default image and fail on slim."""
-    config = load_config(SMOKE_LOCAL_ENGINES_CONFIG)
-    assert config.providers.asr["whisper"].type == "faster_whisper"
+    """The example file is the server half now: what it documents is how
+    the process runs and where it keeps things. The domain half it used
+    to carry lives in the database, and the example fragments under
+    examples/ are what tests/unit/test_config_examples.py runs."""
+    config = load_file_config(EXAMPLE_CONFIG)
+    assert config.server.host == "0.0.0.0"
+    assert config.server.port == 8003
+    assert config.memory is not None
+    assert config.memory.dir == Path("/var/lib/samtal/memory")
 
 
 def test_deploy_example_config_parses() -> None:
-    config = load_config(DEPLOY_EXAMPLE_CONFIG)
+    config = load_file_config(DEPLOY_EXAMPLE_CONFIG)
     # The deployment profile sets what a plain LAN run leaves defaulted.
     assert config.server.websocket_url == "wss://voice.example.com/xiaozhi/v1/"
     assert config.server.auth.enabled is True
-    whisper = config.providers.asr["whisper"]
-    assert whisper.type == "faster_whisper"
-    assert whisper.options["vad_filter"] is True
-    assert whisper.options["language_detect"] == "once"
-    # No default_agent: the devices map is an allowlist, and an
-    # unknown device resolves to no agent at all.
-    assert config.default_agent is None
-    assert config.agents_for_device("ff:ff:ff:ff:ff:ff") == []
     # Memory sits on the data volume, the writable place in the image.
     assert config.memory is not None
     assert config.memory.dir == Path("/data/memory")
 
 
 def test_no_config_gives_defaults() -> None:
-    config = load_config()
+    config = load_file_config()
     assert config.server.host == "0.0.0.0"
     assert config.server.port == 8003
-    assert config.agents == {}
-    assert config.default_agent is None
+    # And the other half of the same default: an empty database.
+    empty = load_config_from_data({})
+    assert empty.agents == {}
+    assert empty.default_agent is None
 
 
 def test_ota_server_settings_have_defaults() -> None:
-    config = load_config()
+    config = load_file_config()
     assert config.server.websocket_url is None
     assert config.server.protocol_version == 1
     assert config.server.timezone_offset_minutes is None
 
 
 def test_limits_have_defaults() -> None:
-    limits = load_config().server.limits
+    limits = load_file_config().server.limits
     assert limits.max_sessions == 8
     assert limits.max_session_s == 3600
     assert limits.idle_timeout_s == 120
@@ -135,7 +102,7 @@ def test_capture_is_off_until_it_is_enabled() -> None:
 
 
 def test_the_example_config_ships_capture_switched_off() -> None:
-    capture = load_config(EXAMPLE_CONFIG).server.capture
+    capture = load_file_config(EXAMPLE_CONFIG).server.capture
     assert capture is not None, "the example lost its capture section"
     assert capture.enabled is False, "the example config would record room audio"
 
@@ -148,7 +115,7 @@ def test_capture_needs_somewhere_to_write_even_when_disabled() -> None:
 
 
 def test_ota_path_defaults_to_the_documented_one() -> None:
-    assert load_config().server.ota_path == "/xiaozhi/ota/"
+    assert load_file_config().server.ota_path == "/xiaozhi/ota/"
 
 
 def test_a_custom_ota_path_is_accepted_and_stripped() -> None:
@@ -166,7 +133,7 @@ def test_an_ota_path_without_both_slashes_is_rejected(path: str) -> None:
 
 
 def test_logging_settings_have_defaults() -> None:
-    config = load_config()
+    config = load_file_config()
     assert config.server.log_format == "text"
     assert config.server.log_level == "INFO"
 
@@ -214,7 +181,7 @@ def test_config_path_from_environment(
 ) -> None:
     path = write_config(tmp_path, "server:\n  port: 9000\n")
     monkeypatch.setenv("SAMTAL_CONFIG", str(path))
-    assert load_config().server.port == 9000
+    assert load_file_config().server.port == 9000
 
 
 def test_the_database_directory_defaults_and_is_overridable(
@@ -222,13 +189,13 @@ def test_the_database_directory_defaults_and_is_overridable(
 ) -> None:
     """The CLI reads this key through the same settings machinery the
     server does, so a deployment names its database directory once."""
-    assert load_config().server.database.dir == Path("/var/lib/samtal")
+    assert load_file_config().server.database.dir == Path("/var/lib/samtal")
 
     path = write_config(tmp_path, "server:\n  database:\n    dir: /data/db\n")
-    assert load_config(path).server.database.dir == Path("/data/db")
+    assert load_file_config(path).server.database.dir == Path("/data/db")
 
     monkeypatch.setenv("SAMTAL_SERVER__DATABASE__DIR", str(tmp_path / "var"))
-    assert load_config(path).server.database.dir == tmp_path / "var"
+    assert load_file_config(path).server.database.dir == tmp_path / "var"
 
 
 def test_env_overrides_beat_the_file(
@@ -237,7 +204,7 @@ def test_env_overrides_beat_the_file(
     path = write_config(tmp_path, "server:\n  host: 10.0.0.1\n  port: 9000\n")
     monkeypatch.setenv("SAMTAL_SERVER__HOST", "127.0.0.1")
     monkeypatch.setenv("SAMTAL_SERVER__PORT", "9100")
-    config = load_config(path)
+    config = load_file_config(path)
     assert config.server.host == "127.0.0.1"
     assert config.server.port == 9100
 
@@ -247,20 +214,9 @@ def test_partial_env_override_keeps_file_values(
 ) -> None:
     path = write_config(tmp_path, "server:\n  host: 10.0.0.1\n  port: 9000\n")
     monkeypatch.setenv("SAMTAL_SERVER__PORT", "9100")
-    config = load_config(path)
+    config = load_file_config(path)
     assert config.server.host == "10.0.0.1"
     assert config.server.port == 9100
-
-
-def test_any_top_level_key_is_env_overridable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    path = write_config(
-        tmp_path,
-        "agents:\n  assistant: {}\n  other: {}\ndefault_agent: assistant\n",
-    )
-    monkeypatch.setenv("SAMTAL_DEFAULT_AGENT", "other")
-    assert load_config(path).default_agent == "other"
 
 
 def test_non_numeric_port_override_reports_location(
@@ -268,30 +224,30 @@ def test_non_numeric_port_override_reports_location(
 ) -> None:
     monkeypatch.setenv("SAMTAL_SERVER__PORT", "not-a-port")
     with pytest.raises(ConfigError, match=r"server\.port"):
-        load_config()
+        load_file_config()
 
 
 def test_missing_file_names_the_path(tmp_path: Path) -> None:
     with pytest.raises(ConfigError, match="config file not found"):
-        load_config(tmp_path / "absent.yaml")
+        load_file_config(tmp_path / "absent.yaml")
 
 
 def test_yaml_syntax_error_reports_line(tmp_path: Path) -> None:
     path = write_config(tmp_path, "server:\n  port: 9000\n bad-indent: 1\n")
     with pytest.raises(ConfigError, match=r"invalid YAML .* line 3"):
-        load_config(path)
+        load_file_config(path)
 
 
 def test_non_mapping_top_level_is_rejected(tmp_path: Path) -> None:
     path = write_config(tmp_path, "- just\n- a\n- list\n")
     with pytest.raises(ConfigError, match="top level must be a mapping"):
-        load_config(path)
+        load_file_config(path)
 
 
 def test_unknown_top_level_key_is_rejected(tmp_path: Path) -> None:
     path = write_config(tmp_path, "serverr:\n  port: 9000\n")
     with pytest.raises(ConfigError, match="serverr"):
-        load_config(path)
+        load_file_config(path)
 
 
 def test_default_agent_must_be_defined() -> None:
@@ -561,8 +517,16 @@ def test_multiple_problems_reported_together() -> None:
 
 
 def load_config_from_data(data: dict) -> Config:
-    """Run a raw mapping through the real loader via a temporary YAML file."""
+    """One mapping through the whole boot composition: the server half
+    written to a temporary YAML file and read by the real loader, the
+    domain half composed onto it the way the database's snapshot is.
+
+    Two halves, one call, because these tests are about what a
+    configuration means rather than about where each half was kept, and
+    they said the same thing when one file held both."""
+    file_data = {key: value for key, value in data.items() if key not in DOMAIN_KEYS}
+    domain_data = {key: value for key, value in data.items() if key in DOMAIN_KEYS}
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "config.yaml"
-        path.write_text(yaml.safe_dump(data), encoding="utf-8")
-        return load_config(path)
+        path.write_text(yaml.safe_dump(file_data), encoding="utf-8")
+        return compose_config(load_file_config(path), domain_data, str(path))

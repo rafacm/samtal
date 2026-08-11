@@ -73,9 +73,11 @@ def test_auth_can_be_turned_off_through_the_environment(
     """The one-flag LAN opt-out, over the ordinary env override path."""
     monkeypatch.delenv(SECRET_ENV, raising=False)
     monkeypatch.setenv("SAMTAL_SERVER__AUTH__ENABLED", "false")
-    from samtal_server.config import load_config
+    from samtal_server.config import Config, load_file_config
 
-    config = load_config()
+    # Read as the file half, which is where the auth section lives, and
+    # composed onto an empty domain half the way boot composes it.
+    config = Config(server=load_file_config().server)
     assert config.server.auth.enabled is False
     assert build_device_auth(config) is None
 

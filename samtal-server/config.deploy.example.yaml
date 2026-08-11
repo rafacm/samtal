@@ -1,18 +1,25 @@
 # samtal-server deployment example: the container image behind a
 # TLS-terminating proxy, on a small CPU quota. Where config.example.yaml
-# is the reference that documents every key, this file sets only what a
-# deployment should decide, with values validated by latency
+# is the reference that documents every server-half key, this file sets
+# only what a deployment should decide, with values validated by latency
 # measurements from a live deployment. Take it as the starting point
-# and adapt the names, agents and devices.
+# and adapt it.
+#
+# The file is the server half. The domain half of this same profile
+# (the providers it runs on, its agent and its device binding) is
+# written into the database with `samtal-server config`, and the
+# commands that write it are at the bottom of this file, with the same
+# measured values and the reasoning behind each one.
 #
 # The published image already reads its config from /config/config.yaml,
-# sends every model cache to the /data volume (HOME=/data), and defaults
-# its logs to the json format, so none of that appears here. Secrets
-# never live in this file: the keys below name environment variables,
-# and the deployment provides them.
+# keeps its database on the /data volume
+# (SAMTAL_SERVER__DATABASE__DIR=/data/db), sends every model cache there
+# too (HOME=/data), and defaults its logs to the json format, so none of
+# that appears here. Secrets never live in this file: the keys below
+# name environment variables, and the deployment provides them.
 #
-# This file assumes the DEFAULT image variant, the unsuffixed tags: it
-# configures faster_whisper for ASR and piper for TTS, and the slim
+# This profile assumes the DEFAULT image variant, the unsuffixed tags:
+# it configures faster_whisper for ASR and piper for TTS, and the slim
 # variant carries neither and would refuse to start on it. A deployment
 # whose ASR and TTS both name external providers can use the slim
 # variant instead and save about 390 MB.
@@ -61,10 +68,11 @@ server:
   # inside the refractory window after playback starts, and past both
   # the reply is paused and cancelled only when ASR transcribes actual
   # words. When room noise or playback bleed still cuts replies short,
-  # raise the floor first. The companion knob is the VAD threshold
-  # under providers.vad below: raising it makes the endpointer
-  # stricter about what counts as speech in the first place, so less
-  # noise ever reaches these gates.
+  # raise the floor first. The companion knob is the threshold on the
+  # silero provider entry (written with the commands at the bottom of
+  # this file): raising it makes the endpointer stricter about what
+  # counts as speech in the first place, so less noise ever reaches
+  # these gates.
   # barge_in_min_speech_ms: 500
   # barge_in_refractory_ms: 1000
 
@@ -90,76 +98,6 @@ server:
   # the drain itself, so it needs its own -t raised.
   drain_s: 20
 
-providers:
-  llm:
-    claude:
-      type: anthropic
-      model: claude-sonnet-5
-      # The environment variable holding the key, never the key.
-      api_key_env: ANTHROPIC_API_KEY
-
-  asr:
-    whisper:
-      type: faster_whisper
-      # Weights download into /data at first start, so the first boot
-      # takes minutes and later ones seconds.
-      model: small
-      device: cpu
-      compute_type: int8
-      # The engine sizes its thread pool from the host's core count and
-      # ignores container CPU quotas: set this to the quota, and keep
-      # the two moving together, because drift between them is exactly
-      # the throttling this key exists to prevent. A non-zero value
-      # overrides OMP_NUM_THREADS for this engine; the variable still
-      # steers the process's other native libraries.
-      cpu_threads: 3
-      # Strip non-speech inside the ASR call before decoding. Cuts both
-      # latency and hallucinations on silence-padded utterances.
-      vad_filter: true
-      # Feeding each window's text into the next is the documented
-      # cause of repetition loops; false is the standard mitigation.
-      condition_on_previous_text: false
-      # A short fallback ladder for failed decodes. The engine's
-      # six-step default can retry one bad utterance six times over,
-      # and a voice UI feels that worst case.
-      temperature: [0.0, 0.2]
-      # Detect the language once per session and reuse the first
-      # confident answer, so later turns skip the whole detection pass.
-      # Below the floor the guess is distrusted: the utterance decodes
-      # as the fallback language instead, and nothing is locked. Keep
-      # the fallback a language the agent's voice speaks: whatever is
-      # decoded, that one voice renders it.
-      language_detect: once
-      language_confidence_floor: 0.6
-      language_fallback: sv
-
-  tts:
-    piper:
-      type: piper
-      # Voice name from the Piper voice collection, downloaded into
-      # /data at first start.
-      voice: sv_SE-nst-medium
-
-  vad:
-    silero:
-      type: silero
-      # Speech probability threshold, default shown. In a noisy room
-      # this is the companion knob to the server's barge-in gates:
-      # raise it toward 0.6 or 0.7 so less noise counts as speech at
-      # all, instead of leaning on the gates to catch it later.
-      # threshold: 0.5
-      #
-      # The silence that ends an utterance, and the biggest remaining
-      # deployment-decided latency knob: it sits directly in front of
-      # every reply. 500 to 600 is a meaningful cut from the 700
-      # default; the trade is clipping slow speakers mid-sentence.
-      # Caution: the shorter this gets, the more sentences endpoint at
-      # a mid-sentence pause. The barge-in merge stitches a chopped
-      # sentence back together, but only by restarting the reply, so
-      # do not shorten this further in a deployment that interrupts
-      # too much already.
-      # trailing_silence_ms: 600
-
 # Facts agents remember between conversations. Removing this section
 # removes the remember tool with it. The directory sits on the data
 # volume, the one place a container running a read-only root
@@ -167,26 +105,102 @@ providers:
 memory:
   dir: /data/memory
 
-agent_defaults:
-  llm: claude
-  asr: whisper
-  vad: silero
-
-agents:
-  assistant:
-    # State the reply language explicitly: models otherwise pick one by
-    # their training bias.
-    prompt: >
-      You are a helpful voice assistant. Keep replies short, plain, and
-      speakable: one or two sentences, no lists, no markdown. Always
-      reply in the language the user spoke.
-    tts: piper
-
-# Devices are bound by the MAC address they send as Device-Id. There
-# is deliberately no default_agent: omitting it is what turns this map
-# into an allowlist, so an unknown device resolves to no agent, is
-# issued no token, and is refused at the handshake. With the OTA
-# endpoint guarded only by its unguessable path, a publicly exposed
-# deployment wants that refusal.
-devices:
-  "aa:bb:cc:dd:ee:ff": assistant
+# The domain half of this profile, written into the database. Run these
+# once against the deployment's data volume, with the same
+# SAMTAL_SERVER__DATABASE__DIR the server uses; each write applies at
+# the next server start. The order matters: a write whose references do
+# not resolve is refused, so providers come before the agent defaults,
+# and the agent before the device bound to it.
+#
+#   samtal-server config set provider llm claude -f - <<'YAML'
+#   type: anthropic
+#   model: claude-sonnet-5
+#   # The environment variable holding the key, never the key.
+#   api_key_env: ANTHROPIC_API_KEY
+#   YAML
+#
+#   samtal-server config set provider asr whisper -f - <<'YAML'
+#   type: faster_whisper
+#   # Weights download into /data at first start, so the first boot
+#   # takes minutes and later ones seconds.
+#   model: small
+#   device: cpu
+#   compute_type: int8
+#   # The engine sizes its thread pool from the host's core count and
+#   # ignores container CPU quotas: set this to the quota, and keep the
+#   # two moving together, because drift between them is exactly the
+#   # throttling this key exists to prevent. A non-zero value overrides
+#   # OMP_NUM_THREADS for this engine; the variable still steers the
+#   # process's other native libraries.
+#   cpu_threads: 3
+#   # Strip non-speech inside the ASR call before decoding. Cuts both
+#   # latency and hallucinations on silence-padded utterances.
+#   vad_filter: true
+#   # Feeding each window's text into the next is the documented cause
+#   # of repetition loops; false is the standard mitigation.
+#   condition_on_previous_text: false
+#   # A short fallback ladder for failed decodes. The engine's six-step
+#   # default can retry one bad utterance six times over, and a voice UI
+#   # feels that worst case.
+#   temperature: [0.0, 0.2]
+#   # Detect the language once per session and reuse the first confident
+#   # answer, so later turns skip the whole detection pass. Below the
+#   # floor the guess is distrusted: the utterance decodes as the
+#   # fallback language instead, and nothing is locked. Keep the
+#   # fallback a language the agent's voice speaks: whatever is decoded,
+#   # that one voice renders it.
+#   language_detect: once
+#   language_confidence_floor: 0.6
+#   language_fallback: sv
+#   YAML
+#
+#   samtal-server config set provider tts piper -f - <<'YAML'
+#   type: piper
+#   # Voice name from the Piper voice collection, downloaded into /data
+#   # at first start.
+#   voice: sv_SE-nst-medium
+#   YAML
+#
+#   samtal-server config set provider vad silero -f - <<'YAML'
+#   type: silero
+#   # Speech probability threshold, default 0.5. In a noisy room this is
+#   # the companion knob to the server's barge-in gates: raise it toward
+#   # 0.6 or 0.7 so less noise counts as speech at all, instead of
+#   # leaning on the gates to catch it later.
+#   # threshold: 0.5
+#   #
+#   # The silence that ends an utterance, and the biggest remaining
+#   # deployment-decided latency knob: it sits directly in front of
+#   # every reply. 500 to 600 is a meaningful cut from the 700 default;
+#   # the trade is clipping slow speakers mid-sentence. Caution: the
+#   # shorter this gets, the more sentences endpoint at a mid-sentence
+#   # pause. The barge-in merge stitches a chopped sentence back
+#   # together, but only by restarting the reply, so do not shorten this
+#   # further in a deployment that interrupts too much already.
+#   # trailing_silence_ms: 600
+#   YAML
+#
+#   samtal-server config set agent-defaults -f - <<'YAML'
+#   llm: claude
+#   asr: whisper
+#   vad: silero
+#   YAML
+#
+#   samtal-server config set agent assistant -f - <<'YAML'
+#   # State the reply language explicitly: models otherwise pick one by
+#   # their training bias.
+#   prompt: >
+#     You are a helpful voice assistant. Keep replies short, plain, and
+#     speakable: one or two sentences, no lists, no markdown. Always
+#     reply in the language the user spoke.
+#   tts: piper
+#   YAML
+#
+#   samtal-server config bind-device aa:bb:cc:dd:ee:ff assistant
+#
+# Devices are bound by the MAC address they send as Device-Id. There is
+# deliberately no default agent: leaving it unset is what turns the
+# device bindings into an allowlist, so an unknown device resolves to
+# no agent, is issued no token, and is refused at the handshake. With
+# the OTA endpoint guarded only by its unguessable path, a publicly
+# exposed deployment wants that refusal.

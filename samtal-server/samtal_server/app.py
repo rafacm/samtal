@@ -8,7 +8,9 @@ from samtal_server import __version__, ota, ws
 from samtal_server.auth import build_device_auth
 from samtal_server.build_info import revision
 from samtal_server.capture import CaptureStore, DeviceFacts
-from samtal_server.config import Config, load_config
+from samtal_server.config import Config
+from samtal_server.config.boot import load_boot_config
+from samtal_server.config.secrets import SecretStore
 from samtal_server.filler import build_agent_fillers
 from samtal_server.providers import build_agent_providers
 from samtal_server.registry import SessionRegistry
@@ -40,10 +42,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await app.state.mcp_servers.stop_all()
 
 
-def create_app(config: Config | None = None) -> FastAPI:
-    """Build the ASGI app. Without a config the file named by SAMTAL_CONFIG
-    is loaded, which is what an external ASGI server gets; the CLI loads the
-    config itself (it also honours --config) and passes it in."""
+def create_app(config: Config | None = None, secrets: SecretStore | None = None) -> FastAPI:
+    """Build the ASGI app. Without a config the whole boot configuration is
+    read here (the file named by SAMTAL_CONFIG plus the domain half from the
+    database), which is what an external ASGI server gets; the CLI reads it
+    itself (it also honours --config) and passes both halves in.
+
+    `secrets` are the stored credentials the snapshot was loaded with,
+    None for a configuration whose credentials are all environment
+    references. They reach exactly the two places a credential is
+    materialized: building a provider, and connecting an MCP server."""
     # No interactive docs, no schema. A device needs two paths and a
     # healthcheck needs a third; publishing an API description of them to
     # anyone who asks is surface with no reader, and the security default
@@ -56,7 +64,10 @@ def create_app(config: Config | None = None) -> FastAPI:
         redoc_url=None,
         openapi_url=None,
     )
-    app.state.config = config if config is not None else load_config()
+    if config is None:
+        booted = load_boot_config()
+        config, secrets = booted.config, booted.secrets
+    app.state.config = config
     # Auth is resolved first and fails the boot when it is enabled with no
     # secret in the environment, so a deployment that forgot one never
     # comes up serving every device that connects.
@@ -69,11 +80,11 @@ def create_app(config: Config | None = None) -> FastAPI:
     # than the first conversation. The same for MCP servers: an unknown
     # reference or an unset secret is a boot failure, being unreachable
     # is not.
-    app.state.agent_providers = build_agent_providers(app.state.config)
+    app.state.agent_providers = build_agent_providers(app.state.config, secrets)
     # Filled at startup by the lifespan above, since synthesis is async;
     # empty means no agent masks its latency, which is the default.
     app.state.agent_fillers = {}
-    app.state.mcp_servers = McpServers.build(app.state.config)
+    app.state.mcp_servers = McpServers.build(app.state.config, secrets)
     # Absent memory configuration means no remember tool and no
     # injection; the directory itself is created on the first write.
     memory = app.state.config.memory
