@@ -33,7 +33,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Body, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
@@ -56,9 +56,26 @@ from samtal_server.config.models import (
     Config,
     McpServerConfig,
     ProviderConfig,
+    normalize_mac,
 )
-from samtal_server.config.secrets import load_keys
+from samtal_server.config.secrets import SecretLocation, load_keys
 from samtal_server.config.store import ConfigStore
+from samtal_server.config.writes import (
+    CLEARED_DEFAULT_AGENT,
+    RESTART_NOTICE,
+    WROTE_AGENT_DEFAULTS,
+    bound_device,
+    cleared_secret,
+    deleted_agent,
+    deleted_device,
+    deleted_mcp_server,
+    deleted_provider,
+    wrote_agent,
+    wrote_default_agent,
+    wrote_mcp_server,
+    wrote_provider,
+    wrote_secret,
+)
 from samtal_server.db import open_database
 
 logger = logging.getLogger(__name__)
@@ -136,6 +153,83 @@ ENTITY_MODELS: tuple[type[BaseModel], ...] = (
     McpServerConfig,
     AgentConfig,
     AgentDefaults,
+)
+
+# The three bodies that are arguments rather than fragments, as the
+# document describes them. The models below are documentation and
+# nothing else: they are injected into `components` and named by the
+# routes' `openapi_extra`, and they are deliberately not declared as
+# body types, for the reason the entity models are not either. What
+# enforces them at runtime is the exact-shape parser further down, which
+# describes the expectation and never echoes what it refused.
+
+
+class DeviceBinding(BaseModel):
+    """What a device write carries: the agents the device may reach."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    agents: list[str] = Field(
+        description=(
+            "The agents this device is bound to, by name. The first is the agent a "
+            "conversation starts on and the rest are the ones switch_agent can reach. "
+            "Every name has to be an agent that exists, or the write is refused."
+        )
+    )
+
+
+class DefaultAgentName(BaseModel):
+    """What a default-agent write carries. Clearing it is the DELETE,
+    not a null here: one way to say a thing."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        description=(
+            "The agent an unbound device reaches. It has to be an agent that exists. "
+            "To unset it, DELETE this resource, which leaves the devices map as the "
+            "allowlist."
+        )
+    )
+
+
+class SecretValue(BaseModel):
+    """What a secret write carries: the credential itself, the only
+    plaintext this API ever accepts."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    secret: str = Field(
+        description=(
+            "The credential, in plaintext, stored encrypted under the newest key in "
+            "SAMTAL_MASTER_KEY. It crosses the connection as itself, which is why the "
+            "whole API belongs on a loopback connection or behind TLS. It is never "
+            "read back: a read names the slot and masks the value."
+        )
+    )
+
+
+REQUEST_MODELS: tuple[type[BaseModel], ...] = (DeviceBinding, DefaultAgentName, SecretValue)
+
+# What each argument-shaped body must be, said as an expectation rather
+# than as a complaint about what arrived. The body is never quoted back,
+# and for the secret write that is not a nicety: the rejected value is a
+# credential often enough that echoing it would make the refusal the
+# leak.
+DEVICE_BODY = (
+    'the body has to be a JSON object with exactly one key, "agents", holding an '
+    "array of agent names as strings. Nothing sent is quoted back"
+)
+
+DEFAULT_AGENT_BODY = (
+    'the body has to be a JSON object with exactly one key, "name", holding the '
+    "agent's name as a string. Nothing sent is quoted back"
+)
+
+SECRET_BODY = (
+    'the body has to be a JSON object with exactly one key, "secret", holding the '
+    "credential as a non-empty string. Nothing sent is quoted back, which on this "
+    "endpoint is the point"
 )
 
 # How the document describes each refusal a route can answer with. The
@@ -276,6 +370,26 @@ class Problem(BaseModel):
             "command prints for it. It names the entity the request addressed and "
             "the rule that was broken; it never quotes a secret or a configuration "
             "value that was rejected."
+        )
+    )
+
+
+class Acknowledgement(BaseModel):
+    """What a write answers with: what it did, and when it takes
+    effect."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    wrote: str = Field(
+        description=(
+            "What was written or deleted, naming the entity the way the "
+            "`samtal-server config` command names it in the line it prints."
+        )
+    )
+    notice: str = Field(
+        description=(
+            "When the change takes effect. Configuration is a boot-time snapshot, so "
+            "this is always the same sentence: it applies at the next server start."
         )
     )
 
@@ -478,6 +592,296 @@ def _reads(api: FastAPI) -> None:
         return views.default_agent(store.read_default_agent())
 
 
+# A body, exactly as it was sent, handed to the repository unread.
+#
+# Deliberately not the entity model as a body type. FastAPI's own
+# validation echoes the input it rejected back in its 422 (`"input":
+# ...` per error), and a fragment can carry a credential pasted where a
+# variable name belongs, so declaring the model here would put that
+# value in a response body. Received as an opaque object instead and
+# validated in exactly one place, the repository, which is where the
+# YAML file is validated too: one code path, one sanitized message
+# shape, no second dialect.
+RawBody = Annotated[Any, Body()]
+
+
+def _writes(api: FastAPI) -> None:
+    """Every write the API serves.
+
+    PUT is create-or-replace, matching the CLI's `set`: the entity's
+    model-shaped half is what a write replaces, and its stored secrets
+    are not touched, because a fragment cannot carry ciphertext and a
+    whole-row replacement would erase them on an ordinary edit. Which is
+    the repository's rule, not restated here.
+
+    Nothing about the configuration is decided in this function. A
+    handler parses the addressing (which entity, which slot, and for the
+    three argument-shaped bodies the one key they carry), calls one
+    repository method, and answers with what it did and when it applies.
+    """
+
+    @api.put(
+        "/providers/{stage}/{name}",
+        response_model=Acknowledgement,
+        responses=_problems(401, 409, 422, 500),
+        openapi_extra=_request_body(ProviderConfig),
+    )
+    def write_provider(
+        stage: str, name: str, body: RawBody, store: StoreDep
+    ) -> dict[str, str]:
+        """Create or replace one provider from a fragment in the shape
+        the YAML section had."""
+        store.set_provider(stage, name, body)
+        return _acknowledge(wrote_provider(stage, name))
+
+    @api.delete(
+        "/providers/{stage}/{name}",
+        response_model=Acknowledgement,
+        responses=_problems(401, 404, 409, 422, 500),
+    )
+    def remove_provider(stage: str, name: str, store: StoreDep) -> dict[str, str]:
+        """Delete one provider, and the secrets stored on it. Refused
+        while an agent or the agent defaults still name it."""
+        store.delete_provider(stage, name)
+        return _acknowledge(deleted_provider(stage, name))
+
+    @api.put(
+        "/providers/{stage}/{name}/secrets/{slot}",
+        response_model=Acknowledgement,
+        responses=_problems(401, 404, 409, 422, 500),
+        openapi_extra=_request_body(SecretValue),
+    )
+    def write_provider_secret(
+        stage: str, name: str, slot: str, body: RawBody, store: StoreDep
+    ) -> dict[str, str]:
+        """Store one of this provider's credentials, encrypted. The slot
+        is the option name the credential fills, such as api_key; a
+        stored secret takes precedence over an environment reference
+        written for the same slot."""
+        location = SecretLocation.provider(stage, name, slot)
+        store.set_secret(location, _secret(body))
+        return _acknowledge(wrote_secret(location.describe()))
+
+    @api.delete(
+        "/providers/{stage}/{name}/secrets/{slot}",
+        response_model=Acknowledgement,
+        responses=_problems(401, 404, 409, 422, 500),
+    )
+    def remove_provider_secret(
+        stage: str, name: str, slot: str, store: StoreDep
+    ) -> dict[str, str]:
+        """Remove one stored credential. A slot holding none is a 404."""
+        location = SecretLocation.provider(stage, name, slot)
+        store.clear_secret(location)
+        return _acknowledge(cleared_secret(location.describe()))
+
+    @api.put(
+        "/mcp-servers/{name}",
+        response_model=Acknowledgement,
+        responses=_problems(401, 409, 422, 500),
+        openapi_extra=_request_body(McpServerConfig),
+    )
+    def write_mcp_server(name: str, body: RawBody, store: StoreDep) -> dict[str, str]:
+        """Create or replace one MCP server."""
+        store.set_mcp_server(name, body)
+        return _acknowledge(wrote_mcp_server(name))
+
+    @api.delete(
+        "/mcp-servers/{name}",
+        response_model=Acknowledgement,
+        responses=_problems(401, 404, 409, 422, 500),
+    )
+    def remove_mcp_server(name: str, store: StoreDep) -> dict[str, str]:
+        """Delete one MCP server, and the secrets stored on it."""
+        store.delete_mcp_server(name)
+        return _acknowledge(deleted_mcp_server(name))
+
+    @api.put(
+        "/mcp-servers/{name}/secrets/{slot}",
+        response_model=Acknowledgement,
+        responses=_problems(401, 404, 409, 422, 500),
+        openapi_extra=_request_body(SecretValue),
+    )
+    def write_mcp_secret(
+        name: str, slot: str, body: RawBody, store: StoreDep
+    ) -> dict[str, str]:
+        """Store one of this MCP server's credentials, encrypted. The
+        slot is `env.<KEY>` or `headers.<Key>`, which is where the value
+        would otherwise have been written as a $VAR reference."""
+        location = SecretLocation.mcp_server(name, slot)
+        store.set_secret(location, _secret(body))
+        return _acknowledge(wrote_secret(location.describe()))
+
+    @api.delete(
+        "/mcp-servers/{name}/secrets/{slot}",
+        response_model=Acknowledgement,
+        responses=_problems(401, 404, 409, 422, 500),
+    )
+    def remove_mcp_secret(name: str, slot: str, store: StoreDep) -> dict[str, str]:
+        """Remove one stored credential."""
+        location = SecretLocation.mcp_server(name, slot)
+        store.clear_secret(location)
+        return _acknowledge(cleared_secret(location.describe()))
+
+    @api.put(
+        "/agents/{name}",
+        response_model=Acknowledgement,
+        responses=_problems(401, 409, 422, 500),
+        openapi_extra=_request_body(AgentConfig),
+    )
+    def write_agent(name: str, body: RawBody, store: StoreDep) -> dict[str, str]:
+        """Create or replace one agent. Every provider and MCP server it
+        names has to exist already, which is what the natural creation
+        order is about."""
+        store.set_agent(name, body)
+        return _acknowledge(wrote_agent(name))
+
+    @api.delete(
+        "/agents/{name}",
+        response_model=Acknowledgement,
+        responses=_problems(401, 404, 409, 422, 500),
+    )
+    def remove_agent(name: str, store: StoreDep) -> dict[str, str]:
+        """Delete one agent. Refused while a device binding or the
+        default agent still names it."""
+        store.delete_agent(name)
+        return _acknowledge(deleted_agent(name))
+
+    @api.put(
+        "/agent-defaults",
+        response_model=Acknowledgement,
+        responses=_problems(401, 409, 422, 500),
+        openapi_extra=_request_body(AgentDefaults),
+    )
+    def write_agent_defaults(body: RawBody, store: StoreDep) -> dict[str, str]:
+        """Replace what every agent uses unless it names something else.
+        One entry for the whole deployment, so this is a replace and
+        there is nothing to delete."""
+        store.set_agent_defaults(body)
+        return _acknowledge(WROTE_AGENT_DEFAULTS)
+
+    @api.put(
+        "/devices/{mac}",
+        response_model=Acknowledgement,
+        responses=_problems(401, 409, 422, 500),
+        openapi_extra=_request_body(DeviceBinding),
+    )
+    def write_device(mac: str, body: RawBody, store: StoreDep) -> dict[str, str]:
+        """Bind one device to one or more agents. The MAC is normalized
+        before it is written, so the two spellings reach one row."""
+        agents = _agents(body)
+        store.bind_device(mac, agents)
+        return _acknowledge(bound_device(_mac(mac), agents))
+
+    @api.delete(
+        "/devices/{mac}",
+        response_model=Acknowledgement,
+        responses=_problems(401, 404, 409, 422, 500),
+    )
+    def remove_device(mac: str, store: StoreDep) -> dict[str, str]:
+        """Remove one device's binding, which with no default agent set
+        means the device is refused at the handshake."""
+        store.delete_device(mac)
+        return _acknowledge(deleted_device(_mac(mac)))
+
+    @api.put(
+        "/default-agent",
+        response_model=Acknowledgement,
+        responses=_problems(401, 409, 422, 500),
+        openapi_extra=_request_body(DefaultAgentName),
+    )
+    def write_default_agent(body: RawBody, store: StoreDep) -> dict[str, str]:
+        """Set the agent an unbound device reaches."""
+        name = _name(body)
+        store.set_default_agent(name)
+        return _acknowledge(wrote_default_agent(name))
+
+    @api.delete(
+        "/default-agent",
+        response_model=Acknowledgement,
+        responses=_problems(401, 409, 500),
+    )
+    def remove_default_agent(store: StoreDep) -> dict[str, str]:
+        """Unset it, leaving the devices map as the allowlist.
+        Idempotent, like the CLI: there is no such thing as a default
+        agent that was already not set."""
+        store.clear_default_agent()
+        return _acknowledge(CLEARED_DEFAULT_AGENT)
+
+
+def _acknowledge(what: str) -> dict[str, str]:
+    return {"wrote": what, "notice": RESTART_NOTICE}
+
+
+def _mac(mac: str) -> str:
+    """The canonical spelling of a MAC, for the acknowledgement: what a
+    write says it did should name the row it wrote, not the spelling the
+    request happened to use. A MAC that is not one has already been
+    refused by the repository before this runs."""
+    return normalize_mac(mac)
+
+
+def _request_body(model: type[BaseModel]) -> dict[str, Any]:
+    """One route's request body, as the document describes it.
+
+    The schema is a reference into `components`, where `_entity_schemas`
+    injects these models: nothing in the running application declares
+    them, deliberately, so a bare reference would dangle without that
+    injection.
+    """
+    return {
+        "requestBody": {
+            "required": True,
+            "content": {
+                "application/json": {
+                    "schema": {"$ref": f"#/components/schemas/{model.__name__}"}
+                }
+            },
+        }
+    }
+
+
+# The three argument-shaped bodies
+#
+# Exactly one key, of exactly one shape. Every other body is refused
+# with a sentence describing what was expected, and none of them quotes
+# what arrived: for the secret write the rejected value is a credential
+# often enough that echoing it would make the refusal the leak, and the
+# other two are held to the same rule rather than to a weaker one that
+# would have to be remembered.
+#
+# Written with plain checks and no try/except, because a refusal raised
+# inside a handler carries the exception being handled as its context,
+# and a KeyError or a TypeError raised on a body holds the body.
+
+
+def _sole_value(body: object, key: str, expectation: str) -> object:
+    if not isinstance(body, dict) or set(body) != {key}:
+        raise ConfigError(expectation)
+    return body[key]
+
+
+def _agents(body: object) -> list[str]:
+    value = _sole_value(body, "agents", DEVICE_BODY)
+    if not isinstance(value, list) or not all(isinstance(name, str) for name in value):
+        raise ConfigError(DEVICE_BODY)
+    return value
+
+
+def _name(body: object) -> str:
+    value = _sole_value(body, "name", DEFAULT_AGENT_BODY)
+    if not isinstance(value, str):
+        raise ConfigError(DEFAULT_AGENT_BODY)
+    return value
+
+
+def _secret(body: object) -> str:
+    value = _sole_value(body, "secret", SECRET_BODY)
+    if not isinstance(value, str) or not value:
+        raise ConfigError(SECRET_BODY)
+    return value
+
+
 def mount_api(app: FastAPI, api: FastAPI) -> None:
     """Mount the sub-application so that both /api and /api/ reach it.
 
@@ -629,6 +1033,7 @@ def _application() -> FastAPI:
         api.add_exception_handler(refusal, _refusal(status))
     api.add_exception_handler(RequestValidationError, _malformed_request)
     _reads(api)
+    _writes(api)
     return api
 
 
@@ -680,6 +1085,7 @@ def _openapi(api: FastAPI) -> Callable[[], dict[str, Any]]:
         )
         components = schema.setdefault("components", {})
         components.setdefault("schemas", {}).update(_entity_schemas())
+        _resolve_body_schemas(schema)
         components.setdefault("securitySchemes", {})[BEARER_SCHEME] = {
             "type": "http",
             "scheme": "bearer",
@@ -695,6 +1101,25 @@ def _openapi(api: FastAPI) -> Callable[[], dict[str, Any]]:
     return openapi
 
 
+def _resolve_body_schemas(schema: dict[str, Any]) -> None:
+    """Leave each write's request body as the reference it declared, and
+    nothing else.
+
+    FastAPI deep-merges a route's `openapi_extra` into the operation it
+    generated, key by key, so the title it gave the opaque body
+    parameter survives beside the `$ref` the route declared. A `$ref`
+    with a sibling is ignored by some readers and confusing to the rest,
+    and the reference is the whole content of these bodies, so the
+    leftover goes.
+    """
+    for operations in schema.get("paths", {}).values():
+        for operation in operations.values():
+            content = operation.get("requestBody", {}).get("content", {})
+            body = content.get("application/json", {}).get("schema")
+            if isinstance(body, dict) and "$ref" in body:
+                content["application/json"]["schema"] = {"$ref": body["$ref"]}
+
+
 def _entity_schemas() -> dict[str, Any]:
     """The entity models as components, each with its nested `$defs`
     hoisted beside it.
@@ -707,7 +1132,7 @@ def _entity_schemas() -> dict[str, Any]:
     repository.
     """
     schemas: dict[str, Any] = {}
-    for model in ENTITY_MODELS:
+    for model in ENTITY_MODELS + REQUEST_MODELS:
         schema = model.model_json_schema(ref_template="#/components/schemas/{model}")
         schemas.update(schema.pop("$defs", {}))
         schemas[model.__name__] = schema

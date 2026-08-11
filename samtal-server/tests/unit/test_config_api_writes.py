@@ -1,0 +1,497 @@
+"""The write routes, over real HTTP.
+
+Every write the CLI can make is reachable here, answering with what it
+did and when it applies, and refusing with the repository's own
+sentences under the status codes the plan fixes. The repository decides
+everything; what is checked here is that the transport carries the
+decision faithfully and adds nothing.
+
+The other property is that nothing leaks, and a write is where that is
+hardest: the body is the one place a credential legitimately travels,
+and a rejected body is exactly the one a mistake put a credential into.
+So every malformed-body path is driven with a sentinel value, and the
+sentinel is looked for in the response, in its headers and in every
+captured log record.
+"""
+
+import logging
+import sqlite3
+from collections.abc import Iterator
+from pathlib import Path
+from urllib.parse import quote
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from samtal_server import db as db_module
+from samtal_server.config.api import build_api
+from samtal_server.config.secrets import (
+    MASTER_KEY_ENV,
+    SecretLocation,
+    generate_key,
+    load_keys,
+)
+from samtal_server.config.store import ConfigStore
+from samtal_server.config.writes import RESTART_NOTICE
+from samtal_server.db import DATABASE_FILENAME, open_database
+
+TOKEN = "test-api-token-" + "0123456789abcdef" * 2
+
+# Not real credentials, and shaped so a substring check for one cannot
+# match by accident.
+SECRET = "sk-test-4f8b2c9e-never-a-real-credential"
+OTHER_SECRET = "tok-test-7a1d3f60-never-a-real-credential"
+
+SHORT_BUSY_MS = 200
+
+# Names that only survive a URL path percent-encoded. Legal repository
+# identities, all three.
+AWKWARD = ["a name with spaces", "100%-sure", "agente-café"]
+
+
+@pytest.fixture
+def directory(tmp_path: Path) -> Path:
+    return tmp_path / "db"
+
+
+@pytest.fixture
+def store(directory: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[ConfigStore]:
+    """A second view of the same database, for reading back what a
+    request wrote. The API opens its own connection per request, so what
+    it wrote is what this finds."""
+    monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
+    engine = open_database(directory)
+    try:
+        yield ConfigStore(engine, load_keys())
+    finally:
+        engine.dispose()
+
+
+@pytest.fixture
+def api(directory: Path) -> FastAPI:
+    return build_api(TOKEN, directory)
+
+
+@pytest.fixture
+def client(api: FastAPI) -> TestClient:
+    return TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"})
+
+
+def _pipeline(client: TestClient) -> None:
+    """A working configuration, written the way a first deployment
+    writes one: providers, then the agent defaults, then the agent, then
+    what names it."""
+    client.put("/providers/llm/claude", json={"type": "anthropic", "model": "m"})
+    client.put("/providers/asr/whisper", json={"type": "mock"})
+    client.put(
+        "/mcp-servers/weather",
+        json={"transport": "streamable_http", "url": "https://example.invalid/mcp"},
+    )
+    client.put("/agent-defaults", json={"llm": "claude", "asr": "whisper"})
+    client.put("/agents/sam", json={"prompt": "You are Sam."})
+
+
+# What a write answers
+
+
+WRITES = [
+    ("put", "/providers/llm/claude", {"type": "anthropic", "model": "m"}),
+    ("put", "/mcp-servers/home", {"transport": "stdio", "command": "uvx"}),
+    ("put", "/agents/sam", {"prompt": "You are Sam."}),
+    ("put", "/agent-defaults", {}),
+    ("put", "/devices/aa:bb:cc:dd:ee:ff", {"agents": ["sam"]}),
+    ("put", "/default-agent", {"name": "sam"}),
+    ("delete", "/default-agent", None),
+]
+
+
+@pytest.mark.parametrize(("method", "path", "body"), WRITES)
+def test_every_write_is_gated(
+    client: TestClient, method: str, path: str, body: object
+) -> None:
+    """The gate is in front of routing, so a write is no more reachable
+    without the token than a read is."""
+    response = client.request(
+        method.upper(), path, json=body, headers={"Authorization": "Bearer wrong"}
+    )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize(("method", "path", "body"), WRITES)
+def test_a_write_says_what_it_did_and_when_it_applies(
+    client: TestClient, method: str, path: str, body: object
+) -> None:
+    """Configuration is a boot-time snapshot, so a write that answered
+    only "ok" would leave the one operational trap of that design open."""
+    _pipeline(client)
+
+    response = client.request(method.upper(), path, json=body)
+
+    assert response.status_code == 200
+    answer = response.json()
+    assert set(answer) == {"wrote", "notice"}
+    assert answer["notice"] == RESTART_NOTICE
+    assert answer["wrote"]
+
+
+def test_an_empty_database_becomes_a_working_configuration(
+    client: TestClient, store: ConfigStore
+) -> None:
+    """The API-era first start, executed: nothing configured is a valid
+    state to write into, and every intermediate state here would fail the
+    boot-only completeness rule without any of the writes being refused."""
+    _pipeline(client)
+    assert client.put("/devices/AA-BB-CC-DD-EE-FF", json={"agents": ["sam"]}).json()[
+        "wrote"
+    ] == "device aa:bb:cc:dd:ee:ff bound to sam"
+    assert client.put("/default-agent", json={"name": "sam"}).status_code == 200
+
+    domain = store.load().domain
+    assert domain.providers.llm["claude"].type == "anthropic"
+    assert domain.mcp_servers["weather"].transport == "streamable_http"
+    assert domain.agent_defaults.llm == "claude"
+    assert domain.agents["sam"].prompt == "You are Sam."
+    assert domain.devices == {"aa:bb:cc:dd:ee:ff": ["sam"]}
+    assert domain.default_agent == "sam"
+
+
+def test_a_put_replaces_an_entity_and_keeps_its_stored_secret(
+    client: TestClient, store: ConfigStore
+) -> None:
+    """The repository's rule, reachable over HTTP: a fragment cannot
+    carry ciphertext, so a whole-row replacement would erase a stored
+    secret on an ordinary edit."""
+    client.put("/providers/llm/claude", json={"type": "anthropic", "model": "m"})
+    client.put("/providers/llm/claude/secrets/api_key", json={"secret": SECRET})
+
+    client.put("/providers/llm/claude", json={"type": "anthropic", "model": "n"})
+
+    assert client.get("/providers/llm/claude").json()["entity"]["model"] == "n"
+    assert store.load().secrets.secret(
+        SecretLocation.provider("llm", "claude", "api_key")
+    ) == SECRET
+
+
+def test_a_delete_takes_the_stored_secrets_with_it(
+    client: TestClient, store: ConfigStore
+) -> None:
+    client.put("/providers/llm/claude", json={"type": "anthropic", "model": "m"})
+    client.put("/providers/llm/claude/secrets/api_key", json={"secret": SECRET})
+
+    response = client.delete("/providers/llm/claude")
+
+    assert response.json()["wrote"] == "provider llm.claude deleted, with its stored secrets"
+    assert store.load().secrets.locations() == []
+    assert client.get("/providers/llm/claude").status_code == 404
+
+
+def test_clearing_the_default_agent_is_idempotent(client: TestClient) -> None:
+    """Unset is a configuration rather than a missing entity, so clearing
+    one that is already clear is not a 404, exactly as in the CLI."""
+    assert client.delete("/default-agent").status_code == 200
+    assert client.delete("/default-agent").status_code == 200
+    assert client.get("/default-agent").json() == {"name": None}
+
+
+def test_a_device_is_written_under_either_spelling_of_its_mac(
+    client: TestClient, store: ConfigStore
+) -> None:
+    _pipeline(client)
+
+    client.put("/devices/AA-BB-CC-DD-EE-FF", json={"agents": ["sam"]})
+
+    assert set(store.load().domain.devices) == {"aa:bb:cc:dd:ee:ff"}
+    assert client.delete("/devices/aa:bb:cc:dd:ee:ff").json()["wrote"] == (
+        "device aa:bb:cc:dd:ee:ff deleted"
+    )
+
+
+@pytest.mark.parametrize("name", AWKWARD)
+def test_an_identity_that_needs_encoding_round_trips_through_a_write(
+    client: TestClient, name: str
+) -> None:
+    """A name is one decoded path segment, so a space, a percent sign or
+    a character outside ASCII is written and read back by
+    percent-encoding it and nothing else."""
+    encoded = quote(name, safe="")
+
+    assert client.put(f"/agents/{encoded}", json={"prompt": "You are it."}).json()[
+        "wrote"
+    ] == f"agent {name}"
+    assert client.get(f"/agents/{encoded}").json()["entity"]["prompt"] == "You are it."
+    assert client.delete(f"/agents/{encoded}").status_code == 200
+
+
+def test_a_dotted_mcp_slot_rides_in_one_path_segment(
+    client: TestClient, store: ConfigStore
+) -> None:
+    """`env.<KEY>` and `headers.<Key>` carry a dot, which needs no
+    encoding and no second addressing scheme."""
+    client.put(
+        "/mcp-servers/weather",
+        json={"transport": "streamable_http", "url": "https://example.invalid/mcp"},
+    )
+
+    assert client.put(
+        "/mcp-servers/weather/secrets/headers.Authorization", json={"secret": SECRET}
+    ).json()["wrote"] == "secret for mcp_server weather headers.Authorization"
+    assert client.put(
+        "/mcp-servers/weather/secrets/env.API_TOKEN", json={"secret": OTHER_SECRET}
+    ).status_code == 200
+
+    assert store.load().secrets.slots_for("mcp_server", "weather") == [
+        "env.API_TOKEN",
+        "headers.Authorization",
+    ]
+    assert client.delete("/mcp-servers/weather/secrets/env.API_TOKEN").status_code == 200
+
+
+def test_a_name_no_path_can_carry_is_unroutable_rather_than_written(
+    client: TestClient
+) -> None:
+    """The reason the addressability rule exists, seen from the
+    transport: a slash in a name is a slash in the path, so such a write
+    never reaches a handler at all. The rule is what stops one being
+    created by a caller that could reach the repository directly."""
+    response = client.put("/agents/a%2Fb", json={"prompt": "You are it."})
+
+    assert response.status_code == 404
+    assert client.get("/agents").json() == {}
+
+
+# What a write refuses
+
+
+def test_a_refused_reference_is_422_in_the_repository_s_own_words(
+    client: TestClient
+) -> None:
+    response = client.put("/agents/sam", json={"llm": "ghost"})
+
+    assert response.status_code == 422
+    assert 'unknown llm provider "ghost"' in response.json()["detail"]
+
+
+def test_deleting_something_that_is_not_there_is_404(client: TestClient) -> None:
+    for path, detail in (
+        ("/providers/llm/ghost", "providers.llm.ghost: no such provider"),
+        ("/mcp-servers/ghost", "mcp_servers.ghost: no such MCP server"),
+        ("/agents/ghost", "agents.ghost: no such agent"),
+        ("/devices/aa:bb:cc:dd:ee:ff", "devices.aa:bb:cc:dd:ee:ff: no such device"),
+    ):
+        response = client.delete(path)
+        assert response.status_code == 404, path
+        assert response.json() == {"detail": detail}
+
+
+def test_a_secret_for_a_slot_holding_none_is_404(client: TestClient) -> None:
+    client.put("/providers/llm/claude", json={"type": "anthropic", "model": "m"})
+
+    response = client.delete("/providers/llm/claude/secrets/api_key")
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "provider llm.claude api_key: no secret is stored for this slot"
+    }
+
+
+def test_a_slot_that_is_not_a_credential_slot_is_422(client: TestClient) -> None:
+    client.put("/providers/llm/claude", json={"type": "anthropic", "model": "m"})
+
+    response = client.put("/providers/llm/claude/secrets/model", json={"secret": SECRET})
+
+    assert response.status_code == 422
+    assert "is not a credential slot" in response.json()["detail"]
+
+
+def test_an_identity_that_cannot_be_addressed_at_all_is_422(client: TestClient) -> None:
+    stage = client.put("/providers/nonsense/x", json={"type": "mock"})
+    mac = client.put("/devices/not-a-mac", json={"agents": ["sam"]})
+
+    assert stage.status_code == 422
+    assert "is not a provider stage" in stage.json()["detail"]
+    assert mac.status_code == 422
+    assert "is not a MAC address" in mac.json()["detail"]
+
+
+def test_a_write_that_cannot_take_the_lock_is_409(
+    client: TestClient, store: ConfigStore, directory: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The retryable refusal, forced by holding a real lock rather than
+    hoped for, and asserted by status code so that no wording becomes
+    load-bearing."""
+    monkeypatch.setattr(db_module, "BUSY_TIMEOUT_MS", SHORT_BUSY_MS)
+    holder = sqlite3.connect(directory / DATABASE_FILENAME, isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    try:
+        response = client.put("/agents/sam", json={"prompt": "You are Sam."})
+    finally:
+        holder.close()
+
+    assert response.status_code == 409
+    assert set(response.json()) == {"detail"}
+    # And with the lock let go, the same request is answered.
+    assert client.put("/agents/sam", json={"prompt": "You are Sam."}).status_code == 200
+
+
+# The argument-shaped bodies
+
+
+MALFORMED_DEVICE = [
+    {},
+    {"agent": ["sam"]},
+    {"agents": ["sam"], "extra": 1},
+    {"agents": None},
+    {"agents": "sam"},
+    {"agents": [1]},
+    ["sam"],
+    "sam",
+]
+
+MALFORMED_DEFAULT_AGENT = [
+    {},
+    {"agent": "sam"},
+    {"name": "sam", "extra": 1},
+    {"name": None},
+    {"name": ["sam"]},
+    ["sam"],
+]
+
+MALFORMED_SECRET = [
+    {},
+    {"value": SECRET},
+    {"secret": SECRET, "extra": 1},
+    {"secret": None},
+    {"secret": ""},
+    {"secret": [SECRET]},
+    {"secret": {"secret": SECRET}},
+    [SECRET],
+    SECRET,
+]
+
+
+@pytest.mark.parametrize("body", MALFORMED_DEVICE)
+def test_a_device_body_of_the_wrong_shape_is_refused(client: TestClient, body: object) -> None:
+    response = client.put("/devices/aa:bb:cc:dd:ee:ff", json=body)
+
+    assert response.status_code == 422
+    assert '"agents"' in response.json()["detail"]
+
+
+@pytest.mark.parametrize("body", MALFORMED_DEFAULT_AGENT)
+def test_a_default_agent_body_of_the_wrong_shape_is_refused(
+    client: TestClient, body: object
+) -> None:
+    response = client.put("/default-agent", json=body)
+
+    assert response.status_code == 422
+    assert '"name"' in response.json()["detail"]
+
+
+@pytest.mark.parametrize("body", MALFORMED_SECRET)
+def test_a_secret_body_of_the_wrong_shape_is_refused_without_echoing_it(
+    client: TestClient, body: object, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Every one of these carries the sentinel where a credential would
+    be, which is what makes them the case worth checking: the body a
+    mistake malforms is the body a mistake put a credential into."""
+    client.put("/providers/llm/claude", json={"type": "anthropic", "model": "m"})
+
+    with caplog.at_level(logging.DEBUG):
+        response = client.put("/providers/llm/claude/secrets/api_key", json=body)
+
+    assert response.status_code == 422
+    assert '"secret"' in response.json()["detail"]
+    assert SECRET not in response.text
+    assert SECRET not in str(response.headers)
+    assert SECRET not in caplog.text
+
+
+def test_a_body_that_is_not_json_at_all_is_refused_without_echoing_it(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """FastAPI's own validation fires here, and its default response
+    quotes the input it rejected."""
+    with caplog.at_level(logging.DEBUG):
+        broken = client.put(
+            "/agents/sam",
+            content=f"not json {SECRET}".encode(),
+            headers={"content-type": "application/json"},
+        )
+        missing = client.put("/agents/sam", json=None)
+
+    for response in (broken, missing):
+        assert response.status_code == 422
+        assert SECRET not in response.text
+        assert "Traceback" not in response.text
+    assert SECRET not in caplog.text
+
+
+def test_a_fragment_the_models_refuse_is_not_quoted_back(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An inline secret in a fragment is the case where the rejected
+    input is itself the thing that must not travel back."""
+    with caplog.at_level(logging.DEBUG):
+        response = client.put(
+            "/providers/llm/claude", json={"type": "anthropic", "api_key": SECRET}
+        )
+
+    assert response.status_code == 422
+    assert "looks like an inline secret" in response.json()["detail"]
+    assert SECRET not in response.text
+    assert SECRET not in str(response.headers)
+    assert SECRET not in caplog.text
+
+
+# What a stored secret does, and never does
+
+
+def test_a_secret_set_over_http_is_stored_encrypted_and_never_read_back(
+    client: TestClient, store: ConfigStore, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The whole contract of a secret write in one place: it is stored
+    encrypted, it shadows the reference written for the same slot, it
+    decrypts where it is used, and it appears in no response, header or
+    log."""
+    client.put(
+        "/providers/llm/claude",
+        json={"type": "anthropic", "model": "m", "api_key_env": "ANTHROPIC_API_KEY"},
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        wrote = client.put("/providers/llm/claude/secrets/api_key", json={"secret": SECRET})
+        read = client.get("/providers/llm/claude")
+        whole = client.get("/config")
+
+    assert wrote.json()["wrote"] == "secret for provider llm.claude api_key"
+    # Stored as ciphertext, and openable where it is used.
+    location = SecretLocation.provider("llm", "claude", "api_key")
+    snapshot = store.load()
+    assert snapshot.secrets.secret(location) == SECRET
+    # Named in the envelope, marked as displacing the reference beside
+    # it, and never valued.
+    assert read.json()["secrets"] == {"api_key": {"shadows": "api_key_env"}}
+    assert read.json()["entity"]["api_key_env"] == "ANTHROPIC_API_KEY"
+    for response in (wrote, read, whole):
+        assert SECRET not in response.text
+        assert SECRET not in str(response.headers)
+    assert SECRET not in caplog.text
+    assert TOKEN not in caplog.text
+
+
+def test_a_cleared_secret_stops_shadowing_its_reference(
+    client: TestClient, store: ConfigStore
+) -> None:
+    client.put(
+        "/providers/llm/claude",
+        json={"type": "anthropic", "model": "m", "api_key_env": "ANTHROPIC_API_KEY"},
+    )
+    client.put("/providers/llm/claude/secrets/api_key", json={"secret": SECRET})
+
+    response = client.delete("/providers/llm/claude/secrets/api_key")
+
+    assert response.json()["wrote"] == "secret for provider llm.claude api_key cleared"
+    assert client.get("/providers/llm/claude").json()["secrets"] == {}
+    assert store.load().secrets.locations() == []

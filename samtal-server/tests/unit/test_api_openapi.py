@@ -119,25 +119,70 @@ def test_the_bearer_scheme_is_stated_and_required() -> None:
     assert document["security"] == [{BEARER_SCHEME: []}]
 
 
-def test_the_document_describes_every_read_the_api_serves() -> None:
+def test_the_document_describes_every_route_the_api_serves() -> None:
     """The document is generated from the routes, so this is what makes
-    a route added without a thought for the contract visible."""
+    a route added without a thought for the contract visible. The methods
+    are asserted per path as well: which of them a resource answers to is
+    the contract, and a PUT that never reached the document would read
+    like a resource nobody may write."""
     paths = json.loads(docgen.openapi())["paths"]
 
-    assert set(paths) == {
-        "/config",
-        "/providers",
-        "/providers/{stage}/{name}",
-        "/mcp-servers",
-        "/mcp-servers/{name}",
-        "/agents",
-        "/agents/{name}",
-        "/agent-defaults",
-        "/devices",
-        "/devices/{mac}",
-        "/default-agent",
+    assert {path: sorted(operations) for path, operations in paths.items()} == {
+        "/config": ["get"],
+        "/providers": ["get"],
+        "/providers/{stage}/{name}": ["delete", "get", "put"],
+        "/providers/{stage}/{name}/secrets/{slot}": ["delete", "put"],
+        "/mcp-servers": ["get"],
+        "/mcp-servers/{name}": ["delete", "get", "put"],
+        "/mcp-servers/{name}/secrets/{slot}": ["delete", "put"],
+        "/agents": ["get"],
+        "/agents/{name}": ["delete", "get", "put"],
+        "/agent-defaults": ["get", "put"],
+        "/devices": ["get"],
+        "/devices/{mac}": ["delete", "get", "put"],
+        "/default-agent": ["delete", "get", "put"],
     }
-    assert all(set(operations) == {"get"} for operations in paths.values())
+
+
+def test_a_write_declares_the_entity_schema_it_takes() -> None:
+    """The running code receives a raw object, so nothing about the body
+    reaches the document by itself. Each write names the component it
+    accepts, and the reference is the whole of it: FastAPI deep-merges
+    `openapi_extra` into what it generated, and a `$ref` with siblings
+    beside it is at best ignored."""
+    paths = json.loads(docgen.openapi())["paths"]
+
+    for path, method, model in (
+        ("/providers/{stage}/{name}", "put", "ProviderConfig"),
+        ("/mcp-servers/{name}", "put", "McpServerConfig"),
+        ("/agents/{name}", "put", "AgentConfig"),
+        ("/agent-defaults", "put", "AgentDefaults"),
+        ("/devices/{mac}", "put", "DeviceBinding"),
+        ("/default-agent", "put", "DefaultAgentName"),
+        ("/providers/{stage}/{name}/secrets/{slot}", "put", "SecretValue"),
+        ("/mcp-servers/{name}/secrets/{slot}", "put", "SecretValue"),
+    ):
+        body = paths[path][method]["requestBody"]
+        assert body["required"] is True, path
+        assert body["content"]["application/json"]["schema"] == {
+            "$ref": f"#/components/schemas/{model}"
+        }, path
+
+    # And a delete takes no body at all.
+    assert "requestBody" not in paths["/agents/{name}"]["delete"]
+
+
+def test_a_write_answers_with_what_it_did_and_when_it_applies() -> None:
+    """Decision 5's contract, in the document: a write is acknowledged
+    rather than silent, and the acknowledgement carries the restart
+    sentence."""
+    paths = json.loads(docgen.openapi())["paths"]
+
+    for path, method in (("/agents/{name}", "put"), ("/agents/{name}", "delete")):
+        ok = paths[path][method]["responses"]["200"]
+        assert ok["content"]["application/json"]["schema"] == {
+            "$ref": "#/components/schemas/Acknowledgement"
+        }, (path, method)
 
 
 def test_every_refusal_a_read_can_answer_with_is_described() -> None:
@@ -177,7 +222,18 @@ def test_the_entity_schemas_are_registered_with_their_definitions() -> None:
     to one of them resolve."""
     schemas = json.loads(docgen.openapi())["components"]["schemas"]
 
-    for name in ("ProviderConfig", "McpServerConfig", "AgentConfig", "AgentDefaults"):
+    for name in (
+        "ProviderConfig",
+        "McpServerConfig",
+        "AgentConfig",
+        "AgentDefaults",
+        # The three argument-shaped bodies, injected the same way and for
+        # the same reason: they document a shape the runtime parser
+        # enforces, and are deliberately not declared as body types.
+        "DeviceBinding",
+        "DefaultAgentName",
+        "SecretValue",
+    ):
         assert name in schemas
     # Nested one level down in pydantic's own output, and a component of
     # its own here.
