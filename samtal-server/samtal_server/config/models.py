@@ -349,15 +349,40 @@ class ProviderConfig(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    type: NonBlankStr
-    api_key_env: str | None = None
+    type: NonBlankStr = Field(
+        description=(
+            "The provider implementation this entry configures, such as anthropic, "
+            "openai_compatible, faster_whisper, openai, piper, elevenlabs or silero. "
+            "Every key beyond the ones listed here is an option for that "
+            "implementation."
+        )
+    )
+    api_key_env: str | None = Field(
+        default=None,
+        description=(
+            "The name of the environment variable holding this provider's "
+            "credential, never the credential itself. Left unset for a local engine "
+            "or a keyless self-hosted endpoint. A credential stored with "
+            "`config set-secret` fills the same slot and takes precedence."
+        ),
+    )
 
     # The operator's own egress assertion, honoured only for types whose
     # class-level marking is None because their configuration decides
     # (openai_compatible, where base_url can name localhost or a cloud
     # vendor). Declaring it on a type that knows its own egress is
     # rejected when the provider is built.
-    egress: bool | None = None
+    egress: bool | None = Field(
+        default=None,
+        description=(
+            "Whether this entry sends session data off the host, asserted by the "
+            "operator for the types whose configuration decides it rather than "
+            "their name (openai_compatible, and the openai ASR and TTS types, whose "
+            "base_url may be local or a vendor). Under server.local_only such an "
+            "entry must declare egress: false; a type that knows its own egress "
+            "rejects the key."
+        ),
+    )
 
     @model_validator(mode="after")
     def _reject_inline_secrets(self) -> "ProviderConfig":
@@ -395,12 +420,40 @@ class ProviderConfig(BaseModel):
 
 
 class ProvidersConfig(BaseModel):
+    """The provider entries of each pipeline stage, keyed by the name
+    agents and agent_defaults reference them by."""
+
     model_config = ConfigDict(extra="forbid")
 
-    llm: dict[NonBlankStr, ProviderConfig] = Field(default_factory=dict)
-    asr: dict[NonBlankStr, ProviderConfig] = Field(default_factory=dict)
-    tts: dict[NonBlankStr, ProviderConfig] = Field(default_factory=dict)
-    vad: dict[NonBlankStr, ProviderConfig] = Field(default_factory=dict)
+    llm: dict[NonBlankStr, ProviderConfig] = Field(
+        default_factory=dict,
+        description=(
+            "The language model providers, keyed by the name that agents and "
+            "agent_defaults reference."
+        ),
+    )
+    asr: dict[NonBlankStr, ProviderConfig] = Field(
+        default_factory=dict,
+        description=(
+            "The speech recognition providers, keyed by the name that agents and "
+            "agent_defaults reference."
+        ),
+    )
+    tts: dict[NonBlankStr, ProviderConfig] = Field(
+        default_factory=dict,
+        description=(
+            "The speech synthesis providers, keyed by the name that agents and "
+            "agent_defaults reference. A voice is a provider entry, so two agents "
+            "that should sound different reference two entries."
+        ),
+    )
+    vad: dict[NonBlankStr, ProviderConfig] = Field(
+        default_factory=dict,
+        description=(
+            "The voice activity detection providers, keyed by the name that agents "
+            "and agent_defaults reference."
+        ),
+    )
 
 
 def _env_reference(value: str) -> str | None:
@@ -445,14 +498,50 @@ class McpServerConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    transport: Literal["stdio", "streamable_http"]
+    transport: Literal["stdio", "streamable_http"] = Field(
+        description=(
+            "Which field group applies: stdio spawns `command` as a subprocess, "
+            "streamable_http connects to `url`. Naming a field of the other "
+            "transport is an error rather than a silently ignored key."
+        )
+    )
 
-    command: str | None = None
-    args: list[str] = Field(default_factory=list)
-    env: dict[str, str] = Field(default_factory=dict)
+    command: str | None = Field(
+        default=None,
+        description=(
+            "The executable a stdio server is spawned as. Required for that "
+            "transport, and rejected for streamable_http."
+        ),
+    )
+    args: list[str] = Field(
+        default_factory=list,
+        description="The arguments the stdio command is spawned with, one per entry.",
+    )
+    env: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Environment variables for the spawned stdio command. A value of $NAME "
+            "is read from the server's own environment at startup, and any "
+            "secret-bearing key (token, api_key, authorization, ...) must use that "
+            "form."
+        ),
+    )
 
-    url: str | None = None
-    headers: dict[str, str] = Field(default_factory=dict)
+    url: str | None = Field(
+        default=None,
+        description=(
+            "The endpoint a streamable_http server is reached at. Required for that "
+            "transport, and rejected for stdio."
+        ),
+    )
+    headers: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Headers sent with every streamable_http request. A value of $NAME is "
+            "read from the server's own environment at startup, and any "
+            "secret-bearing key must use that form."
+        ),
+    )
 
     # Whether this server sends session data off the local network. Tool
     # arguments carry conversation-derived data, and neither transport
@@ -460,11 +549,28 @@ class McpServerConfig(BaseModel):
     # name localhost. Under server.local_only every referenced entry
     # must therefore declare egress: false, the operator asserting that
     # whatever its command or URL reaches stays local (#30).
-    egress: bool | None = None
+    egress: bool | None = Field(
+        default=None,
+        description=(
+            "Whether this server sends session data off the local network. Tool "
+            "arguments carry conversation-derived data and neither transport can "
+            "tell on its own, since a stdio command may proxy anywhere and a url "
+            "may name localhost, so under server.local_only every referenced entry "
+            "must declare it."
+        ),
+    )
 
     # How long one tool call on this server may take before the model is
     # told it timed out. Spoken silence is the cost, so it is short.
-    tool_timeout_s: float = Field(default=15.0, gt=0)
+    tool_timeout_s: float = Field(
+        default=15.0,
+        gt=0,
+        description=(
+            "How long one tool call on this server may take, in seconds, before the "
+            "model is told it timed out. The device hears silence meanwhile, so "
+            "keep it short."
+        ),
+    )
 
     @model_validator(mode="after")
     def _check_transport_fields(self) -> "McpServerConfig":
@@ -533,7 +639,13 @@ class FillerConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = False
+    enabled: bool = Field(
+        default=False,
+        description=(
+            "Whether a filled pause is played while a slow reply is prepared. Off "
+            "by default."
+        ),
+    )
 
     # How long the user hears silence before the filler starts, counted
     # from the transcription (the `heard` event). Healthy replies get
@@ -541,12 +653,26 @@ class FillerConfig(BaseModel):
     # keeps ordinary turns filler-free while landing well before the
     # 2 to 3 s of dead air where users start asking whether anyone is
     # there.
-    delay_ms: float = Field(default=1800.0, gt=0)
+    delay_ms: float = Field(
+        default=1800.0,
+        gt=0,
+        description=(
+            "How long the user hears silence before the filler starts, in "
+            "milliseconds, counted from the transcription of their utterance."
+        ),
+    )
 
     # One or more phrases in the agent's own language; the player
     # rotates through them rather than always playing the same one.
     # Required when enabled: there is nothing to say otherwise.
-    phrases: list[NonBlankStr] = Field(default_factory=list)
+    phrases: list[NonBlankStr] = Field(
+        default_factory=list,
+        description=(
+            "The phrases to play, written in the agent's own language; the player "
+            "rotates through them rather than always playing the same one. At least "
+            "one is required when the feature is enabled."
+        ),
+    )
 
     @model_validator(mode="after")
     def _check_phrases(self) -> "FillerConfig":
@@ -567,27 +693,75 @@ class AgentDefaults(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    llm: NonBlankStr | None = None
-    asr: NonBlankStr | None = None
-    tts: NonBlankStr | None = None
-    vad: NonBlankStr | None = None
+    llm: NonBlankStr | None = Field(
+        default=None,
+        description=(
+            "The language model, by the name it is defined under in providers.llm. "
+            "An agent that leaves it unset inherits the agent_defaults entry."
+        ),
+    )
+    asr: NonBlankStr | None = Field(
+        default=None,
+        description=(
+            "The speech recognizer, by the name it is defined under in "
+            "providers.asr. An agent that leaves it unset inherits the "
+            "agent_defaults entry."
+        ),
+    )
+    tts: NonBlankStr | None = Field(
+        default=None,
+        description=(
+            "The voice, by the name it is defined under in providers.tts. An agent "
+            "that leaves it unset inherits the agent_defaults entry."
+        ),
+    )
+    vad: NonBlankStr | None = Field(
+        default=None,
+        description=(
+            "The voice activity detector, by the name it is defined under in "
+            "providers.vad. An agent that leaves it unset inherits the "
+            "agent_defaults entry."
+        ),
+    )
 
     # The MCP servers this agent talks to. None means inherit; a list
     # replaces rather than extends the inherited one, like the stage
     # fields, so an agent naming an empty list opts out of tools.
-    mcp: list[NonBlankStr] | None = None
+    mcp: list[NonBlankStr] | None = Field(
+        default=None,
+        description=(
+            "The MCP servers whose tools this layer offers the model, by entry "
+            "name. Unset inherits the agent_defaults list; naming a list replaces "
+            "the inherited one rather than extending it, so an empty list opts an "
+            "agent out of the tools its siblings have."
+        ),
+    )
 
     # Latency masking with a pre-synthesized filler clip. None means
     # inherit; a section replaces the inherited one wholly, like the
     # stage fields, so an agent naming its own phrases names all of
     # them, and `filler: {enabled: false}` opts an agent out.
-    filler: FillerConfig | None = None
+    filler: FillerConfig | None = Field(
+        default=None,
+        description=(
+            "Latency masking with a pre-synthesized filled pause. Unset inherits the "
+            "agent_defaults section; naming one replaces it wholly rather than "
+            "merging with it, so `filler: {enabled: false}` opts an agent out."
+        ),
+    )
 
 
 class AgentConfig(AgentDefaults):
     """One persona: a prompt, plus whichever stages it overrides."""
 
-    prompt: str = ""
+    prompt: str = Field(
+        default="",
+        description=(
+            "The persona instruction this agent replies under, sent as the system "
+            "prompt on every turn. State the reply language explicitly: a model "
+            "otherwise picks one by its training bias."
+        ),
+    )
 
 
 def normalize_mac(value: str) -> str:
@@ -631,6 +805,45 @@ def normalize_device_bindings(value: object) -> object:
             raise ValueError(f'device "{mac}" appears more than once (as {key})')
         normalized[key] = _binding_as_list(key, bound)
     return normalized
+
+
+# What each domain section is, written once because two models carry
+# these fields: the composed Config the server boots from, and the
+# DomainConfig the repository loads a database into. The generated
+# reference and the CLI help both read them from whichever model they
+# render, so a single source is what keeps the two renderings equal.
+DOMAIN_DESCRIPTIONS: dict[str, str] = {
+    "providers": (
+        "The provider entries agents reference, one group per pipeline stage "
+        "(llm, asr, tts, vad)."
+    ),
+    "mcp_servers": (
+        "The MCP servers agents may be given tools from, keyed by entry name. The "
+        "name becomes the prefix its tools are offered to the model under "
+        "(home__turn_on_light), so it must match [A-Za-z0-9_-]+ and must not be one "
+        "of the names the merged tool list already uses."
+    ),
+    "agent_defaults": (
+        "What every agent uses unless it names something else. One entry for the "
+        "whole deployment, and deliberately without a prompt: a prompt is what "
+        "makes an agent that agent, so inheriting one silently would make two "
+        "agents the same one."
+    ),
+    "agents": (
+        "The personas this deployment serves, keyed by agent name. An agent is a "
+        "prompt plus whichever stages it overrides, and every stage must resolve to "
+        "a provider, here or in agent_defaults, for the server to start."
+    ),
+    "devices": (
+        "Which agents each device may talk to, keyed by MAC address as the "
+        "Device-Id header sends it. The first name in a list is the agent a "
+        "conversation starts on and the rest are the ones it may be switched to."
+    ),
+    "default_agent": (
+        "The agent an unknown device reaches. Leaving it unset makes the devices "
+        "map an allowlist: a device with no binding is then turned away."
+    ),
+}
 
 
 class DomainSnapshot(Protocol):
@@ -761,17 +974,29 @@ class Config(BaseSettings):
         )
 
     server: ServerConfig = Field(default_factory=ServerConfig)
-    providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
+    providers: ProvidersConfig = Field(
+        default_factory=ProvidersConfig, description=DOMAIN_DESCRIPTIONS["providers"]
+    )
     # Named like providers, and referenced by agents the same way. The
     # entry name becomes the prefix its tools are offered under.
-    mcp_servers: dict[NonBlankStr, McpServerConfig] = Field(default_factory=dict)
+    mcp_servers: dict[NonBlankStr, McpServerConfig] = Field(
+        default_factory=dict, description=DOMAIN_DESCRIPTIONS["mcp_servers"]
+    )
     memory: MemoryConfig | None = None
-    agent_defaults: AgentDefaults = Field(default_factory=AgentDefaults)
-    agents: dict[NonBlankStr, AgentConfig] = Field(default_factory=dict)
+    agent_defaults: AgentDefaults = Field(
+        default_factory=AgentDefaults, description=DOMAIN_DESCRIPTIONS["agent_defaults"]
+    )
+    agents: dict[NonBlankStr, AgentConfig] = Field(
+        default_factory=dict, description=DOMAIN_DESCRIPTIONS["agents"]
+    )
     # One device may be bound to several agents; the value is written as a
     # single name or a list, and always stored as a list.
-    devices: dict[str, list[NonBlankStr]] = Field(default_factory=dict)
-    default_agent: NonBlankStr | None = None
+    devices: dict[str, list[NonBlankStr]] = Field(
+        default_factory=dict, description=DOMAIN_DESCRIPTIONS["devices"]
+    )
+    default_agent: NonBlankStr | None = Field(
+        default=None, description=DOMAIN_DESCRIPTIONS["default_agent"]
+    )
 
     @field_validator("mcp_servers")
     @classmethod
