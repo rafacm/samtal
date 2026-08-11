@@ -146,6 +146,8 @@ samtal config list
 
 The order matters: a write whose references do not resolve is refused, so the providers come first and the agent that names them second. Every field is documented in [`docs/reference/domain-config.md`](docs/reference/domain-config.md), generated from the models, and [`samtal-server/examples/`](samtal-server/examples/) holds a commented fragment per entity and provider type to copy from, cloud engines included. A credential is never written into a fragment: it names the environment variable holding it, or is stored encrypted with `config set-secret` under a `SAMTAL_MASTER_KEY` you generate once and keep.
 
+From outside the container instead, name the API with `--api-url` (or `SAMTAL_API_URL`) and carry the token yourself, over TLS or a tunnel that terminates it: the client refuses a plain `http://` connection to any host but its own. [The configuration API](samtal-server/README.md#the-configuration-api) in the server README has the whole surface, and [`docs/reference/api-openapi.json`](docs/reference/api-openapi.json) is the contract for anything that writes this configuration without a person typing it.
+
 **4. Restart the server.** The configuration is a boot-time snapshot: it is read once at start, which is why every write above said it applies at the next one. This is that next one, and it is the last step that needs doing again after any later change:
 
 ```bash
