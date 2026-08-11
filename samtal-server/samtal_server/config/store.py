@@ -430,6 +430,7 @@ class ConfigStore:
     def set_secret(self, location: SecretLocation, secret: str) -> None:
         """Store one credential, encrypted under the newest configured
         key. The only write that needs a key at all."""
+        _secret_value(location, secret)
         with self._transaction() as connection:
             domain = _read_domain(connection)
             _check_slot(domain, location)
@@ -837,6 +838,29 @@ def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
 
 
 # Arguments and fragments
+
+
+def _secret_value(location: SecretLocation, secret: object) -> None:
+    """The one thing the repository has to know about a secret itself:
+    that it is a non-empty string.
+
+    Checked here rather than trusted from the annotation, because what
+    an annotation does not stop is a caller handing this something else:
+    a null, a number, a JSON object out of a request body. Any of them
+    would be encrypted into an envelope whose payload fails verification
+    at the next boot, which is a refusal to start earned by a write that
+    answered "wrote". The CLI keeps its friendlier wording in front of
+    this for the stdin case; this is the floor under every caller.
+
+    The value is never quoted back, here least of all: what fails this
+    check is by definition something that arrived where a credential
+    goes.
+    """
+    if not isinstance(secret, str) or not secret:
+        raise ConfigError(
+            f"{location.describe()}: a secret has to be a non-empty string; nothing "
+            f"was stored. The value is not quoted back."
+        )
 
 
 def _stage(stage: str) -> str:

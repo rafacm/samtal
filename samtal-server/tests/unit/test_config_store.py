@@ -497,6 +497,22 @@ def test_a_secret_for_an_unknown_entity_or_slot_is_refused(store: ConfigStore) -
         assert SECRET not in _chain(caught.value)
 
 
+def test_a_secret_that_is_not_a_non_empty_string_is_refused(store: ConfigStore) -> None:
+    """An annotation stops nothing: a null, a number or an object
+    arriving from a request body would otherwise be encrypted into an
+    envelope that fails verification at the next boot, which is a refusal
+    to start earned by a write that answered "wrote"."""
+    store.set_provider("llm", "claude", {"type": "anthropic", "model": "m"})
+
+    for value in (None, "", 1, {"secret": SECRET}, [SECRET]):
+        with pytest.raises(ConfigError) as caught:
+            store.set_secret(CLAUDE, value)  # type: ignore[arg-type]
+        assert "non-empty string" in str(caught.value)
+        assert SECRET not in _chain(caught.value)
+
+    assert store.load().secrets.locations() == []
+
+
 def test_storing_a_secret_without_a_key_is_refused(tmp_path: Path) -> None:
     """The one command that needs a key. Everything else treats
     ciphertext as opaque, so the CLI stays usable as the recovery tool
