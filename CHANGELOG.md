@@ -7,6 +7,49 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-08-11
 
+### Changed
+
+- **The server boots its domain half from the database** (#86). The
+  YAML file keeps `server:` and `memory:`; providers, MCP servers,
+  agent defaults, agents, devices and the default agent now come from
+  the database `samtal-server config` writes, read once at boot and
+  composed onto the file half into the same validated shape the server
+  has always used. Nothing about a conversation changes; where the
+  configuration comes from does.
+
+  **A domain section left in the YAML file, or a `SAMTAL_` override for
+  one, refuses the boot** naming the key, the command that writes it
+  now, and the reference. A configuration that silently stopped
+  applying would be worse than one that will not start, and
+  pydantic-settings ignores unmatched prefixed variables, so the
+  environment is scanned explicitly for the six moved names.
+
+  `config.example.yaml` shrinks to the server half, with its header
+  pointing at the config commands, the generated reference and the
+  example fragments; `config.deploy.example.yaml` keeps its profile's
+  domain half as the commands that write it, values and reasoning
+  intact. The container image sets
+  `SAMTAL_SERVER__DATABASE__DIR=/data/db`, so the database lives on the
+  data volume beside the model caches and the memory files, and the
+  smoke lane seeds each image check's configuration through the CLI
+  from the image itself before the container starts.
+
+  Deployment notes for it are in `samtal-server/README.md`: generating
+  and escrowing `SAMTAL_MASTER_KEY`, rotation adding a key without
+  being able to retire one, WAL-safe backups (`VACUUM INTO` or
+  `.backup`, or a plain copy only of a stopped and checkpointed
+  database), what a restore needs, and what a copy of the file does and
+  does not expose.
+
+### Removed
+
+- The staging notice on every mutating `samtal-server config` command,
+  and the staging paragraphs in the generated reference and the
+  examples README (#86). The window they existed for closed when the
+  server started reading the database. Mutating commands now print that
+  the write applies at the next server start, which is the trap a
+  boot-time snapshot does have.
+
 ### Added
 
 - Generated documentation for the domain configuration (#86). Every

@@ -762,3 +762,199 @@ after the branch was rebased onto the merged milestones:
 4. **P3: a generated 96-character prose line.** The fragment-examples
    sentence broke the reference's wrapping convention. Fixed: the
    link sits on its own line, reference regenerated.
+
+## Milestone 4: switchover and docs
+
+The database becomes the source the domain half boots from. `Config` is
+composed rather than loaded, a domain key left in the file or in the
+environment refuses the boot naming where it moved, the example files
+and the smoke lane shrink to their server halves, the staging notices
+go, and the documentation says how a deployment configures and backs up
+the thing it now depends on.
+
+### What landed
+
+**The split.** `FileConfig` is the settings model, `server` and `memory`
+only, with today's `SAMTAL_` environment behavior intact. `Config` stops
+being a `BaseSettings` and becomes a plain model composed from the file
+half plus a domain snapshot, keeping its name, its attribute paths, its
+helper methods and its boot-time validator, so `app.py` and every call
+site and test that builds a `Config(...)` directly is unchanged.
+`compose_config` is the one place the two meet, and it renders a failure
+through the loader's existing formatter with the database named as the
+source.
+
+**`config/boot.py`.** The boot order milestone 2 spelled out, in one
+function: load the file half, `open_database(server.database.dir)`,
+`store.load()`, `verify_secrets`, compose, validate. It returns the
+composed `Config` and the `SecretStore` beside it, and disposes the
+engine: the configuration is a boot-time snapshot, so nothing after this
+reads the database. `create_app` takes the store as a second argument
+and hands it to `build_agent_providers` and `McpServers.build`, which is
+the whole wiring, both arguments having existed since milestone 2.
+
+**The moved-key refusals.** The file half is checked in the loader's
+existing pre-flight, where the parsed top level is already in hand; the
+environment is scanned explicitly for the six names, bare and
+`__`-nested. Both messages name the key, the command that writes it now,
+and the reference. One test per key for each route, plus one pinning
+that the value-carrying variables (`SAMTAL_CONFIG`, `SAMTAL_MASTER_KEY`,
+`SAMTAL_AUTH_SECRET`) are outside the scan.
+
+**The example files.** `config.example.yaml` is the pure deletion
+milestone 3 measured (lines 195 to 513 and 536 to 605), with `memory:`
+between them untouched, plus the header rewrite and two comment fixes
+the deletion forced: the `database:` block no longer says the server
+does not read it, and the `local_only` comment points at the reference
+rather than at sections that are no longer in the file.
+
+**The integration lane.** Its conftest gained `booted(config)`: the
+domain half of the `Config` a test wrote is dumped as fragments,
+written through the repository into a scratch database in the order the
+reference checks require, read back, and composed onto the file half
+again. Every scenario in the lane therefore covers the round trip, and
+no assertion moved. `test_app_boot.py` now boots through the
+module-level `app`, which reads both halves itself, against an empty
+database directory.
+
+**The smoke lane.** The three `tests/smoke/config*.yaml` files shrink to
+their server halves, and each check gained a seeding script
+(`seed.sh`, `seed-slim.sh`, `seed-local-engines.sh`) that writes its
+domain half through the CLI. CI runs each one from the image being
+tested, onto the named volume the container then reads, so the seeding
+exercises the shipped artifact; the image sets
+`SAMTAL_SERVER__DATABASE__DIR=/data/db`.
+
+**The documentation.** The server README's configuration section
+describes both halves, walks a deployment from an empty database, and
+points at the generated reference and the fragments; its domain YAML
+blocks became the `config set` commands that write them. A new
+deployment subsection covers the master key, rotation, WAL-safe backups,
+restores and the restart semantics, in the plan's own wording. The root
+README gains the step between running the server and flashing a board.
+
+### Deviations from the plan
+
+**`load_config` is gone rather than renamed in place.** The plan says
+the file half becomes a settings model without saying what the existing
+entry point returns. Keeping the name for a function that returns only
+half of a configuration would have been the kind of thing a call site
+gets wrong once: `load_file_config` returns the file half,
+`load_boot_config` returns both, and the compiler-shaped failure of a
+stale call is an import error rather than a missing attribute at
+runtime.
+
+**Boot lives in `config/boot.py`, not in `loader.py`.** Milestone 2
+noted that `samtal_server.config` imports neither the store nor the
+database, and that serving should keep pulling in neither at package
+import. Serving now needs both, but `config schema` and `config
+reference` still do not, and the documentation lane runs the latter from
+a plain sync. A separate module keeps the package import free of
+SQLAlchemy for everything that is not a boot.
+
+**`config.deploy.example.yaml` was not in milestone 3's audit, and its
+domain half is not deleted.** The audit covered `config.example.yaml`.
+The deployment profile carries its own field-measured values
+(`cpu_threads: 3` against the container quota, the `language_detect`
+ladder, the Piper voice, the VAD tuning), none of which has a
+destination in `examples/`, because the fragments document the options
+generically and this file documents one deployment's choices. Its
+domain half therefore became the `config set` commands that write it,
+comments and values intact, at the bottom of the same file. Nothing was
+dropped, and the file is still valid YAML for the server half.
+
+**Two smoke-lane tests moved rather than being edited.**
+`test_the_slim_boot_config_names_no_local_engine` and
+`test_the_local_engine_config_really_names_one` read the smoke YAML
+files, which no longer hold providers. They live in
+`tests/unit/test_smoke_seeds.py` now, running each seeding script
+against a scratch database and reading the result back through the
+repository, with their assertions unchanged. That also pins something
+the old tests could not: that the scripts work at all, in an order the
+write-time reference checks accept.
+
+**Three test bodies lost assertions whose subject was deleted.**
+`test_example_config_parses` asserted the example file's providers,
+agents and device bindings, `test_deploy_example_config_parses` its
+whisper options and its allowlist, and `test_any_top_level_key_is_env_overridable`
+used `SAMTAL_DEFAULT_AGENT`, which is now a boot error. The first two
+keep their server-half assertions; the third is replaced by the
+moved-environment tests, which pin the same variable with the opposite
+expectation. No assertion about behavior changed value.
+
+**The checkpoint workflow needed one sentence, not a document.** The
+plan expects the `*.local.yaml` checkpoint workflow to become a script
+of `config set` calls and the device checkpoint docs to follow.
+`docs/xiaozhi-notes.md` turns out to document the upstream server's
+configuration, not samtal-server's, and the only place the workflow is
+described is one sentence in the server README, which now says the
+domain half of a local experiment is a short script of `config set`
+calls against a database directory of its own.
+
+### Resolutions of milestone 3's open questions
+
+**1. The file header's `SAMTAL_DEFAULT_AGENT` example: replaced with a
+server-half key.** The header now illustrates the override convention
+with `SAMTAL_SERVER__PORT=9000` and `SAMTAL_SERVER__LOG_LEVEL=DEBUG`.
+The variable it used to name is one this milestone turns into a boot
+error, and the header is the last place a reader should meet a variable
+that refuses the boot.
+
+**2. A second agent fragment: no.** The `llm: local` commented override
+the PR #99 review round restored to `agent.yaml` carries the contrast
+the example file's two agents showed (an agent overriding a stage its
+siblings inherit). A second file saying the same thing under another
+name would be one more document to keep true.
+
+**3. The memory-orphaning warning: kept in the file, pointed at from the
+reference.** "Renaming an agent orphans its memory" is a `memory:`
+comment about a server-half section, so it stays in
+`config.example.yaml` with the section it belongs to. It is also a
+consequence of an agent's name, which is now documented in a different
+place, so the reference's agent section gained one sentence saying so
+and linking to it. A pointer costs a sentence; meeting the warning by
+accident costs a persona's accumulated facts.
+
+### Discoveries
+
+**Composition must pass models, never a dump.** `McpServerConfig` reads
+`model_fields_set` to tell "my headers are ignored" from "my headers are
+wrong", so a snapshot round-tripped through `model_dump()` and
+re-validated fails its own validator for every stdio entry. `Config`
+takes the loaded model instances themselves, which pydantic accepts
+without revalidating, and the integration lane's fragments are dumped
+with `exclude_unset=True` for the same reason.
+
+**A test helper that seeds through the repository would have changed
+assertions; composing does not.** `load_config_from_data` in
+`tests/unit/test_config.py` was rewritten to split the mapping and
+compose the halves, rather than to write the domain half through the
+CLI. Through the store, the per-entity validation errors arrive in the
+repository's message shape (`invalid agent_defaults:\n  - prompt: ...`)
+rather than the loader's (`  - agent_defaults.prompt: ...`), which would
+have meant editing assertions to match a message that had moved. Boot
+validates the composed model, so composing is also the honest route.
+
+**`create_app()` with no config now opens a database**, which is what
+turned four unit tests red the first time the lanes ran: two health
+tests and one app test called it because they did not care about the
+configuration, and they now pass a `Config()` or point
+`SAMTAL_SERVER__DATABASE__DIR` at a tmp path. Worth knowing before
+adding a test that builds the default app: the default database
+directory is `/var/lib/samtal`, and a laptop refuses it.
+
+**The refusal has to be readable from inside the trap it describes.** A
+deployment upgrading with a domain-bearing file gets the boot error, and
+the CLI it names reads the same file for `server.database.dir`, so it is
+refused too. The messages therefore say to remove the sections from the
+file, which is what the migration requires anyway; the alternative, a
+lenient read for the CLI only, would be a second place that decides what
+the file may contain.
+
+### Verification
+
+Lint, unit and integration lanes green locally, and the drift check
+(`uv run samtal-server config reference | diff - ../docs/reference/domain-config.md`)
+clean. The smoke lane and the image cannot run locally: they need the
+built image, and the seeding steps are written against what the image
+sets rather than tried. CI is the first run of both.
