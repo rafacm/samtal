@@ -132,11 +132,24 @@ exactly it, so its feasibility is the thing under test.
 
 Two independent recordings of the same exchange:
 
-- **The tap**: every Opus packet leaving the serializer, with a
-  monotonic send timestamp, decoded to PCM and laid out on the send
-  timeline (gaps as silence). This matches samtal's capture
-  semantics for channel 1 and is the ground truth for what the
-  device actually heard, and when.
+- **The tap**: every outgoing Opus packet, timestamped at the
+  latest observable boundary, immediately after the awaited
+  websocket send for that packet returns, not at serialization.
+  Serialization can precede framework queuing, pacing, and the
+  actual write, and a tap upstream of those would call audio
+  "sent" that had not left yet, which is the exact mistake the
+  spike exists to catch. The tapped packets are decoded to PCM
+  and laid out on the send timeline by the epoch rules below.
+  This matches samtal's capture semantics for channel 1 and is
+  the ground truth for what the device actually heard, and when.
+  The tap also reports the inter-send interval distribution
+  against the 60 ms frame cadence: paced output shows a tight
+  mode at 60 ms, bursting shows up directly, and either way the
+  distribution is gate 1 evidence. If the transport turns out
+  not to pace, the spike either adds production-representative
+  pacing and counts it as adapter glue in gate 2, or records the
+  absence as gate evidence; what it must not do is let the
+  simulator's receive buffering quietly absorb the question.
 - **The buffer recording**: `AudioBufferProcessor`'s bot track (and
   user track, for the mask), as pipecat records it.
 
@@ -292,11 +305,13 @@ processors.
 - Whether xiaozhi-sdk accepts a direct websocket URL or the OTA
   stub is required (implementation discovers; either is fine).
 - Whether pipecat's websocket transport paces audio out at frame
-  cadence or writes as fast as encoding allows. Not a blocker
-  either way: the simulator buffers. But it changes what the tap
-  timeline means, and the answer is itself gate 1 evidence
-  (pacing jitter absent from the recorded track is a named
-  failure mode).
+  cadence or writes as fast as encoding allows. The tap's
+  inter-send distribution answers this empirically, and the
+  instrumentation section says what each answer costs: no pacing
+  means either production-representative pacing added and
+  counted as adapter glue, or the absence recorded as gate
+  evidence. The simulator buffering the result proves receipt,
+  not a playback clock, so it settles nothing.
 - Whether one long canned reply or many shorter turns is the
   better window source. Implementation picks whichever the
   simulator sustains; the two-minute reply-audio floor stands
@@ -343,6 +358,13 @@ each carries its resolution once the amendment addressing it lands.
    queuing, pacing, and the awaited websocket write; and if the
    transport bursts, the simulator buffering the result hides a
    production obligation named in #89 rather than settling it.
+   *Resolution*: the tap now sits immediately after the awaited
+   websocket send returns, reports the inter-send interval
+   distribution against the 60 ms cadence as gate 1 evidence,
+   and a non-pacing transport costs either
+   production-representative pacing counted as adapter glue or
+   an explicit gate finding; the "not a blocker" open question
+   is rewritten accordingly.
 4. **P1: gate 2 is not yet a like-for-like size comparison.** The
    spike serializer supports one exchange while the bespoke edge
    covers far more; the obligation map lacked a "required but not
