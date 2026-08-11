@@ -79,6 +79,12 @@ _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 # request could never carry is not a slot.
 _HEADER_TOKEN_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 
+# What a stored row that will not validate is told about. The same
+# sentence the column-shape refusals end with, because it is the same
+# situation: the request was fine and the stored state is not.
+_UNREADABLE_ROW = "the row cannot be read as configuration:"
+_UNREADABLE_ROWS = "the stored configuration cannot be read:"
+
 
 class DomainConfig(BaseModel):
     """The domain half of a configuration, as the database holds it.
@@ -540,22 +546,35 @@ def _read_domain(connection: Connection) -> DomainConfig:
             )
         providers[row.stage][row.name] = _provider_from_row(row)
 
-    domain = DomainConfig(
-        providers=ProvidersConfig(**providers),
-        mcp_servers={
-            row.name: _mcp_from_row(row) for row in connection.execute(select(schema.mcp_servers))
-        },
-        agents={
-            row.name: _agent_from_row(row) for row in connection.execute(select(schema.agents))
-        },
-        devices={
-            row.mac: _list(f"devices.{row.mac}", "agents", row.agents)
-            for row in connection.execute(select(schema.devices))
-        },
-    )
+    # The rows are read one by one above and assembled here, and the
+    # assembly validates too: an entry name, a MAC or a binding that
+    # cannot be read is as much a stored-state failure as a column of
+    # the wrong shape.
+    domain: DomainConfig | None = None
+    problem: str | None = None
+    try:
+        domain = DomainConfig(
+            providers=ProvidersConfig(**providers),
+            mcp_servers={
+                row.name: _mcp_from_row(row)
+                for row in connection.execute(select(schema.mcp_servers))
+            },
+            agents={
+                row.name: _agent_from_row(row) for row in connection.execute(select(schema.agents))
+            },
+            devices={
+                row.mac: _list(f"devices.{row.mac}", "agents", row.agents)
+                for row in connection.execute(select(schema.devices))
+            },
+        )
+    except ValidationError as exc:
+        problem = _validation_problems(_UNREADABLE_ROWS, exc)
+    if domain is None:
+        raise StorageError(problem)
+
     defaults = connection.execute(select(schema.agent_defaults)).first()
     if defaults is not None:
-        domain.agent_defaults = _load(
+        domain.agent_defaults = _stored(
             AgentDefaults, "agent_defaults", _layer_data("agent_defaults", defaults)
         )
     default_agent = connection.execute(
@@ -598,7 +617,7 @@ def _provider_from_row(row: Row) -> ProviderConfig:
     }
     if row.api_key_env is not None:
         data["api_key_env"] = row.api_key_env
-    return _load(ProviderConfig, location, data)
+    return _stored(ProviderConfig, location, data)
 
 
 def _mcp_from_row(row: Row) -> McpServerConfig:
@@ -620,13 +639,13 @@ def _mcp_from_row(row: Row) -> McpServerConfig:
         mapping = _mapping(location, key, value)
         if mapping:
             data[key] = mapping
-    return _load(McpServerConfig, location, data)
+    return _stored(McpServerConfig, location, data)
 
 
 def _agent_from_row(row: Row) -> AgentConfig:
     location = f"agents.{row.name}"
     data = {"prompt": row.prompt or "", **_layer_data(location, row)}
-    return _load(AgentConfig, location, data)
+    return _stored(AgentConfig, location, data)
 
 
 def _layer_data(location: str, row: Row) -> dict[str, object]:
@@ -912,12 +931,33 @@ def _load[Model: BaseModel](
         # __context__, and a ValidationError's errors() hold the whole
         # rejected fragment, inline secret and all. Raising after the
         # handler leaves neither a cause nor a context.
-        problem = _validation_problems(location, exc)
+        problem = _validation_problems(f"invalid {location}:", exc)
     raise ConfigError(problem)
 
 
-def _validation_problems(location: str, exc: ValidationError) -> str:
-    lines = [f"invalid {location}:"]
+def _stored[Model: BaseModel](
+    model: type[Model], location: str, data: Mapping[str, object]
+) -> Model:
+    """One stored row through the model that owns its shape.
+
+    The same validation a fragment gets, and a different refusal. A
+    caller reading a row did nothing wrong, and there is nothing it can
+    do about what is stored, so a row that will not validate is a
+    storage failure (the 500 the API answers) rather than a rejection of
+    the request (422). The message names the row and the fields that
+    failed and never their values, and is built inside the handler and
+    raised outside it, since a ValidationError holds the whole row.
+    """
+    problem: str | None = None
+    try:
+        return model.model_validate(dict(data))
+    except ValidationError as exc:
+        problem = _validation_problems(f"{location}: {_UNREADABLE_ROW}", exc)
+    raise StorageError(problem)
+
+
+def _validation_problems(headline: str, exc: ValidationError) -> str:
+    lines = [headline]
     for error in exc.errors():
         where = ".".join(str(part) for part in error["loc"])
         message = error["msg"].removeprefix("Value error, ")

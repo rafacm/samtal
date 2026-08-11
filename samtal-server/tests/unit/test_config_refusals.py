@@ -122,6 +122,63 @@ def test_a_column_that_cannot_be_read_is_a_storage_error(store: ConfigStore) -> 
     assert "the options column does not hold an object with string keys" in str(caught.value)
 
 
+@pytest.mark.parametrize(
+    ("table", "values"),
+    [
+        (schema.providers, {"type": ""}),
+        (schema.mcp_servers, {"transport": "nonsense"}),
+        (schema.agents, {"llm": ""}),
+        (schema.agent_defaults, {"tts": ""}),
+        (schema.devices, {"mac": "not-a-mac"}),
+    ],
+)
+def test_a_stored_row_that_will_not_validate_is_a_storage_error(
+    store: ConfigStore, table: object, values: dict[str, object]
+) -> None:
+    """The same models, two refusals: a fragment that does not validate
+    is the caller's mistake (422), a stored row that does not validate
+    is not (500). Nothing the reader of a row can do makes it valid."""
+    _populate(store)
+    store.set_agent_defaults({"llm": "claude"})
+    store.bind_device("aa:bb:cc:dd:ee:ff", ["sam"])
+    with store._engine.begin() as connection:
+        connection.execute(update(table).values(**values))
+
+    with pytest.raises(StorageError) as caught:
+        store.load()
+
+    # One row names itself, the assembly of them names the whole; both
+    # say what the situation is rather than what the caller did.
+    assert "cannot be read" in str(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+def test_an_unreadable_row_still_fails_the_boot_as_a_config_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The storage type is a ConfigError, so the boot path prints what
+    it always printed rather than growing a second failure shape."""
+    from samtal_server.config.boot import load_boot_config
+
+    directory = tmp_path / "db"
+    engine = open_database(directory)
+    try:
+        ConfigStore(engine).set_agent("sam", {"prompt": "hello"})
+        with engine.begin() as connection:
+            connection.execute(update(schema.agents).values(llm=""))
+    finally:
+        engine.dispose()
+    monkeypatch.delenv("SAMTAL_CONFIG", raising=False)
+    monkeypatch.setenv("SAMTAL_SERVER__DATABASE__DIR", str(directory))
+
+    with pytest.raises(ConfigError) as caught:
+        load_boot_config()
+
+    assert isinstance(caught.value, StorageError)
+    assert "cannot be read as configuration" in str(caught.value)
+
+
 def test_a_stored_row_naming_no_stage_is_a_storage_error(store: ConfigStore) -> None:
     _populate(store)
     with store._engine.begin() as connection:
