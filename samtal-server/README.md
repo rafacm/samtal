@@ -953,9 +953,14 @@ forms are supported:
   A stored secret takes precedence over an environment reference for the
   same slot, and `config show` marks the reference it displaces. With
   ciphertext stored and no key configured, or a key that does not open
-  it, the server refuses to start naming the entity and the slot; the
-  CLI keeps working without a key, which is what makes it the tool that
-  repairs exactly that condition.
+  it, the server refuses to start naming the entity and the slot, and
+  the API goes down with it, so the repair runs through `--local`. Two
+  ways out, differing in what they need: `config --local clear-secret`
+  removes the envelope and needs no key at all, leaving the slot to its
+  environment reference if it has one, and `config --local set-secret`
+  writes the credential again and needs a usable key in
+  `SAMTAL_MASTER_KEY` to encrypt under, since storing a secret is the
+  one write that encrypts anything.
 
 Instance configs stay out of the repository; `*.local.yaml` and `.env`
 are gitignored for local experiments, and the domain half of a local
@@ -1472,8 +1477,16 @@ It is only needed once a credential is stored encrypted; a deployment
 whose keys are all environment references never needs one. Once
 ciphertext exists, losing the key means losing those credentials: the
 server refuses to start with a stored secret it cannot open, naming the
-entity and the slot, and the way out is `config set-secret` with the
-value again.
+entity and the slot. That refusal takes the API with it, so the way back
+in is `--local`, with two choices per slot.
+`config --local clear-secret` drops the envelope and needs no key, which
+is enough when the entity carries an environment reference for the same
+slot or can go without.
+`config --local set-secret` writes the value again and needs a usable
+key in `SAMTAL_MASTER_KEY` to encrypt under; it need not be the
+lost one, because what the next boot needs is a key list that opens
+every envelope still stored, which means every secret written under the
+lost key has to be set again or cleared.
 
 **Rotation adds a key, and this release cannot retire one.**
 `SAMTAL_MASTER_KEY` holds a comma-separated list, newest first;
