@@ -12,9 +12,16 @@ its dependencies never touch the server's, and its pipecat version is
 pinned exactly because the measured numbers only mean something
 against a named version.
 
-The verdict, with every number: both gates were measured, gate 1
-failed on a constant 145 ms offset and gate 2 did not pass on size.
-The findings are the implementation doc, not this file.
+The verdict, with every number: gate 1 passed, recovering a known
+echo's delay to 1.2 ms and its gain to 0.2 dB, but only through
+`on_bot_turn_audio_data` recorded at the native output rate; the other
+bot track pipecat offers is silently corrupted. Gate 2 did not pass on
+size and did not fail on shape. The findings are the implementation
+doc, not this file.
+
+The serializer speaks xiaozhi **protocol v1** only, which is what
+xiaozhi-sdk 0.5.1 exercises: bare Opus frames, no version negotiation,
+no v2 or v3 binary headers.
 
 ## Running it
 
@@ -31,8 +38,9 @@ uv run python fidelity.py runs/<id>  # what each reference contains
 offers two bot tracks: `captures/` uses the delivered track, the only
 one whose arrivals can be timestamped, and `captures-turn/` uses the
 turn track, which is faithful but arrives once at the end of the turn.
-`drive.py --extra-pacing` adds the serializer's redundant 60 ms clock,
-which is the cross-check that showed the transport already paces.
+The transport paces at real time on its own, so the adapter adds no
+pacing of its own; an earlier version did, and measurement showed it
+was redundant.
 
 Then the analysis, with the repository's own unmodified scripts. The
 control proves the pair is well formed; the injection is gate 1:

@@ -557,8 +557,8 @@ rather than adjusted. As built with the pacing feature present it was
 338 physical and 168 code-only.
 
 Reported separately, outside the comparison, as the plan requires:
-measurement harness, `pipeline.py` (184), `drive.py` (202),
-`make_audio.py` (94), `tap.py` (107), `compose.py` (248),
+measurement harness, `pipeline.py` (187), `drive.py` (191),
+`make_audio.py` (94), `tap.py` (107), `compose.py` (331),
 `inject.py` (147), `fidelity.py` (215) and `spike_env.py` (25),
 **1297** physical lines. The canned reply service, the app wiring, the
 tap and the composer are all in there; none of it is counted against

@@ -20,36 +20,45 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   dependencies never touch the server's, and nothing from it lands in
   `samtal_server/`.
 
-  **Gate 1, capture alignment: failed**, at 250 ms and 1500 ms
-  injected delay alike. pipecat's `AudioBufferProcessor` offers two
-  bot tracks and neither is usable as an echo or AEC reference. The
-  track whose deliveries can be timestamped is time-corrupted, 126 s
-  of reply coming back as 154 s with 24 s of silence inserted inside
-  continuous speech, because the processor pads the bot track up to
-  the user track whenever a device streams microphone audio during a
-  reply, which is what barge-in requires. The track that is faithful
-  arrives once, when the bot stops speaking, and placing it by the
-  epoch rules fixed in the plan leaves a constant 145.5 ms lag bias,
-  stable to a 0.1 ms IQR over two minutes. The failure is a fixed
-  offset rather than drift or jitter: detection was 100% and the drift
-  statistic was indistinguishable from zero.
+  **Gate 1, capture alignment: passed**, at 250 ms and 1500 ms injected
+  delay alike. A capture built on pipecat recovers a known echo's delay
+  to 1.2 ms and its gain to 0.2 dB, in all 125 candidate windows per
+  delay, with a lag IQR of zero and no measurable drift over two
+  minutes. Three qualifications come with it. `AudioBufferProcessor`
+  offers two bot tracks and only `on_bot_turn_audio_data` works: the
+  delivered track, the one whose arrivals can be timestamped, is
+  silently corrupted whenever the device streams microphone audio
+  during a reply, because the processor pads the bot track up to the
+  user track at every delivery, turning 126 s of reply into 150 s with
+  13 s of silence inserted inside continuous speech. The track that
+  works arrives once per turn, so it serves offline echo measurement
+  and not a real-time AEC reference. And the processor has to record at
+  the native output rate, because asking it for the capture rate puts
+  its never-flushed streaming resampler in the path and truncates each
+  turn's tail.
 
-  **Gate 2, adapter size: not passed.** The adoption-required adapter
-  is 324 lines against 899 for the whole bespoke edge, but against the
-  comparable slice of it that this exchange actually exercises it is
-  324 against 222, or 160 against 155 counting code only: the same
-  size, not smaller, while covering 8 of the seam's 23 obligations.
-  Its shape stayed message translation, which is the good half of the
-  answer.
+  **Gate 2, adapter size: not passed, and not failed.** The
+  adoption-required adapter is 312 lines against 899 for the whole
+  bespoke edge, but against the comparable slice of it that this
+  exchange actually exercises it is 312 against 222, or 154 against 155
+  counting code only: the same size, not smaller, while covering 8 of
+  the seam's 23 obligations and speaking xiaozhi protocol v1 only. Its
+  shape stayed message translation, which is the half of the answer
+  that would have condemned it.
 
-  Consequence: the streaming conversation runtime (#31) is built
-  bespoke behind the device-facing boundary from #85, and the pipecat
-  question is settled by evidence rather than postponed. Along the way
-  the spike established that pipecat's websocket transport does pace
-  output at real time (a wrong first reading of its send-interval
-  formula is recorded and corrected in the implementation doc), and
-  that whether its recording is wire-aligned at all depends on where
-  the adopter places the buffer processor rather than on the component.
+  Consequence: adopting pipecat for the streaming conversation runtime
+  (#31) is a genuine tradeoff to be argued with these numbers rather
+  than a question settled either way. Along the way the spike
+  established that pipecat's websocket transport does pace output at
+  real time, and that whether its recording is wire-aligned depends
+  entirely on which recording API the adopter picks and at what rate.
+
+  An external review of the spike's own pull request caught two
+  measurement errors that had produced an earlier, wrong, "gate 1
+  failed" conclusion: tap packets placed at the end rather than the
+  start of their playout slot, and two different resamplers where the
+  method required one. Both are recorded in the implementation doc
+  along with the reversal.
 
 ## 2026-08-10
 
