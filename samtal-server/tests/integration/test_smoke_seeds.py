@@ -46,25 +46,30 @@ def _free_port() -> int:
         return probe.getsockname()[1]
 
 
-def seeded(script: str, tmp_path: Path) -> DomainConfig:
+def _domain(directory: Path) -> DomainConfig:
+    engine = open_database(directory)
+    try:
+        return ConfigStore(engine).load().domain
+    finally:
+        engine.dispose()
+
+
+def seeded(script: str, tmp_path: Path, environment: dict[str, str] | None = None) -> DomainConfig:
     """What one seeding script writes, read back through the repository.
 
     The script is run verbatim, as CI runs it: it starts its own server,
     waits for it, writes through the API, and stops it again.
     """
     directory = tmp_path / "db"
-    environment = {
+    inherited = {
         key: value for key, value in os.environ.items() if key != "SAMTAL_CONFIG"
     }
-    environment["SAMTAL_SERVER__DATABASE__DIR"] = str(directory)
-    environment["SAMTAL_SERVER__PORT"] = str(_free_port())
-    subprocess.run(["sh", str(SMOKE / script)], check=True, env=environment, timeout=180)
+    inherited["SAMTAL_SERVER__DATABASE__DIR"] = str(directory)
+    inherited["SAMTAL_SERVER__PORT"] = str(_free_port())
+    inherited.update(environment or {})
+    subprocess.run(["sh", str(SMOKE / script)], check=True, env=inherited, timeout=180)
 
-    engine = open_database(directory)
-    try:
-        return ConfigStore(engine).load().domain
-    finally:
-        engine.dispose()
+    return _domain(directory)
 
 
 def test_the_smoke_conversation_runs_on_mock_providers(tmp_path: Path) -> None:
@@ -95,6 +100,27 @@ def test_the_local_engine_config_really_names_one(tmp_path: Path) -> None:
     on the default image and fail on slim."""
     domain = seeded("seed-local-engines.sh", tmp_path)
     assert domain.providers.asr["whisper"].type == "faster_whisper"
+
+
+@pytest.mark.parametrize(
+    "script", ["seed.sh", "seed-slim.sh", "seed-local-engines.sh"]
+)
+def test_a_seed_ignores_an_ambient_api_url(
+    served_api, tmp_path: Path, script: str
+) -> None:
+    """An SAMTAL_API_URL left over in a shell, or set in a CI job for
+    another deployment, would otherwise take the writes and the bearer
+    token with them while the server the script started stayed empty.
+    The decoy here is a real server on a real database, so "it was
+    ignored" is checked by looking at what the decoy holds rather than by
+    the script merely not failing."""
+    decoy = tmp_path / "decoy"
+    with served_api(decoy) as decoy_url:
+        domain = seeded(script, tmp_path, {"SAMTAL_API_URL": decoy_url})
+
+    assert domain.default_agent == "assistant"
+    assert _domain(decoy).agents == {}
+    assert _domain(decoy).default_agent is None
 
 
 def test_a_seeding_script_reports_a_server_that_will_not_start(

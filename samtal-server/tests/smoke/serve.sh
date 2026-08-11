@@ -27,6 +27,15 @@
 # readers, one value, no drift between the file's port and this one.
 SAMTAL_SEED_PORT="${SAMTAL_SERVER__PORT:-8003}"
 export SAMTAL_SERVER__PORT="$SAMTAL_SEED_PORT"
+
+# And where the CLI sends the writes, set rather than left to be
+# resolved. The CLI gives an inherited SAMTAL_API_URL precedence over
+# the port, which is right for an operator and wrong here: an ambient
+# one, left over in a shell or set in a CI job for another deployment,
+# would take the seeding writes and the bearer token with them while
+# the server started below stayed empty. The seeding writes to the
+# server the seeding started, and to nothing else.
+export SAMTAL_API_URL="http://127.0.0.1:${SAMTAL_SEED_PORT}/api"
 SAMTAL_SEED_LOG="${TMPDIR:-/tmp}/samtal-seed-server.log"
 SAMTAL_SEED_PID=""
 
