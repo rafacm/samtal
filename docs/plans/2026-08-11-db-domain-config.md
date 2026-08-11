@@ -322,9 +322,15 @@ credentials, not just round-trip the envelope.
 
 `SAMTAL_MASTER_KEY` holds one or more Fernet keys, comma-separated,
 newest first, wrapped in MultiFernet: encryption always uses the
-newest key, decryption tries them in order, so rotation is add the
-new key, restart, re-encrypt at leisure (the re-encrypt command
-stays deferred until rotation is actually needed, per the issue).
+newest key, decryption tries them in order. What this release
+supports is adding a new key; it does not support retiring an old
+one. Until the deferred re-encrypt command exists (deferred until
+rotation is actually needed, per the issue), only newly written
+secrets use the new key, so every old key must stay in
+`SAMTAL_MASTER_KEY` for as long as any token written under it
+remains in the database, and the deployment notes say exactly
+that. The interim workaround is re-running `set-secret` for each
+stored secret, which rewrites its token under the newest key.
 
 Boot-time key check, same fail-at-boot pattern as `auth.enabled`,
 and deliberately not part of opening the database: `open_database`
@@ -934,6 +940,12 @@ addressing it lands.
     cannot be retired. State that every old key must remain in
     `SAMTAL_MASTER_KEY` until all tokens have been rewritten by
     future tooling.
+    *Resolution*: the envelope section now states that this
+    release supports adding a key and not retiring one, that
+    every old key stays in `SAMTAL_MASTER_KEY` while any token
+    written under it remains, and that re-running `set-secret`
+    per stored secret is the interim rewrite path; the deployment
+    notes carry the same statement.
 
 ## Milestones
 
