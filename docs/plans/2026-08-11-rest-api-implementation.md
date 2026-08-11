@@ -490,3 +490,188 @@ places that pass looked at.
 
 Full lanes after the fixes: ruff clean, both suites green and both
 drift checks clean (counts in the PR's verification section).
+
+## Milestone 3: write path and CLI switchover
+
+The behavior change, in one push: the API gains every write, the CLI
+becomes its client with its grammar untouched, and the recovery subset
+becomes the only thing that still opens the database from a command
+line. No published state holds two co-equal write paths, which is the
+whole reason these land together.
+
+### What landed
+
+**The write routes (`config/api.py`).** The plan's surface exactly: PUT
+and DELETE per entity kind, the two write-only secret endpoints, PUT for
+the device binding and the default agent, DELETE for the default agent's
+idempotent clear, and PUT for the agent defaults, which are one entry
+for the deployment and so have nothing to delete. Every success answers
+200 with `{"wrote": ..., "notice": RESTART_NOTICE}`: configuration is a
+boot-time snapshot, and a write that answered only "ok" would leave the
+one operational trap of that design open.
+
+Fragment bodies are received as `Annotated[Any, Body()]` and handed to
+the repository unread. Declaring the entity models as body types would
+put FastAPI's own validation in front of them, and its 422 echoes the
+input it rejected, which for a fragment carrying a pasted credential is
+exactly the leak the repository's `_load` exists to avoid. The three
+argument-shaped bodies (devices, default agent, secret) get exact-shape
+parsers: one key, one shape, and a refusal describing the expectation
+rather than quoting what arrived. They are written with plain checks and
+no `try`/`except`, because a `KeyError` or a `TypeError` raised on a body
+holds the body, and the PR #104 rule is that a sanitized refusal is
+raised outside the handler that formed it.
+
+**The write vocabulary (`config/writes.py`).** What a write says it did,
+and `RESTART_NOTICE`, in a leaf module both write paths import. The API
+answers in these words and `--local` prints the same ones, so the
+break-glass path and the ordinary one cannot come to describe the same
+act differently.
+
+**The CLI as a client (`config/cli.py`).** The grammar is unchanged and
+so is every message: the API carries the repository's sentence in
+`detail` and the CLI prints `detail`. Where the server is: `--api-url`,
+then `SAMTAL_API_URL`, then `http://127.0.0.1:<server.port>/api`. The
+token is the value of the variable `server.api.secret_env` names, read
+from the same file configuration, resolved before any request is sent.
+The transport policy refuses a plain `http://` connection to a host that
+is not this machine (no override flag), refuses a URL carrying userinfo,
+strips userinfo from any URL it prints, and reports a non-2xx body that
+is not this API's own as a status code rather than relaying it. Timeouts
+are explicit: connect 5 s, read 30 s, which is margin above the
+database's 10 second busy timeout so that the settled retryable 409
+arrives as itself rather than as a client-side timeout.
+
+`--local` covers `show`, `delete`, `clear-secret` and `set-secret`,
+carried on the commands themselves (`local_ok`) rather than in a list
+kept somewhere else. Every `--local` invocation prints the notice on
+stderr, reads included; every other command refuses the flag by naming
+the four.
+
+**The acceptance suite (`tests/unit/test_config_cli.py`).** The scenario
+tests now drive `cli.main()` through the injected client factory against
+the real sub-application over a scratch database, with the exact stderr
+assertions kept: that is the regression net for "the API carries the
+repository's message and the CLI prints it". Added: the URL and token
+resolution, the transport refusals with a sentinel in the userinfo, the
+unrecognized-body case, the lock-held 409, the `--local` notice, subset
+and boundary, and the awkward-name round trips through the whole client.
+`tests/unit/test_config_api_writes.py` is the same surface from the HTTP
+side, with every malformed-body path driven by a sentinel and checked
+against the response, its headers and the captured log.
+
+**Scripts.** The three seeding scripts start a server of their own, poll
+`/healthz`, write over loopback with the image's own CLI and stop it
+again, with the lifecycle in one sourced `tests/smoke/serve.sh` and the
+server's log printed on any failure. `config.deploy.example.sh` is
+rewritten to run against a running server, its measured values
+untouched. Both sets of script tests move to the integration lane, the
+seeds run unmodified with no fixture, and the deployment profile runs
+verbatim against one new conftest fixture serving a built app on an
+ephemeral loopback port.
+
+**Documentation.** Getting Started reorders to start, configure,
+restart, with the restart as its own step; the server README moves with
+it where the switchover forces it. The full sweep is milestone 4.
+
+### Two commits that arrive twice
+
+The addressability rule (`071cd57`) and `set_secret`'s non-empty-string
+refusal (`8c7c11b`) were written here because milestone 3 is where the
+plan puts them, and milestone 2's own review round landed versions of
+both while this branch was in flight. They are the first two commits on
+this branch and touch nothing else, so at rebase they are expected to be
+dropped in favour of milestone 2's, or merged with them where the
+wording differs. What depends on them here does not depend on which
+version wins: the write routes and the CLI meet the rule through the
+repository, and the tests that would notice a wording change are the
+ones in `tests/unit/test_config_store.py` that those same two commits
+added.
+
+### Deviations from the plan
+
+**`RESTART_NOTICE` moved rather than being imported from the CLI.** The
+plan says the API reuses `cli.RESTART_NOTICE`. That direction cannot be:
+the CLI imports the API's mount path and its write vocabulary, so the
+API importing the CLI would be a cycle, and even without one it would be
+backwards for the server's admin surface to import the command-line
+tool. The plan's actual requirement is that decision 5's contract is one
+string in one place, and it is: `config/writes.py`, a leaf module with
+no heavy imports, which is also what keeps `config schema` and `config
+reference` from importing FastAPI on their way to printing a document
+that has nothing to do with it.
+
+**The CLI's default address carries the mount prefix.** The plan writes
+the default as `http://127.0.0.1:<server.port>`, which cannot reach
+anything: the sub-application is mounted at `/api` on the server's port,
+which is what the plan's own surface table and the document's `servers`
+entry say. The default is the port plus `API_MOUNT_PATH`, from the same
+constant the server mounts on. Caught by running a seeding script
+against a real server, which is the case an injected test client would
+never have shown.
+
+**`config list` is not in the `--local` subset.** The issue's four are
+`show`, `delete`, `clear-secret` and `set-secret`, and `list` is not one
+of them, so `--local list` is refused by naming the subset. `--local
+show` is the reading command that needs no server, and the local
+development example in the server README uses it.
+
+**`_summary` is rendered from the masked document.** `config list` used
+to walk the loaded models and the secret store; over HTTP what comes
+back is the same masked document `show` prints, so the summary is built
+from that. The output is unchanged, which the unchanged assertions pin.
+
+### Discoveries
+
+**A name a URL path cannot carry is unroutable, not refused.** The
+addressability rule refuses such a name at write time in the repository,
+which is where a caller that can reach the repository meets it. A caller
+that goes through HTTP never gets that far: `quote("a/b")` is `a%2Fb`,
+and both uvicorn and Starlette's TestClient decode the path before
+routing, so the request reaches no route and answers 404. The entity is
+not created either way, and the CLI test asserts that rather than a
+sentence. It is also the concrete reason the rule exists: without it the
+repository would happily create rows the API could never address.
+
+**FastAPI deep-merges `openapi_extra` into what it generated.** A route
+with a raw-object body gets an auto-generated request schema
+(`{"title": "Body"}`), and `openapi_extra` merges key by key rather than
+replacing, so the title survived beside the `$ref`. A `$ref` with a
+sibling is ignored by some readers and confusing to the rest, so
+`_resolve_body_schemas` reduces each write's body schema to the
+reference it declared, and the drift test pins it.
+
+**A body with no JSON content type arrives as `bytes`.** With
+`Annotated[Any, Body()]`, FastAPI parses JSON only when the content type
+says so and otherwise passes the raw bytes through. Nothing leaks: the
+repository refuses a `bytes` fragment by naming its type, and the
+exact-shape parsers refuse anything that is not a mapping. Worth knowing
+before somebody assumes a handler can only ever see a decoded object.
+
+**The port has to be exported, not only read.** A seeding script reads
+`SAMTAL_SERVER__PORT` to know where to poll, but the CLI inside it
+resolves the port through the settings machinery, which would otherwise
+take the mounted file's value. Exporting the one value makes the server,
+the CLI and the poll agree by construction.
+
+**Uvicorn in a thread is what a subprocess test needs.** The
+deployment-profile script is a subprocess, so the server it talks to
+cannot live on the test's own event loop. `uvicorn.Server.run` in a
+daemon thread works because uvicorn skips its signal handlers off the
+main thread; the fixture waits on `server.started` with a deadline and a
+liveness check rather than a bare loop.
+
+### Notes for milestone 4
+
+- The server README's API section, the deployment notes (token
+  generation, ingress guidance for `/api/`, loopback-or-TLS, the upgrade
+  note) and the markdown reference's API pointers are still to write.
+  What milestone 3 touched is only what the switchover forced: the
+  container walkthrough, the smoke-lane example, the domain-half
+  section's "you need a server up" note, the local-development example,
+  and the deployment profile's own header.
+- The `--local` subset is documented in one paragraph of the server
+  README and in the CLI's own help. The deployment notes are where the
+  break-glass procedure belongs in full.
+- `config.example.yaml` needs no change: the schema did not move in this
+  milestone.
