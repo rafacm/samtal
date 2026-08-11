@@ -995,7 +995,7 @@ its section of the implementation doc when written.
   accounted for in the audit, the committed reference regenerates
   byte-identical in CI, lanes green.
 - [x] **[Switchover and docs](2026-08-11-db-domain-config-implementation.md#milestone-4-switchover-and-docs)**
-  (PR TBD): `Config` composed from the
+  (PR #102): `Config` composed from the
   file half plus the database snapshot; domain keys in YAML and
   domain `SAMTAL_` env vars refusing boot with the
   moved-to-the-database error; `config.example.yaml` shrunk to
