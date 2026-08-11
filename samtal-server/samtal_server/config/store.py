@@ -39,6 +39,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from samtal_server.config.loader import ConfigError
 from samtal_server.config.models import (
+    DOMAIN_DESCRIPTIONS,
     PROVIDER_STAGES,
     AgentConfig,
     AgentDefaults,
@@ -72,12 +73,24 @@ class DomainConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
-    mcp_servers: dict[NonBlankStr, McpServerConfig] = Field(default_factory=dict)
-    agent_defaults: AgentDefaults = Field(default_factory=AgentDefaults)
-    agents: dict[NonBlankStr, AgentConfig] = Field(default_factory=dict)
-    devices: dict[str, list[NonBlankStr]] = Field(default_factory=dict)
-    default_agent: NonBlankStr | None = None
+    providers: ProvidersConfig = Field(
+        default_factory=ProvidersConfig, description=DOMAIN_DESCRIPTIONS["providers"]
+    )
+    mcp_servers: dict[NonBlankStr, McpServerConfig] = Field(
+        default_factory=dict, description=DOMAIN_DESCRIPTIONS["mcp_servers"]
+    )
+    agent_defaults: AgentDefaults = Field(
+        default_factory=AgentDefaults, description=DOMAIN_DESCRIPTIONS["agent_defaults"]
+    )
+    agents: dict[NonBlankStr, AgentConfig] = Field(
+        default_factory=dict, description=DOMAIN_DESCRIPTIONS["agents"]
+    )
+    devices: dict[str, list[NonBlankStr]] = Field(
+        default_factory=dict, description=DOMAIN_DESCRIPTIONS["devices"]
+    )
+    default_agent: NonBlankStr | None = Field(
+        default=None, description=DOMAIN_DESCRIPTIONS["default_agent"]
+    )
 
     @field_validator("mcp_servers")
     @classmethod
