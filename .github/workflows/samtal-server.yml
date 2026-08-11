@@ -5,10 +5,16 @@ on:
     branches: [main]
     paths:
       - "samtal-server/**"
+      # The generated domain-configuration reference is committed there
+      # and diffed below, so an edit to the committed copy alone has to
+      # trigger this workflow too. Without it, hand-editing the file
+      # would simply pass.
+      - "docs/reference/**"
       - ".github/workflows/samtal-server.yml"
   pull_request:
     paths:
       - "samtal-server/**"
+      - "docs/reference/**"
       - ".github/workflows/samtal-server.yml"
 
 defaults:
@@ -47,6 +53,20 @@ jobs:
 
       - name: Integration tests
         run: uv run pytest tests/integration -v
+
+      # The reference is generated from the models, so the committed
+      # copy is a cache: it exists to be read on GitHub and in an
+      # editor, and it is worth nothing if it can drift from what the
+      # models say. Regenerating and diffing is what keeps the two the
+      # same document. The diff is printed on failure, which names the
+      # field that moved.
+      - name: Check the committed domain reference is current
+        run: |
+          uv run samtal-server config reference > "$RUNNER_TEMP/domain-config.md"
+          if ! diff -u ../docs/reference/domain-config.md "$RUNNER_TEMP/domain-config.md"; then
+            echo "::error::docs/reference/domain-config.md is stale; regenerate it with: uv run samtal-server config reference > ../docs/reference/domain-config.md"
+            exit 1
+          fi
 
       # The database's Alembic scripts live inside the package so that a
       # built wheel carries them, and no test run from the checkout can
