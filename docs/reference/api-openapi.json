@@ -1,0 +1,28 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "samtal-server configuration API",
+    "description": "The domain half of one samtal-server deployment's configuration: providers, MCP servers, agents, devices, and the credentials they use. Every request carries a bearer token, whose value is the environment variable `server.api.secret_env` names.\n\nConfiguration is a boot-time snapshot, so a successful write applies at the next server start rather than immediately, and every write says so.\n\nA provider entry carries whatever options its `type` takes, and those are passed through rather than declared, so no schema can list them. Until typed option models land (#88) they are documented in the example fragments under `samtal-server/examples/`, which is also where the measured numbers behind each default are kept.",
+    "version": "1"
+  },
+  "servers": [
+    {
+      "url": "/api"
+    }
+  ],
+  "paths": {},
+  "components": {
+    "securitySchemes": {
+      "bearerToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "The value of the environment variable server.api.secret_env names. It grants everything this API can do, secret writes included, so it belongs on a loopback connection or behind TLS."
+      }
+    }
+  },
+  "security": [
+    {
+      "bearerToken": []
+    }
+  ]
+}

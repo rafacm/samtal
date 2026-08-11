@@ -7,6 +7,12 @@ committed at `docs/reference/domain-config.md`, and as the `--help`
 text of the commands that take a fragment. A description that is only
 true in one of them cannot exist, which is the point.
 
+A fourth rendering has a different source: the configuration API's
+OpenAPI document comes from that application's routes, committed at
+`docs/reference/api-openapi.json` under the same regenerate-and-diff
+check. It lives here because it is documentation, and because these
+commands are the ones a documentation lane runs.
+
 Everything here is deterministic: no timestamps, no set iteration, and
 the field order is the models' own declaration order. CI regenerates
 the committed reference and diffs it byte for byte, so anything that
@@ -249,6 +255,26 @@ def schema(name: str | None = None) -> str:
     configuration when nothing is named."""
     model = DomainConfig if name in (None, DOMAIN) else entity(str(name)).model
     return json.dumps(model.model_json_schema(), indent=2, ensure_ascii=False) + "\n"
+
+
+# The OpenAPI document
+
+
+def openapi() -> str:
+    """The configuration API's OpenAPI document, which is the document
+    CI diffs the committed copy against.
+
+    The sub-application is imported here rather than at the top of the
+    module: these renderings are what a documentation lane runs from a
+    plain sync, and there is no reason for `config schema` to pay for
+    the API's imports on its way to printing a JSON Schema. Building the
+    application opens no database, reads no configuration file and needs
+    no key, so the command in front of this stays as read-only as its
+    two neighbours.
+    """
+    from samtal_server.config.api import document
+
+    return json.dumps(document(), indent=2, ensure_ascii=False) + "\n"
 
 
 # The markdown reference
@@ -503,6 +529,7 @@ __all__ = [
     "entity",
     "entity_names",
     "fragment_help",
+    "openapi",
     "reference",
     "schema",
 ]

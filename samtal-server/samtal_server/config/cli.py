@@ -257,6 +257,14 @@ def _reference(args: argparse.Namespace) -> None:
     print(docgen.reference(), end="")
 
 
+def _openapi(args: argparse.Namespace) -> None:
+    """The configuration API's OpenAPI document, the other artifact CI
+    diffs its committed copy against. Rendered from the routes, so it
+    opens no database and needs no token: the application is built, its
+    document is taken, and nothing of it is served."""
+    print(docgen.openapi(), end="")
+
+
 def _show_device(args: argparse.Namespace) -> None:
     snapshot = _loaded(args)
     bound = snapshot.domain.devices.get(_mac(args.mac))
@@ -747,10 +755,11 @@ def _parser() -> argparse.ArgumentParser:
     listing = commands.add_parser("list", parents=[common], help="a summary tree")
     listing.set_defaults(run=_list)
 
-    # Read-only and local: these two render the models, so they take no
-    # --config, open no database, and need no encryption key. Keep it
-    # that way: the documentation lane runs `config reference` from a
-    # plain sync, with no database and no key anywhere.
+    # Read-only and local: these three render the models and the API's
+    # own routes, so they take no --config, open no database, and need
+    # no encryption key. Keep it that way: the documentation lane runs
+    # `config reference` and `config openapi` from a plain sync, with no
+    # database and no key anywhere.
     schema = commands.add_parser(
         "schema", help="the JSON Schema of one entity, or of the whole domain half"
     )
@@ -766,6 +775,11 @@ def _parser() -> argparse.ArgumentParser:
         "reference", help="the markdown reference, generated from the models"
     )
     reference.set_defaults(run=_reference)
+
+    openapi = commands.add_parser(
+        "openapi", help="the configuration API's OpenAPI document, generated from its routes"
+    )
+    openapi.set_defaults(run=_openapi)
 
     show = commands.add_parser("show", parents=[common], help="everything, or one entity")
     show.set_defaults(run=_show_all)
