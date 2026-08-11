@@ -1,0 +1,187 @@
+"""Which refusal is which, by type.
+
+The CLI prints every refusal as a sentence and needs no distinction.
+The REST API answers with a status code, and the plan fixes the mapping:
+a missing entity is 404, a lock that did not arrive is 409, unreadable
+stored state is 500, and everything else (shape, references, slots,
+stage names) is 422. Mapping by reading the message would make the
+wording load-bearing, so the refusals carry types instead.
+
+All three subclass ConfigError, so nothing that catches ConfigError
+changes; these tests pin the subtype where the status code depends on
+it, and pin that the messages did not move.
+
+The busy case is forced rather than hoped for: a real lock is held by a
+second connection while the busy timeout is short, once inside the
+open-and-migrate step (which the API is on the path of for every
+request) and once inside a repository write.
+"""
+
+import sqlite3
+from pathlib import Path
+
+import pytest
+from cryptography.fernet import Fernet, MultiFernet
+from sqlalchemy import update
+
+from samtal_server import db as db_module
+from samtal_server.config.loader import (
+    ConfigError,
+    DatabaseBusyError,
+    StorageError,
+    UnknownEntityError,
+)
+from samtal_server.config.secrets import SecretLocation, generate_key
+from samtal_server.config.store import ConfigStore
+from samtal_server.db import DATABASE_FILENAME, open_database, schema
+
+CLAUDE = SecretLocation.provider("llm", "claude", "api_key")
+
+# Short enough that a blocked writer gives up inside a test run, and
+# long enough that an unblocked one never sees it.
+SHORT_BUSY_MS = 200
+
+
+@pytest.fixture
+def store(tmp_path: Path):
+    engine = open_database(tmp_path / "db")
+    try:
+        yield ConfigStore(engine, MultiFernet([Fernet(generate_key())]))
+    finally:
+        engine.dispose()
+
+
+def _populate(store: ConfigStore) -> None:
+    store.set_provider("llm", "claude", {"type": "anthropic", "model": "claude-sonnet-5"})
+    store.set_mcp_server("weather", {"transport": "stdio", "command": "weather-mcp"})
+    store.set_agent("sam", {"prompt": "hello"})
+
+
+def test_every_typed_refusal_is_still_a_config_error() -> None:
+    for kind in (UnknownEntityError, DatabaseBusyError, StorageError):
+        assert issubclass(kind, ConfigError)
+
+
+def test_a_missing_entity_is_an_unknown_entity_error(store: ConfigStore) -> None:
+    """The 404 set. Each message is the one the CLI has always printed."""
+    _populate(store)
+    cases = [
+        (lambda: store.delete_provider("llm", "gone"), "providers.llm.gone: no such provider"),
+        (lambda: store.delete_mcp_server("gone"), "mcp_servers.gone: no such MCP server"),
+        (lambda: store.delete_agent("gone"), "agents.gone: no such agent"),
+        (
+            lambda: store.delete_device("aa:bb:cc:dd:ee:ff"),
+            "devices.aa:bb:cc:dd:ee:ff: no such device",
+        ),
+        (
+            lambda: store.clear_secret(CLAUDE),
+            "no secret is stored for this slot",
+        ),
+        (
+            lambda: store.set_secret(SecretLocation.provider("llm", "gone", "api_key"), "x"),
+            "providers.llm.gone: no such provider",
+        ),
+        (
+            lambda: store.set_secret(SecretLocation.mcp_server("gone", "env.TOKEN"), "x"),
+            "mcp_servers.gone: no such MCP server",
+        ),
+    ]
+    for call, message in cases:
+        with pytest.raises(UnknownEntityError) as caught:
+            call()
+        assert message in str(caught.value)
+
+
+def test_a_refusal_that_is_not_about_a_missing_entity_stays_plain(store: ConfigStore) -> None:
+    """The 422 set, asserted as "not one of the other three": a fragment
+    that does not validate, a reference that would be left unresolved, a
+    slot that is not a credential slot, and a stage that is not a
+    stage."""
+    _populate(store)
+    calls = [
+        lambda: store.set_provider("llm", "broken", {"type": ""}),
+        lambda: store.set_agent("sam", {"prompt": "hello", "llm": "missing"}),
+        lambda: store.set_secret(SecretLocation.provider("llm", "claude", "model"), "x"),
+        lambda: store.set_provider("nonsense", "x", {"type": "anthropic"}),
+    ]
+    for call in calls:
+        with pytest.raises(ConfigError) as caught:
+            call()
+        assert type(caught.value) is ConfigError, caught.value
+
+
+def test_a_column_that_cannot_be_read_is_a_storage_error(store: ConfigStore) -> None:
+    """The 500 set: the request was fine, the stored row is not."""
+    _populate(store)
+    with store._engine.begin() as connection:
+        connection.execute(update(schema.providers).values(options="not an object"))
+
+    with pytest.raises(StorageError) as caught:
+        store.load()
+
+    assert "the options column does not hold an object with string keys" in str(caught.value)
+
+
+def test_a_stored_row_naming_no_stage_is_a_storage_error(store: ConfigStore) -> None:
+    _populate(store)
+    with store._engine.begin() as connection:
+        connection.execute(update(schema.providers).values(stage="nonsense"))
+
+    with pytest.raises(StorageError):
+        store.load()
+
+
+def test_an_unopenable_directory_is_a_storage_error(tmp_path: Path) -> None:
+    blocker = tmp_path / "not-a-directory"
+    blocker.write_text("", encoding="utf-8")
+
+    with pytest.raises(StorageError):
+        open_database(blocker / "db")
+
+
+def _hold_the_write_lock(directory: Path) -> sqlite3.Connection:
+    """A second process's write transaction, as far as the engine under
+    test can tell: one connection to the same file, in a transaction
+    that has taken the write lock and does not let go."""
+    holder = sqlite3.connect(directory / DATABASE_FILENAME, isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    return holder
+
+
+def test_a_write_that_cannot_take_the_lock_is_a_busy_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(db_module, "BUSY_TIMEOUT_MS", SHORT_BUSY_MS)
+    directory = tmp_path / "db"
+    engine = open_database(directory)
+    holder = _hold_the_write_lock(directory)
+    try:
+        with pytest.raises(DatabaseBusyError) as caught:
+            ConfigStore(engine).set_agent("sam", {"prompt": "hello"})
+    finally:
+        holder.close()
+        engine.dispose()
+
+    # The retryable sentence, unchanged: it is what the CLI prints and
+    # what the API's 409 carries.
+    assert "Nothing was changed; run the command again." in str(caught.value)
+
+
+def test_an_open_that_cannot_take_the_lock_is_a_busy_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The case the API adds: opening the database is on every request
+    path, and its migration check takes the same write lock, so a lock
+    timeout here has to be the retryable refusal too rather than the
+    generic one."""
+    monkeypatch.setattr(db_module, "BUSY_TIMEOUT_MS", SHORT_BUSY_MS)
+    directory = tmp_path / "db"
+    open_database(directory).dispose()
+    holder = _hold_the_write_lock(directory)
+    try:
+        with pytest.raises(DatabaseBusyError) as caught:
+            open_database(directory)
+    finally:
+        holder.close()
+
+    assert "server.database.dir" in str(caught.value)

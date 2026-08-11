@@ -37,7 +37,12 @@ from sqlalchemy import Connection, Engine, Row, Table, delete, insert, select, u
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.sql.elements import ColumnElement
 
-from samtal_server.config.loader import ConfigError
+from samtal_server.config.loader import (
+    ConfigError,
+    DatabaseBusyError,
+    StorageError,
+    UnknownEntityError,
+)
 from samtal_server.config.models import (
     DOMAIN_DESCRIPTIONS,
     PROVIDER_STAGES,
@@ -179,7 +184,7 @@ class ConfigStore:
             domain = _read_domain(connection)
             entries = getattr(domain.providers, stage)
             if name not in entries:
-                raise ConfigError(f"providers.{stage}.{name}: no such provider")
+                raise UnknownEntityError(f"providers.{stage}.{name}: no such provider")
             del entries[name]
             _refuse_unresolved(domain)
             # The row carries its own secrets column, so deleting the
@@ -207,7 +212,7 @@ class ConfigStore:
         with self._transaction() as connection:
             domain = _read_domain(connection)
             if name not in domain.mcp_servers:
-                raise ConfigError(f"mcp_servers.{name}: no such MCP server")
+                raise UnknownEntityError(f"mcp_servers.{name}: no such MCP server")
             del domain.mcp_servers[name]
             _refuse_unresolved(domain)
             connection.execute(
@@ -234,7 +239,7 @@ class ConfigStore:
         with self._transaction() as connection:
             domain = _read_domain(connection)
             if name not in domain.agents:
-                raise ConfigError(f"agents.{name}: no such agent")
+                raise UnknownEntityError(f"agents.{name}: no such agent")
             del domain.agents[name]
             _refuse_unresolved(domain)
             connection.execute(delete(schema.agents).where(schema.agents.c.name == name))
@@ -268,7 +273,7 @@ class ConfigStore:
         with self._transaction() as connection:
             domain = _read_domain(connection)
             if normalized not in domain.devices:
-                raise ConfigError(f"devices.{normalized}: no such device")
+                raise UnknownEntityError(f"devices.{normalized}: no such device")
             del domain.devices[normalized]
             _refuse_unresolved(domain)
             connection.execute(delete(schema.devices).where(schema.devices.c.mac == normalized))
@@ -314,7 +319,9 @@ class ConfigStore:
         with self._transaction() as connection:
             stored = dict(_stored_secrets(connection, location))
             if location.slot not in stored:
-                raise ConfigError(f"{location.describe()}: no secret is stored for this slot")
+                raise UnknownEntityError(
+                    f"{location.describe()}: no secret is stored for this slot"
+                )
             del stored[location.slot]
             _write_secrets(connection, location, stored)
 
@@ -330,17 +337,21 @@ class ConfigStore:
         except ConfigError:
             raise
         except SQLAlchemyError as exc:
-            raise ConfigError(_database_problem(exc)) from None
+            raise _database_problem(exc) from None
 
 
-def _database_problem(exc: SQLAlchemyError) -> str:
+def _database_problem(exc: SQLAlchemyError) -> ConfigError:
+    """The busy lock told from everything else, by type as well as by
+    message: one is worth retrying and the other is not, and a caller
+    that answers with a status code cannot be made to read the
+    sentence. The sentences themselves are unchanged."""
     detail = str(getattr(exc, "orig", "")) or type(exc).__name__
     if isinstance(exc, OperationalError) and ("locked" in detail or "busy" in detail):
-        return (
+        return DatabaseBusyError(
             "the configuration database is busy: another process holds the write "
             "lock. Nothing was changed; run the command again."
         )
-    return f"the configuration database could not be read or written: {detail}"
+    return StorageError(f"the configuration database could not be read or written: {detail}")
 
 
 # Reading rows
@@ -350,7 +361,10 @@ def _read_domain(connection: Connection) -> DomainConfig:
     providers: dict[str, dict[str, ProviderConfig]] = {stage: {} for stage in PROVIDER_STAGES}
     for row in connection.execute(select(schema.providers)):
         if row.stage not in providers:
-            raise ConfigError(
+            # A stored row, not an argument: the same sentence the stage
+            # check raises for a caller's typo, but nothing the caller
+            # can do about it, so it is a storage failure here.
+            raise StorageError(
                 f'providers.{row.stage}.{row.name}: "{row.stage}" is not a provider '
                 f"stage; expected one of: " + ", ".join(PROVIDER_STAGES)
             )
@@ -381,7 +395,7 @@ def _read_domain(connection: Connection) -> DomainConfig:
     ).scalar()
     if default_agent is not None:
         if not isinstance(default_agent, str):
-            raise ConfigError(
+            raise StorageError(
                 f"domain_settings.{schema.DEFAULT_AGENT_KEY}: the value column does not "
                 f"hold a string; the row cannot be read as configuration"
             )
@@ -472,7 +486,7 @@ def _mapping(location: str, column: str, value: object) -> dict[str, object]:
     if value is None:
         return {}
     if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
-        raise ConfigError(_shape_problem(location, column, "an object with string keys"))
+        raise StorageError(_shape_problem(location, column, "an object with string keys"))
     return dict(value)
 
 
@@ -482,7 +496,7 @@ def _list(location: str, column: str, value: object) -> list[object]:
     if value is None:
         return []
     if not isinstance(value, list):
-        raise ConfigError(_shape_problem(location, column, "an array"))
+        raise StorageError(_shape_problem(location, column, "an array"))
     return list(value)
 
 
@@ -563,7 +577,7 @@ def _write_secrets(
     table, where = _secret_row(location)
     result = connection.execute(update(table).where(*where).values(secrets=dict(stored)))
     if result.rowcount == 0:
-        raise ConfigError(
+        raise UnknownEntityError(
             f"{location.describe()}: no such entity; create it first with "
             f"samtal-server config set"
         )
@@ -587,7 +601,7 @@ def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
     if location.kind == "provider":
         stage, _, name = location.identity.partition(".")
         if name not in getattr(domain.providers, _stage(stage)):
-            raise ConfigError(f"providers.{stage}.{name}: no such provider")
+            raise UnknownEntityError(f"providers.{stage}.{name}: no such provider")
         if location.slot.lower().endswith("_env") or not is_secret_option(location.slot):
             raise ConfigError(
                 f'"{location.slot}" is not a credential slot on a provider; a slot is '
@@ -596,7 +610,7 @@ def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
         return
 
     if location.identity not in domain.mcp_servers:
-        raise ConfigError(f"mcp_servers.{location.identity}: no such MCP server")
+        raise UnknownEntityError(f"mcp_servers.{location.identity}: no such MCP server")
     group, _, key = location.slot.partition(".")
     if group not in MCP_SECRET_GROUPS or not key:
         raise ConfigError(

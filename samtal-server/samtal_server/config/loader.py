@@ -58,6 +58,32 @@ class ConfigError(Exception):
     """A configuration problem, with a message meant to be shown as is."""
 
 
+# The three refusals that are not simply "this configuration is wrong".
+# They live here, beside ConfigError and above anything that imports a
+# database driver, because both raisers need them: the repository, and
+# `open_database`, which the API is on the path of for every request.
+# All three subclass ConfigError, so the CLI and the boot path keep
+# catching one exception and printing one sentence, and the messages are
+# unchanged; what the types add is a caller that has to answer with a
+# status code rather than a sentence.
+
+
+class UnknownEntityError(ConfigError):
+    """The named entity, or the stored secret in that slot, does not
+    exist. The request was well formed and addressed nothing."""
+
+
+class DatabaseBusyError(ConfigError):
+    """Another process held the write lock for longer than the busy
+    timeout allows. Nothing was changed, and the same call may be
+    retried."""
+
+
+class StorageError(ConfigError):
+    """The stored state cannot be read as configuration, or the database
+    could not be read or written at all. Not the caller's mistake."""
+
+
 def load_file_config(path: str | Path | None = None) -> FileConfig:
     """The file half of the configuration: `server` and `memory`."""
     if path is None:
