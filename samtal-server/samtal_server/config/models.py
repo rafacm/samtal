@@ -157,6 +157,24 @@ class CaptureConfig(BaseModel):
     min_free_mb: float = Field(default=1000.0, ge=0)
 
 
+class DatabaseConfig(BaseModel):
+    """Where the domain half of the configuration is stored.
+
+    The directory rather than the file is the key, mirroring memory.dir
+    and capture.dir, so database-adjacent artifacts later need no second
+    path key. One SQLite file named samtal.db lives inside it.
+
+    The default is the generic one, not what any particular deployment
+    runs with: a container image whose writable volume is elsewhere
+    points this at that volume, and a development machine that cannot
+    write to /var/lib either gets an error naming this key.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    dir: Path = Path("/var/lib/samtal")
+
+
 class ServerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -192,6 +210,11 @@ class ServerConfig(BaseModel):
 
     auth: AuthConfig = Field(default_factory=AuthConfig)
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
+
+    # Where `samtal-server config` writes the domain configuration. The
+    # server does not read it yet; the switchover is what makes it the
+    # source the domain half boots from.
+    database: DatabaseConfig = Field(default_factory=DatabaseConfig)
 
     # Absent, or present with enabled off, means no session is ever
     # recorded. Absent is the default.
