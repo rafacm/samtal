@@ -106,15 +106,15 @@ def test_a_wrong_token_and_a_wrong_scheme_answer_alike(client: TestClient) -> No
 
 
 def test_the_scheme_is_matched_without_regard_to_case(client: TestClient) -> None:
-    response = client.get("/config", headers={"Authorization": f"bearer {TOKEN}"})
+    response = client.get("/no-such-route", headers={"Authorization": f"bearer {TOKEN}"})
 
     assert response.status_code == 404
 
 
-def test_the_right_token_reaches_routing_and_finds_nothing_yet(client: TestClient) -> None:
-    """The milestone 1 acceptance: with the token, /api answers 404
-    because there are no routes; without it, 401."""
-    response = client.get("/config", headers=_bearer(TOKEN))
+def test_the_right_token_reaches_routing(client: TestClient) -> None:
+    """Past the gate, routing decides: a path that is not a route is a
+    404, and only an authenticated caller ever finds that out."""
+    response = client.get("/no-such-route", headers=_bearer(TOKEN))
 
     assert response.status_code == 404
 
@@ -311,13 +311,22 @@ def test_the_whole_namespace_is_gated_without_a_redirect(
     assert response.headers["WWW-Authenticate"] == "Bearer"
 
 
-@pytest.mark.parametrize("path", [MOUNT_PATH, f"{MOUNT_PATH}/", f"{MOUNT_PATH}/config"])
+@pytest.mark.parametrize("path", [MOUNT_PATH, f"{MOUNT_PATH}/", f"{MOUNT_PATH}/nothing"])
 def test_the_namespace_answers_the_token_holder(served: TestClient, path: str) -> None:
-    """With the token, 404: there are no routes yet, and only an
-    authenticated caller gets to find that out."""
+    """With the token, routing answers: none of these is a route, and
+    only an authenticated caller gets to find that out."""
     response = served.get(path, headers=_bearer(TOKEN))
 
     assert response.status_code == 404, path
+
+
+def test_a_read_route_is_reachable_through_the_mount(served: TestClient) -> None:
+    """The routes are served where the document says they are, which a
+    test against the sub-application on its own cannot show."""
+    response = served.get(f"{MOUNT_PATH}/config", headers=_bearer(TOKEN))
+
+    assert response.status_code == 200
+    assert response.json()["config"]["agents"] == {}
 
 
 def test_the_device_facing_app_is_unchanged(served: TestClient) -> None:

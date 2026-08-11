@@ -10,8 +10,1205 @@
       "url": "/api"
     }
   ],
-  "paths": {},
+  "paths": {
+    "/config": {
+      "get": {
+        "summary": "Read Config",
+        "description": "The whole domain configuration, masked, with the location of\nevery stored secret beside it.",
+        "operationId": "read_config_config_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigDocument"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/providers": {
+      "get": {
+        "summary": "Read Providers",
+        "description": "Every provider, by stage and then by name: a provider is\naddressed by the two together, since two stages may hold one\nname.",
+        "operationId": "read_providers_providers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "additionalProperties": {
+                      "$ref": "#/components/schemas/Envelope"
+                    },
+                    "type": "object"
+                  },
+                  "type": "object",
+                  "title": "Response Read Providers Providers Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/providers/{stage}/{name}": {
+      "get": {
+        "summary": "Read Provider",
+        "description": "One provider.",
+        "operationId": "read_provider_providers__stage___name__get",
+        "parameters": [
+          {
+            "name": "stage",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Stage"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing of that identity exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mcp-servers": {
+      "get": {
+        "summary": "Read Mcp Servers",
+        "description": "Every MCP server, by name.",
+        "operationId": "read_mcp_servers_mcp_servers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/Envelope"
+                  },
+                  "type": "object",
+                  "title": "Response Read Mcp Servers Mcp Servers Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mcp-servers/{name}": {
+      "get": {
+        "summary": "Read Mcp Server",
+        "description": "One MCP server.",
+        "operationId": "read_mcp_server_mcp_servers__name__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing of that identity exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents": {
+      "get": {
+        "summary": "Read Agents",
+        "description": "Every agent, by name.",
+        "operationId": "read_agents_agents_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/Envelope"
+                  },
+                  "type": "object",
+                  "title": "Response Read Agents Agents Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agents/{name}": {
+      "get": {
+        "summary": "Read Agent",
+        "description": "One agent.",
+        "operationId": "read_agent_agents__name__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing of that identity exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/agent-defaults": {
+      "get": {
+        "summary": "Read Agent Defaults",
+        "description": "What every agent uses unless it names something else. One\nentry for the whole deployment, and never missing: an unwritten\none reads as the empty entry.",
+        "operationId": "read_agent_defaults_agent_defaults_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/devices": {
+      "get": {
+        "summary": "Read Devices",
+        "description": "Every device binding, by the canonical form of its MAC.",
+        "operationId": "read_devices_devices_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/Envelope"
+                  },
+                  "type": "object",
+                  "title": "Response Read Devices Devices Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/devices/{mac}": {
+      "get": {
+        "summary": "Read Device",
+        "description": "One device's binding. The MAC is normalized before it is\nlooked up, so `AA-BB-...` and `aa:bb:...` reach the same\ndevice.",
+        "operationId": "read_device_devices__mac__get",
+        "parameters": [
+          {
+            "name": "mac",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mac"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing of that identity exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/default-agent": {
+      "get": {
+        "summary": "Read Default Agent",
+        "description": "The agent an unbound device reaches, or null. Unset is a\nconfiguration rather than a missing entity, so this is never a\n404.",
+        "operationId": "read_default_agent_default_agent_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DefaultAgent"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
   "components": {
+    "schemas": {
+      "ConfigDocument": {
+        "properties": {
+          "config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config",
+            "description": "The domain half of the configuration (providers, MCP servers, agent defaults, agents, devices, the default agent) in the shape `docs/reference/domain-config.md` documents, with every secret-bearing value masked."
+          },
+          "secrets": {
+            "items": {
+              "$ref": "#/components/schemas/StoredSecretLocation"
+            },
+            "type": "array",
+            "title": "Secrets",
+            "description": "Where every secret stored in the database is, which the masked document above cannot say. A list rather than a mapping, because a location is three fields and not a key."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "config",
+          "secrets"
+        ],
+        "title": "ConfigDocument",
+        "description": "The whole domain configuration of one deployment, masked."
+      },
+      "DefaultAgent": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "The default agent's name, or null when none is set, which leaves the devices map as the allowlist."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "DefaultAgent",
+        "description": "The agent an unbound device reaches."
+      },
+      "Envelope": {
+        "properties": {
+          "entity": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Entity",
+            "description": "The entity's body in the shape a write of it accepts, with every secret-bearing value masked. Described rather than validated here: a masked value is not one the entity model would accept back, so the entity schemas under `components/schemas` are what say which keys a write may carry."
+          },
+          "secrets": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SecretSlot"
+            },
+            "type": "object",
+            "title": "Secrets",
+            "description": "The slots holding a secret stored in the database, by slot name, and never their values: reads are masked. Empty for the kinds that can hold no stored secret (agents, agent defaults, devices), so that every read has one shape."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "entity",
+          "secrets"
+        ],
+        "title": "Envelope",
+        "description": "One entity as a read returns it: the entity, and its stored-secret\nslots beside it."
+      },
+      "Problem": {
+        "properties": {
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "What was refused and why, the same sentence the `samtal-server config` command prints for it. It never quotes what was sent."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "detail"
+        ],
+        "title": "Problem",
+        "description": "A refusal, in the repository's own words."
+      },
+      "SecretSlot": {
+        "properties": {
+          "shadows": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shadows",
+            "description": "The entity key this stored secret displaces, or null when the entity writes no reference for the slot. A stored secret takes precedence over an environment reference written for the same slot, and this names what it takes the place of."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SecretSlot",
+        "description": "One slot of an entity that holds a secret stored in the database."
+      },
+      "StoredSecretLocation": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "description": "The kind of entity holding it: provider or mcp_server."
+          },
+          "identity": {
+            "type": "string",
+            "title": "Identity",
+            "description": "The entity's identity: `<stage>.<name>` for a provider, the name for an MCP server."
+          },
+          "slot": {
+            "type": "string",
+            "title": "Slot",
+            "description": "The credential slot inside that entity."
+          },
+          "shadows": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shadows",
+            "description": "The entity key this stored secret displaces, or null."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind",
+          "identity",
+          "slot"
+        ],
+        "title": "StoredSecretLocation",
+        "description": "Where one stored secret is, in the whole-configuration read."
+      },
+      "ProviderConfig": {
+        "additionalProperties": true,
+        "description": "One provider entry. Options beyond `type` are passed through to the\nprovider implementation, so extra keys are allowed here.",
+        "properties": {
+          "type": {
+            "description": "The provider implementation this entry configures, such as anthropic, openai_compatible, faster_whisper, openai, piper, elevenlabs or silero. Every key beyond the ones listed here is an option for that implementation.",
+            "minLength": 1,
+            "title": "Type",
+            "type": "string"
+          },
+          "api_key_env": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The name of the environment variable holding this provider's credential, never the credential itself. Left unset for a local engine or a keyless self-hosted endpoint. A credential stored with `config set-secret` fills the same slot and takes precedence.",
+            "title": "Api Key Env"
+          },
+          "egress": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether this entry sends session data off the host, asserted by the operator for the types whose configuration decides it rather than their name (openai_compatible, and the openai ASR and TTS types, whose base_url may be local or a vendor). Under server.local_only such an entry must declare egress: false; a type that knows its own egress rejects the key.",
+            "title": "Egress"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "ProviderConfig",
+        "type": "object"
+      },
+      "McpServerConfig": {
+        "additionalProperties": false,
+        "description": "One MCP server, named so agents can reference it.\n\n`transport` decides which of the two field groups applies: a stdio\nserver is a command this server spawns, a streamable_http one is a\nURL it connects to. Naming a field of the other transport is an\nerror rather than a silently ignored key, since the difference\nbetween \"my headers are ignored\" and \"my headers are wrong\" is a\ndebugging afternoon.",
+        "properties": {
+          "transport": {
+            "description": "Which field group applies: stdio spawns `command` as a subprocess, streamable_http connects to `url`. Naming a field of the other transport is an error rather than a silently ignored key.",
+            "enum": [
+              "stdio",
+              "streamable_http"
+            ],
+            "title": "Transport",
+            "type": "string"
+          },
+          "command": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The executable a stdio server is spawned as. Required for that transport, and rejected for streamable_http.",
+            "title": "Command"
+          },
+          "args": {
+            "description": "The arguments the stdio command is spawned with, one per entry.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Args",
+            "type": "array"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Environment variables for the spawned stdio command. A value of $NAME is read from the server's own environment at startup, and any secret-bearing key (token, api_key, authorization, ...) must use that form.",
+            "title": "Env",
+            "type": "object"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The endpoint a streamable_http server is reached at. Required for that transport, and rejected for stdio.",
+            "title": "Url"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Headers sent with every streamable_http request. A value of $NAME is read from the server's own environment at startup, and any secret-bearing key must use that form.",
+            "title": "Headers",
+            "type": "object"
+          },
+          "egress": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Whether this server sends session data off the local network. Tool arguments carry conversation-derived data and neither transport can tell on its own, since a stdio command may proxy anywhere and a url may name localhost, so under server.local_only every referenced entry must declare it.",
+            "title": "Egress"
+          },
+          "tool_timeout_s": {
+            "default": 15.0,
+            "description": "How long one tool call on this server may take, in seconds, before the model is told it timed out. The device hears silence meanwhile, so keep it short.",
+            "exclusiveMinimum": 0,
+            "title": "Tool Timeout S",
+            "type": "number"
+          }
+        },
+        "required": [
+          "transport"
+        ],
+        "title": "McpServerConfig",
+        "type": "object"
+      },
+      "FillerConfig": {
+        "additionalProperties": false,
+        "description": "Masking reply latency with a pre-synthesized filled pause.\n\nOff by default. When enabled, the phrases are synthesized in the\nagent's own voice at boot and cached as PCM; a reply whose first\naudio has not started within `delay_ms` of the utterance being\ntranscribed plays one, and the real reply queues behind its tail.\nA synthesis failure at boot logs a warning and leaves the feature\noff for that agent rather than failing the boot.",
+        "properties": {
+          "enabled": {
+            "default": false,
+            "description": "Whether a filled pause is played while a slow reply is prepared. Off by default.",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "delay_ms": {
+            "default": 1800.0,
+            "description": "How long the user hears silence before the filler starts, in milliseconds, counted from the transcription of their utterance.",
+            "exclusiveMinimum": 0,
+            "title": "Delay Ms",
+            "type": "number"
+          },
+          "phrases": {
+            "description": "The phrases to play, written in the agent's own language; the player rotates through them rather than always playing the same one. At least one is required when the feature is enabled.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "Phrases",
+            "type": "array"
+          }
+        },
+        "title": "FillerConfig",
+        "type": "object"
+      },
+      "AgentConfig": {
+        "additionalProperties": false,
+        "description": "One persona: a prompt, plus whichever stages it overrides.",
+        "properties": {
+          "llm": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The language model, by the name it is defined under in providers.llm. An agent that leaves it unset inherits the agent_defaults entry.",
+            "title": "Llm"
+          },
+          "asr": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The speech recognizer, by the name it is defined under in providers.asr. An agent that leaves it unset inherits the agent_defaults entry.",
+            "title": "Asr"
+          },
+          "tts": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The voice, by the name it is defined under in providers.tts. An agent that leaves it unset inherits the agent_defaults entry.",
+            "title": "Tts"
+          },
+          "vad": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The voice activity detector, by the name it is defined under in providers.vad. An agent that leaves it unset inherits the agent_defaults entry.",
+            "title": "Vad"
+          },
+          "mcp": {
+            "anyOf": [
+              {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The MCP servers whose tools this layer offers the model, by entry name. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have.",
+            "title": "Mcp"
+          },
+          "filler": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FillerConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly rather than merging with it, so `filler: {enabled: false}` opts an agent out."
+          },
+          "prompt": {
+            "default": "",
+            "description": "The persona instruction this agent replies under, sent as the system prompt on every turn. State the reply language explicitly: a model otherwise picks one by its training bias.",
+            "title": "Prompt",
+            "type": "string"
+          }
+        },
+        "title": "AgentConfig",
+        "type": "object"
+      },
+      "AgentDefaults": {
+        "additionalProperties": false,
+        "description": "Provider references every agent inherits unless it names its own.\n\nDeliberately no prompt: a persona's prompt is its identity, and\ninheriting one silently would make two agents the same agent.",
+        "properties": {
+          "llm": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The language model, by the name it is defined under in providers.llm. An agent that leaves it unset inherits the agent_defaults entry.",
+            "title": "Llm"
+          },
+          "asr": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The speech recognizer, by the name it is defined under in providers.asr. An agent that leaves it unset inherits the agent_defaults entry.",
+            "title": "Asr"
+          },
+          "tts": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The voice, by the name it is defined under in providers.tts. An agent that leaves it unset inherits the agent_defaults entry.",
+            "title": "Tts"
+          },
+          "vad": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The voice activity detector, by the name it is defined under in providers.vad. An agent that leaves it unset inherits the agent_defaults entry.",
+            "title": "Vad"
+          },
+          "mcp": {
+            "anyOf": [
+              {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The MCP servers whose tools this layer offers the model, by entry name. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have.",
+            "title": "Mcp"
+          },
+          "filler": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FillerConfig"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly rather than merging with it, so `filler: {enabled: false}` opts an agent out."
+          }
+        },
+        "title": "AgentDefaults",
+        "type": "object"
+      }
+    },
     "securitySchemes": {
       "bearerToken": {
         "type": "http",
