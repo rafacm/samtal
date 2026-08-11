@@ -249,7 +249,8 @@ def _set_secret(args: argparse.Namespace) -> None:
     location = _secret_location(args)
     secret = _read_secret(args)
     if args.local:
-        with _store(args) as store:
+        # The one recovery command that needs a key: it encrypts.
+        with _store(args, keyed=True) as store:
             store.set_secret(location, secret)
         _report(wrote_secret(location.describe()))
         return
@@ -828,13 +829,22 @@ def _secret_location(args: argparse.Namespace) -> SecretLocation:
 
 
 @contextmanager
-def _store(args: argparse.Namespace) -> Iterator[ConfigStore]:
+def _store(args: argparse.Namespace, keyed: bool = False) -> Iterator[ConfigStore]:
     """The repository, opened directly. Reached only through --local,
     whose four commands are the ones an operator needs when the server
-    they would otherwise ask will not start."""
+    they would otherwise ask will not start.
+
+    The keys are loaded only for the one command that needs them.
+    `set-secret` encrypts, so it cannot work without a usable key and
+    says so; `show`, `delete` and `clear-secret` treat ciphertext as
+    opaque and never open it, and a key that will not load is one of the
+    exact conditions this path exists to repair. Loading it for them
+    would take the recovery tool away in the situation it is for, which
+    is the same reason `open_database` does not verify secrets.
+    """
     engine = open_database(_database_dir(args))
     try:
-        yield ConfigStore(engine, load_keys())
+        yield ConfigStore(engine, load_keys() if keyed else None)
     finally:
         engine.dispose()
 

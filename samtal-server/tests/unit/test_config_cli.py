@@ -1015,6 +1015,55 @@ def test_the_recovery_subset_needs_no_server(
     assert run.reached == []
 
 
+def test_the_recovery_subset_works_with_a_key_that_will_not_load(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A `SAMTAL_MASTER_KEY` that is not a Fernet key is one of the exact
+    conditions --local exists to repair: it refuses the boot, so there is
+    no server to ask, and reading the keys eagerly would refuse the
+    recovery tool for the same reason.
+
+    Reading, deleting and clearing all treat ciphertext as opaque, so
+    none of them needs a key at all."""
+    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run("set-secret", "provider", "llm", "claude", "api_key", stdin=SECRET)
+    run.reached.clear()
+    capsys.readouterr()
+    monkeypatch.setenv(MASTER_KEY_ENV, "not-a-fernet-key")
+
+    assert run("--local", "show") == 0
+    whole = capsys.readouterr().out
+    assert MASK in whole
+    assert SECRET not in whole
+
+    assert run("--local", "show", "provider", "llm", "claude") == 0
+    assert f"api_key: {MASK}" in capsys.readouterr().out
+
+    assert run("--local", "clear-secret", "provider", "llm", "claude", "api_key") == 0
+    capsys.readouterr()
+    assert run("--local", "delete", "provider", "llm", "claude") == 0
+    capsys.readouterr()
+    assert run.reached == []
+
+
+def test_storing_a_secret_locally_still_needs_a_usable_key(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The one recovery command that cannot work without one, because it
+    encrypts. It names the variable and never the material."""
+    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    capsys.readouterr()
+    monkeypatch.setenv(MASTER_KEY_ENV, "not-a-fernet-key")
+
+    assert run("--local", "set-secret", "provider", "llm", "claude", "api_key", stdin=SECRET) == 1
+
+    captured = capsys.readouterr()
+    assert MASTER_KEY_ENV in captured.err
+    assert "not-a-fernet-key" not in captured.err
+    assert SECRET not in captured.err
+    assert "Traceback" not in captured.err
+
+
 def test_a_command_outside_the_subset_is_refused_naming_it(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
