@@ -64,6 +64,23 @@ server:
     # OTA on every boot, so one in normal use is re-issued long before.
     # token_expire_s: 2592000
 
+  # Where the domain half of the configuration is stored: one SQLite
+  # file named samtal.db inside this directory, written by the
+  # `samtal-server config` commands. The directory is the key, the way
+  # memory.dir and capture.dir are, and it must be on the data volume.
+  #
+  # The default below is the generic one; a container image points this
+  # at its own writable volume, and a development machine needs it
+  # pointed somewhere writable too:
+  #
+  #   SAMTAL_SERVER__DATABASE__DIR=./var uv run samtal-server config list
+  #
+  # The server does not read this database yet. Until the switchover it
+  # is written by the CLI and read by nothing, and the domain sections
+  # further down this file are still what the server boots from.
+  # database:
+  #   dir: /var/lib/samtal
+
   # What one server holds at once, and for how long. A device refused for
   # capacity reconnects on its next wake word; one closed by either time
   # bound does the same, so none of this is visible in normal use.
