@@ -76,7 +76,12 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     def factory(base_url: str, token: str) -> TestClient:
         reached.append(base_url)
         directory = load_file_config(None).server.database.dir
-        api = build_api(token, directory)
+        # The server's token is fixed here and is not the one the CLI
+        # resolved. Building the gate out of whatever the client happened
+        # to send would make every token the right one, and the
+        # token-resolution tests would be asserting nothing: the wrong
+        # variable, a stale value and a typo would all authenticate.
+        api = build_api(TOKEN, directory)
         # A base URL with a path prefix is the deployed shape, where the
         # sub-application is mounted on the server's own port, so the
         # fixture mounts it exactly where the server does rather than
@@ -895,6 +900,26 @@ def test_the_token_comes_from_the_variable_the_config_file_names(
     monkeypatch.setenv("SAMTAL_OTHER_TOKEN", TOKEN)
 
     assert run("--config", str(config), "list") == 0
+
+
+def test_the_wrong_token_is_refused_by_the_server_the_way_any_failure_is(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other half of resolving a token: sending one the server does
+    not hold. It is a real 401 from the real gate, and it reaches the
+    operator through the same contract every other refusal does, the
+    detail on stderr and exit 1."""
+    monkeypatch.setenv(API_SECRET_ENV, "not-the-token-this-server-was-given")
+
+    assert run("list") == 1
+
+    captured = capsys.readouterr()
+    assert "Authorization" in captured.err
+    assert "bearer token" in captured.err
+    assert captured.out == ""
+    # It was sent, which is what distinguishes this from a token that
+    # could not be resolved at all.
+    assert run.reached
 
 
 def test_a_server_that_cannot_be_reached_says_so_and_names_the_recovery_path(
