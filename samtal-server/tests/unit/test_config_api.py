@@ -21,7 +21,7 @@ from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from samtal_server.app import create_app
-from samtal_server.config import Config, ConfigError
+from samtal_server.config import Config, ConfigError, load_file_config
 from samtal_server.config.api import (
     MALFORMED_REQUEST,
     MOUNT_PATH,
@@ -273,6 +273,55 @@ def test_the_device_facing_app_is_unchanged(served: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+@pytest.mark.parametrize("path", [f"{MOUNT_PATH}/", f"{MOUNT_PATH}/x/", f"{MOUNT_PATH}/ota/x/"])
+def test_an_ota_path_inside_the_api_namespace_is_refused(tmp_path: Path, path: str) -> None:
+    """The OTA endpoint is the one route that is deliberately
+    unauthenticated (it issues the device tokens), and it is registered
+    before the API is mounted, so a configured path under /api/ would
+    be found first and would answer a request the gate never saw. The
+    configuration is refused rather than the ordering quietly relied
+    on.
+
+    Read through the loader, which is where an operator meets it and
+    where the message is rendered from the error rather than from
+    pydantic's own str()."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(f"server:\n  ota_path: {path}\n", encoding="utf-8")
+
+    with pytest.raises(ConfigError) as caught:
+        load_file_config(config_file)
+
+    message = str(caught.value)
+    assert "server.ota_path" in message
+    assert f"{MOUNT_PATH}/ is reserved" in message
+
+
+def test_the_refused_ota_path_is_not_quoted_back(tmp_path: Path) -> None:
+    """A public deployment hides the OTA endpoint behind a long random
+    segment, which is the closest this key comes to a secret, so the
+    refusal names the rule and not the value."""
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(f"server:\n  ota_path: {MOUNT_PATH}/8f3a9c2b/\n", encoding="utf-8")
+
+    with pytest.raises(ConfigError) as caught:
+        load_file_config(config_file)
+
+    assert "8f3a9c2b" not in str(caught.value)
+
+
+@pytest.mark.parametrize("path", ["/xiaozhi/ota/", "/apix/", "/xiaozhi/ota/8f3a9c2b/"])
+def test_an_ota_path_outside_the_namespace_still_passes(path: str) -> None:
+    assert Config(server={"ota_path": path}).server.ota_path == path
+
+
+def test_the_reserved_path_is_the_one_the_api_is_mounted_at() -> None:
+    """One string: a namespace reserved somewhere else than the mount
+    would reserve nothing."""
+    from samtal_server.config.models import API_MOUNT_PATH
+
+    assert MOUNT_PATH == API_MOUNT_PATH
 
 
 def test_a_server_without_a_token_refuses_to_boot(monkeypatch: pytest.MonkeyPatch) -> None:

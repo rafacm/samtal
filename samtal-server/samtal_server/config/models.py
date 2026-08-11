@@ -62,6 +62,13 @@ _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 PROVIDER_STAGES = ("llm", "asr", "tts", "vad")
 
+# Where the configuration API is mounted on the server's own port. It
+# lives here, and not only in config/api.py, because ota_path's
+# validator has to reserve it: the OTA route is registered before the
+# API is mounted, so a route matching under this prefix would be found
+# first and would answer a request the API's token gate never saw.
+API_MOUNT_PATH = "/api"
+
 # The logging level names, most to least verbose. NOTSET is left out: on
 # the root logger it means WARNING, which is not what writing it says.
 _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
@@ -361,6 +368,18 @@ class ServerConfig(BaseModel):
             raise ValueError(
                 f'"{value}" is not a usable OTA path; it must start and end with '
                 f'"/", for example /xiaozhi/ota/ or /xiaozhi/ota/8f3a9c2b.../'
+            )
+        # Never quoting the value here, unlike the refusal above: an
+        # operator who exposes the server publicly hides the OTA
+        # endpoint behind a long random segment, and that segment is
+        # the closest thing this key has to a secret.
+        if path.startswith(f"{API_MOUNT_PATH}/"):
+            raise ValueError(
+                f"{API_MOUNT_PATH}/ is reserved for the configuration API, so the OTA "
+                f"endpoint cannot be served there or anywhere under it: the OTA route "
+                f"is registered before the API is mounted, so it would be found first "
+                f"and would answer a request the API's token gate never saw. Serve it "
+                f"somewhere else, for example /xiaozhi/ota/"
             )
         return path
 

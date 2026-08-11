@@ -46,7 +46,7 @@ from samtal_server.config.loader import (
     StorageError,
     UnknownEntityError,
 )
-from samtal_server.config.models import Config
+from samtal_server.config.models import API_MOUNT_PATH, Config
 from samtal_server.config.secrets import load_keys
 from samtal_server.config.store import ConfigStore
 from samtal_server.db import open_database
@@ -56,8 +56,9 @@ logger = logging.getLogger(__name__)
 # Where the sub-application is mounted on the server's own port. A
 # mounted application renders its internal paths (/config, not
 # /api/config), so this is also what the document carries as its
-# server URL.
-MOUNT_PATH = "/api"
+# server URL. Single-sourced on the models, where `server.ota_path`'s
+# validator needs it to keep the OTA endpoint out of this namespace.
+MOUNT_PATH = API_MOUNT_PATH
 
 # The API contract's version, fixed and deliberately not the package
 # version: a release does not change the contract, and a committed
