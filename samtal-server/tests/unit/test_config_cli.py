@@ -1,45 +1,105 @@
 """The config command group, driven through its entry function.
 
-The acceptance case is the first test: an empty directory becomes a
+This is the acceptance suite for the whole write path. The commands are
+the ones an operator types, parsed by the real grammar, sent as real
+HTTP requests to the real sub-application, handled by the real
+repository against a scratch database. What replaces the socket is the
+client factory: Starlette's TestClient is itself a synchronous
+`httpx.Client` subclass driving an ASGI application through its own
+portal, so `cli.main()` stays the unchanged synchronous entry point and
+nothing bridges an event loop.
+
+The first test is the acceptance case: an empty database becomes a
 working configuration through CLI calls alone, in the natural order,
 with nothing wedging on the way. The rest is what has to hold around
-it: secrets masked wherever they are read back, the restart notice on
-every write, and no failure path that lets a plaintext, a rejected
-fragment or a traceback out.
+it: the exact sentences, which is the regression net for "the API
+carries the repository's message and the CLI prints it"; secrets masked
+wherever they are read back; the restart notice on every write; the
+transport policy that keeps the token off a clear connection; and no
+failure path that lets a plaintext, a rejected fragment or a traceback
+out.
 """
 
 import io
 import logging
+import sqlite3
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 import yaml
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import update
 
+from samtal_server import db as db_module
 from samtal_server.config import cli
+from samtal_server.config.api import MOUNT_PATH, build_api, mount_api
+from samtal_server.config.loader import load_file_config
 from samtal_server.config.secrets import MASK, MASTER_KEY_ENV, generate_key
-from samtal_server.db import open_database, schema
+from samtal_server.db import DATABASE_FILENAME, open_database, schema
 
 # Not real credentials, and shaped so a substring check for one cannot
 # match by accident.
 SECRET = "sk-test-4f8b2c9e-never-a-real-credential"
 OTHER_SECRET = "tok-test-7a1d3f60-never-a-real-credential"
 
+API_SECRET_ENV = "SAMTAL_API_SECRET"
+
+TOKEN = "test-api-token-" + "0123456789abcdef" * 2
+
+# Short enough that a blocked writer gives up inside a test run, and
+# long enough that an unblocked one never sees it.
+SHORT_BUSY_MS = 200
+
 
 @pytest.fixture
 def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """Run one command the way the entry point runs it, against a
-    database of this test's own."""
+    """Run one command the way the entry point runs it, against a server
+    of this test's own.
+
+    The application is built per request rather than once, from the
+    database directory the CLI itself would have resolved, because that
+    is what a deployment's server does too: the CLI and the server read
+    `server.database.dir` through the same machinery and cannot disagree
+    about it.
+    """
     monkeypatch.delenv("SAMTAL_CONFIG", raising=False)
+    monkeypatch.delenv(cli.API_URL_ENV, raising=False)
     monkeypatch.setenv("SAMTAL_SERVER__DATABASE__DIR", str(tmp_path / "db"))
     monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
+    monkeypatch.setenv(API_SECRET_ENV, TOKEN)
+
+    reached: list[str] = []
+
+    def factory(base_url: str, token: str) -> TestClient:
+        reached.append(base_url)
+        directory = load_file_config(None).server.database.dir
+        api = build_api(token, directory)
+        # A base URL with a path prefix is the deployed shape, where the
+        # sub-application is mounted on the server's own port, so the
+        # fixture mounts it exactly where the server does rather than
+        # serving it at the root and letting the prefix go nowhere.
+        served: object = api
+        if urlsplit(base_url).path.rstrip("/"):
+            assert urlsplit(base_url).path.rstrip("/") == MOUNT_PATH
+            served = FastAPI()
+            mount_api(served, api)
+        return TestClient(
+            served,
+            base_url=base_url,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    monkeypatch.setattr(cli, "build_client", factory)
 
     def _run(*argv: str, stdin: str | None = None) -> int:
         if stdin is not None:
             monkeypatch.setattr(sys, "stdin", io.StringIO(stdin))
         return cli.main(list(argv))
 
+    _run.reached = reached
     return _run
 
 
@@ -607,19 +667,311 @@ def test_a_database_that_cannot_be_opened_names_the_key(
     assert "Traceback" not in captured.err
 
 
-def test_the_database_directory_comes_from_the_config_file(
-    run, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+def test_a_config_file_that_is_not_there_is_an_error_not_a_default(
+    run, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The same key the server reads, through the same machinery, so a
-    deployment names its database directory once."""
-    monkeypatch.delenv("SAMTAL_SERVER__DATABASE__DIR")
-    named = tmp_path / "named"
-    config = tmp_path / "config.yaml"
-    config.write_text(f"server:\n  database:\n    dir: {named}\n", encoding="utf-8")
-
-    assert run("--config", str(config), "list") == 0
-    assert (named / "samtal.db").is_file()
-
-    # And a config file that is not there is an error, not a default.
     assert run("--config", str(tmp_path / "nowhere.yaml"), "list") == 1
     assert "config file not found" in capsys.readouterr().err
+
+
+# Where the CLI sends a command, and what it will not send it over
+
+
+def test_the_default_target_is_this_machine_on_the_configured_port(
+    run, tmp_path: Path
+) -> None:
+    """The same file the server reads, through the same machinery, so a
+    deployment names its port once and the CLI cannot disagree with the
+    server about where the server is."""
+    config = tmp_path / "config.yaml"
+    config.write_text("server:\n  port: 9123\n", encoding="utf-8")
+
+    assert run("--config", str(config), "list") == 0
+
+    assert run.reached == ["http://127.0.0.1:9123"]
+
+
+def test_the_environment_names_the_target_and_the_flag_beats_it(
+    run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(cli.API_URL_ENV, "http://127.0.0.1:9001/api")
+    assert run("list") == 0
+
+    assert run("--api-url", "http://localhost:9002/api", "list") == 0
+
+    assert run.reached == ["http://127.0.0.1:9001/api", "http://localhost:9002/api"]
+
+
+def test_a_plain_connection_to_another_host_is_refused(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The bearer token rides on every request and grants everything the
+    API can do, so loopback-or-TLS is the rule for the whole client
+    rather than a set-secret footnote, and there is deliberately no flag
+    to override it."""
+    assert run("--api-url", "http://config.example.invalid/api", "list") == 1
+
+    captured = capsys.readouterr()
+    assert "no flag to override" in captured.err
+    assert "https://" in captured.err
+    assert run.reached == []
+
+
+def test_tls_to_another_host_is_permitted(run) -> None:
+    assert run("--api-url", "https://config.example.invalid/api", "list") == 0
+
+    assert run.reached == ["https://config.example.invalid/api"]
+
+
+def test_the_mount_prefix_in_the_url_reaches_the_mounted_namespace(run) -> None:
+    """The deployed shape: the API is mounted on the server's own port,
+    so a base URL naming that prefix is what a request has to be joined
+    onto."""
+    assert run("--api-url", f"http://127.0.0.1:8003{MOUNT_PATH}", "list") == 0
+
+
+def test_a_url_carrying_a_credential_is_refused_without_repeating_it(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A token does not belong in a URL, and the refusal for putting one
+    there must not be what publishes it."""
+    assert run("--api-url", f"https://user:{SECRET}@config.example.invalid/api", "list") == 1
+
+    captured = capsys.readouterr()
+    assert "username or a password" in captured.err
+    assert SECRET not in captured.err
+    assert "user" not in captured.err.split("https://")[-1].split("/")[0]
+    assert run.reached == []
+
+
+def test_a_missing_token_is_named_before_any_request_is_sent(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv(API_SECRET_ENV)
+
+    assert run("list") == 1
+
+    captured = capsys.readouterr()
+    assert API_SECRET_ENV in captured.err
+    assert "--local" in captured.err
+    assert run.reached == []
+
+
+def test_the_token_comes_from_the_variable_the_config_file_names(
+    run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Which on a deployment is the variable the server itself was
+    started with, so exec into the running container and the CLI has the
+    token for free."""
+    config = tmp_path / "config.yaml"
+    config.write_text("server:\n  api:\n    secret_env: SAMTAL_OTHER_TOKEN\n", encoding="utf-8")
+    monkeypatch.delenv(API_SECRET_ENV)
+    monkeypatch.setenv("SAMTAL_OTHER_TOKEN", TOKEN)
+
+    assert run("--config", str(config), "list") == 0
+
+
+def test_a_server_that_cannot_be_reached_says_so_and_names_the_recovery_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The real client, against a port nothing is listening on: the one
+    case the injected test client cannot show."""
+    monkeypatch.delenv("SAMTAL_CONFIG", raising=False)
+    monkeypatch.setenv("SAMTAL_SERVER__DATABASE__DIR", str(tmp_path / "db"))
+    monkeypatch.setenv(API_SECRET_ENV, TOKEN)
+
+    assert cli.main(["--api-url", "http://127.0.0.1:1", "list"]) == 1
+
+    captured = capsys.readouterr()
+    assert "cannot reach the configuration API at http://127.0.0.1:1" in captured.err
+    assert "--local" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_a_body_that_is_not_this_api_s_own_is_not_relayed(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """What a proxy or a gateway returns is not this API's sanitized
+    output, so it is reported as a status code and never printed."""
+    from fastapi import FastAPI
+    from fastapi.responses import HTMLResponse
+
+    gateway = FastAPI()
+
+    @gateway.get("/{path:path}")
+    def refuse(path: str) -> HTMLResponse:
+        return HTMLResponse(f"<html>502 {SECRET}</html>", status_code=502)
+
+    monkeypatch.setattr(
+        cli, "build_client", lambda base_url, token: TestClient(gateway, base_url=base_url)
+    )
+
+    assert run("list") == 1
+
+    captured = capsys.readouterr()
+    assert "answered 502" in captured.err
+    assert SECRET not in captured.err
+    assert "<html>" not in captured.err
+
+
+def test_a_write_that_cannot_take_the_lock_prints_the_retryable_refusal(
+    run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The reason the client's read timeout has margin above the
+    database's busy timeout: the settled answer to contention is a
+    sentence the operator can act on, and a client-side timeout at five
+    seconds would replace it with one that says nothing.
+
+    Both sides are taken under the same held lock, so what is asserted is
+    that the CLI printed what the API answered, whatever that turns out
+    to be: the API opens the database per request, so a held lock is met
+    by the open-and-migrate step and the sentence is that one rather than
+    the repository's own."""
+    run("set", "agent", "sam", "-f", "-", stdin="prompt: You are Sam.\n")
+    capsys.readouterr()
+    monkeypatch.setattr(db_module, "BUSY_TIMEOUT_MS", SHORT_BUSY_MS)
+    directory = tmp_path / "db"
+    holder = sqlite3.connect(directory / DATABASE_FILENAME, isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    try:
+        over_http = TestClient(
+            build_api(TOKEN, directory), headers={"Authorization": f"Bearer {TOKEN}"}
+        ).put("/agents/sam", json={"prompt": "Still Sam."})
+        assert run("set", "agent", "sam", "-f", "-", stdin="prompt: Still Sam.\n") == 1
+    finally:
+        holder.close()
+
+    assert over_http.status_code == 409
+    captured = capsys.readouterr()
+    assert captured.err.rstrip("\n") == over_http.json()["detail"]
+    assert captured.out == ""
+    # And with the lock let go, the same command is answered.
+    assert run("set", "agent", "sam", "-f", "-", stdin="prompt: Still Sam.\n") == 0
+
+
+# The recovery subset
+
+
+def test_every_local_invocation_says_what_it_is(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """There is no reliable way to tell whether a server is running
+    against the same file, so the honest substitute for a refusal is
+    saying what this path is, every time, reads included."""
+    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    capsys.readouterr()
+
+    assert run("--local", "show") == 0
+    assert "bypassing the configuration API" in capsys.readouterr().err
+
+    assert run("--local", "delete", "provider", "llm", "claude") == 0
+    assert "bypassing the configuration API" in capsys.readouterr().err
+
+
+def test_the_recovery_subset_needs_no_server(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The situation --local exists for: the four commands run against
+    the database with nothing to ask, which is what `reached` staying
+    empty says."""
+    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run.reached.clear()
+    capsys.readouterr()
+
+    assert run("--local", "set-secret", "provider", "llm", "claude", "api_key", stdin=SECRET) == 0
+    assert run("--local", "show", "provider", "llm", "claude") == 0
+    shown = capsys.readouterr().out
+    assert f"api_key: {MASK}" in shown
+    assert SECRET not in shown
+
+    assert run("--local", "clear-secret", "provider", "llm", "claude", "api_key") == 0
+    assert run("--local", "delete", "provider", "llm", "claude") == 0
+    assert run.reached == []
+
+
+def test_a_command_outside_the_subset_is_refused_naming_it(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    for argv in (
+        ("--local", "list"),
+        ("--local", "set", "agent", "sam", "-f", "-"),
+        ("--local", "bind-device", "aa:bb:cc:dd:ee:ff", "sam"),
+        ("--local", "set-default-agent", "sam"),
+        ("--local", "clear-default-agent"),
+    ):
+        assert run(*argv, stdin="prompt: x\n") == 1, argv
+        captured = capsys.readouterr()
+        assert "show, delete, clear-secret and set-secret" in captured.err, argv
+        assert captured.out == ""
+    assert run.reached == []
+
+
+def test_the_flag_is_accepted_after_its_command_too(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run.reached.clear()
+    capsys.readouterr()
+
+    assert run("show", "provider", "llm", "claude", "--local") == 0
+    assert run.reached == []
+
+
+def test_local_show_reaches_a_name_no_new_write_could_create(
+    run, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The reason the recovery subset goes by membership rather than by
+    the write-time addressability rule: a row written before that rule
+    existed has to stay readable and removable, and it cannot be reached
+    over a URL path at all."""
+    run("list")
+    capsys.readouterr()
+    engine = open_database(tmp_path / "db")
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                schema.providers.insert().values(
+                    stage="llm", name="a/b", type="mock", egress=None, options={}, secrets={}
+                )
+            )
+    finally:
+        engine.dispose()
+
+    assert run("--local", "show", "provider", "llm", "a/b") == 0
+    assert "type: mock" in capsys.readouterr().out
+
+    assert run("--local", "delete", "provider", "llm", "a/b") == 0
+    capsys.readouterr()
+    assert run("--local", "show", "provider", "llm", "a/b") == 1
+    assert "no such provider" in capsys.readouterr().err
+
+
+# Identities that only survive a URL path encoded
+
+
+@pytest.mark.parametrize("name", ["a name with spaces", "100%-sure", "agente-café"])
+def test_an_awkward_name_round_trips_through_the_whole_client(
+    run, name: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run("set", "agent", name, "-f", "-", stdin="prompt: You are it.\n") == 0
+    assert f"wrote agent {name}" in capsys.readouterr().out
+
+    assert run("show", "agent", name) == 0
+    assert _document(capsys.readouterr().out)["prompt"] == "You are it."
+
+    assert run("delete", "agent", name) == 0
+    capsys.readouterr()
+    assert run("show", "agent", name) == 1
+    assert "no such agent" in capsys.readouterr().err
+
+
+def test_a_name_a_url_path_cannot_carry_is_refused(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Refused at the repository when it can be reached, and unroutable
+    when it cannot: either way no such entity is created."""
+    assert run("set", "agent", "a/b", "-f", "-", stdin="prompt: You are it.\n") == 1
+    capsys.readouterr()
+
+    assert run("list") == 0
+    assert "(none)" in capsys.readouterr().out

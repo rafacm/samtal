@@ -5,22 +5,33 @@
 # reasoning behind each one.
 #
 # A script rather than a block of commented commands, because a
-# configuration nobody can run is worse than none: this one is run by
-# tests/unit/test_config_examples.py against a scratch database, so its
-# values are checked rather than merely written down.
+# configuration nobody can run is worse than none: this one is run
+# verbatim by tests/integration/test_config_examples.py against a real
+# server, so its values are checked rather than merely written down.
 #
-# Run it once against the deployment's data volume, with the same
-# SAMTAL_SERVER__DATABASE__DIR the server uses (the container image sets
-# it to /data/db), or from the image itself:
+# Run it against a running server. `samtal-server config` writes through
+# the configuration API, so the natural place is inside the container
+# that serves it, where the token variable and the loopback address are
+# already in the environment:
 #
-#   docker run --rm -v samtal-data:/data \
-#     -v /path/to/config.yaml:/config/config.yaml:ro \
-#     -v "$PWD/config.deploy.example.sh:/seed.sh:ro" \
-#     --entrypoint sh ghcr.io/rafacm/samtal-server:latest /seed.sh
+#   docker exec -i <container> sh < config.deploy.example.sh
 #
-# Each write applies at the next server start. The order matters: a write
-# whose references do not resolve is refused, so the providers come
-# before the agent defaults, and the agent before the device bound to it.
+# From outside, name the API and carry the token yourself. It is the
+# value of the variable server.api.secret_env names, SAMTAL_API_SECRET by
+# default, and it is the same one the server was started with:
+#
+#   SAMTAL_API_URL=https://samtal.example/api \
+#   SAMTAL_API_SECRET=... sh config.deploy.example.sh
+#
+# The token grants everything the API can do, so the client refuses a
+# plain http:// connection to anything but this machine: reach it over
+# TLS, through a tunnel that terminates TLS, or on loopback from inside
+# the container.
+#
+# Each write applies at the next server start, so restart the server when
+# this finishes. The order matters: a write whose references do not
+# resolve is refused, so the providers come before the agent defaults,
+# and the agent before the device bound to it.
 set -eu
 
 samtal-server config set provider llm claude -f - <<'YAML'
