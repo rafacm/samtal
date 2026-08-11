@@ -439,3 +439,74 @@ not at package import.
   placeholders today (`"the option it fills, such as api_key"`), and
   the fragment-shaped commands (`set ...`) are the ones the plan says
   must derive theirs.
+
+### PR #97 review round
+
+One external review of the pull request's diff: codex CLI 0.147.0,
+model gpt-5.6-sol, read-only, 2026-08-11, posted on the PR. Verdict:
+mergeable after closing the plaintext paths and the sanitized
+boundary's two gaps. Five findings, each fixed with its own commit:
+
+1. **P1: a fragment could persist a plaintext credential.**
+   `api_key_env` and the secret-shaped `*_env` extras accepted any
+   string, so a credential pasted where its variable name belongs was
+   written into the row unencrypted and reported as a successful write,
+   and would have been quoted back later by the build-time error saying
+   the variable is not set. Fixed in 36241a5: every key ending in
+   `_env` must hold an environment variable name (letters, digits and
+   underscores, not starting with a digit), refused with a message that
+   names the key and shows an example rather than quoting what was
+   written. The CLI test that pinned the insecure write as successful
+   now pins the refusal, with the credential absent from stdout,
+   stderr, the log records and the exception chain.
+2. **P2: malformed persisted JSON escaped the sanitized boundary.**
+   SQLite enforces no shape on a JSON column, so a row whose `options`
+   held a string raised TypeError and one whose `secrets` held a string
+   raised AttributeError, neither of which `_transaction` catches, and
+   `config list` and `config show` answered with a traceback. Fixed in
+   a7064df: every JSON column's container type is checked on load and a
+   mismatch is a ConfigError naming the row and the column and never
+   the value. Two cases were worse than a traceback and are now
+   refused: a `devices` row holding a string bound the device to one
+   agent per character, and a `default_agent` value holding an object
+   became the `str()` of that object.
+3. **P2: MCP credentials were retained as plaintext, and the delivery
+   test proved nothing.** The manager decrypted into `_env` and
+   `_headers` at construction and held them for the life of the
+   process, and the test inspected those attributes, so it would have
+   passed with the forwarding removed. Fixed in 4c80892: resolution
+   happens inside `_connect`, the constructor still resolves once and
+   discards so a missing reference or an undecryptable token fails the
+   boot, and both transports are now tested by what arrived: the
+   spawned server answers whether its own environment holds the
+   expected value, and a local stub records the header the request
+   carried.
+4. **P2: syntax errors exited 2.** argparse writes to stderr and exits
+   from inside `parse_args`, bypassing the ConfigError boundary and the
+   documented exit codes. Fixed in 5e9e399: parsing runs inside the
+   boundary through a parser subclass whose `error()` raises
+   ConfigError, subparsers inherit it, and `--help` keeps exit 0. The
+   unrecognized-arguments message is rewritten rather than passed
+   through, because argparse names the arguments and the mistake that
+   lands there is typing the secret after the slot.
+5. **P3: the CHANGELOG advertised a command that does not exist.** The
+   entry paired `set` and `delete` over one list of entity kinds, which
+   reads as a grammar with `delete agent-defaults` in it. Fixed in
+   e82cd48: the two verbs list their own kinds.
+
+Two notes the fixes leave behind.
+
+**Finding 1 changes YAML boot behavior, deliberately.** A pasted value
+in an `*_env` key is now refused at parse time rather than at provider
+construction. Nothing that worked stops working: the name is looked up
+in the environment, and no lookup of a pasted key succeeds, so the
+configurations this refuses were already failing at boot. What changes
+is where they fail and what the failure says, which is the point, since
+the parse-time refusal is the one that can keep the value out of the
+message.
+
+**Finding 3 changed one existing test assertion.** Removing the
+retained plaintext removes the attributes
+`test_a_resolved_secret_reaches_the_spawned_server` named, so it now
+asks the resolver the connection asks. The value it asserts and the
+property it pins are unchanged.
