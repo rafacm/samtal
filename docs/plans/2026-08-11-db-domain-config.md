@@ -112,10 +112,36 @@ CLI without ever being wedged:
   stays where it is today, in the boot validator, with the same
   error format.
 
-The mechanism: every write loads the current snapshot, applies the
-change in the model layer, and validates the resulting snapshot
-minus the completeness checks; only then does the row persist. One
-validation code path serves the CLI today and the REST API later.
+The mechanism is not "the current validator minus something",
+because the current `Config._check_references` mixes both kinds in
+one model validator and provider construction enforces more
+completeness afterwards. The checks become named, independently
+tested functions over the domain snapshot, and each caller states
+which it runs:
+
+- `check_shape`: the per-entity pydantic models, exactly as today
+  (this is parsing, not a separate pass).
+- `check_references`: every reference resolves; agents to
+  providers and MCP servers, device bindings to agents,
+  default_agent to an agent. Run at write and at boot.
+- `check_completeness`: the runnable-server rules; today's
+  "default_agent is required when agents are defined and no device
+  is bound", every agent stage resolving to a provider through the
+  defaults. Run at boot only.
+- Deployment checks (`local_only` egress, provider construction,
+  auth secret presence) stay where they live today, downstream of
+  the composed config; nothing here moves them.
+
+The refactor splits the existing `_check_references` into the
+reference and completeness halves without changing a message; the
+boot path runs both halves in sequence, so the composed `Config`
+validates exactly what it validates today. Every write loads the
+current snapshot, applies the change in the model layer, runs
+`check_references`, and only then persists. Deleting an agent
+still referenced by a device binding or by default_agent is
+refused by the same pass, and the write-time refusal test matrix
+includes both cases. One validation code path serves the CLI today
+and the REST API later.
 
 ## Planned for, not built: the REST API refactor
 
@@ -646,6 +672,13 @@ addressing it lands.
    phases and how write and boot select them, and the write-time
    refusal matrix must include deleting an agent still referenced
    by devices or default_agent.
+   *Resolution*: the strictness section now names the phases
+   (`check_shape` as the models themselves, `check_references`
+   run at write and boot, `check_completeness` boot-only, with
+   deployment checks unmoved downstream), derives them by
+   splitting the existing `_check_references` without changing a
+   message, and adds agent deletion under a device binding or
+   default_agent reference to the write-time refusal matrix.
 6. **P2: CRUD cannot represent several necessary state
    transitions.** No command clears `default_agent` (so the valid
    device-allowlist configuration is unreachable once it is set),
