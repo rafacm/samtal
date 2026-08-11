@@ -23,6 +23,7 @@ import argparse
 import ctypes.util
 import json
 import struct
+import wave
 from pathlib import Path
 
 import numpy as np
@@ -169,8 +170,6 @@ def main() -> None:
         ("turn track", "captures-turn"),
     ):
         session = (run / "session").read_text().strip()
-        import wave
-
         with wave.open(str(run / directory / f"{session}.wav")) as w:
             raw = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
         lag, r = best_lag(tap_f, raw[1::2].astype(np.float64))
