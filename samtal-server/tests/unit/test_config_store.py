@@ -128,6 +128,27 @@ def test_a_loaded_snapshot_has_no_unresolved_references(store: ConfigStore) -> N
     assert check_completeness(domain) == []
 
 
+def test_the_credential_reference_lives_in_its_own_column(store: ConfigStore) -> None:
+    """api_key_env is a declared model field with a column of its own
+    (PR #95 review finding 1); folding it into the options JSON would
+    contradict options holding exactly the model extras, and a later
+    reader of the raw row would miss it."""
+    store.set_provider(
+        "llm",
+        "claude",
+        {"type": "anthropic", "model": "claude-sonnet-5", "api_key_env": "ANTHROPIC_API_KEY"},
+    )
+
+    with store._engine.connect() as connection:
+        row = connection.execute(schema.providers.select()).mappings().one()
+    assert row["api_key_env"] == "ANTHROPIC_API_KEY"
+    assert "api_key_env" not in row["options"]
+
+    loaded = store.load().domain.providers.llm["claude"]
+    assert loaded.api_key_env == "ANTHROPIC_API_KEY"
+    assert loaded.options == {"model": "claude-sonnet-5"}
+
+
 def test_building_up_from_empty_never_wedges(store: ConfigStore) -> None:
     """The deadlock the write-time check set is chosen to avoid: every
     intermediate state here fails the boot-only completeness rule, and
