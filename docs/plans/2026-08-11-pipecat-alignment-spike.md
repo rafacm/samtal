@@ -522,7 +522,7 @@ no PR at the time they were ticked; substitute the PR number when it
 is opened. Each links to its section of the implementation doc.
 
 - [x] [**One full exchange**](2026-08-11-pipecat-alignment-spike-implementation.md#milestone-1-one-full-exchange)
-  (#89): the feasibility checkpoint from the
+  (PR #90): the feasibility checkpoint from the
   risk section first (mixed frame types, hello routing, the send
   hook, buffer delivery semantics, serializer lifecycle, answers
   recorded), then the spike project scaffolding, the serializer,
@@ -532,20 +532,20 @@ is opened. Each links to its section of the implementation doc.
   `drive.py`, no cloud, no keys, and the checkpoint's answers
   are in the implementation doc.
 - [x] [**Instrumentation and a well-formed pair**](2026-08-11-pipecat-alignment-spike-implementation.md#milestone-2-instrumentation-and-a-well-formed-pair)
-  (#89): the tap, the
+  (PR #90): the tap, the
   buffer recording, the composer; the stock control passes on a
   composed capture. Accept:
   `echo_leakage_control.py` reports PASSED on the pair,
   unmodified scripts.
 - [x] [**The alignment verdict**](2026-08-11-pipecat-alignment-spike-implementation.md#milestone-3-the-alignment-verdict)
-  (#89): tap injection at 250 and
+  (PR #90): tap injection at 250 and
   1500 ms over the same captured pair, at least 100 candidate
   windows per delay, numbers against the bar. Accept: both runs
   executed and recorded,
   verdict stated with the measured lag bias, IQR, and detection
   rate, whichever way it goes.
 - [x] [**The size verdict and the paper trail**](2026-08-11-pipecat-alignment-spike-implementation.md#milestone-4-the-size-verdict-and-the-paper-trail)
-  (#89): serializer and
+  (PR #90): serializer and
   glue line counts against both baselines with the comparable
   slice, the seam-obligation map, the
   implementation doc complete, changelog entry, the #84 evidence
