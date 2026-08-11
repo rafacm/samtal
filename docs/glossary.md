@@ -355,7 +355,10 @@ One connection episode from one device: wake (button
 press or wake word) to close. A session attaches to conversations;
 it is not a conversation. "Sophia... let me talk to Nadia... back to
 Sophia" is one session touching two conversations, and the session
-records, in order, the conversations it touched. Belongs to the
+records, in order, the conversations it touched. Its own transcript
+(everything said and done from wake to close, across every
+conversation touched plus the meta turns) is reconstructed from that
+record and the session's events, never stored twice. Belongs to the
 device side of the model the way a conversation belongs to an agent.
 See [the concepts page](concepts.md#conversation-and-session).
 

@@ -89,6 +89,17 @@ beginning with the one that opened it. Meta capabilities read that
 linkage ("what did we talk about this morning on the kitchen
 device").
 
+A consequence of the decisions below, stated so nothing rediscovers
+it: the **session transcript** is its own artifact, distinct from any
+conversation's transcript. A session's full record is what was said
+and done on the device from wake to close: the entries of every
+conversation it touched, in order, plus the meta turns that belong to
+no conversation. It is reconstructed from the session's ordered
+conversation references and its session events, so no dialogue is
+stored twice. This is also the record device-side diagnostics
+already live in: capture and the structured event stream are scoped
+to a session, not to a conversation.
+
 The split is what makes the desired behaviors ordinary instead of
 special cases:
 
