@@ -18,6 +18,12 @@
 #   samtal-server config bind-device aa:bb:cc:dd:ee:ff sam
 #   samtal-server config list
 #
+# Those commands write through the configuration API described under
+# server.api below, so they need a running server, and an empty database
+# is a valid state to run one on: start the server, configure it, restart
+# it. `samtal-server config --local` is the recovery path for a server
+# that will not start (show, delete, clear-secret, set-secret).
+#
 # Every field of it is documented in docs/reference/domain-config.md
 # (generated from the models, also available as `samtal-server config
 # reference`), and examples/ holds a commented fragment per entity and
@@ -100,8 +106,8 @@ server:
     secret_env: SAMTAL_API_SECRET
 
   # Where the domain half of the configuration is stored: one SQLite
-  # file named samtal.db inside this directory, written by the
-  # `samtal-server config` commands and read once at each server start.
+  # file named samtal.db inside this directory, written by the server
+  # through the configuration API and read once at each server start.
   # The directory is the key, the way memory.dir and capture.dir are,
   # and it must be on the data volume.
   #
@@ -109,7 +115,11 @@ server:
   # at its own writable volume, and a development machine needs it
   # pointed somewhere writable too:
   #
-  #   SAMTAL_SERVER__DATABASE__DIR=./var uv run samtal-server config list
+  #   SAMTAL_SERVER__DATABASE__DIR=./var uv run samtal-server
+  #
+  # The same variable points `samtal-server config --local` at it, which
+  # is the one way a command reads or writes this file with no server on
+  # the other side.
   #
   # A write through the config commands applies at the next start: the
   # configuration is a boot-time snapshot, so restart the server after
