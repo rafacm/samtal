@@ -256,13 +256,25 @@ jobs:
       # throwaway and nothing here reaches a vendor: the assertion is
       # that the providers are built and the server serves, not that a
       # conversation runs, which the smoke suite below covers.
+      #
+      # The domain half of each check's configuration is written into a
+      # database on the data volume first, by running the CLI from the
+      # image itself, so the seeding exercises the shipped artifact and
+      # the server finds what a deployment's server would find. The
+      # mounted YAML is the server half only.
       - name: Check the slim image boots on external providers
         if: matrix.variant == 'slim'
         run: |
+          docker run --rm \
+            -v slim-boot-data:/data \
+            -v "$PWD/tests/smoke:/smoke:ro" \
+            -v "$PWD/tests/smoke/config.slim.yaml:/config/config.yaml:ro" \
+            --entrypoint sh samtal-server:ci-amd64 /smoke/seed-slim.sh
           docker run -d --name slim-boot -p 18003:8003 \
             -e SAMTAL_AUTH_SECRET \
             -e ANTHROPIC_API_KEY=not-a-real-key \
             -e OPENAI_API_KEY=not-a-real-key \
+            -v slim-boot-data:/data \
             -v "$PWD/tests/smoke/config.slim.yaml:/config/config.yaml:ro" \
             samtal-server:ci-amd64
           for _ in $(seq 45); do
@@ -283,8 +295,14 @@ jobs:
       - name: Check the slim image refuses local engines
         if: matrix.variant == 'slim'
         run: |
+          docker run --rm \
+            -v slim-refuse-data:/data \
+            -v "$PWD/tests/smoke:/smoke:ro" \
+            -v "$PWD/tests/smoke/config.local-engines.yaml:/config/config.yaml:ro" \
+            --entrypoint sh samtal-server:ci-amd64 /smoke/seed-local-engines.sh
           if docker run --rm --name slim-refuse \
               -e SAMTAL_AUTH_SECRET \
+              -v slim-refuse-data:/data \
               -v "$PWD/tests/smoke/config.local-engines.yaml:/config/config.yaml:ro" \
               samtal-server:ci-amd64 > refusal.log 2>&1; then
             echo "::error::the slim image started on a config naming a local engine"
@@ -297,13 +315,25 @@ jobs:
             exit 1
           }
 
-      # The milestone acceptance, encoded: one mounted YAML, one docker
-      # run, one whole conversation.
+      # The milestone acceptance, encoded: one seeded database, one
+      # mounted YAML, one docker run, one whole conversation. The
+      # seeding runs the CLI from the image being tested, against the
+      # volume the server then reads, which is the deployment procedure
+      # rather than a fixture.
+      - name: Seed the domain configuration
+        run: |
+          docker run --rm \
+            -v smoke-data:/data \
+            -v "$PWD/tests/smoke:/smoke:ro" \
+            -v "$PWD/tests/smoke/config.yaml:/config/config.yaml:ro" \
+            --entrypoint sh samtal-server:ci-amd64 /smoke/seed.sh
+
       - name: Start the container
         run: |
           docker run -d --name samtal-smoke \
             -p 8003:8003 \
             -e SAMTAL_AUTH_SECRET \
+            -v smoke-data:/data \
             -v "$PWD/tests/smoke/config.yaml:/config/config.yaml:ro" \
             samtal-server:ci-amd64
 
