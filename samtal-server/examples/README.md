@@ -6,6 +6,11 @@ copy and edit, not a configuration the server reads: the domain half of
 the configuration lives in the database, and a fragment is how one
 entity gets written into it.
 
+Until the switchover lands, the server does not read that database
+yet: it still boots its whole configuration from the YAML file, so a
+fragment written today is staging for the flip, and restarting changes
+nothing. This paragraph goes when the switchover lands.
+
 Every file names its own command in its header, so installing one is
 copy, edit, run:
 
