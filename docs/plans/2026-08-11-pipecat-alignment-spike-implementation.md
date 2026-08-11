@@ -667,6 +667,75 @@ assumed: it records the packets at the moment they are sent, on one
 clock, and that property is the thing a framework has to provide, not
 the recording itself.
 
+## PR review round
+
+One external review of the branch as first pushed to PR #90: codex CLI
+0.147.0, model gpt-5.6-sol, high reasoning, read-only against the
+diff to `main`, 2026-08-11. Six findings, condensed below as received,
+each carrying its resolution once the commit addressing it landed.
+
+The overall verdict accepted the delivered-track corruption and its
+`_align_track_buffers` mechanism, the 93.75 ms block signature, the
+Theil-Sen calculations, the protocol-v1 exchange and the primary
+comparable-slice counts. It rejected the gate 1 numbers as written,
+because finding 1 invalidates the placement they rest on.
+
+1. **P1: the tap placement matches neither device playout nor
+   samtal's own capture.** `compose.py` placed each packet so that it
+   *ended* at its post-send timestamp. samtal's capture places decoded
+   audio *starting* at that timestamp and keeps packets contiguous when
+   sends arrive early (`capture.py`, `at = max(channel.next_frame,
+   self._frame_of(now), self._start_frame)`), and pipecat sends first
+   and sleeps afterwards, so the timestamp marks the beginning of the
+   60 ms playout slot rather than its end. The spike therefore shifted
+   the tap 60 ms early and overwrote 11,668 samples where placements
+   collided, dropping tap self-fidelity to r = 0.755. That manufactures
+   much of the reported 145.5 ms faithful-track offset and invalidates
+   the gate 1 verdict as written.
+   *Resolution*: the plan's epoch mapping is amended, deliberately and
+   on the record, to `start = max(previous_end, round(send_t * rate))`
+   with gaps retained only for late sends and no overwrites;
+   `compose.py` implements it and every downstream figure was rerun.
+2. **P2: the resampling violated the plan's own method.**
+   `pipeline.py` had `AudioBufferProcessor` resample the bot track
+   internally with pipecat's streaming SOXR resampler while
+   `compose.py` resampled the tap with SciPy `resample_poly`, so the
+   two tracks did not go through one implementation and the filter
+   delay was never recorded. It mattered: the unflushed streaming
+   resampler is what left the turn track 92 ms short, feeding the
+   placement bias directly.
+   *Resolution*: the buffer processor now records both tracks at their
+   native 24 kHz, and `compose.py` converts every full track to 16 kHz
+   through the same `resample_poly(2, 3)` call, with the measured
+   filter delay and the input and output sample counts recorded.
+3. **P2: the gate 2 numerator subtracted an incomplete feature.** Only
+   the 14-line `_pace` method was deducted while the pacing feature's
+   imports, its `_paced` and `_next_send` state, its constructor
+   option, its conditional call and its edge wiring stayed counted as
+   ambient adapter code.
+   *Resolution*: the pacing experiment is gone from the adapter
+   entirely and the adapter is recounted as it now stands, with the
+   as-built figure reported beside it.
+4. **P3: "speaks stock xiaozhi" overstates what was exercised.** The
+   serializer treats every binary frame as bare Opus and emits bare
+   Opus, without observing `Protocol-Version` or the hello's `version`.
+   That is right for xiaozhi-sdk 0.5.1's protocol-v1 exchange and wrong
+   for protocol versions 2 and 3, which carry binary headers.
+   *Resolution*: every such claim is scoped to protocol v1 as
+   exercised, here, in the obligation map and in the #84 draft, and
+   the missing negotiation is named as adapter work an adoption would
+   still owe.
+5. **P3: "every silence block ends exactly on a delivery boundary" is
+   too strong.** In the retained evidence 253 of 256 did; three ended
+   one or two samples later.
+   *Resolution*: `fidelity.py` now audits the boundary alignment and
+   prints the distribution, and the claim quotes its output.
+6. **P3: two non-gating counts were off by one.** `fidelity.py` was
+   reported as 197 lines and the harness total as 1,204, where `wc -l`
+   gives 196 and 1,203.
+   *Resolution*: corrected, and every count in this document was
+   re-taken from `wc -l` rather than carried forward.
+
 ### Draft comment for #84, not yet posted
 
 Deliberately not hard-wrapped, unlike the rest of this file: GitHub
