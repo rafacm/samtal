@@ -10,7 +10,7 @@ monotonic clock, because the sdk's own `send_silence_audio` writes as
 fast as the socket accepts, which would compress the device's side of
 the timeline into a fraction of the wall clock it represents.
 
-    uv run python drive.py [--extra-pacing] [--seconds N]
+    uv run python drive.py [--seconds N]
 """
 
 import spike_env  # noqa: F401  (must precede every pipecat import)
@@ -76,11 +76,6 @@ async def paced_send(client: XiaoZhiWebsocket, pcm: bytes) -> None:
 async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "--extra-pacing",
-        action="store_true",
-        help="add the serializer's redundant 60 ms clock (cross-check)",
-    )
-    parser.add_argument(
         "--seconds",
         type=float,
         default=None,
@@ -97,9 +92,7 @@ async def main() -> None:
 
     recorder = Recorder()
     finished = asyncio.Event()
-    app = create_app(
-        recorder, reply, SENTENCE, paced=args.extra_pacing, finished=finished
-    )
+    app = create_app(recorder, reply, SENTENCE, finished=finished)
 
     replied = asyncio.Event()
     events: list[dict] = []
@@ -152,11 +145,7 @@ async def main() -> None:
     sends = [t for t, _ in recorder.sends]
     print(f"run {session} -> {run}")
     print(f"  reply clip      : {reply_secs:.1f} s at 24000 Hz")
-    print(
-        "  pacing          : "
-        + ("stock transport, plus the serializer's redundant 60 ms clock"
-           if args.extra_pacing else "stock transport")
-    )
+    print("  pacing          : the transport's own, nothing added")
     print(f"  tap packets     : {len(sends)}")
     if sends:
         print(f"  first send      : {sends[0]:.3f} s")

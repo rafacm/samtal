@@ -98,9 +98,9 @@ chunk's duration and the `/2` cancels it exactly. For the spike's
 configuration, 6 chunks of 10 ms at 24 kHz, the interval works out at
 (2880 / 24000) / 2 = 0.06 s: precisely one 60 ms frame per 60 ms.
 
-Measured, with the serializer's own pacing disabled: 2103 packets over
-126.06 s of wall clock, median inter-send interval 60.0 ms, 100% of
-intervals within 5 ms of the frame cadence. The transport supplies the
+Measured, with nothing in the adapter pacing anything: 2103 packets
+over 126.06 s of wall clock, median inter-send interval 60.0 ms, 99.8%
+of intervals within 5 ms of the frame cadence. The transport supplies the
 playback clock the plan doubted, and the open question "whether
 pipecat's websocket transport paces audio out at frame cadence or
 writes as fast as encoding allows" is answered: it paces.
@@ -110,13 +110,14 @@ mono: `audio_out_channels = 2` would make `audio_chunk_size` four times
 the sample count and the transport would send at half real time, so the
 formula is right by coincidence rather than by construction. And the
 clock is not exact: across the 126 s run the send times accumulated
-58 ms ahead of a perfect 60 ms clock, about -27.6 ms per minute, so the
-transport sent 126.12 s of audio in 126.06 s of wall clock.
+57.7 ms ahead of a perfect 60 ms clock, about -27.5 ms per minute, so
+the transport sent 126.120 s of audio in 126.062 s of wall clock.
 
 The consequence for gate 2 is that the pacing layer the spike added is
-**redundant, not forced**. It is off by default and kept behind a flag;
-the plan's clause about counting added pacing as adapter glue does not
-apply, and gate 2 counts the adapter without it.
+**redundant, not forced**. It has been removed from the adapter
+entirely rather than merely disabled, so the plan's clause about
+counting added pacing as adapter glue does not apply and gate 2 counts
+an adapter an adoption would actually ship.
 
 **5. What are `AudioBufferProcessor`'s delivery and timing
 semantics?**
@@ -511,18 +512,26 @@ Everything adoption-required, regardless of filename.
 
 | file | physical | code-only | why it is adoption-required |
 | --- | --- | --- | --- |
-| `serializer.py` | 171 | 78 | the frame translation itself |
+| `serializer.py` | 145 | 64 | the frame translation itself |
 | `control.py` | 113 | 62 | the handshake and every outbound control message, which the serializer contract cannot express |
 | `edge.py` | 54 | 28 | the per-connection transport parameters and construction |
-| **total as built** | **338** | **168** | |
-| less `_pace` | -14 | -8 | redundant: the transport paces (checkpoint finding 4) |
-| **adoption-required** | **324** | **160** | |
+| **adoption-required** | **312** | **154** | |
+
+The pacing layer the spike first added is **removed**, not deducted.
+The review round's third finding was that subtracting the 14-line
+`_pace` method left its imports, its `_paced` and `_next_send` state,
+its constructor option, its conditional call and its edge wiring
+counted as ambient adapter code, so the 324 and 160 first reported here
+were arithmetic on a feature that had not actually gone. It has gone
+now, and the figures above are the adapter as it stands, measured
+rather than adjusted. As built with the pacing feature present it was
+338 physical and 168 code-only.
 
 Reported separately, outside the comparison, as the plan requires:
 measurement harness, `pipeline.py` (184), `drive.py` (202),
 `make_audio.py` (94), `tap.py` (107), `compose.py` (248),
-`inject.py` (147), `fidelity.py` (197) and `spike_env.py` (25),
-**1204** physical lines. The canned reply service, the app wiring, the
+`inject.py` (147), `fidelity.py` (215) and `spike_env.py` (25),
+**1297** physical lines. The canned reply service, the app wiring, the
 tap and the composer are all in there; none of it is counted against
 either side.
 
@@ -544,9 +553,9 @@ That slice is **222 physical lines, 155 code-only**.
 
 | comparison | pipecat adapter | bespoke | ratio |
 | --- | --- | --- | --- |
-| against the whole file, physical | 324 | 899 | 0.36 |
-| against the comparable slice, physical | 324 | 222 | 1.46 |
-| against the comparable slice, code-only | 160 | 155 | 1.03 |
+| against the whole file, physical | 312 | 899 | 0.35 |
+| against the comparable slice, physical | 312 | 222 | 1.41 |
+| against the comparable slice, code-only | 154 | 155 | 0.99 |
 
 **For the work it actually does, the adapter is the same size as the
 bespoke code it would replace.** The 0.36 figure is real but it

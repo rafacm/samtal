@@ -34,11 +34,11 @@ from serializer import (
 )
 
 
-def device_edge(websocket, *, paced: bool = False):
+def device_edge(websocket):
     """The transport, the control processor and the session id for one
     device connection."""
     session_id = uuid.uuid4().hex[:8]
-    serializer = XiaozhiFrameSerializer(session_id, paced=paced)
+    serializer = XiaozhiFrameSerializer(session_id)
     params = FastAPIWebsocketParams(
         audio_in_enabled=True,
         audio_in_sample_rate=DEVICE_SAMPLE_RATE,
