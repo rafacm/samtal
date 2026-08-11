@@ -68,6 +68,18 @@ jobs:
             exit 1
           fi
 
+      # The same for the configuration API's OpenAPI document, which is
+      # generated from the routes and committed for the same reason: it
+      # is the machine-readable contract, and a copy that can drift from
+      # the routes is worth nothing.
+      - name: Check the committed OpenAPI document is current
+        run: |
+          uv run samtal-server config openapi > "$RUNNER_TEMP/api-openapi.json"
+          if ! diff -u ../docs/reference/api-openapi.json "$RUNNER_TEMP/api-openapi.json"; then
+            echo "::error::docs/reference/api-openapi.json is stale; regenerate it with: uv run samtal-server config openapi > ../docs/reference/api-openapi.json"
+            exit 1
+          fi
+
       # The database's Alembic scripts live inside the package so that a
       # built wheel carries them, and no test run from the checkout can
       # prove that: the source tree makes every file discoverable
