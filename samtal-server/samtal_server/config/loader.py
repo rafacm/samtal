@@ -110,7 +110,14 @@ def load_file_config(path: str | Path | None = None) -> FileConfig:
         # that matters: what lands in it wrongly is the secret itself.
         problem = _format_validation_error(exc, _source(path))
     except SettingsError as exc:
-        raise ConfigError(f"invalid config in {_source(path)}: {exc}") from exc
+        # The same care, for the same reason. This is what a malformed
+        # SAMTAL_ override of a structured key raises, and the parser
+        # failure underneath it holds the whole rejected environment
+        # value (a JSONDecodeError keeps it in `.doc`). The settings
+        # error's own text names the field and the source rather than
+        # the value, so the message is unchanged; what goes is the
+        # chain that carried the value behind it.
+        problem = f"invalid config in {_source(path)}: {exc}"
     finally:
         yaml_file_var.reset(token)
     raise ConfigError(problem)
@@ -151,14 +158,22 @@ def _check_config_file(path: Path) -> None:
     except OSError as exc:
         raise ConfigError(f"cannot read config file {path}: {exc.strerror}") from exc
 
+    problem: str | None = None
     try:
         data = yaml.safe_load(text)
     except yaml.YAMLError as exc:
+        # Rendered from the problem and the mark rather than from
+        # str(exc), which quotes the offending source line back, and
+        # raised after the handler: a parser exception retains the
+        # buffer it was parsing, so leaving it as the context would
+        # attach the whole file to a refusal about one line of it.
         detail = str(exc)
         if isinstance(exc, yaml.MarkedYAMLError) and exc.problem_mark is not None:
             mark = exc.problem_mark
             detail = f"{exc.problem} at line {mark.line + 1}, column {mark.column + 1}"
-        raise ConfigError(f"invalid YAML in {path}: {detail}") from exc
+        problem = f"invalid YAML in {path}: {detail}"
+    if problem is not None:
+        raise ConfigError(problem)
 
     if data is not None and not isinstance(data, dict):
         raise ConfigError(

@@ -7,6 +7,11 @@ import yaml
 from samtal_server.config import Config, ConfigError, compose_config, load_file_config
 from samtal_server.config.models import DOMAIN_KEYS, normalize_mac
 
+# Not a real credential, and shaped so a substring check for it cannot
+# match by accident. Written into the input a parser chokes on, since a
+# parser exception keeps what it was reading.
+PARSER_SENTINEL = "sk-test-6e0d4a11-never-a-real-credential"
+
 EXAMPLE_CONFIG = Path(__file__).parents[2] / "config.example.yaml"
 DEPLOY_EXAMPLE_CONFIG = Path(__file__).parents[2] / "config.deploy.example.yaml"
 
@@ -236,6 +241,41 @@ def test_yaml_syntax_error_reports_line(tmp_path: Path) -> None:
     path = write_config(tmp_path, "server:\n  port: 9000\n bad-indent: 1\n")
     with pytest.raises(ConfigError, match=r"invalid YAML .* line 3"):
         load_file_config(path)
+
+
+def test_a_yaml_parse_failure_carries_no_parser_exception(tmp_path: Path) -> None:
+    """A parser exception retains the buffer it was parsing, so leaving
+    it as the refusal's cause or context would attach the whole file to
+    a complaint about one line of it, credentials included."""
+    path = write_config(
+        tmp_path, f'server:\n  log_level: "INFO\n  note: {PARSER_SENTINEL}\n'
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        load_file_config(path)
+
+    assert "invalid YAML" in str(caught.value)
+    assert PARSER_SENTINEL not in str(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+def test_a_malformed_structured_override_carries_no_parser_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A SAMTAL_ override of a structured key is read as JSON, and the
+    decoder's exception keeps the whole rejected value in `.doc`. The
+    refusal names the field and the source, and nothing behind it holds
+    what was written."""
+    monkeypatch.setenv("SAMTAL_SERVER__LIMITS", f'{{"max_sessions": 1, "n": "{PARSER_SENTINEL}"')
+
+    with pytest.raises(ConfigError) as caught:
+        load_file_config()
+
+    assert "invalid config in" in str(caught.value)
+    assert PARSER_SENTINEL not in str(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_non_mapping_top_level_is_rejected(tmp_path: Path) -> None:
