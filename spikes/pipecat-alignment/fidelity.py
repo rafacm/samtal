@@ -22,12 +22,13 @@ plan's placement rule costs on its own.
 import argparse
 import ctypes.util
 import json
-import struct
 import wave
 from pathlib import Path
 
 import numpy as np
-from scipy.signal import fftconvolve, resample_poly
+from scipy.signal import fftconvolve
+
+from compose import TAP_FRAME_MS, TAP_RATE, read_packets, to_capture_rate
 
 if ctypes.util.find_library("opus") is None:
     from xiaozhi_sdk.utils import setup_opus
@@ -37,21 +38,7 @@ if ctypes.util.find_library("opus") is None:
 import opuslib  # noqa: E402
 
 CAPTURE_RATE = 16000
-TAP_RATE = 24000
-TAP_FRAME_MS = 60
 FRAME_S = TAP_FRAME_MS / 1000
-
-
-def read_packets(path: Path) -> list[bytes]:
-    raw = path.read_bytes()
-    packets = []
-    at = 0
-    while at < len(raw):
-        (n,) = struct.unpack_from("<I", raw, at)
-        at += 4
-        packets.append(raw[at : at + n])
-        at += n
-    return packets
 
 
 def best_lag(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
@@ -87,10 +74,14 @@ def main() -> None:
         np.frombuffer(decoder.decode(p, frame_size=frame), dtype=np.int16)
         for p in packets
     ]
-    uniform = resample_poly(np.concatenate(decoded).astype(np.float64), 2, 3)
+    uniform = to_capture_rate(np.concatenate(decoded)).astype(np.float64)
 
-    turn = np.frombuffer((run / "turn_bot.raw").read_bytes(), dtype=np.int16)
-    bot = np.frombuffer((run / "buffer_bot.raw").read_bytes(), dtype=np.int16)
+    # Both buffer tracks are recorded natively at the output rate, so
+    # they go through the same one conversion every other track does.
+    turn_raw = np.frombuffer((run / "turn_bot.raw").read_bytes(), dtype=np.int16)
+    bot_raw = np.frombuffer((run / "buffer_bot.raw").read_bytes(), dtype=np.int16)
+    turn = to_capture_rate(turn_raw)
+    bot = to_capture_rate(bot_raw)
     tap16 = np.frombuffer((run / "tap16k.raw").read_bytes(), dtype=np.int16)
 
     sent_s = len(packets) * FRAME_S
@@ -117,21 +108,44 @@ def main() -> None:
     )
 
     # Silence the delivered track carries inside otherwise continuous
-    # reply audio, which is what the cross-track padding inserts.
-    nonzero = np.nonzero(bot)[0]
+    # reply audio, which is what the cross-track padding inserts. Done
+    # on the raw recording, at the rate it was recorded, so the block
+    # sizes are the processor's own and not a resampler's rounding.
+    rate = TAP_RATE
+    floor = rate // 16  # 62.5 ms, well clear of ordinary zero crossings
+    nonzero = np.nonzero(bot_raw)[0]
     gaps = np.diff(nonzero)
-    blocks = gaps[gaps > 1000] - 1
+    blocks = gaps[gaps > floor] - 1
+    block_ends = nonzero[:-1][gaps > floor] + blocks
     print(
         f"  delivered track interior silence: {len(blocks)} blocks over "
-        f"1000 samples, {blocks.sum() / CAPTURE_RATE:.2f} s total"
+        f"{floor} samples, {blocks.sum() / rate:.2f} s total"
     )
+
+    # Review finding 5: "every block ends exactly on a delivery
+    # boundary" was too strong, so the alignment is audited rather than
+    # asserted.
+    deliveries = [json.loads(line) for line in (run / "buffer.jsonl").open()]
+    boundaries = np.cumsum([d["samples"] for d in deliveries])
+    if len(blocks):
+        offsets = np.array(
+            [int(end - boundaries[np.argmin(np.abs(boundaries - end))])
+             for end in block_ends]
+        )
+        exact = int(np.sum(offsets == 0))
+        within2 = int(np.sum(np.abs(offsets) <= 2))
+        print(
+            f"  block ends against delivery boundaries: {exact} exact, "
+            f"{within2} within 2 samples, of {len(blocks)}; "
+            f"worst {int(np.max(np.abs(offsets)))} samples"
+        )
     if len(blocks):
         sizes, counts = np.unique(blocks, return_counts=True)
         top = sorted(zip(counts, sizes), reverse=True)[:3]
         print(
             "  most common block sizes: "
             + ", ".join(
-                f"{s} samples ({s / CAPTURE_RATE * 1000:.2f} ms) x{c}" for c, s in top
+                f"{s} samples ({s / rate * 1000:.2f} ms) x{c}" for c, s in top
             )
         )
 
@@ -180,13 +194,18 @@ def main() -> None:
     turns = [json.loads(line) for line in (run / "turn.jsonl").open()]
     if turns:
         stamp = turns[0]["t"]
-        start = stamp - turns[0]["samples"] / CAPTURE_RATE
-        wire_start = sends[0]["t"] - FRAME_S
+        start = stamp - turns[0]["samples"] / TAP_RATE
+        # Under the corrected mapping a packet's playout slot opens at
+        # its send, so the wire's audio starts at the first send and the
+        # last packet is still playing for a frame after the last one.
+        wire_start = sends[0]["t"]
+        wire_end = sends[-1]["t"] + FRAME_S
         print()
         print("turn track placement, by the plan's rule (ends at its stamp):")
         print(f"  delivered at        {stamp:8.3f} s")
         print(f"  last wire send at   {sends[-1]['t']:8.3f} s")
-        print(f"  stamp minus send    {(stamp - sends[-1]['t']) * 1000:+8.1f} ms")
+        print(f"  wire playout ends   {wire_end:8.3f} s")
+        print(f"  stamp minus playout {(stamp - wire_end) * 1000:+8.1f} ms")
         print(f"  track starts at     {start:8.3f} s")
         print(f"  wire audio starts   {wire_start:8.3f} s")
         print(f"  placement bias      {(start - wire_start) * 1000:+8.1f} ms")

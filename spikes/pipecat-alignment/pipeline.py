@@ -15,11 +15,15 @@ stated here rather than buried:
   the send the tap timestamped. Placed before the output transport it
   would record on the TTS's timeline instead, which is what the plan
   assumed and what an unlucky adopter would get.
-- The buffer processor is asked for 16 kHz, so its own single stateful
-  stream resampler converts the 24 kHz bot track once over the whole
-  session. Resampling the delivered chunks ourselves would reset
-  filter state at every boundary and inject exactly the artefacts
-  under test.
+- The buffer processor is asked for the output rate, 24 kHz, so the
+  bot track is recorded natively and pipecat resamples none of it.
+  Asking it for 16 kHz instead put its own streaming SOXR resampler
+  in the path, which is never flushed at end of stream and so
+  truncated the turn track by 92 ms, and it left the two tracks the
+  measurement compares going through two different resampler
+  implementations. `compose.py` now converts every full track to
+  16 kHz through one `resample_poly` call, which is what the plan
+  asked for.
 """
 
 import spike_env  # noqa: F401  (must precede every pipecat import)
@@ -129,9 +133,9 @@ def create_app(
         recorder.mark("session_open", session_id=session_id)
 
         buffer = AudioBufferProcessor(
-            sample_rate=CAPTURE_RATE,
+            sample_rate=OUTPUT_SAMPLE_RATE,
             num_channels=2,
-            buffer_size=CAPTURE_RATE * 2 // 4,
+            buffer_size=OUTPUT_SAMPLE_RATE * 2 // 4,
             auto_start_recording=True,
             # The other bot track the processor offers, recorded for
             # comparison: it is extended only with the bot's own audio,
