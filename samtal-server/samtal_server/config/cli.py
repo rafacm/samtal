@@ -386,26 +386,33 @@ def _fragment(path: str) -> object:
     variable already lives."""
     source = "the fragment on stdin" if path == "-" else path
     text = _stdin() if path == "-" else _file(path)
+    # Rendered from the problem and the mark rather than from str(exc),
+    # which quotes the offending source line back, and recorded rather
+    # than raised inside the handler: a PyYAML mark holds the whole
+    # buffer it was parsing, which here is the fragment, and an
+    # exception raised inside a handler keeps the one being handled as
+    # its __context__.
+    problem: str | None = None
     try:
         return yaml.safe_load(text)
     except yaml.YAMLError as exc:
-        # Rendered from the problem and the mark rather than from
-        # str(exc), which quotes the offending source line back, and
-        # raised without a cause so the chain does not carry it either.
         detail = str(exc)
         if isinstance(exc, yaml.MarkedYAMLError) and exc.problem_mark is not None:
             mark = exc.problem_mark
             detail = f"{exc.problem} at line {mark.line + 1}, column {mark.column + 1}"
-        raise ConfigError(f"invalid YAML in {source}: {detail}") from None
+        problem = f"invalid YAML in {source}: {detail}"
+    raise ConfigError(problem)
 
 
 def _file(path: str) -> str:
+    problem: str | None = None
     try:
         return Path(path).read_text(encoding="utf-8")
     except FileNotFoundError:
-        raise ConfigError(f"fragment file not found: {path}") from None
+        problem = f"fragment file not found: {path}"
     except OSError as exc:
-        raise ConfigError(f"cannot read fragment file {path}: {exc.strerror}") from None
+        problem = f"cannot read fragment file {path}: {exc.strerror}"
+    raise ConfigError(problem)
 
 
 def _stdin() -> str:
@@ -466,10 +473,12 @@ def _database_dir(args: argparse.Namespace) -> Path:
 
 
 def _mac(mac: str) -> str:
+    problem: str | None = None
     try:
         return normalize_mac(mac)
     except ValueError as exc:
-        raise ConfigError(str(exc)) from None
+        problem = str(exc)
+    raise ConfigError(problem)
 
 
 def _wrote(what: str) -> None:

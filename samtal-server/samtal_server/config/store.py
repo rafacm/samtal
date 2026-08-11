@@ -290,10 +290,13 @@ class ConfigStore:
     def set_mcp_server(self, name: str, fragment: object) -> None:
         name = _identifier("mcp_servers", name)
         entry = _parse(McpServerConfig, f"mcp_servers.{name}", fragment)
+        problem: str | None = None
         try:
             check_mcp_entry_names({name: entry})
         except ValueError as exc:
-            raise ConfigError(str(exc)) from None
+            problem = str(exc)
+        if problem is not None:
+            raise ConfigError(problem)
         with self._transaction() as connection:
             domain = _read_domain(connection)
             domain.mcp_servers[name] = entry
@@ -787,17 +790,27 @@ def _identifier(location: str, name: str) -> str:
 
 
 def _mac(mac: str) -> str:
+    # Recorded here and raised outside the handler, the rule this
+    # codebase settled on: `from None` clears the cause and leaves the
+    # context, so the rejected value would still be reachable on the
+    # exception that travels out.
+    problem: str | None = None
     try:
         return normalize_mac(mac)
     except ValueError as exc:
-        raise ConfigError(str(exc)) from None
+        problem = str(exc)
+    raise ConfigError(problem)
 
 
 def _binding(mac: str, agents: Sequence[str]) -> dict[str, list[str]]:
+    binding: dict[str, list[str]] | None = None
+    problem: str | None = None
     try:
         binding = normalize_device_bindings({mac: list(agents)})
     except ValueError as exc:
-        raise ConfigError(str(exc)) from None
+        problem = str(exc)
+    if binding is None:
+        raise ConfigError(problem)
     return {key: [str(agent).strip() for agent in bound] for key, bound in binding.items()}
 
 

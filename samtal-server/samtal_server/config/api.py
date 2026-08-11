@@ -271,7 +271,9 @@ class Problem(BaseModel):
     detail: str = Field(
         description=(
             "What was refused and why, the same sentence the `samtal-server config` "
-            "command prints for it. It never quotes what was sent."
+            "command prints for it. It names the entity the request addressed and "
+            "the rule that was broken; it never quotes a secret or a configuration "
+            "value that was rejected."
         )
     )
 

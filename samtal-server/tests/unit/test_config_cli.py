@@ -203,6 +203,29 @@ def test_malformed_yaml_is_refused_without_echoing_the_line(
     assert "Traceback" not in captured.err
 
 
+def test_a_parser_failure_carries_no_parser_exception(tmp_path: Path) -> None:
+    """A PyYAML mark holds the whole buffer it was parsing, which here
+    is the fragment, so the refusal is built inside the handler and
+    raised outside it: `from None` would leave the parser's exception
+    reachable as __context__."""
+    fragment = tmp_path / "broken.yaml"
+    fragment.write_text(f"prompt: '{SECRET}\n", encoding="utf-8")
+
+    with pytest.raises(cli.ConfigError) as caught:
+        cli._fragment(str(fragment))
+
+    assert "invalid YAML" in str(caught.value)
+    assert SECRET not in str(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+    with pytest.raises(cli.ConfigError) as missing:
+        cli._fragment(str(tmp_path / "nowhere.yaml"))
+
+    assert missing.value.__cause__ is None
+    assert missing.value.__context__ is None
+
+
 def test_a_secret_is_read_from_stdin_and_never_shown(
     run, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
 ) -> None:

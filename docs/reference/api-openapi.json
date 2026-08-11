@@ -782,7 +782,7 @@
           "detail": {
             "type": "string",
             "title": "Detail",
-            "description": "What was refused and why, the same sentence the `samtal-server config` command prints for it. It never quotes what was sent."
+            "description": "What was refused and why, the same sentence the `samtal-server config` command prints for it. It names the entity the request addressed and the rule that was broken; it never quotes a secret or a configuration value that was rejected."
           }
         },
         "additionalProperties": false,
