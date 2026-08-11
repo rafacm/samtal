@@ -97,6 +97,20 @@ def place(
     return overlap
 
 
+def write_pair(
+    captures: Path, session: str, mic: np.ndarray, ref: np.ndarray
+) -> None:
+    """One stereo 16 kHz capture: microphone left, reference right."""
+    interleaved = np.empty(2 * len(mic), dtype=np.int16)
+    interleaved[0::2] = mic
+    interleaved[1::2] = ref
+    with wave.open(str(captures / f"{session}.wav"), "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(CAPTURE_RATE)
+        w.writeframes(interleaved.tobytes())
+
+
 def compose(run: Path) -> None:
     session = (run / "session").read_text().strip()
     deliveries = read_jsonl(run / "buffer.jsonl")
@@ -151,16 +165,34 @@ def compose(run: Path) -> None:
         tap16 = np.concatenate([tap16, np.zeros(n - len(tap16), dtype=np.int16)])
     tap16 = tap16[:n]
 
+    # The other reference pipecat offers: the bot *turn* track, which is
+    # extended only with the bot's own audio and delivered once, when the
+    # bot stops speaking. It is placed by exactly the same rule as a
+    # delivery, ending at the timestamp its handler observed, so the
+    # comparison grants it no freedom the delivered track did not have.
+    turn = np.zeros(n, dtype=np.int16)
+    turn_written = np.zeros(n, dtype=bool)
+    turn_overlap = 0
+    turns = read_jsonl(run / "turn.jsonl") if (run / "turn.jsonl").exists() else []
+    turn_raw = (
+        np.frombuffer((run / "turn_bot.raw").read_bytes(), dtype=np.int16)
+        if (run / "turn_bot.raw").exists()
+        else np.zeros(0, dtype=np.int16)
+    )
+    at_turn = 0
+    for t in turns:
+        count = t["samples"]
+        turn_overlap += place(
+            turn, turn_written, turn_raw[at_turn : at_turn + count], t["t"], CAPTURE_RATE
+        )
+        at_turn += count
+
     captures = run / "captures"
     captures.mkdir(exist_ok=True)
-    interleaved = np.empty(2 * n, dtype=np.int16)
-    interleaved[0::2] = mic
-    interleaved[1::2] = ref
-    with wave.open(str(captures / f"{session}.wav"), "wb") as w:
-        w.setnchannels(2)
-        w.setsampwidth(2)
-        w.setframerate(CAPTURE_RATE)
-        w.writeframes(interleaved.tobytes())
+    write_pair(captures, session, mic, ref)
+    turn_captures = run / "captures-turn"
+    turn_captures.mkdir(exist_ok=True)
+    write_pair(turn_captures, session, mic, turn)
     (run / "tap16k.raw").write_bytes(tap16.tobytes())
 
     # The event track. `heard` carries the utterance duration so the
@@ -189,9 +221,10 @@ def compose(run: Path) -> None:
             }
         )
     track.sort(key=lambda e: e["t_ms"])
-    with (captures / f"{session}.jsonl").open("w") as f:
-        for e in track:
-            f.write(json.dumps(e) + "\n")
+    for directory in (captures, turn_captures):
+        with (directory / f"{session}.jsonl").open("w") as f:
+            for e in track:
+                f.write(json.dumps(e) + "\n")
 
     print(f"composed {session} -> {captures}")
     print(f"  span            : {n / CAPTURE_RATE:.1f} s")
@@ -200,6 +233,8 @@ def compose(run: Path) -> None:
     print(f"  tap             : {len(packets)} packets at {TAP_RATE} Hz")
     print(f"  tap overlap     : {tap_overlap} samples")
     print(f"  tap resample    : {tap_n} in -> {len(tap16)} out (24k -> 16k)")
+    print(f"  turn track      : {len(turns)} turns, {at_turn} samples "
+          f"({at_turn / CAPTURE_RATE:.1f} s), overlap {turn_overlap}")
     print(f"  events          : {[e['event'] for e in track]}")
 
 

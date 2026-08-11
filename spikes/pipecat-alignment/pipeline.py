@@ -133,11 +133,20 @@ def create_app(
             num_channels=2,
             buffer_size=CAPTURE_RATE * 2 // 4,
             auto_start_recording=True,
+            # The other bot track the processor offers, recorded for
+            # comparison: it is extended only with the bot's own audio,
+            # so it escapes the cross-track padding the delivered track
+            # carries, but it arrives once, when the bot stops speaking.
+            enable_turn_audio=True,
         )
 
         @buffer.event_handler("on_track_audio_data")
         async def on_track(_proc, user: bytes, bot: bytes, rate: int, _channels: int):
             recorder.on_delivery(user, bot, rate)
+
+        @buffer.event_handler("on_bot_turn_audio_data")
+        async def on_bot_turn(_proc, bot: bytes, _rate: int, _channels: int):
+            recorder.on_turn(bytes(bot))
 
         pipeline = Pipeline(
             [
