@@ -9,6 +9,31 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **The configuration API writes** (#101). Every write the
+  `samtal-server config` commands can make is now a route under `/api`:
+  PUT and DELETE per entity kind, the two write-only secret endpoints,
+  the device binding, and the default agent with its idempotent clear.
+  A successful write answers with what it did and the sentence saying
+  when it applies, because configuration stays a boot-time snapshot.
+  Fragment bodies are received as opaque objects and validated only in
+  the repository, so the one validator that could echo a rejected body
+  back (and with it a pasted credential) is never in front of them; the
+  three argument-shaped bodies are parsed to an exact shape and refused
+  with a description of what was expected rather than a quote of what
+  arrived. The committed OpenAPI document
+  (`docs/reference/api-openapi.json`) carries every write, the schema
+  each body takes, and the refusals each can answer with.
+
+- **`samtal-server config --local`** (#101), the break-glass recovery
+  subset: `show`, `delete`, `clear-secret` and `set-secret` against the
+  database directly, for a deployment whose server will not start. Every
+  `--local` invocation says on stderr that it bypasses the API and that
+  a running server will not observe the change until its next start;
+  every other command refuses the flag by naming the four. Its `show`
+  and `delete` go by what is stored rather than by what a new write
+  would be allowed to create, so a row that predates the addressability
+  rule stays readable and removable.
+
 - **The configuration API reads** (#101). Every read the
   `samtal-server config` commands can do is now a GET under `/api`:
   `/config` for the whole masked document with the location of every
@@ -22,8 +47,7 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   response, a header or a log. The committed OpenAPI document
   (`docs/reference/api-openapi.json`) describes the routes, the
   refusals each can answer with, and the entity schemas a client needs
-  to write an entity back. Writing over the API comes next; the CLI is
-  still the only write path.
+  to write an entity back.
 
 ### Changed
 
@@ -71,6 +95,43 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   legal and percent-encode losslessly. The rule runs at write time
   only: a row written before it still boots, still appears in
   `config show`, and is still deletable.
+
+- **`samtal-server config` is a client of the configuration API**
+  (#101). The grammar is unchanged and every message is unchanged: the
+  API carries the repository's own sentence and the CLI prints it. What
+  changed is that a command now needs a running server to talk to. It
+  finds it at `--api-url`, then `SAMTAL_API_URL`, then
+  `http://127.0.0.1:<server.port>/api`, and authenticates with the value
+  of the variable `server.api.secret_env` names, which on a deployment
+  is the variable the server itself was started with: exec into the
+  running container and the CLI has the address and the token for free.
+
+- **The API client refuses to send the token in clear** (#101). The
+  bearer token crosses every request and grants everything the API can
+  do, secret writes included, so a plain `http://` connection to a host
+  that is not this machine is refused outright, with no flag to override
+  it: use TLS, a tunnel that terminates it, or loopback from inside the
+  container. A URL carrying a username or password is refused too, and
+  no URL is printed with either still in it. A non-2xx response that is
+  not this API's own is reported as a status code and never relayed,
+  because what a proxy returns is not sanitized output.
+
+- **Getting Started reorders to start, configure, restart** (#101).
+  Configuring requires a running server, and an empty database is a
+  valid state to run one on: it comes up serving no agents, is
+  configured over its own API, and picks the configuration up at the
+  restart, which is now a documented step of its own rather than a
+  sentence at the end of another one.
+
+- **The smoke lane's seeding scripts manage their own server** (#101).
+  `seed.sh`, `seed-slim.sh` and `seed-local-engines.sh` each start a
+  server inside the seeding container, wait for `/healthz`, write
+  through it over loopback with the image's own CLI, and stop it again,
+  printing the server's log if anything fails. The seeding containers
+  are given the two secrets a server needs, and no provider credential,
+  because an empty domain half builds no provider.
+  `config.deploy.example.sh` is rewritten to run against a running
+  server, and both sets of script tests move to the integration lane.
 
 - **Every deployment must set `SAMTAL_API_SECRET` before upgrading**
   (#101). The configuration API is always mounted and always behind a
