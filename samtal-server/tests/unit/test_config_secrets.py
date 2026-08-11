@@ -14,13 +14,18 @@ from samtal_server.config import ConfigError
 from samtal_server.config.secrets import (
     MASK,
     MASTER_KEY_ENV,
+    ProviderSecrets,
     SecretLocation,
+    SecretStore,
     decrypt,
     encrypt,
     generate_key,
     is_envelope,
     load_keys,
     mask,
+    provider_secrets_in_force,
+    resolve_mcp_values,
+    stored_provider_secret,
 )
 
 # Not a real credential, and shaped so that a substring check for it in
@@ -182,6 +187,98 @@ def test_keys_are_read_newest_first_from_the_environment() -> None:
     written = encrypt(CLAUDE, SECRET, keys)
     assert decrypt(CLAUDE, written, MultiFernet([Fernet(new)])) == SECRET
     assert decrypt(CLAUDE, encrypt(CLAUDE, SECRET, MultiFernet([Fernet(old)])), keys) == SECRET
+
+
+def _store(*locations: SecretLocation) -> tuple[SecretStore, MultiFernet]:
+    keys = MultiFernet([Fernet(generate_key())])
+    return SecretStore({where: encrypt(where, SECRET, keys) for where in locations}, keys), keys
+
+
+def test_the_store_opens_what_it_holds_and_nothing_else() -> None:
+    store, _ = _store(CLAUDE)
+
+    assert store.secret(CLAUDE) == SECRET
+    assert store.secret(WEATHER) is None
+    assert CLAUDE in store
+    assert len(store) == 1
+
+
+def test_the_store_lists_its_locations_and_an_entity_slots() -> None:
+    env_slot = SecretLocation.mcp_server("weather", "env.API_TOKEN")
+    store, _ = _store(WEATHER, CLAUDE, env_slot)
+
+    assert store.locations() == [env_slot, WEATHER, CLAUDE]
+    assert store.slots_for("mcp_server", "weather") == ["env.API_TOKEN", "headers.Authorization"]
+    assert store.slots_for("provider", "llm.claude") == ["api_key"]
+    assert store.slots_for("provider", "llm.other") == []
+
+
+def test_a_store_that_cannot_open_a_slot_refuses_naming_the_location() -> None:
+    written = encrypt(CLAUDE, SECRET, MultiFernet([Fernet(generate_key())]))
+
+    for keys in (MultiFernet([Fernet(generate_key())]), None):
+        with pytest.raises(ConfigError) as caught:
+            SecretStore({CLAUDE: written}, keys).secret(CLAUDE)
+        assert CLAUDE.describe() in str(caught.value)
+        assert SECRET not in _chain(caught.value)
+
+
+def test_a_provider_credential_is_bound_to_its_stage_and_name() -> None:
+    store, _ = _store(CLAUDE)
+
+    assert ProviderSecrets("llm", "claude", store).secret("api_key") == SECRET
+    assert ProviderSecrets("llm", "claude", store).secret("other_key") is None
+    assert ProviderSecrets("tts", "claude", store).secret("api_key") is None
+    # No store at all is the default deployment: environment references
+    # only, and nothing to consult.
+    assert ProviderSecrets("llm", "claude").secret("api_key") is None
+
+
+def test_the_provider_seam_is_empty_outside_a_construction() -> None:
+    store, _ = _store(CLAUDE)
+
+    assert stored_provider_secret("api_key") is None
+    with provider_secrets_in_force(ProviderSecrets("llm", "claude", store)):
+        assert stored_provider_secret("api_key") == SECRET
+    assert stored_provider_secret("api_key") is None
+
+
+def test_mcp_values_resolve_literals_and_references(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WEATHER_TOKEN", SECRET)
+
+    resolved = resolve_mcp_values(
+        "weather", "env", {"REGION": "eu", "API_TOKEN": "$WEATHER_TOKEN"}, None
+    )
+
+    assert resolved == {"REGION": "eu", "API_TOKEN": SECRET}
+
+
+def test_a_stored_mcp_secret_shadows_the_reference_written_for_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ciphertext wins for the same slot, and the reference it shadows is
+    not even consulted: an unset variable behind it must not fail the
+    boot the secret was set to fix."""
+    monkeypatch.delenv("WEATHER_TOKEN", raising=False)
+    store, _ = _store(SecretLocation.mcp_server("weather", "env.API_TOKEN"))
+
+    resolved = resolve_mcp_values(
+        "weather", "env", {"REGION": "eu", "API_TOKEN": "$WEATHER_TOKEN"}, store
+    )
+
+    assert resolved == {"REGION": "eu", "API_TOKEN": SECRET}
+
+
+def test_a_stored_mcp_secret_needs_no_key_in_the_entity() -> None:
+    """A fragment cannot carry the value, so it need not carry a
+    placeholder for it either."""
+    store, _ = _store(SecretLocation.mcp_server("weather", "headers.Authorization"))
+
+    assert resolve_mcp_values("weather", "headers", {}, store) == {"Authorization": SECRET}
+    # The groups do not bleed into each other.
+    assert resolve_mcp_values("weather", "env", {}, store) == {}
 
 
 def test_an_unusable_key_names_its_position_and_not_its_material() -> None:
