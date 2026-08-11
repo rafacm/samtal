@@ -248,3 +248,138 @@ debugger) reads what it holds.
 
 Full lanes after the fixes: ruff clean, both suites green and both
 drift checks clean (counts in the PR's verification section).
+## Milestone 2: read routes
+
+The gated namespace gets its reads. `ConfigStore` answers for one
+entity at a time, `views.py` turns that into the masked envelope both
+callers show, and eleven GET routes serve it. The CLI renders the same
+envelopes it always rendered, byte for byte, and is still the only
+write path.
+
+### What landed
+
+**Repository reads (`config/store.py`).** One method per addressable
+entity kind (`read_provider`, `read_mcp_server`, `read_agent`,
+`read_agent_defaults`, `read_device`, `read_default_agent`) beside the
+whole-snapshot `load()`. Each raises `UnknownEntityError` with the
+sentence the CLI has always printed, so "no such provider" is decided
+once whatever the transport; a stage that is not a stage and a MAC that
+is not a MAC stay plain `ConfigError`, which is the difference between
+the 404 and the 422. The agent defaults and the default agent are never
+missing: an unwritten singleton is the empty entry and an unset default
+agent is null, both configurations rather than absences.
+
+A read returns an `Entity`: the model-shaped half, plus a
+`StoredSecret` per slot holding a stored secret, each carrying the
+entity key its value displaces (`shadows`). Precedence is the
+repository's decision, applied by one rule (`_shadowed`) that the
+whole-snapshot helper `stored_secrets()` uses too, so a slot cannot be
+said to shadow one key in a listing and another in a single read.
+
+**`config/views.py`.** The CLI's display helpers, moved: the masked
+provider and MCP bodies, the agent and agent-defaults layer, the device
+binding, and the mask rule applied to an entity in exactly one place.
+On top of them it builds the envelope
+(`{"entity": ..., "secrets": {slot: {"shadows": ...}}}`), the four
+identity-keyed listings, and the whole-configuration document
+(`{"config": ..., "secrets": [locations]}`). The API returns those
+dictionaries as JSON; `cli.py` renders the same ones as YAML and builds
+its comment lines from the envelope rather than from a second walk over
+the entity. No CLI test changed, and the output was also compared
+directly: every `show` and `list` variant, including the refusals and
+their exit codes, run against one seeded database by this branch and by
+the milestone 1 commit, is identical byte for byte.
+
+**Read routes (`config/api.py`).** The plan's surface exactly: `GET
+/config`, the four listings, one route per entity kind, and
+`/default-agent`. Handlers are plain `def` on the threadpool, take the
+per-request store dependency and call one repository method and one
+view each. The dependency is resolved from `request.app.state.store`
+rather than closed over, so `document()` still builds an application
+that never opens a database. Identities ride as decoded single path
+segments: spaces, percent signs and non-ASCII names round-trip
+percent-encoded, and a MAC is normalized before it is looked up.
+
+**Transport models and the document.** `Envelope`, `SecretSlot`,
+`ConfigDocument`, `StoredSecretLocation`, `DefaultAgent` and `Problem`,
+declared as `response_model` and in each route's `responses`, so the
+document carries real schemas and every refusal a route can answer
+with. `_entity_schemas()` injects the four entity models into
+`components.schemas` with their nested `$defs` hoisted, which is the
+seam milestone 3's `openapi_extra` request bodies reference.
+`docs/reference/api-openapi.json` is regenerated; the drift,
+determinism, `$ref`-resolution and validator tests all still pass.
+
+**Tests.** `tests/unit/test_config_reads.py` (the repository's reads and
+the view over them: the refusal sentences, the shadow marks, the empty
+secrets, fail-closed masking, and a listing agreeing with a single read)
+and `tests/unit/test_config_api_reads.py` (the same over HTTP: envelope
+shapes per route family, the listings, 404 with the repository's exact
+sentence, 422 for an unaddressable identity, 500 for an unreadable row,
+409 with a real lock held, the encoded-identity round trips, and the
+no-leak assertions over bodies, headers and logs).
+`tests/unit/test_api_openapi.py` gains the route inventory, the refusal
+inventory and the registered entity schemas.
+
+### Deviations from the plan
+
+Two, neither changing what the milestone delivers.
+
+**Three milestone 1 tests moved off `/config`.** They asserted the
+skeleton's acceptance ("with the token, 404, because there are no
+routes") against `/api/config`, which is now a route. They assert the
+same property against a path that is not a route, and one new test
+takes the other half: `/api/config` answers 200 through the mount, which
+is what shows the routes are served where the document says they are.
+No CLI test changed, which is the check that mattered.
+
+**The 409 is forced through the open-and-migrate step, not the read.**
+The plan asks for the busy refusal exercised through a real GET. Because
+the API opens the database per request, a held lock is met by
+`open_database`'s migration check before any handler runs, so that is
+the phase an HTTP test can reach; the repository-write phase stays
+covered by `tests/unit/test_config_refusals.py`, which forces both. The
+route test asserts the status code and the error shape only, never the
+wording.
+
+### Discoveries
+
+**A pasted credential cannot reach a read as itself, but a
+name-shaped one can.** The models refuse an inline secret and refuse an
+`*_env` value that does not look like a variable name, so a row holding
+an obvious paste cannot be loaded at all. What does load is a
+credential shaped like a name (`sk_test_...`), because the model's
+check only asks that a reference look like a name, and that is exactly
+what `secrets.mask` catches by passing only a canonical reference
+through. So the fail-closed masking tests use a name-shaped sentinel:
+the earlier draft's plainly-pasted one made the row unloadable and
+tested nothing.
+
+**A stored row that fails model validation answers 422.** `_read_domain`
+loads each row through its entity model, and `_load` raises plain
+`ConfigError`, which the API maps to 422: the caller's mistake, which it
+is not. Only the JSON-column shape refusals are typed `StorageError` and
+answer 500. Nothing in this milestone depends on it and no wording
+changes, but the honest mapping for an unloadable row is 500, and the
+change belongs where the boot path can be considered with it.
+
+**A response model with `extra="forbid"` is the check that views and
+the transport agree.** FastAPI validates what a handler returns through
+`response_model`; with the default `extra="ignore"` a key the view
+started producing would be dropped from the response silently. Forbidding
+extras makes that a failure in the suite instead.
+
+### Notes for milestone 3
+
+- `_reads(api)` in `config/api.py` registers the GETs; the writes want
+  the same shape (`_writes(api)`), registered from `_application()` so
+  they are in the document by construction.
+- `_entity_schemas()` is where the request schemas already live. A PUT's
+  `openapi_extra` can `$ref` `#/components/schemas/ProviderConfig` and
+  the resolution test will keep it honest.
+- `views.reference_value(body, key)` is what turns a `shadows` mark into
+  the value it displaced, dotted MCP slots included; the CLI's comment
+  lines are built from it.
+- The repository's reads are what `--local show` consumes: it needs no
+  new existence logic, only the same methods against a locally opened
+  store.

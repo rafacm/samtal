@@ -7,6 +7,24 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-08-11
 
+### Added
+
+- **The configuration API reads** (#101). Every read the
+  `samtal-server config` commands can do is now a GET under `/api`:
+  `/config` for the whole masked document with the location of every
+  stored secret beside it, an identity-keyed listing per entity kind,
+  one route per addressable entity, and `/default-agent`. A read
+  answers with the entity's masked body and the slots holding a stored
+  secret, each marked with the entity key its value displaces, which is
+  the fact a masked read exists to convey and the one the entity itself
+  can never carry. Reads are masked and stay masked: no secret value,
+  and no plaintext that got into a row another way, appears in a
+  response, a header or a log. The committed OpenAPI document
+  (`docs/reference/api-openapi.json`) describes the routes, the
+  refusals each can answer with, and the entity schemas a client needs
+  to write an entity back. Writing over the API comes next; the CLI is
+  still the only write path.
+
 ### Changed
 
 - **Every deployment must set `SAMTAL_API_SECRET` before upgrading**
