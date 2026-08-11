@@ -36,7 +36,7 @@ from sqlalchemy import update
 from samtal_server import db as db_module
 from samtal_server.config import cli
 from samtal_server.config.api import MOUNT_PATH, build_api, mount_api
-from samtal_server.config.loader import load_file_config
+from samtal_server.config.loader import ConfigError, load_file_config
 from samtal_server.config.secrets import MASK, MASTER_KEY_ENV, generate_key
 from samtal_server.db import DATABASE_FILENAME, open_database, schema
 
@@ -101,6 +101,19 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     _run.reached = reached
     return _run
+
+
+def _chain(exc: BaseException) -> str:
+    """Everything an exception carries, including what a chain walker
+    would find behind it."""
+    parts: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        parts += [repr(current), str(current)]
+        current = current.__cause__ or current.__context__
+    return "\n".join(parts)
 
 
 def _document(out: str) -> object:
@@ -780,6 +793,67 @@ def test_the_mount_prefix_in_the_url_reaches_the_mounted_namespace(run) -> None:
     so a base URL naming that prefix is what a request has to be joined
     onto."""
     assert run("--api-url", f"http://127.0.0.1:8003{MOUNT_PATH}", "list") == 0
+
+
+# The URLs the parser itself refuses, each carrying the sentinel where
+# the parser would have put it into its own ValueError.
+UNREADABLE_URLS = [
+    ("a port that is not a number", f"http://localhost:{SECRET}/api"),
+    ("a port that is empty of digits", "http://localhost:notaport/api"),
+    ("an unclosed IPv6 literal", f"http://[::1{SECRET}/api"),
+    ("a malformed IPv6 literal", f"http://[bad::{SECRET}::x]:8003/api"),
+]
+
+# The URLs that parse and are then refused on their merits. These do
+# name the address, minus any userinfo, because an operator who typed
+# the wrong scheme needs to see which address was read that way.
+UNUSABLE_URLS = [
+    ("a scheme that is not http", "ftp://host/api"),
+    ("no host at all", "http:///api"),
+]
+
+
+@pytest.mark.parametrize(("what", "url"), UNREADABLE_URLS)
+def test_a_url_that_cannot_be_read_is_refused_inside_the_boundary(
+    run, capsys: pytest.CaptureFixture[str], what: str, url: str
+) -> None:
+    """`urlsplit` raises on a malformed IPv6 literal and `.port` raises
+    on a port that is not a number, and both carry the text they refused.
+    Outside a handler that is a traceback out of main() with the address
+    in it, which is the address somebody was typing a token near."""
+    assert run("--api-url", url, "list") == 1, what
+
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.err, what
+    assert SECRET not in captured.err, what
+    assert captured.out == "", what
+    assert run.reached == []
+
+
+@pytest.mark.parametrize(("what", "url"), UNUSABLE_URLS)
+def test_a_url_that_is_read_and_refused_names_the_address(
+    run, capsys: pytest.CaptureFixture[str], what: str, url: str
+) -> None:
+    assert run("--api-url", url, "list") == 1, what
+
+    captured = capsys.readouterr()
+    assert "http://" in captured.err or "ftp://" in captured.err, what
+    assert "Traceback" not in captured.err, what
+    assert run.reached == []
+
+
+def test_a_url_refusal_carries_no_parser_exception(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The chain, not just the message: a ValueError from the URL parser
+    holds the text it refused, and anything that walks a chain reads
+    what it holds."""
+    with pytest.raises(ConfigError) as caught:
+        cli._permitted(f"http://localhost:{SECRET}/api", "--api-url")
+
+    assert SECRET not in _chain(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_a_url_carrying_a_credential_is_refused_without_repeating_it(

@@ -40,7 +40,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import NoReturn
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import SplitResult, quote, urlsplit, urlunsplit
 
 import httpx
 import yaml
@@ -469,8 +469,8 @@ def _permitted(url: str, source: str) -> str:
     deliberately no flag to override it: such a flag's only purpose would
     be sending the token in clear.
     """
-    parsed = urlsplit(url)
-    shown = _without_userinfo(url)
+    parsed = _parsed(url, source)
+    shown = _without_userinfo(parsed)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise ConfigError(
             f"{source} is not an http:// or https:// URL with a host: {shown}"
@@ -502,10 +502,43 @@ def _loopback(host: str) -> bool:
         return False
 
 
-def _without_userinfo(url: str) -> str:
+def _parsed(url: str, source: str) -> SplitResult:
+    """The URL, split, with the parser's own failures kept inside the
+    boundary.
+
+    `urlsplit` raises on a malformed IPv6 literal and `.port` raises on
+    a port that is not a number, and both put the text they refused into
+    the exception. Outside a handler that is a traceback out of main()
+    with the address in it; inside one it is a fixed sentence. The
+    address is not quoted even here: what a mistyped URL holds is
+    whatever was being typed, and the one thing an operator is typing
+    around this command is a token.
+
+    Both are provoked deliberately rather than trusted to happen later:
+    `.port` is read here so that its refusal belongs to this function
+    rather than to whichever caller touches it first.
+    """
+    problem: str | None = None
+    try:
+        parsed = urlsplit(url)
+        # Read rather than trusted to be read later: `.port` parses on
+        # access, so this is where its refusal belongs rather than in
+        # whichever caller touches it first.
+        _ = parsed.port
+        return parsed
+    except ValueError:
+        problem = (
+            f"{source} is not a URL this client can read. It has to be an http:// or "
+            f"https:// address with a host, and a port if it names one has to be a "
+            f"number. It is not quoted back, because a mistyped address holds whatever "
+            f"was being typed."
+        )
+    raise ConfigError(problem)
+
+
+def _without_userinfo(parsed: SplitResult) -> str:
     """The URL as it may be printed. A credential written into a URL is
     refused, and the refusal must not be the thing that publishes it."""
-    parsed = urlsplit(url)
     host = parsed.hostname or ""
     if ":" in host:
         host = f"[{host}]"
