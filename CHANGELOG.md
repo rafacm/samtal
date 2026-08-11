@@ -9,6 +9,39 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- The storage foundation for the DB-backed domain configuration (#86):
+  `samtal_server/db/` opens, configures and migrates a SQLite database
+  holding the domain half of the configuration, and
+  `samtal_server/config/secrets.py` defines the envelope its secrets
+  are stored in. Nothing reads or writes it yet: no server behavior
+  changes, and the YAML file is still the only configuration the
+  server boots from.
+
+  `open_database` creates the directory when it can, opens the file in
+  WAL mode with a busy timeout, and runs the packaged Alembic
+  migrations, so a fresh data volume becomes a current database with no
+  init command to forget. Every transaction begins with `BEGIN
+  IMMEDIATE`, which is what stops two processes racing the baseline
+  migration and, later, two CLI writes interleaving their
+  read-validate-write. Opening deliberately does not verify stored
+  secrets: a missing or wrong key is exactly when the CLI has to stay
+  usable as the recovery tool.
+
+  A stored secret is either an environment reference, unchanged from
+  today (`api_key_env`, `$VAR`), or Fernet ciphertext under
+  `SAMTAL_MASTER_KEY`. The encrypted payload carries the secret
+  together with its canonical location, and decryption refuses a token
+  whose location is not the slot being read, so a valid token copied
+  into another entity's row does not decrypt there. The key variable
+  holds one or more keys, newest first: the newest encrypts, decryption
+  tries them in order, and until a re-encrypt command exists every old
+  key must stay configured while any token written under it is stored.
+
+  CI now also builds the wheel, installs it into a scratch environment,
+  and migrates a fresh database from the installed artifact alone, since
+  a test run from the checkout cannot show that the migration scripts
+  were packaged.
+
 - A throwaway spike under `spikes/pipecat-alignment/` that measures
   whether pipecat could sit behind samtal's device edge, and answers
   it with numbers (#89). It runs a minimal pipecat 1.7.0 pipeline
