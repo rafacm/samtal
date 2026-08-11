@@ -63,6 +63,11 @@ this before suspecting the code.
 
 ## Workflow
 
+- Implementing an issue end to end follows the pipeline encoded in
+  the `implement-issue` project skill (`.claude/skills/`): committed
+  plan, external plan review, per-milestone subagents in stacked
+  worktrees, a PR per milestone with its own review round. External
+  reviews of plans and PR diffs use the `external-review` skill.
 - Before beginning any new work: verify the current branch is `main`
   (`git branch --show-current`), pull latest changes (`git pull --rebase`),
   and stop to ask for guidance if either step has problems.
