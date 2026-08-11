@@ -59,12 +59,19 @@ HELP_WIDTH = 78
 # instead. A provider entry passes every key beyond the declared ones
 # through to its implementation (`extra="allow"`), so no schema can
 # enumerate them until typed option models land.
-OPTIONS_NOTE = (
+#
+# Two renderings of one claim, differing only in how they point at the
+# fragments: the reference lists them further down its own page, the
+# OpenAPI document has no page to point down. Built from one string, so
+# the two cannot come to say different things.
+_OPTIONS_CONTRACT = (
     "A provider entry carries whatever options its `type` takes, and those are "
     "passed through rather than declared, so no schema can list them. Until typed "
-    "option models land (#88) they are documented in the example fragments below, "
-    "which is also where the measured numbers behind each default are kept."
+    "option models land (#88) they are documented in the example fragments"
 )
+_OPTIONS_WHERE = ", which is also where the measured numbers behind each default are kept."
+OPTIONS_NOTE = f"{_OPTIONS_CONTRACT} below{_OPTIONS_WHERE}"
+API_OPTIONS_NOTE = f"{_OPTIONS_CONTRACT} under `samtal-server/examples/`{_OPTIONS_WHERE}"
 
 
 @dataclass(frozen=True)
