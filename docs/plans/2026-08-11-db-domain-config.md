@@ -73,11 +73,22 @@ development machine `/var/lib/samtal` is usually not writable
 either; opening the database creates the directory when it can and
 otherwise fails with an error naming `server.database.dir`, so the
 failure tells you which key to point somewhere writable
-(`SAMTAL_SERVER__DATABASE__DIR=./var` or the config file). What a
-backup must include is the database file and the master key, which
-lives only in the deployment environment; the deployment notes
-spell out that a copy of the file alone leaks nothing and restores
-nothing encrypted.
+(`SAMTAL_SERVER__DATABASE__DIR=./var` or the config file).
+
+Backups are taken with SQLite's own mechanisms, never by copying
+the live file: under WAL a plain copy of `samtal.db` can miss
+committed data still sitting in the `-wal` file. The deployment
+notes prescribe `sqlite3 samtal.db "VACUUM INTO 'backup.db'"` (or
+the `.backup` command) against the live database, or a plain copy
+only of a stopped, checkpointed one. A restore needs the backup
+file and every MultiFernet key still required to decrypt what it
+holds, so the keys are escrowed wherever the deployment keeps its
+environment secrets, separate from the backup. The claim is scoped
+honestly: a copy of the database alone exposes no stored plaintext
+secret, and it does expose the rest of the domain configuration
+(prompts, endpoints, environment variable names), which is why the
+file still belongs on the data volume and in access-controlled
+backups, not in a repository.
 
 ### agent_defaults stays a singleton
 
@@ -784,6 +795,11 @@ addressing it lands.
    variable names remain readable. Prescribe the SQLite backup API
    or a stopped, checkpointed database; escrow every MultiFernet
    key still required; scope the claim to stored plaintext secrets.
+   *Resolution*: the database-path section now prescribes `VACUUM
+   INTO` or `.backup` for live backups and plain copies only of a
+   stopped, checkpointed database, requires key escrow separate
+   from the backup, and scopes the claim to "exposes no stored
+   plaintext secret" while naming what the file does expose.
 10. **P2: the wheel packaging test does not test a wheel.** Tests
     run from the source checkout through the editable environment,
     which proves nothing about Alembic scripts being included and
