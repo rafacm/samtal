@@ -1,0 +1,258 @@
+"""The envelope a stored secret is written in, and the keys behind it.
+
+A stored secret value has exactly two forms. The first is an
+environment reference, carried over verbatim from the YAML file:
+`api_key_env: ANTHROPIC_API_KEY` in a provider's options, a `$VAR`
+value in an MCP server's env or headers. Those stay the models'
+business, they are not secrets themselves, and they display as
+themselves. The second is ciphertext, written only by
+`samtal-server config set-secret`, stored as the JSON object
+`{"enc": "<fernet token>"}` in the entity row's `secrets` column under
+the credential slot it fills.
+
+Fernet authenticates a token but says nothing about where it belongs,
+so the encrypted payload here is not the bare secret: it is a small
+JSON document carrying the secret together with its canonical location
+(entity kind, identity, slot). Decryption verifies that location
+against the slot being read and refuses a mismatch, so a token copied
+into another row (an attacker-controlled MCP server's headers, say)
+does not decrypt into a credential it was never set for. The
+consequence is deliberate: moving a secret means setting it again,
+there is no copy path for ciphertext.
+
+`SAMTAL_MASTER_KEY` holds one or more Fernet keys, comma-separated,
+newest first, wrapped in MultiFernet: encryption always uses the
+newest, decryption tries them in order. This release supports adding a
+key, not retiring one. Until a re-encrypt command exists, only newly
+written secrets use a new key, so every old key must stay in the
+variable for as long as any token written under it is still stored.
+
+Every failure here raises ConfigError with a message that names the
+location and the kind of failure and never embeds the value, and every
+raise cuts the exception chain: a JSON decode error carries the
+document it failed on, which in this module is the decrypted plaintext.
+"""
+
+import json
+import os
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Literal
+
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
+
+from samtal_server.config.loader import ConfigError
+
+MASTER_KEY_ENV = "SAMTAL_MASTER_KEY"
+
+# What an encrypted value renders as in `config show` and `config list`.
+# Fixed rather than derived from the value: a mask whose length tracks
+# the secret's is a length oracle.
+MASK = "********"
+
+# The single key of the stored envelope object. Short, and distinct
+# from anything a model field is called, so a stored envelope is
+# recognizable wherever one turns up.
+ENVELOPE_KEY = "enc"
+
+# Bumped only if the payload's shape changes, which would need a
+# migration of every stored token; it exists so that such a change can
+# be detected rather than misread.
+_PAYLOAD_VERSION = 1
+
+EntityKind = Literal["provider", "mcp_server"]
+
+
+@dataclass(frozen=True)
+class SecretLocation:
+    """Where a stored secret belongs: an entity kind, that entity's
+    identity, and the credential slot inside it.
+
+    The triple is encrypted with the secret and checked on the way back
+    out, so it is part of the ciphertext's meaning rather than
+    bookkeeping around it."""
+
+    kind: EntityKind
+    identity: str
+    slot: str
+
+    @classmethod
+    def provider(cls, stage: str, name: str, slot: str) -> "SecretLocation":
+        """A provider is identified by its stage and its name together,
+        everywhere it is named."""
+        return cls(kind="provider", identity=f"{stage}.{name}", slot=slot)
+
+    @classmethod
+    def mcp_server(cls, name: str, slot: str) -> "SecretLocation":
+        """The slot is a dotted path into the row's model-shaped half:
+        env.API_ACCESS_TOKEN, headers.Authorization."""
+        return cls(kind="mcp_server", identity=name, slot=slot)
+
+    def describe(self) -> str:
+        """How the location reads in an error message."""
+        return f"{self.kind} {self.identity} {self.slot}"
+
+
+def load_keys(environ: Mapping[str, str] | None = None) -> MultiFernet | None:
+    """The configured encryption keys, newest first, or None when
+    SAMTAL_MASTER_KEY is unset or empty.
+
+    None is a legitimate state, not an error: a deployment whose secrets
+    are all environment references never needs a key, and the CLI has to
+    keep running without one so it can repair a deployment whose key is
+    wrong. Refusing to boot with ciphertext stored and no key is
+    verify_secrets' job, at startup."""
+    raw = (environ if environ is not None else os.environ).get(MASTER_KEY_ENV, "")
+    entries = [entry.strip() for entry in raw.split(",")]
+    entries = [entry for entry in entries if entry]
+    if not entries:
+        return None
+
+    keys: list[Fernet] = []
+    for position, entry in enumerate(entries, start=1):
+        try:
+            keys.append(Fernet(entry))
+        except (ValueError, TypeError):
+            # The entry is key material; the position is what identifies
+            # it without quoting it.
+            raise ConfigError(
+                f"{MASTER_KEY_ENV}: entry {position} of {len(entries)} is not a "
+                f"Fernet key; each entry is a 32-byte urlsafe-base64 key, newest "
+                f"first, comma-separated"
+            ) from None
+    return MultiFernet(keys)
+
+
+def generate_key() -> str:
+    """A fresh Fernet key, for the deployment notes and for tests."""
+    return Fernet.generate_key().decode("ascii")
+
+
+def is_envelope(value: object) -> bool:
+    """Whether a stored value is ciphertext rather than a plain string."""
+    return (
+        isinstance(value, Mapping)
+        and set(value) == {ENVELOPE_KEY}
+        and isinstance(value[ENVELOPE_KEY], str)
+    )
+
+
+def mask(value: object) -> object:
+    """A stored value as it may be displayed. Ciphertext becomes the
+    mask; an environment reference is the name of a variable, not a
+    secret, and passes through as itself."""
+    return MASK if is_envelope(value) else value
+
+
+def encrypt(location: SecretLocation, secret: str, keys: MultiFernet | None) -> dict[str, str]:
+    """The envelope holding `secret` bound to `location`, under the
+    newest configured key."""
+    if keys is None:
+        raise ConfigError(
+            f"{location.describe()}: cannot store a secret without an encryption "
+            f"key; set {MASTER_KEY_ENV} to one or more Fernet keys, newest first"
+        )
+    payload = json.dumps(
+        {
+            "v": _PAYLOAD_VERSION,
+            "kind": location.kind,
+            "identity": location.identity,
+            "slot": location.slot,
+            "secret": secret,
+        }
+    ).encode("utf-8")
+    try:
+        token = keys.encrypt(payload)
+    except Exception:
+        # Nothing from the library reaches the caller: its exceptions
+        # are raised with the payload in scope.
+        raise ConfigError(
+            f"{location.describe()}: the secret could not be encrypted"
+        ) from None
+    return {ENVELOPE_KEY: token.decode("ascii")}
+
+
+def decrypt(location: SecretLocation, envelope: object, keys: MultiFernet | None) -> str:
+    """The secret inside `envelope`, which must have been written for
+    `location`. Every refusal names the location and the kind of
+    failure, and none of them carries the value."""
+    if not is_envelope(envelope):
+        raise ConfigError(
+            f"{location.describe()}: the stored secret is not a valid envelope; "
+            f"set it again with samtal-server config set-secret"
+        )
+    if keys is None:
+        raise ConfigError(
+            f"{location.describe()}: an encrypted secret is stored but no "
+            f"encryption key is configured; set {MASTER_KEY_ENV}"
+        )
+
+    token = envelope[ENVELOPE_KEY]  # type: ignore[index]
+    try:
+        payload = keys.decrypt(token.encode("ascii"))
+    except (InvalidToken, ValueError, TypeError):
+        raise ConfigError(
+            f"{location.describe()}: the stored secret cannot be decrypted with "
+            f"any key in {MASTER_KEY_ENV}; if a key was rotated, the key the "
+            f"secret was written under must stay configured, or set the secret "
+            f"again"
+        ) from None
+
+    return _unwrap(location, payload)
+
+
+def _unwrap(location: SecretLocation, payload: bytes) -> str:
+    """The secret out of a decrypted payload, once the payload says it
+    belongs here. Raised without a cause throughout: a JSONDecodeError
+    carries the document it failed on, which is the plaintext."""
+    try:
+        document = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise ConfigError(
+            f"{location.describe()}: the stored secret decrypted to something "
+            f"that is not a valid payload; set it again with samtal-server "
+            f"config set-secret"
+        ) from None
+
+    if not isinstance(document, dict) or document.get("v") != _PAYLOAD_VERSION:
+        raise ConfigError(
+            f"{location.describe()}: the stored secret has an unsupported "
+            f"payload version"
+        )
+
+    fields = [document.get("kind"), document.get("identity"), document.get("slot")]
+    if not all(isinstance(field, str) for field in fields):
+        raise ConfigError(
+            f"{location.describe()}: the stored secret's payload names no location"
+        )
+
+    stored = SecretLocation(kind=fields[0], identity=fields[1], slot=fields[2])
+    if stored != location:
+        # A valid token that belongs somewhere else. Both locations are
+        # names of configuration entries, never values, so quoting them
+        # is what makes the refusal actionable.
+        raise ConfigError(
+            f"{location.describe()}: the stored secret was written for "
+            f"{stored.describe()}; a secret cannot be moved between slots, "
+            f"set it again with samtal-server config set-secret"
+        )
+
+    secret = document.get("secret")
+    if not isinstance(secret, str):
+        raise ConfigError(
+            f"{location.describe()}: the stored secret's payload holds no secret"
+        )
+    return secret
+
+
+__all__ = [
+    "MASK",
+    "MASTER_KEY_ENV",
+    "SecretLocation",
+    "decrypt",
+    "encrypt",
+    "generate_key",
+    "is_envelope",
+    "load_keys",
+    "mask",
+]
