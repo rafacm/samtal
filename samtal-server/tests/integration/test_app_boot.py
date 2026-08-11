@@ -22,7 +22,14 @@ def test_served_app_responds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     # builds the app, and it has to happen after the override is set.
     from samtal_server.app import app
 
-    with TestClient(app) as client:
+    with TestClient(app, follow_redirects=False) as client:
         response = client.get("/healthz")
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
+
+        # The configuration API is mounted on the same app and gated,
+        # which a boot through the module-level object is the honest
+        # place to check: the token it compares against was resolved
+        # from the environment that boot read.
+        assert client.get("/api").status_code == 401
+        assert client.get("/api/config").status_code == 401
