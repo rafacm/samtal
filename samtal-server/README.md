@@ -899,8 +899,9 @@ loopback address are already in the environment. That is the intended
 way to run these commands.
 
 The token grants everything the API can do, so the client refuses a
-plain `http://` connection to any host but this machine, and there is
-deliberately no flag to override it: such a flag's only purpose would be
+plain `http://` connection to a host that is not a loopback address
+(`127.0.0.1`, `::1` or `localhost`), and there is deliberately no flag
+to override it: such a flag's only purpose would be
 sending the token in clear. A URL carrying a username or a password is
 refused outright, and any URL the client prints has that stripped. Its
 timeouts are explicit (5 s to connect, 30 s to read) so that the
@@ -1572,8 +1573,10 @@ The bearer token rides on every request and grants everything the API
 can do, `set-secret` included, so a plain `http://` request to it from
 another machine puts the token on the wire in clear. This is a rule the
 client enforces rather than recommends: `samtal-server config` refuses a
-plain `http://` URL whose host is not the machine it runs on, with no
-flag to override it. Reach the API over `https://`, through a tunnel
+plain `http://` URL whose host is not a loopback address, with no flag
+to override it. The machine's own address on the network is not one of
+those, and neither is a name that resolves to loopback: the check reads
+the host as written. Reach the API over `https://`, through a tunnel
 that terminates TLS, or on loopback from inside the container, which is
 the case the default address is built for.
 
