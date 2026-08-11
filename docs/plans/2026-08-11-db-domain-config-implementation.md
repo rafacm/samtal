@@ -164,3 +164,42 @@ rerunning: Alembic raises `CommandError: Path doesn't exist`, which
 - `schema.DEFAULT_AGENT_KEY` and `schema.AGENT_DEFAULTS_ID` are the two
   fixed keys the repository needs; both live with the tables so they
   cannot drift from the check constraint that enforces one of them.
+
+### PR #95 review round
+
+One external review of the pull request's diff (main...c34331e):
+codex CLI 0.147.0, model gpt-5.6-sol, read-only, 2026-08-11, posted
+verbatim on the PR. Verdict: mergeable after fixing the provider
+reference representation and the masking and concurrency-test gaps.
+Three findings, each fixed with its own commit:
+
+1. **P1: provider environment-key references had no defined
+   storage.** `api_key_env` is a declared model field, excluded from
+   `ProviderConfig.options`, and the providers table had no column
+   for it, so a repository written naturally against the schema
+   would have silently dropped every cloud provider's credential
+   reference. Fixed in 4edaaa8: a nullable `api_key_env` column in
+   the table and the baseline migration, the plan's schema section
+   updated to name it, and a test pinning both that every declared
+   model field has a column and that a row carrying `api_key_env`
+   round-trips intact.
+2. **P2: masking exposed malformed stored values.** `mask()` passed
+   through everything that was not a perfectly formed envelope,
+   including near-envelopes with extra keys and stray plaintext in a
+   secret slot. Fixed in 6691e99: only the two syntactic
+   environment-reference forms pass through ($NAME and the bare
+   uppercase name an `*_env` field holds); everything else fails
+   closed to the mask, with sentinel-credential tests over each
+   malformed case.
+3. **P2: the migration-race test did not force the race.** The
+   barrier released before either thread entered `open_database`, so
+   scheduling could hand one opener the whole migration before the
+   other started, and the test could pass with serialization
+   removed. Fixed in c37d055: the first opener is held inside the
+   migration while it owns the write lock, the second is asserted to
+   neither finish nor enter the migration until the first commits,
+   and swapping BEGIN IMMEDIATE for a deferred BEGIN now fails the
+   test in a single run.
+
+Full lanes after the fixes: ruff clean, unit and integration suites
+green (counts in the PR's verification section).
