@@ -28,6 +28,7 @@ import sys
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
+from typing import NoReturn
 
 import yaml
 
@@ -73,14 +74,47 @@ SECRETS_HEADING = "# stored secrets, set with: samtal-server config set-secret"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run one config command. Returns the process exit code."""
-    args = _parser().parse_args(argv)
+    """Run one config command. Returns the process exit code.
+
+    Parsing is inside the boundary, so a mistake in the grammar answers
+    the way a mistake in a fragment does: a sentence on stderr and exit
+    1. --help still leaves through argparse's own exit 0, because asking
+    for help is not a failure."""
     try:
+        args = _parser().parse_args(argv)
         args.run(args)
     except ConfigError as exc:
         print(exc, file=sys.stderr)
         return 1
     return 0
+
+
+class _Parser(argparse.ArgumentParser):
+    """A parser whose usage errors leave through the same door as every
+    other failure.
+
+    argparse writes to stderr and exits 2 from inside parse_args, which
+    would make an unknown command or a missing argument the one failure
+    that bypasses the ConfigError boundary and the documented exit
+    codes. Subparsers inherit this class from the parser that creates
+    them, so the whole grammar answers alike."""
+
+    def error(self, message: str) -> NoReturn:
+        raise ConfigError(_usage_problem(message))
+
+
+def _usage_problem(message: str) -> str:
+    if message.startswith("unrecognized arguments"):
+        # Never the arguments themselves. A secret is never an argument
+        # of this CLI, and the mistake that would put one there (typing
+        # the value after `set-secret ... api_key`) lands exactly here,
+        # where argparse would have echoed it back.
+        return (
+            "unrecognized extra arguments; run with --help for the grammar. Note that a "
+            "secret is never given as an argument: set-secret reads it from stdin, or "
+            "from the variable named with --from-env"
+        )
+    return f"{message}; run with --help for the grammar"
 
 
 # The commands
@@ -590,7 +624,7 @@ def _parser() -> argparse.ArgumentParser:
         help="YAML fragment for this entity, or - to read it from stdin",
     )
 
-    parser = argparse.ArgumentParser(
+    parser = _Parser(
         prog="samtal-server config",
         description=(
             "Read and write the domain half of the configuration: providers, "
