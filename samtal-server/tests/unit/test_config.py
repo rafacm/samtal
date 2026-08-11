@@ -250,6 +250,63 @@ def test_unknown_top_level_key_is_rejected(tmp_path: Path) -> None:
         load_file_config(path)
 
 
+# What a leftover section of each moved key looks like in a file, and
+# the command the refusal has to name for it.
+MOVED_SECTIONS: list[tuple[str, str, str]] = [
+    ("providers", "providers:\n  llm:\n    claude:\n      type: anthropic\n", "set provider"),
+    ("mcp_servers", "mcp_servers:\n  home:\n    transport: stdio\n", "set mcp-server"),
+    ("agent_defaults", "agent_defaults:\n  llm: claude\n", "set agent-defaults"),
+    ("agents", "agents:\n  assistant:\n    prompt: hi\n", "set agent"),
+    ("devices", 'devices:\n  "aa:bb:cc:dd:ee:ff": assistant\n', "bind-device"),
+    ("default_agent", "default_agent: assistant\n", "set-default-agent"),
+]
+
+
+@pytest.mark.parametrize(("key", "section", "command"), MOVED_SECTIONS)
+def test_a_domain_section_left_in_the_file_names_where_it_moved(
+    tmp_path: Path, key: str, section: str, command: str
+) -> None:
+    """A section the server no longer reads must not be ignored: a
+    deployment editing it would be editing nothing, and the failure it
+    would eventually meet has nothing to do with the edit."""
+    path = write_config(tmp_path, f"server:\n  port: 9000\n{section}")
+    with pytest.raises(ConfigError) as excinfo:
+        load_file_config(path)
+    message = str(excinfo.value)
+    assert f"{key}: moved to the database" in message
+    assert f"samtal-server config {command}" in message
+    assert "docs/reference/domain-config.md" in message
+
+
+@pytest.mark.parametrize("key", [key for key, _, _ in MOVED_SECTIONS])
+@pytest.mark.parametrize("suffix", ["", "__ASSISTANT", "__ASSISTANT__LLM"])
+def test_a_moved_environment_override_names_where_it_moved(
+    monkeypatch: pytest.MonkeyPatch, key: str, suffix: str
+) -> None:
+    """The environment source looks up known fields and ignores every
+    other prefixed variable, so without this scan a stale
+    SAMTAL_DEFAULT_AGENT would simply stop applying, silently."""
+    variable = f"SAMTAL_{key.upper()}{suffix}"
+    monkeypatch.setenv(variable, "whatever")
+    with pytest.raises(ConfigError) as excinfo:
+        load_file_config()
+    message = str(excinfo.value)
+    assert f"{variable}: {key} moved to the database" in message
+    assert "samtal-server config" in message
+
+
+def test_the_variables_that_carry_a_value_are_left_alone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The scan matches the six moved section names and nothing else, so
+    the reserved variables are outside it by construction. Pinned
+    because a scan written as "every SAMTAL_ variable we do not know"
+    would take the auth secret and the master key with it."""
+    for variable in ("SAMTAL_AUTH_SECRET", "SAMTAL_MASTER_KEY", "SAMTAL_REVISION"):
+        monkeypatch.setenv(variable, "value")
+    assert load_file_config().server.port == 8003
+
+
 def test_default_agent_must_be_defined() -> None:
     with pytest.raises(ConfigError, match='default_agent "ghost" is not a defined agent'):
         load_config_from_data({"default_agent": "ghost"})
