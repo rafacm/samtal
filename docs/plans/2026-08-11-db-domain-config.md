@@ -177,9 +177,12 @@ Baseline Alembic migration, one revision, these tables:
   option name to encrypted envelope, empty by default).
 - `mcp_servers`: `name` (primary key), `transport`, `command`,
   `args` (JSON), `env` (JSON), `url`, `headers` (JSON), `egress`,
-  `tool_timeout_s`. Values inside `env` and `headers` are either
-  literal strings, today's `$VAR` reference strings, or encrypted
-  envelopes.
+  `tool_timeout_s`, `secrets` (JSON, empty by default). Values
+  inside `env` and `headers` are literal strings or today's `$VAR`
+  reference strings, never envelopes; encrypted values live in the
+  `secrets` column keyed by dotted path (`env.API_ACCESS_TOKEN`,
+  `headers.Authorization`), so the row's model-shaped half loads
+  into `McpServerConfig` unchanged.
 - `agent_defaults`: fixed single row; `llm`, `asr`, `tts`, `vad`
   (nullable text), `mcp` (nullable JSON list), `filler` (nullable
   JSON).
@@ -221,8 +224,34 @@ A stored secret value has exactly the two forms decision 3 names:
   through a file.
 - **Ciphertext**: a JSON object envelope (`{"enc": "..."}`) holding
   a Fernet token, written only by `config set-secret` (and later
-  the REST API), stored in the provider row's `secrets` column or
-  in place of an MCP env/header value.
+  the REST API), stored in the entity row's `secrets` column, keyed
+  by the credential slot it fills (a provider's `api_key`, an MCP
+  server's `env.API_ACCESS_TOKEN` or `headers.Authorization`).
+
+The pydantic domain models never carry an envelope or a decrypted
+value, deliberately: `ProviderConfig` rejects secret-shaped extras
+and `McpServerConfig` requires `$VAR` for secret-shaped env and
+header keys, and those validators keep guarding fragments exactly
+as they guard the YAML file today. The persistence representation
+for ciphertext is therefore separate from the models: the loaded
+snapshot pairs the model-shaped domain configuration with a
+`SecretStore`, a mapping from (entity kind, entity identity,
+slot) to envelope, carried alongside the models and never inside
+them, so "writes validate through the existing models" stays true
+without weakening a validator.
+
+Point of use has an explicit resolver seam, and it is the seam the
+code already has: providers resolve credentials through
+`resolve_api_key` (`providers/openai_endpoint.py` and friends) and
+MCP servers resolve `$VAR` values through `resolve_env_references`
+(`tools/mcp.py`). Both gain the secret store as a second source,
+injected at boot where `build_agent_providers` and
+`McpServers.build` run: a slot with a stored envelope decrypts
+there, at construction, and the transient plaintext goes straight
+into the provider client or the spawned process environment
+without ever landing on a pydantic model. The unit tests for this
+build a real provider and a real MCP manager from encrypted
+credentials, not just round-trip the envelope.
 
 `SAMTAL_MASTER_KEY` holds one or more Fernet keys, comma-separated,
 newest first, wrapped in MultiFernet: encryption always uses the
@@ -250,7 +279,9 @@ which is not a secret.
   configuration with the existing pydantic models (`ProviderConfig`
   and friends, unchanged in shape). The result is a
   `DomainConfig` model holding providers, mcp_servers,
-  agent_defaults, agents, devices, default_agent.
+  agent_defaults, agents, devices, default_agent, paired with the
+  `SecretStore` described in the envelope section, which rides
+  beside the models and never inside them.
 - **Write**: parse the fragment or arguments through the same
   models, apply to the current snapshot, run the write-time
   validation set (above), persist.
@@ -501,6 +532,16 @@ addressing it lands.
    keys map to factory credentials and how MCP encrypted values
    stay outside `McpServerConfig`, and test building a real
    provider and MCP manager from encrypted credentials.
+   *Resolution*: the envelope section now states the models never
+   carry envelopes or plaintext and their validators stay intact;
+   ciphertext lives in a per-entity `secrets` column keyed by
+   credential slot (dotted paths for MCP env and headers), loaded
+   into a `SecretStore` carried beside the models, never inside;
+   the point-of-use resolver is the seam the code already has
+   (`resolve_api_key`, `resolve_env_references`), which gains the
+   store as a second source where `build_agent_providers` and
+   `McpServers.build` run; and the unit tests build a real
+   provider and a real MCP manager from encrypted credentials.
 2. **P1: stale domain environment variables will be silently
    ignored.** pydantic-settings' environment source only looks for
    known fields and ignores unmatched OS variables even with
