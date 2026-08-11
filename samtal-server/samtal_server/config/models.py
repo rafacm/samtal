@@ -420,6 +420,44 @@ def is_env_name(value: object) -> bool:
     return isinstance(value, str) and _ENV_NAME_RE.match(value) is not None
 
 
+def check_no_inline_secrets(path: str, value: object) -> None:
+    """A secret-shaped key holds no value, at any depth inside a
+    provider's options.
+
+    Depth is the point. A provider entry passes every option beyond the
+    declared ones through to its implementation, so an option can be a
+    structure, and `connection: {api_key: ...}` is as ordinary a shape
+    to write as `api_key: ...` is. Checking only the top level would
+    accept the nested one, store it, and read it back verbatim on every
+    display path, which is exactly what the flat rule exists to prevent.
+
+    Refusals name the dotted path and never the value: a key that fails
+    either check most likely holds the credential itself.
+    """
+    leaf = path.rpartition(".")[2]
+    if leaf.lower().endswith("_env"):
+        if value is not None and not is_env_name(value):
+            raise ValueError(
+                f'"{path}" must hold the name of an environment variable, and '
+                f"what it holds does not look like one; a pasted value belongs "
+                f"nowhere in this file, so name the variable holding it, for "
+                f"example {path}: MY_PROVIDER_KEY"
+            )
+        return
+    if is_secret_option(leaf):
+        raise ValueError(
+            f'"{path}" looks like an inline secret, which is not allowed; '
+            f"reference an environment variable instead, for example "
+            f"{path}_env: MY_PROVIDER_{leaf.upper()}"
+        )
+    if isinstance(value, Mapping):
+        for key, nested in value.items():
+            check_no_inline_secrets(f"{path}.{key}", nested)
+    elif isinstance(value, (list, tuple)):
+        for position, item in enumerate(value):
+            check_no_inline_secrets(f"{path}.{position}", item)
+
+
 def is_mcp_secret_key(name: str) -> bool:
     """The same question for an MCP server's env and headers, where the
     key carrying a secret is as often called Authorization as token."""
@@ -473,28 +511,9 @@ class ProviderConfig(BaseModel):
         # The declared field and the pass-through extras are the same
         # question: a key ending in _env names a variable, and any other
         # secret-shaped key is a value that does not belong here.
-        entries: list[tuple[str, object]] = [("api_key_env", self.api_key_env)]
-        entries += list((self.model_extra or {}).items())
-        for key, value in entries:
-            if key.lower().endswith("_env"):
-                if value is not None and not is_env_name(value):
-                    # Never the value: a key that fails this check most
-                    # likely holds the credential itself, so the message
-                    # says what the key must hold and shows an example
-                    # rather than quoting what was written.
-                    raise ValueError(
-                        f'"{key}" must hold the name of an environment variable, and '
-                        f"what it holds does not look like one; a pasted value belongs "
-                        f"nowhere in this file, so name the variable holding it, for "
-                        f"example {key}: MY_PROVIDER_KEY"
-                    )
-                continue
-            if is_secret_option(key):
-                raise ValueError(
-                    f'"{key}" looks like an inline secret, which is not allowed; '
-                    f"reference an environment variable instead, for example "
-                    f"{key}_env: MY_PROVIDER_{key.upper()}"
-                )
+        check_no_inline_secrets("api_key_env", self.api_key_env)
+        for key, value in (self.model_extra or {}).items():
+            check_no_inline_secrets(key, value)
         return self
 
     @property

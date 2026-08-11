@@ -157,11 +157,32 @@ def provider_body(entry: ProviderConfig) -> dict[str, object]:
         data["egress"] = entry.egress
     data.update(
         {
-            key: mask(value) if is_secret_option(key) else value
+            key: mask(value) if is_secret_option(key) else masked_option(value)
             for key, value in entry.options.items()
         }
     )
     return data
+
+
+def masked_option(value: object) -> object:
+    """One provider option, masked at every depth.
+
+    An option can be a structure, because options are passed through to
+    the provider implementation, so a secret-shaped key can be nested
+    inside one. The models refuse to accept such a key now, but the
+    display path does not rely on that: it is the last thing standing
+    between a row that got its contents another way and a caller, so it
+    fails closed on its own. A secret-shaped key masks whatever it
+    holds, structures included.
+    """
+    if isinstance(value, Mapping):
+        return {
+            key: mask(nested) if is_secret_option(key) else masked_option(nested)
+            for key, nested in value.items()
+        }
+    if isinstance(value, list):
+        return [masked_option(item) for item in value]
+    return value
 
 
 def mcp_server_body(entry: McpServerConfig) -> dict[str, object]:
@@ -269,6 +290,7 @@ __all__ = [
     "device_body",
     "devices",
     "layer_body",
+    "masked_option",
     "mcp_server",
     "mcp_server_body",
     "mcp_servers",

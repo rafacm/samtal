@@ -275,6 +275,39 @@ def test_an_invalid_fragment_is_refused_without_quoting_it(store: ConfigStore) -
     assert caught.value.__context__ is None
 
 
+def test_a_secret_nested_inside_an_option_is_refused_too(store: ConfigStore) -> None:
+    """Options are passed through to the provider implementation, so an
+    option can be a structure and a secret-shaped key can sit inside
+    one. A rule that only looked at the top level would accept it,
+    store it, and read it back verbatim."""
+    nested = [
+        ({"type": "anthropic", "connection": {"api_key": SECRET}}, "connection.api_key"),
+        (
+            {"type": "anthropic", "backends": [{"auth": {"token": SECRET}}]},
+            "backends.0.auth.token",
+        ),
+    ]
+    for fragment, path in nested:
+        with pytest.raises(ConfigError) as caught:
+            store.set_provider("llm", "claude", fragment)
+
+        assert path in str(caught.value)
+        assert "looks like an inline secret" in str(caught.value)
+        assert SECRET not in _chain(caught.value)
+        assert caught.value.__cause__ is None
+        assert caught.value.__context__ is None
+
+
+def test_a_nested_reference_key_must_still_name_a_variable(store: ConfigStore) -> None:
+    with pytest.raises(ConfigError) as caught:
+        store.set_provider(
+            "llm", "claude", {"type": "anthropic", "connection": {"api_key_env": SECRET}}
+        )
+
+    assert "connection.api_key_env" in str(caught.value)
+    assert SECRET not in _chain(caught.value)
+
+
 def test_an_unknown_stage_and_an_empty_name_are_refused(store: ConfigStore) -> None:
     with pytest.raises(ConfigError, match="not a provider stage"):
         store.set_provider("speech", "x", {"type": "mock"})
