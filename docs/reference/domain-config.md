@@ -47,9 +47,10 @@ written with `samtal-server config set-secret`, which reads it from stdin
 or from a named variable and never from an argument. A stored secret takes
 precedence over an environment reference for the same slot.
 
-`set` replaces an entity whole and leaves its stored secrets alone. A
-change takes effect at the next server start: the configuration is read
-once at boot.
+`set` replaces an entity whole and leaves its stored secrets alone.
+Once the switchover above lands, a change takes effect at the next
+server start (the configuration is read once at boot); until then a
+write is staging, and restarting still boots from the YAML file.
 
 `samtal-server config schema [entity]` prints the same field descriptions
 as JSON Schema, which is what a machine reads before writing a fragment.
@@ -240,7 +241,8 @@ built up in the natural order without wedging.
 ## The whole domain configuration
 
 What one deployment's domain half holds, which is what `samtal-server
-config show` prints and what the server loads at boot.
+config show` prints and, once the switchover lands, what the server
+loads at boot.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
