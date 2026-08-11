@@ -262,6 +262,57 @@ processors.
   simulator sustains; the two-minute reply-audio floor stands
   either way.
 
+## Plan review round
+
+One external review of the plan as first committed (898a905): codex
+CLI 0.147.0, model gpt-5.6-sol, read-only against this repository
+with both issue bodies supplied, 2026-08-11. Verdict: well scoped
+and faithful to the issue; the tap-injection concept sound; not
+ready to implement, because four findings could each independently
+produce an invalid gate verdict. Findings as received, condensed;
+each carries its resolution once the amendment addressing it lands.
+
+1. **P1: the 1500 ms run cannot pass as specified.**
+   `echo_leakage.py` searches lags up to 1.2 s by default, so a
+   1500 ms echo is outside the search space; the control widens its
+   own range but the plan's tap runs did not. The plan also ran the
+   stock control once where #89 asks for short and long.
+2. **P1: the epoch construction is too vague to support the
+   absolute-lag verdict.** "Recording start plus sample counting"
+   does not define whether the buffer retains leading silence, when
+   sample zero becomes valid, or how scheduling delay is
+   represented; the stock control cannot detect an epoch error, and
+   stability cannot either, since a constant epoch error is
+   perfectly stable and wrong. Onset- or correlation-based
+   alignment would erase exactly the latency under test.
+3. **P1: the tap is not yet established as wire ground truth.**
+   A packet "leaving the serializer" may precede framework
+   queuing, pacing, and the awaited websocket write; and if the
+   transport bursts, the simulator buffering the result hides a
+   production obligation named in #89 rather than settling it.
+4. **P1: gate 2 is not yet a like-for-like size comparison.** The
+   spike serializer supports one exchange while the bespoke edge
+   covers far more; the obligation map lacked a "required but not
+   implemented" category; the 883 figure is a historical snapshot
+   (the file is 899 physical lines at current HEAD); the counting
+   method and the qualitative "impedance-matching layer" bar were
+   undefined.
+5. **P2: two minutes of reply audio does not guarantee enough
+   candidate windows**, after windowing, the discarded lag-search
+   prefix, the level threshold, and the user mask; and the added
+   mic noise was unspecified where it should be either dropped or
+   pinned.
+6. **P2: resampling and drift need an explicit method.** The tap
+   must also be resampled to 16 kHz, through the same stateful
+   resampler as the buffer track; a drift statistic was promised
+   but never defined, and the 50 ms IQR bar only catches large
+   drift over two minutes.
+7. **P2: two mechanics should be front-loaded as feasibility
+   checks**: whether the transport's serializer contract supports
+   mixed JSON and binary plus hello handling and exposes the real
+   send boundary; and that Silero must be driven by real speech
+   audio, not the integration lane's 300 Hz sine.
+
 ## Milestones
 
 Ticked with the PR number when done, each linking to its section
