@@ -70,7 +70,12 @@ Minimal by design, per the issue and the #84 decision record:
   same app returns the websocket URL; that endpoint is harness, not
   adapter (samtal-server already owns a real one, so adoption would
   keep it, not rewrite it).
-- **VAD**: Silero through pipecat's bundled analyzer, local.
+- **VAD**: Silero through pipecat's bundled analyzer, local. The
+  simulator's utterance is a real 16 kHz speech clip followed by
+  paced silence, not the integration lane's 300 Hz sine: that
+  lane's mock providers never cared, but Silero is a speech
+  detector and a tone that fails to trip it would stall the
+  exchange for a reason that looks like a spike bug.
 - **Reply**: a canned-audio service that streams a fixed local WAV
   as TTS output in small chunks, no LLM and no cloud. On end of
   user turn, the bot speaks the canned clip. The clip is
@@ -351,10 +356,20 @@ processors.
 - **Pipecat API drift against what this plan assumes.** The plan
   names components (FastAPI websocket transport, Silero analyzer,
   `AudioBufferProcessor`) from documentation, not from running
-  code. The implementer verifies against the pinned version first
-  and records renames or reshapes as deviations; if a named
-  component does not exist in usable form, that is itself gate 2
-  evidence.
+  code. The first hour of implementation is a feasibility
+  checkpoint on the load-bearing specifics, before any serializer
+  code is written: whether the transport's serializer contract
+  carries mixed JSON text and binary audio in both directions,
+  where the hello handshake can run relative to pipeline start,
+  whether the output path exposes a per-packet awaited send to
+  tap, what `AudioBufferProcessor`'s delivery and timing
+  semantics actually are, and the serializer's lifecycle hooks.
+  Each answer lands in the implementation doc. If the answer
+  forces a custom transport rather than a serializer, the spike
+  proceeds and counts that transport as adapter code in gate 2,
+  which is exactly the kind of evidence the gate exists to
+  surface; if a named component does not exist in usable form,
+  that too is gate 2 evidence, not a dead end.
 - **The simulator's handshake requirements.** xiaozhi-sdk may
   require the OTA discovery step and specific hello fields; the
   integration lane's `conftest.py` is the working reference for
@@ -491,17 +506,28 @@ each carries its resolution once the amendment addressing it lands.
    mixed JSON and binary plus hello handling and exposes the real
    send boundary; and that Silero must be driven by real speech
    audio, not the integration lane's 300 Hz sine.
+   *Resolution*: milestone 1 now opens with a first-hour
+   feasibility checkpoint (mixed frame types, hello routing, the
+   send hook, buffer delivery semantics, serializer lifecycle),
+   whose answers land in the implementation doc, with a forced
+   custom transport counted as gate 2 adapter code; and the
+   utterance is a real 16 kHz speech clip followed by paced
+   silence.
 
 ## Milestones
 
 Ticked with the PR number when done, each linking to its section
 of the implementation doc.
 
-- [ ] **One full exchange**: the spike project scaffolding, the
-  serializer, the minimal pipeline; xiaozhi-sdk completes hello,
-  an utterance, and hears the canned reply back. Accept: the
-  exchange runs locally end to end, driven by `drive.py`, no
-  cloud, no keys.
+- [ ] **One full exchange**: the feasibility checkpoint from the
+  risk section first (mixed frame types, hello routing, the send
+  hook, buffer delivery semantics, serializer lifecycle, answers
+  recorded), then the spike project scaffolding, the serializer,
+  the minimal pipeline; xiaozhi-sdk completes hello, an
+  utterance of real speech, and hears the canned reply back.
+  Accept: the exchange runs locally end to end, driven by
+  `drive.py`, no cloud, no keys, and the checkpoint's answers
+  are in the implementation doc.
 - [ ] **Instrumentation and a well-formed pair**: the tap, the
   buffer recording, the composer; the stock control passes on a
   composed capture. Accept:
