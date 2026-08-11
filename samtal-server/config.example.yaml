@@ -84,6 +84,21 @@ server:
     # OTA on every boot, so one in normal use is re-issued long before.
     # token_expire_s: 2592000
 
+  # The configuration REST API, served under /api on the port above.
+  # It is always mounted and always behind a bearer token: there is no
+  # enabled flag, because an admin surface switched off by forgetting a
+  # key is a surface that ships unprotected. The server refuses to boot
+  # when the variable named below holds nothing:
+  #
+  #   SAMTAL_API_SECRET=$(openssl rand -hex 32)
+  #
+  # The token grants everything the API can do, secret writes included,
+  # so it belongs on a loopback connection or behind TLS and nowhere
+  # else.
+  api:
+    # The environment variable holding the token, never the token.
+    secret_env: SAMTAL_API_SECRET
+
   # Where the domain half of the configuration is stored: one SQLite
   # file named samtal.db inside this directory, written by the
   # `samtal-server config` commands and read once at each server start.
