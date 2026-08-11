@@ -1,0 +1,43 @@
+# An MCP server this server spawns and talks to over stdio. This one
+# proxies to a Home Assistant on the LAN.
+#
+#   samtal-server config set mcp-server home -f examples/mcp-server-stdio.yaml
+#
+# The entry name is what its tools are prefixed with in the merged tool
+# list (`home__turn_on_light`), which is why it must be a plain
+# [A-Za-z0-9_-]+ name and cannot be `self`, `switch_agent`, or
+# `remember`: those already mean something there.
+#
+# A server that is down at startup only logs a warning; its tools are
+# absent and the server reconnects in the background when a session
+# needs it.
+
+transport: stdio
+
+command: mcp-proxy
+
+args:
+  - http://homeassistant.local:8123/mcp_server/sse
+
+# Secrets are never written here: a value of $NAME is read from that
+# environment variable at startup, and any key that looks secret-bearing
+# (token, api_key, authorization, ...) must use that form. The other way
+# is to store the value encrypted in the database, under the slot the
+# key names:
+#
+#   samtal-server config set-secret mcp-server home env.API_ACCESS_TOKEN
+#
+env:
+  API_ACCESS_TOKEN: $HOME_ASSISTANT_TOKEN
+
+# Tool arguments carry conversation-derived data, and no transport can
+# know where they end up: a stdio command may proxy anywhere, a url may
+# name localhost. Under server.local_only every referenced entry must
+# therefore declare its egress; false is the operator asserting that
+# whatever the command or URL reaches stays on your own network, as this
+# proxy to a Home Assistant on the LAN does.
+egress: false
+
+# How long one call may take before the model is told it timed out. The
+# device hears silence meanwhile, so keep it short.
+# tool_timeout_s: 15

@@ -1,0 +1,72 @@
+# The other cloud voice: worth it when the deployment is already on
+# OpenAI, since the same key serves the LLM stage and the voices are the
+# stock ones rather than something to pick out of a library. The
+# endpoint reference and the guide:
+# https://platform.openai.com/docs/api-reference/audio/createSpeech
+# https://platform.openai.com/docs/guides/text-to-speech
+#
+#   samtal-server config set provider tts openai_voice -f examples/tts-openai.yaml
+
+type: openai
+
+# One of the stock voices, the same on every account: alloy, ash,
+# ballad, coral, echo, sage, shimmer, verse, marin, cedar. Hear them at
+# https://www.openai.fm/
+voice: alloy
+
+api_key_env: OPENAI_API_KEY
+
+# Any server implementing /v1/audio/speech works here, the same way
+# openai_compatible opens the LLM stage to local models. A keyless
+# self-hosted one can leave api_key_env out; one that authenticates
+# still names its variable there, since only OpenAI's own host makes a
+# key mandatory. This is also what decides whether replies leave the
+# host, so the type cannot declare its own egress: under
+# server.local_only an entry carries `egress: false` to assert the
+# endpoint is local.
+# base_url: http://localhost:8080/v1
+
+# Default: gpt-4o-mini-tts, the current speech model and the fastest of
+# the three to start speaking (measured at ~820 ms to first audio,
+# against tts-1's ~1400 ms and tts-1-hd's ~1900 ms). Note that this
+# whole family is slow to start next to the other engines here:
+# ElevenLabs answers in ~190 ms and Piper in under 80 ms. Reach for
+# OpenAI because one key already serves the LLM stage, not because it is
+# quick.
+#
+# That figure is a fixed cost, not a per-word one: this provider
+# streams, so the wait is the same whatever the reply and a long answer
+# starts speaking no later than a short one. Piper is the opposite, and
+# grows with the sentence.
+#
+# It is paid more than once, though. A reply is spoken sentence by
+# sentence, and each sentence is synthesized only after the previous one
+# has finished playing, so the same wait falls at every sentence
+# boundary: measured at 520 to 617 ms per boundary here, against
+# ElevenLabs' 111 to 131 ms. Around 130 ms passes unnoticed and around
+# 600 ms is audible as the voice stuttering through a long reply, so
+# this type suits agents that answer in a sentence or two rather than
+# ones that tell stories.
+# model: tts-1
+
+# How to speak, in prose. Read by the gpt-4o models only, which is why
+# naming it alongside a tts-1 model fails the boot rather than being
+# ignored. That check knows OpenAI's models, so it applies only when
+# base_url is OpenAI's; a compatible server has its own rules and both
+# knobs reach it unexamined.
+# instructions: Speak slowly and warmly, like a patient teacher.
+
+# A multiplier from 0.25 to 4.0, and the tts-1 models' answer to
+# instructions: they read this and ignore the prose, while the gpt-4o
+# models do the opposite.
+# speed: 1.0
+
+# Seconds before a synthesis request is abandoned, and a real bound
+# because retries are off: the SDK would otherwise try a failed request
+# three times, leaving the device silent for three timeouts plus backoff
+# inside a single sentence.
+# timeout_s: 30
+
+# No audio format option, unlike ElevenLabs: the API's pcm format is
+# fixed at 24 kHz, which is the rate devices are spoken at, so nothing
+# is resampled and there is nothing to choose.

@@ -1,0 +1,27 @@
+# A local voice, synthesized on this host.
+#
+#   samtal-server config set provider tts piper -f examples/tts-piper.yaml
+#
+# A voice is a provider entry: two agents that should sound different
+# reference two entries. There is no per-agent voice option, because for
+# Piper the voice is the loaded model either way. Installing a second
+# voice is this file again under another name and another `voice`:
+#
+#   samtal-server config set provider tts piper_english -f examples/tts-piper.yaml
+#
+# piper-tts is GPL-3.0 and therefore an optional extra:
+#
+#   uv sync --extra piper
+#
+# The default container image carries it; the slim one does not, and
+# refuses to boot on a configuration naming this type.
+
+type: piper
+
+# Voice name from the Piper voice collection
+# (https://huggingface.co/rhasspy/piper-voices), downloaded at server
+# startup.
+voice: sv_SE-nst-medium
+
+# Where voices are stored (default: ~/.cache/samtal/piper).
+# download_dir: /var/lib/samtal/piper
