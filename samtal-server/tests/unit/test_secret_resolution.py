@@ -11,6 +11,8 @@ environment, and in no model, log record or error message.
 
 import logging
 import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
@@ -29,7 +31,7 @@ from samtal_server.providers.anthropic_llm import AnthropicLlm
 from samtal_server.providers.openai_llm import OpenAiCompatibleLlm
 from samtal_server.tools.mcp import McpServerManager
 
-STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
+ENV_ECHO_SERVER = Path(__file__).parents[1] / "support" / "mcp_env_echo_server.py"
 
 # Not a real credential, and shaped so a substring check for it cannot
 # match by accident.
@@ -152,14 +154,20 @@ def test_a_credential_that_cannot_be_opened_names_the_slot_and_not_the_value() -
 
 
 async def test_a_stored_secret_reaches_a_real_mcp_child_process() -> None:
-    """The manager spawns the stdio server the MCP tests spawn, so the
-    environment the secret lands in is a real process environment."""
+    """The delivery test, and it has to be the child process that says
+    so: inspecting the manager would pass just as well if _connect
+    stopped forwarding what it resolved.
+
+    The spawned server answers whether its own environment holds the
+    expected value, so the assertion travels the whole path (decrypt,
+    spawn, environment) and prints a boolean rather than a credential
+    when it fails."""
     slot = SecretLocation.mcp_server("tools", "env.API_TOKEN")
     config = McpServerConfig.model_validate(
         {
             "transport": "stdio",
             "command": sys.executable,
-            "args": [str(STDIO_SERVER)],
+            "args": [str(ENV_ECHO_SERVER)],
             "env": {"REGION": "eu"},
         }
     )
@@ -168,33 +176,101 @@ async def test_a_stored_secret_reaches_a_real_mcp_child_process() -> None:
     await manager.start()
     try:
         assert manager.up
-        assert manager._env == {"REGION": "eu", "API_TOKEN": SECRET}
+        assert await manager.call(
+            "tools__env_matches", {"name": "API_TOKEN", "expected": SECRET}
+        ) == ("true", False)
+        # The literal beside it arrived too, so the stored slot did not
+        # replace the mapping it joined.
+        assert await manager.call("tools__env_matches", {"name": "REGION", "expected": "eu"}) == (
+            "true",
+            False,
+        )
         assert SECRET not in str(config.model_dump())
     finally:
         await manager.stop()
 
 
-def test_a_stored_header_shadows_the_reference_written_for_it(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv("WEATHER_TOKEN", raising=False)
-    slot = SecretLocation.mcp_server("weather", "headers.Authorization")
+async def test_the_manager_keeps_no_decrypted_credential() -> None:
+    """A manager lives as long as the process. Resolution happens per
+    connection, so the plaintext exists for the length of one connect
+    and is not held in a long-lived object waiting to be picked up by a
+    heap dump or a repr in a log line."""
+    slot = SecretLocation.mcp_server("tools", "env.API_TOKEN")
     config = McpServerConfig.model_validate(
-        {
-            "transport": "streamable_http",
-            "url": "https://example.invalid/mcp",
-            "headers": {"Authorization": "$WEATHER_TOKEN", "X-Region": "eu"},
-        }
+        {"transport": "stdio", "command": sys.executable, "args": [str(ENV_ECHO_SERVER)]}
     )
 
-    manager = McpServerManager("weather", config, _store(slot))
+    manager = McpServerManager("tools", config, _store(slot))
+    await manager.start()
+    try:
+        assert manager.up
+        assert SECRET not in repr(manager.__dict__)
+        assert all(SECRET not in repr(value) for value in vars(manager).values())
+    finally:
+        await manager.stop()
 
-    assert manager._headers == {"X-Region": "eu", "Authorization": SECRET}
+
+# The SDK's streamablehttp_client is deprecated in the pinned mcp
+# version, and this lane turns warnings into errors, which would fail
+# the connection before it is made rather than because of anything under
+# test. The server still calls it (switching is its own change, on the
+# server's schedule); the filter is here so this test measures what it
+# says it measures.
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+async def test_a_stored_header_reaches_a_real_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The same question for the other transport, answered by what
+    arrived on the wire. The stub refuses the handshake, which is fine:
+    the request carrying the header is what is under test, and a server
+    that will not talk is a warning rather than a failure by design."""
+    monkeypatch.delenv("WEATHER_TOKEN", raising=False)
+    slot = SecretLocation.mcp_server("weather", "headers.Authorization")
+    received: list[dict[str, str]] = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - the stdlib's spelling
+            received.append({key.lower(): value for key, value in self.headers.items()})
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *_args: object) -> None:
+            """Silence: the stub is not the subject of the test."""
+
+    stub = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=stub.serve_forever, daemon=True)
+    thread.start()
+    try:
+        config = McpServerConfig.model_validate(
+            {
+                "transport": "streamable_http",
+                "url": f"http://127.0.0.1:{stub.server_port}/mcp",
+                "headers": {"Authorization": "$WEATHER_TOKEN", "X-Region": "eu"},
+            }
+        )
+
+        manager = McpServerManager("weather", config, _store(slot))
+        await manager.start()
+        await manager.stop()
+    finally:
+        stub.shutdown()
+        thread.join(timeout=10)
+        stub.server_close()
+
+    assert received, "the client never reached the stub"
+    # The stored secret shadowed the $VAR that was never set, and the
+    # header beside it came along.
+    assert received[0]["authorization"] == SECRET
+    assert received[0]["x-region"] == "eu"
 
 
 def test_an_mcp_server_without_a_store_still_reads_its_references(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """No store is the deployment every configuration has today: the
+    $VAR is read from the server's own environment, at construction, so
+    an unset one fails the boot."""
     monkeypatch.setenv("WEATHER_TOKEN", "from-the-environment")
     config = McpServerConfig.model_validate(
         {
@@ -204,6 +280,10 @@ def test_an_mcp_server_without_a_store_still_reads_its_references(
         }
     )
 
-    assert McpServerManager("weather", config)._headers == {
+    assert McpServerManager("weather", config)._resolve("headers") == {
         "Authorization": "from-the-environment"
     }
+
+    monkeypatch.delenv("WEATHER_TOKEN")
+    with pytest.raises(ValueError, match="WEATHER_TOKEN"):
+        McpServerManager("weather", config)

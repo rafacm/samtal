@@ -58,15 +58,19 @@ class McpServerManager:
     ) -> None:
         self._name = name
         self._config = config
-        # Secrets resolve here, at boot: an unset $VAR fails the start
-        # rather than the first conversation that needs the server. A
-        # slot with a secret stored in the configuration database
-        # resolves here too, and takes precedence over the reference
-        # written for the same key. Either way the plaintext goes
-        # straight into the spawned process or the request headers, and
-        # onto no model on the way.
-        self._env = resolve_mcp_values(name, "env", config.env, secrets)
-        self._headers = resolve_mcp_values(name, "headers", config.headers, secrets)
+        self._secrets = secrets
+        # Resolved once here and thrown away. Resolving at construction
+        # is what makes an unset $VAR or a token that will not decrypt
+        # fail the boot rather than the first conversation that needs
+        # the server. Keeping the result is what must not happen: a
+        # manager lives as long as the process, so a decrypted
+        # credential kept on it is a plaintext secret held for the
+        # lifetime of the server, in a long-lived object, for the sake
+        # of a value that is needed for the length of one connection.
+        # _connect resolves again, where the value goes straight into
+        # the child process or the request headers.
+        self._resolve("env")
+        self._resolve("headers")
         self._session: ClientSession | None = None
         self._published = PublishedTools(tools=[], originals={})
         self._task: asyncio.Task[None] | None = None
@@ -154,6 +158,14 @@ class McpServerManager:
             self._published = PublishedTools(tools=[], originals={})
             self._settled.set()
 
+    def _resolve(self, group: str) -> dict[str, str]:
+        """This server's env or headers, as the process or the request
+        should see them. Called per connection, and the result is never
+        stored: the values it holds are the only plaintext secrets the
+        server ever materializes."""
+        values = self._config.env if group == "env" else self._config.headers
+        return resolve_mcp_values(self._name, group, values, self._secrets)
+
     async def _connect(self, stack: AsyncExitStack) -> ClientSession:
         if self._config.transport == "stdio":
             assert self._config.command is not None
@@ -162,13 +174,13 @@ class McpServerManager:
                 args=list(self._config.args),
                 # Merged rather than replaced: a spawned server still
                 # needs a PATH and a HOME to find its own tools.
-                env={**get_default_environment(), **self._env},
+                env={**get_default_environment(), **self._resolve("env")},
             )
             read, write = await stack.enter_async_context(stdio_client(parameters))
         else:
             assert self._config.url is not None
             read, write, _ = await stack.enter_async_context(
-                streamablehttp_client(self._config.url, headers=self._headers or None)
+                streamablehttp_client(self._config.url, headers=self._resolve("headers") or None)
             )
         session = await stack.enter_async_context(ClientSession(read, write))
         await session.initialize()

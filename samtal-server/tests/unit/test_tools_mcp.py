@@ -220,7 +220,10 @@ async def test_a_resolved_secret_reaches_the_spawned_server(
     )
     servers = McpServers.build(config)
     manager = servers._managers["tools"]
-    assert manager._env == {"API_TOKEN": "sk-test"}
+    # Resolved per connection rather than kept on the manager, so this
+    # asks the resolver the connection asks. What it answers is
+    # unchanged: the reference became the value.
+    assert manager._resolve("env") == {"API_TOKEN": "sk-test"}
     # And the configuration itself never held the secret.
     assert config.mcp_servers["tools"].env == {"API_TOKEN": "$SAMTAL_TEST_MCP_TOKEN"}
 
