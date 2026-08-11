@@ -425,6 +425,24 @@ validators; plaintext enters through `set-secret` reading stdin or
 a named environment variable, never through a file or an argument
 (arguments land in shell history).
 
+`set` replaces the entity, not its stored secrets. A fragment
+cannot contain ciphertext by design, so whole-row replacement that
+covered the `secrets` column would silently erase every stored
+secret on any ordinary edit; instead the model-shaped half of the
+row is replaced and the `secrets` column is untouched, modified
+only by `set-secret` and `clear-secret`. The supported slots are
+defined, not arbitrary: for a provider, a slot is a secret-shaped
+option name (the `_SECRET_KEY_FRAGMENTS` rule the models already
+use, `api_key` being the common case), and the resolver hands it
+to the factory through the same `<slot>_env`-shaped seam
+(`resolve_api_key`); for an MCP server, a slot is a dotted
+`env.<KEY>` or `headers.<KEY>` path. When both forms exist for
+the same slot (an `api_key_env` reference in the entity and a
+stored ciphertext), the ciphertext wins, because `set-secret` is
+the later and more deliberate act; `show` marks the shadowed
+environment reference so the precedence is visible rather than
+silent. Deleting the entity deletes its stored secrets with it.
+
 The `*.local.yaml` checkpoint workflow becomes a short script of
 `config set` calls, and the device checkpoint docs update to match
 in the switchover milestone.
@@ -720,6 +738,13 @@ addressing it lands.
    replacement, modify them only through `set-secret` and
    `clear-secret`, and define the supported slots and the
    precedence between encrypted values and environment references.
+   *Resolution*: the CLI section now states that `set` replaces
+   the model-shaped half and never touches the `secrets` column;
+   slots are defined by the existing secret-shaped-key rule for
+   providers and dotted env/headers paths for MCP servers;
+   ciphertext wins over an environment reference for the same
+   slot, with `show` marking the shadowed reference; entity
+   deletion removes its stored secrets.
 8. **P2: snapshot validation and persistence need one serialized
    transaction.** WAL and a busy timeout do not make
    read-modify-validate-write atomic: concurrent CLI processes can
