@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
@@ -162,18 +163,70 @@ def test_each_refusal_maps_to_its_status(
 
 
 def test_an_unhandled_failure_is_a_generic_500(
-    api: FastAPI, caplog: pytest.LogCaptureFixture
+    api: FastAPI,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """The body says nothing, and neither does the log beyond the fact
+    of the failure and its kind. An exception's own message is whatever
+    a request put in front of the code that raised it, and a traceback
+    carries the values that produced it, so neither is written: a log
+    line is as much of a leak as a response body once the log is
+    shipped somewhere."""
     _route(api, "/boom", RuntimeError(f"connection string with {SENTINEL} in it"))
 
-    with caplog.at_level(logging.ERROR):
+    with caplog.at_level(logging.DEBUG):
         response = TestClient(api).get("/boom", headers=_bearer(TOKEN))
 
     assert response.status_code == 500
     assert response.json() == {"detail": UNEXPECTED}
     assert SENTINEL not in response.text
-    # Logged server-side, which is where a traceback belongs.
-    assert any("failed to handle a request" in record.getMessage() for record in caplog.records)
+
+    # It happened, and what kind of failure it was.
+    assert any(
+        "failed to handle a request (RuntimeError)" in record.getMessage()
+        for record in caplog.records
+    )
+    for record in caplog.records:
+        assert SENTINEL not in record.getMessage()
+        assert SENTINEL not in str(record.__dict__)
+        # No traceback, here or anywhere an outer logger could pick the
+        # exception up after this one answered.
+        assert record.exc_info is None
+        assert record.exc_text is None
+
+    captured = capsys.readouterr()
+    assert SENTINEL not in captured.err
+    assert SENTINEL not in captured.out
+    assert "Traceback" not in captured.err
+
+
+def test_a_failure_after_the_response_started_is_not_re_raised(
+    api: FastAPI, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Once a response has started there is nothing left to say that
+    would not corrupt it, and re-raising would only reach an outer
+    logger, which would write the traceback this took care not to."""
+
+    @api.get("/half")
+    def endpoint() -> StreamingResponse:
+        def chunks():
+            yield b"half a response"
+            raise RuntimeError(f"then {SENTINEL}")
+
+        return StreamingResponse(chunks())
+
+    with caplog.at_level(logging.DEBUG):
+        # No pytest.raises: the exception ends in the middleware, so the
+        # client sees a truncated response rather than a traceback.
+        TestClient(api).get("/half", headers=_bearer(TOKEN))
+
+    assert [record.getMessage() for record in caplog.records].count(
+        "the configuration API failed to handle a request (RuntimeError)"
+    ) == 1
+    for record in caplog.records:
+        assert SENTINEL not in str(record.__dict__)
+        assert record.exc_info is None
 
 
 def test_a_body_that_is_not_the_expected_shape_is_not_quoted_back(api: FastAPI) -> None:
