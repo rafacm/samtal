@@ -295,6 +295,46 @@ def test_a_moved_environment_override_names_where_it_moved(
     assert "samtal-server config" in message
 
 
+@pytest.mark.parametrize(
+    "variable",
+    [
+        "SAMTAL_default_agent",
+        "SaMtAl_DeFaUlT_aGeNt",
+        "SAMTAL_agents__assistant__llm",
+        "samtal_AGENTS__assistant",
+        "SAMTAL_AgEnT_dEfAuLtS__llm",
+        "samtal_providers__llm__claude__type",
+    ],
+)
+def test_a_moved_override_is_refused_whatever_its_case(
+    monkeypatch: pytest.MonkeyPatch, variable: str
+) -> None:
+    """pydantic-settings matches environment names without regard to
+    case, over the whole name and not only the part after the prefix, so
+    every spelling here set what it names before the switchover. A
+    case-sensitive scan would leave them applying to nothing, silently,
+    which is the one thing this refusal exists to prevent."""
+    monkeypatch.setenv(variable, "whatever")
+    with pytest.raises(ConfigError) as excinfo:
+        load_file_config()
+    message = str(excinfo.value)
+    # Reported in the spelling it was written in: that is what has to be
+    # found and unset.
+    assert f"{variable}: " in message
+    assert "moved to the database" in message
+
+
+@pytest.mark.parametrize("variable", ["SAMTAL_server__port", "SaMtAl_SeRvEr__PoRt"])
+def test_a_server_half_override_still_applies_in_any_case(
+    monkeypatch: pytest.MonkeyPatch, variable: str
+) -> None:
+    """The other side of the same fact: the file half keeps every
+    spelling pydantic-settings accepts, so the scan above must not be a
+    match on the prefix alone."""
+    monkeypatch.setenv(variable, "9111")
+    assert load_file_config().server.port == 9111
+
+
 def test_the_variables_that_carry_a_value_are_left_alone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
