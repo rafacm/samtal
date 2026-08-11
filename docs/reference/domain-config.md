@@ -12,13 +12,6 @@ database and written with the `samtal-server config` commands. The server
 half (`server:` and `memory:`) stays in the YAML file and is documented
 there, in [`config.example.yaml`](../../samtal-server/config.example.yaml).
 
-**The server does not read that database yet.** It still boots its whole
-configuration from the YAML file, so a write through these commands is
-staging for the switchover and changes nothing about a running server,
-and the domain sections of `config.example.yaml` are still what a
-deployment is configured with today. This paragraph goes when the
-switchover lands.
-
 ## How the pieces fit
 
 Providers and MCP servers are named engines and named tool sources. An
@@ -48,10 +41,10 @@ written with `samtal-server config set-secret`, which reads it from stdin
 or from a named variable and never from an argument. A stored secret takes
 precedence over an environment reference for the same slot.
 
-`set` replaces an entity whole and leaves its stored secrets alone.
-Once the switchover above lands, a change takes effect at the next
-server start (the configuration is read once at boot); until then a
-write is staging, and restarting still boots from the YAML file.
+`set` replaces an entity whole and leaves its stored secrets alone. A
+change takes effect at the next server start: the configuration is read
+once at boot, so an edit made while the server runs applies when it is
+restarted.
 
 `samtal-server config schema [entity]` prints the same field descriptions
 as JSON Schema, which is what a machine reads before writing a fragment.
@@ -146,6 +139,12 @@ samtal-server config set agent <name> -f fragment.yaml
 | `mcp` | `list[str] \| null` | `null` | The MCP servers whose tools this layer offers the model, by entry name. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. |
 | `filler` | `FillerConfig \| null` | `null` | Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly rather than merging with it, so `filler: {enabled: false}` opts an agent out. |
 | `prompt` | `str` | `""` | The persona instruction this agent replies under, sent as the system prompt on every turn. State the reply language explicitly: a model otherwise picks one by its training bias. |
+
+An agent's name is also the key its remembered facts are stored under, so
+renaming an agent orphans its memory: the old file stays on disk and the
+renamed agent starts empty. The `memory:` section in
+[`config.example.yaml`](../../samtal-server/config.example.yaml) says what to
+do about it.
 
 Examples:
 
@@ -242,8 +241,7 @@ built up in the natural order without wedging.
 ## The whole domain configuration
 
 What one deployment's domain half holds, which is what `samtal-server
-config show` prints and, once the switchover lands, what the server
-loads at boot.
+config show` prints and what the server loads at boot.
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |

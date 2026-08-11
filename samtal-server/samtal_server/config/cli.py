@@ -17,8 +17,10 @@ code 1, naming the location and the kind of failure without quoting the
 value that caused it, and no traceback from pydantic, PyYAML,
 SQLAlchemy or cryptography reaches the user.
 
-Until the switchover lands, the server does not read what this writes,
-so every mutating command says so.
+The configuration is read once at boot, so a write here applies at the
+next server start. Every mutating command says so: an edit that
+silently waits for a restart is the operational trap of a boot-time
+snapshot, and the one place to close it is where the edit is made.
 """
 
 import argparse
@@ -54,18 +56,13 @@ from samtal_server.config.secrets import (
 from samtal_server.config.store import ConfigStore, DomainConfig, Snapshot
 from samtal_server.db import open_database
 
-# Printed after every mutating command until the switchover makes the
-# database live, and removed by the same change that does. The window
-# between them is a real deployment state (the image publishes from
-# main), and a staged write that looks applied is the trap this exists
-# to close.
-STAGING_NOTICE = """\
-------------------------------------------------------------------------
-STAGING ONLY: the server does not read this database yet.
-It still boots its whole configuration from the YAML file. This write is
-staging for the switchover, which is when the domain half starts coming
-from here. Nothing about the running server changed.
-------------------------------------------------------------------------"""
+# Printed after every mutating command. The configuration is a
+# boot-time snapshot by design, and a write that quietly waits for a
+# restart is the one thing about that design an operator can be caught
+# by, so the write itself says when it takes effect.
+RESTART_NOTICE = (
+    "This applies at the next server start: the configuration is read once at boot."
+)
 
 # How a stored secret is introduced in `show` and `list`. Comment lines
 # rather than a mapping: the mask is not a value that could be written
@@ -608,7 +605,7 @@ def _wrote(what: str) -> None:
     # Flushed first, so the notice lands after the line it is about
     # rather than ahead of it: stderr is unbuffered and stdout is not.
     sys.stdout.flush()
-    print(STAGING_NOTICE, file=sys.stderr)
+    print(RESTART_NOTICE, file=sys.stderr)
 
 
 # The grammar
@@ -751,7 +748,9 @@ def _parser() -> argparse.ArgumentParser:
     listing.set_defaults(run=_list)
 
     # Read-only and local: these two render the models, so they take no
-    # --config, open no database, and need no encryption key.
+    # --config, open no database, and need no encryption key. Keep it
+    # that way: the documentation lane runs `config reference` from a
+    # plain sync, with no database and no key anywhere.
     schema = commands.add_parser(
         "schema", help="the JSON Schema of one entity, or of the whole domain half"
     )
@@ -790,4 +789,4 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-__all__ = ["STAGING_NOTICE", "main"]
+__all__ = ["RESTART_NOTICE", "main"]

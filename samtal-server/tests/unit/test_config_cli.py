@@ -3,7 +3,7 @@
 The acceptance case is the first test: an empty directory becomes a
 working configuration through CLI calls alone, in the natural order,
 with nothing wedging on the way. The rest is what has to hold around
-it: secrets masked wherever they are read back, the staging notice on
+it: secrets masked wherever they are read back, the restart notice on
 every write, and no failure path that lets a plaintext, a rejected
 fragment or a traceback out.
 """
@@ -113,21 +113,24 @@ def test_a_missing_fragment_file_is_named(run, capsys: pytest.CaptureFixture[str
     assert "Traceback" not in captured.err
 
 
-def test_every_mutating_command_says_the_write_is_staging(
+def test_every_mutating_command_says_when_the_write_applies(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    """The configuration is a boot-time snapshot by design, which makes
+    a write that quietly waits for a restart the one thing about that
+    design an operator can be caught by."""
     run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
-    assert "STAGING ONLY" in capsys.readouterr().err
+    assert cli.RESTART_NOTICE in capsys.readouterr().err
 
     run("set", "agent", "sam", "-f", "-", stdin="llm: claude\n")
-    assert "STAGING ONLY" in capsys.readouterr().err
+    assert cli.RESTART_NOTICE in capsys.readouterr().err
 
     run("set-default-agent", "sam")
-    assert "STAGING ONLY" in capsys.readouterr().err
+    assert cli.RESTART_NOTICE in capsys.readouterr().err
 
     # A read is not a write, and says nothing.
     run("list")
-    assert "STAGING ONLY" not in capsys.readouterr().err
+    assert cli.RESTART_NOTICE not in capsys.readouterr().err
 
 
 def test_a_refused_write_exits_one_with_the_reason(
