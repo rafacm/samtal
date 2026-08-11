@@ -22,9 +22,11 @@ url: http://localhost:8000/mcp
 headers:
   Authorization: $WEATHER_TOKEN
 
-# A url may name localhost and it may name a vendor, so the transport
-# cannot tell: under server.local_only every referenced entry declares
-# it. This one is a local endpoint.
+# Tool arguments carry conversation-derived data, and no transport can
+# know where they end up: a url may name localhost and it may name a
+# vendor. Under server.local_only every referenced entry must therefore
+# declare its egress; false is the operator asserting that whatever the
+# URL reaches stays on your own network, as this local endpoint does.
 egress: false
 
 # How long one call may take before the model is told it timed out. The
