@@ -48,6 +48,53 @@ jobs:
       - name: Integration tests
         run: uv run pytest tests/integration -v
 
+      # The database's Alembic scripts live inside the package so that a
+      # built wheel carries them, and no test run from the checkout can
+      # prove that: the source tree makes every file discoverable
+      # whether it was packaged or not. So build the artifact, install
+      # it on its own, and migrate a fresh database from it with the
+      # source tree off sys.path. `-P` drops the current directory from
+      # sys.path, and the run happens outside the checkout as well, so
+      # `samtal_server` can only resolve to the installed wheel; the
+      # script asserts that too rather than trusting it.
+      - name: Migrate a fresh database from the built wheel
+        run: |
+          uv build --wheel --out-dir "$RUNNER_TEMP/dist"
+          uv venv --python 3.12 "$RUNNER_TEMP/wheel-venv"
+          uv pip install --python "$RUNNER_TEMP/wheel-venv/bin/python" "$RUNNER_TEMP"/dist/*.whl
+          mkdir -p "$RUNNER_TEMP/wheel-run"
+          cd "$RUNNER_TEMP/wheel-run"
+          "$RUNNER_TEMP/wheel-venv/bin/python" -P - <<'PY'
+          import pathlib
+          import sys
+          import tempfile
+
+          import samtal_server
+          from samtal_server.db import open_database
+          from sqlalchemy import inspect
+
+          installed = pathlib.Path(samtal_server.__file__).resolve()
+          if "site-packages" not in installed.parts:
+              sys.exit(f"the source tree was imported, not the wheel: {installed}")
+
+          engine = open_database(pathlib.Path(tempfile.mkdtemp()) / "db")
+          tables = set(inspect(engine).get_table_names())
+          engine.dispose()
+
+          expected = {
+              "providers",
+              "mcp_servers",
+              "agent_defaults",
+              "agents",
+              "devices",
+              "domain_settings",
+          }
+          missing = expected - tables
+          if missing:
+              sys.exit("the wheel's migrations did not create: " + ", ".join(sorted(missing)))
+          print(f"migrated a fresh database from {installed.parent}")
+          PY
+
   # The image is built and smoke-tested on every run, and published only
   # on a push to main. `needs: test` is what makes publishing conditional
   # on the suite: nothing reaches the registry that did not pass it.
