@@ -14,8 +14,18 @@ it literally:
   sample 0 of both channels.
 - A buffer delivery of N samples observed at time t occupies
   (t - N/rate, t]. Nothing is placed by how much was written before it.
-- A tap packet occupies its decoded duration ending at its send
-  timestamp.
+- A tap packet is placed *starting* at its send timestamp and never
+  overwrites the packet before it: it occupies
+  `start = max(previous_end, round(send_t * rate))` onwards, so a gap
+  appears only when a send arrives later than the previous packet's
+  playout would have ended. The plan pinned an ending-at rule first
+  and the PR review round corrected it: pipecat sends a chunk and only
+  then sleeps, so the timestamp taken when the awaited send returns
+  opens that packet's 60 ms playout slot rather than closing it, and
+  samtal's own capture, which this mirrors, places decoded audio
+  starting at the send time and keeps packets contiguous when sends
+  arrive early (`capture.py`, `at = max(channel.next_frame,
+  self._frame_of(now), self._start_frame)`).
 - Gaps are silence and leading silence is kept. There is no onset
   detection and no correlation-based shifting anywhere in this file:
   either would erase the fixed latency the spike exists to measure.
@@ -97,6 +107,29 @@ def place(
     return overlap
 
 
+def place_contiguous(
+    track: np.ndarray,
+    samples: np.ndarray,
+    start_t: float,
+    rate: int,
+    previous_end: int,
+) -> tuple[int, int]:
+    """Write `samples` starting at `start_t`, never before `previous_end`.
+
+    This is samtal's own capture rule. Returns the new end position and
+    how many samples of silent gap preceded this write, which is the
+    audit figure for how often a send arrived later than the previous
+    packet's playout would have finished. Nothing is ever overwritten,
+    so no audio is lost to a collision.
+    """
+    start = max(previous_end, int(round(start_t * rate)))
+    gap = start - previous_end
+    end = min(start + len(samples), len(track))
+    if end > start:
+        track[start:end] = samples[: end - start]
+    return end, gap
+
+
 def write_pair(
     captures: Path, session: str, mic: np.ndarray, ref: np.ndarray
 ) -> None:
@@ -154,11 +187,17 @@ def compose(run: Path) -> None:
     frame = TAP_RATE * TAP_FRAME_MS // 1000
     tap_n = int(round(span_s * TAP_RATE))
     tap = np.zeros(tap_n, dtype=np.int16)
-    tap_written = np.zeros(tap_n, dtype=bool)
-    tap_overlap = 0
-    for send, payload in zip(sends, packets):
+    tap_end = 0
+    tap_gaps = 0
+    tap_gap_samples = 0
+    for index, (send, payload) in enumerate(zip(sends, packets)):
         pcm = np.frombuffer(decoder.decode(payload, frame_size=frame), dtype=np.int16)
-        tap_overlap += place(tap, tap_written, pcm, send["t"], TAP_RATE)
+        tap_end, gap = place_contiguous(tap, pcm, send["t"], TAP_RATE, tap_end)
+        # The first packet's "gap" is the session's leading silence,
+        # which the mapping keeps on purpose, not a late send.
+        if gap and index:
+            tap_gaps += 1
+            tap_gap_samples += gap
     tap16 = resample_poly(tap.astype(np.float64), 2, 3)
     tap16 = np.clip(tap16, -32768, 32767).astype(np.int16)
     if len(tap16) < n:
@@ -231,7 +270,10 @@ def compose(run: Path) -> None:
     print(f"  buffer          : {len(deliveries)} deliveries, {at} samples")
     print(f"  buffer overlap  : {overlap} samples ({overlap / at:.4%})")
     print(f"  tap             : {len(packets)} packets at {TAP_RATE} Hz")
-    print(f"  tap overlap     : {tap_overlap} samples")
+    print(
+        f"  tap gaps        : {tap_gaps} late sends, {tap_gap_samples} samples "
+        f"of silence between packets (no overwrites by construction)"
+    )
     print(f"  tap resample    : {tap_n} in -> {len(tap16)} out (24k -> 16k)")
     print(f"  turn track      : {len(turns)} turns, {at_turn} samples "
           f"({at_turn / CAPTURE_RATE:.1f} s), overlap {turn_overlap}")

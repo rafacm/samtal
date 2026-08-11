@@ -201,10 +201,33 @@ and never adjusted afterwards:
   the moment the spike's handler observes it, together with its
   cumulative sample count.
 - Sample placement is explicit: a buffer delivery of N samples
-  observed at time t occupies (t - N/rate, t]; tap packets occupy
-  their decoded duration ending at their send timestamp; gaps in
-  either track are silence. Leading silence is kept, never
-  trimmed.
+  observed at time t occupies (t - N/rate, t]; tap packets are
+  placed starting at their send timestamp and never overwrite an
+  earlier packet, so packet k occupies
+  `start = max(previous_end, round(send_t * rate))` onwards and a
+  gap appears only when a send arrives later than the previous
+  packet's playout would have ended; gaps in either track are
+  silence. Leading silence is kept, never trimmed.
+
+  **This rule was corrected by the PR review round, after the first
+  runs and with the correction recorded rather than folded in.** The
+  mapping as first pinned had tap packets *end* at their send
+  timestamp. That is wrong in two independent ways. pipecat's output
+  transport sends a chunk and only then sleeps, so the timestamp
+  taken when the awaited send returns opens that packet's 60 ms
+  playout slot rather than closing it, and placing the packet before
+  its own timestamp shifts the whole tap track one frame early.
+  samtal's own capture, the semantics this spike exists to mirror,
+  places decoded audio starting at the send time and keeps packets
+  contiguous when sends arrive early (`capture.py`: `at =
+  max(channel.next_frame, self._frame_of(now), self._start_frame)`).
+  Ending-at placement also silently overwrote earlier audio whenever
+  two placements collided, which is data loss dressed as a mapping.
+  Amending a pinned method after seeing results is exactly what the
+  plan set out to avoid, so the amendment is stated here, its reason
+  is a property of the transport and of samtal's capture rather than
+  of any measured lag, and every downstream figure was rerun under
+  it.
 - No onset-based or correlation-based shifting of either track,
   ever: aligning by first audible sample or by best correlation
   would erase exactly the fixed latency under test.
