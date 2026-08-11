@@ -273,6 +273,57 @@ def test_show_and_list_mask_stored_secrets_and_mark_what_they_shadow(
     assert SECRET not in listed and OTHER_SECRET not in listed
 
 
+def test_a_secret_shaped_key_holding_something_else_is_masked(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Nothing validates the shape of an api_key_env value, so an
+    operator can paste the key where its variable name belongs. The
+    command they would run to find that mistake must not read it back
+    out, which is what masking everything that is not a syntactic
+    reference means here."""
+    fragment = f"type: anthropic\nmodel: m\napi_key_env: {SECRET}\n"
+    assert run("set", "provider", "llm", "claude", "-f", "-", stdin=fragment) == 0
+    capsys.readouterr()
+
+    run("show", "provider", "llm", "claude")
+    shown = capsys.readouterr().out
+    assert SECRET not in shown
+    assert f"api_key_env: '{MASK}'" in shown
+
+    run("show")
+    assert SECRET not in capsys.readouterr().out
+
+
+def test_an_mcp_reference_shows_and_anything_else_in_its_place_does_not(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The model already requires a $VAR for a secret-bearing key, so a
+    valid entry displays exactly as it was written; the mask is what
+    covers a value that got in another way."""
+    run(
+        "set",
+        "mcp-server",
+        "weather",
+        "-f",
+        "-",
+        stdin=(
+            "transport: streamable_http\n"
+            "url: https://example.invalid/mcp\n"
+            "headers:\n"
+            "  Authorization: $WEATHER_TOKEN\n"
+            "  X-Region: eu\n"
+        ),
+    )
+    capsys.readouterr()
+
+    run("show", "mcp-server", "weather")
+    shown = capsys.readouterr().out
+    assert "$WEATHER_TOKEN" in shown
+    # A key that carries no secret keeps its literal value: masking it
+    # would hide configuration for nothing.
+    assert "eu" in shown
+
+
 def test_show_renders_every_entity_kind(run, capsys: pytest.CaptureFixture[str]) -> None:
     run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
     run(
