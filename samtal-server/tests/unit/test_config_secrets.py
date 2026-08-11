@@ -152,6 +152,25 @@ def test_masking_hides_ciphertext_and_shows_references() -> None:
     assert not is_envelope({"enc": "abc", "extra": 1})
 
 
+def test_masking_fails_closed_on_everything_that_is_not_a_reference() -> None:
+    """A malformed value sitting in a secret slot may be a plaintext
+    secret, so the display path masks whatever it does not positively
+    recognize as an environment reference. Passing such a value
+    through would make the recovery-oriented show path the leak."""
+    sentinel = "sk-live-hunter2-credential"
+
+    # A near-envelope: right key, extra baggage. Not valid ciphertext,
+    # not a reference, and possibly carrying a secret in the baggage.
+    assert mask({"enc": "token", "extra": sentinel}) == MASK
+    # A bare string that is not reference-shaped: lowercase, dashes.
+    assert mask(sentinel) == MASK
+    assert MASK == "********"
+    # Non-string oddities fail closed too.
+    assert mask(None) == MASK
+    assert mask(42) == MASK
+    assert mask(["$WEATHER_TOKEN"]) == MASK
+
+
 def test_keys_are_read_newest_first_from_the_environment() -> None:
     new, old = generate_key(), generate_key()
 
