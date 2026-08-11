@@ -160,13 +160,23 @@ def _check_moved_environment() -> None:
     applying without a word. Only the six moved names are matched, so
     the variables that carry a value rather than name a section
     (SAMTAL_CONFIG, SAMTAL_MASTER_KEY, SAMTAL_AUTH_SECRET) are outside
-    this by construction."""
+    this by construction.
+
+    Matched without regard to case, because that is how the source this
+    replaces reads them: pydantic-settings is case-insensitive by
+    default, over the whole variable name and not only the part after
+    the prefix, so `SAMTAL_server__port` sets the port and
+    `SAMTAL_aGeNtS__x` would have set an agent. A case-sensitive scan
+    would leave exactly those spellings applying to nothing, silently,
+    which is the hole this whole check exists to close. The variable is
+    reported in the spelling it was written in, since that is what has
+    to be found and unset."""
     moved = [
         (name, key)
         for key in DOMAIN_KEYS
         for name in sorted(os.environ)
-        if name == f"{ENV_PREFIX}{key.upper()}"
-        or name.startswith(f"{ENV_PREFIX}{key.upper()}__")
+        if name.upper() == f"{ENV_PREFIX}{key.upper()}"
+        or name.upper().startswith(f"{ENV_PREFIX}{key.upper()}__")
     ]
     if not moved:
         return
