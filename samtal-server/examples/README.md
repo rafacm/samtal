@@ -6,7 +6,10 @@ copy and edit, not a configuration the server reads: the domain half of
 the configuration lives in the database, and a fragment is how one
 entity gets written into it.
 
-A write applies at the next server start: the configuration is read once
+Installing one needs a running server: `samtal-server config` writes
+through the configuration API the server mounts, which
+[the server README](../README.md#the-configuration-api) describes. A
+write applies at the next server start: the configuration is read once
 at boot, so installing a fragment into a running deployment means
 restarting it afterwards.
 
