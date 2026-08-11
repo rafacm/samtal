@@ -41,11 +41,12 @@ SCRIPTS = REPO / "scripts"
 RATE = 16000
 
 
-def build(run: Path, delay_ms: float, gain_db: float) -> tuple[Path, str]:
+def build(run: Path, delay_ms: float, gain_db: float, ref_kind: str) -> tuple[Path, str]:
     """The injected pair, written where the analysis can be pointed at
     it. Only the microphone channel differs from the composed pair."""
     session = (run / "session").read_text().strip()
-    with wave.open(str(run / "captures" / f"{session}.wav")) as w:
+    source = run / ("captures" if ref_kind == "buffer" else "captures-turn")
+    with wave.open(str(source / f"{session}.wav")) as w:
         raw = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
     mic = raw[0::2].astype(np.float64)
     ref = raw[1::2].astype(np.float64)
@@ -58,7 +59,7 @@ def build(run: Path, delay_ms: float, gain_db: float) -> tuple[Path, str]:
     mic = mic.copy()
     mic[delay:] += 10 ** (gain_db / 20) * tap[: len(tap) - delay]
 
-    out = run / f"injected-{int(delay_ms)}ms"
+    out = run / f"injected-{ref_kind}-{int(delay_ms)}ms"
     out.mkdir(exist_ok=True)
     interleaved = np.empty(2 * len(mic), dtype=np.int16)
     interleaved[0::2] = np.clip(mic, -32768, 32767).astype(np.int16)
@@ -68,9 +69,7 @@ def build(run: Path, delay_ms: float, gain_db: float) -> tuple[Path, str]:
         w.setsampwidth(2)
         w.setframerate(RATE)
         w.writeframes(interleaved.tobytes())
-    shutil.copy(
-        run / "captures" / f"{session}.jsonl", out / f"{session}.jsonl"
-    )
+    shutil.copy(source / f"{session}.jsonl", out / f"{session}.jsonl")
     return out, session
 
 
@@ -115,12 +114,18 @@ def main() -> None:
     parser.add_argument("--gain-db", type=float, default=-30.0)
     parser.add_argument("--max-lag-s", type=float, default=2.0)
     parser.add_argument("--r-floor", type=float, default=0.10)
+    parser.add_argument(
+        "--ref",
+        choices=("buffer", "turn"),
+        default="buffer",
+        help="which pipecat bot track is the reference channel",
+    )
     args = parser.parse_args()
 
-    out, session = build(args.run, args.delay_ms, args.gain_db)
+    out, session = build(args.run, args.delay_ms, args.gain_db, args.ref)
     print(
         f"injected the tap at {args.gain_db:.0f} dB, {args.delay_ms:.0f} ms "
-        f"into {out}"
+        f"into {out} (ref: the {args.ref} track)"
     )
     print(f"running scripts/echo_leakage.py --max-lag-s {args.max_lag_s}\n")
     subprocess.run(

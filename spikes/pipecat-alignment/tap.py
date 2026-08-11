@@ -28,6 +28,9 @@ class Recorder:
         self.sends: list[tuple[float, bytes]] = []
         # (t, sample count, user pcm, bot pcm) per buffer delivery.
         self.deliveries: list[tuple[float, int, bytes, bytes]] = []
+        # (t, bot pcm) per completed bot turn: the other track pipecat
+        # offers, delivered once when the bot stops speaking.
+        self.turns: list[tuple[float, bytes]] = []
         self.buffer_rate: int | None = None
         self.events: list[dict] = []
 
@@ -43,6 +46,9 @@ class Recorder:
     def on_delivery(self, user: bytes, bot: bytes, rate: int) -> None:
         self.buffer_rate = rate
         self.deliveries.append((self.now(), len(bot) // 2, user, bot))
+
+    def on_turn(self, bot: bytes) -> None:
+        self.turns.append((self.now(), bot))
 
     def write(self, run: Path) -> None:
         """The raw logs, kept beside the capture so a disputed lag can be
@@ -72,6 +78,12 @@ class Recorder:
                 f.write(user)
         with (run / "buffer_bot.raw").open("wb") as f:
             for _, _, _, bot in self.deliveries:
+                f.write(bot)
+        with (run / "turn.jsonl").open("w") as f:
+            for t, bot in self.turns:
+                f.write(json.dumps({"t": t, "samples": len(bot) // 2}) + "\n")
+        with (run / "turn_bot.raw").open("wb") as f:
+            for _, bot in self.turns:
                 f.write(bot)
         (run / "events.json").write_text(json.dumps(self.events, indent=2))
 
