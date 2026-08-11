@@ -506,6 +506,18 @@ models (decision 6). Concretely:
   `asr-faster-whisper.yaml`, `tts-elevenlabs.yaml`, ...), linked
   from the reference. These are examples to feed `config set`,
   not live config: the commented-YAML tradition continues there.
+  The fragments land in the same PR as the descriptions and the
+  reference, so the editing pass is one reviewable whole: every
+  comment's destination (description, fragment, or reference
+  prose) exists when the audit is judged, and the reference never
+  links to files that do not exist yet. The old
+  `config.example.yaml` deliberately still duplicates the
+  narrative during that PR; the switchover PR then only removes,
+  with no editorial judgment mixed into the behavior change.
+- CLI `--help` text for fragment-shaped input is derived from the
+  same `Field(description=...)` values rather than hand-written,
+  which the issue asks for explicitly; the short description is
+  written once, on the model.
 - Provider-type options remain the one part schema generation
   cannot document (`extra="allow"` pass-through, typed option
   models are #88); until #88 they stay documented in the example
@@ -537,17 +549,21 @@ change that ticks its milestone:
    reads YAML; the database is
    fully writable and readable, in parallel, which is what makes
    this PR testable end to end without touching the boot path.
-3. **Generated documentation.** The Field-description editing
-   pass, `docgen.py`, `config schema` and `config reference`,
-   `docs/reference/domain-config.md` committed, the CI drift
-   check and workflow path filter update. YAML still works; the
-   descriptions document the same models the file loader uses, so
-   nothing here waits on the switchover.
+3. **Generated documentation.** The whole editing pass in one
+   reviewable PR: the Field descriptions, the commented per-entity
+   fragments under `samtal-server/examples/`, and the completed
+   comment audit in the implementation doc; `docgen.py`, `config
+   schema` and `config reference` with `--help` text derived from
+   the descriptions; `docs/reference/domain-config.md` committed;
+   the CI drift check and workflow path filter update. YAML still
+   works and `config.example.yaml` still carries its comments, so
+   during this PR the narrative exists in both places and the
+   audit is judged with every destination in hand.
 4. **Switchover and docs.** `Config` composition boots the domain
    half from the database; domain keys in YAML and domain
    `SAMTAL_` env vars refuse boot naming the move;
-   `config.example.yaml` shrinks; the example fragments land with
-   the comment audit completed; the integration lane seeds its
+   `config.example.yaml` shrinks (pure removal, the audit was
+   completed in PR 3); the integration lane seeds its
    domain config through the repository; the container image and
    the smoke lane move with the switchover in the same PR: the
    `Dockerfile` points `server.database.dir` at the data volume,
@@ -662,7 +678,7 @@ mistake a staged write for an applied one.
   exists. Decided in milestone 2 if a concrete consumer appears;
   the default answer is no, the API is the machine interface.
 - The exact fragment file inventory under `samtal-server/examples/`
-  is decided during the milestone 4 editing pass, driven by the
+  is decided during the milestone 3 editing pass, driven by the
   audit rather than fixed here.
 
 ## Plan review round
@@ -851,6 +867,13 @@ addressing it lands.
     domain YAML without documentation judgment mixed in. Also
     require argparse help text derived from the same
     `Field.description` values, which the issue explicitly asks.
+    *Resolution*: PR 3 now carries the whole editing pass
+    (descriptions, fragments, completed audit) as one reviewable
+    unit while `config.example.yaml` still duplicates the
+    narrative; PR 4 and milestone 4 become pure removal on the
+    documentation side; `--help` text derives from the Field
+    descriptions; the fragment-inventory open question moves to
+    milestone 3.
 13. **P2: secret error-path protections and tests are
     incomplete.** Interactive stdin can echo a secret; YAML and
     pydantic failures can expose rejected input in tracebacks;
@@ -902,23 +925,26 @@ its section of the implementation doc when written.
   masked in all output, the server still boots from YAML
   unchanged, lanes green.
 - [ ] **Generated documentation** (PR TBD): the Field-description
-  editing pass over the domain models with the comment audit
-  started in the implementation doc; `config/docgen.py`; `config
-  schema` and `config reference`; `docs/reference/domain-config.md`
-  committed; the CI drift check and the workflow path filter
-  gaining `docs/reference/**`. Accept: every domain model field
-  carries a description, the committed reference regenerates
+  editing pass over the domain models; the commented per-entity
+  fragments under `samtal-server/examples/`; the comment audit
+  completed in the implementation doc; `config/docgen.py`; `config
+  schema` and `config reference` with `--help` derived from the
+  descriptions; `docs/reference/domain-config.md` committed; the
+  CI drift check and the workflow path filter gaining
+  `docs/reference/**`. Accept: every domain model field carries a
+  description, every domain comment in `config.example.yaml` is
+  accounted for in the audit, the committed reference regenerates
   byte-identical in CI, lanes green.
 - [ ] **Switchover and docs** (PR TBD): `Config` composed from the
   file half plus the database snapshot; domain keys in YAML and
   domain `SAMTAL_` env vars refusing boot with the
   moved-to-the-database error; `config.example.yaml` shrunk to
-  server and memory; the commented per-entity fragments under
-  `samtal-server/examples/` with the comment audit completed
-  (nothing dropped silently); the integration lane seeding through
-  the repository; README, deployment notes, checkpoint workflow
-  docs, CHANGELOG. Accept: the server boots its domain half from
-  the database, a leftover domain key or env var produces the
-  naming error, the audit in the implementation doc accounts for
-  every migrated comment, both lanes green with no behavioral
-  assertion changed.
+  server and memory as pure removal (the audit was completed in
+  milestone 3); the integration lane seeding through the
+  repository; the `Dockerfile` database dir on the data volume
+  and the smoke checks seeding through the CLI; README,
+  deployment notes, checkpoint workflow docs, CHANGELOG. Accept:
+  the server boots its domain half from the database, a leftover
+  domain key or env var produces the naming error, the image and
+  all three smoke checks pass in CI, both lanes green with no
+  behavioral assertion changed.
