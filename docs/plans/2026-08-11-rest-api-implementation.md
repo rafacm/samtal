@@ -921,3 +921,68 @@ open questions: serving the document live at an authenticated endpoint,
 an unmasked export for backup tooling, and an `api.enabled` switch or a
 bind option. Hot apply is a later issue; every write says so in the
 meantime.
+
+### PR #107 review round
+
+One external review of the pull request's diff: codex CLI 0.147.0,
+model gpt-5.6-sol, read-only, 2026-08-12, posted on the PR by the review
+run itself. Verdict: mergeable after the listed fixes. Four findings,
+three P2 and one P3, each fixed with its own commit. Three of them are
+the same class: a documented procedure that was written before the CLI
+became a client of the API, and that the milestone reread without
+noticing it had stopped being runnable.
+
+1. **P2: the key-loss recovery was still the pre-switchover one.** The
+   Secrets section said the CLI keeps working without a key, and the
+   deployment notes said the way out of a lost key is a plain
+   `config set-secret` with the value again. Both were true when the
+   CLI wrote the database. They contradict each other now: ciphertext
+   the configured keys cannot open is what refuses the boot, the refusal
+   takes the API down with the server, and a plain `config set-secret`
+   has nothing to write through. What is left is `--local`, and its two
+   commands differ in exactly what the old text glossed over. Fixed in
+   44317da: `clear-secret` drops the envelope and needs no key,
+   `set-secret` is the one write that encrypts and needs a usable key in
+   `SAMTAL_MASTER_KEY`, which need not be the lost one, because what the
+   next boot needs is a list that opens every envelope still stored.
+2. **P2: the break-glass procedure assumed a container to enter.** It
+   said to run the commands inside the container or wherever the volume
+   is mounted, and the failure it exists for is a server that will not
+   boot, whose container has exited. Fixed in 7553119: a one-off
+   container, two lines of difference from the walkthrough above it
+   (same image, same mounted YAML, same data volume, no published port,
+   and the command line after the image name because the entrypoint is
+   `samtal-server` itself), with the second example passing
+   `SAMTAL_MASTER_KEY` and keeping stdin open because `set-secret` needs
+   both. The paragraph after them says why each mount is there.
+3. **P2: "this machine" is not the rule the client implements.** Three
+   passages said a plain `http://` connection is permitted to this
+   machine; `_loopback` reads the host as written and accepts a loopback
+   literal or the name localhost, so the machine's own address on the
+   network is refused, and so is a name that resolves to loopback. A
+   reader taking the phrase at face value would conclude the opposite of
+   both. Fixed in 305549f, which is a message change and not only a
+   documentation one: the CLI's own refusal said it too, and it now
+   names a loopback address and spells out the three forms that pass.
+   Its test asserts the new vocabulary rather than only the parts that
+   did not move, so the message and the documentation cannot drift apart
+   again; the module docstring, the default address's comment and the
+   deployment profile's header say the same words.
+4. **P3: contending writers do not produce a loser.** Two passages said
+   two writers serialize "and the loser" gets the retryable refusal,
+   which reads as though every race has one and makes a `--local` repair
+   beside a running server sound like a coin toss. The second writer
+   waits on the lock and, on any ordinary write, gets it and commits:
+   SQLite is told to wait ten seconds. Fixed in fb4635e: both passages
+   name the wait, the commit, and the refusal as what happens only when
+   the lock has not come free by the timeout, with the number stated.
+
+The class the first three share is worth naming, because it is the one a
+documentation milestone is exposed to: prose that was correct when it
+was written and that the change under review invalidated somewhere else
+in the file. Reading a passage for what it says is not enough; it has to
+be read against what the system now does, which for a procedure means
+asking whether it would still run.
+
+Full lanes after the fixes: ruff clean, both suites green and both drift
+checks clean (counts in the PR's verification section).
