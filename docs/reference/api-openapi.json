@@ -2490,7 +2490,8 @@
         "description": "What a secret write carries: the credential itself, the only\nplaintext this API ever accepts.",
         "properties": {
           "secret": {
-            "description": "The credential, in plaintext, stored encrypted under the newest key in SAMTAL_MASTER_KEY. It crosses the connection as itself, which is why the whole API belongs on a loopback connection or behind TLS. It is never read back: a read names the slot and masks the value.",
+            "description": "The credential, in plaintext, stored encrypted under the newest key in SAMTAL_MASTER_KEY. It crosses the connection as itself, which is why the whole API belongs on a loopback connection or behind TLS. It is never read back: a read names the slot and masks the value. It may not be empty.",
+            "minLength": 1,
             "title": "Secret",
             "type": "string"
           }
