@@ -49,6 +49,10 @@ from samtal_server.config.store import DomainConfig
 EXAMPLES = "../../samtal-server/examples"
 CONFIG_FILE = "../../samtal-server/config.example.yaml"
 
+# The configuration API's committed document, which sits beside the
+# reference in the same directory, so the reference points at it by name.
+API_DOCUMENT = "api-openapi.json"
+
 # Where the reference's prose wraps. The tables cannot wrap (a row is a
 # line), so only paragraphs go through this.
 PROSE_WIDTH = 78
@@ -297,6 +301,16 @@ def reference() -> str:
         "half (`server:` and `memory:`) stays in the YAML file and is documented",
         f"there, in [`config.example.yaml`]({CONFIG_FILE}).",
         "",
+        "Those commands are a client of the configuration API the server mounts",
+        "at `/api` on its own port, so they need a running server, and the API is",
+        "the machine-readable way to write the same entities: a fragment below is",
+        "the body of a `PUT`, validated in the same one place whichever way it",
+        f"arrived. The API's own contract is [`{API_DOCUMENT}`]({API_DOCUMENT}),",
+        "generated from its routes under the same regenerate-and-diff check as",
+        "this document. `samtal-server config --local` writes the database",
+        "directly for the recovery subset (`show`, `delete`, `clear-secret`,",
+        "`set-secret`), which is the way in when the server will not start.",
+        "",
         "## How the pieces fit",
         "",
         "Providers and MCP servers are named engines and named tool sources. An",
@@ -333,6 +347,8 @@ def reference() -> str:
         "",
         "`samtal-server config schema [entity]` prints the same field descriptions",
         "as JSON Schema, which is what a machine reads before writing a fragment.",
+        "The API's document carries the same schemas under `components`, where a",
+        "client that has read an entity back finds what a write of it may carry.",
         "",
         "## Entities",
         "",
