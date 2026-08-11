@@ -12,6 +12,16 @@ database and written with the `samtal-server config` commands. The server
 half (`server:` and `memory:`) stays in the YAML file and is documented
 there, in [`config.example.yaml`](../../samtal-server/config.example.yaml).
 
+Those commands are a client of the configuration API the server mounts
+at `/api` on its own port, so they need a running server, and the API is
+the machine-readable way to write the same entities: a fragment below is
+the body of a `PUT`, validated in the same one place whichever way it
+arrived. The API's own contract is [`api-openapi.json`](api-openapi.json),
+generated from its routes under the same regenerate-and-diff check as
+this document. `samtal-server config --local` writes the database
+directly for the recovery subset (`show`, `delete`, `clear-secret`,
+`set-secret`), which is the way in when the server will not start.
+
 ## How the pieces fit
 
 Providers and MCP servers are named engines and named tool sources. An
@@ -48,6 +58,8 @@ restarted.
 
 `samtal-server config schema [entity]` prints the same field descriptions
 as JSON Schema, which is what a machine reads before writing a fragment.
+The API's document carries the same schemas under `components`, where a
+client that has read an entity back finds what a write of it may carry.
 
 ## Entities
 
