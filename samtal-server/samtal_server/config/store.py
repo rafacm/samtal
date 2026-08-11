@@ -947,10 +947,21 @@ def _parse[Model: BaseModel](model: type[Model], location: str, fragment: object
         raise ConfigError(
             f"invalid {location}: expected a mapping of keys, got {type(fragment).__name__}"
         )
+    check_finite(location, fragment)
+    return _load(model, location, dict(fragment))
+
+
+def check_finite(location: str, fragment: object) -> None:
+    """A fragment refused if it carries a number JSON cannot.
+
+    The repository applies this to every fragment it parses; the CLI
+    runs the same check before a fragment travels as a request body,
+    because the JSON encoder would otherwise refuse NaN with a
+    traceback where this sentence belongs. One rule, one wording,
+    whichever caller meets the value first."""
     where = _nonfinite(fragment)
     if where is not None:
         raise ConfigError(f"invalid {location}: {_NOT_FINITE.format(where=where)}")
-    return _load(model, location, dict(fragment))
 
 
 def _load[Model: BaseModel](
@@ -1046,6 +1057,7 @@ def _refuse_unresolved(domain: DomainConfig) -> None:
 
 __all__ = [
     "ConfigStore",
+    "check_finite",
     "DomainConfig",
     "Entity",
     "Snapshot",
