@@ -110,8 +110,9 @@ MALFORMED_REQUEST = (
 )
 
 # What a caller is told when something in here failed rather than
-# something in the request. The detail is in the server's log.
-UNEXPECTED = "the server failed to handle this request; the details are in its log"
+# something in the request. The log records that it happened and what
+# kind of failure it was, and deliberately no more than that.
+UNEXPECTED = "the server failed to handle this request; the failure is recorded in its log"
 
 
 def build_api(token: str, database_dir: Path) -> FastAPI:
@@ -269,6 +270,12 @@ class _SanitizedErrors:
     mounted application means the exception continues into the
     device-facing app's own error handling. This ends it here, where the
     response was decided.
+
+    "In the log" means one fixed line naming the exception's class, not
+    a traceback and not the exception's own message: this is the point
+    where anything a request carried has already been through a handler
+    that failed on it, and a log line is as much of a leak as a response
+    body when the log is shipped somewhere.
     """
 
     def __init__(self, app: ASGIApp) -> None:
@@ -288,15 +295,25 @@ class _SanitizedErrors:
 
         try:
             await self._app(scope, receive, watched)
-        except Exception:
-            logger.exception(
-                "the configuration API failed to handle a request",
-                extra={"event": "api_error", "path": scope.get("path", "")},
+        except Exception as exc:
+            # One fixed line, and deliberately not logger.exception. A
+            # traceback carries the values that produced it, an
+            # exception's own message can be anything a request put in
+            # front of it, and the path is request-controlled too. The
+            # class name is the most that can be said about a failure
+            # here that a request could not have written.
+            logger.error(
+                "the configuration API failed to handle a request (%s)",
+                type(exc).__name__,
+                extra={"event": "api_error"},
             )
             if started:
-                # Half a response is already on the wire; there is
-                # nothing left to say that would not corrupt it.
-                raise
+                # Half a response is already on the wire, so there is
+                # nothing left to say that would not corrupt it. Ended
+                # here rather than re-raised: re-raising only reaches an
+                # outer logger, which would write the traceback this
+                # just took care not to.
+                return
             await JSONResponse({"detail": UNEXPECTED}, status_code=500)(scope, receive, send)
 
 
