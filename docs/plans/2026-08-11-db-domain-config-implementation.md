@@ -731,3 +731,34 @@ anything a user typed.
   a `DomainConfig` instance rather than copying its fields across, the
   mapping stays useful; if it deletes those fields from `Config`, the
   mapping has exactly one consumer left and could move into `store.py`.
+
+### PR #99 review round
+
+One external review of the pull request's stacked diff (b9704e0):
+codex CLI 0.147.0, model gpt-5.6-sol, read-only, 2026-08-11, posted
+verbatim on the PR by the review run itself. Verdict: mergeable after
+fixing the premature switchover wording and restoring the dropped
+local-model override. Four findings, each fixed with its own commit
+after the branch was rebased onto the merged milestones:
+
+1. **P2: restart behavior documented as live before the
+   switchover.** The reference's staging paragraph was contradicted
+   further down by "a change takes effect at the next server start",
+   and the examples README had no staging qualification at all.
+   Fixed: both statements are qualified as post-switchover behavior,
+   the README carries the staging paragraph with the same removal
+   marker, the reference is regenerated.
+2. **P2: the local-model override was dropped despite the audit.**
+   Audit item 23 claimed the "runs on the local model" comment moved
+   to `agent.yaml`, but the fragment only showed the tts override,
+   so the zero-dropped claim was wrong by one. Fixed: `agent.yaml`
+   gains a commented `llm: local` override with its explanation, and
+   the audit row records both the destination and the overclaim.
+3. **P3: the MCP audit overstated verbatim coverage.** The
+   streamable_http fragment carried a shortened egress comment while
+   the audit said both fragments held the rationale verbatim. Fixed:
+   the HTTP fragment carries the conversation-derived-data rationale
+   and the explicit meaning of `egress: false`.
+4. **P3: a generated 96-character prose line.** The fragment-examples
+   sentence broke the reference's wrapping convention. Fixed: the
+   link sits on its own line, reference regenerated.
