@@ -5,6 +5,47 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-12
+
+### Added
+
+- **Documentation for the configuration API** (#101). The server README
+  gains a section on it under Configuration: what mounts at `/api`, the
+  bearer token and how to generate one, the routes a noun at a time,
+  what a masked read adds to an entity, the acknowledgement that says
+  when a write applies, the refusal mapping, and
+  `docs/reference/api-openapi.json` as the contract. The
+  `samtal-server config` commands are documented as the client they now
+  are, with the order they resolve the URL and the token in and exec
+  into the running container as the deployment story, and `--local` as
+  the break-glass path with its subset and its notice.
+
+  Deployment notes beside the ones for the configuration database cover
+  the four decisions a deployment has to make: setting
+  `SAMTAL_API_SECRET` before rolling the image rather than meeting the
+  boot error, what to do with `/api/` at the edge (do not route it
+  outward, route it separately and restrict it, or accept that the token
+  is the only thing in front of it), loopback-or-TLS for the whole API
+  because the token rides on every request, and the recovery procedure
+  in full.
+
+  The generated domain reference now says that those commands are a
+  client of the API and points at its document and its schemas; the root
+  README's Getting Started gains the from-outside case beside the
+  from-inside one it already had.
+
+### Fixed
+
+- Documentation that the API's arrival had made untrue (#101): the
+  server README's list of what the server exposes and its "nothing else
+  is exposed" paragraph, neither of which mentioned `/api/` or the rule
+  that keeps the OTA endpoint out of it; the Stack section's "future
+  admin API"; the promise that hot apply is what the admin API will
+  bring, when the API answers with the same restart notice; and
+  `config.example.yaml`'s comments about who writes the database, one
+  of which offered `config list` as an example of a command that opens
+  it directly, which it no longer is.
+
 ## 2026-08-11
 
 ### Added
