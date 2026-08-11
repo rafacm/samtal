@@ -272,6 +272,32 @@ encrypted credentials), `test_config_cli.py` (the acceptance case
 end to end, masking, the staging notice, and the leak surfaces), plus
 `SecretStore` cases added to `test_config_secrets.py`.
 
+### Reconciled with milestone 1's review round
+
+This milestone was written against the pre-review schema and rebased
+onto the three fixes PR #95's review drove. Two of them reached into
+this code.
+
+**The credential reference moved to its own column.** The repository
+had folded `api_key_env` into the options JSON, which was the only
+place it could go before the column existed. Both directions of the row
+mapping now use the column, and a test reads the raw row to pin that
+options stays free of it. Nothing else changed: a replacement still
+writes the column unconditionally, so clearing a reference by omitting
+it from a fragment works.
+
+**Masking now fails closed, including in `show`.** `mask()` passes only
+a syntactic environment reference through. The display path applies it
+to the value of every secret-shaped key, not just to stored envelopes:
+nothing validates the shape of an `api_key_env` value, so an operator
+can paste the credential where its variable name belongs, and the
+command they would run to find that mistake must not read it back out.
+An MCP server's env and headers get the same treatment, which changes
+nothing for a valid entry (the model already requires a `$VAR` there)
+and covers a value that arrived another way. The rule itself is
+single-sourced in `models.is_secret_option` and `models.is_mcp_secret_key`,
+which the entity validators use too.
+
 ### Deviations from the plan
 
 **`check_completeness` holds one rule, not two.** The plan's strictness

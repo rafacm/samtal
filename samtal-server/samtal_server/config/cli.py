@@ -37,6 +37,8 @@ from samtal_server.config.models import (
     AgentDefaults,
     McpServerConfig,
     ProviderConfig,
+    is_mcp_secret_key,
+    is_secret_option,
     normalize_mac,
 )
 from samtal_server.config.secrets import (
@@ -45,6 +47,7 @@ from samtal_server.config.secrets import (
     SecretLocation,
     SecretStore,
     load_keys,
+    mask,
 )
 from samtal_server.config.store import ConfigStore, DomainConfig, Snapshot
 from samtal_server.db import open_database
@@ -311,11 +314,22 @@ def _written_values(domain: DomainConfig) -> dict[tuple[str, str], dict[str, obj
 
 def _mcp_written(entry: McpServerConfig) -> dict[str, object]:
     """An MCP server's env and headers under their dotted slot names,
-    which is how a stored secret addresses them."""
+    which is how a stored secret addresses them. Masked on the same
+    rule as everywhere else these are displayed."""
     return {
         f"{group}.{key}": value
         for group, values in (("env", entry.env), ("headers", entry.headers))
-        for key, value in values.items()
+        for key, value in _shown_values(values).items()
+    }
+
+
+def _shown_values(values: dict[str, str]) -> dict[str, object]:
+    """An MCP server's env or headers as they may be displayed. The
+    model already requires a $VAR for the secret-bearing keys, so this
+    changes nothing for a valid entry; it is what stops a value that got
+    in another way from being read back out."""
+    return {
+        key: mask(value) if is_mcp_secret_key(key) else value for key, value in values.items()
     }
 
 
@@ -374,12 +388,23 @@ def _short(value: object) -> str:
 
 
 def _provider_data(entry: ProviderConfig) -> dict[str, object]:
+    """One provider as it may be displayed. Whatever a secret-shaped key
+    holds goes through the mask, which passes an environment reference
+    through as itself and fails closed on everything else: nothing
+    validates the shape of an api_key_env value, so an operator who
+    pasted the key where its variable name belongs must not have it read
+    back out by the command they would run to find the mistake."""
     data: dict[str, object] = {"type": entry.type}
     if entry.api_key_env is not None:
-        data["api_key_env"] = entry.api_key_env
+        data["api_key_env"] = mask(entry.api_key_env)
     if entry.egress is not None:
         data["egress"] = entry.egress
-    data.update(entry.options)
+    data.update(
+        {
+            key: mask(value) if is_secret_option(key) else value
+            for key, value in entry.options.items()
+        }
+    )
     return data
 
 
@@ -390,11 +415,11 @@ def _mcp_data(entry: McpServerConfig) -> dict[str, object]:
     if entry.args:
         data["args"] = list(entry.args)
     if entry.env:
-        data["env"] = dict(entry.env)
+        data["env"] = _shown_values(entry.env)
     if entry.url is not None:
         data["url"] = entry.url
     if entry.headers:
-        data["headers"] = dict(entry.headers)
+        data["headers"] = _shown_values(entry.headers)
     if entry.egress is not None:
         data["egress"] = entry.egress
     data["tool_timeout_s"] = entry.tool_timeout_s

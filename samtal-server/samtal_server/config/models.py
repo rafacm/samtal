@@ -310,11 +310,19 @@ class ServerConfig(BaseModel):
 def is_secret_option(name: str) -> bool:
     """Whether an option name is secret-shaped.
 
-    One rule, two readers: it is what makes an inline value in a
-    fragment an error, and what decides which option names are
-    credential slots a secret may be stored under."""
+    One rule, three readers: it is what makes an inline value in a
+    fragment an error, what decides which option names are credential
+    slots a secret may be stored under, and what the display path masks
+    the value of."""
     lowered = name.lower()
     return any(fragment in lowered for fragment in _SECRET_KEY_FRAGMENTS)
+
+
+def is_mcp_secret_key(name: str) -> bool:
+    """The same question for an MCP server's env and headers, where the
+    key carrying a secret is as often called Authorization as token."""
+    lowered = name.lower()
+    return any(fragment in lowered for fragment in _MCP_SECRET_KEY_FRAGMENTS)
 
 
 class ProviderConfig(BaseModel):
@@ -455,8 +463,7 @@ class McpServerConfig(BaseModel):
         problems: list[str] = []
         for group, values in (("env", self.env), ("headers", self.headers)):
             for key, value in values.items():
-                lowered = key.lower()
-                if not any(fragment in lowered for fragment in _MCP_SECRET_KEY_FRAGMENTS):
+                if not is_mcp_secret_key(key):
                     continue
                 if _env_reference(value) is None:
                     problems.append(
