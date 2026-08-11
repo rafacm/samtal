@@ -58,7 +58,7 @@ from samtal_server.config.secrets import (
     SecretLocation,
     load_keys,
 )
-from samtal_server.config.store import ConfigStore, check_finite
+from samtal_server.config.store import ConfigStore, check_transportable
 from samtal_server.config.writes import (
     RESTART_NOTICE,
     cleared_secret,
@@ -175,25 +175,25 @@ def _usage_problem(message: str) -> str:
 
 def _set_provider(args: argparse.Namespace) -> None:
     fragment = _fragment(args.file)
-    check_finite(f"providers.{args.stage}.{args.name}", fragment)
+    check_transportable(f"providers.{args.stage}.{args.name}", fragment)
     _wrote(_call(args, "PUT", _path("providers", args.stage, args.name), fragment))
 
 
 def _set_mcp_server(args: argparse.Namespace) -> None:
     fragment = _fragment(args.file)
-    check_finite(f"mcp_servers.{args.name}", fragment)
+    check_transportable(f"mcp_servers.{args.name}", fragment)
     _wrote(_call(args, "PUT", _path("mcp-servers", args.name), fragment))
 
 
 def _set_agent(args: argparse.Namespace) -> None:
     fragment = _fragment(args.file)
-    check_finite(f"agents.{args.name}", fragment)
+    check_transportable(f"agents.{args.name}", fragment)
     _wrote(_call(args, "PUT", _path("agents", args.name), fragment))
 
 
 def _set_agent_defaults(args: argparse.Namespace) -> None:
     fragment = _fragment(args.file)
-    check_finite("agent_defaults", fragment)
+    check_transportable("agent_defaults", fragment)
     _wrote(_call(args, "PUT", _path("agent-defaults"), fragment))
 
 

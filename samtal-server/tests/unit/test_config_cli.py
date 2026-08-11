@@ -287,6 +287,58 @@ def test_a_number_that_is_not_finite_is_refused(
     assert _document(capsys.readouterr().out)["temperature"] == 0.7
 
 
+TRANSPORT_REFUSALS = [
+    ("a timestamp", "type: anthropic\nreleased: 2026-01-01\n", "JSON has no way to write"),
+    (
+        "a timestamp with a time",
+        "type: anthropic\nwhen: 2026-01-01 12:00:00\n",
+        "JSON has no way to write",
+    ),
+    ("binary", "type: anthropic\nblob: !!binary |\n  AAEC\n", "JSON has no way to write"),
+    ("a set", "type: anthropic\ntags: !!set\n  ? a\n  ? b\n", "JSON has no way to write"),
+    ("a recursive alias", "&loop\ntype: anthropic\nself: *loop\n", "contains itself"),
+    ("an integer key", "type: anthropic\noptions:\n  1: x\n", "rather than a string"),
+    ("a null key", "type: anthropic\noptions:\n  ~: x\n", "rather than a string"),
+]
+
+
+@pytest.mark.parametrize(("what", "fragment", "expected"), TRANSPORT_REFUSALS)
+def test_a_fragment_json_cannot_carry_is_refused_before_it_travels(
+    run, capsys: pytest.CaptureFixture[str], what: str, fragment: str, expected: str
+) -> None:
+    """YAML is the wider language, so a fragment can hold things the
+    request body has no way to say. Every one of them meets the
+    repository's sentence rather than the JSON encoder's TypeError,
+    ValueError or RecursionError, and none of them writes anything."""
+    assert run("set", "provider", "llm", "claude", "-f", "-", stdin=fragment) == 1, what
+
+    captured = capsys.readouterr()
+    assert expected in captured.err, what
+    assert "Traceback" not in captured.err, what
+    assert captured.out == "", what
+
+    # And nothing was written: the entity does not exist.
+    assert run("show", "provider", "llm", "claude") == 1
+    assert "no such provider" in capsys.readouterr().err
+
+
+def test_a_fragment_sharing_one_anchor_twice_still_travels(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The check refuses a structure that contains itself, not one that
+    mentions the same anchor twice, which is an ordinary YAML file and
+    is written out twice in JSON."""
+    fragment = "type: anthropic\none: &shared\n  a: 1\ntwo: *shared\n"
+
+    assert run("set", "provider", "llm", "claude", "-f", "-", stdin=fragment) == 0
+    capsys.readouterr()
+
+    run("show", "provider", "llm", "claude")
+    shown = _document(capsys.readouterr().out)
+    assert shown["one"] == {"a": 1}
+    assert shown["two"] == {"a": 1}
+
+
 def test_a_parser_failure_carries_no_parser_exception(tmp_path: Path) -> None:
     """A PyYAML mark holds the whole buffer it was parsing, which here
     is the fragment, so the refusal is built inside the handler and
