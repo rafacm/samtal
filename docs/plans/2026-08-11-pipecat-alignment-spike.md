@@ -140,9 +140,35 @@ Two independent recordings of the same exchange:
 - **The buffer recording**: `AudioBufferProcessor`'s bot track (and
   user track, for the mask), as pipecat records it.
 
-Both are anchored to one epoch at recording start, using the best
-mapping pipecat affords (recording start time plus sample
-counting). The composer then writes a samtal-format capture pair:
+Both recordings are placed on one shared timeline by a mapping
+that is predefined here, before any correlation result is seen,
+and never adjusted afterwards:
+
+- One monotonic clock, read once before recording starts, is the
+  epoch for everything.
+- Every wire send is timestamped on that clock at the moment the
+  awaited websocket write returns; every buffer-track delivery
+  from `AudioBufferProcessor` is timestamped on the same clock at
+  the moment the spike's handler observes it, together with its
+  cumulative sample count.
+- Sample placement is explicit: a buffer delivery of N samples
+  observed at time t occupies (t - N/rate, t]; tap packets occupy
+  their decoded duration ending at their send timestamp; gaps in
+  either track are silence. Leading silence is kept, never
+  trimmed.
+- No onset-based or correlation-based shifting of either track,
+  ever: aligning by first audible sample or by best correlation
+  would erase exactly the fixed latency under test.
+- The raw timestamp logs (per-send, per-delivery) are written to
+  disk beside the WAV and kept, so the mapping is auditable after
+  the fact.
+
+If `AudioBufferProcessor` turns out to expose only an aggregate
+buffer with no per-delivery observation point that can be
+timestamped independently, that is itself a gate 1 finding to
+record, not a gap to paper over with inferred alignment.
+
+The composer then writes a samtal-format capture pair:
 
 - `<session>.wav`, stereo 16 kHz s16le: channel 0 (mic) is the
   simulator's utterance audio as received, on the shared epoch,
@@ -246,10 +272,14 @@ processors.
   and rerun. Gate 1 is only ever judged on runs whose stock
   control passes.
 - **Epoch construction error read as pipecat misalignment.** The
-  constant-bias component of run 2 is reported as a range with the
-  epoch method named, and the verdict leans on the stability
-  criteria (detection rate, lag IQR, drift) that no epoch error
-  can fake. If a constant bias alone breaches the 20 ms bar, the
+  mapping is predefined above and frozen before any correlation
+  result is seen, and its raw timestamp logs are kept, so a
+  disputed lag can be re-derived from the logs rather than argued
+  about. A constant epoch error is stable, so stability criteria
+  cannot catch it; what bounds it is the mapping's own audit trail
+  (scheduling delay between a send returning and its timestamp is
+  the residual, and that is microseconds to low milliseconds, not
+  tens). If a constant bias breaches the 20 ms bar anyway, the
   finding says exactly that, because an adoption would face the
   same construction.
 - **The stale bytecode trap** (AGENTS.md). The spike runs scripts
@@ -299,6 +329,15 @@ each carries its resolution once the amendment addressing it lands.
    stability cannot either, since a constant epoch error is
    perfectly stable and wrong. Onset- or correlation-based
    alignment would erase exactly the latency under test.
+   *Resolution*: the mapping is now predefined in the
+   instrumentation section and frozen before any result is seen:
+   one monotonic epoch read before recording, timestamps at the
+   awaited send return and at each buffer delivery with its
+   cumulative sample count, explicit sample placement rules,
+   leading silence kept, no onset or correlation shifting, and
+   the raw timestamp logs preserved for audit. A buffer with no
+   independently timestampable delivery point is itself a gate 1
+   finding.
 3. **P1: the tap is not yet established as wire ground truth.**
    A packet "leaving the serializer" may precede framework
    queuing, pacing, and the awaited websocket write; and if the
