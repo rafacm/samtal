@@ -412,6 +412,70 @@ def test_a_number_that_is_not_finite_is_refused(store: ConfigStore) -> None:
     assert store.read_provider("llm", "claude").entry.options == {"temperature": 0.7}
 
 
+def test_a_value_json_cannot_carry_is_refused(store: ConfigStore) -> None:
+    """YAML is the wider language: `!!timestamp` gives a date,
+    `!!binary` bytes, `!!set` a set. None of them has a JSON spelling,
+    and all of them reach here as an ordinary fragment."""
+    import datetime
+
+    for fragment in (
+        {"type": "anthropic", "released": datetime.date(2026, 1, 1)},
+        {"type": "anthropic", "when": datetime.datetime(2026, 1, 1, 12, 0)},
+        {"type": "anthropic", "blob": b"\x00\x01"},
+        {"type": "anthropic", "tags": {"a", "b"}},
+        {"type": "anthropic", "nested": {"deep": [1, {"worse": datetime.date(2026, 1, 1)}]}},
+    ):
+        with pytest.raises(ConfigError) as caught:
+            store.set_provider("llm", "claude", fragment)
+        assert "JSON has no way to write" in str(caught.value)
+        assert type(caught.value) is ConfigError, caught.value
+
+    assert store.load().domain.providers.llm == {}
+
+
+def test_a_mapping_key_that_is_not_a_string_is_refused(store: ConfigStore) -> None:
+    """The quiet one: JSON would not refuse this, it would stringify the
+    key and hand a reader `"1"` where `1` was written."""
+    for fragment in (
+        {"type": "anthropic", "options": {1: "x"}},
+        {"type": "anthropic", "options": {None: "x"}},
+        {"type": "anthropic", "options": {(1, 2): "x"}},
+    ):
+        with pytest.raises(ConfigError) as caught:
+            store.set_provider("llm", "claude", fragment)
+        assert "rather than a string" in str(caught.value)
+
+    assert store.load().domain.providers.llm == {}
+
+
+def test_a_fragment_that_contains_itself_is_refused(store: ConfigStore) -> None:
+    """A YAML anchor can build one, and walking it is what would
+    otherwise end in a RecursionError rather than a sentence."""
+    recursive: dict[str, object] = {"type": "anthropic"}
+    recursive["self"] = recursive
+    looping: list[object] = []
+    looping.append(looping)
+
+    for fragment in (recursive, {"type": "anthropic", "items": looping}):
+        with pytest.raises(ConfigError) as caught:
+            store.set_provider("llm", "claude", fragment)
+        assert "contains itself" in str(caught.value)
+
+    assert store.load().domain.providers.llm == {}
+
+
+def test_two_keys_sharing_one_anchor_are_not_recursion(store: ConfigStore) -> None:
+    """The shape a naive seen-set would refuse: an anchored mapping used
+    twice is written out twice and read back correctly, so it is a
+    perfectly ordinary YAML file."""
+    shared = {"a": 1}
+
+    store.set_provider("llm", "claude", {"type": "anthropic", "one": shared, "two": shared})
+
+    entry = store.read_provider("llm", "claude").entry
+    assert entry.options == {"one": {"a": 1}, "two": {"a": 1}}
+
+
 def test_a_stored_number_that_is_not_finite_cannot_be_read(store: ConfigStore) -> None:
     """A row written before the rule, or by something else: reported as
     unreadable rather than answered with a value nobody wrote."""

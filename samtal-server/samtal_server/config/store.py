@@ -94,6 +94,25 @@ _NOT_FINITE = (
     "so a reader of this configuration would be given null in its place"
 )
 
+# The rest of what YAML can express and JSON cannot. Each names where it
+# is and what kind of thing it is, and never the value: a fragment
+# refused here is one nobody has validated yet, so it may hold anything.
+_NOT_TRANSPORTABLE = (
+    "{where} is a {kind}, which JSON has no way to write, so this configuration "
+    "could not be stored or read back as what it says"
+)
+
+_RECURSIVE = (
+    "{where} contains itself. A configuration that refers to itself has no written "
+    "form, so it cannot be stored or read back"
+)
+
+_NON_STRING_KEY = (
+    "{where} has a key that is a {kind} rather than a string. JSON names every key "
+    "with a string, so such a key would silently become one and a reader would be "
+    "given a key nobody wrote"
+)
+
 
 class DomainConfig(BaseModel):
     """The domain half of a configuration, as the database holds it.
@@ -947,21 +966,30 @@ def _parse[Model: BaseModel](model: type[Model], location: str, fragment: object
         raise ConfigError(
             f"invalid {location}: expected a mapping of keys, got {type(fragment).__name__}"
         )
-    check_finite(location, fragment)
+    check_transportable(location, fragment)
     return _load(model, location, dict(fragment))
 
 
-def check_finite(location: str, fragment: object) -> None:
-    """A fragment refused if it carries a number JSON cannot.
+def check_transportable(location: str, fragment: object) -> None:
+    """A fragment refused if JSON cannot carry it as it is.
 
     The repository applies this to every fragment it parses; the CLI
-    runs the same check before a fragment travels as a request body,
-    because the JSON encoder would otherwise refuse NaN with a
-    traceback where this sentence belongs. One rule, one wording,
-    whichever caller meets the value first."""
-    where = _nonfinite(fragment)
-    if where is not None:
-        raise ConfigError(f"invalid {location}: {_NOT_FINITE.format(where=where)}")
+    runs the same check before a fragment travels as a request body.
+    One rule, one wording, met by whichever caller sees the value first,
+    because the alternative is what the encoder does on its own: a
+    TypeError, a ValueError or a RecursionError with a traceback, in
+    place of the sentence this file exists to produce.
+
+    YAML is the wider language, which is the whole reason this is
+    needed. `!!timestamp` produces a date, `!!binary` bytes and `!!set`
+    a set, none of which JSON has; an anchor can make a structure that
+    contains itself; and a non-string mapping key is the quiet one,
+    because JSON would not refuse it at all, it would stringify it and
+    hand a reader a key nobody wrote.
+    """
+    problem = _untransportable(fragment)
+    if problem is not None:
+        raise ConfigError(f"invalid {location}: {problem}")
 
 
 def _load[Model: BaseModel](
@@ -1007,6 +1035,52 @@ def _stored[Model: BaseModel](
     except ValidationError as exc:
         problem = _validation_problems(f"{location}: {_UNREADABLE_ROW}", exc)
     raise StorageError(problem)
+
+
+def _untransportable(
+    value: object, path: str = "", ancestors: frozenset[int] = frozenset()
+) -> str | None:
+    """What in `value` JSON cannot carry, said without quoting any of it,
+    or None.
+
+    Cycle-safe by carrying the containers currently above this one
+    rather than every container already seen: two keys pointing at the
+    same anchored mapping is a shape JSON writes out twice and reads
+    back correctly, so refusing it would refuse a legitimate YAML file.
+    A container that is its own ancestor is the one that cannot be
+    written at all.
+    """
+    if id(value) in ancestors:
+        return _RECURSIVE.format(where=path or "the fragment")
+    if isinstance(value, Mapping):
+        below = ancestors | {id(value)}
+        for key, nested in value.items():
+            if not isinstance(key, str):
+                return _NON_STRING_KEY.format(
+                    where=path or "the fragment", kind=type(key).__name__
+                )
+            found = _untransportable(nested, f"{path}.{key}" if path else key, below)
+            if found is not None:
+                return found
+        return None
+    if isinstance(value, (list, tuple)):
+        below = ancestors | {id(value)}
+        for position, item in enumerate(value):
+            found = _untransportable(
+                item, f"{path}.{position}" if path else str(position), below
+            )
+            if found is not None:
+                return found
+        return None
+    if isinstance(value, float) and not math.isfinite(value):
+        return _NOT_FINITE.format(where=path or "the value")
+    # bool before int, and both before the refusal, because bool is a
+    # subclass of int and neither needs naming twice.
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return None
+    return _NOT_TRANSPORTABLE.format(
+        where=path or "the fragment", kind=type(value).__name__
+    )
 
 
 def _nonfinite(value: object, path: str = "") -> str | None:
@@ -1057,7 +1131,7 @@ def _refuse_unresolved(domain: DomainConfig) -> None:
 
 __all__ = [
     "ConfigStore",
-    "check_finite",
+    "check_transportable",
     "DomainConfig",
     "Entity",
     "Snapshot",
