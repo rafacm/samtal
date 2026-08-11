@@ -12,6 +12,13 @@ database and written with the `samtal-server config` commands. The server
 half (`server:` and `memory:`) stays in the YAML file and is documented
 there, in [`config.example.yaml`](../../samtal-server/config.example.yaml).
 
+**The server does not read that database yet.** It still boots its whole
+configuration from the YAML file, so a write through these commands is
+staging for the switchover and changes nothing about a running server,
+and the domain sections of `config.example.yaml` are still what a
+deployment is configured with today. This paragraph goes when the
+switchover lands.
+
 ## How the pieces fit
 
 Providers and MCP servers are named engines and named tool sources. An

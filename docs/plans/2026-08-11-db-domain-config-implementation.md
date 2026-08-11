@@ -703,6 +703,11 @@ anything a user typed.
 
 ### For the milestones that follow
 
+- The reference carries a staging paragraph of its own, saying the server
+  does not read the database yet, and naming itself as the paragraph the
+  switchover removes. It goes with `cli.STAGING_NOTICE`, in `docgen`'s
+  `reference()`, and the committed copy is regenerated in the same
+  change.
 - The switchover's removal pass in `config.example.yaml` is now a pure
   deletion of lines 195 to 513 and 536 to 605, plus the header rewrite.
   Every comment in those ranges has a live destination, listed above, and
