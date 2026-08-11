@@ -383,16 +383,36 @@ config delete agent <name>
 config delete device <mac>
 config bind-device <mac> <agent> [<agent> ...]
 config set-default-agent <name>
-config set-secret provider <stage> <name> <key>       # value from
+config clear-default-agent                # back to devices-as-allowlist
+config set-secret provider <stage> <name> <slot>      # value from
 config set-secret mcp-server <name> env.<KEY>         # stdin, or
 config set-secret mcp-server <name> headers.<KEY>     # --from-env VAR
+config clear-secret provider <stage> <name> <slot>
+config clear-secret mcp-server <name> <dotted-key>
 config list                                           # summary tree
-config show [<kind> [<name>]]                         # masked YAML
+config show                                           # everything
+config show provider <stage> <name>                   # one entity,
+config show mcp-server <name>                         # masked YAML
+config show agent <name>
+config show agent-defaults
+config show device <mac>
 config schema [<entity>]                              # JSON Schema
 config reference                                      # the markdown
                                                       # reference, to
                                                       # stdout
 ```
+
+Every entity is addressed the way its identity is keyed: a
+provider is `(stage, name)` everywhere it is named (`set`,
+`delete`, `show`, `set-secret`, `clear-secret`), never by name
+alone. `clear-default-agent` exists because omitting default_agent
+is a meaningful configuration (the devices map as the allowlist,
+per today's validator), and without it that state would be
+unreachable once set; clearing it is refused by the boot-only
+completeness check no more than setting it late is, and the
+write-time reference pass simply no longer has a reference to
+check. `clear-secret` is the inverse write `set-secret` needs for
+recovery and rotation hygiene.
 
 Fragments are the same YAML shape as today's sections, one entity
 per invocation, validated by the same models: `config set provider
@@ -685,6 +705,12 @@ addressing it lands.
    there is no `clear-secret`, and provider `show` addressing is
    ambiguous because provider identity is `(stage, name)`. Add
    explicit unset operations and unambiguous addressing.
+   *Resolution*: the grammar gains `clear-default-agent` and
+   `clear-secret` for both entity kinds, `show` is spelled per
+   entity kind with providers addressed as `(stage, name)`
+   everywhere they are named, and the section states why clearing
+   default_agent is a meaningful configuration rather than a
+   degenerate one.
 7. **P2: create-or-replace semantics do not define what happens to
    stored secrets.** A fragment cannot include ciphertext, so
    whole-row replacement either silently erases secrets or forces
