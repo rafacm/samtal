@@ -157,9 +157,11 @@ counting). The composer then writes a samtal-format capture pair:
 
 ### The runs
 
-1. **Stock control, the sanity baseline.**
-   `scripts/echo_leakage_control.py` on the composed pair: injects
-   the ref channel into the mic channel and must come back exact.
+1. **Stock control, the sanity baseline, at both delays.**
+   `scripts/echo_leakage_control.py` on the composed pair, run
+   twice: `--delay-ms 250` and `--delay-ms 1500`, matching the
+   short and long controls #89 names (the control widens its own
+   lag search past the injected delay). Both must come back exact.
    This proves the measurement works on this data at all; it does
    not test alignment (both channels share whatever error the
    composition has). A failure here means the pair is malformed,
@@ -168,7 +170,15 @@ counting). The composer then writes a samtal-format capture pair:
    the tap-decoded track, delayed and attenuated (-30 dB, matching
    the round 1 reference), into the mic channel, and
    `scripts/echo_leakage.py` runs over the result with ref still
-   the buffer track. This simulates the production echo path (wire
+   the buffer track. The script's default lag search stops at
+   1.2 s, which would put the 1500 ms echo outside the search
+   space entirely; both tap runs therefore pass an explicit
+   `--max-lag-s` of at least 2.0, wide enough past the longer
+   injection that a substantial fixed bias is diagnosed rather
+   than truncated, and the findings record whether any measured
+   lag lands at the search boundary, because a boundary value
+   means the search was still too narrow, not that the lag was
+   measured. This simulates the production echo path (wire
    to air to mic) against the reference an adopted pipecat would
    offer (the buffer recording). If the buffer track is aligned
    with the wire, the measurement recovers the injected delay and
@@ -277,6 +287,10 @@ each carries its resolution once the amendment addressing it lands.
    1500 ms echo is outside the search space; the control widens its
    own range but the plan's tap runs did not. The plan also ran the
    stock control once where #89 asks for short and long.
+   *Resolution*: the stock control now runs at both 250 and
+   1500 ms; the tap runs pass an explicit `--max-lag-s` of at
+   least 2.0, and any lag landing at the search boundary is
+   recorded as a too-narrow search, not a measurement.
 2. **P1: the epoch construction is too vague to support the
    absolute-lag verdict.** "Recording start plus sample counting"
    does not define whether the buffer retains leading silence, when
