@@ -224,9 +224,8 @@ class ServerConfig(BaseModel):
     auth: AuthConfig = Field(default_factory=AuthConfig)
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
 
-    # Where `samtal-server config` writes the domain configuration. The
-    # server does not read it yet; the switchover is what makes it the
-    # source the domain half boots from.
+    # Where `samtal-server config` writes the domain configuration, and
+    # where the server reads it at each start.
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
 
     # Absent, or present with enabled off, means no session is ever
