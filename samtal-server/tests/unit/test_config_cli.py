@@ -1064,6 +1064,37 @@ def test_storing_a_secret_locally_still_needs_a_usable_key(
     assert "Traceback" not in captured.err
 
 
+def test_local_delete_removes_the_row_that_is_keeping_the_server_down(
+    run, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The whole point of the break-glass path, end to end: a row the
+    loader refuses is the row stopping the boot, so it is the one that
+    has to come out, and every reading command refuses it on the way."""
+    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run("set", "provider", "asr", "whisper", "-f", "-", stdin="type: mock\n")
+    capsys.readouterr()
+    engine = open_database(tmp_path / "db")
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                update(schema.providers)
+                .where(schema.providers.c.name == "claude")
+                .values(options="not an object")
+            )
+    finally:
+        engine.dispose()
+    # Nothing can read it, which is the state a server meets at boot.
+    assert run("--local", "show") == 1
+    assert "options" in capsys.readouterr().err
+
+    assert run("--local", "delete", "provider", "llm", "claude") == 0
+    capsys.readouterr()
+
+    # And with it gone the configuration reads again.
+    assert run("--local", "show") == 0
+    assert "whisper" in capsys.readouterr().out
+
+
 def test_a_command_outside_the_subset_is_refused_naming_it(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
