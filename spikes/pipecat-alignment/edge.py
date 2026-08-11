@@ -34,7 +34,7 @@ from serializer import (
 )
 
 
-def device_edge(websocket, *, paced: bool = True):
+def device_edge(websocket, *, paced: bool = False):
     """The transport, the control processor and the session id for one
     device connection."""
     session_id = uuid.uuid4().hex[:8]
