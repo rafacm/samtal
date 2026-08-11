@@ -133,6 +133,41 @@ def test_an_unwritable_directory_names_the_configuration_key(tmp_path: Path) -> 
     assert "server.database.dir" in str(caught.value)
 
 
+def test_provider_rows_hold_every_declared_model_field(tmp_path: Path) -> None:
+    """ProviderConfig's declared fields are excluded from its options
+    property, so each needs a column of its own; a missing one would
+    make the repository silently drop that field on every round trip.
+    api_key_env is the case that bit: the environment-reference
+    credential form every cloud provider uses."""
+    from samtal_server.config.models import ProviderConfig
+    from samtal_server.db.schema import providers
+
+    declared = set(ProviderConfig.model_fields)
+    assert declared <= set(providers.c.keys())
+
+    engine = open_database(tmp_path / "db")
+    try:
+        with engine.connect() as connection:
+            connection.execute(
+                providers.insert().values(
+                    stage="llm",
+                    name="claude",
+                    type="anthropic",
+                    api_key_env="ANTHROPIC_API_KEY",
+                    egress=None,
+                    options={"model": "claude-sonnet-5"},
+                    secrets={},
+                )
+            )
+            connection.commit()
+        with engine.connect() as connection:
+            row = connection.execute(providers.select()).mappings().one()
+        assert row["api_key_env"] == "ANTHROPIC_API_KEY"
+        assert row["options"] == {"model": "claude-sonnet-5"}
+    finally:
+        engine.dispose()
+
+
 def test_the_migrations_ship_inside_the_package() -> None:
     """Discovery from an installed wheel is proved in CI, which installs
     one and migrates from it. This is the cheap half: the scripts are

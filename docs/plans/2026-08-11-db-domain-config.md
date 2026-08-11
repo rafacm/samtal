@@ -213,9 +213,12 @@ today, `samtal-server config ...` runs the command group and exits.
 Baseline Alembic migration, one revision, these tables:
 
 - `providers`: `stage` and `name` (composite primary key), `type`,
-  `egress` (nullable boolean), `options` (JSON: the non-secret
-  pass-through keys, exactly today's extras), `secrets` (JSON:
-  option name to encrypted envelope, empty by default).
+  `api_key_env` (nullable text: the declared environment-reference
+  credential field, which is not a model extra and therefore needs
+  its own column), `egress` (nullable boolean), `options` (JSON:
+  the non-secret pass-through keys, exactly today's extras),
+  `secrets` (JSON: option name to encrypted envelope, empty by
+  default).
 - `mcp_servers`: `name` (primary key), `transport`, `command`,
   `args` (JSON), `env` (JSON), `url`, `headers` (JSON), `egress`,
   `tool_timeout_s`, `secrets` (JSON, empty by default). Values
