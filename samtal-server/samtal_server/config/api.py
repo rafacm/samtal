@@ -200,12 +200,18 @@ class SecretValue(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     secret: str = Field(
+        # The runtime parser refuses an empty string, and so does the
+        # repository underneath it, so the document says the same: a
+        # contract that permits what the API refuses is one a client
+        # generator would build the wrong request from.
+        min_length=1,
         description=(
             "The credential, in plaintext, stored encrypted under the newest key in "
             "SAMTAL_MASTER_KEY. It crosses the connection as itself, which is why the "
             "whole API belongs on a loopback connection or behind TLS. It is never "
-            "read back: a read names the slot and masks the value."
-        )
+            "read back: a read names the slot and masks the value. It may not be "
+            "empty."
+        ),
     )
 
 

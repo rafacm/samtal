@@ -172,6 +172,17 @@ def test_a_write_declares_the_entity_schema_it_takes() -> None:
     assert "requestBody" not in paths["/agents/{name}"]["delete"]
 
 
+def test_the_document_permits_no_body_the_api_refuses() -> None:
+    """A contract looser than the code is one a client generator builds
+    the wrong request from. The empty secret is the case: the parser and
+    the repository both refuse it, so the schema says so too."""
+    schemas = json.loads(docgen.openapi())["components"]["schemas"]
+
+    assert schemas["SecretValue"]["properties"]["secret"]["minLength"] == 1
+    assert schemas["SecretValue"]["required"] == ["secret"]
+    assert schemas["SecretValue"]["additionalProperties"] is False
+
+
 def test_a_write_answers_with_what_it_did_and_when_it_applies() -> None:
     """Decision 5's contract, in the document: a write is acknowledged
     rather than silent, and the acknowledgement carries the restart
