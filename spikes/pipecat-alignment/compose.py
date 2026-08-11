@@ -60,9 +60,39 @@ import opuslib  # noqa: E402
 # The rate the pair is written at, as samtal's capture does.
 CAPTURE_RATE = 16000
 
-# What the tap's packets decode to: the rate the server hello announced.
+# The rate everything is recorded and placed at: the output rate the
+# server hello announced, which is what the tap's packets decode to and
+# what the buffer processor is asked to record natively. Every track is
+# laid out here and converted to the capture rate exactly once, at the
+# end, through the same call.
 TAP_RATE = 24000
 TAP_FRAME_MS = 60
+
+# 24 kHz to 16 kHz.
+DOWN_UP, DOWN_DOWN = 2, 3
+
+
+def to_capture_rate(track: np.ndarray) -> np.ndarray:
+    """The one resampler every track goes through, once, whole."""
+    out = resample_poly(track.astype(np.float64), DOWN_UP, DOWN_DOWN)
+    return np.clip(out, -32768, 32767).astype(np.int16)
+
+
+def resampler_delay_samples() -> float:
+    """The group delay `to_capture_rate` introduces, measured.
+
+    `resample_poly` centres its FIR filter and compensates internally,
+    so the expected answer is zero within a sample, but the plan
+    requires the figure recorded rather than assumed. An impulse in,
+    and the distance of the output peak from where an ideal converter
+    would put it, out.
+    """
+    n = 4096
+    impulse = np.zeros(n)
+    impulse[n // 2] = 1.0
+    out = resample_poly(impulse, DOWN_UP, DOWN_DOWN)
+    ideal = (n // 2) * DOWN_UP / DOWN_DOWN
+    return float(np.argmax(np.abs(out)) - ideal)
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -154,16 +184,16 @@ def compose(run: Path) -> None:
     packets = read_packets(run / "tap.opus")
 
     rates = {d["rate"] for d in deliveries}
-    if rates != {CAPTURE_RATE}:
+    if rates != {TAP_RATE}:
         raise SystemExit(
-            f"buffer delivered {sorted(rates)} Hz; the pair is written at "
-            f"{CAPTURE_RATE} Hz and the spike asks the processor for it"
+            f"buffer delivered {sorted(rates)} Hz; every track is laid out at "
+            f"{TAP_RATE} Hz and the spike asks the processor to record natively"
         )
 
     span_s = max(
         [d["t"] for d in deliveries] + [s["t"] for s in sends] + [0.0]
     ) + 1.0
-    n = int(round(span_s * CAPTURE_RATE))
+    n = int(round(span_s * TAP_RATE))
     mic = np.zeros(n, dtype=np.int16)
     ref = np.zeros(n, dtype=np.int16)
     mic_written = np.zeros(n, dtype=bool)
@@ -175,9 +205,9 @@ def compose(run: Path) -> None:
     for d in deliveries:
         count = d["samples"]
         overlap += place(
-            mic, mic_written, user_raw[at : at + count], d["t"], CAPTURE_RATE
+            mic, mic_written, user_raw[at : at + count], d["t"], TAP_RATE
         )
-        place(ref, ref_written, bot_raw[at : at + count], d["t"], CAPTURE_RATE)
+        place(ref, ref_written, bot_raw[at : at + count], d["t"], TAP_RATE)
         at += count
 
     # The tap, on its own 24 kHz timeline, then resampled once over the
@@ -185,8 +215,7 @@ def compose(run: Path) -> None:
     # filter state at every boundary and inject the artefacts under test.
     decoder = opuslib.Decoder(fs=TAP_RATE, channels=1)
     frame = TAP_RATE * TAP_FRAME_MS // 1000
-    tap_n = int(round(span_s * TAP_RATE))
-    tap = np.zeros(tap_n, dtype=np.int16)
+    tap = np.zeros(n, dtype=np.int16)
     tap_end = 0
     tap_gaps = 0
     tap_gap_samples = 0
@@ -198,11 +227,6 @@ def compose(run: Path) -> None:
         if gap and index:
             tap_gaps += 1
             tap_gap_samples += gap
-    tap16 = resample_poly(tap.astype(np.float64), 2, 3)
-    tap16 = np.clip(tap16, -32768, 32767).astype(np.int16)
-    if len(tap16) < n:
-        tap16 = np.concatenate([tap16, np.zeros(n - len(tap16), dtype=np.int16)])
-    tap16 = tap16[:n]
 
     # The other reference pipecat offers: the bot *turn* track, which is
     # extended only with the bot's own audio and delivered once, when the
@@ -222,16 +246,29 @@ def compose(run: Path) -> None:
     for t in turns:
         count = t["samples"]
         turn_overlap += place(
-            turn, turn_written, turn_raw[at_turn : at_turn + count], t["t"], CAPTURE_RATE
+            turn, turn_written, turn_raw[at_turn : at_turn + count], t["t"], TAP_RATE
         )
         at_turn += count
 
+    # Every track has now been laid out at the native 24 kHz on one
+    # timeline. Each is converted to the capture rate exactly once here,
+    # whole and through the same call, which is what the plan requires
+    # and what putting pipecat's own streaming resampler in the path
+    # broke: two implementations, and one of them never flushed.
+    mic16, ref16, turn16, tap16 = (
+        to_capture_rate(track) for track in (mic, ref, turn, tap)
+    )
+    n16 = min(len(mic16), len(ref16), len(turn16), len(tap16))
+    mic16, ref16, turn16, tap16 = (
+        track[:n16] for track in (mic16, ref16, turn16, tap16)
+    )
+
     captures = run / "captures"
     captures.mkdir(exist_ok=True)
-    write_pair(captures, session, mic, ref)
+    write_pair(captures, session, mic16, ref16)
     turn_captures = run / "captures-turn"
     turn_captures.mkdir(exist_ok=True)
-    write_pair(turn_captures, session, mic, turn)
+    write_pair(turn_captures, session, mic16, turn16)
     (run / "tap16k.raw").write_bytes(tap16.tobytes())
 
     # The event track. `heard` carries the utterance duration so the
@@ -266,7 +303,7 @@ def compose(run: Path) -> None:
                 f.write(json.dumps(e) + "\n")
 
     print(f"composed {session} -> {captures}")
-    print(f"  span            : {n / CAPTURE_RATE:.1f} s")
+    print(f"  span            : {n / TAP_RATE:.1f} s, laid out at {TAP_RATE} Hz")
     print(f"  buffer          : {len(deliveries)} deliveries, {at} samples")
     print(f"  buffer overlap  : {overlap} samples ({overlap / at:.4%})")
     print(f"  tap             : {len(packets)} packets at {TAP_RATE} Hz")
@@ -274,9 +311,13 @@ def compose(run: Path) -> None:
         f"  tap gaps        : {tap_gaps} late sends, {tap_gap_samples} samples "
         f"of silence between packets (no overwrites by construction)"
     )
-    print(f"  tap resample    : {tap_n} in -> {len(tap16)} out (24k -> 16k)")
+    print(
+        f"  resample        : {n} in -> {n16} out per track "
+        f"({TAP_RATE} -> {CAPTURE_RATE} Hz), 4 tracks, one call each, "
+        f"filter delay {resampler_delay_samples():+.2f} samples"
+    )
     print(f"  turn track      : {len(turns)} turns, {at_turn} samples "
-          f"({at_turn / CAPTURE_RATE:.1f} s), overlap {turn_overlap}")
+          f"({at_turn / TAP_RATE:.1f} s), overlap {turn_overlap}")
     print(f"  events          : {[e['event'] for e in track]}")
 
 
