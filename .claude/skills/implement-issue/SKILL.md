@@ -1,0 +1,130 @@
+---
+name: implement-issue
+description: Implement a GitHub issue end to end with the samtal plan/review/implement pipeline - committed plan, external plan review, per-milestone subagents in stacked worktrees, a PR per milestone with its own external review round, rebase merges with stacked-PR retargeting. Use for any issue whose settled decisions are ready to be built.
+---
+
+# Implement an issue end to end
+
+The pipeline that shipped #86 (PRs #95/#100/#99/#102) and #101.
+Milestones and stacked PRs are not a token-saving device; they exist
+because a bounded, single-purpose diff gets reviewed instead of
+skimmed, because this repository publishes an image on every push to
+`main` so every merge must be a valid release, because the milestone
+checklist plus the implementation doc lets a fresh session resume
+from the repository alone, and because a per-PR CI run and review
+round attaches findings to the change that caused them. Stacking
+lets milestone N+1 proceed while N sits in review; its price is the
+retargeting discipline under "Merging".
+
+## Preflight
+
+- `git branch --show-current` must say `main`; `git pull --rebase`;
+  stop and ask on any problem with either.
+- `export GH_REPO=rafacm/samtal`, and still pass
+  `--repo rafacm/samtal` on every `gh` call (AGENTS.md says why the
+  flag stays even with the export).
+- All branch work happens in `git worktree`s under the session
+  scratchpad, never in the main checkout: another session may hold
+  it, and worktrees are what let milestones proceed in parallel.
+- Read in full before planning: the issue (its decisions are
+  settled and not re-litigated; its open questions are the plan's
+  to resolve), AGENTS.md, `docs/architecture/principles.md`, the
+  plans and implementation docs of the work this builds on, and the
+  code the issue touches.
+
+## Step 1: the plan
+
+`docs/plans/YYYY-MM-DD-<slug>.md` (today's date) on a
+`feature/<slug>` branch, in the house style of the existing plans:
+goal; the issue's decisions restated, not re-litigated; the issue's
+open questions resolved, each with its reasons; the smaller design
+decisions the issue leaves open, decided with reasons; module
+layout; tests (reuse existing test assets, do not restate them);
+risks with mitigations; milestones as an annotated checklist that
+doubles as the milestone descriptions; the companion
+`-implementation.md` convention named in the goal.
+
+The plan decides the PR structure. The binding constraint: the
+workflow publishes an image on every push to `main`, so every merge
+in the stack must leave `main` releasable, with no state that
+violates a settled decision (two co-equal write paths, a mandatory
+variable CI does not set). Cut milestones so behavior changes sit
+alone in review. Commit the plan.
+
+## Step 2: external plan review
+
+Use the `external-review` skill in plan mode. Record the findings
+as received in a "Plan review round" section (own commit), then
+address each finding with its own amendment commit, appending a
+`*Resolution*` note under the recorded finding.
+
+## Step 3: implement, one subagent per milestone
+
+One general-purpose subagent with model opus per milestone, each in
+its own scratchpad worktree, on a branch stacked on the previous
+milestone's branch. The subagent's brief states, verbatim where
+possible:
+
+- The reviewed plan is the authoritative spec, including its review
+  round; where the brief and the plan disagree, the plan wins.
+- uv only, never pip; everything runs from `samtal-server/`.
+- Small commits: one logical change, imperative ~50-char title, a
+  body explaining what and why, ending with the Claude trailer.
+- No em-dashes anywhere. `config.example.yaml` updates in the same
+  change as any server-section schema change. `CHANGELOG.md`
+  date-based entries. The implementation-doc section is written in
+  the change that ticks its milestone, ticked with "PR TBD" until
+  the PR exists.
+- Honest verification only: `uv run ruff check .`,
+  `uv run pytest tests/unit -q`,
+  `uv run pytest tests/integration -q`, and the doc drift checks,
+  all from `samtal-server/`; anything unverifiable locally (the
+  image, the smoke lane) stated plainly, never claimed.
+- `PYTHONDONTWRITEBYTECODE=1` outside pytest (the stale-bytecode
+  trap in AGENTS.md).
+- No pushes and no GitHub commands from subagents.
+
+If a subagent dies mid-run (machine sleep), resume it with a status
+recap verified from `git log`, not from memory; its commits
+survive. If an agent must be stopped, freeze its branch explicitly
+before touching the branch yourself.
+
+## Step 4: a PR per milestone
+
+Rebase the milestone branch onto its current base first, push, then
+`gh pr create --repo rafacm/samtal`. Title: imperative verb, colon,
+deliverables. Bodies and comments are NEVER hard-wrapped (GitHub's
+breaks extension turns every newline into a line break): one line
+per paragraph and per list item. The body covers what and why,
+decisions and recorded deviations, and a Verification section as a
+task list with honestly checked and unchecked boxes; an unchecked
+box carries a note saying why it is not yet verifiable. Substitute
+the PR number into the plan's milestone tick once the PR exists.
+Wait for CI green before the review round.
+
+## Step 5: external PR review
+
+Use the `external-review` skill in PR mode (the self-posting
+script). Fix every finding with its own commit, delegating to the
+milestone's subagent, which has the context. Record the round in
+the implementation doc, reply on the PR with per-finding
+resolutions and commit hashes, update the PR description, and wait
+for CI again. A finding that invalidates a claim gets a transparent
+correction on the PR.
+
+## Merging
+
+Merge each PR once its review round is fully resolved and CI is
+green with no blocker; stop and ask only when something is red or
+contentious. The stacked-PR trap, learned the hard way in #86: a
+rebase merge that deletes the base branch auto-closes stacked
+children unrecoverably. Retarget every child PR to `main` BEFORE
+merging its parent, and rebase children with `git rebase --onto`
+after each merge.
+
+## Finishing
+
+Update the session's resume-point memory note as milestones land,
+not only at the end. Finish with a summary: per-milestone status,
+every review round's findings and resolutions, verification
+results, and anything left open.
