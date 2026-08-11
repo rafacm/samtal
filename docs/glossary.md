@@ -26,10 +26,11 @@ More: [Speex/SpeexDSP AEC](https://www.speex.org/docs/manual/speex-manual/node7.
 
 ### Agent
 
-One configured persona: a system prompt, an LLM, a voice,
-an ASR language pin, and a tool set. A device is bound to one or
-more agents; the first is active at connect. Older issues say
-"persona"; new writing says agent.
+A named configuration of prompt, providers, voice, and
+MCP tools that holds conversations and accrues memory. A device is
+bound to one or more agents; the default answers a fresh wake. Older
+issues say "persona"; new writing says agent. The full domain model
+is on [the concepts page](concepts.md).
 
 ### ASR (automatic speech recognition)
 
@@ -58,6 +59,15 @@ reply; suppressed attempts are logged with the gate that stopped
 them. The design decision is recorded in
 [the barge-in ADR](adr/2026-08-05-replies-cancel-only-on-evidence-of-speech.md).
 
+### Binding
+
+The link between a device and the agents reachable from
+it, one of which is the designated default that answers a fresh
+wake. Many-to-many: one agent can serve several devices, one device
+can reach several agents. Today it is the device's agent list in
+configuration, first entry the default. See
+[the concepts page](concepts.md#binding).
+
 ### Capture
 
 Per-session recording for field analysis: a stereo WAV
@@ -77,6 +87,17 @@ user gets to finish their own thought. Example from field round 2:
 "I'm here with my..." endpointed, drew the reply "Take your time!",
 and the continuation "I'm here with my kids." then had to fight
 that reply to be heard.
+
+### Conversation
+
+A dialogue between a user and exactly one agent,
+living on the server independently of any device: it accrues a
+transcript and a cost, is suspended rather than ended, and can be
+resumed later, including from a different device. Distinct from a
+session, which is one device connection episode. The persistent
+entity is decided direction; today conversation history lives only
+as long as its session. See
+[the concepts page](concepts.md#conversation-and-session).
 
 ### Conversational filler
 
@@ -167,6 +188,15 @@ name in conversation and executed by the LLM's `switch_agent` tool.
 The tool's enum of bound agents is what maps a near-miss transcript
 ("Mark") onto the right agent (`marc`).
 
+### Help agent
+
+The planned built-in agent bound to every device by
+default. Answers how the device in front of the user works (from the
+per-board device guide, selected by device model at runtime), what
+samtal's concepts mean, and which voice commands the device itself
+publishes as MCP tools. Knows whether its device has a wake word
+enabled, and that the wake word wakes the device, not an agent.
+
 ### Idle timeout
 
 A realtime session with no conversation for the
@@ -210,6 +240,16 @@ on both sides: the device publishes its own controls (volume,
 screen) to the server over it, and the server connects outward to
 configured MCP servers whose tools agents may call.
 More: [modelcontextprotocol.io](https://modelcontextprotocol.io/).
+
+### Meta capability
+
+A samtal-owned tool injected into every agent's
+tool set, so meta questions are answerable in any conversation:
+conversation cost so far, searching and resuming the asking agent's
+past conversations, switching agents. Planned rather than built;
+the handover tool is the piece that exists today. Conversation
+search is deliberately agent-scoped. See
+[the concepts page](concepts.md#meta-capabilities).
 
 ### Opus
 
@@ -301,6 +341,14 @@ every sentence boundary of a multi-sentence reply (issue #37). The
 subtlety is ownership: a synthesized-ahead sentence belongs to the
 agent leg that started it, which matters across a handover.
 
+### Session
+
+One connection episode from one device: wake (button
+press or wake word) to close. A session attaches to a conversation;
+it is not the conversation. Belongs to the device side of the model
+the way a conversation belongs to an agent. See
+[the concepts page](concepts.md#conversation-and-session).
+
 ### Structured event
 
 A named JSONL record the server emits at each conversational
@@ -346,5 +394,8 @@ More: [Silero VAD](https://github.com/snakers4/silero-vad).
 
 An always-on, on-device trigger phrase that opens a
 session hands-free. Supported by the firmware's ESP-SR models; the
-primary test setup uses the conversation button instead.
+primary test setup uses the conversation button instead. The wake
+word wakes the device, never a particular agent: ESP-SR spots it
+on-chip, the server learns only that a session opened, and the
+device's default agent answers.
 More: [ESP-SR](https://github.com/espressif/esp-sr).
