@@ -479,6 +479,139 @@ YAML-backed models, after 4 the issue is done.
   is decided during the milestone 4 editing pass, driven by the
   audit rather than fixed here.
 
+## Plan review round
+
+One external review of the plan as first committed (f87b4e8): codex
+CLI 0.147.0, model gpt-5.6-sol, read-only against this repository
+with the issue #86 body supplied, 2026-08-11. Verdict: ready after
+the P1 and P2 amendments, not ready to implement as is. Findings as
+received, condensed; each carries its resolution once the amendment
+addressing it lands.
+
+1. **P1: encrypted secrets cannot flow through the proposed
+   models.** `ProviderConfig` only represents `api_key_env` and its
+   validator rejects secret-shaped extras; `McpServerConfig.env`
+   and `.headers` are `dict[str, str]`, so an `{"enc": ...}` value
+   cannot pass model validation, and the secret validator would
+   also reject decrypted plaintext. This contradicts both "existing
+   models unchanged in shape" and "every write validates the
+   resulting snapshot through those models". The plan must define a
+   separate persistence representation for stored secret values and
+   an explicit point-of-use resolver, state how provider secret
+   keys map to factory credentials and how MCP encrypted values
+   stay outside `McpServerConfig`, and test building a real
+   provider and MCP manager from encrypted credentials.
+2. **P1: stale domain environment variables will be silently
+   ignored.** pydantic-settings' environment source only looks for
+   known fields and ignores unmatched OS variables even with
+   `extra="forbid"`, so a stale `SAMTAL_DEFAULT_AGENT` or
+   `SAMTAL_AGENTS__...` would silently stop applying instead of
+   producing the moved-key boot error. The loader must explicitly
+   scan `os.environ` for the removed domain prefixes, including
+   nested `__` forms, while allowing reserved variables, with one
+   test per removed prefix.
+3. **P1: the switchover cannot keep the current container and
+   smoke CI green.** The image runs as an unprivileged user with
+   `/data` as its writable volume; `/var/lib/samtal` is neither
+   created nor writable, so "the default matches the deployed
+   container" is false. All three image checks in CI boot from
+   domain-bearing files under `tests/smoke/`, which after the
+   switchover become boot errors or an empty database; the plan
+   only reseeds the integration lane. PR 4 must point the image's
+   database dir at the data volume and redesign every smoke-image
+   setup to seed a database before boot.
+4. **P1: putting boot verification in generic database opening
+   wedges the recovery CLI.** If `open_database()` always verifies
+   every ciphertext, a missing key, wrong key, or corrupt token
+   prevents `show`, `delete`, or replacement commands from running,
+   so the only supported write path cannot repair the condition
+   that prevents boot. Opening and migrating must be separate from
+   server boot verification; masked reads and deletion must not
+   require decryption; `set-secret` requires a valid encryption
+   key; the exhaustive decryptability check runs at server startup.
+5. **P2: the validation modes are not concretely separable.** The
+   current `Config._check_references` combines the default-agent
+   completeness rule with all cross-reference checks in one model
+   validator, and full pipeline completeness is enforced later by
+   provider construction, so "validate the snapshot minus
+   completeness checks" is not an available operation on the models
+   as written. The plan should name independently tested validation
+   phases and how write and boot select them, and the write-time
+   refusal matrix must include deleting an agent still referenced
+   by devices or default_agent.
+6. **P2: CRUD cannot represent several necessary state
+   transitions.** No command clears `default_agent` (so the valid
+   device-allowlist configuration is unreachable once it is set),
+   there is no `clear-secret`, and provider `show` addressing is
+   ambiguous because provider identity is `(stage, name)`. Add
+   explicit unset operations and unambiguous addressing.
+7. **P2: create-or-replace semantics do not define what happens to
+   stored secrets.** A fragment cannot include ciphertext, so
+   whole-row replacement either silently erases secrets or forces
+   round-tripping a masked value; arbitrary `set-secret` keys are
+   also not mapped to known credential slots. Define
+   omitted-secret semantics: preserve stored secrets on entity
+   replacement, modify them only through `set-secret` and
+   `clear-secret`, and define the supported slots and the
+   precedence between encrypted values and environment references.
+8. **P2: snapshot validation and persistence need one serialized
+   transaction.** WAL and a busy timeout do not make
+   read-modify-validate-write atomic: concurrent CLI processes can
+   validate against stale snapshots, lose updates, or race
+   migrations. Require one transaction (`BEGIN IMMEDIATE` with
+   bounded retries) around read, validation, and persistence;
+   specify migration serialization; test two concurrent writers.
+9. **P2: the documented backup procedure is unsafe under WAL.**
+   Copying only `samtal.db` while the server or CLI is active can
+   omit committed data still in the WAL, and "a copy of the file
+   leaks nothing" is too broad since prompts, endpoints, and
+   variable names remain readable. Prescribe the SQLite backup API
+   or a stopped, checkpointed database; escrow every MultiFernet
+   key still required; scope the claim to stored plaintext secrets.
+10. **P2: the wheel packaging test does not test a wheel.** Tests
+    run from the source checkout through the editable environment,
+    which proves nothing about Alembic scripts being included and
+    discoverable in a built wheel. PR 1 must build the wheel,
+    install it into an isolated environment, and migrate a fresh
+    database using only the installed artifact.
+11. **P2: PR 2 exposes a CLI whose writes the server never
+    reads.** During PRs 2 and 3, `config set` succeeds (and may
+    print a restart reminder) but restarting still boots from
+    YAML: two writable configurations and a misleading operational
+    command. Keep the CLI explicitly unavailable until the
+    switchover, print a staging-only warning, or treat PRs 2 to 4
+    as a dependent stack.
+12. **P2: the documentation editing pass is split across PRs
+    inconsistently.** PR 3 performs the editing pass and generates
+    a reference linking to fragments, but the fragments, completed
+    audit, and fragment inventory are deferred to PR 4, which can
+    leave PR 3 with incomplete narrative documentation or broken
+    links. Move the fragments and the completed audit into PR 3
+    while the old YAML still duplicates them; PR 4 removes the
+    domain YAML without documentation judgment mixed in. Also
+    require argparse help text derived from the same
+    `Field.description` values, which the issue explicitly asks.
+13. **P2: secret error-path protections and tests are
+    incomplete.** Interactive stdin can echo a secret; YAML and
+    pydantic failures can expose rejected input in tracebacks;
+    database, migration, malformed-envelope, and cryptography
+    errors are not normalized through `ConfigError`. Require
+    no-echo terminal input, centralized sanitized exception
+    handling, SQLAlchemy parameter logging disabled, and tests
+    over stdout, stderr, logs, and traceback behavior.
+14. **P3: Fernet tokens are not bound to their entity and key
+    location.** Fernet authenticates the token but not where it
+    belongs: a valid ciphertext moved to an attacker-controlled
+    MCP header would decrypt and transmit another stored
+    credential. Consider encrypting a payload containing the
+    plaintext and its canonical location, rejecting a mismatch.
+15. **P3: rotation wording implies completion is possible in this
+    release.** Without the deferred re-encrypt command, adding a
+    new first key only affects newly written secrets; old keys
+    cannot be retired. State that every old key must remain in
+    `SAMTAL_MASTER_KEY` until all tokens have been rewritten by
+    future tooling.
+
 ## Milestones
 
 One PR per milestone, ticked with its PR number, each linking to
