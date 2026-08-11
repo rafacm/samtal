@@ -9,6 +9,33 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **Every deployment must set `SAMTAL_API_SECRET` before upgrading**
+  (#101). The configuration API is always mounted and always behind a
+  bearer token, deliberately without an `enabled` flag, so a server
+  started with that variable unset or blank refuses to boot. The
+  refusal names the variable, prints
+  `SAMTAL_API_SECRET=$(openssl rand -hex 32)`, and says that the token
+  grants everything the API can do, so it belongs on a loopback
+  connection or behind TLS. `server.api.secret_env` renames the
+  variable for a deployment that wants another one.
+
+- **`server.auth.secret_env` and `server.api.secret_env` must hold the
+  name of an environment variable** (#101), the rule a provider's
+  `*_env` keys already follow. Pasting a secret into either key is now
+  refused when the configuration is read, with a message that says
+  what the key must hold and shows an example rather than quoting what
+  was written. This is a behavior change and worth being honest about:
+  a pasted value never worked, because the name is looked up in the
+  environment and no lookup of a pasted secret succeeds, so such a
+  configuration was already failing, only later and while echoing the
+  paste.
+
+- The repository's refusals carry types (`UnknownEntityError`,
+  `DatabaseBusyError`, `StorageError`, all subclassing `ConfigError`)
+  so that the API can map a refusal to a status code without reading
+  its message (#101). No message text changes anywhere, and the CLI
+  prints exactly what it printed before.
+
 - **The server boots its domain half from the database** (#86). The
   YAML file keeps `server:` and `memory:`; providers, MCP servers,
   agent defaults, agents, devices and the default agent now come from
@@ -51,6 +78,30 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   boot-time snapshot does have.
 
 ### Added
+
+- **A REST API for the domain configuration, mounted at `/api`**
+  (#101), as a skeleton: the namespace exists, is gated, and has no
+  routes yet. Every request under it must carry
+  `Authorization: Bearer <token>` whose value is the environment
+  variable `server.api.secret_env` names, and one that does not is
+  refused with 401 whether or not the path it asked for exists, since
+  only an authenticated caller gets to learn which routes there are.
+  Refusals from the repository keep their exact wording and gain a
+  status code: 404 for a missing entity, 409 for the retryable busy
+  lock, 500 for stored state that cannot be read, 422 for everything
+  else. No request body and no traceback is ever quoted back.
+
+  `samtal-server config openapi` prints the API's OpenAPI document,
+  generated from its routes and committed at
+  `docs/reference/api-openapi.json`, where CI regenerates and diffs it
+  the way it already does the domain reference. Like `config schema`
+  and `config reference` it is read-only: no configuration file, no
+  database, no encryption key, no token.
+
+  Nothing about a device conversation changes, and the device-facing
+  endpoints are structurally absent from the API's document: the API
+  is a second application mounted on the server's port, not a router
+  on the one that serves devices.
 
 - Generated documentation for the domain configuration (#86). Every
   domain model field now carries a description, and three renderings
