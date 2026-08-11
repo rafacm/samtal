@@ -64,11 +64,15 @@ key, default `/var/lib/samtal`, holding one SQLite file named
 key, mirroring `memory.dir` and `capture.dir`, and it leaves room
 for database-adjacent artifacts later without a second path key.
 
-The default matches the deployed container. On a development
-machine `/var/lib/samtal` is usually not writable; opening the
-database creates the directory when it can and otherwise fails with
-an error naming `server.database.dir`, so the failure tells you
-which key to point somewhere writable
+`/var/lib/samtal` is the generic model default, not what the
+container runs with: the image runs as an unprivileged user whose
+writable volume is `/data` (`Dockerfile`), so the image sets
+`SAMTAL_SERVER__DATABASE__DIR=/data/db` in its environment, the
+same way its other paths already live on the volume. On a
+development machine `/var/lib/samtal` is usually not writable
+either; opening the database creates the directory when it can and
+otherwise fails with an error naming `server.database.dir`, so the
+failure tells you which key to point somewhere writable
 (`SAMTAL_SERVER__DATABASE__DIR=./var` or the config file). What a
 backup must include is the database file and the master key, which
 lives only in the deployment environment; the deployment notes
@@ -437,7 +441,15 @@ change that ticks its milestone:
    `SAMTAL_` env vars refuse boot naming the move;
    `config.example.yaml` shrinks; the example fragments land with
    the comment audit completed; the integration lane seeds its
-   domain config through the repository; README, deployment notes
+   domain config through the repository; the container image and
+   the smoke lane move with the switchover in the same PR: the
+   `Dockerfile` points `server.database.dir` at the data volume,
+   and every smoke-image check in the workflow (the full
+   conversation, the external-provider slim boot, and the
+   missing-local-extra refusal) is redesigned to seed its domain
+   configuration into a database on the mounted volume through the
+   CLI before booting the container, replacing the domain half of
+   the `tests/smoke/config*.yaml` files; README, deployment notes
    (master key generation, database dir, what a backup must
    include, edits apply at restart), checkpoint workflow docs.
 
@@ -468,6 +480,14 @@ YAML-backed models, after 4 the issue is done.
   scenarios keep their assertions. The switchover PR carries this
   churn; behavior assertions do not change, the same bar as the
   boundary refactor.
+- **Smoke** (`tests/smoke` and the image jobs in the workflow):
+  the three image checks boot from domain-bearing YAML files
+  today, which the switchover turns into boot errors. Each check
+  gains a seeding step that writes its domain configuration into
+  a database on the mounted data volume (running the CLI from the
+  image itself, so the seeding also exercises the shipped
+  artifact) before the container starts; the
+  `tests/smoke/config*.yaml` files shrink to their server halves.
 - The CI drift check is itself the test for the committed
   reference.
 
@@ -578,6 +598,14 @@ addressing it lands.
    only reseeds the integration lane. PR 4 must point the image's
    database dir at the data volume and redesign every smoke-image
    setup to seed a database before boot.
+   *Resolution*: the database-path section now names
+   `/var/lib/samtal` as the generic model default and has the
+   image set `SAMTAL_SERVER__DATABASE__DIR=/data/db`; PR 4's scope
+   and a new smoke bullet in the tests section cover the
+   `Dockerfile` change and the redesign of all three image checks
+   to seed their domain configuration through the CLI, from the
+   image itself, onto the mounted volume before boot, with the
+   smoke config files shrunk to their server halves.
 4. **P1: putting boot verification in generic database opening
    wedges the recovery CLI.** If `open_database()` always verifies
    every ciphertext, a missing key, wrong key, or corrupt token
