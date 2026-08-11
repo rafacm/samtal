@@ -263,14 +263,23 @@ newest key, decryption tries them in order, so rotation is add the
 new key, restart, re-encrypt at leisure (the re-encrypt command
 stays deferred until rotation is actually needed, per the issue).
 
-Boot-time key check, same fail-at-boot pattern as `auth.enabled`:
-opening the database enumerates the stored envelopes; if any
-ciphertext exists and the key is missing, or any stored token fails
-to decrypt under every configured key, the server refuses to start
-with an error naming the entity and key location. The verification
-pass discards plaintext immediately; materialized secrets exist
-only at the point of use (building a provider, connecting an MCP
-server), are never stored on a model, and are never logged.
+Boot-time key check, same fail-at-boot pattern as `auth.enabled`,
+and deliberately not part of opening the database: `open_database`
+only opens and migrates, so the CLI keeps working when the key is
+missing, wrong, or a token is corrupt, which is exactly when the
+CLI is the recovery tool (`show` stays masked and needs no
+decryption, `delete` and `clear-secret` remove what cannot be
+read, a fresh `set-secret` replaces it). The exhaustive check is
+`verify_secrets`, run by server startup: it enumerates the stored
+envelopes, and if any ciphertext exists with no key configured, or
+any stored token fails to decrypt under every configured key, the
+server refuses to start with an error naming the entity and slot.
+`set-secret` is the one CLI command that requires a valid
+encryption key (it cannot write without one); everything else
+touches ciphertext only as opaque data. The verification pass
+discards plaintext immediately; materialized secrets exist only at
+the point of use (building a provider, connecting an MCP server),
+are never stored on a model, and are never logged.
 `config show` and `config list` render an encrypted value as a
 fixed mask and an environment reference as the reference itself,
 which is not a secret.
@@ -299,8 +308,9 @@ paths (`config.providers`, `config.agents`, ...), its helper
 methods (`provider_for_agent`, `mcp_for_agent`,
 `agents_for_device`, ...), and its boot-time cross-reference
 validator, so `app.py` and the call sites do not change shape.
-Boot order: load the file half, open the database (which runs the
-key check), load the snapshot, compose, validate, build the app.
+Boot order: load the file half, open the database, verify the
+stored secrets against the configured keys, load the snapshot,
+compose, validate, build the app.
 
 A domain key left in the YAML file is a boot error naming where it
 moved (`providers: moved to the database; write it with
@@ -326,7 +336,9 @@ domain prefix pins the scan.
 The `local_only` egress check, provider building, MCP connection,
 and everything downstream read the composed `Config` exactly as
 today; the only difference visible to them is where the domain
-half came from.
+half came from. Boot order places `verify_secrets` between opening
+the database and building providers, so a bad key fails with the
+naming error rather than a decryption traceback mid-build.
 
 ## The CLI
 
@@ -426,8 +438,10 @@ change that ticks its milestone:
    outside tests.
 2. **Repository and write path.** `store.py`, the write-time
    validation set, the CLI command group including `set-secret`,
-   `list`, `show` with masking, and the boot key verification in
-   the open path. The server still reads YAML; the database is
+   `list`, `show` with masking, and `verify_secrets` as the
+   startup-only check kept out of `open_database`, tested but not
+   yet called by the still YAML-driven boot. The server still
+   reads YAML; the database is
    fully writable and readable, in parallel, which is what makes
    this PR testable end to end without touching the boot path.
 3. **Generated documentation.** The Field-description editing
@@ -615,6 +629,13 @@ addressing it lands.
    server boot verification; masked reads and deletion must not
    require decryption; `set-secret` requires a valid encryption
    key; the exhaustive decryptability check runs at server startup.
+   *Resolution*: `open_database` now only opens and migrates; the
+   exhaustive check is `verify_secrets`, run by server startup
+   between opening and provider building; `show`, `delete` and
+   `clear-secret` treat ciphertext as opaque data so the CLI
+   remains the recovery tool under a missing or wrong key; only
+   `set-secret` requires a valid key. PR 2 and the milestone
+   wording updated to match.
 5. **P2: the validation modes are not concretely separable.** The
    current `Config._check_references` combines the default-agent
    completeness rule with all cross-reference checks in one model
@@ -718,8 +739,9 @@ its section of the implementation doc when written.
   fragments through them with the write-time validation set;
   `config/cli.py` with set, delete, bind-device,
   set-default-agent, set-secret, list, and show (masked);
-  `main.py` subcommand dispatch; boot key verification wired into
-  the open path. Accept: a scratch database is populated from
+  `main.py` subcommand dispatch; `verify_secrets` implemented and
+  tested, kept out of `open_database` so the CLI works without a
+  key. Accept: a scratch database is populated from
   empty to a full working configuration through CLI calls alone in
   the natural order, every refusal case is tested, secrets are
   masked in all output, the server still boots from YAML
