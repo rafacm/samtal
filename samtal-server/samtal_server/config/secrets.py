@@ -35,6 +35,7 @@ document it failed on, which in this module is the decrypted plaintext.
 
 import json
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal
@@ -137,11 +138,28 @@ def is_envelope(value: object) -> bool:
     )
 
 
+# The two environment-reference spellings, and nothing else, may be
+# displayed. The $NAME form mirrors the models' _ENV_REFERENCE_RE; the
+# bare form is the uppercase name an *_env field holds. Anything that
+# matches neither may be a plaintext secret that ended up in a secret
+# slot, so the display path fails closed rather than passing it on.
+_DOLLAR_REFERENCE_RE = re.compile(r"^\$[A-Za-z_][A-Za-z0-9_]*$")
+_BARE_REFERENCE_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+
+
 def mask(value: object) -> object:
-    """A stored value as it may be displayed. Ciphertext becomes the
-    mask; an environment reference is the name of a variable, not a
-    secret, and passes through as itself."""
-    return MASK if is_envelope(value) else value
+    """A stored secret-slot value as it may be displayed. Only a
+    syntactically valid environment reference passes through, because a
+    reference names a variable and that is not a secret. Everything
+    else becomes the mask: valid ciphertext, malformed envelopes, and
+    stray strings alike, since a malformed value in a secret slot may
+    be a plaintext secret and showing it would make the recovery path
+    the leak."""
+    if isinstance(value, str) and (
+        _DOLLAR_REFERENCE_RE.match(value) or _BARE_REFERENCE_RE.match(value)
+    ):
+        return value
+    return MASK
 
 
 def encrypt(location: SecretLocation, secret: str, keys: MultiFernet | None) -> dict[str, str]:
