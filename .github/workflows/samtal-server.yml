@@ -152,6 +152,10 @@ jobs:
       # Throwaway, and only ever inside this job: the smoke lane needs
       # the signing key to verify the token the server issues it.
       SAMTAL_AUTH_SECRET: smoke-lane-secret-not-a-real-deployment
+      # Also throwaway, and mandatory from the commit that mounts the
+      # configuration API: a server started without it refuses to boot,
+      # so every container below that starts a server is given it.
+      SAMTAL_API_SECRET: smoke-lane-api-token-not-a-real-deployment
     steps:
       - uses: actions/checkout@v7
 
@@ -272,6 +276,7 @@ jobs:
             --entrypoint sh samtal-server:ci-amd64 /smoke/seed-slim.sh
           docker run -d --name slim-boot -p 18003:8003 \
             -e SAMTAL_AUTH_SECRET \
+            -e SAMTAL_API_SECRET \
             -e ANTHROPIC_API_KEY=not-a-real-key \
             -e OPENAI_API_KEY=not-a-real-key \
             -v slim-boot-data:/data \
@@ -302,6 +307,7 @@ jobs:
             --entrypoint sh samtal-server:ci-amd64 /smoke/seed-local-engines.sh
           if docker run --rm --name slim-refuse \
               -e SAMTAL_AUTH_SECRET \
+              -e SAMTAL_API_SECRET \
               -v slim-refuse-data:/data \
               -v "$PWD/tests/smoke/config.local-engines.yaml:/config/config.yaml:ro" \
               samtal-server:ci-amd64 > refusal.log 2>&1; then
@@ -333,6 +339,7 @@ jobs:
           docker run -d --name samtal-smoke \
             -p 8003:8003 \
             -e SAMTAL_AUTH_SECRET \
+            -e SAMTAL_API_SECRET \
             -v smoke-data:/data \
             -v "$PWD/tests/smoke/config.yaml:/config/config.yaml:ro" \
             samtal-server:ci-amd64

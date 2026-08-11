@@ -77,3 +77,15 @@ AUTH_SECRET_ENV = "SAMTAL_AUTH_SECRET"
 TEST_AUTH_SECRET = "test-secret-" + "0123456789abcdef" * 2
 
 os.environ.setdefault(AUTH_SECRET_ENV, TEST_AUTH_SECRET)
+
+# The configuration API is always mounted and always gated, so a server
+# with no token in the environment refuses to boot the same way. The
+# same shape as the auth secret above, and set the same way rather than
+# through an autouse fixture, for the same reason: a module that builds
+# an app while it is being imported needs it before collection, not
+# before the first test runs.
+API_SECRET_ENV = "SAMTAL_API_SECRET"
+
+TEST_API_SECRET = "test-api-token-" + "fedcba9876543210" * 2
+
+os.environ.setdefault(API_SECRET_ENV, TEST_API_SECRET)
