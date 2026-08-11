@@ -61,11 +61,77 @@ Any board supported by xiaozhi-esp32 can work; these are the ones samtal targets
 
 The device runs upstream's prebuilt xiaozhi firmware; the server is samtal's, and ships as a container image.
 
-**1. Run the server.** For a trial on a network you trust, authentication off and everything in one file:
+**1. Write the server half.** One YAML file says how the process runs. A trial needs almost nothing in it:
+
+```yaml
+server:
+  # A trial on a network you trust. Leave it out for anything that
+  # outlives an afternoon: authentication is on by default.
+  auth:
+    enabled: false
+```
+
+Start from [`samtal-server/config.example.yaml`](samtal-server/config.example.yaml), which documents every key of it, or from [`samtal-server/config.deploy.example.yaml`](samtal-server/config.deploy.example.yaml), a ready-to-adapt profile for the container image behind a proxy on a small CPU quota.
+
+**2. Say what the assistant is.** The other half of the configuration (which engines, which persona, which devices) lives in a database on the data volume, written with `samtal-server config`, the CLI the image ships. Seed it before the first start, and the server comes up with an assistant ready to talk. This one is fully local and needs no account anywhere: Silero, faster-whisper, [Ollama](https://ollama.com) and Piper.
+
+```bash
+# The CLI, from the same image, against the volume the server will read.
+samtal() {
+  docker run --rm -i \
+    -v samtal-data:/data \
+    -v /path/to/config.yaml:/config/config.yaml:ro \
+    --entrypoint samtal-server ghcr.io/rafacm/samtal-server:latest "$@"
+}
+
+samtal config set provider vad ears -f - <<'YAML'
+type: silero
+YAML
+
+samtal config set provider asr whisper -f - <<'YAML'
+type: faster_whisper
+model: small
+YAML
+
+samtal config set provider llm local -f - <<'YAML'
+type: openai_compatible
+# Ollama on the host. On Linux, add
+# --add-host=host.docker.internal:host-gateway to the docker run above.
+base_url: http://host.docker.internal:11434/v1
+model: qwen3:8b
+YAML
+
+samtal config set provider tts voice -f - <<'YAML'
+type: piper
+voice: en_US-lessac-medium
+YAML
+
+samtal config set agent-defaults -f - <<'YAML'
+llm: local
+asr: whisper
+tts: voice
+vad: ears
+YAML
+
+samtal config set agent assistant -f - <<'YAML'
+prompt: >
+  You are a helpful voice assistant. Keep replies short, plain and
+  speakable, and always reply in the language the user spoke.
+YAML
+
+# Which agent an unknown device reaches. Bind specific devices instead
+# with: samtal config bind-device aa:bb:cc:dd:ee:ff assistant
+samtal config set-default-agent assistant
+
+samtal config list
+```
+
+The order matters: a write whose references do not resolve is refused, so the providers come first and the agent that names them second. Every field is documented in [`docs/reference/domain-config.md`](docs/reference/domain-config.md), generated from the models, and [`samtal-server/examples/`](samtal-server/examples/) holds a commented fragment per entity and provider type to copy from, cloud engines included. A credential is never written into a fragment: it names the environment variable holding it, or is stored encrypted with `config set-secret` under a `SAMTAL_MASTER_KEY` you generate once and keep.
+
+**3. Run the server.** For a trial on a network you trust, with the file from step 1:
 
 ```bash
 docker run -d --name samtal -p 8003:8003 \
-  -e SAMTAL_SERVER__AUTH__ENABLED=false \
   -v /path/to/config.yaml:/config/config.yaml:ro \
   -v samtal-data:/data \
   ghcr.io/rafacm/samtal-server:latest
@@ -86,25 +152,13 @@ docker run -d --name samtal -p 8003:8003 \
 
 Generating it inline in the `docker run` would mint a new secret on every restart, and each new secret invalidates the token every device has stored. A device that has one then gets refused until its next OTA check, which it only makes on boot, so it sits there playing an error tone at you.
 
-The mounted YAML is the server half of the configuration: how the process runs. Start from [`samtal-server/config.example.yaml`](samtal-server/config.example.yaml), which documents every key of it, or from [`samtal-server/config.deploy.example.yaml`](samtal-server/config.deploy.example.yaml), a ready-to-adapt profile for the container image behind a proxy on a small CPU quota. Speech models download into the `/data` volume at first start, so the first run takes a few minutes and later ones take seconds.
+Speech models download into the `/data` volume at first start, so the first run takes a few minutes and later ones take seconds. The configuration is read once at boot, so anything written with `samtal config ...` after this point applies when the container is restarted.
 
-**2. Tell it what to say and to whom.** The domain half (providers, MCP servers, agents, device bindings) lives in a database on the same volume, written with `samtal-server config`, which is the CLI the image ships:
+**4. Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`.
 
-```bash
-docker run --rm -v samtal-data:/data \
-  -v /path/to/config.yaml:/config/config.yaml:ro \
-  -v /path/to/fragments:/fragments:ro \
-  --entrypoint samtal-server ghcr.io/rafacm/samtal-server:latest \
-  config set provider llm claude -f /fragments/llm-anthropic.yaml
-```
+**5. Point** the device at your server by writing one NVS key (`wifi/ota_url` = `http://<server-host>:8003/xiaozhi/ota/`) over USB.
 
-Every field of it is documented in [`docs/reference/domain-config.md`](docs/reference/domain-config.md), generated from the models, and [`samtal-server/examples/`](samtal-server/examples/) holds a commented fragment per entity and provider type to copy from. A credential is never written into a fragment: it names the environment variable holding it, or is stored encrypted with `config set-secret` under a `SAMTAL_MASTER_KEY` you generate once and keep. Configuration is read once at boot, so a change applies when the server is restarted.
-
-**3. Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`.
-
-**4. Point** the device at your server by writing one NVS key (`wifi/ota_url` = `http://<server-host>:8003/xiaozhi/ota/`) over USB.
-
-**5. Provision WiFi** from the device's captive portal, press the button, and talk.
+**6. Provision WiFi** from the device's captive portal, press the button, and talk.
 
 The complete procedure, including a fully local zero-API-key pipeline and every serial gotcha, is in [`docs/xiaozhi-notes.md`](docs/xiaozhi-notes.md); the server's own options, security defaults, and container details are in [`samtal-server/README.md`](samtal-server/README.md). samtal has no versioned releases yet: images are tagged `latest`, the build time (`2026-08-03-1200`, UTC), and the commit SHA (`sha-3f9362a`). Only `latest` moves; deploy from one of the other two.
 
