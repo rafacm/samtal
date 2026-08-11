@@ -777,3 +777,145 @@ that needed it.
 Full lanes after the fixes: ruff clean, both suites green, both drift
 checks clean, and the three seeding scripts run against a scratch
 database (counts in the PR's verification section).
+
+## Milestone 4: docs
+
+The sweep the three code milestones deferred. No behavior changes here:
+what landed is the documentation of the surface they built, plus the
+corrections the surface's arrival had made necessary in text nobody had
+reread since.
+
+### What landed
+
+**The server README's API section
+(`samtal-server/README.md`, under Configuration).** What mounts at
+`/api` and that the committed OpenAPI document is the contract; the
+bearer token, where its value comes from, how to generate one, and that
+a caller without it meets 401 whichever path it asked for; the surface
+listed one noun at a time; what a masked read adds to the entity (the
+slots holding a stored secret and the key each displaces) and that a
+stored secret is read back by nothing; PUT as create-or-replace with the
+three argument-shaped bodies named; the acknowledgement and its restart
+notice, which is the boot-time snapshot said in the one place an
+operator meets it; and the refusal mapping with the no-echo rule and the
+reason for it. Then `samtal-server config` as the ergonomic client: the
+URL resolution order, the token from the variable
+`server.api.secret_env` names, exec into the running container as the
+deployment story, the transport refusals, and the explicit timeouts with
+the 409 they exist to let through. Then `--local`: the four commands,
+the notice, why there is no liveness check, and why the concurrency is
+safe anyway.
+
+**The deployment notes (`samtal-server/README.md`, beside the
+configuration database's).** Four decisions, in the order they bite.
+`SAMTAL_API_SECRET` goes into the environment before the image is
+rolled, the boot error being the safety net rather than the plan. What
+happens to `/api/` at the edge, with three answers and a stated
+preference: not routing it outward at all, since it is on the device
+endpoints' port and an edge that routes the port routes the admin
+surface with it. Loopback-or-TLS for the whole API rather than for
+secret writes alone, with the client-side refusal named as the thing
+that enforces it. And the break-glass procedure in full: when it
+applies, the four commands as commands, what each of them needs (no
+token, no server, and the master key only for `set-secret`), what the
+notice on stderr means, and the restart that ends the repair.
+
+**The generated reference (`config/docgen.py`,
+`docs/reference/domain-config.md`).** Two paragraphs of prose, edited on
+docgen and regenerated: that the `samtal-server config` commands are a
+client of the API and therefore need a running server, that a fragment
+is the body of a PUT validated in the same one place whichever way it
+arrived, where the API's own document is, and that `--local` is the
+recovery subset. The schema paragraph gains the sentence a machine
+client needs, that the same schemas are in the API's document under
+`components`.
+
+**The root README.** Getting Started was already reordered to
+start-configure-restart by milestone 3, and reads coherently with the
+API section as it stands. What it lacked was the from-outside case:
+one paragraph after step 3 naming `--api-url` and `SAMTAL_API_URL`,
+saying that the client refuses a plain `http://` connection to another
+host, and linking the server README's API section and the committed
+document. The hardware tables are untouched, so the sync rule with
+`samtal-esp32/README.md` is not in play.
+
+**`config.example.yaml`.** Two comments, described under the deviations
+below.
+
+**`CHANGELOG.md`.** One Added entry for the sweep and one Fixed entry
+for the statements the API's arrival had made untrue, under a
+`2026-08-12` section, which is the date these commits carry.
+
+### Deviations from the plan
+
+**`config.example.yaml` did change.** Milestone 3's note for this one
+said it needed nothing, because the schema had not moved, and the schema
+had indeed not moved. Two of its comments had gone stale for another
+reason: the database section said the file is written by the
+`samtal-server config` commands, which since the switchover write
+through the server, and it offered
+`SAMTAL_SERVER__DATABASE__DIR=./var ... config list` as the example of
+pointing the directory somewhere writable, which is now a command that
+does not open the database at all and would ignore the variable. Both
+are corrected, and the header gains the two sentences that say the
+commands need a running server and that `--local` is the recovery path.
+The `server.api` block itself needed nothing: it has said what is true
+since milestone 1 wrote it.
+
+**The sweep also corrected four claims the milestone's scope did not
+name.** The plan's Docs bullet lists the new sections. Writing them made
+four older statements visibly false: the opening summary of what the
+server exposes and Security's "nothing else is exposed", neither
+mentioning `/api/`; the Stack section's "the future admin API, which is
+what the command grammar is a rehearsal of"; and Configuration's "hot
+apply is what the admin API will bring", when the API that arrived
+answers with the same restart notice the CLI prints. Leaving them would
+have made the new section argue with the file around it, so they are
+corrected in the same commit that introduces the section, and the
+changelog separates them from the additions as a Fixed entry.
+
+### Discoveries
+
+**The deployment story was already in the code's own sentences.** The
+CLI's missing-token refusal and its remote-`http://` refusal both name
+exec into the running container as the way forward, so the deployment
+notes are documenting behavior an operator meets anyway rather than
+adding a policy the code does not know about. That is the shape to keep:
+where a note and a message disagree, the message is what an operator
+actually reads.
+
+**`--local` needs the master key only for `set-secret`.** The other
+three commands never decrypt: a read is masked, `clear-secret` removes
+an envelope without opening it, and `delete` drops rows. That is what
+makes the recovery path usable on the deployment whose key is the
+problem, and it is worth stating in the procedure, because "run these
+four commands" reads as though all four want the same environment.
+
+**`server.ota_path`'s reserved-prefix rule turns the Security claim into
+a rule.** "Nothing else is exposed" used to be a description of the
+routes as written; with the OTA path refused under `/api/` (PR #104's
+first review finding), the claim is enforced by a validator rather than
+by nobody having done it yet, so it is stated that way.
+
+### The issue is delivered
+
+Issue #101's five checklist items, across the four PRs of the stack:
+
+- **The API skeleton**, PR #104: `server.api.secret_env`, the mounted
+  sub-application, the token gate, the typed refusals, `config openapi`
+  and the committed document with its CI check.
+- **Entity routes**, PRs #105 and #106: every read in the former, every
+  write in the latter, one noun per entity kind with the identity in
+  the path.
+- **Secret routes**, PR #106: write-only, plaintext in the body of a
+  PUT and in nothing else, masked everywhere it is read.
+- **The CLI refactor**, PR #106: the grammar unchanged, the backend
+  swapped to the API, the scenario tests converted into the acceptance
+  suite, and the `--local` recovery subset with its notice.
+- **Docs**, this PR.
+
+What the issue deferred stays deferred and is recorded in the plan's
+open questions: serving the document live at an authenticated endpoint,
+an unmasked export for backup tooling, and an `api.enabled` switch or a
+bind option. Hot apply is a later issue; every write says so in the
+meantime.
