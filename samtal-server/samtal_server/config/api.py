@@ -10,10 +10,11 @@ decorator could forget. And `local_only` stays one sentence in
 nothing anywhere, so it needs no egress declaration.
 
 Nothing here decides anything about the configuration. The repository
-(`store.py`) validates fragments, checks references and keeps secrets
-write-only; a handler that restated any of that would be the bug. What
-this module owns is transport: the token, the status code a refusal
-maps to, and the shape of an error body.
+(`store.py`) validates fragments, checks references, decides what
+exists and keeps secrets write-only; `views.py` decides what a read may
+show. A handler that restated any of that would be the bug. What this
+module owns is transport: the token, the path an entity is addressed
+by, the status code a refusal maps to, and the shape of a body.
 
 The gate is ASGI middleware, not a dependency, because a dependency
 only runs for a matched route: an unmatched path inside /api would
@@ -30,15 +31,17 @@ import logging
 import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.routing import Route
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from samtal_server.config import views
 from samtal_server.config.docgen import API_OPTIONS_NOTE
 from samtal_server.config.loader import (
     ConfigError,
@@ -46,7 +49,14 @@ from samtal_server.config.loader import (
     StorageError,
     UnknownEntityError,
 )
-from samtal_server.config.models import API_MOUNT_PATH, Config
+from samtal_server.config.models import (
+    API_MOUNT_PATH,
+    AgentConfig,
+    AgentDefaults,
+    Config,
+    McpServerConfig,
+    ProviderConfig,
+)
 from samtal_server.config.secrets import load_keys
 from samtal_server.config.store import ConfigStore
 from samtal_server.db import open_database
@@ -113,6 +123,157 @@ MALFORMED_REQUEST = (
 # something in the request. The log records that it happened and what
 # kind of failure it was, and deliberately no more than that.
 UNEXPECTED = "the server failed to handle this request; the failure is recorded in its log"
+
+# The entity models the document carries the schemas of. FastAPI
+# collects the models its own routes declare, and the write routes will
+# declare none: a fragment is received as a raw object and validated in
+# the repository, because FastAPI's own validation echoes the input it
+# rejected and a fragment can carry a pasted credential. So they are
+# injected below instead, which is also what a client that has read an
+# envelope needs in order to write one back.
+ENTITY_MODELS: tuple[type[BaseModel], ...] = (
+    ProviderConfig,
+    McpServerConfig,
+    AgentConfig,
+    AgentDefaults,
+)
+
+# How the document describes each refusal a route can answer with. The
+# sentence a caller actually receives is the repository's own; these say
+# what the status means.
+PROBLEM_DESCRIPTIONS: dict[int, str] = {
+    401: "The request carried no bearer token, or not the one this server was given.",
+    404: "Nothing of that identity exists.",
+    409: (
+        "Another process holds the configuration database's write lock. Nothing was "
+        "changed and the request can be retried."
+    ),
+    422: (
+        "The request names something that cannot be addressed, such as a stage that is "
+        "not a provider stage or a MAC address that is not one."
+    ),
+    500: (
+        "The stored configuration cannot be read, or the request failed for a reason "
+        "that is not the caller's. The details are in the server's log."
+    ),
+}
+
+
+# The transport shapes
+#
+# Declared as response models so that the document carries real schemas
+# rather than the empty objects an untyped dictionary return would
+# produce. They are shapes and not a second validation layer: what
+# `views` builds passes through them unchanged, and nothing here decides
+# what a read may show.
+
+
+class SecretSlot(BaseModel):
+    """One slot of an entity that holds a secret stored in the database."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    shadows: str | None = Field(
+        default=None,
+        description=(
+            "The entity key this stored secret displaces, or null when the entity "
+            "writes no reference for the slot. A stored secret takes precedence over "
+            "an environment reference written for the same slot, and this names what "
+            "it takes the place of."
+        ),
+    )
+
+
+class Envelope(BaseModel):
+    """One entity as a read returns it: the entity, and its stored-secret
+    slots beside it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    entity: dict[str, Any] = Field(
+        description=(
+            "The entity's body in the shape a write of it accepts, with every "
+            "secret-bearing value masked. Described rather than validated here: a "
+            "masked value is not one the entity model would accept back, so the "
+            "entity schemas under `components/schemas` are what say which keys a "
+            "write may carry."
+        )
+    )
+    secrets: dict[str, SecretSlot] = Field(
+        description=(
+            "The slots holding a secret stored in the database, by slot name, and "
+            "never their values: reads are masked. Empty for the kinds that can hold "
+            "no stored secret (agents, agent defaults, devices), so that every read "
+            "has one shape."
+        )
+    )
+
+
+class StoredSecretLocation(BaseModel):
+    """Where one stored secret is, in the whole-configuration read."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str = Field(description="The kind of entity holding it: provider or mcp_server.")
+    identity: str = Field(
+        description=(
+            "The entity's identity: `<stage>.<name>` for a provider, the name for an "
+            "MCP server."
+        )
+    )
+    slot: str = Field(description="The credential slot inside that entity.")
+    shadows: str | None = Field(
+        default=None, description="The entity key this stored secret displaces, or null."
+    )
+
+
+class ConfigDocument(BaseModel):
+    """The whole domain configuration of one deployment, masked."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    config: dict[str, Any] = Field(
+        description=(
+            "The domain half of the configuration (providers, MCP servers, agent "
+            "defaults, agents, devices, the default agent) in the shape "
+            "`docs/reference/domain-config.md` documents, with every secret-bearing "
+            "value masked."
+        )
+    )
+    secrets: list[StoredSecretLocation] = Field(
+        description=(
+            "Where every secret stored in the database is, which the masked document "
+            "above cannot say. A list rather than a mapping, because a location is "
+            "three fields and not a key."
+        )
+    )
+
+
+class DefaultAgent(BaseModel):
+    """The agent an unbound device reaches."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(
+        default=None,
+        description=(
+            "The default agent's name, or null when none is set, which leaves the "
+            "devices map as the allowlist."
+        ),
+    )
+
+
+class Problem(BaseModel):
+    """A refusal, in the repository's own words."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    detail: str = Field(
+        description=(
+            "What was refused and why, the same sentence the `samtal-server config` "
+            "command prints for it. It never quotes what was sent."
+        )
+    )
 
 
 def build_api(token: str, database_dir: Path) -> FastAPI:
@@ -188,6 +349,129 @@ def store_dependency(directory: Path) -> Callable[[], Iterator[ConfigStore]]:
             engine.dispose()
 
     return store
+
+
+def _store(request: Request) -> Iterator[ConfigStore]:
+    """The repository, for the length of one request.
+
+    Taken from the application rather than closed over by the routes, so
+    that the document can be rendered from an application built without
+    a database directory: `build_api` attaches the dependency and
+    `document()` never resolves it.
+    """
+    yield from request.app.state.store()
+
+
+StoreDep = Annotated[ConfigStore, Depends(_store)]
+
+
+def _problems(*statuses: int) -> dict[int | str, dict[str, Any]]:
+    """The refusals a route can answer with, as the document describes
+    them. Declaring 422 here also replaces FastAPI's own
+    validation-error response, which describes a body shape the
+    sanitized handler never sends."""
+    return {
+        status: {"model": Problem, "description": PROBLEM_DESCRIPTIONS[status]}
+        for status in statuses
+    }
+
+
+def _reads(api: FastAPI) -> None:
+    """Every read the API serves.
+
+    Each handler is one repository call and one view, and restates
+    nothing: which entity exists is the repository's decision, what a
+    read may show is the view's, and what is left here is the path, the
+    status code and the shape. They are plain `def`, so FastAPI runs
+    them on the threadpool and the synchronous repository never blocks
+    the event loop.
+
+    An identity rides in the path as one decoded segment, so a name
+    carrying a space, a percent sign or a character outside ASCII is
+    reached by percent-encoding it and nothing else.
+    """
+
+    @api.get("/config", response_model=ConfigDocument, responses=_problems(401, 409, 500))
+    def read_config(store: StoreDep) -> dict[str, Any]:
+        """The whole domain configuration, masked, with the location of
+        every stored secret beside it."""
+        return views.config(store.load())
+
+    @api.get(
+        "/providers",
+        response_model=dict[str, dict[str, Envelope]],
+        responses=_problems(401, 409, 500),
+    )
+    def read_providers(store: StoreDep) -> dict[str, Any]:
+        """Every provider, by stage and then by name: a provider is
+        addressed by the two together, since two stages may hold one
+        name."""
+        return views.providers(store.load())
+
+    @api.get(
+        "/providers/{stage}/{name}",
+        response_model=Envelope,
+        responses=_problems(401, 404, 409, 422, 500),
+    )
+    def read_provider(stage: str, name: str, store: StoreDep) -> dict[str, Any]:
+        """One provider."""
+        return views.provider(store.read_provider(stage, name))
+
+    @api.get(
+        "/mcp-servers", response_model=dict[str, Envelope], responses=_problems(401, 409, 500)
+    )
+    def read_mcp_servers(store: StoreDep) -> dict[str, Any]:
+        """Every MCP server, by name."""
+        return views.mcp_servers(store.load())
+
+    @api.get(
+        "/mcp-servers/{name}",
+        response_model=Envelope,
+        responses=_problems(401, 404, 409, 422, 500),
+    )
+    def read_mcp_server(name: str, store: StoreDep) -> dict[str, Any]:
+        """One MCP server."""
+        return views.mcp_server(store.read_mcp_server(name))
+
+    @api.get("/agents", response_model=dict[str, Envelope], responses=_problems(401, 409, 500))
+    def read_agents(store: StoreDep) -> dict[str, Any]:
+        """Every agent, by name."""
+        return views.agents(store.load())
+
+    @api.get(
+        "/agents/{name}", response_model=Envelope, responses=_problems(401, 404, 409, 422, 500)
+    )
+    def read_agent(name: str, store: StoreDep) -> dict[str, Any]:
+        """One agent."""
+        return views.agent(store.read_agent(name))
+
+    @api.get("/agent-defaults", response_model=Envelope, responses=_problems(401, 409, 500))
+    def read_agent_defaults(store: StoreDep) -> dict[str, Any]:
+        """What every agent uses unless it names something else. One
+        entry for the whole deployment, and never missing: an unwritten
+        one reads as the empty entry."""
+        return views.agent_defaults(store.read_agent_defaults())
+
+    @api.get("/devices", response_model=dict[str, Envelope], responses=_problems(401, 409, 500))
+    def read_devices(store: StoreDep) -> dict[str, Any]:
+        """Every device binding, by the canonical form of its MAC."""
+        return views.devices(store.load())
+
+    @api.get(
+        "/devices/{mac}", response_model=Envelope, responses=_problems(401, 404, 409, 422, 500)
+    )
+    def read_device(mac: str, store: StoreDep) -> dict[str, Any]:
+        """One device's binding. The MAC is normalized before it is
+        looked up, so `AA-BB-...` and `aa:bb:...` reach the same
+        device."""
+        return views.device(store.read_device(mac))
+
+    @api.get("/default-agent", response_model=DefaultAgent, responses=_problems(401, 409, 500))
+    def read_default_agent(store: StoreDep) -> dict[str, Any]:
+        """The agent an unbound device reaches, or null. Unset is a
+        configuration rather than a missing entity, so this is never a
+        404."""
+        return views.default_agent(store.read_default_agent())
 
 
 def mount_api(app: FastAPI, api: FastAPI) -> None:
@@ -340,6 +624,7 @@ def _application() -> FastAPI:
     for refusal, status in REFUSAL_STATUS.items():
         api.add_exception_handler(refusal, _refusal(status))
     api.add_exception_handler(RequestValidationError, _malformed_request)
+    _reads(api)
     return api
 
 
@@ -371,11 +656,11 @@ async def _malformed_request(request: Request, exc: Exception) -> JSONResponse:
 
 
 def _openapi(api: FastAPI) -> Callable[[], dict[str, Any]]:
-    """The document, with the four things FastAPI's default generation
-    cannot know: the fixed contract version, the mount prefix, the
-    bearer scheme (enforcement is middleware, so no dependency carries
-    it), and the document-level requirement that it applies to every
-    operation."""
+    """The document, with the things FastAPI's default generation cannot
+    know: the fixed contract version, the mount prefix, the bearer
+    scheme (enforcement is middleware, so no dependency carries it), the
+    document-level requirement that it applies to every operation, and
+    the entity schemas nothing in the running application declares."""
 
     def openapi() -> dict[str, Any]:
         schema = get_openapi(
@@ -386,6 +671,7 @@ def _openapi(api: FastAPI) -> Callable[[], dict[str, Any]]:
             servers=api.servers,
         )
         components = schema.setdefault("components", {})
+        components.setdefault("schemas", {}).update(_entity_schemas())
         components.setdefault("securitySchemes", {})[BEARER_SCHEME] = {
             "type": "http",
             "scheme": "bearer",
@@ -399,6 +685,25 @@ def _openapi(api: FastAPI) -> Callable[[], dict[str, Any]]:
         return schema
 
     return openapi
+
+
+def _entity_schemas() -> dict[str, Any]:
+    """The entity models as components, each with its nested `$defs`
+    hoisted beside it.
+
+    Hoisted because a `$ref` into `components/schemas` has to resolve
+    there, and pydantic nests a model's definitions one level down
+    inside its own schema. This is the seam the write routes will use:
+    their request bodies name these components through `openapi_extra`
+    while the running code keeps validating in exactly one place, the
+    repository.
+    """
+    schemas: dict[str, Any] = {}
+    for model in ENTITY_MODELS:
+        schema = model.model_json_schema(ref_template="#/components/schemas/{model}")
+        schemas.update(schema.pop("$defs", {}))
+        schemas[model.__name__] = schema
+    return schemas
 
 
 __all__ = [

@@ -119,6 +119,53 @@ def test_the_bearer_scheme_is_stated_and_required() -> None:
     assert document["security"] == [{BEARER_SCHEME: []}]
 
 
+def test_the_document_describes_every_read_the_api_serves() -> None:
+    """The document is generated from the routes, so this is what makes
+    a route added without a thought for the contract visible."""
+    paths = json.loads(docgen.openapi())["paths"]
+
+    assert set(paths) == {
+        "/config",
+        "/providers",
+        "/providers/{stage}/{name}",
+        "/mcp-servers",
+        "/mcp-servers/{name}",
+        "/agents",
+        "/agents/{name}",
+        "/agent-defaults",
+        "/devices",
+        "/devices/{mac}",
+        "/default-agent",
+    }
+    assert all(set(operations) == {"get"} for operations in paths.values())
+
+
+def test_every_refusal_a_read_can_answer_with_is_described() -> None:
+    """A status code is part of this contract, so a client generator has
+    to find all of them, each carrying the one error shape."""
+    read = json.loads(docgen.openapi())["paths"]["/providers/{stage}/{name}"]["get"]
+
+    assert set(read["responses"]) == {"200", "401", "404", "409", "422", "500"}
+    for status in ("401", "404", "409", "422", "500"):
+        schema = read["responses"][status]["content"]["application/json"]["schema"]
+        assert schema == {"$ref": "#/components/schemas/Problem"}
+
+
+def test_the_entity_schemas_are_registered_with_their_definitions() -> None:
+    """The write routes will receive raw objects, so FastAPI collects
+    none of these models on its own: they are injected, with their
+    nested definitions hoisted beside them, which is what makes a $ref
+    to one of them resolve."""
+    schemas = json.loads(docgen.openapi())["components"]["schemas"]
+
+    for name in ("ProviderConfig", "McpServerConfig", "AgentConfig", "AgentDefaults"):
+        assert name in schemas
+    # Nested one level down in pydantic's own output, and a component of
+    # its own here.
+    assert "FillerConfig" in schemas
+    assert "$defs" not in schemas["AgentConfig"]
+
+
 def test_the_description_admits_the_provider_options_contract() -> None:
     """The one part no schema can describe, in the words the markdown
     reference uses for it."""
