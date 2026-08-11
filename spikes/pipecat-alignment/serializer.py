@@ -1,0 +1,164 @@
+"""The xiaozhi frame serializer for pipecat's websocket transport.
+
+Gate 2's measured artifact. It mirrors the semantics of samtal's own
+device boundary (`samtal_server/device/boundary.py`): mic audio and the
+protocol's turn-taking acts inbound, transcript, speaking state and
+paced reply audio outbound. Everything here would have to exist, and be
+maintained, in any pipecat adoption; the harness around it (the canned
+reply, the tap, the composer) would not.
+
+Three things are worth reading before the code, because each is a gate
+2 finding rather than an implementation detail.
+
+**The serializer cannot answer a message, and never sees an outbound
+control frame.** Its only handle on the world is `setup(StartFrame)`,
+which carries sample rates and no transport, so the hello handshake
+cannot live here. Nor can the `tts` and `stt` messages: pipecat's
+websocket output transport delivers audio and transport messages to
+`serialize` and drops every other outbound frame (`control.py` has the
+detail). Both therefore live in `control.py`, and what remains here is
+codec translation plus the JSON that control hands down. That split is
+not a style choice, it is what the contract allows.
+
+**One payload per frame.** `serialize` returns a single `str | bytes |
+None`, so a chunk of PCM that fills two Opus packets can only return
+one of them. samtal's boundary has `encode_audio` return a *batch*
+(`PlayableAudio`) for exactly this reason. The serializer therefore
+keeps its own encode buffer and the transport is configured to hand it
+exactly one frame's worth at a time; the buffer exists to make the
+mismatch safe rather than to use it.
+
+**Pacing lives here, and should not have to.** pipecat's websocket
+output transport sleeps half a chunk's duration per chunk, so a reply
+leaves the socket at twice real time (feasibility checkpoint, finding
+4). A device is not a socket: xiaozhi firmware expects one 60 ms packet
+per 60 ms. `_pace` is the production-representative pacing that
+absence forces, and it is counted as adapter code deliberately: the
+plan's qualitative bar names "re-implements scheduling or pacing the
+framework claims to own" as evidence against adoption, and this is
+that.
+"""
+
+import asyncio
+import ctypes.util
+import json
+import time
+
+from pipecat.frames.frames import (
+    Frame,
+    InputAudioRawFrame,
+    InputTransportMessageFrame,
+    InterruptionFrame,
+    OutputAudioRawFrame,
+    OutputTransportMessageFrame,
+    OutputTransportMessageUrgentFrame,
+    StartFrame,
+)
+from pipecat.serializers.base_serializer import FrameSerializer
+
+if ctypes.util.find_library("opus") is None:
+    # opuslib binds libopus by name; the simulator ships a copy for
+    # platforms without one installed, and its shim is the supported way
+    # to point ctypes at it.
+    from xiaozhi_sdk.utils import setup_opus
+
+    setup_opus()
+
+import opuslib  # noqa: E402
+
+# What devices send: 16 kHz mono Opus in 60 ms frames. Fixed by the
+# firmware, not negotiable from here.
+DEVICE_SAMPLE_RATE = 16000
+FRAME_MS = 60
+
+# What the server announces in its hello and speaks back, as
+# samtal-server does.
+OUTPUT_SAMPLE_RATE = 24000
+
+
+class XiaozhiFrameSerializer(FrameSerializer):
+    """Translates between xiaozhi wire messages and pipecat frames.
+
+    `paced` is the production-representative pacing described above.
+    Turning it off is what measures the transport's stock behaviour;
+    leaving it off in production would send a two minute reply in one
+    minute.
+    """
+
+    def __init__(self, session_id: str, *, paced: bool = True, **kwargs):
+        super().__init__(**kwargs)
+        self._session_id = session_id
+        self._paced = paced
+        self._decoder = opuslib.Decoder(fs=DEVICE_SAMPLE_RATE, channels=1)
+        self._encoder = opuslib.Encoder(
+            fs=OUTPUT_SAMPLE_RATE, channels=1, application=opuslib.APPLICATION_AUDIO
+        )
+        self._in_frame_size = DEVICE_SAMPLE_RATE * FRAME_MS // 1000
+        self._out_frame_size = OUTPUT_SAMPLE_RATE * FRAME_MS // 1000
+        self._encode_buffer = bytearray()
+        self._next_send: float | None = None
+
+    async def setup(self, frame: StartFrame) -> None:
+        """Called once from each of the two transports, so idempotent."""
+
+    # Device to pipeline.
+
+    async def deserialize(self, data: str | bytes) -> Frame | None:
+        if isinstance(data, bytes):
+            pcm = self._decoder.decode(data, frame_size=self._in_frame_size)
+            return InputAudioRawFrame(
+                audio=pcm, sample_rate=DEVICE_SAMPLE_RATE, num_channels=1
+            )
+
+        message = json.loads(data)
+        kind = message.get("type")
+        if kind == "hello":
+            # Answered by the handshake processor: see the module note.
+            return InputTransportMessageFrame(message=message)
+        if kind == "abort":
+            return InterruptionFrame()
+        if kind == "listen":
+            # The listening mode is device policy. samtal's edge acts on
+            # it (arming, manual end of turn, the barge-in gates); the
+            # spike only observes it, and gate 2's obligation map says so.
+            return InputTransportMessageFrame(message=message)
+        return None
+
+    # Pipeline to device.
+
+    async def serialize(self, frame: Frame) -> str | bytes | None:
+        if self.should_ignore_frame(frame):
+            return None
+        if isinstance(frame, OutputAudioRawFrame):
+            return await self._audio(frame)
+        if isinstance(
+            frame, (OutputTransportMessageFrame, OutputTransportMessageUrgentFrame)
+        ):
+            return json.dumps(frame.message)
+        return None
+
+    async def _audio(self, frame: OutputAudioRawFrame) -> bytes | None:
+        self._encode_buffer.extend(frame.audio)
+        want = self._out_frame_size * 2
+        if len(self._encode_buffer) < want:
+            return None
+        pcm = bytes(self._encode_buffer[:want])
+        del self._encode_buffer[:want]
+        if self._paced:
+            await self._pace()
+        return self._encoder.encode(pcm, self._out_frame_size)
+
+    async def _pace(self) -> None:
+        """Hold each packet until its slot on a 60 ms clock.
+
+        The clock restarts whenever it has fallen more than a frame
+        behind, which is a new reply after a silent gap rather than a
+        backlog to burst through.
+        """
+        now = time.monotonic()
+        period = FRAME_MS / 1000
+        if self._next_send is None or now > self._next_send + period:
+            self._next_send = now
+        else:
+            await asyncio.sleep(max(0.0, self._next_send - now))
+        self._next_send += period
