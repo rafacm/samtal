@@ -286,6 +286,14 @@ A stored secret value has exactly the two forms decision 3 names:
   the REST API), stored in the entity row's `secrets` column, keyed
   by the credential slot it fills (a provider's `api_key`, an MCP
   server's `env.API_ACCESS_TOKEN` or `headers.Authorization`).
+  Fernet authenticates the token but not where it belongs, so the
+  encrypted payload is not the bare secret: it is a small JSON
+  document carrying the secret and its canonical location (entity
+  kind, identity, slot). Decryption verifies the location matches
+  the slot being resolved and refuses a mismatch, so a valid
+  token copied to a different row (say, into an
+  attacker-controlled MCP server's headers) does not decrypt into
+  a credential it was never set for.
 
 The pydantic domain models never carry an envelope or a decrypted
 value, deliberately: `ProviderConfig` rejects secret-shaped extras
@@ -914,6 +922,12 @@ addressing it lands.
     MCP header would decrypt and transmit another stored
     credential. Consider encrypting a payload containing the
     plaintext and its canonical location, rejecting a mismatch.
+    *Resolution*: adopted; the envelope's encrypted payload is a
+    JSON document carrying the secret and its canonical (entity
+    kind, identity, slot) location, and decryption refuses a
+    location mismatch. A consequence is stated by design: moving
+    an entity's secret means re-running `set-secret`, there is no
+    copy path for ciphertext.
 15. **P3: rotation wording implies completion is possible in this
     release.** Without the deferred re-encrypt command, adding a
     new first key only affects newly written secrets; old keys
