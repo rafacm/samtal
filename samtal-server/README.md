@@ -918,7 +918,11 @@ flag by naming the four. It does not check whether a server is running:
 there is no reliable way to, and a wrong refusal would wedge the
 recovery path in exactly the situation it exists for. What makes that
 safe is that a write is one transaction either way, so two writers
-serialize and the loser gets the retryable refusal.
+serialize: the second one waits for the lock, and on any ordinary write
+it gets it and commits well inside the database's 10 second busy
+timeout. Only a writer still waiting when that timeout runs out is
+refused, and it is told nothing was changed and to run the command
+again.
 
 Its `show` and `delete` go by what is stored rather than by what a new
 write would be allowed to create, which is what lets it reach a row
@@ -1642,8 +1646,10 @@ because there is no reliable way to tell whether a server is running
 against the same file, and a wrong refusal would wedge the recovery path
 in exactly the situation it exists for. Concurrency is safe regardless:
 each write is one transaction, so a `--local` write racing a server's
-own serializes with it, and the loser is told nothing was changed and to
-run the command again.
+own serializes with it, and the one that arrives second waits for the
+lock and then commits. The retryable refusal is what a writer meets only
+if the lock has not come free inside the 10 second busy timeout, and it
+says nothing was changed and to run the command again.
 
 Restart the server when the repair is done. Nothing written this way is
 observed until then.
