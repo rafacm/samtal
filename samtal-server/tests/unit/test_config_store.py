@@ -317,6 +317,27 @@ def test_an_unknown_stage_and_an_empty_name_are_refused(store: ConfigStore) -> N
         store.delete_device("nonsense")
 
 
+def test_no_refusal_carries_the_exception_that_caused_it(store: ConfigStore) -> None:
+    """Every refusal built from another exception is built inside the
+    handler and raised outside it. `from None` clears the cause and
+    leaves the context, and whatever a library raised is still reachable
+    from the exception that travels out: its message, its arguments and,
+    for a parser, the buffer it was reading."""
+    _populate(store)
+    calls = [
+        lambda: store.delete_device(f"not-a-mac-{SECRET}"),
+        lambda: store.bind_device(f"not-a-mac-{SECRET}", ["sam"]),
+        lambda: store.read_device(f"not-a-mac-{SECRET}"),
+        lambda: store.set_mcp_server("not a usable name", {"transport": "stdio", "command": "x"}),
+        lambda: store.set_agent("poet", {"prompt": SECRET, "llm": "ghost"}),
+    ]
+    for call in calls:
+        with pytest.raises(ConfigError) as caught:
+            call()
+        assert caught.value.__cause__ is None, caught.value
+        assert caught.value.__context__ is None, caught.value
+
+
 def test_replacing_an_entity_keeps_its_stored_secrets(store: ConfigStore) -> None:
     """A fragment cannot carry ciphertext, so a whole-row replacement
     would erase every stored secret on an ordinary edit."""
