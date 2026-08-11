@@ -20,6 +20,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
+from samtal_server.app import create_app
 from samtal_server.config import Config, ConfigError
 from samtal_server.config.api import (
     MALFORMED_REQUEST,
@@ -228,6 +229,59 @@ def test_the_store_dependency_opens_and_disposes_one_database(tmp_path: Path) ->
 
 def test_the_application_carries_the_dependency(api: FastAPI) -> None:
     assert callable(api.state.store)
+
+
+# The mount
+
+
+@pytest.fixture
+def served(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> TestClient:
+    """The whole server, with the API mounted on it the way a
+    deployment gets it."""
+    monkeypatch.setenv(API_SECRET_ENV, TOKEN)
+    config = Config(server={"database": {"dir": str(tmp_path / "db")}})
+    # No lifespan: nothing under test here starts an MCP server or
+    # synthesizes a filler clip.
+    return TestClient(create_app(config), follow_redirects=False)
+
+
+@pytest.mark.parametrize("path", [MOUNT_PATH, f"{MOUNT_PATH}/", f"{MOUNT_PATH}/config"])
+def test_the_whole_namespace_is_gated_without_a_redirect(
+    served: TestClient, path: str
+) -> None:
+    """Both /api and /api/ resolve. A trailing-slash redirect would
+    answer before the gate does, and a client that does not resend its
+    Authorization header on one would meet a 401 it cannot explain."""
+    response = served.get(path)
+
+    assert response.status_code == 401, path
+    assert response.headers["WWW-Authenticate"] == "Bearer"
+
+
+@pytest.mark.parametrize("path", [MOUNT_PATH, f"{MOUNT_PATH}/", f"{MOUNT_PATH}/config"])
+def test_the_namespace_answers_the_token_holder(served: TestClient, path: str) -> None:
+    """With the token, 404: there are no routes yet, and only an
+    authenticated caller gets to find that out."""
+    response = served.get(path, headers=_bearer(TOKEN))
+
+    assert response.status_code == 404, path
+
+
+def test_the_device_facing_app_is_unchanged(served: TestClient) -> None:
+    """No device path acquired a token requirement."""
+    response = served.get("/healthz")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ok"
+
+
+def test_a_server_without_a_token_refuses_to_boot(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(API_SECRET_ENV, raising=False)
+
+    with pytest.raises(ConfigError) as caught:
+        create_app(Config())
+
+    assert API_SECRET_ENV in str(caught.value)
 
 
 # The token

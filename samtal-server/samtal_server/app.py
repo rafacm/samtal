@@ -9,6 +9,7 @@ from samtal_server.auth import build_device_auth
 from samtal_server.build_info import revision
 from samtal_server.capture import CaptureStore, DeviceFacts
 from samtal_server.config import Config
+from samtal_server.config.api import api_token, build_api, mount_api
 from samtal_server.config.boot import load_boot_config
 from samtal_server.config.secrets import SecretStore
 from samtal_server.filler import build_agent_fillers
@@ -72,6 +73,12 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     # secret in the environment, so a deployment that forgot one never
     # comes up serving every device that connects.
     app.state.device_auth = build_device_auth(app.state.config)
+    # The configuration API's token is resolved beside it and for the
+    # same reason: it is always mounted, so a deployment that forgot the
+    # variable must be refused here rather than serve an admin surface
+    # its own operator cannot reach. Passed straight into the gate and
+    # kept nowhere else, least of all on app.state, and never logged.
+    api = build_api(api_token(app.state.config), app.state.config.server.database.dir)
     # One registry per app: what decides whether there is room for the
     # next conversation, and what the drain reaches the live ones through.
     app.state.sessions = SessionRegistry(app.state.config.server.limits.max_sessions)
@@ -144,6 +151,12 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     # decided before the config was read.
     app.include_router(ota.build_router(app.state.config.server.ota_path))
     app.include_router(ws.router)
+
+    # Mounted last, so the device-facing routes are what this app is
+    # and the configuration API is one gated object hanging off it. It
+    # is control plane: it accepts inbound requests and sends nothing
+    # anywhere, so server.local_only has nothing to say about it.
+    mount_api(app, api)
 
     return app
 
