@@ -825,6 +825,12 @@ Generate it once and keep it where the deployment keeps its other
 environment secrets. A request with no token, or with the wrong one, is
 answered 401 whichever path it asked for, whether or not that path is a
 route: only an authenticated caller gets to learn which routes exist.
+One request, for the shape of them:
+
+```bash
+curl -sS -H "Authorization: Bearer $SAMTAL_API_SECRET" \
+  http://127.0.0.1:8003/api/config
+```
 
 **One noun per entity kind**, addressed the way the entity is keyed (a
 provider by its stage and its name, a device by its MAC):
