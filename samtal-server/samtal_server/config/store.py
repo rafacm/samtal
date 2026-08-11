@@ -425,14 +425,19 @@ class ConfigStore:
         """One BEGIN IMMEDIATE around the read, the check and the
         persist, with every database failure normalized: the library's
         own message carries the statement and its bound parameters, so
-        it is never quoted and the exception chain is cut."""
+        it is never quoted, and the refusal is raised outside the
+        handler so that the exception holding them is not attached to
+        it either."""
+        problem: ConfigError | None = None
         try:
             with self._engine.begin() as connection:
                 yield connection
         except ConfigError:
             raise
         except SQLAlchemyError as exc:
-            raise _database_problem(exc) from None
+            problem = _database_problem(exc)
+        if problem is not None:
+            raise problem
 
 
 def stored_secrets(snapshot: Snapshot) -> tuple[StoredSecret, ...]:

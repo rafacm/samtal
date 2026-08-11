@@ -113,17 +113,24 @@ def load_keys(environ: Mapping[str, str] | None = None) -> MultiFernet | None:
         return None
 
     keys: list[Fernet] = []
+    problem: str | None = None
     for position, entry in enumerate(entries, start=1):
         try:
             keys.append(Fernet(entry))
         except (ValueError, TypeError):
             # The entry is key material; the position is what identifies
-            # it without quoting it.
-            raise ConfigError(
+            # it without quoting it. Recorded here and raised below,
+            # because a refusal raised inside the handler keeps the
+            # library's exception as its __context__, and what that one
+            # was given is the key.
+            problem = (
                 f"{MASTER_KEY_ENV}: entry {position} of {len(entries)} is not a "
                 f"Fernet key; each entry is a 32-byte urlsafe-base64 key, newest "
                 f"first, comma-separated"
-            ) from None
+            )
+            break
+    if problem is not None:
+        raise ConfigError(problem)
     return MultiFernet(keys)
 
 
@@ -182,14 +189,16 @@ def encrypt(location: SecretLocation, secret: str, keys: MultiFernet | None) -> 
             "secret": secret,
         }
     ).encode("utf-8")
+    token: bytes | None = None
     try:
         token = keys.encrypt(payload)
     except Exception:
         # Nothing from the library reaches the caller: its exceptions
-        # are raised with the payload in scope.
-        raise ConfigError(
-            f"{location.describe()}: the secret could not be encrypted"
-        ) from None
+        # are raised with the payload in scope, so the refusal is raised
+        # outside the handler rather than merely without a cause.
+        pass
+    if token is None:
+        raise ConfigError(f"{location.describe()}: the secret could not be encrypted")
     return {ENVELOPE_KEY: token.decode("ascii")}
 
 
@@ -209,31 +218,40 @@ def decrypt(location: SecretLocation, envelope: object, keys: MultiFernet | None
         )
 
     token = envelope[ENVELOPE_KEY]  # type: ignore[index]
+    payload: bytes | None = None
     try:
         payload = keys.decrypt(token.encode("ascii"))
     except (InvalidToken, ValueError, TypeError):
+        pass
+    if payload is None:
         raise ConfigError(
             f"{location.describe()}: the stored secret cannot be decrypted with "
             f"any key in {MASTER_KEY_ENV}; if a key was rotated, the key the "
             f"secret was written under must stay configured, or set the secret "
             f"again"
-        ) from None
+        )
 
     return _unwrap(location, payload)
 
 
 def _unwrap(location: SecretLocation, payload: bytes) -> str:
     """The secret out of a decrypted payload, once the payload says it
-    belongs here. Raised without a cause throughout: a JSONDecodeError
-    carries the document it failed on, which is the plaintext."""
+    belongs here. Raised outside every handler here: a JSONDecodeError
+    carries the document it failed on, which is the plaintext, and
+    clearing the cause would leave it attached as the context."""
+    document: object = None
+    decoded = False
     try:
         document = json.loads(payload.decode("utf-8"))
+        decoded = True
     except (UnicodeDecodeError, json.JSONDecodeError):
+        pass
+    if not decoded:
         raise ConfigError(
             f"{location.describe()}: the stored secret decrypted to something "
             f"that is not a valid payload; set it again with samtal-server "
             f"config set-secret"
-        ) from None
+        )
 
     if not isinstance(document, dict) or document.get("v") != _PAYLOAD_VERSION:
         raise ConfigError(

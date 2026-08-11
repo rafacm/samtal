@@ -350,7 +350,19 @@ def test_a_row_that_cannot_be_read_is_500(
     assert response.status_code == 500
     assert "the options column does not hold an object" in response.json()["detail"]
     assert "Traceback" not in response.text
-    assert any("unreadable stored state" in record.getMessage() for record in caplog.records)
+
+    # One fixed line, whose only variable part is the class name. Every
+    # field is inspected, args included: a record holding the exception
+    # itself would carry its message and its chain to anything that
+    # walks the record, which is what a structured log handler does.
+    logged = [record for record in caplog.records if record.name.startswith("samtal_server")]
+    assert [record.args for record in logged] == [("StorageError",)]
+    for record in logged:
+        assert record.exc_info is None
+        assert "unreadable stored state" in record.getMessage()
+        for value in record.__dict__.values():
+            assert not isinstance(value, BaseException)
+        assert "options column" not in str(record.__dict__)
 
 
 def test_a_read_that_cannot_take_the_lock_is_409(
