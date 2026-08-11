@@ -748,6 +748,9 @@
         },
         "additionalProperties": false,
         "type": "object",
+        "required": [
+          "name"
+        ],
         "title": "DefaultAgent",
         "description": "The agent an unbound device reaches."
       },
@@ -810,6 +813,9 @@
         },
         "additionalProperties": false,
         "type": "object",
+        "required": [
+          "shadows"
+        ],
         "title": "SecretSlot",
         "description": "One slot of an entity that holds a secret stored in the database."
       },
@@ -848,7 +854,8 @@
         "required": [
           "kind",
           "identity",
-          "slot"
+          "slot",
+          "shadows"
         ],
         "title": "StoredSecretLocation",
         "description": "Where one stored secret is, in the whole-configuration read."
