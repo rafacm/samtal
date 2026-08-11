@@ -78,6 +78,17 @@ independent of any device. This is decided direction, not yet code:
 today conversation history lives only as long as the session that
 produced it.
 
+In short: sessions are how audio reaches the server; conversations
+are what accumulates and what you come back to. "Sophia... let me
+talk to Nadia... back to Sophia" is one session touching two
+conversations; resuming with Sophia tomorrow from another device is
+the same conversation in a new session. The model keeps the link in
+both directions: a session records, in order, the conversations it
+touched, and a conversation records the sessions it was part of,
+beginning with the one that opened it. Meta capabilities read that
+linkage ("what did we talk about this morning on the kitchen
+device").
+
 The split is what makes the desired behaviors ordinary instead of
 special cases:
 
@@ -90,7 +101,7 @@ special cases:
 - **Cost.** "How much has this conversation cost so far" is answerable
   because cost is a property of the conversation entity.
 
-Two decided semantics, and one edge left open:
+Three decided semantics:
 
 - **A switch lasts for the session.** The next wake of the device gets
   its default agent again, so the wake experience stays predictable.
@@ -98,12 +109,19 @@ Two decided semantics, and one edge left open:
   conversation" in the model. The consequences are features to build:
   cleanup of old conversations, a warning when one grows very long,
   and an offer to summarize it and start fresh from the summary.
-- **Open: what a handover shows the incoming agent.** Today the
-  session transcript carries across a handover, so the incoming agent
-  reads everything said since wake. Once conversations are persistent
-  per-agent entities, what the incoming agent may read (the whole
-  session so far, a summary, nothing) becomes a real choice with a
-  privacy component, and it is not made here.
+- **A switch starts clean by default.** The incoming agent does not
+  read what was said to the outgoing one. Agents are scoped on
+  purpose, and a switch that silently handed the whole session to the
+  incoming agent would leak around that scoping; it would also move
+  words spoken to a local agent to whatever provider the incoming
+  agent uses. Carrying context is explicit: phrasing that asks for
+  continuation ("ask Nadia about this") carries it, and when the
+  phrasing is ambiguous the agent asks rather than guessing. What is
+  deliberately carried becomes part of the new conversation. Nothing
+  is lost by starting clean, since the suspended conversation is
+  still there to come back to. Today's handover behaves differently
+  (the session transcript carries across); it adopts this rule when
+  conversations become persistent entities.
 
 ## The wake word wakes the device, not an agent
 
@@ -158,6 +176,15 @@ That preserves the focus story and the credential scoping that make
 per-agent MCP configuration worth having; it is a privacy boundary,
 not a convenience default. A cross-agent search may arrive later as a
 separate, explicitly user-level capability.
+
+Recording decision: **meta turns stay out of the conversation.**
+"Increase the volume to 9" is work for the session, not part of the
+dialogue with the agent, so a turn that is only a meta request
+(device control, a cost question, the switch itself) is recorded as a
+session event rather than an entry in the conversation transcript.
+Resuming a conversation months later replays the dialogue, not the
+volume adjustments. The honest edge: a mixed turn ("set the volume to
+9, and what were we saying?") belongs to the conversation.
 
 ## The help agent
 

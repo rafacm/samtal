@@ -93,10 +93,12 @@ that reply to be heard.
 A dialogue between a user and exactly one agent,
 living on the server independently of any device: it accrues a
 transcript and a cost, is suspended rather than ended, and can be
-resumed later, including from a different device. Distinct from a
-session, which is one device connection episode. The persistent
-entity is decided direction; today conversation history lives only
-as long as its session. See
+resumed later, including from a different device. What accumulates
+and what you come back to, where a session is how audio reaches the
+server. One conversation can span many sessions, and it records the
+sessions it was part of, beginning with the one that opened it. The
+persistent entity is decided direction; today conversation history
+lives only as long as its session. See
 [the concepts page](concepts.md#conversation-and-session).
 
 ### Conversational filler
@@ -186,7 +188,11 @@ speech cancels it.
 Switching the active agent mid-session, requested by
 name in conversation and executed by the LLM's `switch_agent` tool.
 The tool's enum of bound agents is what maps a near-miss transcript
-("Mark") onto the right agent (`marc`).
+("Mark") onto the right agent (`marc`). Today the session transcript
+carries across; once conversations are persistent entities a switch
+starts clean by default, with context carried only on explicit
+request. See
+[the concepts page](concepts.md#conversation-and-session).
 
 ### Help agent
 
@@ -248,7 +254,9 @@ tool set, so meta questions are answerable in any conversation:
 conversation cost so far, searching and resuming the asking agent's
 past conversations, switching agents. Planned rather than built;
 the handover tool is the piece that exists today. Conversation
-search is deliberately agent-scoped. See
+search is deliberately agent-scoped, and turns that are only meta
+requests (device control, a cost question, the switch itself) are
+recorded as session events, not conversation entries. See
 [the concepts page](concepts.md#meta-capabilities).
 
 ### Opus
@@ -344,10 +352,12 @@ agent leg that started it, which matters across a handover.
 ### Session
 
 One connection episode from one device: wake (button
-press or wake word) to close. A session attaches to a conversation;
-it is not the conversation. Belongs to the device side of the model
-the way a conversation belongs to an agent. See
-[the concepts page](concepts.md#conversation-and-session).
+press or wake word) to close. A session attaches to conversations;
+it is not a conversation. "Sophia... let me talk to Nadia... back to
+Sophia" is one session touching two conversations, and the session
+records, in order, the conversations it touched. Belongs to the
+device side of the model the way a conversation belongs to an agent.
+See [the concepts page](concepts.md#conversation-and-session).
 
 ### Structured event
 
