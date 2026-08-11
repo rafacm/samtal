@@ -339,6 +339,25 @@ are never stored on a model, and are never logged.
 fixed mask and an environment reference as the reference itself,
 which is not a secret.
 
+The error paths hold the same line as the happy path:
+
+- `set-secret` reading from an interactive terminal uses no-echo
+  input (`getpass`); a pipe or redirect reads plainly, which is
+  what scripts use. The value never appears in an argument.
+- Every database, migration, malformed-envelope, cryptography, and
+  fragment-validation failure surfaces through `ConfigError` with
+  a message that names the location and the kind of failure and
+  never embeds the rejected value; raw tracebacks from the
+  underlying libraries do not reach the CLI user or the boot log.
+- The SQLAlchemy engine runs with statement echo off and parameter
+  logging never enabled, so a secret bound into an INSERT cannot
+  ride a debug log line.
+- Tests cover the leak surfaces directly: for invalid fragments,
+  malformed envelopes, database failures, and wrong keys, the
+  assertions read stdout, stderr, captured log records, and the
+  exception chain, and require the plaintext (and for fragments,
+  the rejected input) absent from all of them.
+
 ## Repository and Config composition
 
 `store.py` owns both directions:
@@ -882,6 +901,13 @@ addressing it lands.
     no-echo terminal input, centralized sanitized exception
     handling, SQLAlchemy parameter logging disabled, and tests
     over stdout, stderr, logs, and traceback behavior.
+    *Resolution*: the envelope section gains an error-path
+    contract: `getpass` for interactive `set-secret`, every
+    failure normalized through `ConfigError` naming location and
+    kind without embedding the rejected value, statement echo and
+    parameter logging off, and leak-surface tests asserting
+    plaintext absent from stdout, stderr, log records, and the
+    exception chain for all four failure families.
 14. **P3: Fernet tokens are not bound to their entity and key
     location.** Fernet authenticates the token but not where it
     belongs: a valid ciphertext moved to an attacker-controlled
