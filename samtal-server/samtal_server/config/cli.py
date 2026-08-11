@@ -47,7 +47,12 @@ import yaml
 
 from samtal_server.config import docgen, views
 from samtal_server.config.loader import CONFIG_ENV_VAR, ConfigError, load_file_config
-from samtal_server.config.models import PROVIDER_STAGES, FileConfig, normalize_mac
+from samtal_server.config.models import (
+    API_MOUNT_PATH,
+    PROVIDER_STAGES,
+    FileConfig,
+    normalize_mac,
+)
 from samtal_server.config.secrets import (
     MASK,
     SecretLocation,
@@ -66,9 +71,11 @@ from samtal_server.config.writes import (
 from samtal_server.db import open_database
 
 # Where the API is, when nothing says otherwise: this machine, on the
-# port the server half of the configuration names. Read through the same
-# machinery the server reads it with, so the two cannot disagree about
-# the port any more than they can about the database directory.
+# port the server half of the configuration names, under the prefix the
+# sub-application is mounted at. The port is read through the same
+# machinery the server reads it with, so the two cannot disagree about it
+# any more than they can about the database directory, and the prefix
+# comes from the same constant the server mounts on.
 API_URL_ENV = "SAMTAL_API_URL"
 
 # The client's timeouts, explicit because the defaults would lie. The
@@ -445,7 +452,7 @@ def _base_url(args: argparse.Namespace, file_config: FileConfig) -> str:
     named = os.environ.get(API_URL_ENV, "").strip()
     if named:
         return _permitted(named, API_URL_ENV)
-    return f"http://127.0.0.1:{file_config.server.port}"
+    return f"http://127.0.0.1:{file_config.server.port}{API_MOUNT_PATH}"
 
 
 def _permitted(url: str, source: str) -> str:
@@ -862,8 +869,8 @@ def _parser() -> argparse.ArgumentParser:
         f"(default: ${CONFIG_ENV_VAR})"
     )
     api_url_help = (
-        f"base URL of the configuration API "
-        f"(default: ${API_URL_ENV}, then http://127.0.0.1:<server.port>)"
+        f"base URL of the configuration API (default: ${API_URL_ENV}, then "
+        f"http://127.0.0.1:<server.port>{API_MOUNT_PATH})"
     )
     local_help = (
         "read and write the database directly instead of the API: the recovery subset "

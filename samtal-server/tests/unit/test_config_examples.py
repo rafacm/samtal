@@ -19,10 +19,11 @@ import sys
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from samtal_server.config import cli
-from samtal_server.config.api import build_api
+from samtal_server.config.api import build_api, mount_api
 from samtal_server.config.loader import load_file_config
 from samtal_server.config.secrets import MASTER_KEY_ENV, generate_key
 
@@ -72,10 +73,12 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     def factory(base_url: str, token: str) -> TestClient:
         directory = load_file_config(None).server.database.dir
+        # Mounted where the server mounts it, since that prefix is part
+        # of the address the CLI resolves on its own.
+        served = FastAPI()
+        mount_api(served, build_api(token, directory))
         return TestClient(
-            build_api(token, directory),
-            base_url=base_url,
-            headers={"Authorization": f"Bearer {token}"},
+            served, base_url=base_url, headers={"Authorization": f"Bearer {token}"}
         )
 
     monkeypatch.setattr(cli, "build_client", factory)

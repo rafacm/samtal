@@ -688,7 +688,7 @@ def test_the_default_target_is_this_machine_on_the_configured_port(
 
     assert run("--config", str(config), "list") == 0
 
-    assert run.reached == ["http://127.0.0.1:9123"]
+    assert run.reached == [f"http://127.0.0.1:9123{MOUNT_PATH}"]
 
 
 def test_the_environment_names_the_target_and_the_flag_beats_it(
