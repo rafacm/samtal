@@ -516,10 +516,13 @@ each carries its resolution once the amendment addressing it lands.
 
 ## Milestones
 
-Ticked with the PR number when done, each linking to its section
-of the implementation doc.
+All milestones land in one pull request. They are ticked with the
+issue number rather than the PR's, because the spike's branch carries
+no PR at the time they were ticked; substitute the PR number when it
+is opened. Each links to its section of the implementation doc.
 
-- [ ] **One full exchange**: the feasibility checkpoint from the
+- [x] [**One full exchange**](2026-08-11-pipecat-alignment-spike-implementation.md#milestone-1-one-full-exchange)
+  (#89): the feasibility checkpoint from the
   risk section first (mixed frame types, hello routing, the send
   hook, buffer delivery semantics, serializer lifecycle, answers
   recorded), then the spike project scaffolding, the serializer,
@@ -528,18 +531,21 @@ of the implementation doc.
   Accept: the exchange runs locally end to end, driven by
   `drive.py`, no cloud, no keys, and the checkpoint's answers
   are in the implementation doc.
-- [ ] **Instrumentation and a well-formed pair**: the tap, the
+- [x] [**Instrumentation and a well-formed pair**](2026-08-11-pipecat-alignment-spike-implementation.md#milestone-2-instrumentation-and-a-well-formed-pair)
+  (#89): the tap, the
   buffer recording, the composer; the stock control passes on a
   composed capture. Accept:
   `echo_leakage_control.py` reports PASSED on the pair,
   unmodified scripts.
-- [ ] **The alignment verdict**: tap injection at 250 and
+- [x] [**The alignment verdict**](2026-08-11-pipecat-alignment-spike-implementation.md#milestone-3-the-alignment-verdict)
+  (#89): tap injection at 250 and
   1500 ms over the same captured pair, at least 100 candidate
   windows per delay, numbers against the bar. Accept: both runs
   executed and recorded,
   verdict stated with the measured lag bias, IQR, and detection
   rate, whichever way it goes.
-- [ ] **The size verdict and the paper trail**: serializer and
+- [x] [**The size verdict and the paper trail**](2026-08-11-pipecat-alignment-spike-implementation.md#milestone-4-the-size-verdict-and-the-paper-trail)
+  (#89): serializer and
   glue line counts against both baselines with the comparable
   slice, the seam-obligation map, the
   implementation doc complete, changelog entry, the #84 evidence

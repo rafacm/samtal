@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-11
+
+### Added
+
+- A throwaway spike under `spikes/pipecat-alignment/` that measures
+  whether pipecat could sit behind samtal's device edge, and answers
+  it with numbers (#89). It runs a minimal pipecat 1.7.0 pipeline
+  (Silero VAD, a canned reply, no LLM and no cloud) behind a xiaozhi
+  frame serializer on pipecat's FastAPI websocket transport, driven by
+  the unmodified xiaozhi-sdk device simulator, and runs the
+  repository's existing `scripts/echo_leakage.py` analysis unmodified
+  over the capture it produces. It is its own uv project so its
+  dependencies never touch the server's, and nothing from it lands in
+  `samtal_server/`.
+
+  **Gate 1, capture alignment: failed**, at 250 ms and 1500 ms
+  injected delay alike. pipecat's `AudioBufferProcessor` offers two
+  bot tracks and neither is usable as an echo or AEC reference. The
+  track whose deliveries can be timestamped is time-corrupted, 126 s
+  of reply coming back as 154 s with 24 s of silence inserted inside
+  continuous speech, because the processor pads the bot track up to
+  the user track whenever a device streams microphone audio during a
+  reply, which is what barge-in requires. The track that is faithful
+  arrives once, when the bot stops speaking, and placing it by the
+  epoch rules fixed in the plan leaves a constant 145.5 ms lag bias,
+  stable to a 0.1 ms IQR over two minutes. The failure is a fixed
+  offset rather than drift or jitter: detection was 100% and the drift
+  statistic was indistinguishable from zero.
+
+  **Gate 2, adapter size: not passed.** The adoption-required adapter
+  is 324 lines against 899 for the whole bespoke edge, but against the
+  comparable slice of it that this exchange actually exercises it is
+  324 against 222, or 160 against 155 counting code only: the same
+  size, not smaller, while covering 8 of the seam's 23 obligations.
+  Its shape stayed message translation, which is the good half of the
+  answer.
+
+  Consequence: the streaming conversation runtime (#31) is built
+  bespoke behind the device-facing boundary from #85, and the pipecat
+  question is settled by evidence rather than postponed. Along the way
+  the spike established that pipecat's websocket transport does pace
+  output at real time (a wrong first reading of its send-interval
+  formula is recorded and corrected in the implementation doc), and
+  that whether its recording is wire-aligned at all depends on where
+  the adopter places the buffer processor rather than on the component.
+
 ## 2026-08-10
 
 ### Changed
