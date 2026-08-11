@@ -676,3 +676,104 @@ liveness check rather than a bare loop.
   break-glass procedure belongs in full.
 - `config.example.yaml` needs no change: the schema did not move in this
   milestone.
+
+### PR #106 review round
+
+One external review of the pull request's diff: codex CLI 0.147.0,
+model gpt-5.6-sol, read-only, 2026-08-12, posted on the PR by the review
+run itself. Verdict: mergeable after the listed fixes. Ten findings,
+five P1 and five P2, each fixed with its own commit:
+
+1. **P1: only non-finite numbers were checked before a fragment
+   travelled.** YAML is the wider language and the check stopped at the
+   first case of a wider rule: a `!!timestamp`, `!!binary` or `!!set`
+   reached the JSON encoder and died there with a TypeError, a recursive
+   anchor sent the checker's own walk into a RecursionError before the
+   encoder saw it, and a non-string mapping key was refused by nothing
+   at all, because JSON does not refuse one either. It stringifies it,
+   and hands a reader a key nobody wrote. Fixed in f74b41f:
+   `check_finite` becomes `check_transportable`, one check with one
+   home, run by the repository on every fragment it parses and by the
+   CLI before one travels. The walk is cycle-safe by carrying the
+   containers above it rather than every container it has seen, so two
+   keys sharing one anchor stays the ordinary YAML file it is while a
+   container that is its own ancestor is refused.
+2. **P1: the URL parser escaped the sanitized boundary.** `_permitted`
+   called `urlsplit` and read `.port` outside any handler, and both
+   parse on the spot: a malformed IPv6 literal and a port that is not a
+   number each raise a ValueError carrying the text they refused, which
+   left main() as a traceback with the address in it. That is the
+   address an operator is typing a token next to. Fixed in d43bf8c: one
+   guarded parse whose refusal is built in the handler and raised
+   outside it, quoting nothing, with the chain asserted empty.
+3. **P1: `--local` needed the key it may exist to repair.** Every
+   recovery command opened the store with `load_keys()`, which refuses a
+   malformed `SAMTAL_MASTER_KEY`: the boot fails on it, so there is no
+   server to ask, and the tool that would take the bad ciphertext out
+   refused for the same reason the server did. Fixed in a51a236: `show`,
+   `delete` and `clear-secret` open the store with no keys, since they
+   treat ciphertext as opaque; `set-secret` asks for them because it
+   encrypts. The same reasoning that keeps `verify_secrets` out of
+   `open_database`.
+4. **P1: the break-glass delete could not remove the row keeping the
+   server down.** A delete read and validated the whole domain before
+   removing anything, so a row the loader refuses failed on the way to
+   removing the very thing that was failing. Fixed in 867dedc: the four
+   deletes remove the row by identity first and validate what remains,
+   inside the one BEGIN IMMEDIATE they already ran in, so a deletion the
+   remaining references refuse is rolled back with the row still there.
+   When the remainder cannot be read at all the reference check is
+   skipped rather than turned into a refusal, which is sound because a
+   delete cannot make a readable domain unreadable: the remainder was
+   already unreadable before it, so the invariant is broken by that
+   other row. Without that, one unreadable row would make every other
+   entity undeletable, which is the same deadlock one level out.
+5. **P1: an ambient `SAMTAL_API_URL` would have taken the seeding.**
+   `serve.sh` exported the port, but the CLI gives an inherited URL
+   precedence over it, so one left in a shell or set in a CI job for
+   another deployment would have received the writes and the bearer
+   token while the server started by the script stayed empty. Fixed in
+   a86a897: the URL is set rather than left to be resolved, and the test
+   points a decoy server at a database of its own and asserts that
+   database is still empty, so what is checked is where the writes went.
+6. **P2: an interrupt could exit zero.** `on_exit` handled EXIT, INT and
+   TERM together and read `$?`, which for a signal is whatever the last
+   command returned: an interrupted seeding reported success, and the
+   cleanup ran twice. Fixed in 5ab6382: separate signal handlers setting
+   130 and 143, one EXIT cleanup, and every handler clearing the traps
+   before it exits.
+7. **P2: the document permitted an empty secret the API refuses.**
+   `SecretValue.secret` had no lower bound while the parser and the
+   repository both refuse one, and a contract looser than the code is
+   one a client generator builds the wrong request from. Fixed in
+   94b5751, document regenerated.
+8. **P2: the contention test did not guard the constant it depends on.**
+   It replaces the client and shortens the busy timeout, so it would
+   keep passing with the read timeout back at httpx's five second
+   default, which is the regression the explicit timeout exists to
+   prevent. Fixed in 9e6c2d0: the relationship is asserted directly at
+   the production values, and a second test holds a real lock against a
+   real server through `build_client` over a socket.
+9. **P2: the acceptance harness authenticated any token.** It built the
+   gate out of whatever token the CLI resolved and then sent that same
+   token, so the token-resolution tests asserted only that some string
+   came out of somewhere. Fixed in 9033c1f: the server's token is fixed
+   in the harness and the CLI's rides only the request, with the missing
+   case added, the wrong value in the right variable.
+10. **P2: the plan's end-to-end restart case was missing.** No test
+    restarted an application, so "start empty, configure over the API,
+    restart" was a procedure the documentation described and the suite
+    never carried out. Fixed in 81eb2d7: a real server on a loopback
+    port, a full pipeline written as ordinary requests, and a second
+    application built from the same database and asserted on, because it
+    is the one that has to serve the conversation.
+
+Findings 3 and 4 are the same defect seen twice, and worth stating once:
+the recovery path has to work in the state it exists for. A check that
+runs before the repair, whether it is a key that will not load or a row
+that will not validate, takes the tool away in exactly the situation
+that needed it.
+
+Full lanes after the fixes: ruff clean, both suites green, both drift
+checks clean, and the three seeding scripts run against a scratch
+database (counts in the PR's verification section).
