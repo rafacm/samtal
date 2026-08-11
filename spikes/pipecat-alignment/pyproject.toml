@@ -1,0 +1,19 @@
+[project]
+name = "pipecat-alignment-spike"
+version = "0.1.0"
+description = "Throwaway spike for issue #89: pipecat capture alignment and adapter size."
+requires-python = ">=3.12"
+
+# Pinned exactly. The spike's measured numbers are only meaningful
+# against a named version, and the findings quote these.
+dependencies = [
+    "pipecat-ai[silero,websocket]==1.7.0",
+    "xiaozhi-sdk==0.5.1",
+    "uvicorn==0.52.1",
+    "numpy==2.4.6",
+    "scipy==1.18.0",
+    "opuslib==3.0.1",
+]
+
+[tool.uv]
+package = false
