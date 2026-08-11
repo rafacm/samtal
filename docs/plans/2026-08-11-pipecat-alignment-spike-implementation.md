@@ -213,6 +213,16 @@ reply back. From the run used for every figure below (`runs/stock`):
 samples at 16 kHz, and the device saw `stt`, `tts start`,
 `tts sentence_start` and `tts stop` in that order.
 
+**Scoped to xiaozhi protocol v1.** The serializer treats every binary
+frame as bare Opus and emits bare Opus, without reading
+`Protocol-Version` or the hello's `version`. That is exactly what
+xiaozhi-sdk 0.5.1 speaks and what this exchange exercised, and it is
+wrong for protocol v2 and v3, which carry binary headers. Every claim
+in this document that the serializer "speaks stock xiaozhi" means
+protocol v1 as exercised here, and version negotiation with v2/v3
+framing is adapter work an adoption would still owe, on top of every
+figure in gate 2.
+
 **Deviations from the plan.** Four, all recorded above or below rather
 than silently absorbed.
 
@@ -273,14 +283,26 @@ adopter makes, not a property of the component.
 
 - The simulator's utterance is 16 kHz, sent as 60 ms Opus frames.
 - The tap's packets decode to 24 kHz, the announced output rate.
-- `AudioBufferProcessor` was asked for 16 kHz and verified to deliver
-  it: every delivery in the run reports `rate = 16000`, and
-  `compose.py` refuses to build a pair if it ever reports anything
-  else. Its own single stateful `create_stream_resampler()` per track
-  does that conversion, once over the session.
-- The tap is converted 24 kHz to 16 kHz by one `resample_poly(2, 3)`
-  call over the whole continuous track, never per packet: 3155427
-  samples in, 2103618 out, which is the exact 2:3 ratio.
+- `AudioBufferProcessor` is asked for 24 kHz, the output rate, and
+  verified to deliver it: every delivery in the run reports
+  `rate = 24000`, and `compose.py` refuses to build a pair if it ever
+  reports anything else. Recording natively means pipecat resamples
+  nothing, which is the point.
+- Every track is laid out on the shared timeline at 24 kHz and
+  converted to the 16 kHz capture rate exactly once, whole, through
+  the same `resample_poly(2, 3)` call: 3155950 samples in, 2103967
+  out, per track, four tracks, one call each. The converter's group
+  delay, measured by resampling an impulse rather than assumed, is
+  **-0.33 samples**, which is the sub-sample centring `resample_poly`
+  does internally and is negligible against every figure here.
+
+  The first version of this got it wrong, and the PR review round
+  caught it: the buffer processor was asked for 16 kHz, so pipecat's
+  own streaming SOXR resampler sat in the path, chunk by chunk and
+  never flushed at end of stream, while the tap went through SciPy.
+  Two implementations where the plan required one, and the unflushed
+  one truncated the turn track by 92 ms, which fed straight into the
+  placement bias the first gate 1 verdict rested on.
 
 Where the live pipeline resamples was observed rather than inferred.
 The canned clip is already 24 kHz and the pipeline's output rate is
@@ -297,16 +319,21 @@ reference) and `<session>.jsonl` (`session_open`, one `heard` carrying
 the utterance duration so the analysis masks the user's speech, and one
 `speaking_started` stamped from the tap's first packet).
 
-For `runs/stock`: span 131.5 s; 538 buffer deliveries totalling 2471720
-samples, of which 393391 samples (15.9%) landed on positions already
-written and were overwritten by the later delivery; 2103 tap packets
-with 11668 samples of placement overlap; the turn track one delivery of
-2017400 samples with no overlap at all.
+For `runs/stock`, laid out at 24 kHz: span 131.5 s; 539 buffer
+deliveries totalling 3598470 samples, of which 486702 (13.5%) landed on
+positions already written and were overwritten by the later delivery;
+2103 tap packets placed contiguously with **no late sends and no
+overwrites at all**; the turn track one delivery of 3026880 samples,
+also with no overlap.
 
-The 15.9% buffer overlap is not a composition bug and is the first
+The 13.5% buffer overlap is not a composition bug and is the first
 visible symptom of the milestone 3 finding: the delivered track
 accumulates audio faster than wall clock, so placing each delivery to
-end at its arrival stamp makes successive deliveries collide.
+end at its arrival stamp makes successive deliveries collide. The tap
+has no overlap by construction now: under the corrected mapping a
+packet starts at its send and never overwrites the one before it, and
+because the wire clock runs slightly fast every send arrived early, so
+no gap opened either.
 
 ### Accept: the stock control
 
@@ -342,66 +369,62 @@ tracks. Otherwise the instrumentation is as specified.
 ### What the two bot tracks contain
 
 `AudioBufferProcessor` offers two recordings of the bot, and gate 1
-turns on the fact that neither is what an echo measurement needs. The
-figures come from `fidelity.py`, which compares each against the
-*uniform decode*: the tapped Opus packets decoded and laid end to end
-with no timestamps involved. That is the right yardstick because a
-device plays through a DAC on its own clock and its jitter buffer
-absorbs arrival jitter, so packet arrival times never survive into the
-sound.
+turns on the difference between them. The figures come from
+`fidelity.py`, which compares each against the *uniform decode*: the
+tapped Opus packets decoded and laid end to end with no timestamps
+involved. That is the right yardstick because a device plays through a
+DAC on its own clock and its jitter buffer absorbs arrival jitter, so
+packet arrival times never survive into the sound.
 
-**The delivered track** (`on_track_audio_data`, the only one whose
-arrivals can be timestamped) is corrupted. Against the 126.180 s the
-wire actually carried it runs 154.482 s, 28.302 s longer, and it
-carries 24.00 s of silence in 256 blocks inserted *inside* otherwise
-continuous reply audio, 252 of them exactly 1500 samples (93.75 ms).
-No single lag aligns it with the audio sent: the best correlation over
-every admissible lag is r = 0.022.
+**The delivered track** (`on_track_audio_data`, the one whose arrivals
+can be timestamped) is corrupted. Against the 126.180 s the wire
+carried it runs 149.936 s, 23.756 s longer, and it carries 13.00 s of
+silence in 137 blocks inserted *inside* otherwise continuous reply
+audio, 135 of them exactly 2280 samples (95.00 ms at the 24 kHz
+recording rate). No single lag aligns it with the audio sent: the best
+correlation over every admissible lag is r = -0.023.
 
-The mechanism is in pipecat's source and was confirmed against the
-data: every one of those silence blocks ends exactly on a delivery
-boundary. While the device streams microphone audio during a reply,
-each bot frame runs `_sync_buffer_to_position(user, len(bot))`, padding
-the user track up to the bot's position, and then the user's own frames
-extend it further, so the user track outruns the bot track. At each
-delivery `_align_track_buffers()` pads the shorter track to the longer,
-which writes that accumulated difference into the *bot* track as
-silence. A device that streams continuously is not an edge case for
-samtal, it is the requirement barge-in imposes, so this is the normal
-operating condition rather than a corner.
+The mechanism is in pipecat's source and audited against the data.
+Every block ends on or within one sample of a delivery boundary
+(`fidelity.py`: 137 of 137 within two samples, worst case one sample,
+none exactly on one at this rate). While the device streams microphone
+audio during a reply, each bot frame runs
+`_sync_buffer_to_position(user, len(bot))`, padding the user track up
+to the bot's position, and then the user's own frames extend it
+further, so the user track outruns the bot track. At each delivery
+`_align_track_buffers()` pads the shorter track to the longer, which
+writes that accumulated difference into the *bot* track as silence. A
+device that streams continuously is not an edge case for samtal, it is
+what barge-in requires, so this is the normal operating condition.
 
-**The turn track** (`on_bot_turn_audio_data`) is faithful:
-r = 0.990 against the uniform decode, contiguous, no interior padding,
-because `_bot_turn_audio_buffer` is extended only with the bot's own
-audio. It is 0.092 s shorter than the audio sent, a tail loss at the
-end of the turn. But it arrives **once**, when the bot stops speaking,
-which is the plan's named fallback finding: a track with no
-per-delivery observation point that can be timestamped independently.
+The corruption is present in the raw recording, upstream of any
+resampling, and it survived the resampler correction unchanged, as it
+had to.
 
-So the choice an adopter faces is not between a good and a bad
-configuration. It is between a track that can be placed in time but is
-not the audio that was played, and a track that is the audio that was
-played but arrives as one aggregate at the end of the turn.
+**The turn track** (`on_bot_turn_audio_data`) is faithful: r = 0.989
+against the uniform decode, contiguous, no interior padding, because
+`_bot_turn_audio_buffer` is extended only with the bot's own audio. It
+is 0.060 s shorter than the audio sent, a tail the turn buffer closes
+before the last chunk reaches it. It arrives **once**, when the bot
+stops speaking.
 
-### The wire, and what the tap's own placement costs
+### The wire, and the tap
 
 The inter-send distribution answers the plan's open question directly.
-With the transport's stock clock: median 60.0 ms, p5 59.1 ms,
-p95 60.9 ms, max 62.4 ms, and **100%** of intervals within 5 ms of the
-60 ms frame cadence. Per-interval jitter is sd 1.40 ms. There is no
-bursting to hide behind the simulator's receive buffering.
+With the transport's own clock and nothing added: median 60.0 ms,
+p5 59.1 ms, p95 60.9 ms, max 70.7 ms, and 99.8% of intervals within
+5 ms of the 60 ms frame cadence, per-interval jitter sd 1.46 ms. There
+is no bursting to hide behind the simulator's receive buffering.
 
-The clock is not exact, though: send times accumulated 58.0 ms ahead of
-a perfect 60 ms clock over the run, about -27.6 ms per minute, so
+The clock is not exact: send times accumulated 57.7 ms ahead of a
+perfect 60 ms clock over the run, about -27.5 ms per minute, so
 126.120 s of audio left in 126.062 s of wall clock.
 
-One figure prices the plan's own placement rule, and it belongs in the
-findings so the gain numbers below are not misread as pure pipecat
-error: the tap track, laid out per packet by send timestamp, scores
-r = 0.755 against the uniform decode of those same packets. Placing
-audio by real send times rather than by playback order costs about a
-quarter of the achievable correlation, and that cost is a property of
-the construction the plan froze, not of pipecat.
+Under the corrected placement rule the tap is a faithful rendering of
+the wire: r = 0.982 against the uniform decode of the same packets, up
+from 0.755 under the ending-at rule the PR review corrected, which had
+shifted every packet a frame early and overwritten audio wherever
+placements collided.
 
 ### The tap-injection runs
 
@@ -411,19 +434,19 @@ reference, and runs `scripts/echo_leakage.py` unmodified with an
 explicit `--max-lag-s 2.0`. Both delays run offline over the same
 captured pair, so the two verdicts differ only in the injection.
 
-| reference | delay | detected | median lag | lag bias | median gain | lag IQR |
-| --- | --- | --- | --- | --- | --- | --- |
-| delivered | 250 ms | 125/125 | 172 ms | -78 ms | -41.8 dB | 21.8 ms |
-| delivered | 1500 ms | 125/125 | 1420 ms | -80 ms | -41.4 dB | 27.4 ms |
-| turn | 250 ms | 125/125 | 104.5 ms | -145.5 ms | -32.3 dB | 0.1 ms |
-| turn | 1500 ms | 125/125 | 1354.5 ms | -145.5 ms | -32.3 dB | 0.1 ms |
+| reference | delay | detected | median lag | lag bias | median gain | gain error | lag IQR | median r |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| delivered | 250 ms | 125/125 | 308 ms | +58 ms | -38.7 dB | 8.7 dB | 24.3 ms | 0.36 |
+| delivered | 1500 ms | 125/125 | 1557 ms | +57 ms | -38.6 dB | 8.6 dB | 24.3 ms | 0.36 |
+| turn | 250 ms | 125/125 | 251.2 ms | **+1.2 ms** | -30.2 dB | **0.2 dB** | 0.0 ms | 0.99 |
+| turn | 1500 ms | 125/125 | 1501.2 ms | **+1.2 ms** | -30.2 dB | **0.2 dB** | 0.0 ms | 0.99 |
 
 Drift, by the statistic the plan fixed, over the 5 s to 129 s span:
 
 | reference | delay | Theil-Sen slope | first vs last quartile | movement over span | at search boundary |
 | --- | --- | --- | --- | --- | --- |
-| delivered | 250 ms | +3.24 ms/min | +2.6 ms | 6.7 ms | 0 of 125 |
-| delivered | 1500 ms | +3.75 ms/min | +2.0 ms | 7.8 ms | 0 of 125 |
+| delivered | 250 ms | -0.00 ms/min | +15.6 ms | 0.0 ms | 0 of 125 |
+| delivered | 1500 ms | +0.33 ms/min | +6.2 ms | 0.7 ms | 0 of 125 |
 | turn | 250 ms | -0.00 ms/min | +0.0 ms | 0.0 ms | 0 of 125 |
 | turn | 1500 ms | -0.00 ms/min | +0.0 ms | 0.0 ms | 0 of 125 |
 
@@ -433,59 +456,65 @@ floor for the drift statistic on a 124 s span is set by the lag grid,
 one sample at 16 kHz or 0.0625 ms, over that span: slopes below about
 0.03 ms per minute cannot be distinguished from zero.
 
-The turn track's bias is not an inference. `fidelity.py` measures the
-composed turn-track reference sitting **+145.4 ms** after the composed
-tap track, with r = 0.760, which matches the -145.5 ms bias the
-injection runs report and the r of 0.78 they measure per window. Its
-audit trail: the turn buffer is delivered 59.5 ms after the last wire
-send and is 92 ms short of the audio sent, so placing it to end at its
-delivery stamp starts it 94.0 ms late, and the wire clock's 58.0 ms
-accumulated offset displaces the tap's per-packet placements across the
-span. Both components are properties of the construction an adoption
-would face.
+The turn track's result is corroborated independently of the echo
+machinery. `fidelity.py` measures the composed turn-track reference
+sitting **-1.2 ms** from the composed tap track with r = 0.991, and the
+placement arithmetic agrees: the turn buffer is delivered 2.9 ms after
+the last packet's playout slot closes, and placing it to end at that
+stamp starts it 5.2 ms after the wire's first send.
 
-### Gate 1: FAILED, at both delays, on both tracks
+### Gate 1: PASSED on the turn track, at both delays
 
 Against the plan's bar:
 
 | criterion | bar | delivered track | turn track |
 | --- | --- | --- | --- |
 | detection rate | at least 90% | 100% pass | 100% pass |
-| median lag | within 20 ms | -78 / -80 ms **fail** | -145.5 ms **fail** |
-| median gain | within 3 dB | 11.8 / 11.4 dB **fail** | 2.3 dB pass |
-| lag IQR | under 50 ms | 21.8 / 27.4 ms pass | 0.1 ms pass |
-| drift | under 20 ms over span | 6.7 / 7.8 ms pass | 0.0 ms pass |
+| median lag | within 20 ms | +58 / +57 ms **fail** | +1.2 ms pass |
+| median gain | within 3 dB | 8.7 / 8.6 dB **fail** | 0.2 dB pass |
+| lag IQR | under 50 ms | 24.3 ms pass | 0.0 ms pass |
+| drift | under 20 ms over span | 0.0 / 0.7 ms pass | 0.0 ms pass |
 
-**Gate 1 fails.** Both references breach the 20 ms lag bar at both
-delays, by four to seven times, and the delivered track breaches the
-gain bar besides.
+**Gate 1 passes.** A capture built on pipecat 1.7.0 recovers a known
+echo's delay to 1.2 ms and its gain to 0.2 dB, in every one of 125
+candidate windows, at both 250 ms and 1500 ms, with a lag IQR of zero
+and no measurable drift across two minutes. That is the quality
+samtal's own capture achieves, and it settles the question the spike
+existed to answer: a shared timeline between pipecat's recording and
+the wire **can** be constructed to cross-correlation grade.
 
-The shape of the failure matters more than the fact of it, and it is
-exactly the shape the plan warned could not be caught by stability
-criteria. The turn track's error is a **constant offset**: an IQR of
-0.1 ms and a Theil-Sen slope indistinguishable from zero across two
-minutes. It is not drift, not jitter, and not noise. A perfectly stable
-145 ms lie is still a lie, and the plan said in advance that if a
-constant bias breached the bar the finding would say exactly that,
-because an adoption would face the same construction.
+**This reverses the verdict this document first recorded.** The first
+run reported a constant 145.5 ms bias and called gate 1 failed. Two
+errors in the spike's own instrumentation produced that number, both
+found by the PR review round and both the spike's fault rather than
+pipecat's: tap packets were placed ending at their send timestamp
+instead of starting there, which shifted the whole wire track one frame
+early and overwrote audio at collisions, and the bot track was
+resampled by pipecat's unflushed streaming resampler instead of the
+single converter the plan required, which truncated it by 92 ms.
+Correcting both and rerunning everything downstream moved the bias from
+145.5 ms to 1.2 ms. The measurement was wrong, not the framework, and
+saying so is the whole point of keeping the record.
 
-What that means for an adoption is concrete. Echo measurement and any
-AEC reference need to know when the audio the microphone hears left the
-machine. pipecat 1.7.0 records what was played but not when, and the
-one track that could be timestamped is not what was played. Closing
-that gap is not configuration: it needs a per-packet send timeline that
-the framework does not expose, which is exactly the tap this spike had
-to build, and an adopter would have to build and maintain it too.
+Three qualifications travel with the pass, and an adoption owns all
+three.
+
+- **The reference must be the turn track.** The delivered track, the
+  one whose arrivals can be timestamped and the one a reader of the
+  documentation would reach for first, is corrupted whenever the device
+  streams during a reply. Nothing warns you: it looks like audio.
+- **It is one aggregate per turn.** That is enough for offline echo
+  measurement, which is what #48 does and what this gate tested. It is
+  not a real-time AEC reference, because it does not exist until the
+  turn is over.
+- **The processor must record at the native output rate.** Asking it
+  for the capture rate puts its streaming resampler in the path, and
+  that resampler is never flushed, so the tail of every turn is lost.
 
 **Deviations from the plan.** Two. The plan expected one bot track and
-found two, so the table has twice the rows. And the plan's expected
-failure modes were drift, jitter and buffer quantization; the measured
-failure is a fixed offset, with drift and jitter comfortably inside
-their bars.
-
-**A figure the plan asked for on a pass, recorded anyway**: the
-constant bias an adoption would have to calibrate out is 145.5 ms for
-the faithful track, stable to 0.1 ms IQR over two minutes.
+found two, so every table has twice the rows. And the plan's epoch
+mapping was amended mid-flight, on the record and for reasons
+independent of any measured lag, which the plan section states in full.
 
 ## Milestone 4: the size verdict and the paper trail
 
@@ -537,7 +566,7 @@ either side.
 
 ### The comparable slice
 
-The full-file comparison is 324 against 899, but the spike's exchange
+The full-file comparison is 312 against 899, but the spike's exchange
 exercises a fraction of what the bespoke edge does, so the plan
 requires one honest small-against-small number beside it. The bespoke
 responsibilities the spike's exchange actually exercises are the hello
@@ -613,7 +642,11 @@ carries bytes (`audio`). The rest are the adapter's own or absent.
 
 ### What the seam could not express
 
-The plan asks for this either way, and there are three.
+The plan asks for this either way, and there are three. A fourth item
+is not a seam limitation but belongs beside them, because it is
+unbuilt adapter work the counts below do not include: the serializer
+speaks xiaozhi **protocol v1 only**, with no version negotiation and
+no binary-header framing for v2 or v3.
 
 - **The serializer cannot originate a message.** Its only lifecycle
   hook, `setup(StartFrame)`, carries sample rates and no transport, so
@@ -643,38 +676,62 @@ On the plan's qualitative bar, the adapter as it would ship is
 **clean**. It does not duplicate framework state to correct timing, and
 it holds no per-reply state machine beyond message translation. It did
 re-implement pacing the framework owns, which is precisely the named
-symptom, but measurement showed that layer was unnecessary and it is
-gone; that is worth recording as how easily an adoption acquires one,
-not as a standing charge.
+symptom, but measurement showed that layer was unnecessary and it has
+been removed; that is worth recording as how easily an adoption
+acquires one, not as a standing charge.
 
-On size, the adapter is **not evidence for adoption**. It is 324 lines
-against 222 for the bespoke code doing the same job, or 160 against 155
+On size, the adapter is **not evidence for adoption**. It is 312 lines
+against 222 for the bespoke code doing the same job, or 154 against 155
 counting code only: the same size, not smaller. Adoption would not
 shrink the device edge, it would relocate it, add a framework
 dependency, and leave thirteen of twenty-three seam obligations still
-to write.
+to write, plus the protocol-version negotiation the spike does not
+implement at all.
 
 Gate 2 therefore does not produce the evidence for adoption the issue
-looked for. It is not the decisive failure; gate 1 is. But it removes
-the argument that would have survived a gate 1 failure, that adoption
-at least buys a much smaller edge, and the measured answer is that it
-does not.
+looked for. It does not produce evidence against adoption either: the
+shape stayed translation, which was the thing that would have condemned
+it. What it removes is the expectation that adopting a framework shrinks
+the edge. It does not.
 
 ### The verdict, and what it decides
 
-**Gate 1 failed. Gate 2 did not pass.** Per issue #89's stated
-outcome, #31 is built bespoke behind the #85 boundary, and the pipecat
-question is settled by evidence rather than postponed again.
+**Gate 1 passed. Gate 2 was neutral: clean in shape, no smaller in
+size.** Per issue #89's stated outcome, that makes #31 "a genuine
+tradeoff (porting the gate ladder, filler, and observer as custom
+processors versus owning a streaming pipeline), decided with the
+spike's measured numbers". It does not settle #31 by itself, and it
+does not licence adoption either.
 
-Two things are worth carrying forward whatever happens to #31. The
+What the numbers say, put plainly for whoever decides #31:
+
+- A trustworthy capture **is** constructible on pipecat 1.7.0, to
+  1.2 ms of lag and 0.2 dB of gain. The worry that motivated the gate
+  is answered, and answered in pipecat's favour.
+- It is constructible only via `on_bot_turn_audio_data`, recorded at
+  the native output rate, placed by its end stamp. The obvious
+  configuration, the delivered track at the capture rate, silently
+  produces a corrupted reference and a truncated one. An adoption
+  carries that knowledge as a permanent maintenance obligation against
+  a component the project changes often.
+- It is a per-turn aggregate, so it serves offline echo measurement
+  and not a real-time AEC reference. If #31 ever needs the latter, this
+  spike did not test it and the delivered track cannot supply it.
+- The adapter costs about what the bespoke edge costs for the same
+  work, buys 8 of 23 seam obligations, and does not speak xiaozhi
+  protocol v2 or v3 at all.
+- The observability constraint from #84 is untouched by any of this:
+  the reasoned decision events survive only in self-owned processors.
+
+Two things carry forward whatever happens to #31. The
 `SessionInput`/`DeviceOutput` seam survived contact with a foreign
 framework: every obligation could be named and located, and the three
-that could not be expressed were expressible as findings rather than
+that could not be expressed came out as findings rather than
 confusion, which is what a good boundary buys. And the reason samtal's
 own capture is trustworthy is now stated precisely rather than
-assumed: it records the packets at the moment they are sent, on one
-clock, and that property is the thing a framework has to provide, not
-the recording itself.
+assumed: it places decoded audio at the moment it is sent, contiguously,
+on one clock. That is the property a framework has to provide, and
+reproducing it on pipecat is what the whole measurement turned on.
 
 ## PR review round
 
@@ -684,10 +741,15 @@ diff to `main`, 2026-08-11. Six findings, condensed below as received,
 each carrying its resolution once the commit addressing it landed.
 
 The overall verdict accepted the delivered-track corruption and its
-`_align_track_buffers` mechanism, the 93.75 ms block signature, the
+`_align_track_buffers` mechanism, the padding-block signature, the
 Theil-Sen calculations, the protocol-v1 exchange and the primary
 comparable-slice counts. It rejected the gate 1 numbers as written,
 because finding 1 invalidates the placement they rest on.
+
+It was right to. Fixing findings 1 and 2 and rerunning moved the turn
+track's measured bias from 145.5 ms to 1.2 ms and **reversed the gate 1
+verdict from failed to passed**. The review is the reason this document
+does not carry a wrong conclusion.
 
 1. **P1: the tap placement matches neither device playout nor
    samtal's own capture.** `compose.py` placed each packet so that it
@@ -705,6 +767,9 @@ because finding 1 invalidates the placement they rest on.
    on the record, to `start = max(previous_end, round(send_t * rate))`
    with gaps retained only for late sends and no overwrites;
    `compose.py` implements it and every downstream figure was rerun.
+   Tap self-fidelity against the uniform decode rose from 0.755 to
+   0.982, no placement overwrote another (and no send was late), and
+   the turn track's bias fell to 1.2 ms, which is what flipped gate 1.
 2. **P2: the resampling violated the plan's own method.**
    `pipeline.py` had `AudioBufferProcessor` resample the bot track
    internally with pipecat's streaming SOXR resampler while
@@ -716,15 +781,19 @@ because finding 1 invalidates the placement they rest on.
    *Resolution*: the buffer processor now records both tracks at their
    native 24 kHz, and `compose.py` converts every full track to 16 kHz
    through the same `resample_poly(2, 3)` call, with the measured
-   filter delay and the input and output sample counts recorded.
+   filter delay (-0.33 samples) and the input and output sample counts
+   (3155950 in, 2103967 out, per track) recorded. The turn track's
+   shortfall fell from 92 ms to 60 ms, and the delivered track's
+   corruption survived untouched, as predicted: it is in the raw
+   recording, upstream of any resampling.
 3. **P2: the gate 2 numerator subtracted an incomplete feature.** Only
    the 14-line `_pace` method was deducted while the pacing feature's
    imports, its `_paced` and `_next_send` state, its constructor
    option, its conditional call and its edge wiring stayed counted as
    ambient adapter code.
    *Resolution*: the pacing experiment is gone from the adapter
-   entirely and the adapter is recounted as it now stands, with the
-   as-built figure reported beside it.
+   entirely and the adapter is recounted as it now stands: 312
+   physical and 154 code-only, against 338 and 168 as built.
 4. **P3: "speaks stock xiaozhi" overstates what was exercised.** The
    serializer treats every binary frame as bare Opus and emits bare
    Opus, without observing `Protocol-Version` or the hello's `version`.
@@ -738,7 +807,10 @@ because finding 1 invalidates the placement they rest on.
    too strong.** In the retained evidence 253 of 256 did; three ended
    one or two samples later.
    *Resolution*: `fidelity.py` now audits the boundary alignment and
-   prints the distribution, and the claim quotes its output.
+   prints the distribution, and the claim quotes its output. On the
+   rerun, at the native 24 kHz recording rate, none of the 137 blocks
+   ends exactly on a boundary and all 137 end within one sample of
+   one, so the text says that instead.
 6. **P3: two non-gating counts were off by one.** `fidelity.py` was
    reported as 197 lines and the harness total as 1,204, where `wc -l`
    gives 196 and 1,203.
@@ -752,34 +824,33 @@ renders comment bodies with the `breaks` extension, so every newline
 inside one becomes a literal line break. It is written to be copied out
 and posted verbatim, and reflowing it here would shatter it there.
 
-> **Pipecat alignment spike: both gates measured, gate 1 failed**
+> **Pipecat alignment spike: both gates measured, gate 1 passed, gate 2 neutral**
 >
-> The spike from #89 ran against **pipecat-ai 1.7.0** (xiaozhi-sdk 0.5.1, CPython 3.13.12, macOS arm64). Minimal pipeline, Silero VAD plus a canned 126 s reply clip, no LLM and no cloud, behind a xiaozhi frame serializer on pipecat's FastAPI websocket transport, driven by the unmodified device simulator. Every figure below is against that version; the transport and the audio buffer processor are both areas the project changes often, so none of it transfers to another release without re-measuring. Full detail: `docs/plans/2026-08-11-pipecat-alignment-spike-implementation.md`.
+> The spike from #89 ran against **pipecat-ai 1.7.0** (xiaozhi-sdk 0.5.1, CPython 3.13.12, macOS arm64). Minimal pipeline, Silero VAD plus a canned 126 s reply clip, no LLM and no cloud, behind a xiaozhi frame serializer on pipecat's FastAPI websocket transport, driven by the unmodified device simulator. Every figure is against that version; the transport and the audio buffer processor are both areas the project changes often, so none of it transfers to another release without re-measuring. Full detail: `docs/plans/2026-08-11-pipecat-alignment-spike-implementation.md`.
 >
-> **Gate 1 (capture alignment): FAILED, at both delays.** The measurement bar is the existing control's: detection in at least 90% of candidate windows, median lag within 20 ms of the injection, median gain within 3 dB, lag IQR under 50 ms, and drift under 20 ms across the span. The stock control passes exactly on the composed pair (125/125 windows, lag and gain exact, at 250 ms and 1500 ms), so the data is sound and the scripts ran unmodified.
+> **Gate 1 (capture alignment): PASSED, at both delays.** The bar is the existing control's: detection in at least 90% of candidate windows, median lag within 20 ms of the injection, median gain within 3 dB, lag IQR under 50 ms, drift under 20 ms across the span. The stock control passes exactly on the composed pair (125/125 windows, lag and gain exact, at 250 ms and 1500 ms), with `scripts/echo_leakage.py` and `scripts/echo_leakage_control.py` run unmodified.
 >
-> `AudioBufferProcessor` turned out to offer two bot tracks, and neither is what an echo measurement needs.
->
-> - The **delivered track** (`on_track_audio_data`), the only one whose arrivals can be timestamped, is time-corrupted: 126.180 s of reply audio comes back as 154.482 s, with 24.00 s of silence inserted *inside* continuous speech in 256 blocks, 252 of them exactly 93.75 ms. Best correlation against the audio actually sent, over every admissible lag: r = 0.022. The cause is `_align_track_buffers()` padding the bot track up to the user track at every delivery, because a device streaming microphone audio during a reply makes the user track outrun it. Continuous mic streaming is not an edge case for us, it is what barge-in requires.
-> - The **turn track** (`on_bot_turn_audio_data`) is faithful, r = 0.990, contiguous, no interior padding. But it arrives once, when the bot stops speaking, so it has no independently timestampable delivery point, which is the fallback finding the plan named in advance.
->
-> Measured, 125 candidate windows per delay, `--max-lag-s 2.0`, no lag at the search boundary:
+> 125 candidate windows per delay, `--max-lag-s 2.0`, no lag at the search boundary:
 >
 > | reference | delay | detected | median lag | bias | median gain | lag IQR | drift over span |
 > | --- | --- | --- | --- | --- | --- | --- | --- |
-> | delivered | 250 ms | 125/125 | 172 ms | -78 ms | -41.8 dB | 21.8 ms | 6.7 ms |
-> | delivered | 1500 ms | 125/125 | 1420 ms | -80 ms | -41.4 dB | 27.4 ms | 7.8 ms |
-> | turn | 250 ms | 125/125 | 104.5 ms | -145.5 ms | -32.3 dB | 0.1 ms | 0.0 ms |
-> | turn | 1500 ms | 125/125 | 1354.5 ms | -145.5 ms | -32.3 dB | 0.1 ms | 0.0 ms |
+> | delivered | 250 ms | 125/125 | 308 ms | +58 ms | -38.7 dB | 24.3 ms | 0.0 ms |
+> | delivered | 1500 ms | 125/125 | 1557 ms | +57 ms | -38.6 dB | 24.3 ms | 0.7 ms |
+> | turn | 250 ms | 125/125 | 251.2 ms | **+1.2 ms** | **-30.2 dB** | 0.0 ms | 0.0 ms |
+> | turn | 1500 ms | 125/125 | 1501.2 ms | **+1.2 ms** | **-30.2 dB** | 0.0 ms | 0.0 ms |
 >
-> The failure is a **constant offset, not drift or jitter**: the faithful track's lag is stable to a 0.1 ms IQR and a Theil-Sen slope indistinguishable from zero over two minutes, and wrong by 145.5 ms. That is the failure mode we said in advance the stability criteria could not catch. An independent measurement of the composed reference against the composed tap track puts the offset at +145.4 ms, matching.
+> A capture built on pipecat recovers a known echo's delay to 1.2 ms and its gain to 0.2 dB, in every window, at both delays, with zero lag IQR and no measurable drift over two minutes. The shared timeline the gate doubted **is** constructible.
 >
-> The transport itself is fine: it paces at real time (median inter-send 60.0 ms, 100% of intervals within 5 ms of the 60 ms cadence), which corrects a wrong reading we made early from the source. What it does not do is record *when* audio left. pipecat 1.7.0 records what was played but not when, and the track that can be timestamped is not what was played.
+> **Correction, and it matters.** An earlier version of this evidence reported gate 1 as failed on a constant 145.5 ms bias. That was the spike's own instrumentation, not pipecat: tap packets were placed *ending* at their send timestamp instead of starting there (samtal's own capture starts at the send and keeps packets contiguous; pipecat sends then sleeps, so the stamp opens the playout slot), and the bot track went through pipecat's unflushed streaming resampler instead of the single converter the plan required, losing 92 ms. An external review of PR #90 caught both. Corrected and rerun, the bias is 1.2 ms.
 >
-> **Gate 2 (adapter size and shape): not passed.** Adoption-required adapter, `wc -l`: **324 lines** (serializer 171, control processor 113, edge wiring 54, less a 14-line pacing layer that measurement proved redundant). Against the bespoke edge at base commit `891e257`, 899 physical lines (883 in the issue's snapshot), that is 0.36. But against the **comparable slice**, the bespoke responsibilities this exchange actually exercises, it is **324 against 222**, or 160 against 155 counting code only: the same size, not smaller.
+> **Three qualifications an adoption owns.** `AudioBufferProcessor` offers two bot tracks and only one works. The **delivered** track (`on_track_audio_data`), the one whose arrivals can be timestamped and the one you would reach for first, is time-corrupted: 126.180 s of reply comes back as 149.936 s with 13.00 s of silence inserted *inside* continuous speech in 137 blocks (135 of exactly 95.00 ms), correlating at r = -0.023 with the audio actually sent. The cause is `_align_track_buffers()` padding the bot track up to the user track at every delivery, which happens whenever a device streams mic audio during a reply, i.e. always, since barge-in requires it. The **turn** track (`on_bot_turn_audio_data`) is faithful (r = 0.989) and is what passes, but it arrives once per turn, so it serves offline echo measurement and not a real-time AEC reference. And the processor must record at the native output rate: asking it for the capture rate puts its never-flushed streaming resampler in the path and truncates every turn's tail.
 >
-> The adapter buys **8 of the 23** `SessionInput`/`DeviceOutput` obligations. Two more are mapped but never exercised, and **13 are required and not implemented**, including `pause_output`/`resume_output`, `speaking_started_at`, `drain`, `flush_encoder` and the device tools. Shape is clean: it stayed message translation, no duplicated framework state, no per-reply state machine. Three things the seam could not express inside the serializer: it cannot originate a message (so the hello became a processor), it never sees outbound control frames (so the whole `tts`/`stt` surface became a processor), and `encode_audio` returns a batch where `serialize` returns one payload.
+> The transport itself paces at real time (median inter-send 60.0 ms, 99.8% of intervals within 5 ms of the 60 ms cadence), correcting a wrong reading we made early from its send-interval formula, whose `/2` cancels a bytes-per-sample factor for mono.
 >
-> **Decision.** Per #89's stated outcome, gate 1 failing means **#31 is built bespoke behind the #85 boundary**. Gate 2 removes the argument that would have survived a gate 1 failure, that adoption at least buys a much smaller edge; measured, it does not. The observability constraint from #84 stands regardless.
+> **Gate 2 (adapter size and shape): not passed, not failed.** Adoption-required adapter, `wc -l`: **312 lines** (serializer 145, control processor 113, edge wiring 54), after removing a pacing layer measurement proved redundant. Against the bespoke edge at base commit `891e257`, 899 physical lines (883 in the issue's snapshot), that is 0.35. But against the **comparable slice**, the bespoke responsibilities this exchange actually exercises, it is **312 against 222**, or **154 against 155** counting code only: the same size, not smaller.
 >
-> Two things carry forward. The `SessionInput`/`DeviceOutput` seam survived contact with a foreign framework: every obligation could be named and located, and the three it could not express came out as findings rather than confusion. And why our own capture is trustworthy is now precise rather than assumed: it decodes the packets at the moment they are sent, on one clock. That property is what a framework has to provide, and this one does not.
+> The adapter buys **8 of the 23** `SessionInput`/`DeviceOutput` obligations. Two more are mapped but never exercised, and **13 are required and not implemented**, including `pause_output`/`resume_output`, `speaking_started_at`, `drain`, `flush_encoder` and the device tools. It also speaks **xiaozhi protocol v1 only**: bare Opus, no version negotiation, no v2/v3 binary headers, which is more adapter work the counts above exclude. Shape is clean, though: it stayed message translation, with no duplicated framework state and no per-reply state machine. Three things the seam could not express inside the serializer: it cannot originate a message (so the hello became a processor), it never sees outbound control frames (so the whole `tts`/`stt` surface became a processor), and `encode_audio` returns a batch where `serialize` returns one payload.
+>
+> **What this decides.** Per #89, gate 1 passing and gate 2 not condemning makes #31 a genuine tradeoff rather than a settled question: porting the gate ladder, filler and observer as custom processors, against owning a streaming pipeline. It does not licence adoption. The measured price is a framework dependency, an edge that is the same size as the bespoke one for the same work, 13 seam obligations still to write, protocol v1 only, and a permanent obligation to keep using exactly the right recording API against a component that changes often. The observability constraint from #84 stands: the reasoned decision events survive only in self-owned processors.
+>
+> Two things carry forward regardless. The `SessionInput`/`DeviceOutput` seam survived contact with a foreign framework: every obligation could be named and located, and the three it could not express came out as findings rather than confusion. And why our own capture is trustworthy is now precise rather than assumed: it places decoded audio at the moment it is sent, contiguously, on one clock. Reproducing that property is what the whole measurement turned on, and getting it wrong is what produced the first, retracted, verdict.
