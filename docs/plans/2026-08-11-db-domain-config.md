@@ -566,6 +566,19 @@ leaves `main` consistent: after 1 or 2 the database is dormant
 machinery, after 3 the docs pipeline runs against the still
 YAML-backed models, after 4 the issue is done.
 
+Between PR 2 and the switchover the CLI can write a database the
+server does not read, and the image publishes from `main`, so
+that window is a real deployment state, not a hypothetical. It is
+handled out loud rather than hidden: until the switchover lands,
+every mutating `config` command prints a prominent notice that
+the server does not yet read the database and this write is
+staging for the switchover; the switchover PR removes the notice
+in the same change that makes the database live. The CHANGELOG
+entry for PR 2 says the same. This keeps the CLI usable for
+exactly what the window is for (staging a deployment's domain
+configuration ahead of the flip) while making it impossible to
+mistake a staged write for an applied one.
+
 ## Tests
 
 - **Unit** (`tests/unit`): open-and-migrate on a tmp path
@@ -822,6 +835,12 @@ addressing it lands.
     command. Keep the CLI explicitly unavailable until the
     switchover, print a staging-only warning, or treat PRs 2 to 4
     as a dependent stack.
+    *Resolution*: the PR-structure section now treats the window
+    as a real deployment state: until the switchover, every
+    mutating command prints a prominent staging notice that the
+    server does not yet read the database, removed by the
+    switchover PR in the same change that makes the database
+    live, with the PR 2 CHANGELOG entry saying the same.
 12. **P2: the documentation editing pass is split across PRs
     inconsistently.** PR 3 performs the editing pass and generates
     a reference linking to fragments, but the fragments, completed
