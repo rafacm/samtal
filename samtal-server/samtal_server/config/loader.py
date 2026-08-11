@@ -7,7 +7,10 @@ with __, for example SAMTAL_SERVER__PORT) override the YAML file, which
 overrides the field defaults.
 
 The file holds `server` and `memory`. The domain half lives in the
-database, and composition puts the two together into `Config`, which is
+database, so a domain section left in the file, or a SAMTAL_ override for
+one, refuses the boot naming where it moved and the command that writes
+it: a key that quietly stopped applying is the trap this closes.
+Composition then puts the two halves together into `Config`, which is
 what validates the whole snapshot the way it always has.
 """
 
@@ -19,9 +22,36 @@ import yaml
 from pydantic import ValidationError
 from pydantic_settings.exceptions import SettingsError
 
-from samtal_server.config.models import Config, FileConfig, yaml_file_var
+from samtal_server.config.models import (
+    DOMAIN_KEYS,
+    Config,
+    FileConfig,
+    yaml_file_var,
+)
 
 CONFIG_ENV_VAR = "SAMTAL_CONFIG"
+
+# The prefix a configuration override carries. Only the domain names
+# below are scanned for: everything else under this prefix is either a
+# key the file half still owns or a variable that carries a value rather
+# than naming a section (SAMTAL_CONFIG, SAMTAL_MASTER_KEY,
+# SAMTAL_AUTH_SECRET), and none of those moved anywhere.
+ENV_PREFIX = "SAMTAL_"
+
+# What writes each moved section now, so the refusal answers the question
+# it raises. One entry per key in DOMAIN_KEYS, checked below.
+MOVED_KEY_COMMANDS: dict[str, str] = {
+    "providers": "samtal-server config set provider <stage> <name> -f fragment.yaml",
+    "mcp_servers": "samtal-server config set mcp-server <name> -f fragment.yaml",
+    "agent_defaults": "samtal-server config set agent-defaults -f fragment.yaml",
+    "agents": "samtal-server config set agent <name> -f fragment.yaml",
+    "devices": "samtal-server config bind-device <mac> <agent> [<agent> ...]",
+    "default_agent": "samtal-server config set-default-agent <name>",
+}
+
+# Where the reference for the moved half is, quoted in the refusal
+# because that document is what a reader needs next.
+DOMAIN_REFERENCE = "docs/reference/domain-config.md"
 
 
 class ConfigError(Exception):
@@ -36,6 +66,7 @@ def load_file_config(path: str | Path | None = None) -> FileConfig:
     else:
         path = Path(path)
 
+    _check_moved_environment()
     if path is not None:
         _check_config_file(path)
 
@@ -97,6 +128,58 @@ def _check_config_file(path: Path) -> None:
             f"invalid config in {path}: top level must be a mapping of "
             f"server/memory, got {type(data).__name__}"
         )
+
+    if isinstance(data, dict):
+        _check_moved_keys(path, data)
+
+
+def _check_moved_keys(path: Path, data: dict) -> None:
+    """A domain section left in the file, refused where the parsed top
+    level is already in hand. Ignoring it silently would leave a
+    deployment editing a section the server no longer reads."""
+    moved = [key for key in DOMAIN_KEYS if key in data]
+    if not moved:
+        return
+    problems = "\n".join(
+        f"  - {key}: moved to the database; write it with: {MOVED_KEY_COMMANDS[key]}"
+        for key in moved
+    )
+    raise ConfigError(
+        f"invalid config in {path}:\n{problems}\n"
+        f"  Remove these sections from the file: the domain half of the "
+        f"configuration lives in the database under server.database.dir. "
+        f"See {DOMAIN_REFERENCE}."
+    )
+
+
+def _check_moved_environment() -> None:
+    """The same refusal for a SAMTAL_ override of a moved section, and
+    deliberately not through pydantic: the environment source looks up
+    known fields and ignores every other prefixed variable, even under
+    extra="forbid", so a stale SAMTAL_DEFAULT_AGENT would simply stop
+    applying without a word. Only the six moved names are matched, so
+    the variables that carry a value rather than name a section
+    (SAMTAL_CONFIG, SAMTAL_MASTER_KEY, SAMTAL_AUTH_SECRET) are outside
+    this by construction."""
+    moved = [
+        (name, key)
+        for key in DOMAIN_KEYS
+        for name in sorted(os.environ)
+        if name == f"{ENV_PREFIX}{key.upper()}"
+        or name.startswith(f"{ENV_PREFIX}{key.upper()}__")
+    ]
+    if not moved:
+        return
+    problems = "\n".join(
+        f"  - {name}: {key} moved to the database, and this override no longer "
+        f"applies; write it with: {MOVED_KEY_COMMANDS[key]}"
+        for name, key in moved
+    )
+    raise ConfigError(
+        f"invalid configuration environment:\n{problems}\n"
+        f"  Unset these variables: the domain half of the configuration lives in "
+        f"the database under server.database.dir. See {DOMAIN_REFERENCE}."
+    )
 
 
 def _format_validation_error(exc: ValidationError, source: str) -> str:
