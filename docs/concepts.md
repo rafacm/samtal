@@ -34,6 +34,32 @@ model, its capabilities ("you are speaking through a device with no
 display"), its location. Everything learned in conversation belongs to
 the agent, so replacing or moving hardware loses nothing.
 
+What the server knows about a device comes from three sources, kept
+distinct on purpose:
+
+- **Identity and declaration.** The `Device-Id` on the wire is what
+  bindings key on, and the operator's configuration says what was
+  *declared* for it: which agents, which default.
+- **Observed facts**: what the device itself reports. Board model and
+  firmware version arrive with the OTA request; protocol version, a
+  feature map, and the device's own MCP tool list arrive at hello;
+  the listening mode arrives with the first listen message and is the
+  empirical echo-cancellation signal, since the firmware chooses
+  realtime exactly when AEC is on; a fired wake word is reported by
+  word. Today these are parsed and dropped; keeping them per device
+  is planned (issue #96).
+- **Hardware facts from the board catalog**: what the model implies
+  but the wire never says: microphone count, echo cancellation,
+  display, button layout. Keyed by the reported board model; the
+  per-board device guides are the prose form for the help agent, and
+  a machine-readable sibling serves the server.
+
+The help agent reads all three ("this board has one microphone and no
+echo cancellation, so I cannot be interrupted mid-reply"). The
+runtime adapts to what they imply rather than controlling the device:
+the device owns its own listening mode, so adaptation is by
+observation, which is the thin-device promise holding.
+
 ## Agent
 
 An agent is what answers: a system prompt, an LLM and the rest of its
