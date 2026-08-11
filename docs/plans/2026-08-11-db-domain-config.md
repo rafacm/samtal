@@ -236,6 +236,24 @@ weaker place. The database opens in WAL mode with a busy timeout,
 so a CLI write while the server holds the file open does not fail;
 the server does not observe it until restart, by design.
 
+WAL and a busy timeout are liveness, not atomicity: the
+read-modify-validate-write sequence every CLI write performs must
+be one serialized transaction, or two concurrent invocations can
+each validate against the pre-change snapshot and persist writes
+that are individually valid and jointly not (both deleting what
+the other's write references, or one losing the other's update).
+Every repository write therefore runs inside a single transaction
+opened with `BEGIN IMMEDIATE`, taking the write lock before the
+snapshot is read, so the read, the reference check, and the
+persist see and produce one consistent state; a lock that cannot
+be taken within the busy timeout fails the command with a
+retryable error rather than half-applying. Migration is
+serialized the same way: the upgrade-on-open runs under an
+immediate transaction too, so two processes opening a fresh
+database do not race the baseline migration; whichever loses the
+lock finds the schema already current. Both properties are
+tested with two concurrent writers.
+
 Migrations run programmatically (Alembic's command API against the
 scripts packaged in `samtal_server/db/migrations/`) whenever the
 database is opened, by the server at boot and by the CLI. A fresh
@@ -752,6 +770,13 @@ addressing it lands.
    migrations. Require one transaction (`BEGIN IMMEDIATE` with
    bounded retries) around read, validation, and persistence;
    specify migration serialization; test two concurrent writers.
+   *Resolution*: the schema section now requires every repository
+   write to run read, reference check, and persist inside one
+   `BEGIN IMMEDIATE` transaction, failing with a retryable error
+   when the lock is not acquired within the busy timeout, and
+   serializes the upgrade-on-open under the same locking so
+   concurrent openers cannot race the baseline migration; both
+   are tested with two concurrent writers.
 9. **P2: the documented backup procedure is unsafe under WAL.**
    Copying only `samtal.db` while the server or CLI is active can
    omit committed data still in the WAL, and "a copy of the file
