@@ -34,26 +34,17 @@ from typing import NoReturn
 
 import yaml
 
-from samtal_server.config import docgen
+from samtal_server.config import docgen, views
 from samtal_server.config.loader import CONFIG_ENV_VAR, ConfigError, load_file_config
-from samtal_server.config.models import (
-    PROVIDER_STAGES,
-    AgentDefaults,
-    McpServerConfig,
-    ProviderConfig,
-    is_mcp_secret_key,
-    is_secret_option,
-    normalize_mac,
-)
+from samtal_server.config.models import PROVIDER_STAGES, normalize_mac
 from samtal_server.config.secrets import (
     MASK,
     EntityKind,
     SecretLocation,
     SecretStore,
     load_keys,
-    mask,
 )
-from samtal_server.config.store import ConfigStore, DomainConfig, Snapshot
+from samtal_server.config.store import ConfigStore, Snapshot
 from samtal_server.db import open_database
 
 # Printed after every mutating command. The configuration is a
@@ -216,32 +207,23 @@ def _show_all(args: argparse.Namespace) -> None:
 
 
 def _show_provider(args: argparse.Namespace) -> None:
-    snapshot = _loaded(args)
-    entry = _provider_entry(snapshot.domain, args.stage, args.name)
-    data = _provider_data(entry)
-    # The entity's own keys are both what is shown and what a stored
-    # secret may shadow, so the same mapping serves twice.
-    _print_entity(data, snapshot.secrets, "provider", f"{args.stage}.{args.name}", data)
+    with _store(args) as store:
+        _print_entity(views.provider(store.read_provider(args.stage, args.name)))
 
 
 def _show_mcp_server(args: argparse.Namespace) -> None:
-    snapshot = _loaded(args)
-    entry = snapshot.domain.mcp_servers.get(args.name)
-    if entry is None:
-        raise ConfigError(f"mcp_servers.{args.name}: no such MCP server")
-    _print_entity(_mcp_data(entry), snapshot.secrets, "mcp_server", args.name, _mcp_written(entry))
+    with _store(args) as store:
+        _print_entity(views.mcp_server(store.read_mcp_server(args.name)))
 
 
 def _show_agent(args: argparse.Namespace) -> None:
-    snapshot = _loaded(args)
-    entry = snapshot.domain.agents.get(args.name)
-    if entry is None:
-        raise ConfigError(f"agents.{args.name}: no such agent")
-    print(_yaml({"prompt": entry.prompt, **_layer_data(entry)}), end="")
+    with _store(args) as store:
+        _print_entity(views.agent(store.read_agent(args.name)))
 
 
 def _show_agent_defaults(args: argparse.Namespace) -> None:
-    print(_yaml(_layer_data(_loaded(args).domain.agent_defaults) or {}), end="")
+    with _store(args) as store:
+        _print_entity(views.agent_defaults(store.read_agent_defaults()))
 
 
 def _schema(args: argparse.Namespace) -> None:
@@ -266,11 +248,8 @@ def _openapi(args: argparse.Namespace) -> None:
 
 
 def _show_device(args: argparse.Namespace) -> None:
-    snapshot = _loaded(args)
-    bound = snapshot.domain.devices.get(_mac(args.mac))
-    if bound is None:
-        raise ConfigError(f"devices.{_mac(args.mac)}: no such device")
-    print(_yaml({"agents": list(bound)}), end="")
+    with _store(args) as store:
+        _print_entity(views.device(store.read_device(args.mac)))
 
 
 # Rendering
@@ -280,110 +259,62 @@ def _show_everything(snapshot: Snapshot) -> str:
     """The whole domain configuration in one document, in the shape the
     YAML file has today, with the stored secrets listed as masks
     underneath it."""
-    domain = snapshot.domain
-    data = {
-        "providers": {
-            stage: {
-                name: _provider_data(entry)
-                for name, entry in sorted(getattr(domain.providers, stage).items())
-            }
-            for stage in PROVIDER_STAGES
-        },
-        "mcp_servers": {
-            name: _mcp_data(entry) for name, entry in sorted(domain.mcp_servers.items())
-        },
-        "agent_defaults": _layer_data(domain.agent_defaults),
-        "agents": {
-            name: {"prompt": entry.prompt, **_layer_data(entry)}
-            for name, entry in sorted(domain.agents.items())
-        },
-        "devices": {mac: list(bound) for mac, bound in sorted(domain.devices.items())},
-        "default_agent": domain.default_agent,
-    }
-    notes = _all_secret_notes(snapshot)
-    return _yaml(data) + ("\n" + "\n".join(notes) + "\n" if notes else "")
+    document = views.config(snapshot)
+    notes = _all_secret_notes(document)
+    return _yaml(document["config"]) + ("\n" + "\n".join(notes) + "\n" if notes else "")
 
 
-def _print_entity(
-    data: dict[str, object],
-    secrets: SecretStore,
-    kind: EntityKind,
-    identity: str,
-    written: dict[str, object],
-) -> None:
-    notes = _secret_notes(secrets, kind, identity, written)
-    rendered = _yaml(data)
-    print(rendered + ("\n" + "\n".join(notes) + "\n" if notes else ""), end="")
+def _print_entity(envelope: dict[str, object]) -> None:
+    """One entity's envelope as YAML: the masked body, and its stored
+    slots as comment lines. Comments rather than a mapping, because the
+    mask is not a value that could be written back, and saying so in the
+    document is more honest than rendering it as though it could."""
+    body = envelope["entity"]
+    notes = _secret_notes(body, envelope["secrets"])
+    print(_yaml(body) + ("\n" + "\n".join(notes) + "\n" if notes else ""), end="")
 
 
-def _all_secret_notes(snapshot: Snapshot) -> list[str]:
-    """Every stored secret in the snapshot, each named by its location
-    and marked when it shadows a reference written for the same slot."""
-    written = _written_values(snapshot.domain)
+def _all_secret_notes(document: dict[str, object]) -> list[str]:
+    """Every stored secret in the whole-configuration view, each named by
+    its location and marked when it shadows a reference written for the
+    same slot."""
+    bodies = _bodies(document["config"])
     notes = [
-        f"#   {location.describe()}: {MASK}"
-        + _shadow_note(written.get((location.kind, location.identity), {}), location.slot)
-        for location in snapshot.secrets.locations()
+        f"#   {stored['kind']} {stored['identity']} {stored['slot']}: {MASK}"
+        + _shadow_note(bodies.get((stored["kind"], stored["identity"]), {}), stored["shadows"])
+        for stored in document["secrets"]
     ]
     return [SECRETS_HEADING, *notes] if notes else []
 
 
-def _secret_notes(
-    secrets: SecretStore, kind: EntityKind, identity: str, written: dict[str, object]
-) -> list[str]:
+def _secret_notes(body: dict[str, object], secrets: dict[str, object]) -> list[str]:
     notes = [
-        f"#   {slot}: {MASK}" + _shadow_note(written, slot)
-        for slot in secrets.slots_for(kind, identity)
+        f"#   {slot}: {MASK}" + _shadow_note(body, marks["shadows"])
+        for slot, marks in secrets.items()
     ]
     return [SECRETS_HEADING, *notes] if notes else []
 
 
-def _shadow_note(written: dict[str, object], slot: str) -> str:
+def _shadow_note(body: dict[str, object], shadows: str | None) -> str:
     """What a stored secret displaces, when the entity also carries a
     reference for the same slot. Ciphertext wins, and making that
     visible is what keeps the precedence from being silent."""
-    reference = written.get(_reference_key(slot))
-    return f"  (used instead of {_reference_key(slot)}: {reference})" if reference else ""
+    reference = views.reference_value(body, shadows) if shadows else None
+    return f"  (used instead of {shadows}: {reference})" if reference else ""
 
 
-def _reference_key(slot: str) -> str:
-    """The key an environment reference for this slot is written under:
-    `<slot>_env` on a provider, the dotted path itself on an MCP
-    server."""
-    return slot if "." in slot else f"{slot}_env"
-
-
-def _written_values(domain: DomainConfig) -> dict[tuple[str, str], dict[str, object]]:
-    """Every entity's own reference-carrying keys, by location, so a
-    stored secret can be matched against what it shadows."""
-    written: dict[tuple[str, str], dict[str, object]] = {}
-    for stage in PROVIDER_STAGES:
-        for name, entry in getattr(domain.providers, stage).items():
-            written[("provider", f"{stage}.{name}")] = _provider_data(entry)
-    for name, entry in domain.mcp_servers.items():
-        written[("mcp_server", name)] = _mcp_written(entry)
-    return written
-
-
-def _mcp_written(entry: McpServerConfig) -> dict[str, object]:
-    """An MCP server's env and headers under their dotted slot names,
-    which is how a stored secret addresses them. Masked on the same
-    rule as everywhere else these are displayed."""
-    return {
-        f"{group}.{key}": value
-        for group, values in (("env", entry.env), ("headers", entry.headers))
-        for key, value in _shown_values(values).items()
+def _bodies(config: dict[str, object]) -> dict[tuple[str, str], dict[str, object]]:
+    """The masked body of every entity that can hold a stored secret,
+    keyed the way a secret location names it."""
+    bodies = {
+        ("provider", f"{stage}.{name}"): body
+        for stage, entries in config["providers"].items()
+        for name, body in entries.items()
     }
-
-
-def _shown_values(values: dict[str, str]) -> dict[str, object]:
-    """An MCP server's env or headers as they may be displayed. The
-    model already requires a $VAR for the secret-bearing keys, so this
-    changes nothing for a valid entry; it is what stops a value that got
-    in another way from being read back out."""
-    return {
-        key: mask(value) if is_mcp_secret_key(key) else value for key, value in values.items()
-    }
+    bodies.update(
+        (("mcp_server", name), body) for name, body in config["mcp_servers"].items()
+    )
+    return bodies
 
 
 def _summary(snapshot: Snapshot) -> str:
@@ -406,11 +337,12 @@ def _summary(snapshot: Snapshot) -> str:
         for name, entry in sorted(domain.mcp_servers.items())
     ] or ["  (none)"]
 
-    lines.append("agent_defaults: " + (_inline(_layer_data(domain.agent_defaults)) or "(none)"))
+    defaults = _inline(views.layer_body(domain.agent_defaults))
+    lines.append("agent_defaults: " + (defaults or "(none)"))
 
     lines.append("agents:")
     lines += [
-        f"  {name}" + (f": {_inline(_layer_data(entry))}" if _layer_data(entry) else "")
+        f"  {name}" + (f": {_inline(views.layer_body(entry))}" if views.layer_body(entry) else "")
         for name, entry in sorted(domain.agents.items())
     ] or ["  (none)"]
 
@@ -438,58 +370,6 @@ def _short(value: object) -> str:
     if isinstance(value, dict):
         return "{...}"
     return str(value)
-
-
-def _provider_data(entry: ProviderConfig) -> dict[str, object]:
-    """One provider as it may be displayed. Whatever a secret-shaped key
-    holds goes through the mask, which passes an environment reference
-    through as itself and fails closed on everything else: nothing
-    validates the shape of an api_key_env value, so an operator who
-    pasted the key where its variable name belongs must not have it read
-    back out by the command they would run to find the mistake."""
-    data: dict[str, object] = {"type": entry.type}
-    if entry.api_key_env is not None:
-        data["api_key_env"] = mask(entry.api_key_env)
-    if entry.egress is not None:
-        data["egress"] = entry.egress
-    data.update(
-        {
-            key: mask(value) if is_secret_option(key) else value
-            for key, value in entry.options.items()
-        }
-    )
-    return data
-
-
-def _mcp_data(entry: McpServerConfig) -> dict[str, object]:
-    data: dict[str, object] = {"transport": entry.transport}
-    if entry.command is not None:
-        data["command"] = entry.command
-    if entry.args:
-        data["args"] = list(entry.args)
-    if entry.env:
-        data["env"] = _shown_values(entry.env)
-    if entry.url is not None:
-        data["url"] = entry.url
-    if entry.headers:
-        data["headers"] = _shown_values(entry.headers)
-    if entry.egress is not None:
-        data["egress"] = entry.egress
-    data["tool_timeout_s"] = entry.tool_timeout_s
-    return data
-
-
-def _layer_data(entry: AgentDefaults) -> dict[str, object]:
-    data: dict[str, object] = {
-        stage: getattr(entry, stage)
-        for stage in PROVIDER_STAGES
-        if getattr(entry, stage) is not None
-    }
-    if entry.mcp is not None:
-        data["mcp"] = list(entry.mcp)
-    if entry.filler is not None:
-        data["filler"] = entry.filler.model_dump()
-    return data
 
 
 def _yaml(data: object) -> str:
@@ -577,28 +457,12 @@ def _store(args: argparse.Namespace) -> Iterator[ConfigStore]:
         engine.dispose()
 
 
-def _loaded(args: argparse.Namespace) -> Snapshot:
-    with _store(args) as store:
-        return store.load()
-
-
 def _database_dir(args: argparse.Namespace) -> Path:
     """Where the server keeps its domain configuration, read through the
     settings machinery the server reads it with, so the two cannot
     disagree. No configuration file has to exist: without one the field
     default and the SAMTAL_ environment are the whole answer."""
     return load_file_config(args.config).server.database.dir
-
-
-def _provider_entry(domain: DomainConfig, stage: str, name: str) -> ProviderConfig:
-    if stage not in PROVIDER_STAGES:
-        raise ConfigError(
-            f'"{stage}" is not a provider stage; expected one of: ' + ", ".join(PROVIDER_STAGES)
-        )
-    entry = getattr(domain.providers, stage).get(name)
-    if entry is None:
-        raise ConfigError(f"providers.{stage}.{name}: no such provider")
-    return entry
 
 
 def _mac(mac: str) -> str:
