@@ -214,8 +214,8 @@ on and the rest are the ones it may be switched to.
 samtal-server config bind-device <mac> <agent> [<agent> ...]
 ```
 
-A MAC is stored in its canonical form (lowercase, colon separated), so `AA-BB-
-CC-DD-EE-FF` and `aa:bb:cc:dd:ee:ff` are the same device.
+A MAC is stored in its canonical form (lowercase, colon separated), so
+`AA-BB-CC-DD-EE-FF` and `aa:bb:cc:dd:ee:ff` are the same device.
 
 `samtal-server config delete device <mac>` removes a binding.
 
