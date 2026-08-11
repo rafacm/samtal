@@ -151,6 +151,25 @@ def test_every_refusal_a_read_can_answer_with_is_described() -> None:
         assert schema == {"$ref": "#/components/schemas/Problem"}
 
 
+def test_every_field_a_read_always_answers_with_is_required() -> None:
+    """Nullable is not optional. Each of these is in every response, so
+    a client is never left telling "the server said null" apart from
+    "the server did not say", which is a third state nothing can act
+    on."""
+    schemas = json.loads(docgen.openapi())["components"]["schemas"]
+
+    assert schemas["DefaultAgent"]["required"] == ["name"]
+    assert schemas["SecretSlot"]["required"] == ["shadows"]
+    assert set(schemas["StoredSecretLocation"]["required"]) == {
+        "kind",
+        "identity",
+        "slot",
+        "shadows",
+    }
+    assert set(schemas["Envelope"]["required"]) == {"entity", "secrets"}
+    assert schemas["ConfigDocument"]["required"] == ["config", "secrets"]
+
+
 def test_the_entity_schemas_are_registered_with_their_definitions() -> None:
     """The write routes will receive raw objects, so FastAPI collects
     none of these models on its own: they are injected, with their

@@ -173,8 +173,11 @@ class SecretSlot(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # Nullable and required, not optional: every read answers with the
+    # key or with null, and a client that has to tell "no reference" from
+    # "the server did not say" has been given a third state it cannot
+    # act on.
     shadows: str | None = Field(
-        default=None,
         description=(
             "The entity key this stored secret displaces, or null when the entity "
             "writes no reference for the slot. A stored secret takes precedence over "
@@ -223,7 +226,7 @@ class StoredSecretLocation(BaseModel):
     )
     slot: str = Field(description="The credential slot inside that entity.")
     shadows: str | None = Field(
-        default=None, description="The entity key this stored secret displaces, or null."
+        description="The entity key this stored secret displaces, or null."
     )
 
 
@@ -255,7 +258,6 @@ class DefaultAgent(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = Field(
-        default=None,
         description=(
             "The default agent's name, or null when none is set, which leaves the "
             "devices map as the allowlist."
