@@ -317,6 +317,70 @@ def test_an_unknown_stage_and_an_empty_name_are_refused(store: ConfigStore) -> N
         store.delete_device("nonsense")
 
 
+def test_a_name_that_cannot_be_a_path_segment_is_refused(store: ConfigStore) -> None:
+    """An entity is addressed by putting its identity in a path segment,
+    so a name holding a slash could never be fetched, replaced or
+    deleted over the API: routing would read it as two segments. The
+    rule is the repository's, so both callers inherit it."""
+    refused = [
+        lambda: store.set_provider("llm", "a/b", {"type": "anthropic"}),
+        lambda: store.set_mcp_server("a/b", {"transport": "stdio", "command": "x"}),
+        lambda: store.set_agent("a/b", {"prompt": "hello"}),
+        lambda: store.set_agent("a\nb", {"prompt": "hello"}),
+        lambda: store.set_provider("llm", "a\x7fb", {"type": "anthropic"}),
+    ]
+    for call in refused:
+        with pytest.raises(ConfigError) as caught:
+            call()
+        message = str(caught.value)
+        assert "URL path segment" in message
+        assert "slash" in message or "control character" in message
+        # The rule and the kind of character, never the name itself.
+        assert "a/b" not in message and "a\nb" not in message
+
+
+def test_a_name_that_only_needs_encoding_is_accepted(store: ConfigStore) -> None:
+    """Spaces, percent signs and characters outside ASCII percent-encode
+    and decode losslessly, so nothing about them is a problem to
+    address."""
+    for name in ("a name with spaces", "100%-sure", "agente-café"):
+        store.set_provider("llm", name, {"type": "anthropic"})
+        store.set_agent(name, {"prompt": "hello"})
+
+        assert store.read_provider("llm", name).entry.type == "anthropic"
+        assert store.read_agent(name).entry.prompt == "hello"
+
+
+def test_a_slot_that_cannot_be_a_path_segment_is_refused(store: ConfigStore) -> None:
+    """A slot rides in a path of its own, and each half of an MCP slot
+    names something that could not hold a slash anyway: a variable for
+    env, a header for headers."""
+    _populate(store)
+    refused = [
+        SecretLocation.provider("llm", "claude", "api_key/extra"),
+        SecretLocation.mcp_server("home", "env.API TOKEN"),
+        SecretLocation.mcp_server("home", "env.a/b"),
+        SecretLocation.mcp_server("home", "headers.Authorization/x"),
+        SecretLocation.mcp_server("home", "headers.Auth orization"),
+    ]
+    for location in refused:
+        with pytest.raises(ConfigError) as caught:
+            store.set_secret(location, SECRET)
+        assert type(caught.value) is ConfigError, caught.value
+        assert SECRET not in str(caught.value)
+
+
+def test_a_dotted_slot_round_trips(store: ConfigStore) -> None:
+    _populate(store)
+    store.set_secret(SecretLocation.mcp_server("home", "env.API_ACCESS_TOKEN"), SECRET)
+    store.set_secret(SecretLocation.mcp_server("home", "headers.X-Api-Key"), SECRET)
+
+    assert [item.location.slot for item in store.read_mcp_server("home").secrets] == [
+        "env.API_ACCESS_TOKEN",
+        "headers.X-Api-Key",
+    ]
+
+
 def test_no_refusal_carries_the_exception_that_caused_it(store: ConfigStore) -> None:
     """Every refusal built from another exception is built inside the
     handler and raised outside it. `from None` clears the cause and

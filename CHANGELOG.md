@@ -41,6 +41,19 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   secret-shaped keys at every depth too, since it is the last thing
   between a row that got its contents another way and a caller.
 
+- **A name or a secret slot must be expressible as one URL path
+  segment** (#101). An entity is addressed by putting its identity in
+  a path, so a name or a slot holding a slash or a control character
+  could never be fetched, replaced or deleted over the API. Both are
+  now refused when they are written, naming the rule and the kind of
+  character rather than the value; an MCP slot's key half must
+  additionally be an environment variable name after `env.` or an HTTP
+  header name after `headers.`, which is what the value would have
+  referenced. Spaces, percent signs and characters outside ASCII stay
+  legal and percent-encode losslessly. The rule runs at write time
+  only: a row written before it still boots, still appears in
+  `config show`, and is still deletable.
+
 - **Every deployment must set `SAMTAL_API_SECRET` before upgrading**
   (#101). The configuration API is always mounted and always behind a
   bearer token, deliberately without an `enabled` flag, so a server
