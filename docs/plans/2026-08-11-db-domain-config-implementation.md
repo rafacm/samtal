@@ -966,3 +966,52 @@ Lint, unit and integration lanes green locally, and the drift check
 clean. The smoke lane and the image cannot run locally: they need the
 built image, and the seeding steps are written against what the image
 sets rather than tried. CI is the first run of both.
+
+### PR #102 review round
+
+One external review of the pull request's diff: codex CLI 0.147.0, model
+gpt-5.6-sol, read-only, 2026-08-11, posted verbatim on the PR. Verdict:
+mergeable after fixing the case-sensitive environment scan and the two
+places where the switchover left documentation or measurements without
+anything running them. Three findings, each fixed with its own commit:
+
+1. **P1: the moved-environment scan matched case-sensitively.**
+   pydantic-settings reads environment names without regard to case, so
+   `SAMTAL_server__port` sets the port and `SAMTAL_aGeNtS__x` or
+   `samtal_default_agent` set what they named before the switchover; a
+   case-sensitive scan leaves exactly those spellings applying to
+   nothing, silently, which is the hole the refusal exists to close.
+   Fixed in d9c7e79: the comparison is normalized over the whole
+   variable name, checked against the installed pydantic-settings rather
+   than assumed (the prefix is case-insensitive too, not only the part
+   after it), and the message still quotes the spelling the variable was
+   written in. Six mixed-case refusals are pinned, bare and nested, plus
+   the other side of the same fact: a mixed-case server-half override
+   still applies untouched.
+2. **P2: Getting Started ended at a device that could not talk.** The
+   root README started the server on an empty database, then wrote one
+   provider, which is not a configuration anything runs on, and went on
+   to flashing with no restart step. Fixed in 4f2c36e: the sequence is
+   reordered so the configuration exists before the first start (which
+   is also the shape with no restart to forget), and the seeding block
+   is a complete fully local pipeline with its agent defaults, agent and
+   default agent. Run verbatim against a scratch database, the
+   composition validates and an unknown device resolves to the
+   assistant.
+3. **P2: the deployment profile's measured values lost their test.**
+   The switchover turned `config.deploy.example.yaml`'s domain half into
+   commented commands, and deleted with the YAML sections the assertions
+   that had checked the CPU-quota pin, the language ladder, the voice
+   and the allowlist. Fixed in 21f9d54: the commands become the runnable
+   `config.deploy.example.sh`, one copy that the file points at, and
+   `tests/unit/test_config_examples.py` runs it against a scratch
+   database and composes the result with the profile's own server half,
+   restoring those assertions on the loaded snapshot and adding what the
+   old test could not check, that the deployment procedure runs at all.
+   The self-contradicting paragraph in this document ("not deleted",
+   then "became comments") is corrected in the same commit.
+
+Full lanes after the fixes: ruff clean, unit and integration suites
+green, the committed reference still byte-identical to the generated
+one. The smoke lane and the image remain unrun locally, for the reason
+the verification note above gives.
