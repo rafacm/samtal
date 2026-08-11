@@ -32,6 +32,7 @@ from typing import NoReturn
 
 import yaml
 
+from samtal_server.config import docgen
 from samtal_server.config.loader import CONFIG_ENV_VAR, ConfigError, load_config
 from samtal_server.config.models import (
     PROVIDER_STAGES,
@@ -244,6 +245,19 @@ def _show_agent(args: argparse.Namespace) -> None:
 
 def _show_agent_defaults(args: argparse.Namespace) -> None:
     print(_yaml(_layer_data(_loaded(args).domain.agent_defaults) or {}), end="")
+
+
+def _schema(args: argparse.Namespace) -> None:
+    """The JSON Schema of one entity kind, or of the whole domain
+    configuration. Reads the models and nothing else: no database, no
+    configuration file, no encryption key."""
+    print(docgen.schema(args.entity), end="")
+
+
+def _reference(args: argparse.Namespace) -> None:
+    """The markdown reference, the same document CI diffs the committed
+    copy against."""
+    print(docgen.reference(), end="")
 
 
 def _show_device(args: argparse.Namespace) -> None:
@@ -600,6 +614,24 @@ def _wrote(what: str) -> None:
 # The grammar
 
 
+def _fragment_parser(
+    kinds: argparse._SubParsersAction, name: str, parents: list[argparse.ArgumentParser]
+) -> argparse.ArgumentParser:
+    """One `set <kind>` command, whose help lists the fields its
+    fragment may carry. The list is generated from the same
+    Field(description=...) values the reference and the JSON Schema are
+    rendered from, so the three cannot disagree and nobody has to
+    remember to update a help string when a field changes."""
+    return kinds.add_parser(
+        name,
+        parents=parents,
+        epilog=docgen.fragment_help(name),
+        # The epilog is laid out already; the default formatter would
+        # reflow it into one paragraph.
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+
 def _parser() -> argparse.ArgumentParser:
     config_help = (
         f"path to the YAML config file naming server.database.dir "
@@ -638,17 +670,17 @@ def _parser() -> argparse.ArgumentParser:
         "set", help="create or replace one entity from a YAML fragment"
     )
     kinds = setter.add_subparsers(dest="kind", required=True)
-    entity = kinds.add_parser("provider", parents=[common, fragment])
+    entity = _fragment_parser(kinds, "provider", [common, fragment])
     entity.add_argument("stage", metavar="STAGE", help=", ".join(PROVIDER_STAGES))
     entity.add_argument("name", metavar="NAME")
     entity.set_defaults(run=_set_provider)
-    entity = kinds.add_parser("mcp-server", parents=[common, fragment])
+    entity = _fragment_parser(kinds, "mcp-server", [common, fragment])
     entity.add_argument("name", metavar="NAME")
     entity.set_defaults(run=_set_mcp_server)
-    entity = kinds.add_parser("agent", parents=[common, fragment])
+    entity = _fragment_parser(kinds, "agent", [common, fragment])
     entity.add_argument("name", metavar="NAME")
     entity.set_defaults(run=_set_agent)
-    entity = kinds.add_parser("agent-defaults", parents=[common, fragment])
+    entity = _fragment_parser(kinds, "agent-defaults", [common, fragment])
     entity.set_defaults(run=_set_agent_defaults)
 
     deleter = commands.add_parser("delete", help="delete one entity")
@@ -717,6 +749,24 @@ def _parser() -> argparse.ArgumentParser:
 
     listing = commands.add_parser("list", parents=[common], help="a summary tree")
     listing.set_defaults(run=_list)
+
+    # Read-only and local: these two render the models, so they take no
+    # --config, open no database, and need no encryption key.
+    schema = commands.add_parser(
+        "schema", help="the JSON Schema of one entity, or of the whole domain half"
+    )
+    schema.add_argument(
+        "entity",
+        metavar="ENTITY",
+        nargs="?",
+        help=", ".join(docgen.entity_names()) + " (default: domain)",
+    )
+    schema.set_defaults(run=_schema)
+
+    reference = commands.add_parser(
+        "reference", help="the markdown reference, generated from the models"
+    )
+    reference.set_defaults(run=_reference)
 
     show = commands.add_parser("show", parents=[common], help="everything, or one entity")
     show.set_defaults(run=_show_all)
