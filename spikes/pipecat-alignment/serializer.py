@@ -28,15 +28,23 @@ keeps its own encode buffer and the transport is configured to hand it
 exactly one frame's worth at a time; the buffer exists to make the
 mismatch safe rather than to use it.
 
-**Pacing lives here, and should not have to.** pipecat's websocket
-output transport sleeps half a chunk's duration per chunk, so a reply
-leaves the socket at twice real time (feasibility checkpoint, finding
-4). A device is not a socket: xiaozhi firmware expects one 60 ms packet
-per 60 ms. `_pace` is the production-representative pacing that
-absence forces, and it is counted as adapter code deliberately: the
-plan's qualitative bar names "re-implements scheduling or pacing the
-framework claims to own" as evidence against adoption, and this is
-that.
+**Pacing does not have to live here, and the first reading that it did
+was wrong.** The feasibility checkpoint read the output transport's
+`_send_interval = (audio_chunk_size / self.sample_rate) / 2` as half a
+chunk's duration and concluded a reply would leave the socket at twice
+real time. `audio_chunk_size` is in *bytes*, so for 16-bit mono the
+division by the sample rate already yields twice the chunk's duration
+and the `/2` cancels it exactly: the interval is the chunk's own
+duration, and the transport paces at real time. Measured, with `_pace`
+off: 1000 packets at a median 60.0 ms inter-send interval, 99.9% within
+5 ms of the frame cadence.
+
+`_pace` is therefore redundant, and it defaults off. It is kept only as
+the cross-check that produced that comparison, and because the same
+formula does misbehave for any `audio_out_channels` other than 1, where
+the bytes-per-sample factor no longer cancels. Leaving it on would be
+the plan's own qualitative bar failing against the adapter:
+"re-implements scheduling or pacing the framework claims to own".
 """
 
 import asyncio
@@ -79,13 +87,12 @@ OUTPUT_SAMPLE_RATE = 24000
 class XiaozhiFrameSerializer(FrameSerializer):
     """Translates between xiaozhi wire messages and pipecat frames.
 
-    `paced` is the production-representative pacing described above.
-    Turning it off is what measures the transport's stock behaviour;
-    leaving it off in production would send a two minute reply in one
-    minute.
+    `paced` adds a second 60 ms clock on top of the transport's own.
+    It defaults off because the transport already paces at real time;
+    turning it on measures how much the redundant layer would cost.
     """
 
-    def __init__(self, session_id: str, *, paced: bool = True, **kwargs):
+    def __init__(self, session_id: str, *, paced: bool = False, **kwargs):
         super().__init__(**kwargs)
         self._session_id = session_id
         self._paced = paced

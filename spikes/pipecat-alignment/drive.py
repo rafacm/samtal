@@ -6,11 +6,11 @@ the run's raw logs to `runs/<session>/`.
 
 The simulator sends real speech at 16 kHz in 60 ms frames and then
 paced silence for as long as the reply lasts. Both are paced on a
-monotonic clock: the sdk's own `send_silence_audio` writes as fast as
-the socket accepts, which would compress the device's timeline the
-same way the transport compresses the server's.
+monotonic clock, because the sdk's own `send_silence_audio` writes as
+fast as the socket accepts, which would compress the device's side of
+the timeline into a fraction of the wall clock it represents.
 
-    uv run python drive.py [--unpaced] [--seconds N]
+    uv run python drive.py [--extra-pacing] [--seconds N]
 """
 
 import spike_env  # noqa: F401  (must precede every pipecat import)
@@ -76,9 +76,9 @@ async def paced_send(client: XiaoZhiWebsocket, pcm: bytes) -> None:
 async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
-        "--unpaced",
+        "--extra-pacing",
         action="store_true",
-        help="leave the transport's stock pacing alone (gate 1 evidence)",
+        help="add the serializer's redundant 60 ms clock (cross-check)",
     )
     parser.add_argument(
         "--seconds",
@@ -98,7 +98,7 @@ async def main() -> None:
     recorder = Recorder()
     finished = asyncio.Event()
     app = create_app(
-        recorder, reply, SENTENCE, paced=not args.unpaced, finished=finished
+        recorder, reply, SENTENCE, paced=args.extra_pacing, finished=finished
     )
 
     replied = asyncio.Event()
@@ -152,7 +152,11 @@ async def main() -> None:
     sends = [t for t, _ in recorder.sends]
     print(f"run {session} -> {run}")
     print(f"  reply clip      : {reply_secs:.1f} s at 24000 Hz")
-    print(f"  pacing          : {'60 ms, added by the serializer' if not args.unpaced else 'stock transport'}")
+    print(
+        "  pacing          : "
+        + ("stock transport, plus the serializer's redundant 60 ms clock"
+           if args.extra_pacing else "stock transport")
+    )
     print(f"  tap packets     : {len(sends)}")
     if sends:
         print(f"  first send      : {sends[0]:.3f} s")
