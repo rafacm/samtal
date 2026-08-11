@@ -36,7 +36,8 @@ and the default agent.
 
 Each entity kind is written from a YAML fragment holding one entity's
 body, with the entity's name given as an argument rather than in the
-document. Commented examples live in [`samtal-server/examples/`](../../samtal-server/examples/);
+document. Commented examples live in
+[`samtal-server/examples/`](../../samtal-server/examples/);
 each file names the command that installs it.
 
 A fragment never holds a credential. A secret-bearing key names the
