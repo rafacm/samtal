@@ -20,8 +20,9 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config as AlembicConfig
 from sqlalchemy import URL, Engine, create_engine, event, text
+from sqlalchemy.exc import OperationalError
 
-from samtal_server.config.loader import ConfigError
+from samtal_server.config.loader import ConfigError, DatabaseBusyError, StorageError
 
 DATABASE_FILENAME = "samtal.db"
 
@@ -39,7 +40,14 @@ def open_database(directory: str | Path) -> Engine:
 
     Returns an engine the caller owns and disposes. Every failure is a
     ConfigError naming `server.database.dir`, because the answer to all
-    of them is to point that key somewhere writable."""
+    of them is to point that key somewhere writable.
+
+    Which ConfigError matters to one caller only: the API opens the
+    database on every request, so a lock timeout that happens here
+    rather than inside a repository write must still be the retryable
+    refusal, and a directory the server cannot write is still the
+    server's problem and not the request's. The messages are the same
+    ones this has always raised."""
     path = _database_path(Path(directory))
     engine = _create_engine(path)
     try:
@@ -49,11 +57,23 @@ def open_database(directory: str | Path) -> Engine:
         raise
     except Exception as exc:
         engine.dispose()
-        raise ConfigError(
+        raise _failure(
+            exc,
             f"cannot migrate the database at {path}: {exc}; "
-            f"server.database.dir names the directory it lives in"
+            f"server.database.dir names the directory it lives in",
         ) from exc
     return engine
+
+
+def _failure(exc: Exception, problem: str) -> ConfigError:
+    """The lock that did not arrive inside the busy timeout, told from
+    everything else. The distinction is the only one a caller answering
+    with a status code needs, and it is made on the driver's own message
+    rather than on ours, which never changes."""
+    detail = str(getattr(exc, "orig", "")) or str(exc)
+    if isinstance(exc, OperationalError) and ("locked" in detail or "busy" in detail):
+        return DatabaseBusyError(problem)
+    return StorageError(problem)
 
 
 def _database_path(directory: Path) -> Path:
@@ -65,7 +85,7 @@ def _database_path(directory: Path) -> Path:
     try:
         directory.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        raise ConfigError(
+        raise StorageError(
             f"cannot create the database directory {directory}: {exc.strerror}; "
             f"set server.database.dir (or SAMTAL_SERVER__DATABASE__DIR) to a "
             f"writable path"
@@ -74,7 +94,7 @@ def _database_path(directory: Path) -> Path:
     # writable, and the first write would otherwise fail somewhere deep
     # inside a migration.
     if not os.access(directory, os.W_OK):
-        raise ConfigError(
+        raise StorageError(
             f"the database directory {directory} is not writable; set "
             f"server.database.dir (or SAMTAL_SERVER__DATABASE__DIR) to a "
             f"writable path"
