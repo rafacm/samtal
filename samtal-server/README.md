@@ -1585,8 +1585,6 @@ situation the API cannot answer for. The recovery path opens the
 database directly and covers four commands:
 
 ```bash
-# Inside the container, or anywhere the data volume is mounted and
-# SAMTAL_SERVER__DATABASE__DIR names it.
 # What is stored.
 samtal-server config --local show
 # Take out what will not load.
@@ -1600,6 +1598,37 @@ samtal-server config --local set-secret provider llm claude api_key
 `--from-env`, and never from an argument. `--local` needs the master key
 only for `set-secret`, and needs no API token and no running server at
 all. Every other command refuses the flag by naming these four.
+
+**Run them in a container of their own**, because the container that
+serves is the one that will not start, so there is nothing to exec into.
+Same image, same mounted YAML and same data volume, with the command
+replaced: the image's entrypoint is `samtal-server`, so what follows it
+is the command line above.
+
+```bash
+docker run --rm -i \
+  -v /path/to/config.yaml:/config/config.yaml:ro \
+  -v samtal-data:/data \
+  ghcr.io/rafacm/samtal-server:latest \
+  config --local show
+
+# set-secret is the one that needs the key, and reads the value on stdin
+# (-i is what gives it one).
+docker run --rm -i \
+  -e SAMTAL_MASTER_KEY \
+  -v /path/to/config.yaml:/config/config.yaml:ro \
+  -v samtal-data:/data \
+  ghcr.io/rafacm/samtal-server:latest \
+  config --local set-secret provider llm claude api_key
+```
+
+The YAML is mounted because the image points `SAMTAL_CONFIG` at
+`/config/config.yaml`, and a command that finds nothing there refuses
+rather than guessing. Which directory it then opens comes from the
+image's own `SAMTAL_SERVER__DATABASE__DIR`, `/data/db`, which is why the
+volume is the mount that matters. No port is published and no secret
+beyond the master key is passed, because nothing here serves anything or
+reaches the API.
 
 Every `--local` invocation prints one line on stderr saying that it
 bypasses the API and that a running server will not observe the change
