@@ -293,6 +293,21 @@ def test_an_identity_that_needs_encoding_round_trips(
     assert name in client.get("/agents").json()
 
 
+def test_a_dotted_slot_reads_back_under_its_own_name(
+    client: TestClient, store: ConfigStore
+) -> None:
+    """Both halves of an MCP slot survive a read: the group and the key
+    the value would otherwise have referenced."""
+    store.set_mcp_server("home", {"transport": "stdio", "command": "uvx"})
+    store.set_secret(SecretLocation.mcp_server("home", "env.API_ACCESS_TOKEN"), SECRET)
+    store.set_secret(SecretLocation.mcp_server("home", "headers.X-Api-Key"), OTHER_SECRET)
+
+    body = client.get("/mcp-servers/home").json()
+
+    assert set(body["secrets"]) == {"env.API_ACCESS_TOKEN", "headers.X-Api-Key"}
+    assert SECRET not in body and OTHER_SECRET not in str(body)
+
+
 # What a read refuses
 
 

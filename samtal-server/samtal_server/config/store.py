@@ -27,6 +27,7 @@ would deadlock the natural creation order: providers, MCP servers,
 agents, devices, and default_agent last.
 """
 
+import re
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -54,6 +55,7 @@ from samtal_server.config.models import (
     ProvidersConfig,
     check_mcp_entry_names,
     check_references,
+    is_env_name,
     is_secret_option,
     normalize_device_bindings,
     normalize_mac,
@@ -65,6 +67,17 @@ from samtal_server.db import schema
 # `env.<KEY>` or `headers.<KEY>`, which is where the value would have
 # been written as a $VAR reference.
 MCP_SECRET_GROUPS = ("env", "headers")
+
+# What no identity may carry: the C0 and C1 control characters and DEL.
+# A slash is refused separately, because a slash is the one character
+# whose presence changes what a path means rather than what it looks
+# like.
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+
+# An HTTP header name, RFC 9110's token production. The key half of a
+# `headers.` slot names the header a request would carry, so what a
+# request could never carry is not a slot.
+_HEADER_TOKEN_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 
 
 class DomainConfig(BaseModel):
@@ -764,6 +777,9 @@ def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
                 f'"{location.slot}" is not a credential slot on a provider; a slot is '
                 f"the option name the credential fills, such as api_key"
             )
+        # A slot is addressed in a path of its own, so it obeys the same
+        # rule a name does.
+        _check_addressable(f"providers.{stage}.{name}", "slot", location.slot)
         return
 
     if location.identity not in domain.mcp_servers:
@@ -773,6 +789,22 @@ def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
         raise ConfigError(
             f'"{location.slot}" is not a credential slot on an MCP server; a slot is '
             f"env.<KEY> or headers.<KEY>, for example headers.Authorization"
+        )
+    # The key half names where the value would have been written as a
+    # reference: a variable for env, a header for headers. Neither can
+    # be spelled with a slash, so this is also what makes the dotted
+    # slot addressable.
+    if group == "env" and not is_env_name(key):
+        raise ConfigError(
+            f"mcp_servers.{location.identity}: the key after env. has to be the name "
+            f"of an environment variable, since that is what the value would "
+            f"otherwise have referenced, for example env.API_ACCESS_TOKEN"
+        )
+    if group == "headers" and not _HEADER_TOKEN_RE.match(key):
+        raise ConfigError(
+            f"mcp_servers.{location.identity}: the key after headers. has to be an "
+            f"HTTP header name, since that is the header the request would carry, "
+            f"for example headers.Authorization"
         )
 
 
@@ -791,7 +823,41 @@ def _identifier(location: str, name: str) -> str:
     cleaned = name.strip()
     if not cleaned:
         raise ConfigError(f"{location}: the name is empty")
+    _check_addressable(location, "name", cleaned)
     return cleaned
+
+
+def _check_addressable(location: str, what: str, value: str) -> None:
+    """A name or a slot has to survive a URL path.
+
+    An entity is addressed by putting its identity in a path segment,
+    so a name holding a slash cannot be fetched, replaced or deleted
+    over the API at all: routing would read it as two segments. Spaces,
+    percent signs and characters outside ASCII stay legal, because they
+    percent-encode and decode losslessly; a control character does not
+    survive a header or a log line intact and has no business in a name
+    either.
+
+    Write time only. The load path does not run this, so a row written
+    before the rule still boots, still appears in a whole-configuration
+    read, and is still deletable, which goes by membership rather than
+    by this check. The refusal names the rule and the kind of character,
+    never the value: what lands in a slot argument by mistake is a
+    credential.
+    """
+    if "/" in value:
+        raise ConfigError(
+            f"{location}: the {what} contains a slash, and it has to be one URL path "
+            f"segment, which is how it is addressed over the configuration API. "
+            f"Spaces, percent signs and characters outside ASCII are fine"
+        )
+    if _CONTROL_RE.search(value):
+        raise ConfigError(
+            f"{location}: the {what} contains a control character, and it has to be "
+            f"one URL path segment, which is how it is addressed over the "
+            f"configuration API. Spaces, percent signs and characters outside ASCII "
+            f"are fine"
+        )
 
 
 def _mac(mac: str) -> str:
