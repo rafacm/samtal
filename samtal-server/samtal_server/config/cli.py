@@ -542,14 +542,19 @@ def _wrote(what: str) -> None:
 
 
 def _parser() -> argparse.ArgumentParser:
+    config_help = (
+        f"path to the YAML config file naming server.database.dir "
+        f"(default: ${CONFIG_ENV_VAR})"
+    )
+    # Accepted before the command and after it, because both readings are
+    # natural: `samtal-server --config path` is how the server takes it,
+    # and options after their subcommand is how everything else does. The
+    # per-command copy suppresses its default rather than defaulting to
+    # None, or an option given before the command would be overwritten by
+    # the command's own empty default.
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
-        "--config",
-        metavar="PATH",
-        help=(
-            f"path to the YAML config file naming server.database.dir "
-            f"(default: ${CONFIG_ENV_VAR})"
-        ),
+        "--config", metavar="PATH", default=argparse.SUPPRESS, help=config_help
     )
     fragment = argparse.ArgumentParser(add_help=False)
     fragment.add_argument(
@@ -567,6 +572,7 @@ def _parser() -> argparse.ArgumentParser:
             "MCP servers, agents, devices and their secrets."
         ),
     )
+    parser.add_argument("--config", metavar="PATH", default=None, help=config_help)
     commands = parser.add_subparsers(dest="command", required=True)
 
     setter = commands.add_parser(
