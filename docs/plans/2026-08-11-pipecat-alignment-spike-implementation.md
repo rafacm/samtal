@@ -603,7 +603,7 @@ absorbs it" requires observed behavior, not a documentation citation.
 
 | obligation | lands | exercised | evidence / what remains |
 | --- | --- | --- | --- |
-| `audio(pcm)` | serializer + framework | yes | `deserialize` decodes Opus to `InputAudioRawFrame`; the input transport carries it. Observed: VAD tripped on the real utterance and the reply followed |
+| `audio(pcm)` | serializer + framework | yes | `deserialize` decodes bare (protocol v1) Opus to `InputAudioRawFrame`; the input transport carries it. Observed: VAD tripped on the real utterance and the reply followed. No v2/v3 header handling |
 | `listen_started()` | serializer, observed only | no | the `listen` message is turned into a frame nobody acts on. **Required, not implemented**: samtal's edge arms the turn on it |
 | `listen_stopped()` | nowhere | no | **Required, not implemented**: manual end of turn. The spike ends turns by VAD only |
 | `device_aborted(reason)` | serializer to `InterruptionFrame` | no | mapped but never fired; pipecat's interruption handling is **claimed, not evidenced** by this spike |
@@ -621,7 +621,7 @@ absorbs it" requires observed behavior, not a documentation citation.
 | `sentence_started(text)` | control processor | yes | `tts sentence_start` seen |
 | `encode_audio(pcm)` | serializer | yes | Opus encode. Shape mismatch: the boundary returns a batch, `serialize` may return one payload, so the serializer keeps an encode buffer |
 | `flush_encoder()` | nowhere | no | **Required, not implemented**: the encode buffer's remainder is dropped at end of reply |
-| `send_audio(batch)` | framework | yes | **Framework absorbs it.** Evidence: 2103 packets at a median 60.0 ms interval, 100% within 5 ms of cadence, with the serializer's own pacing off |
+| `send_audio(batch)` | framework | yes | **Framework absorbs it.** Evidence: 2103 packets at a median 60.0 ms interval, 99.8% within 5 ms of cadence, with nothing in the adapter pacing anything |
 | `finish_speaking()` | control processor | yes | `tts stop` seen, after the last audio packet |
 | `reply_started()` | nowhere | no | **Required, not implemented** |
 | `restart_pacing()` | framework | no | the transport owns the clock; whether its reset semantics match samtal's is untested |
@@ -633,7 +633,7 @@ absorbs it" requires observed behavior, not a documentation citation.
 | `call_device_tool(...)` | nowhere | no | **Required, not implemented** |
 
 Totals: 23 obligations, **8 implemented and exercised**, 2 mapped but
-not exercised, **13 required and not implemented**. The 324-line
+not exercised, **13 required and not implemented**. The 312-line
 adapter buys eight of twenty-three.
 
 One obligation is absorbed with evidence (`send_audio`'s pacing). One
