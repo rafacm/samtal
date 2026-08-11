@@ -233,6 +233,10 @@ class _BearerGate:
         self._token = token.encode("utf-8")
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        # Every HTTP request, matched or not. A scope of any other type
+        # is passed through because this application has none of them:
+        # it declares no websocket route, so one arriving here reaches a
+        # router with nothing to give it.
         if scope["type"] != "http" or self._authorized(scope):
             await self._app(scope, receive, send)
             return
