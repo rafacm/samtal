@@ -367,8 +367,12 @@ def _setting_section(name: str, title: str, command: str, notes: tuple[str, ...]
 def _paragraph(text: str) -> list[str]:
     """One paragraph, wrapped. The committed reference is read as a file
     as often as it is rendered, and an unwrapped paragraph makes every
-    edit to it a one-line diff of the whole thing."""
-    return textwrap.wrap(text, width=PROSE_WIDTH)
+    edit to it a one-line diff of the whole thing.
+
+    Never inside a word or across a hyphen: the default would break
+    `aa-bb-cc-dd-ee-ff` in half, and a code span split over two lines
+    renders with a space in the middle of the MAC address."""
+    return textwrap.wrap(text, width=PROSE_WIDTH, break_long_words=False, break_on_hyphens=False)
 
 
 def _table(model: type[BaseModel]) -> list[str]:
@@ -459,6 +463,8 @@ def fragment_help(name: str) -> str:
             width=HELP_WIDTH,
             initial_indent=lead,
             subsequent_indent=" " * len(lead),
+            break_long_words=False,
+            break_on_hyphens=False,
         )
     if candidate.model.model_config.get("extra") == "allow":
         lines += [
