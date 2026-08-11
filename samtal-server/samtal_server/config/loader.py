@@ -97,14 +97,23 @@ def load_file_config(path: str | Path | None = None) -> FileConfig:
         _check_config_file(path)
 
     token = yaml_file_var.set(path)
+    problem: str | None = None
     try:
         return FileConfig()
     except ValidationError as exc:
-        raise ConfigError(_format_validation_error(exc, _source(path))) from exc
+        # Rendered from the error locations and messages only, never
+        # from str(exc), which quotes the rejected input back
+        # (`input_value=...`); and recorded rather than raised here,
+        # because an exception raised inside a handler carries the one
+        # being handled as its __context__ and would take that quote
+        # with it. A key that names an environment variable is where
+        # that matters: what lands in it wrongly is the secret itself.
+        problem = _format_validation_error(exc, _source(path))
     except SettingsError as exc:
         raise ConfigError(f"invalid config in {_source(path)}: {exc}") from exc
     finally:
         yaml_file_var.reset(token)
+    raise ConfigError(problem)
 
 
 def compose_config(
@@ -119,10 +128,12 @@ def compose_config(
     they are; a mapping of raw sections is equally acceptable, and is
     what a test that has no database in hand passes.
     """
+    problem: str | None = None
     try:
         return Config(server=file_half.server, memory=file_half.memory, **domain)
     except ValidationError as exc:
-        raise ConfigError(_format_validation_error(exc, source)) from exc
+        problem = _format_validation_error(exc, source)
+    raise ConfigError(problem)
 
 
 def _source(path: Path | None) -> str:

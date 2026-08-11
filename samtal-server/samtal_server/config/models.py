@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Annotated, Literal, Protocol
 
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -70,6 +71,58 @@ _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 NonBlankStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
+def _check_env_name(value: str) -> str:
+    """A key that names an environment variable holds a name and nothing
+    else.
+
+    A bare non-blank string would accept a pasted credential, which
+    never worked (the name is looked up in the environment, and no
+    lookup of a pasted key succeeds) and which the failure that follows
+    would print: the boot error quotes the variable name it tells the
+    operator to set. So the refusal happens here, at parse time, and it
+    says what the key must hold and shows an example rather than quoting
+    what was written, exactly as the provider validator does for a key
+    ending in _env.
+    """
+    if not is_env_name(value):
+        raise ValueError(
+            "this key must hold the name of an environment variable, and what it "
+            "holds does not look like one; a pasted value belongs nowhere in this "
+            "file, so name the variable holding it, for example "
+            "secret_env: SAMTAL_API_SECRET"
+        )
+    return value
+
+
+# The name of an environment variable, for the keys whose whole job is
+# to name one. Shared, because the mistake it catches is the same
+# mistake wherever a secret is referenced by variable name.
+EnvName = Annotated[str, AfterValidator(_check_env_name)]
+
+
+class ApiConfig(BaseModel):
+    """The configuration REST API, mounted at /api on the server's port.
+
+    Always on, and always behind a bearer token: there is deliberately
+    no enabled flag, because an admin surface that can be switched off
+    by forgetting a key is a surface that ships unprotected. The token
+    itself is never in this file, only the name of the environment
+    variable holding it, and a server started without that variable set
+    refuses to boot the way enabled device auth without a secret does.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    secret_env: EnvName = Field(
+        default="SAMTAL_API_SECRET",
+        description=(
+            "The name of the environment variable holding the API's bearer token, "
+            "never the token itself. The server refuses to boot when the variable "
+            "it names is unset or blank."
+        ),
+    )
+
+
 class AuthConfig(BaseModel):
     """Device authentication for the websocket endpoint.
 
@@ -84,7 +137,7 @@ class AuthConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = True
-    secret_env: NonBlankStr = "SAMTAL_AUTH_SECRET"
+    secret_env: EnvName = "SAMTAL_AUTH_SECRET"
 
     # How long an issued token stays valid. Thirty days, upstream's
     # default; the firmware re-checks OTA on every boot, so a device in
@@ -222,6 +275,11 @@ class ServerConfig(BaseModel):
     log_level: str = "INFO"
 
     auth: AuthConfig = Field(default_factory=AuthConfig)
+
+    # The configuration API mounted at /api. Always on, so the section
+    # exists only to name the variable its bearer token comes from.
+    api: ApiConfig = Field(default_factory=ApiConfig)
+
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
 
     # Where `samtal-server config` writes the domain configuration, and
