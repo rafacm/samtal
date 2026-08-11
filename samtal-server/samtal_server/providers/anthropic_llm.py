@@ -12,6 +12,7 @@ from typing import Any
 from anthropic import AsyncAnthropic
 
 from samtal_server.config.models import ProviderConfig
+from samtal_server.config.secrets import stored_provider_secret
 from samtal_server.providers.base import (
     LlmEvent,
     LlmProvider,
@@ -32,6 +33,12 @@ DEFAULT_MAX_TOKENS = 1024
 # The one host this type reaches; it has no base_url to point anywhere
 # else.
 API_HOST = "api.anthropic.com"
+
+# The credential slot every provider type here fills, and the name a
+# stored secret is written under. The seam is `<slot>_env` in the
+# configuration and `<slot>` in the store, which is what lets one
+# resolver serve both.
+API_KEY_SLOT = "api_key"
 
 
 def anthropic_messages(turns: Sequence[Turn]) -> list[dict[str, Any]]:
@@ -141,9 +148,23 @@ class AnthropicLlm(LlmProvider):
 
 
 def resolve_api_key(label: str, api_key_env: str | None) -> str | None:
-    """The secret behind an `api_key_env` reference, or None to leave
-    resolution to the SDK. A named but unset variable fails the build,
-    because at request time it would fail every conversation."""
+    """The credential for the `api_key` slot of the provider being
+    built, or None to leave resolution to the SDK.
+
+    Two sources, in one place, because a provider must not care which
+    one a deployment used: a secret stored in the configuration database
+    for this entry's `api_key` slot, or the environment variable an
+    `api_key_env` reference names. A named but unset variable fails the
+    build, because at request time it would fail every conversation.
+
+    Ciphertext wins, and the reference it shadows is not read at all:
+    set-secret is the later and more deliberate act, and an unset
+    variable left behind it must not fail the boot the stored secret was
+    set to fix. The value goes straight into the client here and lands
+    on no model on the way."""
+    stored = stored_provider_secret(API_KEY_SLOT)
+    if stored is not None:
+        return stored
     if api_key_env is None:
         return None
     api_key = os.environ.get(api_key_env, "")

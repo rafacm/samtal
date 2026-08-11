@@ -26,7 +26,8 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import get_default_environment, stdio_client
 from mcp.client.streamable_http import streamablehttp_client
 
-from samtal_server.config import Config, McpServerConfig, resolve_env_references
+from samtal_server.config import Config, McpServerConfig
+from samtal_server.config.secrets import SecretStore, resolve_mcp_values
 from samtal_server.providers import ToolDef
 from samtal_server.tools import names
 from samtal_server.tools.publish import PublishedTools, publish
@@ -52,14 +53,20 @@ class McpServerManager:
     """One configured MCP server: its connection, its tools, and its
     reconnection."""
 
-    def __init__(self, name: str, config: McpServerConfig) -> None:
+    def __init__(
+        self, name: str, config: McpServerConfig, secrets: SecretStore | None = None
+    ) -> None:
         self._name = name
         self._config = config
         # Secrets resolve here, at boot: an unset $VAR fails the start
-        # rather than the first conversation that needs the server.
-        location = f"mcp_servers.{name}"
-        self._env = resolve_env_references(f"{location}.env", config.env)
-        self._headers = resolve_env_references(f"{location}.headers", config.headers)
+        # rather than the first conversation that needs the server. A
+        # slot with a secret stored in the configuration database
+        # resolves here too, and takes precedence over the reference
+        # written for the same key. Either way the plaintext goes
+        # straight into the spawned process or the request headers, and
+        # onto no model on the way.
+        self._env = resolve_mcp_values(name, "env", config.env, secrets)
+        self._headers = resolve_mcp_values(name, "headers", config.headers, secrets)
         self._session: ClientSession | None = None
         self._published = PublishedTools(tools=[], originals={})
         self._task: asyncio.Task[None] | None = None
@@ -237,18 +244,21 @@ class McpServers:
         self._managers = managers
 
     @classmethod
-    def build(cls, config: Config) -> "McpServers":
+    def build(cls, config: Config, secrets: SecretStore | None = None) -> "McpServers":
         """Managers for the entries agents actually use, the way only
         referenced providers are built. Raises McpConfigError for an
         entry that cannot be built, or one that server.local_only
-        forbids, which fails the boot."""
+        forbids, which fails the boot.
+
+        `secrets` is the store a snapshot was loaded with, or None for a
+        deployment whose credentials are all environment references."""
         managers: dict[str, McpServerManager] = {}
         for name in sorted(config.referenced_mcp_servers()):
             entry = config.mcp_servers[name]
             if config.server.local_only:
                 _check_egress(name, entry)
             try:
-                managers[name] = McpServerManager(name, entry)
+                managers[name] = McpServerManager(name, entry, secrets)
             except ValueError as exc:
                 raise McpConfigError(f"mcp_servers.{name}: {exc}") from exc
         return cls(managers)
