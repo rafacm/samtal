@@ -409,6 +409,7 @@ An always-on, on-device trigger phrase that opens a
 session hands-free. Supported by the firmware's ESP-SR models; the
 primary test setup uses the conversation button instead. The wake
 word wakes the device, never a particular agent: ESP-SR spots it
-on-chip, the server learns only that a session opened, and the
-device's default agent answers.
+on-chip, the audio never reaches the server (which is at most told
+which word fired, after the fact), and the device's default agent
+answers.
 More: [ESP-SR](https://github.com/espressif/esp-sr).
