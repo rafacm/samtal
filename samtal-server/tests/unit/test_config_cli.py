@@ -940,6 +940,38 @@ def test_a_body_that_is_not_this_api_s_own_is_not_relayed(
     assert "<html>" not in captured.err
 
 
+def test_the_read_timeout_outlasts_the_database_s_busy_timeout() -> None:
+    """The constant this depends on, asserted against the constant it has
+    to outlast.
+
+    The contention tests below shorten the busy timeout so they finish
+    inside a test run, which means they would keep passing if the read
+    timeout were put back to httpx's five second default: the very
+    regression the explicit timeout exists to prevent. So the relationship
+    is checked directly, at the production values, where nothing has been
+    shortened."""
+    busy_timeout_s = db_module.BUSY_TIMEOUT_MS / 1000
+
+    assert cli.READ_TIMEOUT_S > busy_timeout_s
+    # Margin, not just order: a read timeout a hair above the busy
+    # timeout would still turn a slow answer into a transport error.
+    assert cli.READ_TIMEOUT_S >= busy_timeout_s * 2
+    # And the connect timeout is bounded, which is the other half: a
+    # server that is not there must not take the read timeout to say so.
+    assert cli.CONNECT_TIMEOUT_S < busy_timeout_s
+
+
+def test_the_client_is_built_with_those_timeouts() -> None:
+    """The constants are only worth asserting if the client is built
+    from them."""
+    client = cli.build_client("http://127.0.0.1:8003/api", TOKEN)
+    try:
+        assert client.timeout.read == cli.READ_TIMEOUT_S
+        assert client.timeout.connect == cli.CONNECT_TIMEOUT_S
+    finally:
+        client.close()
+
+
 def test_a_write_that_cannot_take_the_lock_prints_the_retryable_refusal(
     run, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
