@@ -983,7 +983,7 @@ its section of the implementation doc when written.
   masked in all output, the server still boots from YAML
   unchanged, lanes green.
 - [x] **[Generated documentation](2026-08-11-db-domain-config-implementation.md#milestone-3-generated-documentation)**
-  (PR TBD): the Field-description
+  (PR #99): the Field-description
   editing pass over the domain models; the commented per-entity
   fragments under `samtal-server/examples/`; the comment audit
   completed in the implementation doc; `config/docgen.py`; `config
