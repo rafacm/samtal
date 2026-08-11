@@ -471,6 +471,46 @@ def test_a_row_of_the_wrong_shape_is_reported_rather_than_raised(
         assert "Traceback" not in captured.err
 
 
+def test_a_mistake_in_the_grammar_exits_one_like_every_other_failure(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """argparse exits 2 from inside parse_args, which would make an
+    unknown command the one failure that bypasses the documented exit
+    codes and the sanitized boundary."""
+    for argv in (
+        ("nonsense",),
+        (),
+        ("set", "provider", "llm"),
+        ("show", "provider"),
+        ("list", "--nope"),
+    ):
+        assert run(*argv) == 1, argv
+        captured = capsys.readouterr()
+        assert captured.err.strip()
+        assert "Traceback" not in captured.err
+
+
+def test_an_extra_argument_is_refused_without_echoing_it(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The mistake this covers is typing the secret after the slot,
+    which is where argparse would otherwise echo it back."""
+    assert run("set-secret", "provider", "llm", "claude", "api_key", SECRET) == 1
+
+    captured = capsys.readouterr()
+    assert "unrecognized extra arguments" in captured.err
+    assert SECRET not in captured.err
+    assert SECRET not in captured.out
+
+
+def test_asking_for_help_is_not_a_failure(run, capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as caught:
+        run("--help")
+
+    assert caught.value.code == 0
+    assert "usage: samtal-server config" in capsys.readouterr().out
+
+
 def test_a_database_that_cannot_be_opened_names_the_key(
     run, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
