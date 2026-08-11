@@ -668,13 +668,19 @@ def _parse[Model: BaseModel](model: type[Model], location: str, fragment: object
 def _load[Model: BaseModel](
     model: type[Model], location: str, data: Mapping[str, object]
 ) -> Model:
+    problem: str | None = None
     try:
         return model.model_validate(dict(data))
     except ValidationError as exc:
         # Rendered from the error locations and messages only, never
         # from str(exc), which quotes the rejected input back; and
-        # raised without a cause, so the chain does not carry it either.
-        raise ConfigError(_validation_problems(location, exc)) from None
+        # recorded rather than raised here, because an exception raised
+        # inside a handler carries the one being handled as its
+        # __context__, and a ValidationError's errors() hold the whole
+        # rejected fragment, inline secret and all. Raising after the
+        # handler leaves neither a cause nor a context.
+        problem = _validation_problems(location, exc)
+    raise ConfigError(problem)
 
 
 def _validation_problems(location: str, exc: ValidationError) -> str:

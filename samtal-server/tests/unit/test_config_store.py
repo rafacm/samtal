@@ -254,6 +254,16 @@ def test_an_unfreed_entity_is_named_when_it_does_not_exist(store: ConfigStore) -
 
 
 def test_an_invalid_fragment_is_refused_without_quoting_it(store: ConfigStore) -> None:
+    """The refusal names the key and the rule, and carries nothing of
+    the fragment: not in the message, and not in the exception chain
+    either.
+
+    Both links are asserted, because clearing only the cause is not
+    enough. An exception raised inside a handler keeps the one being
+    handled as its __context__, and a pydantic ValidationError's
+    errors() hold the complete rejected input, secret and all; its
+    str() happens to truncate the middle of a long value, which is
+    luck rather than a property to rely on."""
     with pytest.raises(ConfigError) as caught:
         store.set_provider("llm", "claude", {"type": "anthropic", "api_key": SECRET})
 
@@ -262,6 +272,7 @@ def test_an_invalid_fragment_is_refused_without_quoting_it(store: ConfigStore) -
     assert "api_key" in message
     assert SECRET not in _chain(caught.value)
     assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def test_an_unknown_stage_and_an_empty_name_are_refused(store: ConfigStore) -> None:
