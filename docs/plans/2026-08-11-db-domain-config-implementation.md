@@ -853,15 +853,18 @@ a plain sync. A separate module keeps the package import free of
 SQLAlchemy for everything that is not a boot.
 
 **`config.deploy.example.yaml` was not in milestone 3's audit, and its
-domain half is not deleted.** The audit covered `config.example.yaml`.
-The deployment profile carries its own field-measured values
-(`cpu_threads: 3` against the container quota, the `language_detect`
-ladder, the Piper voice, the VAD tuning), none of which has a
-destination in `examples/`, because the fragments document the options
-generically and this file documents one deployment's choices. Its
-domain half therefore became the `config set` commands that write it,
-comments and values intact, at the bottom of the same file. Nothing was
-dropped, and the file is still valid YAML for the server half.
+domain half moved rather than being deleted.** The audit covered
+`config.example.yaml`. The deployment profile carries its own
+field-measured values (`cpu_threads: 3` against the container quota, the
+`language_detect` ladder, the Piper voice, the VAD tuning), none of which
+has a destination in `examples/`, because the fragments document the
+options generically and this file documents one deployment's choices.
+Its domain half is therefore the runnable `config.deploy.example.sh`
+beside it, comments and values intact, which
+`tests/unit/test_config_examples.py` runs against a scratch database
+before asserting the measured values and the allowlist on the composed
+result. Nothing was dropped, the file stays valid YAML for the server
+half, and the values stay checked rather than merely written down.
 
 **Two smoke-lane tests moved rather than being edited.**
 `test_the_slim_boot_config_names_no_local_engine` and
@@ -873,14 +876,19 @@ repository, with their assertions unchanged. That also pins something
 the old tests could not: that the scripts work at all, in an order the
 write-time reference checks accept.
 
-**Three test bodies lost assertions whose subject was deleted.**
-`test_example_config_parses` asserted the example file's providers,
-agents and device bindings, `test_deploy_example_config_parses` its
-whisper options and its allowlist, and `test_any_top_level_key_is_env_overridable`
-used `SAMTAL_DEFAULT_AGENT`, which is now a boot error. The first two
-keep their server-half assertions; the third is replaced by the
-moved-environment tests, which pin the same variable with the opposite
-expectation. No assertion about behavior changed value.
+**Two test bodies lost assertions whose subject was deleted, and one
+was moved.** `test_example_config_parses` asserted the example file's
+providers, agents and device bindings, which the file no longer holds
+and which the `examples/` fragments and their test now cover;
+`test_any_top_level_key_is_env_overridable` used `SAMTAL_DEFAULT_AGENT`,
+which is now a boot error, and is replaced by the moved-environment
+tests pinning the same variable with the opposite expectation.
+`test_deploy_example_config_parses` keeps its server-half assertions,
+and its domain assertions (the whisper options, the allowlist) moved
+whole to `test_the_deployment_profile_boots_with_its_measured_values`,
+which seeds the profile's own script and asserts them on the composed
+snapshot. No assertion about behavior changed value, and none of them
+was dropped.
 
 **The checkpoint workflow needed one sentence, not a document.** The
 plan expects the `*.local.yaml` checkpoint workflow to become a script

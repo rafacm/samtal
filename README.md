@@ -71,7 +71,7 @@ server:
     enabled: false
 ```
 
-Start from [`samtal-server/config.example.yaml`](samtal-server/config.example.yaml), which documents every key of it, or from [`samtal-server/config.deploy.example.yaml`](samtal-server/config.deploy.example.yaml), a ready-to-adapt profile for the container image behind a proxy on a small CPU quota.
+Start from [`samtal-server/config.example.yaml`](samtal-server/config.example.yaml), which documents every key of it, or from [`samtal-server/config.deploy.example.yaml`](samtal-server/config.deploy.example.yaml), a ready-to-adapt profile for the container image behind a proxy on a small CPU quota, whose domain half is the runnable [`config.deploy.example.sh`](samtal-server/config.deploy.example.sh) beside it.
 
 **2. Say what the assistant is.** The other half of the configuration (which engines, which persona, which devices) lives in a database on the data volume, written with `samtal-server config`, the CLI the image ships. Seed it before the first start, and the server comes up with an assistant ready to talk. This one is fully local and needs no account anywhere: Silero, faster-whisper, [Ollama](https://ollama.com) and Piper.
 
