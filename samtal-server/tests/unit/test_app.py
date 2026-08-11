@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from samtal_server.app import create_app
@@ -10,7 +12,12 @@ def test_given_config_is_the_one_the_app_serves() -> None:
     assert app.state.config is config
 
 
-def test_app_without_a_config_loads_one() -> None:
+def test_app_without_a_config_loads_one(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both halves: the file half from the environment, and the domain
+    half from the database it names."""
+    monkeypatch.setenv("SAMTAL_SERVER__DATABASE__DIR", str(tmp_path / "db"))
     app = create_app()
     assert isinstance(app.state.config, Config)
 

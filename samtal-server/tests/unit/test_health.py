@@ -4,10 +4,11 @@ from fastapi.testclient import TestClient
 from samtal_server import __version__
 from samtal_server.app import create_app
 from samtal_server.build_info import REVISION_ENV, revision
+from samtal_server.config import Config
 
 
 def test_healthz_reports_ok_and_version() -> None:
-    client = TestClient(create_app())
+    client = TestClient(create_app(Config()))
     response = client.get("/healthz")
     assert response.status_code == 200
     assert response.json() == {
@@ -26,7 +27,7 @@ def test_healthz_names_the_build_and_not_only_the_package(
     revision.cache_clear()
     monkeypatch.setenv(REVISION_ENV, "deadbeefcafe")
     try:
-        body = TestClient(create_app()).get("/healthz").json()
+        body = TestClient(create_app(Config())).get("/healthz").json()
     finally:
         revision.cache_clear()
     assert body["revision"] == "deadbeefcafe"

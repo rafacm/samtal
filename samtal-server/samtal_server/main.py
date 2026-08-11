@@ -21,7 +21,8 @@ from fastapi import FastAPI
 
 from samtal_server import logs
 from samtal_server.app import create_app
-from samtal_server.config import Config, ConfigError, load_config
+from samtal_server.config import Config, ConfigError
+from samtal_server.config.boot import load_boot_config
 from samtal_server.config.loader import CONFIG_ENV_VAR
 from samtal_server.providers import ProviderError
 
@@ -137,7 +138,10 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        config = load_config(args.config)
+        # Both halves: the file named by --config or SAMTAL_CONFIG, and the
+        # domain half from the database that file points at.
+        booted = load_boot_config(args.config)
+        config = booted.config
         # Logging is configured as early as the config allows, since the
         # format is a config key. Anything that fails before this point is a
         # config error, and those are printed to stderr rather than logged.
@@ -145,7 +149,7 @@ def main() -> None:
         # Pass the app object rather than an import string: the config just
         # read (from --config, which reaches nothing else) has to be the one
         # the app serves from.
-        app = create_app(config)
+        app = create_app(config, booted.secrets)
     except (ConfigError, ProviderError) as exc:
         print(exc, file=sys.stderr)
         raise SystemExit(1) from None

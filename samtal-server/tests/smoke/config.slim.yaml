@@ -1,49 +1,10 @@
-# The configuration the slim image's boot check runs on.
+# The server half of the slim image's boot check.
 #
-# Every network stage names an external provider, which is the whole
-# point of the slim variant: this config loads no local engine, so it
-# has to come up in an image that carries none. The keys are throwaway
-# and nothing here talks to a vendor; what this proves is that the
-# server builds its providers and serves both endpoints, not that a
-# conversation runs. The conversation is the mock-provider smoke suite's
-# job, and it runs against both variants.
-#
-# silero is the exception and stays a local engine deliberately: it is a
-# core dependency rather than an optional extra, so it is present in
-# both variants and runs on every audio frame whichever ASR is
-# configured.
+# Its domain half is seeded by seed-slim.sh, where every network stage
+# names an external provider, which is the whole point of the slim
+# variant: that configuration loads no local engine, so it has to come
+# up in an image that carries none.
 
 server:
   host: 0.0.0.0
   port: 8003
-
-providers:
-  llm:
-    claude:
-      type: anthropic
-      api_key_env: ANTHROPIC_API_KEY
-      model: claude-sonnet-4-5
-  asr:
-    cloud:
-      type: openai
-      api_key_env: OPENAI_API_KEY
-  tts:
-    cloud:
-      type: openai
-      api_key_env: OPENAI_API_KEY
-      voice: alloy
-  vad:
-    silero:
-      type: silero
-
-agent_defaults:
-  llm: claude
-  asr: cloud
-  tts: cloud
-  vad: silero
-
-agents:
-  assistant:
-    prompt: A slim-image boot check.
-
-default_agent: assistant

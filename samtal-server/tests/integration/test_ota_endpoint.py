@@ -18,10 +18,10 @@ from collections.abc import Iterator
 import pytest
 import uvicorn
 
-from samtal_server.app import create_app
 from samtal_server.auth import build_device_auth
 from samtal_server.config import Config
 from samtal_server.ota import OTA_PATH
+from tests.integration.conftest import booted
 
 MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")}
 MOCK_AGENT = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
@@ -57,7 +57,7 @@ def server() -> Iterator[str]:
     """A real uvicorn serving the app, yielding its base URL."""
     port = _free_port()
     server = uvicorn.Server(
-        uvicorn.Config(create_app(CONFIG), host="127.0.0.1", port=port, log_level="warning")
+        uvicorn.Config(booted(CONFIG), host="127.0.0.1", port=port, log_level="warning")
     )
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()

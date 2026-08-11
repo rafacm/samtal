@@ -18,8 +18,8 @@ import pytest
 import uvicorn
 from xiaozhi_sdk import XiaoZhiWebsocket
 
-from samtal_server.app import create_app
 from samtal_server.config import Config
+from tests.integration.conftest import booted
 
 MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")}
 MOCK_AGENT = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
@@ -42,7 +42,7 @@ async def server_port():
         default_agent="assistant",
     )
     server = uvicorn.Server(
-        uvicorn.Config(create_app(config), host="127.0.0.1", port=0, log_level="warning")
+        uvicorn.Config(booted(config), host="127.0.0.1", port=0, log_level="warning")
     )
     task = asyncio.create_task(server.serve())
     while not server.started:

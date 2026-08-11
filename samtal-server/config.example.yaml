@@ -6,12 +6,32 @@
 #   SAMTAL_CONFIG=/path/to/config.yaml uv run samtal-server
 #   uv run samtal-server --config /path/to/config.yaml
 #
-# Secrets never live in this file: a provider references the environment
+# This file holds the server half of the configuration: how the process
+# runs (server:) and where remembered facts are kept (memory:). The
+# domain half, everything about what the server says and to whom
+# (providers, mcp_servers, agent_defaults, agents, devices,
+# default_agent), lives in the database under server.database.dir and is
+# written with the config commands:
+#
+#   samtal-server config set provider llm claude -f examples/llm-anthropic.yaml
+#   samtal-server config set agent sam -f examples/agent.yaml
+#   samtal-server config bind-device aa:bb:cc:dd:ee:ff sam
+#   samtal-server config list
+#
+# Every field of it is documented in docs/reference/domain-config.md
+# (generated from the models, also available as `samtal-server config
+# reference`), and examples/ holds a commented fragment per entity and
+# provider type to copy from. A domain section left in this file, or a
+# SAMTAL_ override for one, refuses the boot naming where it moved.
+#
+# Secrets never live in this file: a provider names the environment
 # variable that holds its key (api_key_env), and the server reads the
-# variable at startup. Any key here can be overridden with a
-# SAMTAL_-prefixed environment variable, nested keys joined with __
-# (SAMTAL_SERVER__PORT=9000, SAMTAL_DEFAULT_AGENT=assistant); a .env file
-# next to where the server is started works too.
+# variable at startup; a credential can also be stored encrypted in the
+# database with `samtal-server config set-secret`. Any key here can be
+# overridden with a SAMTAL_-prefixed environment variable, nested keys
+# joined with __ (SAMTAL_SERVER__PORT=9000,
+# SAMTAL_SERVER__LOG_LEVEL=DEBUG); a .env file next to where the server
+# is started works too.
 
 server:
   host: 0.0.0.0
@@ -66,8 +86,9 @@ server:
 
   # Where the domain half of the configuration is stored: one SQLite
   # file named samtal.db inside this directory, written by the
-  # `samtal-server config` commands. The directory is the key, the way
-  # memory.dir and capture.dir are, and it must be on the data volume.
+  # `samtal-server config` commands and read once at each server start.
+  # The directory is the key, the way memory.dir and capture.dir are,
+  # and it must be on the data volume.
   #
   # The default below is the generic one; a container image points this
   # at its own writable volume, and a development machine needs it
@@ -75,9 +96,9 @@ server:
   #
   #   SAMTAL_SERVER__DATABASE__DIR=./var uv run samtal-server config list
   #
-  # The server does not read this database yet. Until the switchover it
-  # is written by the CLI and read by nothing, and the domain sections
-  # further down this file are still what the server boots from.
+  # A write through the config commands applies at the next start: the
+  # configuration is a boot-time snapshot, so restart the server after
+  # an edit.
   # database:
   #   dir: /var/lib/samtal
 
@@ -100,9 +121,9 @@ server:
   # Refuse to boot anything that sends session data off this host.
   # With this on, a provider entry of a cloud type (anthropic) fails at
   # startup with an error naming the stage and provider, an
-  # openai_compatible entry is refused unless it declares egress: false
-  # (see the providers section), and every referenced mcp_servers entry
-  # needs the same declaration (see mcp_servers). Running fully local
+  # openai_compatible entry is refused unless it declares egress: false,
+  # and every referenced MCP server needs the same declaration (both are
+  # documented in docs/reference/domain-config.md). Running fully local
   # becomes a checked property of the server rather than a
   # documentation property of a carefully chosen configuration: a
   # local_only server that starts is a local_only server. Off by
@@ -192,326 +213,6 @@ server:
   # own -t raised above this, since its default is ten.
   # drain_s: 20
 
-# Providers are named so agents can reference them. Every entry needs a
-# `type`; the remaining keys are options for that provider implementation.
-providers:
-  llm:
-    claude:
-      type: anthropic
-      model: claude-sonnet-5
-      api_key_env: ANTHROPIC_API_KEY
-    local:
-      type: openai_compatible
-      base_url: http://localhost:11434/v1
-      model: qwen3:8b
-      # Whether an openai_compatible endpoint sends session data off
-      # the host is decided by base_url, so the server cannot know it
-      # from the type. Under server.local_only the entry must say:
-      # egress: false is the operator asserting the endpoint stays on
-      # this machine. Types that know their own egress (anthropic,
-      # silero, faster_whisper, piper) reject the key.
-      egress: false
-  asr:
-    whisper:
-      type: faster_whisper
-      # Whisper model size (tiny/base/small/medium/large-v3 or a
-      # Hugging Face model id); weights download at server startup.
-      model: small
-      # Language hint (ISO 639-1, e.g. sv or en); omit to auto-detect
-      # per utterance. Detection costs a constant encoder pass per
-      # utterance, several seconds of it on a small CPU.
-      # language: sv
-      # device: cpu
-      # compute_type: int8
-      # Greedy decoding by default: beam search costs a multiple of
-      # the CPU time and buys little accuracy on short spoken commands.
-      # beam_size: 1
-      # Threads for CPU inference. The engine sizes its pool from the
-      # host's core count and ignores container CPU quotas, so inside
-      # a limit set this to the quota (0 keeps the engine default).
-      # cpu_threads: 3
-      # Strip non-speech inside the ASR call before decoding. Cuts
-      # both latency and hallucinations on silence-padded utterances;
-      # recommended on. vad_parameters tunes the engine's own VAD.
-      # vad_filter: true
-      # vad_parameters:
-      #   min_silence_duration_ms: 500
-      # Feeding each window's text into the next is the documented
-      # cause of repetition loops; false is the standard mitigation.
-      # condition_on_previous_text: false
-      # Fallback ladder for failed decodes. The engine's six-step
-      # default can retry one bad utterance six times over; a short
-      # ladder bounds worst-case latency, which a voice UI feels.
-      # temperature: [0.0, 0.2]
-      # Detection scope. every_utterance (the default) detects fresh on
-      # each turn; once detects until a confident answer arrives, then
-      # reuses that language for the rest of the session, so later
-      # turns skip the whole detection pass. A speaker rarely switches
-      # language mid-conversation; a new conversation detects afresh.
-      # language_detect: once
-      # Below this detection confidence, distrust the guess: use
-      # language_fallback instead when one is set, and never lock a
-      # session to it. Misdetections cluster at low confidence, and a
-      # wrong language costs extra decode time on top of being wrong.
-      # language_confidence_floor: 0.6
-      # language_fallback: en
-    # Cloud transcription, and the one cloud stage that is usually
-    # faster than its local alternative rather than slower: the work
-    # runs on someone else's accelerator, so the network round trip is
-    # cheaper than a CPU decode. It also hears non-English far better
-    # under noise. The endpoint reference and the guide:
-    # https://platform.openai.com/docs/api-reference/audio/createTranscription
-    # https://platform.openai.com/docs/guides/speech-to-text
-    ears:
-      type: openai
-      api_key_env: OPENAI_API_KEY
-      # Default: gpt-4o-mini-transcribe. gpt-4o-transcribe is the
-      # larger sibling, holds up better on the noisiest input, and
-      # costs about the same in latency; whisper-1 is the same Whisper
-      # V2 as the local engine above, roughly twice the latency of the
-      # gpt-4o pair, and there is little reason to choose it.
-      # model: gpt-4o-transcribe
-      # Any server implementing /v1/audio/transcriptions works here,
-      # the same way openai_compatible opens the LLM stage to local
-      # models. A keyless self-hosted one can leave api_key_env out;
-      # one that authenticates still names its variable there, since
-      # only OpenAI's own host makes a key mandatory. This is also what
-      # decides whether the audio leaves the host, so the type cannot
-      # declare its own egress: under server.local_only an entry
-      # carries `egress: false` to assert the endpoint is local. An
-      # endpoint that accepts audio shorter than OpenAI's 0.1 s minimum
-      # is sent it, since that floor was measured against OpenAI.
-      # base_url: http://localhost:8000/v1
-      # A list of words the transcriber should expect. Not the agent's
-      # prompt: that one is the persona instruction under `agents:`
-      # below, and these two unrelated options happen to share a name.
-      # Words the engine would not otherwise guess: names, places, the
-      # assistant's own name. Worth setting, because an unfamiliar
-      # proper noun is the failure this provider actually has ("samtal"
-      # comes back as "sample" under noise, and as "Samtal" with this
-      # set).
-      # Keep it to vocabulary. On short or low-content audio the model
-      # hands this string back as the transcript instead of hearing
-      # anything, which is reliable rather than rare: 45 of 45 clips of
-      # room tone under a second came back as the prompt word for word.
-      # Plain vocabulary makes that harmless noise. Agent names, wake
-      # words or anything imperative make it an instruction the model
-      # can act on, and in a field session an echo of the agent names
-      # triggered a handover nobody asked for. A transcript that is
-      # this string and nothing else never reaches the model as if
-      # spoken: the clip is transcribed once more without the prompt,
-      # a real short answer survives that retry, and an echo that
-      # persists or comes back empty is discarded. A prompt that
-      # cannot be acted on is still the real protection.
-      # prompt: samtal, Stockholm
-      # Spoken language (ISO 639-1). SET THIS for any deployment that
-      # is not English. On clean audio leaving it unset costs nothing,
-      # since detection happens inside the model, but a device
-      # checkpoint showed far-field mic audio through Opus gives
-      # detection far less to go on: unpinned, Swedish came back as
-      # English-shaped nonsense ("Vad heter Sveriges huvudstad?" as
-      # "Hat hetas verigezogistad."), and pinning fixed it outright.
-      # `prompt` above does not compensate; it fixes vocabulary, not
-      # language. The gpt-4o models still treat this as a hint and will
-      # answer in the language they hear, so a wrong value is fairly
-      # harmless and an empty one is what costs you.
-      language: sv
-      # 0.0 to 1.0. Raise it only to loosen a decode that is stuck;
-      # the default is the API's own.
-      # temperature: 0.0
-      # Seconds before a transcription request is abandoned, and a real
-      # bound because retries are off: the SDK would otherwise try a
-      # failed request three times while the user waits for an answer.
-      # timeout_s: 30
-      # There is no language detection reporting and no
-      # language_detect option, unlike the local engine: the API
-      # returns no usable language and no confidence at all. Nothing is
-      # lost by it, since the detection those options exist to skip is
-      # free here.
-  tts:
-    piper:
-      # piper-tts is GPL-3.0 and therefore an optional extra:
-      #   uv sync --extra piper
-      type: piper
-      # Voice name from the Piper voice collection
-      # (https://huggingface.co/rhasspy/piper-voices), downloaded at
-      # server startup.
-      voice: sv_SE-nst-medium
-      # Where voices are stored (default: ~/.cache/samtal/piper).
-      # download_dir: /var/lib/samtal/piper
-    # A voice is a provider entry: two agents that should sound different
-    # reference two entries. There is no per-agent voice option, because
-    # for Piper the voice is the loaded model either way.
-    piper_english:
-      type: piper
-      voice: en_US-lessac-medium
-    # Cloud synthesis, streamed. Costs a network round trip per
-    # sentence and sends the reply text to the vendor, and sounds
-    # markedly better than a local voice for it.
-    #
-    # Every option below is passed to the ElevenLabs streaming
-    # endpoint, whose reference documents all of them:
-    # https://elevenlabs.io/docs/api-reference/text-to-speech/stream
-    eleven:
-      type: elevenlabs
-      # Voice id from your ElevenLabs voice library: the id, not the
-      # display name, and account-specific even for the stock voices.
-      # Browse and pick one in the ElevenLabs app, or list yours with:
-      #   curl -s -H "xi-api-key: $ELEVENLABS_API_KEY" \
-      #     https://api.elevenlabs.io/v1/voices \
-      #     | jq -r '.voices[] | "\(.voice_id)  \(.name)"'
-      # The current listing endpoint, with search and filtering:
-      # https://elevenlabs.io/docs/api-reference/voices/search
-      # Two things the voice listing does not tell you, both found by
-      # a deployment that hit them.
-      #
-      # The stock voices are recorded by English speakers. The model is
-      # multilingual and any voice will speak any of its languages
-      # intelligibly, which reads as "any voice works for any
-      # language", but a stock voice speaking Spanish sounds like an
-      # American speaking fluent Spanish. Pin a native voice for any
-      # non-English agent; a professional clone in the target language
-      # is what fixes it.
-      #
-      # A professional clone is fine-tuned per model, and one that is
-      # not available on the model below fails at synthesis rather than
-      # at boot. On a deployment where nobody is watching the logs that
-      # presents as silence on the device, so validate a clone's ID
-      # with one throwaway synthesis call before shipping it.
-      voice_id: PUT_YOUR_VOICE_ID_HERE
-      api_key_env: ELEVENLABS_API_KEY
-      # Default: eleven_flash_v2_5, the low-latency model (~75 ms to
-      # first byte, 32 languages). eleven_multilingual_v2 sounds
-      # better and answers slower, which a conversation feels. The
-      # model list, with each one's languages and latency:
-      # https://elevenlabs.io/docs/overview/models
-      # model: eleven_multilingual_v2
-      # Audio asked of the API. Only the pcm_<rate> formats work here,
-      # since the stage streams raw PCM; the default matches the rate
-      # devices are spoken at, so nothing is resampled. pcm_44100 and
-      # up need a paid ElevenLabs tier.
-      # output_format: pcm_24000
-      # Pin the spoken language (ISO 639-1) instead of letting the
-      # model infer it from the text.
-      # language_code: sv
-      # Passed to the API as given. Higher stability is more monotone
-      # and more predictable; speed is a multiplier around 1.0, capped
-      # at 0.7 to 1.2. The other keys are style and use_speaker_boost,
-      # which costs latency. What each one does to a voice:
-      # https://elevenlabs.io/docs/overview/capabilities/text-to-speech/best-practices
-      # voice_settings:
-      #   stability: 0.5
-      #   similarity_boost: 0.75
-      #   speed: 1.0
-      # Seconds before a synthesis request is abandoned.
-      # timeout_s: 30
-    # The other cloud voice: worth it when the deployment is already on
-    # OpenAI, since the same key serves the LLM stage and the voices
-    # are the stock ones rather than something to pick out of a
-    # library. The endpoint reference and the guide:
-    # https://platform.openai.com/docs/api-reference/audio/createSpeech
-    # https://platform.openai.com/docs/guides/text-to-speech
-    openai_voice:
-      type: openai
-      # One of the stock voices, the same on every account: alloy, ash,
-      # ballad, coral, echo, sage, shimmer, verse, marin, cedar. Hear
-      # them at https://www.openai.fm/
-      voice: alloy
-      api_key_env: OPENAI_API_KEY
-      # Any server implementing /v1/audio/speech works here, the same
-      # way openai_compatible opens the LLM stage to local models. A
-      # keyless self-hosted one can leave api_key_env out; one that
-      # authenticates still names its variable there, since only
-      # OpenAI's own host makes a key mandatory. This is also what
-      # decides whether replies leave the host, so the type cannot
-      # declare its own egress: under server.local_only an entry
-      # carries `egress: false` to assert the endpoint is local.
-      # base_url: http://localhost:8080/v1
-      # Default: gpt-4o-mini-tts, the current speech model and the
-      # fastest of the three to start speaking (measured at ~820 ms to
-      # first audio, against tts-1's ~1400 ms and tts-1-hd's ~1900 ms).
-      # Note that this whole family is slow to start next to the other
-      # engines here: ElevenLabs answers in ~190 ms and Piper in under
-      # 80 ms. Reach for OpenAI because one key already serves the LLM
-      # stage, not because it is quick.
-      # That figure is a fixed cost, not a per-word one: this provider
-      # streams, so the wait is the same whatever the reply and a long
-      # answer starts speaking no later than a short one. Piper is the
-      # opposite, and grows with the sentence.
-      # It is paid more than once, though. A reply is spoken sentence
-      # by sentence, and each sentence is synthesized only after the
-      # previous one has finished playing, so the same wait falls at
-      # every sentence boundary: measured at 520 to 617 ms per boundary
-      # here, against ElevenLabs' 111 to 131 ms. Around 130 ms passes
-      # unnoticed and around 600 ms is audible as the voice stuttering
-      # through a long reply, so this type suits agents that answer in
-      # a sentence or two rather than ones that tell stories.
-      # model: tts-1
-      # How to speak, in prose. Read by the gpt-4o models only, which
-      # is why naming it alongside a tts-1 model fails the boot rather
-      # than being ignored. That check knows OpenAI's models, so it
-      # applies only when base_url is OpenAI's; a compatible server has
-      # its own rules and both knobs reach it unexamined.
-      # instructions: Speak slowly and warmly, like a patient teacher.
-      # A multiplier from 0.25 to 4.0, and the tts-1 models' answer to
-      # instructions: they read this and ignore the prose, while the
-      # gpt-4o models do the opposite.
-      # speed: 1.0
-      # Seconds before a synthesis request is abandoned, and a real
-      # bound because retries are off: the SDK would otherwise try a
-      # failed request three times, leaving the device silent for three
-      # timeouts plus backoff inside a single sentence.
-      # timeout_s: 30
-      # No audio format option, unlike ElevenLabs above: the API's pcm
-      # format is fixed at 24 kHz, which is the rate devices are spoken
-      # at, so nothing is resampled and there is nothing to choose.
-  vad:
-    silero:
-      type: silero
-      # End-of-utterance tuning, defaults shown: Silero speech
-      # probability threshold, the silence that ends an utterance, and
-      # the cap on utterance length.
-      # threshold: 0.5
-      # trailing_silence_ms: 700
-      # max_utterance_ms: 10000
-
-# MCP servers, named so agents can reference them. The entry name
-# becomes the prefix its tools are offered to the model under
-# (`home__turn_on_light`), which is why it must be a plain
-# [A-Za-z0-9_-]+ name and cannot be `self`, `switch_agent`, or
-# `remember`: those already mean something in the merged tool list.
-#
-# `transport` decides which fields apply. Secrets are never written
-# here: a value of $NAME is read from that environment variable at
-# startup, and any key that looks secret-bearing (token, api_key,
-# authorization, ...) must use that form. A server that is down at
-# startup only logs a warning; its tools are absent and the server
-# reconnects in the background when a session needs it.
-mcp_servers:
-  home:
-    transport: stdio
-    command: mcp-proxy
-    args:
-      - http://homeassistant.local:8123/mcp_server/sse
-    env:
-      API_ACCESS_TOKEN: $HOME_ASSISTANT_TOKEN
-    # Tool arguments carry conversation-derived data, and no transport
-    # can know where they end up: a stdio command may proxy anywhere, a
-    # url may name localhost. Under server.local_only every referenced
-    # entry must therefore declare its egress; false is the operator
-    # asserting that whatever the command or URL reaches stays on your
-    # own network, as this proxy to a Home Assistant on the LAN does.
-    # egress: false
-    #
-    # How long one call may take before the model is told it timed out.
-    # The device hears silence meanwhile, so keep it short.
-    # tool_timeout_s: 15
-  weather:
-    transport: streamable_http
-    url: http://localhost:8000/mcp
-    headers:
-      Authorization: $WEATHER_TOKEN
-
 # Facts agents remember between conversations. The whole section is
 # optional: without it there is no `remember` tool and nothing is
 # injected into any prompt. One file per agent, created on first write,
@@ -533,73 +234,3 @@ mcp_servers:
 memory:
   dir: /var/lib/samtal/memory
 
-# What every agent uses unless it names something else. There is
-# deliberately no prompt here: a prompt is what makes an agent that
-# agent, and inheriting one silently would make two agents the same one.
-agent_defaults:
-  llm: claude
-  asr: whisper
-  vad: silero
-  mcp:
-    - weather
-  # Latency masking with a pre-synthesized filled pause, off by
-  # default. When a reply's first audio has not started within
-  # delay_ms of the utterance being transcribed, the server plays one
-  # of the phrases below, synthesized once at boot in the agent's own
-  # voice and cached, so the clip costs nothing at the moment it masks
-  # and keeps working when the TTS provider is the thing being slow.
-  # The real reply then queues behind the clip's tail. Write the
-  # phrases in the agent's own language, one or more; the player
-  # rotates through them. An agent can name its own filler section,
-  # which replaces this one wholly, like the stage fields above; a
-  # synthesis failure at boot logs a warning and leaves the feature
-  # off for that agent rather than failing the boot. The default
-  # delay of 1800 ms sits above the roughly 1.2 s a healthy reply
-  # takes to its first audio and below the 2 to 3 s of dead air where
-  # users start asking whether anyone is there.
-  # filler:
-  #   enabled: true
-  #   delay_ms: 1800
-  #   phrases:
-  #     - "Hmm, let me see..."
-  #     - "Good question..."
-
-# Agents combine a prompt with one provider per stage; every stage must
-# resolve to a provider (here or in agent_defaults) for the server to
-# start. A typical agent is therefore a prompt and a voice.
-agents:
-  assistant:
-    # State the reply language explicitly: models otherwise pick one by
-    # their training bias (the reference server's default is Chinese).
-    prompt: >
-      You are a helpful voice assistant. Keep replies short, plain, and
-      speakable: one or two sentences, no lists, no markdown. Always
-      reply in the language the user spoke.
-    tts: piper
-    # Naming a list replaces the inherited one rather than extending it,
-    # like the stage fields above.
-    mcp:
-      - home
-      - weather
-  storyteller:
-    prompt: >
-      You tell bedtime stories in English. Every reply is one short
-      story of a few sentences, calm and speakable, no lists, no
-      markdown.
-    # Overriding a default: this one runs on the local model.
-    llm: local
-    tts: piper_english
-    # An empty list is how an agent opts out of tools its siblings have.
-    mcp: []
-
-# Devices are bound to agents by MAC address (as sent in the Device-Id
-# header), as one agent or as a list of them. With a list, the first
-# entry is the agent a conversation starts on and the rest are the ones
-# it may be switched to. Unknown devices get default_agent.
-devices:
-  "aa:bb:cc:dd:ee:ff": assistant
-  "11:22:33:44:55:66":
-    - storyteller
-    - assistant
-
-default_agent: assistant

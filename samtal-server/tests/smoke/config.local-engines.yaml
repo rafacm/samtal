@@ -1,39 +1,14 @@
-# A configuration that names local engines, used to prove the slim image
-# refuses it rather than failing later in some obscure way.
+# The server half of the check that the slim image refuses a local
+# engine.
 #
-# The registry raises a ProviderError at boot naming the missing extra,
-# which is the same failure an operator gets from a bad provider
-# configuration anywhere. The point of checking it is that the message
-# says what to do: the alternative, an image that starts and then breaks
-# on the first utterance, is much worse than one that will not start.
+# Its domain half is seeded by seed-local-engines.sh, which names
+# faster_whisper for ASR. The registry raises a ProviderError at boot
+# naming the missing extra, which is the same failure an operator gets
+# from a bad provider configuration anywhere. The point of checking it
+# is that the message says what to do: the alternative, an image that
+# starts and then breaks on the first utterance, is much worse than one
+# that will not start.
 
 server:
   host: 0.0.0.0
   port: 8003
-
-providers:
-  llm:
-    mock:
-      type: mock
-  asr:
-    whisper:
-      type: faster_whisper
-      model: small
-  tts:
-    mock:
-      type: mock
-  vad:
-    silero:
-      type: silero
-
-agent_defaults:
-  llm: mock
-  asr: whisper
-  tts: mock
-  vad: silero
-
-agents:
-  assistant:
-    prompt: A local-engine configuration.
-
-default_agent: assistant
