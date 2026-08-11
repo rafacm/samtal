@@ -510,3 +510,219 @@ retained plaintext removes the attributes
 `test_a_resolved_secret_reaches_the_spawned_server` named, so it now
 asks the resolver the connection asks. The value it asserts and the
 property it pins are unchanged.
+
+## Milestone 3: generated documentation
+
+The whole editing pass in one change: `Field(description=...)` on every
+domain field, the commented per-entity fragments under
+`samtal-server/examples/`, `config/docgen.py` with the JSON Schema and the
+markdown reference, `config schema` and `config reference` in front of it,
+the `--help` text derived from the same descriptions, the committed
+`docs/reference/domain-config.md`, and the CI drift check that keeps it
+from rotting. `config.example.yaml` is deliberately untouched, so the
+narrative exists in both places during this milestone and the audit below
+could be judged with every destination in hand. Nothing about the server's
+behavior, the loader, the boot path or the database schema moves.
+
+### What landed
+
+**The descriptions.** Every field of `ProviderConfig`, `ProvidersConfig`,
+`McpServerConfig`, `FillerConfig`, `AgentDefaults`, `AgentConfig` and the
+six domain sections carries one. The section descriptions live in a single
+`DOMAIN_DESCRIPTIONS` mapping in `models.py`, because two models carry
+those fields: the composed `Config` the server boots from, and the
+`DomainConfig` the repository loads a database into. Server-half fields
+are out of scope and keep their comments in `config.example.yaml`.
+
+**The fragments.** Thirteen files under `samtal-server/examples/`: one per
+provider type (`llm-anthropic`, `llm-openai-compatible`,
+`asr-faster-whisper`, `asr-openai`, `tts-piper`, `tts-elevenlabs`,
+`tts-openai`, `vad-silero`), one per MCP transport, `agent`,
+`agent-defaults`, and a README explaining that these are fragments to feed
+`config set` rather than a configuration the server reads. Each file's
+header names the command that installs it, and
+`tests/unit/test_config_examples.py` runs every committed fragment through
+exactly that command against a scratch database, in the creation order the
+reference checks require. The header comment is the test's input, so the
+command a reader copies is the command that is known to work.
+
+**`config/docgen.py`.** One source, three renderings: the JSON Schema of
+an entity kind or of the whole domain configuration, the markdown
+reference, and the field list an argparse epilog carries. The prose no
+model can hold (what an entity kind is for, which command writes one, the
+singleton semantics, where the examples are) sits beside each entity in
+the module. Output is deterministic by construction: no timestamps, no set
+iteration, field order is the models' declaration order.
+
+**The commands.** `config schema [entity]` and `config reference`, both
+read-only: no `--config`, no database, no encryption key, no staging
+notice. The four `set` subcommands gained a generated epilog listing the
+fields a fragment may carry with the first sentence of each description,
+which is what the issue asks for instead of a second hand-written copy.
+
+**The committed reference and the drift check.**
+`docs/reference/domain-config.md` is committed, and the `test` job
+regenerates it and diffs it, printing the diff on failure. The workflow's
+path filters gained `docs/reference/**` on both push and pull_request, so
+hand-editing the committed copy alone also triggers the check rather than
+touching nothing under `samtal-server/`. The same comparison is a unit
+test as well, so a stale file fails in the suite instead of after a push.
+Both directions were replicated locally before the step was committed: the
+clean tree passes, and a one-line hand edit to the committed copy fails it.
+
+### The comment audit
+
+Every comment block in `config.example.yaml`'s domain half (providers,
+mcp_servers, agent_defaults, agents, devices, default_agent; `memory` is
+server-half and excluded), and where it went. Twenty-five contiguous
+blocks, holding fifty-one distinct comments once the blocks that document
+several commented-out keys in a row are counted apart. "Verbatim" below
+means the prose moved with its numbers and findings intact, not that a
+sentence was never re-wrapped or re-pointed at its new neighbours.
+
+Destinations in total, over those 51: 15 became or shaped a
+`Field(description=...)`, 50 are carried by an example fragment, 9 shaped
+reference prose in `docgen.py`, 1 (the devices binding rule, #25) has no
+fragment because a device is written with arguments rather than a
+document, and none was dropped. The numbers overlap because the split is
+the point: a comment documenting both what a field is and why its default
+is what it is went to a description and to a fragment.
+
+| # | Lines | Comment | Went to |
+| --- | --- | --- | --- |
+| 1 | 195-196 | providers section header: named entries, `type` plus options | `ProviderConfig.type` description, `DOMAIN_DESCRIPTIONS["providers"]`, reference "Provider" purpose |
+| 2 | 207-212 | openai_compatible egress, and which types reject the key | `ProviderConfig.egress` description; verbatim in `llm-openai-compatible.yaml` |
+| 3 | 217-218 | Whisper model sizes, weights download at startup | `asr-faster-whisper.yaml`, verbatim |
+| 4 | 220-264 | ten comments: language hint and detection cost, `device`/`compute_type`, beam size, `cpu_threads` and the container quota, `vad_filter` and `vad_parameters`, `condition_on_previous_text`, the temperature ladder, `language_detect`, the confidence floor and fallback; then the cloud-ASR intro | nine verbatim in `asr-faster-whisper.yaml`; the cloud-ASR intro verbatim as the header of `asr-openai.yaml` |
+| 5 | 268-317 | four comments: model choice, `base_url` and the 0.1 s floor, the `prompt` vocabulary rule with the 45-of-45 room-tone finding and the field handover incident, the `language` pin with the Swedish misdetection transcript | `asr-openai.yaml`, verbatim |
+| 6 | 319-330 | three comments: `temperature`, `timeout_s` and why retries are off, and why there is no `language_detect` here | `asr-openai.yaml`, verbatim |
+| 7 | 333-334 | piper-tts is GPL-3.0 and an optional extra | `tts-piper.yaml`, verbatim, with the image variants named |
+| 8 | 336-338 | Piper voice names and where they come from | `tts-piper.yaml`, verbatim |
+| 9 | 340-344 | two comments: `download_dir`; and "a voice is a provider entry", no per-agent voice option | `download_dir` verbatim in `tts-piper.yaml`; the voice-is-an-entry rule in `ProvidersConfig.tts`'s description, the reference "Provider" purpose, and the fragment's header |
+| 10 | 348-354 | ElevenLabs intro: cloud cost, and every option going to the streaming endpoint | `tts-elevenlabs.yaml`, verbatim |
+| 11 | 357-380 | `voice_id`, the listing recipe, and the two field findings (stock voices are English-speaker recordings; a professional clone fails at synthesis, not at boot) | `tts-elevenlabs.yaml`, verbatim |
+| 12 | 383-413 | six comments: model and the ~75 ms figure, `output_format`, `language_code`, `voice_settings`, `timeout_s`; then the OpenAI-TTS intro | five verbatim in `tts-elevenlabs.yaml`; the intro verbatim as the header of `tts-openai.yaml` |
+| 13 | 416-418 | the stock OpenAI voices | `tts-openai.yaml`, verbatim |
+| 14 | 421-467 | six comments: `base_url` and egress, the model comparison (~820/1400/1900 ms, ElevenLabs ~190 ms, Piper under 80 ms, 520 to 617 ms per sentence boundary against 111 to 131 ms), `instructions`, `speed`, `timeout_s`, and the absent format option | `tts-openai.yaml`, verbatim |
+| 15 | 471-476 | Silero end-of-utterance tuning | `vad-silero.yaml`, verbatim |
+| 16 | 478-489 | mcp_servers header: the name becomes a tool prefix and the reserved names; `transport` decides the fields; secrets are `$NAME` only; a server down at startup only warns | `DOMAIN_DESCRIPTIONS["mcp_servers"]`, `McpServerConfig.transport`, `.env` and `.headers` descriptions, reference "MCP server" purpose; verbatim across both MCP fragments |
+| 17 | 498-508 | two comments: MCP egress under local_only; `tool_timeout_s` | `McpServerConfig.egress` and `.tool_timeout_s` descriptions; verbatim in both MCP fragments |
+| 18 | 536-538 | agent_defaults header, and why there is deliberately no prompt | `DOMAIN_DESCRIPTIONS["agent_defaults"]`, the reference's singleton notes, `agent-defaults.yaml` header |
+| 19 | 545-565 | the filler section: what it does, the boot-time synthesis and cache, per-agent replacement, the failure mode, and the 1800 ms default against the ~1.2 s healthy reply and the 2 to 3 s of dead air | `FillerConfig.enabled`, `.delay_ms`, `.phrases` and `AgentDefaults.filler` descriptions; verbatim in `agent-defaults.yaml` |
+| 20 | 567-569 | agents header: prompt plus one provider per stage, every stage must resolve | `DOMAIN_DESCRIPTIONS["agents"]`, reference "Agent" purpose, `agent.yaml` header |
+| 21 | 572-573 | state the reply language explicitly, or a model picks by training bias | `AgentConfig.prompt` description; verbatim in `agent.yaml` |
+| 22 | 579-580 | naming a list replaces the inherited one | `AgentDefaults.mcp` description, the reference's agent-defaults notes; verbatim in `agent.yaml` |
+| 23 | 589 | "overriding a default: this one runs on the local model" | `agent.yaml`, as the note on the one overridden stage |
+| 24 | 592 | an empty list opts an agent out of its siblings' tools | `AgentDefaults.mcp` description; verbatim in `agent.yaml` and `agent-defaults.yaml` |
+| 25 | 595-598 | devices are bound by MAC, first entry starts the conversation, unknown devices get default_agent | `DOMAIN_DESCRIPTIONS["devices"]` and `["default_agent"]`, reference "Devices" and "Default agent" sections |
+
+Nothing was dropped. Three questions came out of the pass, none of which
+this milestone decided on its own:
+
+1. **The file header's own example goes stale at the switchover.**
+   `config.example.yaml`'s header (lines 9 to 14, server-half and so
+   outside this audit) offers `SAMTAL_DEFAULT_AGENT=assistant` as its
+   illustration of the `SAMTAL_` override convention. Milestone 4 turns
+   exactly that variable into a boot error naming the move, so the
+   header's example has to change with it. Flagged here rather than
+   edited, because `config.example.yaml` is untouched in this milestone
+   by design.
+2. **Should `examples/` carry a second agent?** The example file's
+   `storyteller` entry demonstrates a whole-stage override (its own LLM
+   and its own voice, and `mcp: []`) next to `assistant`. Its comments
+   are preserved in `agent.yaml`, but the two-agent shape it showed is
+   not. One `agent.yaml` installed twice under two names says the same
+   thing, which is why nothing was added; if a reviewer wants the
+   contrast on the page, a second fragment is the answer.
+3. **The memory-is-keyed-by-agent-name warning has no home in the
+   domain reference.** "Renaming an agent orphans its memory" (lines 521
+   to 525) is a `memory:` comment, server-half, and stays in the file.
+   It is nevertheless a consequence of an agent's name, which is now
+   documented somewhere else entirely, so a reader of the agent section
+   will not meet it. Repeating it in the reference means writing prose
+   about a server-half section in the domain document; leaving it means
+   the warning is one hop further from where the rename happens. Not
+   decided here.
+
+### Deviations from the plan
+
+**The fragment inventory is thirteen files, not the plan's twelve.** The
+plan's expected list (which it explicitly left to this milestone) named
+twelve; `examples/README.md` is the thirteenth committed file, and the
+plan asked for it separately. No provider type in the example file went
+without a fragment, and none was invented for a type the server does not
+implement.
+
+**`docgen` imports `store`.** The whole-domain schema is `DomainConfig`'s,
+and that model lives in `store.py`, so `docgen` imports the repository
+module and with it SQLAlchemy. Nothing is opened: the import is for the
+model class. `samtal_server.config` still does not import either, and
+`main.py` still imports the command group lazily, so serving pulls in
+neither.
+
+**Two entity kinds in the reference have no `config set` command.** The
+plan's entity list is the fragment-shaped ones. `FillerConfig` is
+documented as an entity anyway, because it is a nested shape a fragment
+has to get right and its fields would otherwise appear nowhere, and
+`devices` and `default_agent` get sections of their own built from their
+field descriptions plus the commands that write them.
+
+**Provider stage groups are documented through the domain table rather
+than as an entity.** `ProvidersConfig` has no section of its own: its four
+fields are one row each in the whole-configuration table, and the Provider
+entity section carries the stage explanation. A fifth entity kind whose
+only content is "these are the four stages" would have been a section to
+scroll past.
+
+### Discoveries
+
+**A pipe ends a markdown table cell even inside a code span.** Every
+optional field renders as `str | null`, so the generated tables were
+silently splitting into extra columns until the type cell was escaped the
+same way the description cell already was. Worth knowing for any later
+generated table: backticks do not protect a pipe in GFM.
+
+**`AgentConfig`'s own field renders last.** Pydantic orders a subclass's
+fields base-first, so `prompt` appears after the six inherited stage
+fields in every rendering. Left alone: reordering means moving `prompt`
+into a base or restating the fields, and both cost more than the reading
+order is worth.
+
+**The example fragments are a test fixture as well as documentation.**
+Running each one through the command in its own header found nothing
+broken, but it pins something the reference cannot: that the creation
+order the fragments imply (providers, MCP servers, agent defaults,
+agents) really does pass the write-time reference checks, which is the
+first thing a new deployment does.
+
+**The two libraries that quote input back are still quiet.** Milestone
+2's discovery holds here: `config schema` and `config reference` parse
+nothing, so neither `ValidationError` nor PyYAML is on their path at all,
+and the new `set` epilogs are built from descriptions rather than from
+anything a user typed.
+
+### For the milestones that follow
+
+- The switchover's removal pass in `config.example.yaml` is now a pure
+  deletion of lines 195 to 513 and 536 to 605, plus the header rewrite.
+  Every comment in those ranges has a live destination, listed above, and
+  `memory:` (515 to 534) stays where it is, between them.
+- The header question above (`SAMTAL_DEFAULT_AGENT` as the example of the
+  override convention) is a change milestone 4 has to make anyway, since
+  that variable becomes a boot error. Picking a server-half example
+  (`SAMTAL_SERVER__PORT`, already in the same sentence) is the whole fix.
+- `README.md` and the deployment notes are not yet pointed at
+  `docs/reference/domain-config.md` or at `samtal-server/examples/`.
+  Milestone 4 owns the documentation sweep, and those two links are part
+  of it.
+- The drift check runs `uv run samtal-server config reference` from
+  `samtal-server/`, so the command has to keep working from a plain
+  `uv sync` with no database and no key. Anything milestone 4 adds to the
+  CLI's startup path (a database open at import, say) would break the
+  documentation lane rather than a config test, which is a confusing
+  place to see it fail.
+- `DOMAIN_DESCRIPTIONS` is what keeps `Config` and `DomainConfig`
+  describing the same six sections. If milestone 4 composes `Config` from
+  a `DomainConfig` instance rather than copying its fields across, the
+  mapping stays useful; if it deletes those fields from `Config`, the
+  mapping has exactly one consumer left and could move into `store.py`.

@@ -9,6 +9,28 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- Generated documentation for the domain configuration (#86). Every
+  domain model field now carries a description, and three renderings
+  come from that one source: `samtal-server config schema [entity]`
+  prints JSON Schema, `samtal-server config reference` prints the
+  markdown reference (committed at `docs/reference/domain-config.md`),
+  and the `config set` commands list their fragment's fields in
+  `--help`. Both new commands are read-only: no database, no
+  configuration file, no encryption key.
+
+  The long-form narrative that documented these settings in
+  `config.example.yaml` (the measured latencies, the field findings,
+  the tuning advice) moves to richly commented per-entity fragments
+  under `samtal-server/examples/`, one file per entity or provider
+  type, each naming the `config set` command that installs it and each
+  run through that command by the test suite. `config.example.yaml`
+  itself is unchanged in this release and still carries its domain
+  sections; the switchover is what removes them.
+
+  CI regenerates the committed reference and fails on any difference,
+  and the workflow now also runs on changes under `docs/reference/`, so
+  the committed copy cannot drift from the models.
+
 - The repository and the write path for the DB-backed domain
   configuration (#86): `samtal_server/config/store.py` reads the
   database into the existing pydantic models and writes fragments back
