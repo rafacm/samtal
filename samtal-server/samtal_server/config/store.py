@@ -380,11 +380,12 @@ def _read_secrets(connection: Connection, keys: MultiFernet | None) -> SecretSto
 
 
 def _provider_from_row(row: Row) -> ProviderConfig:
-    return _load(
-        ProviderConfig,
-        f"providers.{row.stage}.{row.name}",
-        {"type": row.type, "egress": row.egress, **(row.options or {})},
-    )
+    # api_key_env is a declared model field with its own column, never
+    # an options key: options holds exactly the model extras.
+    data: dict[str, object] = {"type": row.type, "egress": row.egress, **(row.options or {})}
+    if row.api_key_env is not None:
+        data["api_key_env"] = row.api_key_env
+    return _load(ProviderConfig, f"providers.{row.stage}.{row.name}", data)
 
 
 def _mcp_from_row(row: Row) -> McpServerConfig:
@@ -425,10 +426,12 @@ def _layer_data(row: Row) -> dict[str, object]:
 
 
 def _provider_values(entry: ProviderConfig) -> dict[str, object]:
-    options = dict(entry.options)
-    if entry.api_key_env is not None:
-        options["api_key_env"] = entry.api_key_env
-    return {"type": entry.type, "egress": entry.egress, "options": options}
+    return {
+        "type": entry.type,
+        "api_key_env": entry.api_key_env,
+        "egress": entry.egress,
+        "options": dict(entry.options),
+    }
 
 
 def _mcp_values(entry: McpServerConfig) -> dict[str, object]:
