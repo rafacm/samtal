@@ -1509,6 +1509,94 @@ boot-time snapshot: **an edit applies at the next server start.** A
 changes nothing it is doing until the process restarts, which both the
 command and the API's answer say every time they write.
 
+### The configuration API in a deployment
+
+Four more things, about the surface that writes it. What the API is and
+what it serves is under [The configuration API](#the-configuration-api);
+this is what a deployment has to decide about it.
+
+**Set `SAMTAL_API_SECRET` before rolling the image, not after.** The API
+is always mounted and always gated, so an image from this release
+started without that variable does not come up. It is the one upgrade
+step this change forces, and the boot error is the safety net rather
+than the plan: it names the variable, prints
+`SAMTAL_API_SECRET=$(openssl rand -hex 32)`, and says where the value
+goes. Generate one, put it wherever the deployment keeps
+`SAMTAL_AUTH_SECRET` and `SAMTAL_MASTER_KEY`, and then roll the image.
+`server.api.secret_env` renames the variable for a deployment whose
+convention is another one.
+
+**Decide what happens to `/api/` at the edge.** It is on the same port
+as the device endpoints, because the server is one process, so anything
+routing that port outward routes the admin surface with it unless it is
+told otherwise. Three answers, in the order they are worth reaching for:
+
+- **Do not route it externally at all.** The device endpoints are the
+  only two that need to be reachable from outside, so route
+  `/xiaozhi/ota/` and `/xiaozhi/v1/` and let `/api/` be reachable only
+  from inside. Configure it by exec into the running container, or by
+  forwarding the port to your own machine for the length of a session.
+  This is the default worth defending: the surface with the most
+  authority is the one nothing outside can address.
+- **Route it separately and restrict it**, when a front end or an
+  operator genuinely needs it from outside: a route of its own for the
+  `/api/` prefix, TLS on it, and whatever source restriction the edge
+  can express, so that the bearer token is not the only thing between
+  the internet and the configuration.
+- Route the port as one thing and rely on the token alone. That is what
+  happens by accident, and it is worth choosing deliberately if it is
+  what you want, because a token in a client's environment is a token
+  in more places than a private address is.
+
+**Loopback or TLS, for the whole API and not only for secret writes.**
+The bearer token rides on every request and grants everything the API
+can do, `set-secret` included, so a plain `http://` request to it from
+another machine puts the token on the wire in clear. This is a rule the
+client enforces rather than recommends: `samtal-server config` refuses a
+plain `http://` URL whose host is not the machine it runs on, with no
+flag to override it. Reach the API over `https://`, through a tunnel
+that terminates TLS, or on loopback from inside the container, which is
+the case the default address is built for.
+
+**When the server will not start, `--local` is the way back in.** A
+configuration the server refuses to boot on (a stored secret no
+configured key opens, an entity that cannot be loaded, a reference that
+no longer resolves) leaves nothing to write through, which is the one
+situation the API cannot answer for. The recovery path opens the
+database directly and covers four commands:
+
+```bash
+# Inside the container, or anywhere the data volume is mounted and
+# SAMTAL_SERVER__DATABASE__DIR names it.
+# What is stored.
+samtal-server config --local show
+# Take out what will not load.
+samtal-server config --local delete agent broken
+# Repair a credential.
+samtal-server config --local clear-secret provider llm claude api_key
+samtal-server config --local set-secret provider llm claude api_key
+```
+
+`set-secret` reads the value from stdin, or from a named variable with
+`--from-env`, and never from an argument. `--local` needs the master key
+only for `set-secret`, and needs no API token and no running server at
+all. Every other command refuses the flag by naming these four.
+
+Every `--local` invocation prints one line on stderr saying that it
+bypasses the API and that a running server will not observe the change
+until its next start. That is not a warning about a hazard: it is the
+boot-time snapshot contract, said out loud at the one moment an operator
+is most likely to expect otherwise. It is printed rather than enforced
+because there is no reliable way to tell whether a server is running
+against the same file, and a wrong refusal would wedge the recovery path
+in exactly the situation it exists for. Concurrency is safe regardless:
+each write is one transaction, so a `--local` write racing a server's
+own serializes with it, and the loser is told nothing was changed and to
+run the command again.
+
+Restart the server when the repair is done. Nothing written this way is
+observed until then.
+
 ### Choosing an image
 
 Two variants are published, built from one Dockerfile so they cannot
