@@ -6,8 +6,12 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "alembic>=1.18.5",
     "anthropic>=0.120.0",
     "av>=18.0.0",
+    # Fernet, for the domain configuration's secrets at rest. Already
+    # arrived transitively; direct because the server now uses it.
+    "cryptography>=49.0.0",
     "fastapi>=0.115",
     # Direct because the cloud providers speak their APIs over it rather
     # than pulling in a vendor SDK; it arrives with the LLM SDKs anyway.
@@ -19,6 +23,7 @@ dependencies = [
     "pysilero-vad>=3.4",
     "python-dotenv>=1.0",
     "pyyaml>=6.0",
+    "sqlalchemy>=2.0.51",
     "uvicorn[standard]>=0.34",
 ]
 
