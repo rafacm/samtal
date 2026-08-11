@@ -160,6 +160,38 @@ def test_an_invalid_fragment_is_refused_without_echoing_it(
     assert SECRET not in caplog.text
 
 
+def test_a_secret_nested_in_an_option_is_refused_and_never_read_back(
+    run, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """A provider option can be a structure, so both halves are checked
+    here: a secret-shaped key nested inside one is refused without
+    quoting the value, and a nested reference key holding something
+    that is not a reference is masked by `show` rather than printed."""
+    nested = f"type: anthropic\nconnection:\n  api_key: {SECRET}\n"
+
+    with caplog.at_level(logging.DEBUG):
+        assert run("set", "provider", "llm", "claude", "-f", "-", stdin=nested) == 1
+
+    captured = capsys.readouterr()
+    assert "connection.api_key" in captured.err
+    assert "looks like an inline secret" in captured.err
+    assert SECRET not in captured.err
+    assert SECRET not in captured.out
+    assert SECRET not in caplog.text
+
+    pasted = "sk_test_4f8b2c9e_never_a_real_credential"
+    accepted = f"type: anthropic\nconnection:\n  api_key_env: {pasted}\n"
+    assert run("set", "provider", "llm", "claude", "-f", "-", stdin=accepted) == 0
+    capsys.readouterr()
+
+    assert run("show", "provider", "llm", "claude") == 0
+    shown = capsys.readouterr().out
+    # Quoted by the YAML dumper, since the mask begins with an alias
+    # indicator; what matters is that the value shown is the mask.
+    assert yaml.safe_load(shown)["connection"]["api_key_env"] == MASK
+    assert pasted not in shown
+
+
 def test_malformed_yaml_is_refused_without_echoing_the_line(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -27,6 +27,20 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **A secret-shaped key is refused anywhere inside a provider's
+  options, not only at the top level** (#101). A provider entry passes
+  its options through to the implementation, so an option can be a
+  structure, and `connection: {api_key: ...}` was accepted, stored and
+  read back verbatim by every display path. It is now refused when the
+  fragment is parsed, with a message naming the dotted path and the
+  rule rather than quoting the value. Being honest about the behavior
+  change: a fragment that nested a secret-shaped key was never usable
+  (nothing resolved it, and every read published it), and such a
+  stored row now reports that it cannot be read as configuration
+  rather than showing what it holds. The display path masks
+  secret-shaped keys at every depth too, since it is the last thing
+  between a row that got its contents another way and a caller.
+
 - **Every deployment must set `SAMTAL_API_SECRET` before upgrading**
   (#101). The configuration API is always mounted and always behind a
   bearer token, deliberately without an `enabled` flag, so a server

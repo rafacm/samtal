@@ -399,6 +399,38 @@ def test_no_stored_secret_reaches_a_body_a_header_or_a_log(
     assert TOKEN not in caplog.text
 
 
+def test_a_secret_shaped_key_nested_in_an_option_is_masked_everywhere(
+    client: TestClient, store: ConfigStore, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An option can be a structure, so a secret-shaped key can be
+    nested inside one. The models refuse to accept a value under such a
+    key now, but a reference key one level down accepts anything that
+    looks like a variable name, which a credential can. Every read form
+    masks it: the entity, the listing, the whole document, and no body,
+    header or log record carries it."""
+    store.set_provider(
+        "llm",
+        "claude",
+        {"type": "anthropic", "connection": {"api_key_env": PASTED, "host": "example"}},
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        entity = client.get("/providers/llm/claude")
+        listed = client.get("/providers")
+        whole = client.get("/config")
+
+    assert entity.json()["entity"]["connection"] == {"api_key_env": MASK, "host": "example"}
+    assert listed.json()["llm"]["claude"]["entity"]["connection"]["api_key_env"] == MASK
+    assert whole.json()["config"]["providers"]["llm"]["claude"]["connection"] == {
+        "api_key_env": MASK,
+        "host": "example",
+    }
+    for response in (entity, listed, whole):
+        assert PASTED not in response.text
+        assert PASTED not in str(response.headers)
+    assert PASTED not in caplog.text
+
+
 def test_a_plaintext_that_got_into_a_row_comes_back_masked(
     client: TestClient, store: ConfigStore
 ) -> None:
