@@ -45,15 +45,8 @@ from samtal_server.config.secrets import (
     load_keys,
 )
 from samtal_server.config.store import ConfigStore, Snapshot
+from samtal_server.config.writes import RESTART_NOTICE
 from samtal_server.db import open_database
-
-# Printed after every mutating command. The configuration is a
-# boot-time snapshot by design, and a write that quietly waits for a
-# restart is the one thing about that design an operator can be caught
-# by, so the write itself says when it takes effect.
-RESTART_NOTICE = (
-    "This applies at the next server start: the configuration is read once at boot."
-)
 
 # How a stored secret is introduced in `show` and `list`. Comment lines
 # rather than a mapping: the mask is not a value that could be written

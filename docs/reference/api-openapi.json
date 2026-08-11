@@ -203,6 +203,180 @@
             }
           }
         }
+      },
+      "put": {
+        "summary": "Write Provider",
+        "description": "Create or replace one provider from a fragment in the shape\nthe YAML section had.",
+        "operationId": "write_provider_providers__stage___name__put",
+        "parameters": [
+          {
+            "name": "stage",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Stage"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderConfig"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove Provider",
+        "description": "Delete one provider, and the secrets stored on it. Refused\nwhile an agent or the agent defaults still name it.",
+        "operationId": "remove_provider_providers__stage___name__delete",
+        "parameters": [
+          {
+            "name": "stage",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Stage"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing of that identity exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/mcp-servers": {
@@ -281,6 +455,162 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing of that identity exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Write Mcp Server",
+        "description": "Create or replace one MCP server.",
+        "operationId": "write_mcp_server_mcp_servers__name__put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpServerConfig"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove Mcp Server",
+        "description": "Delete one MCP server, and the secrets stored on it.",
+        "operationId": "remove_mcp_server_mcp_servers__name__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
                 }
               }
             }
@@ -469,6 +799,162 @@
             }
           }
         }
+      },
+      "put": {
+        "summary": "Write Agent",
+        "description": "Create or replace one agent. Every provider and MCP server it\nnames has to exist already, which is what the natural creation\norder is about.",
+        "operationId": "write_agent_agents__name__put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentConfig"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove Agent",
+        "description": "Delete one agent. Refused while a device binding or the\ndefault agent still names it.",
+        "operationId": "remove_agent_agents__name__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing of that identity exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/agent-defaults": {
@@ -499,6 +985,73 @@
           },
           "409": {
             "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Write Agent Defaults",
+        "description": "Replace what every agent uses unless it names something else.\nOne entry for the whole deployment, so this is a replace and\nthere is nothing to delete.",
+        "operationId": "write_agent_defaults_agent_defaults_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentDefaults"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
               "application/json": {
                 "schema": {
@@ -651,6 +1204,162 @@
             }
           }
         }
+      },
+      "put": {
+        "summary": "Write Device",
+        "description": "Bind one device to one or more agents. The MAC is normalized\nbefore it is written, so the two spellings reach one row.",
+        "operationId": "write_device_devices__mac__put",
+        "parameters": [
+          {
+            "name": "mac",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mac"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeviceBinding"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove Device",
+        "description": "Remove one device's binding, which with no default agent set\nmeans the device is refused at the handshake.",
+        "operationId": "remove_device_devices__mac__delete",
+        "parameters": [
+          {
+            "name": "mac",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Mac"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing of that identity exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/default-agent": {
@@ -700,11 +1409,537 @@
             }
           }
         }
+      },
+      "put": {
+        "summary": "Write Default Agent",
+        "description": "Set the agent an unbound device reaches.",
+        "operationId": "write_default_agent_default_agent_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DefaultAgentName"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove Default Agent",
+        "description": "Unset it, leaving the devices map as the allowlist.\nIdempotent, like the CLI: there is no such thing as a default\nagent that was already not set.",
+        "operationId": "remove_default_agent_default_agent_delete",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/providers/{stage}/{name}/secrets/{slot}": {
+      "put": {
+        "summary": "Write Provider Secret",
+        "description": "Store one of this provider's credentials, encrypted. The slot\nis the option name the credential fills, such as api_key; a\nstored secret takes precedence over an environment reference\nwritten for the same slot.",
+        "operationId": "write_provider_secret_providers__stage___name__secrets__slot__put",
+        "parameters": [
+          {
+            "name": "stage",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Stage"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "slot",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slot"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecretValue"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing of that identity exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove Provider Secret",
+        "description": "Remove one stored credential. A slot holding none is a 404.",
+        "operationId": "remove_provider_secret_providers__stage___name__secrets__slot__delete",
+        "parameters": [
+          {
+            "name": "stage",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Stage"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "slot",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slot"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing of that identity exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/mcp-servers/{name}/secrets/{slot}": {
+      "put": {
+        "summary": "Write Mcp Secret",
+        "description": "Store one of this MCP server's credentials, encrypted. The\nslot is `env.<KEY>` or `headers.<Key>`, which is where the value\nwould otherwise have been written as a $VAR reference.",
+        "operationId": "write_mcp_secret_mcp_servers__name__secrets__slot__put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "slot",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slot"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SecretValue"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing of that identity exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove Mcp Secret",
+        "description": "Remove one stored credential.",
+        "operationId": "remove_mcp_secret_mcp_servers__name__secrets__slot__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "slot",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slot"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing of that identity exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Another process holds the configuration database's write lock. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
   "components": {
     "schemas": {
+      "Acknowledgement": {
+        "properties": {
+          "wrote": {
+            "type": "string",
+            "title": "Wrote",
+            "description": "What was written or deleted, naming the entity the way the `samtal-server config` command names it in the line it prints."
+          },
+          "notice": {
+            "type": "string",
+            "title": "Notice",
+            "description": "When the change takes effect. Configuration is a boot-time snapshot, so this is always the same sentence: it applies at the next server start."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "wrote",
+          "notice"
+        ],
+        "title": "Acknowledgement",
+        "description": "What a write answers with: what it did, and when it takes\neffect."
+      },
       "ConfigDocument": {
         "properties": {
           "config": {
@@ -1213,6 +2448,57 @@
           }
         },
         "title": "AgentDefaults",
+        "type": "object"
+      },
+      "DeviceBinding": {
+        "additionalProperties": false,
+        "description": "What a device write carries: the agents the device may reach.",
+        "properties": {
+          "agents": {
+            "description": "The agents this device is bound to, by name. The first is the agent a conversation starts on and the rest are the ones switch_agent can reach. Every name has to be an agent that exists, or the write is refused.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Agents",
+            "type": "array"
+          }
+        },
+        "required": [
+          "agents"
+        ],
+        "title": "DeviceBinding",
+        "type": "object"
+      },
+      "DefaultAgentName": {
+        "additionalProperties": false,
+        "description": "What a default-agent write carries. Clearing it is the DELETE,\nnot a null here: one way to say a thing.",
+        "properties": {
+          "name": {
+            "description": "The agent an unbound device reaches. It has to be an agent that exists. To unset it, DELETE this resource, which leaves the devices map as the allowlist.",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "DefaultAgentName",
+        "type": "object"
+      },
+      "SecretValue": {
+        "additionalProperties": false,
+        "description": "What a secret write carries: the credential itself, the only\nplaintext this API ever accepts.",
+        "properties": {
+          "secret": {
+            "description": "The credential, in plaintext, stored encrypted under the newest key in SAMTAL_MASTER_KEY. It crosses the connection as itself, which is why the whole API belongs on a loopback connection or behind TLS. It is never read back: a read names the slot and masks the value.",
+            "title": "Secret",
+            "type": "string"
+          }
+        },
+        "required": [
+          "secret"
+        ],
+        "title": "SecretValue",
         "type": "object"
       }
     },
