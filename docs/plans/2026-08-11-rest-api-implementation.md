@@ -184,3 +184,67 @@ migrate.
   validation. The argument-shaped writes (devices, default-agent,
   secrets) need their own exact-shape parser in milestone 3, with the
   same rule: describe the expectation, never echo the body.
+
+### PR #104 review round
+
+One external review of the pull request's diff: codex CLI 0.147.0,
+model gpt-5.6-sol, read-only, 2026-08-11, posted on the PR by the
+review run itself. Verdict: mergeable after the listed fixes. Four
+findings, all P1, each fixed with its own commit:
+
+1. **The API's namespace was reachable through the OTA route.** The
+   OTA router is registered before the API is mounted, and Starlette
+   matches routes in order, so a configured `server.ota_path` of
+   `/api/` or anything under it would have been found first and would
+   have answered, unauthenticated, a request the token gate never saw.
+   The OTA endpoint is deliberately open, because it is what issues the
+   device tokens, so this is a hole rather than a curiosity. Fixed in
+   833921c: `ota_path`'s validator refuses the reserved prefix, the
+   mount path is single-sourced on the models so that what is reserved
+   and what is mounted cannot drift apart, and the refusal names the
+   rule without quoting the value, since a public deployment hides the
+   OTA endpoint behind a long random segment.
+2. **The sanitized 500 was not sanitized in the log.** It wrote
+   `logger.exception`, which puts the exception's own text, its
+   traceback and the request path into the log, and then re-raised once
+   a response had started, so an outer logger wrote a second traceback.
+   By that point the exception text is whatever a request put in front
+   of the code that raised it, and a log line leaks as surely as a
+   response body once the log is shipped somewhere. Fixed in 66118c3:
+   one fixed line naming the exception's class and nothing else, no
+   `exc_info`, no request-controlled path, and no re-raise after the
+   response started; the tests assert the sentinel is absent from every
+   captured record and both streams, that no record carries `exc_info`,
+   and that a mid-stream failure produces exactly one line and no
+   exception at the client.
+3. **The repository's fragment refusal still chained the pydantic
+   error.** `_load` raised inside its handler with `from None`, which
+   clears `__cause__` but leaves `__context__` holding the
+   `ValidationError`, whose `errors()` carry the complete rejected
+   fragment, inline secret included. The existing leak test passed only
+   because pydantic's `str()` truncates the middle of a long value,
+   which is luck and not a property. Fixed in 941bf7f, with the pattern
+   the loader had already been given: format in the handler, raise
+   after leaving it, and assert both links are empty.
+4. **Two parser failures in the loader chained their parsers.** The
+   `SettingsError` path raised `from exc`, and a malformed `SAMTAL_`
+   override of a structured key leaves a `JSONDecodeError` whose `.doc`
+   is the whole rejected environment value; the YAML pre-flight check
+   raised `from exc` too, and a PyYAML mark keeps the entire buffer it
+   was parsing, so a complaint about one line carried the whole
+   configuration file behind it. Fixed in 1977ebc, the same way, with
+   sentinel cases writing the sentinel into the input each parser
+   chokes on. Both messages are unchanged: neither was rendered from
+   the parser's own text in the first place.
+
+Findings 3 and 4 are the same defect as milestone 1's second deviation,
+in the two places that pass was not asked to look at. The rule they
+leave behind is worth stating once: in this codebase a sanitized
+refusal is built inside the handler and raised outside it, because
+`from None` is not enough. `__suppress_context__` only stops the
+default traceback printer; the object is still attached, and anything
+that walks the chain (a structured log handler, an error reporter, a
+debugger) reads what it holds.
+
+Full lanes after the fixes: ruff clean, both suites green and both
+drift checks clean (counts in the PR's verification section).
