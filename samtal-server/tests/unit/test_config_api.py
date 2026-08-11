@@ -1,0 +1,261 @@
+"""The configuration API's sub-application: the gate and the answers.
+
+Two properties carry this file. Nothing inside /api answers anything
+but 401 without the right token, matched route or not, because the gate
+runs before routing. And every refusal leaves as `{"detail": ...}` with
+the repository's own sentence and the status code the plan fixes, with
+no traceback and no echo of what was sent.
+
+Milestone 1 has no routes, so the mapping is exercised through
+throwaway routes registered on a test-built application: what is under
+test is the handler wiring, and a route that raises on demand is the
+smallest thing that reaches it.
+"""
+
+import logging
+from pathlib import Path
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from pydantic import BaseModel
+
+from samtal_server.config import Config, ConfigError
+from samtal_server.config.api import (
+    MALFORMED_REQUEST,
+    MOUNT_PATH,
+    UNAUTHORIZED,
+    UNEXPECTED,
+    api_token,
+    build_api,
+    store_dependency,
+)
+from samtal_server.config.loader import DatabaseBusyError, StorageError, UnknownEntityError
+from samtal_server.config.store import ConfigStore
+
+TOKEN = "test-api-token-" + "0123456789abcdef" * 2
+
+API_SECRET_ENV = "SAMTAL_API_SECRET"
+
+# Not a real credential, and shaped so a substring check for it cannot
+# match by accident.
+SENTINEL = "sk-test-2b7d1f0a-never-a-real-credential"
+
+
+@pytest.fixture
+def api(tmp_path: Path) -> FastAPI:
+    return build_api(TOKEN, tmp_path / "db")
+
+
+@pytest.fixture
+def client(api: FastAPI) -> TestClient:
+    return TestClient(api)
+
+
+def _bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _route(api: FastAPI, path: str, raises: Exception):
+    @api.get(path)
+    def endpoint() -> dict[str, str]:
+        raise raises
+
+    return endpoint
+
+
+# The gate
+
+
+def test_a_request_without_a_token_is_refused(client: TestClient) -> None:
+    response = client.get("/config")
+
+    assert response.status_code == 401
+    assert response.headers["WWW-Authenticate"] == "Bearer"
+    assert response.json() == {"detail": UNAUTHORIZED}
+    # The body says how to authenticate and nothing else.
+    assert "Authorization: Bearer" in UNAUTHORIZED
+
+
+def test_an_unmatched_path_is_refused_before_it_is_routed(client: TestClient) -> None:
+    """The reason the gate is middleware: a dependency runs only for a
+    matched route, so an unauthenticated caller would learn which paths
+    exist from the 404s."""
+    for method, path in (
+        ("get", "/no-such-route"),
+        ("post", "/config"),
+        ("delete", "/agents/sam"),
+    ):
+        response = getattr(client, method)(path)
+        assert response.status_code == 401, path
+
+
+def test_a_wrong_token_and_a_wrong_scheme_answer_alike(client: TestClient) -> None:
+    """Never whether the token was close: the answer to a wrong one is
+    the answer to no one at all."""
+    missing = client.get("/config")
+    wrong_scheme = client.get("/config", headers={"Authorization": f"Token {TOKEN}"})
+    wrong_token = client.get("/config", headers=_bearer(TOKEN[:-1] + "0"))
+    empty = client.get("/config", headers=_bearer(""))
+
+    for response in (wrong_scheme, wrong_token, empty):
+        assert response.status_code == missing.status_code
+        assert response.json() == missing.json()
+
+
+def test_the_scheme_is_matched_without_regard_to_case(client: TestClient) -> None:
+    response = client.get("/config", headers={"Authorization": f"bearer {TOKEN}"})
+
+    assert response.status_code == 404
+
+
+def test_the_right_token_reaches_routing_and_finds_nothing_yet(client: TestClient) -> None:
+    """The milestone 1 acceptance: with the token, /api answers 404
+    because there are no routes; without it, 401."""
+    response = client.get("/config", headers=_bearer(TOKEN))
+
+    assert response.status_code == 404
+
+
+def test_the_token_reaches_no_log_record(
+    api: FastAPI, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Whether the request carried it, got it wrong, or failed after it:
+    the token is never logged, at any level."""
+    _route(api, "/boom", RuntimeError("nothing to do with the token"))
+    client = TestClient(api)
+
+    with caplog.at_level(logging.DEBUG):
+        client.get("/config")
+        client.get("/config", headers=_bearer(TOKEN))
+        client.get("/boom", headers=_bearer(TOKEN))
+
+    for record in caplog.records:
+        assert TOKEN not in record.getMessage()
+        assert TOKEN not in str(record.__dict__)
+
+
+# The refusals
+
+
+REFUSALS = [
+    (UnknownEntityError("agents.sam: no such agent"), 404),
+    (DatabaseBusyError("the configuration database is busy"), 409),
+    (StorageError("the options column does not hold an object with string keys"), 500),
+    (ConfigError("invalid agents.sam: the fragment is wrong"), 422),
+]
+
+
+@pytest.mark.parametrize(("refusal", "status"), REFUSALS)
+def test_each_refusal_maps_to_its_status(
+    api: FastAPI, refusal: ConfigError, status: int
+) -> None:
+    _route(api, "/boom", refusal)
+
+    response = TestClient(api).get("/boom", headers=_bearer(TOKEN))
+
+    assert response.status_code == status
+    # The repository's own sentence, unchanged: one vocabulary whether
+    # an operator met it through the CLI or over HTTP.
+    assert response.json() == {"detail": str(refusal)}
+
+
+def test_an_unhandled_failure_is_a_generic_500(
+    api: FastAPI, caplog: pytest.LogCaptureFixture
+) -> None:
+    _route(api, "/boom", RuntimeError(f"connection string with {SENTINEL} in it"))
+
+    with caplog.at_level(logging.ERROR):
+        response = TestClient(api).get("/boom", headers=_bearer(TOKEN))
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": UNEXPECTED}
+    assert SENTINEL not in response.text
+    # Logged server-side, which is where a traceback belongs.
+    assert any("failed to handle a request" in record.getMessage() for record in caplog.records)
+
+
+def test_a_body_that_is_not_the_expected_shape_is_not_quoted_back(api: FastAPI) -> None:
+    """FastAPI's own 422 echoes the rejected input back per error, and a
+    fragment can carry a pasted credential."""
+
+    class Body(BaseModel):
+        name: str
+
+    @api.post("/needs-a-body")
+    def endpoint(body: Body) -> dict[str, str]:
+        return {"name": body.name}
+
+    client = TestClient(api)
+    responses = [
+        client.post("/needs-a-body", json={"api_key": SENTINEL}, headers=_bearer(TOKEN)),
+        client.post("/needs-a-body", content=SENTINEL, headers=_bearer(TOKEN)),
+        client.post("/needs-a-body", json=[SENTINEL], headers=_bearer(TOKEN)),
+    ]
+
+    for response in responses:
+        assert response.status_code == 422
+        assert response.json() == {"detail": MALFORMED_REQUEST}
+        assert SENTINEL not in response.text
+
+
+# The store dependency
+
+
+def test_the_store_dependency_opens_and_disposes_one_database(tmp_path: Path) -> None:
+    """The CLI's `_store` in dependency form: nothing holds an engine
+    between requests."""
+    directory = tmp_path / "db"
+    dependency = store_dependency(directory)
+
+    generator = dependency()
+    store = next(generator)
+    assert isinstance(store, ConfigStore)
+    store.set_agent("sam", {"prompt": "hello"})
+    engine = store._engine
+    with pytest.raises(StopIteration):
+        next(generator)
+
+    assert engine.pool.checkedin() == 0
+    # A second request opens the same database again and reads what the
+    # first one wrote.
+    second = dependency()
+    try:
+        assert "sam" in next(second).load().domain.agents
+    finally:
+        second.close()
+
+
+def test_the_application_carries_the_dependency(api: FastAPI) -> None:
+    assert callable(api.state.store)
+
+
+# The token
+
+
+def test_a_missing_token_refuses_the_boot(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(API_SECRET_ENV, raising=False)
+
+    with pytest.raises(ConfigError) as caught:
+        api_token(Config())
+
+    message = str(caught.value)
+    assert API_SECRET_ENV in message
+    assert "openssl rand -hex 32" in message
+    assert MOUNT_PATH in message
+
+
+def test_a_blank_token_counts_as_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(API_SECRET_ENV, "   ")
+
+    with pytest.raises(ConfigError):
+        api_token(Config())
+
+
+def test_a_custom_variable_is_honoured(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(API_SECRET_ENV, raising=False)
+    monkeypatch.setenv("MY_OWN_API_TOKEN", TOKEN)
+
+    config = Config(server={"api": {"secret_env": "MY_OWN_API_TOKEN"}})
+
+    assert api_token(config) == TOKEN
