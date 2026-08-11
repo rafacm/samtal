@@ -227,6 +227,39 @@ The composer then writes a samtal-format capture pair:
   one `speaking_started` per reply (with `agent`), stamped from
   the tap's first packet.
 
+### Resampling and drift, the method
+
+Rates and resampling are stated per observation point, because a
+resampler of the spike's own can manufacture the offset or drift
+it would then attribute to pipecat:
+
+- The native rate at every point is named in the findings: the
+  simulator's utterance (16 kHz), the tap's decoded PCM (24 kHz,
+  the announced output rate), and the buffer track at whatever
+  rate `AudioBufferProcessor` actually delivers, which the spike
+  verifies rather than assumes.
+- Both tracks that need 16 kHz for the pair are converted by the
+  same stateful resampler, run once over each full continuous
+  track, never per packet or per delivery (stateless per-chunk
+  resampling resets filter state at every boundary and injects
+  exactly the artifacts under test). Input and output sample
+  counts and the resampler's filter delay are recorded, and the
+  same figures go in the findings.
+- Where resampling happens inside the live pipeline is observed
+  and recorded, not inferred from the canned clip's rate: a
+  24 kHz clip proves nothing about which stage resampled if a
+  service upstream already converted it.
+- The drift statistic is fixed now: the robust slope
+  (Theil-Sen) of per-window measured lag against window time, in
+  ms per minute, plus the difference between the median lags of
+  the first and last quartile of windows. Drift that moves lag
+  by more than 20 ms across the measured span fails gate 1, the
+  same spirit as the lag bar; anything smaller is reported with
+  the run's detectable floor stated (a two-minute span cannot
+  see slopes that move lag less than the window lag resolution),
+  and the run is lengthened if a smaller drift matters to the
+  verdict.
+
 ### The runs
 
 1. **Stock control, the sanity baseline, at both delays.**
@@ -281,7 +314,9 @@ Same as the existing control, applied to the tap-injection runs at
 both delays: detected in at least 90% of candidate windows, median
 lag within 20 ms of the injected delay, median gain within 3 dB of
 the injected gain, and the stable-path criterion (lag IQR under
-50 ms) holding. Passing both delays passes gate 1. Any constant
+50 ms) holding, plus the drift bar above (lag moved by more than
+20 ms across the measured span fails). Passing both delays passes
+gate 1. Any constant
 bias, drift rate, or jitter figure measured on the way is recorded
 in the findings even on a pass, because it prices the engineering
 an adoption would need.
@@ -443,6 +478,14 @@ each carries its resolution once the amendment addressing it lands.
    resampler as the buffer track; a drift statistic was promised
    but never defined, and the 50 ms IQR bar only catches large
    drift over two minutes.
+   *Resolution*: a resampling-and-drift method section now names
+   the native rate at every observation point, requires one
+   stateful resampler run over each full track with sample counts
+   and filter delay recorded, observes rather than infers where
+   the live pipeline resamples, and fixes the drift statistic
+   (Theil-Sen slope of lag over time plus first-vs-last-quartile
+   lag difference, with more than 20 ms of movement across the
+   span failing gate 1 and the detectable floor stated).
 7. **P2: two mechanics should be front-loaded as feasibility
    checks**: whether the transport's serializer contract supports
    mixed JSON and binary plus hello handling and exposes the real
