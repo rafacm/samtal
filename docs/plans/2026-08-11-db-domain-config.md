@@ -953,7 +953,8 @@ addressing it lands.
 One PR per milestone, ticked with its PR number, each linking to
 its section of the implementation doc when written.
 
-- [ ] **Storage foundation** (PR TBD): SQLAlchemy, Alembic and
+- [x] **[Storage foundation](2026-08-11-db-domain-config-implementation.md#milestone-1-storage-foundation)**
+  (PR TBD): SQLAlchemy, Alembic and
   cryptography as dependencies; `samtal_server/db/` opening,
   configuring and migrating the database; the baseline migration
   holding the full domain schema including the devices entity
