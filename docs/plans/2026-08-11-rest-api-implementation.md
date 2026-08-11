@@ -574,19 +574,20 @@ ephemeral loopback port.
 restart, with the restart as its own step; the server README moves with
 it where the switchover forces it. The full sweep is milestone 4.
 
-### Two commits that arrive twice
+### One commit arrived twice, and was dropped
 
-The addressability rule (`071cd57`) and `set_secret`'s non-empty-string
-refusal (`8c7c11b`) were written here because milestone 3 is where the
-plan puts them, and milestone 2's own review round landed versions of
-both while this branch was in flight. They are the first two commits on
-this branch and touch nothing else, so at rebase they are expected to be
-dropped in favour of milestone 2's, or merged with them where the
-wording differs. What depends on them here does not depend on which
-version wins: the write routes and the CLI meet the rule through the
-repository, and the tests that would notice a wording change are the
-ones in `tests/unit/test_config_store.py` that those same two commits
-added.
+The addressability rule was written here first (as `071cd57`), because
+milestone 3 is where the plan put it, and then milestone 2's review
+round pulled it forward while this branch was in flight: a merged
+milestone 2 would otherwise have shipped a CLI able to create entities
+the GET surface cannot address. At the rebase onto the merged
+milestone 2, this branch's copy was dropped whole, tests included, in
+favor of the version already on `main` (`497d5f8` there). Nothing
+later on the branch depended on which version won: the write routes
+and the CLI meet the rule through the repository. `set_secret`'s
+non-empty-string refusal looked like the same situation but was not:
+milestone 2's round never touched it, so this branch's commit is the
+only version and it stands.
 
 ### Deviations from the plan
 
