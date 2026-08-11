@@ -1,0 +1,75 @@
+---
+name: external-review
+description: Run an adversarial external review (codex gpt-5.6-sol) of a committed plan or a PR diff, record the findings, and drive per-finding amendments. Use before implementing a plan and before merging any milestone PR.
+---
+
+# External review
+
+An independent model reads what this session produced and tries to
+break it. Two modes: a plan review before any code exists, and a PR
+review of a milestone's diff before it merges. Both use the codex
+CLI with the prompts in this skill's directory.
+
+## Mechanics that are not obvious
+
+- Always `codex exec -m gpt-5.6-sol --sandbox read-only -` with the
+  prompt on stdin. Never `codex review` with a custom prompt: it
+  ignores the prompt.
+- Run it in the background from the worktree under review. Sol takes
+  10 to 25 minutes and looks stuck; stderr shows file-reading
+  activity, and only the final answer reaches stdout:
+  `codex exec -m gpt-5.6-sol --sandbox read-only - < prompt.md > out.txt 2> err.txt`
+- codex has no network. Paste the GitHub issue body into the prompt
+  and name every repository file the reviewer should read; it can
+  only see what is on disk in the worktree.
+- Do not edit the worktree while a review runs: codex reads files
+  live, and a mid-run edit means it reviews a mixture.
+
+## Plan mode
+
+1. The plan must already be committed on its feature branch.
+2. Assemble the prompt: start from `plan-review-prompt.md` in this
+   skill's directory, fill the placeholders, and append the issue
+   body. Keep the reading list explicit and complete: the plan, the
+   prior plans and implementation docs it builds on, the code it
+   touches, AGENTS.md, `docs/architecture/principles.md`, the CI
+   workflow, and the test assets it converts.
+3. Run codex in the background; read stdout when it completes.
+4. Record the findings as received, condensed but faithful, in a
+   "Plan review round" section of the plan (its own commit), noting
+   codex version, model, date, and the reviewed commit hash.
+5. Address each finding with its own amendment commit, appending a
+   `*Resolution*` note under the recorded finding. A finding you
+   reject gets a resolution note saying why, never silence.
+
+## PR mode
+
+Use `run-pr-review.sh` in this skill's directory, which is
+self-posting: it generates the diff, runs codex, and chains the
+result into `gh pr comment` with a provenance header, so the review
+lands on the PR even if the driving session dies mid-run.
+
+```
+run-pr-review.sh <worktree> <base-ref> <pr-number> "<pr-title>" "<context sentence>"
+```
+
+The context sentence names the milestone and the governing plan
+(for example: "milestone 2 of docs/plans/2026-08-11-rest-api.md").
+After the comment lands:
+
+1. Fix every finding with its own commit; delegate to the milestone
+   subagent that wrote the code when one exists, since it has the
+   context.
+2. Record the round in the implementation doc, in the house style
+   of the existing "PR review round" sections.
+3. Reply on the PR with per-finding resolutions and commit hashes,
+   update the PR description, and wait for CI to go green again.
+4. If a finding invalidates a claim already made on the PR, state
+   the correction there transparently.
+
+## Repository specifics
+
+Every `gh` call passes `--repo rafacm/samtal` (worktrees under
+`vendor/` make repository inference dangerous; see AGENTS.md).
+Review comments and replies are never hard-wrapped: GitHub renders
+comment newlines as line breaks, so one line per paragraph.
