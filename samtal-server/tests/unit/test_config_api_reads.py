@@ -380,6 +380,34 @@ def test_a_row_that_cannot_be_read_is_500(
         assert "options column" not in str(record.__dict__)
 
 
+@pytest.mark.parametrize(
+    ("table", "values", "path"),
+    [
+        (schema.providers, {"type": ""}, "/providers/llm/claude"),
+        (schema.mcp_servers, {"transport": "nonsense"}, "/mcp-servers/weather"),
+        (schema.agents, {"llm": ""}, "/agents/sam"),
+        (schema.agent_defaults, {"tts": ""}, "/agent-defaults"),
+        (schema.devices, {"mac": "not-a-mac"}, "/devices/aa:bb:cc:dd:ee:ff"),
+    ],
+)
+def test_a_stored_row_that_will_not_validate_is_500(
+    client: TestClient, store: ConfigStore, table: object, values: dict[str, object], path: str
+) -> None:
+    """A row that cannot be read as configuration is the server's
+    problem, not the request's, whichever entity kind it belongs to and
+    whether it is asked for by name or met on the way through the whole
+    document."""
+    _populate(store)
+    with store._engine.begin() as connection:
+        connection.execute(update(table).values(**values))
+
+    for target in (path, "/config"):
+        response = client.get(target)
+        assert response.status_code == 500, target
+        assert "cannot be read" in response.json()["detail"]
+        assert "Traceback" not in response.text
+
+
 def test_a_read_that_cannot_take_the_lock_is_409(
     client: TestClient, store: ConfigStore, directory: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

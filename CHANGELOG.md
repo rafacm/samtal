@@ -41,6 +41,16 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   secret-shaped keys at every depth too, since it is the last thing
   between a row that got its contents another way and a caller.
 
+- **A stored row that cannot be read as configuration is reported as a
+  server-side failure** (#101), which over the API means 500 rather
+  than the 422 that says the caller sent something wrong. A row that
+  fails the models is nothing a reader of it can fix, and it is the
+  same situation as a column holding the wrong shape, which already
+  said so. The message names the row and the fields that failed and
+  never their values. Boot is unaffected: the storage refusal is a
+  `ConfigError`, so a server meeting an unreadable row still refuses to
+  start with the same sentence it printed before.
+
 - **A name or a secret slot must be expressible as one URL path
   segment** (#101). An entity is addressed by putting its identity in
   a path, so a name or a slot holding a slash or a control character
