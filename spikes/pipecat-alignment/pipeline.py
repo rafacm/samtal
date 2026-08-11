@@ -119,7 +119,6 @@ def create_app(
     reply_pcm: bytes,
     sentence: str,
     *,
-    paced: bool = True,
     finished: asyncio.Event | None = None,
 ) -> FastAPI:
     app = FastAPI()
@@ -128,7 +127,7 @@ def create_app(
     async def device(websocket: WebSocket) -> None:
         await websocket.accept()
         transport, control, session_id = device_edge(
-            TappedWebSocket(websocket, recorder), paced=paced
+            TappedWebSocket(websocket, recorder)
         )
         recorder.mark("session_open", session_id=session_id)
 

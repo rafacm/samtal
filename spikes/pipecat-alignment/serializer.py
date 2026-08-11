@@ -28,29 +28,26 @@ keeps its own encode buffer and the transport is configured to hand it
 exactly one frame's worth at a time; the buffer exists to make the
 mismatch safe rather than to use it.
 
-**Pacing does not have to live here, and the first reading that it did
+**There is no pacing here, and the first reading that there had to be
 was wrong.** The feasibility checkpoint read the output transport's
 `_send_interval = (audio_chunk_size / self.sample_rate) / 2` as half a
 chunk's duration and concluded a reply would leave the socket at twice
 real time. `audio_chunk_size` is in *bytes*, so for 16-bit mono the
 division by the sample rate already yields twice the chunk's duration
 and the `/2` cancels it exactly: the interval is the chunk's own
-duration, and the transport paces at real time. Measured, with `_pace`
-off: 1000 packets at a median 60.0 ms inter-send interval, 99.9% within
-5 ms of the frame cadence.
+duration, and the transport paces at real time. Measured: 2103 packets
+at a median 60.0 ms inter-send interval, 99.8% within 5 ms of the frame
+cadence, with nothing in this file doing anything about it.
 
-`_pace` is therefore redundant, and it defaults off. It is kept only as
-the cross-check that produced that comparison, and because the same
-formula does misbehave for any `audio_out_channels` other than 1, where
-the bytes-per-sample factor no longer cancels. Leaving it on would be
-the plan's own qualitative bar failing against the adapter:
-"re-implements scheduling or pacing the framework claims to own".
+The pacing layer the spike first added was therefore redundant, and it
+is gone rather than merely disabled, so that gate 2 counts an adapter
+an adoption would actually ship. One caveat survives its removal: the
+formula only cancels for mono, and `audio_out_channels = 2` would make
+the transport send at half real time.
 """
 
-import asyncio
 import ctypes.util
 import json
-import time
 
 from pipecat.frames.frames import (
     Frame,
@@ -85,17 +82,11 @@ OUTPUT_SAMPLE_RATE = 24000
 
 
 class XiaozhiFrameSerializer(FrameSerializer):
-    """Translates between xiaozhi wire messages and pipecat frames.
+    """Translates between xiaozhi wire messages and pipecat frames."""
 
-    `paced` adds a second 60 ms clock on top of the transport's own.
-    It defaults off because the transport already paces at real time;
-    turning it on measures how much the redundant layer would cost.
-    """
-
-    def __init__(self, session_id: str, *, paced: bool = False, **kwargs):
+    def __init__(self, session_id: str, **kwargs):
         super().__init__(**kwargs)
         self._session_id = session_id
-        self._paced = paced
         self._decoder = opuslib.Decoder(fs=DEVICE_SAMPLE_RATE, channels=1)
         self._encoder = opuslib.Encoder(
             fs=OUTPUT_SAMPLE_RATE, channels=1, application=opuslib.APPLICATION_AUDIO
@@ -103,7 +94,6 @@ class XiaozhiFrameSerializer(FrameSerializer):
         self._in_frame_size = DEVICE_SAMPLE_RATE * FRAME_MS // 1000
         self._out_frame_size = OUTPUT_SAMPLE_RATE * FRAME_MS // 1000
         self._encode_buffer = bytearray()
-        self._next_send: float | None = None
 
     async def setup(self, frame: StartFrame) -> None:
         """Called once from each of the two transports, so idempotent."""
@@ -151,21 +141,5 @@ class XiaozhiFrameSerializer(FrameSerializer):
             return None
         pcm = bytes(self._encode_buffer[:want])
         del self._encode_buffer[:want]
-        if self._paced:
-            await self._pace()
         return self._encoder.encode(pcm, self._out_frame_size)
 
-    async def _pace(self) -> None:
-        """Hold each packet until its slot on a 60 ms clock.
-
-        The clock restarts whenever it has fallen more than a frame
-        behind, which is a new reply after a silent gap rather than a
-        backlog to burst through.
-        """
-        now = time.monotonic()
-        period = FRAME_MS / 1000
-        if self._next_send is None or now > self._next_send + period:
-            self._next_send = now
-        else:
-            await asyncio.sleep(max(0.0, self._next_send - now))
-        self._next_send += period
