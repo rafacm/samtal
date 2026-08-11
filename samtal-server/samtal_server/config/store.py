@@ -27,6 +27,7 @@ would deadlock the natural creation order: providers, MCP servers,
 agents, devices, and default_agent last.
 """
 
+import math
 import re
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -84,6 +85,14 @@ _HEADER_TOKEN_RE = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
 # situation: the request was fine and the stored state is not.
 _UNREADABLE_ROW = "the row cannot be read as configuration:"
 _UNREADABLE_ROWS = "the stored configuration cannot be read:"
+
+# NaN and the infinities are not JSON, whatever a YAML parser accepts.
+# The message names where the value sits and the rule, which is all
+# there is to say about it.
+_NOT_FINITE = (
+    "{where} is not a finite number, and NaN and infinity cannot be written as JSON, "
+    "so a reader of this configuration would be given null in its place"
+)
 
 
 class DomainConfig(BaseModel):
@@ -914,6 +923,9 @@ def _parse[Model: BaseModel](model: type[Model], location: str, fragment: object
         raise ConfigError(
             f"invalid {location}: expected a mapping of keys, got {type(fragment).__name__}"
         )
+    where = _nonfinite(fragment)
+    if where is not None:
+        raise ConfigError(f"invalid {location}: {_NOT_FINITE.format(where=where)}")
     return _load(model, location, dict(fragment))
 
 
@@ -948,12 +960,45 @@ def _stored[Model: BaseModel](
     failed and never their values, and is built inside the handler and
     raised outside it, since a ValidationError holds the whole row.
     """
+    where = _nonfinite(data)
+    if where is not None:
+        raise StorageError(
+            f"{location}: {_NOT_FINITE.format(where=where)}; the row cannot be read "
+            f"as configuration"
+        )
     problem: str | None = None
     try:
         return model.model_validate(dict(data))
     except ValidationError as exc:
         problem = _validation_problems(f"{location}: {_UNREADABLE_ROW}", exc)
     raise StorageError(problem)
+
+
+def _nonfinite(value: object, path: str = "") -> str | None:
+    """Where the first value that is a number but not a finite one sits,
+    or None.
+
+    NaN and the infinities have no JSON spelling. A stored one is
+    serialized as null on the way out, which quietly turns a
+    configuration into a different one: the option disappears and the
+    provider falls back to its own default. So a fragment carrying one
+    is refused where every other fragment rule is applied, and a row
+    holding one reports that it cannot be read rather than answering
+    with a value nobody wrote.
+    """
+    if isinstance(value, float) and not math.isfinite(value):
+        return path or "the value"
+    if isinstance(value, Mapping):
+        for key, nested in value.items():
+            found = _nonfinite(nested, f"{path}.{key}" if path else str(key))
+            if found is not None:
+                return found
+    elif isinstance(value, (list, tuple)):
+        for position, item in enumerate(value):
+            found = _nonfinite(item, f"{path}.{position}" if path else str(position))
+            if found is not None:
+                return found
+    return None
 
 
 def _validation_problems(headline: str, exc: ValidationError) -> str:

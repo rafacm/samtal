@@ -15,6 +15,7 @@ from cryptography.fernet import Fernet, MultiFernet
 from sqlalchemy import update
 
 from samtal_server.config import ConfigError
+from samtal_server.config.loader import StorageError
 from samtal_server.config.secrets import SecretLocation, generate_key
 from samtal_server.config.store import ConfigStore, verify_secrets
 from samtal_server.db import open_database, schema
@@ -22,6 +23,9 @@ from samtal_server.db import open_database, schema
 # Not a real credential, and shaped so a substring check for it cannot
 # match by accident.
 SECRET = "sk-test-4f8b2c9e-never-a-real-credential"
+
+nan = float("nan")
+inf = float("inf")
 
 CLAUDE = SecretLocation.provider("llm", "claude", "api_key")
 WEATHER = SecretLocation.mcp_server("weather", "headers.Authorization")
@@ -379,6 +383,47 @@ def test_a_dotted_slot_round_trips(store: ConfigStore) -> None:
         "env.API_ACCESS_TOKEN",
         "headers.X-Api-Key",
     ]
+
+
+def test_a_number_that_is_not_finite_is_refused(store: ConfigStore) -> None:
+    """NaN and the infinities have no JSON spelling, so a stored one is
+    serialized as null on the way out: the option vanishes and the
+    provider falls back to its own default, which is a different
+    configuration from the one that was written. Refused where every
+    other fragment rule is applied, at any depth and for every kind."""
+    refused = [
+        lambda: store.set_provider("llm", "claude", {"type": "anthropic", "temperature": nan}),
+        lambda: store.set_provider(
+            "llm", "claude", {"type": "anthropic", "sampling": {"top_p": inf}}
+        ),
+        lambda: store.set_mcp_server(
+            "home", {"transport": "stdio", "command": "uvx", "tool_timeout_s": nan}
+        ),
+        lambda: store.set_agent_defaults({"filler": {"enabled": True, "delay_ms": nan}}),
+    ]
+    for call in refused:
+        with pytest.raises(ConfigError) as caught:
+            call()
+        assert "not a finite number" in str(caught.value)
+        assert type(caught.value) is ConfigError, caught.value
+
+    # A finite one is exactly as acceptable as it was.
+    store.set_provider("llm", "claude", {"type": "anthropic", "temperature": 0.7})
+    assert store.read_provider("llm", "claude").entry.options == {"temperature": 0.7}
+
+
+def test_a_stored_number_that_is_not_finite_cannot_be_read(store: ConfigStore) -> None:
+    """A row written before the rule, or by something else: reported as
+    unreadable rather than answered with a value nobody wrote."""
+    store.set_provider("llm", "claude", {"type": "anthropic", "temperature": 0.7})
+    with store._engine.begin() as connection:
+        connection.execute(update(schema.providers).values(options={"temperature": nan}))
+
+    with pytest.raises(StorageError) as caught:
+        store.load()
+
+    assert "not a finite number" in str(caught.value)
+    assert "cannot be read" in str(caught.value)
 
 
 def test_no_refusal_carries_the_exception_that_caused_it(store: ConfigStore) -> None:

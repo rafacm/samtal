@@ -203,6 +203,30 @@ def test_malformed_yaml_is_refused_without_echoing_the_line(
     assert "Traceback" not in captured.err
 
 
+def test_a_number_that_is_not_finite_is_refused(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """YAML spells NaN and infinity, JSON does not. A stored one would
+    be read back as null, which silently turns the configuration into a
+    different one, so the write is refused where every other fragment
+    rule is applied."""
+    assert run(
+        "set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\ntemperature: .nan\n"
+    ) == 1
+
+    captured = capsys.readouterr()
+    assert "not a finite number" in captured.err
+    assert "Traceback" not in captured.err
+
+    # And a finite value goes through and shows as itself.
+    assert run(
+        "set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\ntemperature: 0.7\n"
+    ) == 0
+    capsys.readouterr()
+    run("show", "provider", "llm", "claude")
+    assert _document(capsys.readouterr().out)["temperature"] == 0.7
+
+
 def test_a_parser_failure_carries_no_parser_exception(tmp_path: Path) -> None:
     """A PyYAML mark holds the whole buffer it was parsing, which here
     is the fragment, so the refusal is built inside the handler and

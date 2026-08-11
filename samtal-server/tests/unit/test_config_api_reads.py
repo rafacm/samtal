@@ -408,6 +408,27 @@ def test_a_stored_row_that_will_not_validate_is_500(
         assert "Traceback" not in response.text
 
 
+def test_a_stored_number_that_is_not_finite_is_500(
+    client: TestClient, store: ConfigStore
+) -> None:
+    """Serializing a stored NaN would answer null, which is a value
+    nobody wrote and a different configuration from the stored one. The
+    read says the row cannot be read instead."""
+    _populate(store)
+    with store._engine.begin() as connection:
+        connection.execute(
+            update(schema.providers)
+            .where(schema.providers.c.name == "claude")
+            .values(options={"temperature": float("nan")})
+        )
+
+    response = client.get("/providers/llm/claude")
+
+    assert response.status_code == 500
+    assert "not a finite number" in response.json()["detail"]
+    assert client.get("/config").status_code == 500
+
+
 def test_a_read_that_cannot_take_the_lock_is_409(
     client: TestClient, store: ConfigStore, directory: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

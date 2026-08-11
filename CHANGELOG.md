@@ -41,6 +41,14 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   secret-shaped keys at every depth too, since it is the last thing
   between a row that got its contents another way and a caller.
 
+- **A number that is not finite is refused in a fragment** (#101).
+  YAML spells `.nan` and `.inf`; JSON does not, so such a value would
+  be read back over the API as null, quietly turning the option into
+  the provider's own default. Every fragment is checked at any depth
+  when it is written, and a stored value that is not finite reports
+  that the row cannot be read rather than answering with a value
+  nobody wrote.
+
 - **A stored row that cannot be read as configuration is reported as a
   server-side failure** (#101), which over the API means 500 rather
   than the 422 that says the caller sent something wrong. A row that
