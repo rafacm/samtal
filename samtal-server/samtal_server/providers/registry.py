@@ -11,8 +11,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import cast
 
-from samtal_server.config import Config
+from samtal_server.config import Config, ConfigError
 from samtal_server.config.models import PROVIDER_STAGES, ProviderConfig
+from samtal_server.config.secrets import (
+    ProviderSecrets,
+    SecretStore,
+    provider_secrets_in_force,
+)
 from samtal_server.providers.base import (
     AsrProvider,
     LlmProvider,
@@ -205,13 +210,23 @@ def _factories() -> dict[str, dict[str, Factory]]:
 
 
 def build_provider(
-    stage: str, name: str, config: ProviderConfig, local_only: bool = False
+    stage: str,
+    name: str,
+    config: ProviderConfig,
+    local_only: bool = False,
+    secrets: SecretStore | None = None,
 ) -> object:
     """Build the provider behind `providers.<stage>.<name>`, raising
     ProviderError for unknown types, bad options, missing extras, an
     egress-marked provider under `local_only`, or anything the provider
     itself raises while constructing. Every one of them names the
-    entry."""
+    entry.
+
+    `secrets` is the store a snapshot was loaded with, or None for a
+    deployment whose credentials are all environment references. This is
+    the one place that knows the stage and the name a stored credential
+    is keyed by, so it is where the entry's secrets are put in force for
+    the construction call."""
     label = f"providers.{stage}.{name}"
     factory = _factories()[stage].get(config.type)
     if factory is None:
@@ -232,10 +247,16 @@ def build_provider(
     #
     # ProviderError passes through untouched, so the messages the rest
     # of this module composes keep their exact wording, and `from exc`
-    # keeps the traceback for whoever wants it.
+    # keeps the traceback for whoever wants it. ConfigError passes
+    # through for the same reason and one more: a stored credential that
+    # will not decrypt is a configuration problem whose message already
+    # names the entity and the slot to set again, and wrapping it as a
+    # failure to build a provider would bury that under the wrong
+    # heading.
     try:
-        provider = factory(label, config)
-    except ProviderError:
+        with provider_secrets_in_force(ProviderSecrets(stage, name, secrets)):
+            provider = factory(label, config)
+    except (ProviderError, ConfigError):
         raise
     except Exception as exc:
         raise ProviderError(f"{label}: could not build {config.type} provider: {exc}") from exc
@@ -293,7 +314,9 @@ class AgentProviders:
     vad: VadProvider
 
 
-def build_agent_providers(config: Config) -> dict[str, AgentProviders]:
+def build_agent_providers(
+    config: Config, secrets: SecretStore | None = None
+) -> dict[str, AgentProviders]:
     """Build every provider the configured agents reference, sharing one
     instance per named entry across agents. Agents are read through their
     effective view, so a stage comes from the agent or from agent_defaults.
@@ -315,7 +338,7 @@ def build_agent_providers(config: Config) -> dict[str, AgentProviders]:
         if key not in built:
             provider_config = getattr(config.providers, stage)[provider_name]
             built[key] = build_provider(
-                stage, provider_name, provider_config, config.server.local_only
+                stage, provider_name, provider_config, config.server.local_only, secrets
             )
         return built[key]
 
