@@ -278,10 +278,19 @@ jobs:
       # image itself, so the seeding exercises the shipped artifact and
       # the server finds what a deployment's server would find. The
       # mounted YAML is the server half only.
+      #
+      # Seeding starts a server of its own inside the seeding container,
+      # because the CLI writes through the configuration API, so those
+      # containers get the two secrets a server needs. They need no
+      # provider credential: with an empty domain half there is no
+      # provider to build, which is what makes the first start on an
+      # empty database a valid one.
       - name: Check the slim image boots on external providers
         if: matrix.variant == 'slim'
         run: |
           docker run --rm \
+            -e SAMTAL_AUTH_SECRET \
+            -e SAMTAL_API_SECRET \
             -v slim-boot-data:/data \
             -v "$PWD/tests/smoke:/smoke:ro" \
             -v "$PWD/tests/smoke/config.slim.yaml:/config/config.yaml:ro" \
@@ -313,6 +322,8 @@ jobs:
         if: matrix.variant == 'slim'
         run: |
           docker run --rm \
+            -e SAMTAL_AUTH_SECRET \
+            -e SAMTAL_API_SECRET \
             -v slim-refuse-data:/data \
             -v "$PWD/tests/smoke:/smoke:ro" \
             -v "$PWD/tests/smoke/config.local-engines.yaml:/config/config.yaml:ro" \
@@ -338,9 +349,18 @@ jobs:
       # seeding runs the CLI from the image being tested, against the
       # volume the server then reads, which is the deployment procedure
       # rather than a fixture.
+      #
+      # The CLI writes through the configuration API, so the seeding
+      # script starts a server of its own inside this container, waits
+      # for /healthz, configures it over loopback and stops it again.
+      # That is why this container is given what a server needs: the two
+      # secrets, and nothing else, because an empty domain half builds no
+      # provider and so needs no provider credential.
       - name: Seed the domain configuration
         run: |
           docker run --rm \
+            -e SAMTAL_AUTH_SECRET \
+            -e SAMTAL_API_SECRET \
             -v smoke-data:/data \
             -v "$PWD/tests/smoke:/smoke:ro" \
             -v "$PWD/tests/smoke/config.yaml:/config/config.yaml:ro" \
