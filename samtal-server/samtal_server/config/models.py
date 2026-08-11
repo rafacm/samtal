@@ -307,6 +307,16 @@ class ServerConfig(BaseModel):
         return url
 
 
+def is_secret_option(name: str) -> bool:
+    """Whether an option name is secret-shaped.
+
+    One rule, two readers: it is what makes an inline value in a
+    fragment an error, and what decides which option names are
+    credential slots a secret may be stored under."""
+    lowered = name.lower()
+    return any(fragment in lowered for fragment in _SECRET_KEY_FRAGMENTS)
+
+
 class ProviderConfig(BaseModel):
     """One provider entry. Options beyond `type` are passed through to the
     provider implementation, so extra keys are allowed here."""
@@ -326,10 +336,9 @@ class ProviderConfig(BaseModel):
     @model_validator(mode="after")
     def _reject_inline_secrets(self) -> "ProviderConfig":
         for key in self.model_extra or {}:
-            lowered = key.lower()
-            if lowered.endswith("_env"):
+            if key.lower().endswith("_env"):
                 continue
-            if any(fragment in lowered for fragment in _SECRET_KEY_FRAGMENTS):
+            if is_secret_option(key):
                 raise ValueError(
                     f'"{key}" looks like an inline secret, which is not allowed; '
                     f"reference an environment variable instead, for example "
