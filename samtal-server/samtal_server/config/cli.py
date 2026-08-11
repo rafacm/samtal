@@ -1,52 +1,112 @@
-"""The `samtal-server config` command group.
+"""The `samtal-server config` command group: a client of the API.
 
-The write path for the domain half of the configuration, and a
-deliberate rehearsal of the REST API that will replace it: one noun per
-entity kind, YAML fragments as the write payload in the shape the API
-will take as JSON, secrets write-only with masked reads. Nothing here
-decides anything about the configuration. Parsing, validation,
-reference checks and secret handling all live in the repository, so
-the day the CLI becomes a client of the API it changes its backend and
-not its grammar.
+The grammar is the one it has always had, one noun per entity kind, YAML
+fragments as the write payload; what changed underneath is that a
+command is now a request to the configuration API rather than a write
+into the database. Nothing here decides anything about the
+configuration: parsing, validation, reference checks, existence and
+secret handling all live in the repository, which the API mounts, so a
+refusal reads the same whichever way it was reached. The API carries the
+repository's sentence in `detail` and this prints `detail`, unchanged.
 
 Nothing plaintext is ever an argument: a secret arrives on stdin (not
 echoed when the terminal is interactive) or from a named environment
 variable, because arguments land in shell history and in the process
-list. Every failure leaves as a ConfigError printed to stderr with exit
-code 1, naming the location and the kind of failure without quoting the
-value that caused it, and no traceback from pydantic, PyYAML,
-SQLAlchemy or cryptography reaches the user.
+list. It then crosses the connection in a request body, which is why the
+transport policy below is a refusal rather than a recommendation: the
+bearer token rides on every request and grants everything the API can
+do, so a plain http:// connection to anything but this machine is not
+made at all.
 
-The configuration is read once at boot, so a write here applies at the
-next server start. Every mutating command says so: an edit that
-silently waits for a restart is the operational trap of a boot-time
-snapshot, and the one place to close it is where the edit is made.
+`--local` is the break-glass path, for a database whose server will not
+start. It covers four commands (show, delete, clear-secret, set-secret),
+opens the database directly, and says so on stderr every time: a change
+made that way is not observed by a running server until its next start,
+which is the boot-time snapshot contract rather than a hazard, but it is
+not something to discover.
+
+Every failure leaves as a ConfigError printed to stderr with exit code
+1, naming the location and the kind of failure without quoting the value
+that caused it, and no traceback from pydantic, PyYAML, SQLAlchemy,
+cryptography or httpx reaches the user.
 """
 
 import argparse
 import getpass
+import ipaddress
 import os
 import sys
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import NoReturn
+from urllib.parse import quote, urlsplit, urlunsplit
 
+import httpx
 import yaml
 
 from samtal_server.config import docgen, views
 from samtal_server.config.loader import CONFIG_ENV_VAR, ConfigError, load_file_config
-from samtal_server.config.models import PROVIDER_STAGES, normalize_mac
+from samtal_server.config.models import PROVIDER_STAGES, FileConfig, normalize_mac
 from samtal_server.config.secrets import (
     MASK,
-    EntityKind,
     SecretLocation,
-    SecretStore,
     load_keys,
 )
-from samtal_server.config.store import ConfigStore, Snapshot
-from samtal_server.config.writes import RESTART_NOTICE
+from samtal_server.config.store import ConfigStore
+from samtal_server.config.writes import (
+    RESTART_NOTICE,
+    cleared_secret,
+    deleted_agent,
+    deleted_device,
+    deleted_mcp_server,
+    deleted_provider,
+    wrote_secret,
+)
 from samtal_server.db import open_database
+
+# Where the API is, when nothing says otherwise: this machine, on the
+# port the server half of the configuration names. Read through the same
+# machinery the server reads it with, so the two cannot disagree about
+# the port any more than they can about the database directory.
+API_URL_ENV = "SAMTAL_API_URL"
+
+# The client's timeouts, explicit because the defaults would lie. The
+# server holds a write for up to the database's busy timeout (10 s)
+# before answering the retryable 409, and httpx's 5 second default would
+# turn exactly that answer into a client-side transport error, replacing
+# "nothing was changed; run the command again" with a sentence that says
+# nothing about what happened. So: a bounded connect, and a read with
+# margin above the busy timeout.
+CONNECT_TIMEOUT_S = 5.0
+READ_TIMEOUT_S = 30.0
+
+# Printed on stderr by every --local invocation, reads included. There
+# is no reliable way to tell whether a server is running against the same
+# file (a pid file lies after a crash and a lock probe races the answer),
+# and a wrong refusal would wedge the recovery path in exactly the
+# situation it exists for. Saying what this is, is the honest substitute.
+LOCAL_NOTICE = (
+    "--local is the break-glass path: it reads and writes the database directly, "
+    "bypassing the configuration API, and a running server will not observe a change "
+    "made this way until its next start."
+)
+
+# What --local does not cover, said by naming what it does. The subset is
+# the recovery one: look at what is stored, take out what will not load,
+# and repair a credential.
+LOCAL_SUBSET = (
+    "--local covers the recovery subset only: show, delete, clear-secret and "
+    "set-secret. Every other command goes through the configuration API, which needs "
+    "a running server."
+)
+
+# Said when the API answered something this client cannot read as an
+# answer. The body is deliberately not quoted: what a proxy, a gateway
+# or a captive portal returns is not this API's sanitized output, and
+# relaying it as though it were is how a middlebox's page ends up looking
+# like a configuration error.
+UNRECOGNIZED_ANSWER = "a body this client does not recognize"
 
 # How a stored secret is introduced in `show` and `list`. Comment lines
 # rather than a mapping: the mask is not a value that could be written
@@ -64,6 +124,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     for help is not a failure."""
     try:
         args = _parser().parse_args(argv)
+        if args.local:
+            if not args.local_ok:
+                raise ConfigError(LOCAL_SUBSET)
+            print(LOCAL_NOTICE, file=sys.stderr)
         args.run(args)
     except ConfigError as exc:
         print(exc, file=sys.stderr)
@@ -104,125 +168,150 @@ def _usage_problem(message: str) -> str:
 
 def _set_provider(args: argparse.Namespace) -> None:
     fragment = _fragment(args.file)
-    with _store(args) as store:
-        store.set_provider(args.stage, args.name, fragment)
-    _wrote(f"provider {args.stage}.{args.name}")
+    _wrote(_call(args, "PUT", _path("providers", args.stage, args.name), fragment))
 
 
 def _set_mcp_server(args: argparse.Namespace) -> None:
     fragment = _fragment(args.file)
-    with _store(args) as store:
-        store.set_mcp_server(args.name, fragment)
-    _wrote(f"mcp-server {args.name}")
+    _wrote(_call(args, "PUT", _path("mcp-servers", args.name), fragment))
 
 
 def _set_agent(args: argparse.Namespace) -> None:
     fragment = _fragment(args.file)
-    with _store(args) as store:
-        store.set_agent(args.name, fragment)
-    _wrote(f"agent {args.name}")
+    _wrote(_call(args, "PUT", _path("agents", args.name), fragment))
 
 
 def _set_agent_defaults(args: argparse.Namespace) -> None:
     fragment = _fragment(args.file)
-    with _store(args) as store:
-        store.set_agent_defaults(fragment)
-    _wrote("agent-defaults")
+    _wrote(_call(args, "PUT", _path("agent-defaults"), fragment))
 
 
 def _delete_provider(args: argparse.Namespace) -> None:
-    with _store(args) as store:
-        store.delete_provider(args.stage, args.name)
-    _wrote(f"provider {args.stage}.{args.name} deleted, with its stored secrets")
+    if args.local:
+        with _store(args) as store:
+            store.delete_provider(args.stage, args.name)
+        _report(deleted_provider(args.stage, args.name))
+        return
+    _wrote(_call(args, "DELETE", _path("providers", args.stage, args.name)))
 
 
 def _delete_mcp_server(args: argparse.Namespace) -> None:
-    with _store(args) as store:
-        store.delete_mcp_server(args.name)
-    _wrote(f"mcp-server {args.name} deleted, with its stored secrets")
+    if args.local:
+        with _store(args) as store:
+            store.delete_mcp_server(args.name)
+        _report(deleted_mcp_server(args.name))
+        return
+    _wrote(_call(args, "DELETE", _path("mcp-servers", args.name)))
 
 
 def _delete_agent(args: argparse.Namespace) -> None:
-    with _store(args) as store:
-        store.delete_agent(args.name)
-    _wrote(f"agent {args.name} deleted")
+    if args.local:
+        with _store(args) as store:
+            store.delete_agent(args.name)
+        _report(deleted_agent(args.name))
+        return
+    _wrote(_call(args, "DELETE", _path("agents", args.name)))
 
 
 def _delete_device(args: argparse.Namespace) -> None:
-    with _store(args) as store:
-        store.delete_device(args.mac)
-    _wrote(f"device {_mac(args.mac)} deleted")
+    if args.local:
+        with _store(args) as store:
+            store.delete_device(args.mac)
+        _report(deleted_device(_mac(args.mac)))
+        return
+    _wrote(_call(args, "DELETE", _path("devices", args.mac)))
 
 
 def _bind_device(args: argparse.Namespace) -> None:
-    with _store(args) as store:
-        store.bind_device(args.mac, args.agents)
-    _wrote(f"device {_mac(args.mac)} bound to {', '.join(args.agents)}")
+    _wrote(_call(args, "PUT", _path("devices", args.mac), {"agents": list(args.agents)}))
 
 
 def _set_default_agent(args: argparse.Namespace) -> None:
-    with _store(args) as store:
-        store.set_default_agent(args.name)
-    _wrote(f"default agent {args.name}")
+    _wrote(_call(args, "PUT", _path("default-agent"), {"name": args.name}))
 
 
 def _clear_default_agent(args: argparse.Namespace) -> None:
-    with _store(args) as store:
-        store.clear_default_agent()
-    _wrote("default agent cleared; the devices map is now the allowlist")
+    _wrote(_call(args, "DELETE", _path("default-agent")))
 
 
 def _set_secret(args: argparse.Namespace) -> None:
     location = _secret_location(args)
     secret = _read_secret(args)
-    with _store(args) as store:
-        store.set_secret(location, secret)
-    _wrote(f"secret for {location.describe()}")
+    if args.local:
+        with _store(args) as store:
+            store.set_secret(location, secret)
+        _report(wrote_secret(location.describe()))
+        return
+    _wrote(_call(args, "PUT", _secret_path(args), {"secret": secret}))
 
 
 def _clear_secret(args: argparse.Namespace) -> None:
     location = _secret_location(args)
-    with _store(args) as store:
-        store.clear_secret(location)
-    _wrote(f"secret for {location.describe()} cleared")
+    if args.local:
+        with _store(args) as store:
+            store.clear_secret(location)
+        _report(cleared_secret(location.describe()))
+        return
+    _wrote(_call(args, "DELETE", _secret_path(args)))
 
 
 def _list(args: argparse.Namespace) -> None:
-    with _store(args) as store:
-        snapshot = store.load()
-    print(_summary(snapshot), end="")
+    print(_summary(_document(_call(args, "GET", _path("config")))), end="")
 
 
 def _show_all(args: argparse.Namespace) -> None:
-    with _store(args) as store:
-        snapshot = store.load()
-    print(_show_everything(snapshot), end="")
+    if args.local:
+        with _store(args) as store:
+            document = views.config(store.load())
+    else:
+        document = _document(_call(args, "GET", _path("config")))
+    print(_show_everything(document), end="")
 
 
 def _show_provider(args: argparse.Namespace) -> None:
-    with _store(args) as store:
-        _print_entity(views.provider(store.read_provider(args.stage, args.name)))
+    if args.local:
+        with _store(args) as store:
+            _print_entity(views.provider(store.read_provider(args.stage, args.name)))
+        return
+    _print_entity(_envelope(_call(args, "GET", _path("providers", args.stage, args.name))))
 
 
 def _show_mcp_server(args: argparse.Namespace) -> None:
-    with _store(args) as store:
-        _print_entity(views.mcp_server(store.read_mcp_server(args.name)))
+    if args.local:
+        with _store(args) as store:
+            _print_entity(views.mcp_server(store.read_mcp_server(args.name)))
+        return
+    _print_entity(_envelope(_call(args, "GET", _path("mcp-servers", args.name))))
 
 
 def _show_agent(args: argparse.Namespace) -> None:
-    with _store(args) as store:
-        _print_entity(views.agent(store.read_agent(args.name)))
+    if args.local:
+        with _store(args) as store:
+            _print_entity(views.agent(store.read_agent(args.name)))
+        return
+    _print_entity(_envelope(_call(args, "GET", _path("agents", args.name))))
 
 
 def _show_agent_defaults(args: argparse.Namespace) -> None:
-    with _store(args) as store:
-        _print_entity(views.agent_defaults(store.read_agent_defaults()))
+    if args.local:
+        with _store(args) as store:
+            _print_entity(views.agent_defaults(store.read_agent_defaults()))
+        return
+    _print_entity(_envelope(_call(args, "GET", _path("agent-defaults"))))
+
+
+def _show_device(args: argparse.Namespace) -> None:
+    if args.local:
+        with _store(args) as store:
+            _print_entity(views.device(store.read_device(args.mac)))
+        return
+    _print_entity(_envelope(_call(args, "GET", _path("devices", args.mac))))
 
 
 def _schema(args: argparse.Namespace) -> None:
     """The JSON Schema of one entity kind, or of the whole domain
     configuration. Reads the models and nothing else: no database, no
-    configuration file, no encryption key."""
+    configuration file, no encryption key, no server."""
     print(docgen.schema(args.entity), end="")
 
 
@@ -240,24 +329,252 @@ def _openapi(args: argparse.Namespace) -> None:
     print(docgen.openapi(), end="")
 
 
-def _show_device(args: argparse.Namespace) -> None:
-    with _store(args) as store:
-        _print_entity(views.device(store.read_device(args.mac)))
+# Reaching the API
+#
+# One request per command, over a client built behind a seam the
+# acceptance suite replaces with a test client, so the same entry point
+# runs against the real application with no socket. What the seam does
+# not cover is the addressing and the transport policy, which run in
+# front of it and are what those tests are checking.
+
+
+def build_client(base_url: str, token: str) -> httpx.Client:
+    """The connection to the configuration API.
+
+    The one seam in this module. `cli.main()` is and stays synchronous,
+    and httpx's ASGI transport is async-only, so the tests replace this
+    with Starlette's TestClient: itself a synchronous `httpx.Client`
+    subclass that drives an ASGI application through its own portal.
+    """
+    return httpx.Client(
+        base_url=base_url,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=httpx.Timeout(READ_TIMEOUT_S, connect=CONNECT_TIMEOUT_S),
+    )
+
+
+_NOTHING = object()
+
+
+def _call(
+    args: argparse.Namespace, method: str, path: str, body: object = _NOTHING
+) -> object:
+    """One request, and its answer as this client understands it."""
+    file_config = load_file_config(args.config)
+    base_url = _base_url(args, file_config)
+    client = build_client(base_url, _token(file_config))
+    try:
+        response = _sent(client, method, path, body, base_url)
+    finally:
+        client.close()
+    return _answer(response, base_url)
+
+
+def _sent(
+    client: httpx.Client, method: str, path: str, body: object, base_url: str
+) -> httpx.Response:
+    """The request, with a transport failure turned into a sentence.
+
+    The message is built inside the handler and raised after it: an
+    exception raised while another is being handled carries that one as
+    its context, and httpx's exceptions carry the request, whose URL is
+    one of the two things this whole policy exists to keep out of sight.
+    """
+    problem: str | None = None
+    try:
+        if body is _NOTHING:
+            return client.request(method, path)
+        return client.request(method, path, json=body)
+    except httpx.HTTPError:
+        problem = (
+            f"cannot reach the configuration API at {base_url}: the request did not "
+            f"complete. Check that the server is running and that this is the address "
+            f"it serves. To repair a database with no server to ask, use --local, which "
+            f"covers show, delete, clear-secret and set-secret."
+        )
+    raise ConfigError(problem)
+
+
+def _answer(response: httpx.Response, base_url: str) -> object:
+    """What the API said, or a sentence about why it cannot be read.
+
+    A refusal's `detail` is the repository's own message and is passed
+    through untouched, which is what keeps one vocabulary whichever way
+    an operator reached the command. Anything else is reported as a
+    status code and a fixed sentence: a body this client did not
+    recognize did not come from the API's sanitized output, and relaying
+    it would put a middlebox's page where a configuration error belongs.
+    """
+    payload = _payload(response)
+    if response.is_success:
+        if payload is _NOTHING:
+            raise ConfigError(_unreadable(response, base_url))
+        return payload
+    if isinstance(payload, Mapping) and isinstance(payload.get("detail"), str):
+        raise ConfigError(payload["detail"])
+    raise ConfigError(_unreadable(response, base_url))
+
+
+def _payload(response: httpx.Response) -> object:
+    """The response's JSON body, or `_NOTHING` when it has none this
+    client can read. No exception escapes, so nothing that walks an
+    exception chain later finds the body attached to it."""
+    if "json" not in response.headers.get("content-type", ""):
+        return _NOTHING
+    parsed: object = _NOTHING
+    try:
+        parsed = response.json()
+    except ValueError:
+        parsed = _NOTHING
+    return parsed
+
+
+def _unreadable(response: httpx.Response, base_url: str) -> str:
+    return (
+        f"the configuration API at {base_url} answered {response.status_code} with "
+        f"{UNRECOGNIZED_ANSWER}. It is not quoted back: what a proxy or a gateway "
+        f"returns is not this API's own output."
+    )
+
+
+def _base_url(args: argparse.Namespace, file_config: FileConfig) -> str:
+    """Where the API is: the flag, then the environment, then this
+    machine on the port the server half names."""
+    if args.api_url:
+        return _permitted(args.api_url, "--api-url")
+    named = os.environ.get(API_URL_ENV, "").strip()
+    if named:
+        return _permitted(named, API_URL_ENV)
+    return f"http://127.0.0.1:{file_config.server.port}"
+
+
+def _permitted(url: str, source: str) -> str:
+    """The transport policy, which is about the token before it is about
+    any secret body.
+
+    The bearer token crosses every request and grants everything the API
+    can do, secret writes included, so loopback-or-TLS is the rule for
+    the whole client rather than a set-secret footnote. There is
+    deliberately no flag to override it: such a flag's only purpose would
+    be sending the token in clear.
+    """
+    parsed = urlsplit(url)
+    shown = _without_userinfo(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ConfigError(
+            f"{source} is not an http:// or https:// URL with a host: {shown}"
+        )
+    if parsed.username or parsed.password:
+        raise ConfigError(
+            f"{source} carries a username or a password in the URL, which is refused: "
+            f"this API's credential is a bearer token sent as a header, and anything in "
+            f"a URL ends up in shell history, process lists and access logs. The "
+            f"address without it is {shown}."
+        )
+    if parsed.scheme == "http" and not _loopback(parsed.hostname):
+        raise ConfigError(
+            f"{source} names {shown}, a plain http:// connection to a host that is not "
+            f"this machine, and the bearer token would cross it in clear along with "
+            f"anything set-secret sends. Use https://, put a TLS-terminating tunnel in "
+            f"front, or exec into the running container and reach the API on loopback. "
+            f"There is deliberately no flag to override this."
+        )
+    return url.rstrip("/")
+
+
+def _loopback(host: str) -> bool:
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _without_userinfo(url: str) -> str:
+    """The URL as it may be printed. A credential written into a URL is
+    refused, and the refusal must not be the thing that publishes it."""
+    parsed = urlsplit(url)
+    host = parsed.hostname or ""
+    if ":" in host:
+        host = f"[{host}]"
+    if parsed.port:
+        host = f"{host}:{parsed.port}"
+    return urlunsplit((parsed.scheme, host, parsed.path, parsed.query, ""))
+
+
+def _token(file_config: FileConfig) -> str:
+    """The bearer token, from the variable `server.api.secret_env` names.
+
+    On a deployment that is exactly the variable the server itself was
+    started with, so exec into the running container and the CLI has the
+    token and the loopback address for free. Resolved before any request
+    is sent, so a missing one is a sentence rather than a 401.
+    """
+    name = file_config.server.api.secret_env
+    token = os.environ.get(name, "").strip()
+    if not token:
+        raise ConfigError(
+            f"{name} is not set, and every request to the configuration API carries its "
+            f"value as a bearer token. It is the same variable the server was started "
+            f"with: exec into the running container and it is already in the "
+            f"environment. To repair a database whose server will not start, use "
+            f"--local, which covers show, delete, clear-secret and set-secret."
+        )
+    return token
+
+
+def _path(*parts: str) -> str:
+    """One resource's path, each identity as exactly one segment.
+
+    Percent-encoded with nothing left safe, which is what lets a name
+    carrying a space, a percent sign or a character outside ASCII be
+    addressed with no second scheme. A name carrying a slash cannot be
+    addressed at all, which is why the repository refuses to write one.
+    """
+    return "/" + "/".join(quote(part, safe="") for part in parts)
+
+
+def _secret_path(args: argparse.Namespace) -> str:
+    if args.kind == "provider":
+        return _path("providers", args.stage, args.name, "secrets", args.slot)
+    return _path("mcp-servers", args.name, "secrets", args.slot)
+
+
+def _envelope(answer: object) -> dict[str, object]:
+    """One entity read, as the API returns it."""
+    if (
+        isinstance(answer, Mapping)
+        and isinstance(answer.get("entity"), Mapping)
+        and isinstance(answer.get("secrets"), Mapping)
+    ):
+        return dict(answer)
+    raise ConfigError(f"the configuration API answered a read with {UNRECOGNIZED_ANSWER}")
+
+
+def _document(answer: object) -> dict[str, object]:
+    """The whole configuration, as the API returns it."""
+    if (
+        isinstance(answer, Mapping)
+        and isinstance(answer.get("config"), Mapping)
+        and isinstance(answer.get("secrets"), list)
+    ):
+        return dict(answer)
+    raise ConfigError(f"the configuration API answered a read with {UNRECOGNIZED_ANSWER}")
 
 
 # Rendering
 
 
-def _show_everything(snapshot: Snapshot) -> str:
+def _show_everything(document: Mapping[str, object]) -> str:
     """The whole domain configuration in one document, in the shape the
     YAML file has today, with the stored secrets listed as masks
     underneath it."""
-    document = views.config(snapshot)
     notes = _all_secret_notes(document)
     return _yaml(document["config"]) + ("\n" + "\n".join(notes) + "\n" if notes else "")
 
 
-def _print_entity(envelope: dict[str, object]) -> None:
+def _print_entity(envelope: Mapping[str, object]) -> None:
     """One entity's envelope as YAML: the masked body, and its stored
     slots as comment lines. Comments rather than a mapping, because the
     mask is not a value that could be written back, and saying so in the
@@ -267,7 +584,7 @@ def _print_entity(envelope: dict[str, object]) -> None:
     print(_yaml(body) + ("\n" + "\n".join(notes) + "\n" if notes else ""), end="")
 
 
-def _all_secret_notes(document: dict[str, object]) -> list[str]:
+def _all_secret_notes(document: Mapping[str, object]) -> list[str]:
     """Every stored secret in the whole-configuration view, each named by
     its location and marked when it shadows a reference written for the
     same slot."""
@@ -280,7 +597,7 @@ def _all_secret_notes(document: dict[str, object]) -> list[str]:
     return [SECRETS_HEADING, *notes] if notes else []
 
 
-def _secret_notes(body: dict[str, object], secrets: dict[str, object]) -> list[str]:
+def _secret_notes(body: Mapping[str, object], secrets: Mapping[str, object]) -> list[str]:
     notes = [
         f"#   {slot}: {MASK}" + _shadow_note(body, marks["shadows"])
         for slot, marks in secrets.items()
@@ -288,7 +605,7 @@ def _secret_notes(body: dict[str, object], secrets: dict[str, object]) -> list[s
     return [SECRETS_HEADING, *notes] if notes else []
 
 
-def _shadow_note(body: dict[str, object], shadows: str | None) -> str:
+def _shadow_note(body: Mapping[str, object], shadows: str | None) -> str:
     """What a stored secret displaces, when the entity also carries a
     reference for the same slot. Ciphertext wins, and making that
     visible is what keeps the precedence from being silent."""
@@ -296,7 +613,7 @@ def _shadow_note(body: dict[str, object], shadows: str | None) -> str:
     return f"  (used instead of {shadows}: {reference})" if reference else ""
 
 
-def _bodies(config: dict[str, object]) -> dict[tuple[str, str], dict[str, object]]:
+def _bodies(config: Mapping[str, object]) -> dict[tuple[str, str], Mapping[str, object]]:
     """The masked body of every entity that can hold a stored secret,
     keyed the way a secret location names it."""
     bodies = {
@@ -310,50 +627,68 @@ def _bodies(config: dict[str, object]) -> dict[tuple[str, str], dict[str, object
     return bodies
 
 
-def _summary(snapshot: Snapshot) -> str:
+def _summary(document: Mapping[str, object]) -> str:
     """The tree `config list` prints: one line per entity, with the
-    slots that hold a stored secret named but never their values."""
-    domain = snapshot.domain
+    slots that hold a stored secret named but never their values.
+
+    Rendered from the same masked document `show` prints, which is what
+    a read of the whole configuration answers with, so the summary can
+    say nothing the document does not carry.
+    """
+    config = document["config"]
+    stored = _stored_slots(document["secrets"])
     lines = ["providers:"]
     for stage in PROVIDER_STAGES:
         lines.append(f"  {stage}:")
-        entries = getattr(domain.providers, stage)
         lines += [
-            f"    {name} ({entry.type})"
-            + _slots(snapshot.secrets, "provider", f"{stage}.{name}")
-            for name, entry in sorted(entries.items())
+            f"    {name} ({body.get('type')})"
+            + _slots(stored, "provider", f"{stage}.{name}")
+            for name, body in config["providers"].get(stage, {}).items()
         ] or ["    (none)"]
 
     lines.append("mcp_servers:")
     lines += [
-        f"  {name} ({entry.transport})" + _slots(snapshot.secrets, "mcp_server", name)
-        for name, entry in sorted(domain.mcp_servers.items())
+        f"  {name} ({body.get('transport')})" + _slots(stored, "mcp_server", name)
+        for name, body in config["mcp_servers"].items()
     ] or ["  (none)"]
 
-    defaults = _inline(views.layer_body(domain.agent_defaults))
+    defaults = _inline(config["agent_defaults"])
     lines.append("agent_defaults: " + (defaults or "(none)"))
 
     lines.append("agents:")
     lines += [
-        f"  {name}" + (f": {_inline(views.layer_body(entry))}" if views.layer_body(entry) else "")
-        for name, entry in sorted(domain.agents.items())
+        f"  {name}" + (f": {_inline(_layer(body))}" if _layer(body) else "")
+        for name, body in config["agents"].items()
     ] or ["  (none)"]
 
     lines.append("devices:")
     lines += [
-        f"  {mac} -> {', '.join(bound)}" for mac, bound in sorted(domain.devices.items())
+        f"  {mac} -> {', '.join(bound)}" for mac, bound in config["devices"].items()
     ] or ["  (none)"]
 
-    lines.append(f"default_agent: {domain.default_agent or '(none)'}")
+    lines.append(f"default_agent: {config['default_agent'] or '(none)'}")
     return "\n".join(lines) + "\n"
 
 
-def _slots(secrets: SecretStore, kind: EntityKind, identity: str) -> str:
-    stored = secrets.slots_for(kind, identity)
-    return f"  [secrets: {', '.join(stored)}]" if stored else ""
+def _stored_slots(secrets: Sequence[Mapping[str, object]]) -> dict[tuple[str, str], list[str]]:
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for stored in secrets:
+        grouped.setdefault((stored["kind"], stored["identity"]), []).append(stored["slot"])
+    return grouped
 
 
-def _inline(data: dict[str, object]) -> str:
+def _slots(stored: Mapping[tuple[str, str], list[str]], kind: str, identity: str) -> str:
+    slots = stored.get((kind, identity), [])
+    return f"  [secrets: {', '.join(slots)}]" if slots else ""
+
+
+def _layer(body: Mapping[str, object]) -> dict[str, object]:
+    """An agent's overrides: its body without the prompt, which is what
+    the summary line has room for."""
+    return {key: value for key, value in body.items() if key != "prompt"}
+
+
+def _inline(data: Mapping[str, object]) -> str:
     return " ".join(f"{key}={_short(value)}" for key, value in data.items())
 
 
@@ -445,11 +780,14 @@ def _secret_location(args: argparse.Namespace) -> SecretLocation:
     return SecretLocation.mcp_server(args.name, args.slot)
 
 
-# The database, and the output around it
+# The database, for the recovery subset only
 
 
 @contextmanager
 def _store(args: argparse.Namespace) -> Iterator[ConfigStore]:
+    """The repository, opened directly. Reached only through --local,
+    whose four commands are the ones an operator needs when the server
+    they would otherwise ask will not start."""
     engine = open_database(_database_dir(args))
     try:
         yield ConfigStore(engine, load_keys())
@@ -474,12 +812,27 @@ def _mac(mac: str) -> str:
     raise ConfigError(problem)
 
 
-def _wrote(what: str) -> None:
+# Output
+
+
+def _wrote(answer: object) -> None:
+    """What the API said the write did, and when it applies."""
+    what = answer.get("wrote") if isinstance(answer, Mapping) else None
+    notice = answer.get("notice") if isinstance(answer, Mapping) else None
+    if not isinstance(what, str):
+        raise ConfigError(
+            f"the configuration API acknowledged the write with {UNRECOGNIZED_ANSWER}; "
+            f"read the configuration back to see whether it was applied."
+        )
+    _report(what, notice if isinstance(notice, str) else RESTART_NOTICE)
+
+
+def _report(what: str, notice: str = RESTART_NOTICE) -> None:
     print(f"wrote {what}")
     # Flushed first, so the notice lands after the line it is about
     # rather than ahead of it: stderr is unbuffered and stdout is not.
     sys.stdout.flush()
-    print(RESTART_NOTICE, file=sys.stderr)
+    print(notice, file=sys.stderr)
 
 
 # The grammar
@@ -505,8 +858,16 @@ def _fragment_parser(
 
 def _parser() -> argparse.ArgumentParser:
     config_help = (
-        f"path to the YAML config file naming server.database.dir "
+        f"path to the YAML config file naming server.port and server.api.secret_env "
         f"(default: ${CONFIG_ENV_VAR})"
+    )
+    api_url_help = (
+        f"base URL of the configuration API "
+        f"(default: ${API_URL_ENV}, then http://127.0.0.1:<server.port>)"
+    )
+    local_help = (
+        "read and write the database directly instead of the API: the recovery subset "
+        "(show, delete, clear-secret, set-secret), for when the server will not start"
     )
     # Accepted before the command and after it, because both readings are
     # natural: `samtal-server --config path` is how the server takes it,
@@ -517,6 +878,12 @@ def _parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument(
         "--config", metavar="PATH", default=argparse.SUPPRESS, help=config_help
+    )
+    common.add_argument(
+        "--api-url", metavar="URL", default=argparse.SUPPRESS, help=api_url_help
+    )
+    common.add_argument(
+        "--local", action="store_true", default=argparse.SUPPRESS, help=local_help
     )
     fragment = argparse.ArgumentParser(add_help=False)
     fragment.add_argument(
@@ -531,10 +898,17 @@ def _parser() -> argparse.ArgumentParser:
         prog="samtal-server config",
         description=(
             "Read and write the domain half of the configuration: providers, "
-            "MCP servers, agents, devices and their secrets."
+            "MCP servers, agents, devices and their secrets. Commands go through the "
+            "configuration API on the running server; --local is the recovery path."
         ),
     )
     parser.add_argument("--config", metavar="PATH", default=None, help=config_help)
+    parser.add_argument("--api-url", metavar="URL", default=None, help=api_url_help)
+    parser.add_argument("--local", action="store_true", help=local_help)
+    # Which commands --local covers, carried on the command itself so
+    # that adding one to the subset is a line beside the command rather
+    # than a list somewhere else to keep in step.
+    parser.set_defaults(local_ok=False)
     commands = parser.add_subparsers(dest="command", required=True)
 
     setter = commands.add_parser(
@@ -555,6 +929,7 @@ def _parser() -> argparse.ArgumentParser:
     entity.set_defaults(run=_set_agent_defaults)
 
     deleter = commands.add_parser("delete", help="delete one entity")
+    deleter.set_defaults(local_ok=True)
     kinds = deleter.add_subparsers(dest="kind", required=True)
     entity = kinds.add_parser("provider", parents=[common])
     entity.add_argument("stage", metavar="STAGE", help=", ".join(PROVIDER_STAGES))
@@ -593,6 +968,7 @@ def _parser() -> argparse.ArgumentParser:
     secret = commands.add_parser(
         "set-secret", help="store one credential, encrypted, read from stdin or a variable"
     )
+    secret.set_defaults(local_ok=True)
     kinds = secret.add_subparsers(dest="kind", required=True)
     entity = kinds.add_parser("provider", parents=[common])
     entity.add_argument("stage", metavar="STAGE", help=", ".join(PROVIDER_STAGES))
@@ -607,6 +983,7 @@ def _parser() -> argparse.ArgumentParser:
     entity.set_defaults(run=_set_secret)
 
     clear = commands.add_parser("clear-secret", help="remove one stored credential")
+    clear.set_defaults(local_ok=True)
     kinds = clear.add_subparsers(dest="kind", required=True)
     entity = kinds.add_parser("provider", parents=[common])
     entity.add_argument("stage", metavar="STAGE", help=", ".join(PROVIDER_STAGES))
@@ -622,10 +999,10 @@ def _parser() -> argparse.ArgumentParser:
     listing.set_defaults(run=_list)
 
     # Read-only and local: these three render the models and the API's
-    # own routes, so they take no --config, open no database, and need
-    # no encryption key. Keep it that way: the documentation lane runs
-    # `config reference` and `config openapi` from a plain sync, with no
-    # database and no key anywhere.
+    # own routes, so they take no --config, open no database, reach no
+    # server and need no encryption key. Keep it that way: the
+    # documentation lane runs `config reference` and `config openapi`
+    # from a plain sync, with no database, no key and no token anywhere.
     schema = commands.add_parser(
         "schema", help="the JSON Schema of one entity, or of the whole domain half"
     )
@@ -648,7 +1025,7 @@ def _parser() -> argparse.ArgumentParser:
     openapi.set_defaults(run=_openapi)
 
     show = commands.add_parser("show", parents=[common], help="everything, or one entity")
-    show.set_defaults(run=_show_all)
+    show.set_defaults(run=_show_all, local_ok=True)
     kinds = show.add_subparsers(dest="kind")
     entity = kinds.add_parser("provider", parents=[common])
     entity.add_argument("stage", metavar="STAGE", help=", ".join(PROVIDER_STAGES))
@@ -669,4 +1046,4 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-__all__ = ["RESTART_NOTICE", "main"]
+__all__ = ["RESTART_NOTICE", "build_client", "main"]

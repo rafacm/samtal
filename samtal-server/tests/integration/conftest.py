@@ -18,6 +18,8 @@ import contextlib
 import math
 import struct
 import tempfile
+import threading
+import time
 from collections.abc import Sequence
 from typing import Any
 
@@ -29,6 +31,7 @@ from xiaozhi_sdk import XiaoZhiWebsocket
 from samtal_server.app import create_app
 from samtal_server.config import Config, FileConfig, compose_config
 from samtal_server.config.models import (
+    API_MOUNT_PATH,
     PROVIDER_STAGES,
     AgentConfig,
     AgentDefaults,
@@ -183,6 +186,51 @@ def spoken(events: list[dict]) -> str:
         for event in events
         if event.get("type") == "tts" and event["state"] == "sentence_start"
     )
+
+
+@contextlib.contextmanager
+def _served_api(directory):
+    """A real server on an ephemeral loopback port, serving an empty
+    domain half, yielding the base URL of its configuration API.
+
+    An empty domain is a valid boot (the completeness check only fires
+    when agents exist), which is exactly what makes the API-era first
+    start work: start with nothing, configure over the API, restart. The
+    scripts this backs are the documented procedure, so what they get is
+    the mounted namespace on a real port rather than an application
+    object.
+
+    Run in a thread rather than on the test's own loop, because what
+    talks to it is a subprocess: uvicorn skips its signal handlers off
+    the main thread, which is the one thing that would otherwise need
+    care here.
+    """
+    # The port lives on the socket rather than in the configuration: the
+    # models refuse 0, which is right for a deployment and is not what
+    # binding an ephemeral port means.
+    config = Config(server={"database": {"dir": str(directory)}})
+    server = uvicorn.Server(
+        uvicorn.Config(create_app(config), host="127.0.0.1", port=0, log_level="warning")
+    )
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    try:
+        deadline = time.monotonic() + 30
+        while not server.started:
+            assert thread.is_alive() and time.monotonic() < deadline, "the server never started"
+            time.sleep(0.02)
+        port = server.servers[0].sockets[0].getsockname()[1]
+        yield f"http://127.0.0.1:{port}{API_MOUNT_PATH}"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=30)
+
+
+@pytest.fixture
+def served_api(tmp_path):
+    """`with served_api(directory) as url: ...`, for the scripts that
+    document themselves as running against a running server."""
+    return _served_api
 
 
 @pytest.fixture
