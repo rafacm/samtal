@@ -25,6 +25,11 @@ READMEs: [the project overview](../README.md),
   round needs before anyone leaves the desk and what it yields, and the
   three layers findings age in (instrument, interaction, calibration).
   The starting point for setting up and analyzing a field-test round.
+- [**concepts.md**](concepts.md): the domain model from the user's
+  point of view: device, agent, binding, conversation, session, and
+  the decided semantics that connect them (wake word, switching,
+  memory, meta capabilities, the help agent). Says which parts are
+  implemented and which are decided direction.
 - [**glossary.md**](glossary.md): the concepts, techniques, and
   technologies the project is built on, one short definition each with
   pointers for going deeper.
