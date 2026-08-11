@@ -96,22 +96,53 @@ It deliberately implements the same semantics as the
 `SessionInput`/`DeviceOutput` seam from #85
 (`samtal_server/device/boundary.py`), so its size and shape compare
 like for like against the bespoke device edge
-(`samtal_server/device/session.py`, 883 lines). Concretely, while
-building it, keep a running map from each seam obligation to where
-it lands in the pipecat stack: absorbed by the framework (pacing?
-interruption? the tts-start latch?), implemented in the serializer,
-implemented in glue around it, or inexpressible. Anything the seam
-could not express is a finding against the comparison's premise and
-gets recorded either way.
+(`samtal_server/device/session.py`).
 
-What counts against the 883 lines is what an adoption would have to
-keep and maintain: the serializer plus the transport glue. The
-canned reply service, the OTA stub, the tap, and the composer are
-measurement harness and are reported separately, outside the
-comparison. An adapter that stays small is evidence for
-normalize-the-hardware-edge with pipecat behind it; an adapter that
-grows into an impedance-matching layer is a finding against
-adoption regardless of what the alignment says.
+The comparison is defined here, before any code exists, so the
+numbers cannot be shaped to flatter the outcome:
+
+- **Denominator.** Two baselines, both reported: the 883 lines
+  issue #89 pins (the implementation doc's snapshot at the
+  boundary work), and the file's physical line count at this
+  branch's base commit, named by commit id. Counting method for
+  every figure is physical lines (`wc -l`), stated once and used
+  everywhere.
+- **Numerator.** Everything an adoption would have to keep and
+  maintain, regardless of filename: the serializer, any transport
+  subclass or override it forces, any pacing layer added (per the
+  tap section), any state machine or helper the exchange needs.
+  The canned reply service, the OTA stub, the tap, and the
+  composer are measurement harness, reported separately, outside
+  the comparison.
+- **The obligation map.** For every `SessionInput` and
+  `DeviceOutput` obligation, one row: where it lands (framework,
+  serializer, glue), the evidence when the claim is "the
+  framework absorbs it" (the component and the behavior
+  observed, not a documentation citation), whether the spike
+  actually exercises it, and what production code would remain.
+  "Required but not implemented by the spike" is an explicit
+  category, distinct from absorbed: the spike serializer speaks
+  one exchange, while the bespoke edge also carries rejection
+  paths, close codes, listening policy, pause and resume, idle
+  limits, capture, and device tools, and rows the spike does not
+  cover must say so rather than vanish from the denominator's
+  side of the ledger.
+- **The comparable slice.** Alongside full-file counts, the
+  findings name which bespoke-edge responsibilities the spike's
+  exchange actually exercises and give the bespoke line count of
+  that slice, so there is one honest small-vs-small number next
+  to the honest small-vs-whole one.
+- **The qualitative bar, fixed now.** The adapter has become an
+  impedance-matching layer when it re-implements scheduling or
+  pacing the framework claims to own, duplicates framework state
+  to correct its timing, or grows a per-reply state machine
+  beyond message translation. Any of those is a finding against
+  adoption regardless of what the alignment says; a small
+  adapter that stays translation is evidence for
+  normalize-the-hardware-edge with pipecat behind it.
+
+Anything the seam could not express is a finding against the
+comparison's premise and gets recorded either way.
 
 ## The measurement, gate 1
 
@@ -372,6 +403,16 @@ each carries its resolution once the amendment addressing it lands.
    (the file is 899 physical lines at current HEAD); the counting
    method and the qualitative "impedance-matching layer" bar were
    undefined.
+   *Resolution*: the gate 2 section now fixes the comparison
+   before implementation: both baselines reported with commit ids
+   and `wc -l` as the stated method, the numerator counts
+   everything adoption-required regardless of filename, the
+   obligation map gains a "required but not implemented" category
+   with evidence required for "absorbed" claims, a comparable
+   bespoke slice is counted alongside the full file, and the
+   impedance-matching bar is defined (re-implemented scheduling,
+   duplicated framework state, a per-reply state machine beyond
+   translation).
 5. **P2: two minutes of reply audio does not guarantee enough
    candidate windows**, after windowing, the discarded lag-search
    prefix, the level threshold, and the user mask; and the added
@@ -409,7 +450,8 @@ of the implementation doc.
   verdict stated with the measured lag bias, IQR, and detection
   rate, whichever way it goes.
 - [ ] **The size verdict and the paper trail**: serializer and
-  glue line counts against 883, the seam-obligation map, the
+  glue line counts against both baselines with the comparable
+  slice, the seam-obligation map, the
   implementation doc complete, changelog entry, the #84 evidence
   comment drafted in the PR (posted on merge). Accept: both gate
   verdicts stated in the implementation doc with numbers, PR
