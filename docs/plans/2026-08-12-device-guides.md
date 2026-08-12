@@ -181,10 +181,13 @@ code, organized under the standard skeleton:
   wake word ("nǐ hǎo xiǎo zhì"); an English model ("Hi ESP") exists
   only in source builds, and the planned samtal build 🚧 will use
   it. The section states plainly that the wake word wakes the
-  device and never a particular agent: it is spotted on-chip, the
-  audio never leaves the board, and the server only learns that a
-  session opened, in line with
-  [`../concepts.md`](../concepts.md).
+  device and never a particular agent: it is spotted on-chip and
+  the trigger audio never leaves the board; what the server may
+  receive is an after-the-fact report naming the fired word, which
+  it currently only debug-logs and does not retain. This matches
+  [`../concepts.md`](../concepts.md) and
+  [`../xiaozhi-notes.md`](../xiaozhi-notes.md), and the
+  consistency pass holds the guides to it.
 - **Voice commands**: what this board's firmware publishes as MCP
   tools, phrased as things to say: current status including volume
   and battery, setting the volume (0 to 100; the buttons step by
@@ -299,6 +302,14 @@ addressing it lands.
    debug-logs and does not retain. Say that detection and trigger
    audio stay on-device, and the server may receive an
    after-the-fact word report it currently only debug-logs.
+   *Resolution*: adopted. The Touch-LCD wake-word inventory now
+   separates the unreachable trigger audio from the reported word
+   (received, debug-logged, not retained), cites both reconciled
+   documents, and the consistency pass holds the guides to that
+   wording. The issue's parenthetical ("the server only learns
+   that a session opened") predates the reconciliation; its
+   substance, that the wake word wakes the device and never an
+   agent, is unchanged.
 
 2. **P1: the proposed common listening description is not common
    to all three boards.** The plan makes idle wake-word monitoring
