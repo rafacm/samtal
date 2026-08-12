@@ -53,7 +53,6 @@ from samtal_server.config.models import (
     API_MOUNT_PATH,
     PROVIDER_STAGES,
     FileConfig,
-    normalize_mac,
 )
 from samtal_server.config.secrets import (
     MASK,
@@ -231,12 +230,14 @@ def _delete_agent(args: argparse.Namespace) -> None:
 def _delete_device(args: argparse.Namespace) -> None:
     if args.local:
         with _store(args) as store:
-            store.delete_device(args.mac)
+            # The row the repository deleted names itself, so this path
+            # normalizes nothing of its own either.
+            deleted = store.delete_device(args.mac)
         # The same sentence the API answers this delete with. A running
         # server reads the devices table, so the removal reaches the
         # device at its next check-in whether the row was deleted
         # through the API or, as here, underneath it.
-        _report(deleted_device(_mac(args.mac)), BINDING_NOTICE)
+        _report(deleted_device(deleted), BINDING_NOTICE)
         return
     _wrote(_call(args, "DELETE", _path("devices", args.mac)))
 
@@ -864,15 +865,6 @@ def _database_dir(args: argparse.Namespace) -> Path:
     disagree. No configuration file has to exist: without one the field
     default and the SAMTAL_ environment are the whole answer."""
     return load_file_config(args.config).server.database.dir
-
-
-def _mac(mac: str) -> str:
-    problem: str | None = None
-    try:
-        return normalize_mac(mac)
-    except ValueError as exc:
-        problem = str(exc)
-    raise ConfigError(problem)
 
 
 # Output

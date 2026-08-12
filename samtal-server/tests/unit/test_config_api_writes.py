@@ -206,6 +206,40 @@ def test_removing_a_binding_is_always_live(serving_client: TestClient) -> None:
     assert serving_client.delete("/default-agent").json()["notice"] == BINDING_NOTICE
 
 
+def test_the_notice_is_about_the_row_and_not_about_the_request(
+    serving_client: TestClient, store: ConfigStore
+) -> None:
+    """A write normalizes the MAC and strips the names, so the request's
+    spelling and the row's are different strings. Both halves of the
+    acknowledgement are about the row: a name sent with spaces around it
+    binds the loaded agent, and saying "restart" there would send an
+    operator to restart a server that is already serving it."""
+    _pipeline(serving_client)
+
+    answer = serving_client.put("/devices/AA-BB-CC-DD-EE-FF", json={"agents": ["  sam  "]})
+
+    assert answer.status_code == 200
+    assert answer.json() == {
+        "wrote": "device aa:bb:cc:dd:ee:ff bound to sam",
+        "notice": BINDING_NOTICE,
+    }
+    # And the row really does hold the stripped name, which is what
+    # makes the notice the true one.
+    assert store.read_device("aa:bb:cc:dd:ee:ff").entry == ["sam"]
+
+
+def test_the_default_agent_notice_is_about_the_row_too(
+    serving_client: TestClient, store: ConfigStore
+) -> None:
+    _pipeline(serving_client)
+
+    answer = serving_client.put("/default-agent", json={"name": " sam "})
+
+    assert answer.status_code == 200
+    assert answer.json() == {"wrote": "default agent sam", "notice": BINDING_NOTICE}
+    assert store.read_default_agent() == "sam"
+
+
 def test_everything_else_still_waits_for_a_restart(serving_client: TestClient) -> None:
     """The exception is device bindings, and the loaded agents do not
     widen it: writing the agent itself is still a boot-time change."""

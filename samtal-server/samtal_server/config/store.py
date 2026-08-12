@@ -181,6 +181,22 @@ class StoredSecret:
 
 
 @dataclass(frozen=True)
+class BoundDevice:
+    """What a device write wrote: the canonical MAC of the row, and the
+    agent names as they were stored.
+
+    A write normalizes both, so the request's spelling and the row's are
+    different strings, and everything said about the write afterwards
+    (the line a caller prints, and whether the change needs a restart to
+    reach the device) has to be about the row. Answering with it is what
+    keeps a caller from normalizing a second time, differently.
+    """
+
+    mac: str
+    agents: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class LiveBinding:
     """What a running server re-reads about one device: its binding, and
     the default agent standing behind it.
@@ -420,7 +436,17 @@ class ConfigStore:
 
     # Devices and the default agent
 
-    def bind_device(self, mac: str, agents: Sequence[str]) -> None:
+    def bind_device(self, mac: str, agents: Sequence[str]) -> BoundDevice:
+        """Bind one device, and answer with what was written.
+
+        The MAC and the names are normalized on the way in (canonical
+        MAC spelling, surrounding whitespace off each name), so what a
+        caller sent and what the row holds are different strings. The
+        write is what a caller has to describe afterwards, in the line
+        it prints and in whether it says a restart is needed, so the
+        canonical form travels back rather than being re-derived by
+        every caller from the request.
+        """
         binding = _binding(mac, list(agents))
         with self._transaction() as connection:
             domain = _read_domain(connection)
@@ -428,8 +454,15 @@ class ConfigStore:
             _refuse_unresolved(domain)
             for normalized, bound in binding.items():
                 _upsert(connection, schema.devices, {"mac": normalized}, {"agents": bound})
+        # One binding in, one row out, so there is exactly one to
+        # describe.
+        written, names = next(iter(binding.items()))
+        return BoundDevice(written, tuple(names))
 
-    def delete_device(self, mac: str) -> None:
+    def delete_device(self, mac: str) -> str:
+        """Remove one device's binding, answering with the canonical MAC
+        of the row that went, for the reason `bind_device` answers with
+        one."""
         normalized = _mac(mac)
         with self._transaction() as connection:
             _delete_row(
@@ -438,8 +471,11 @@ class ConfigStore:
                 (schema.devices.c.mac == normalized,),
                 f"devices.{normalized}: no such device",
             )
+        return normalized
 
-    def set_default_agent(self, name: str) -> None:
+    def set_default_agent(self, name: str) -> str:
+        """Set the agent an unbound device reaches, answering with the
+        name as it was stored."""
         name = _identifier("default_agent", name)
         with self._transaction() as connection:
             domain = _read_domain(connection)
@@ -451,6 +487,7 @@ class ConfigStore:
                 {"key": schema.DEFAULT_AGENT_KEY},
                 {"value": name},
             )
+        return name
 
     def clear_default_agent(self) -> None:
         """Back to the devices map as the allowlist, which is a
@@ -1266,6 +1303,7 @@ def _refuse_unresolved(domain: DomainConfig) -> None:
 
 
 __all__ = [
+    "BoundDevice",
     "ConfigStore",
     "check_transportable",
     "DomainConfig",
