@@ -72,8 +72,9 @@ The board publishes the firmware's usual set plus its own WiFi command:
 - Setting the speaker volume, 0 to 100.
 - Setting the screen brightness, 0 to 100.
 - Switching the screen between the light and dark theme.
-- Rebooting into WiFi provisioning, which the firmware asks the
-  assistant to confirm with you first, and which ends the conversation.
+- Switching into WiFi provisioning, which closes the conversation and
+  raises the board's access point rather than restarting it, and which
+  the firmware asks the assistant to confirm with you first.
 
 The availability caveat on the [common page](README.md#talking-to-the-device-itself)
 applies here too: these work once the server has finished discovering
