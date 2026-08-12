@@ -118,6 +118,19 @@ server:
   # correct one, which is how a typo (and a rotated secret) diagnoses
   # itself. With auth turned off there is no secret, so the route is
   # served keyless at /x/.
+  #
+  # Two commands read this file and answer without a server: `ota-url`
+  # prints the URL to type, and `doctor` says what a device pointed at
+  # it would be told.
+  #
+  #   samtal-server config ota-url
+  #   samtal-server config doctor
+  #
+  # A board typing that URL and resolving to no agent is answered with a
+  # six-digit code it shows and speaks; `config pending` lists what is
+  # waiting and `config add-device <code> <agent>` binds it, with no
+  # restart and no MAC to look up. A deployment with default_agent set
+  # covers every unknown board already, so its devices never see a code.
   onboarding:
     enabled: true
     # The key, pinned. Its one use is a secret rotation: pinning the
