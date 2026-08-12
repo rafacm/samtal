@@ -30,6 +30,14 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **`server.websocket_url` refuses a URL carrying credentials** (#40):
+  the OTA endpoint renders this value verbatim in the reply to a GET,
+  and the short onboarding path serves that same GET, so a
+  `user:password@host` written here was readable by anyone holding the
+  onboarding URL. It is now refused at load, without the value being
+  quoted back. This is a behavior change for a configuration that was
+  already leaking, and no other websocket URL is affected.
+
 - The word "persona" is gone from the server's own voice: model
   docstrings and field descriptions, the generated domain reference
   and OpenAPI document, the example config's memory comments, two

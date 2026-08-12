@@ -467,13 +467,34 @@ class ServerConfig(BaseModel):
 
     @field_validator("websocket_url")
     @classmethod
-    def _check_websocket_scheme(cls, value: str | None) -> str | None:
+    def _check_websocket_url(cls, value: str | None) -> str | None:
+        """A ws or wss URL, carrying no credentials.
+
+        This value is handed to every device and rendered verbatim by the
+        OTA endpoint's own GET, which anyone holding the onboarding URL
+        can reach, so a `user:password@host` written here would be read
+        back out by whoever asks. Refused rather than stripped, and never
+        quoted back: the same posture public_url holds.
+        """
         if value is None:
             return value
         url = value.strip()
+        problem: str | None = None
         if not url.startswith(("ws://", "wss://")):
+            problem = "it must start with ws:// or wss://"
+        elif "@" in urlsplit(url).netloc:
+            problem = (
+                "it carries a user:password, which this key must not, since the OTA "
+                "endpoint hands this value to every device and prints it back to "
+                "anyone who asks it what it serves"
+            )
+        if problem is not None:
             raise ValueError(
-                f'"{value}" is not a websocket URL; it must start with ws:// or wss://'
+                f"this is not a usable websocket URL: {problem}. Write the address "
+                f"devices should connect to, for example "
+                f"ws://192.168.1.10:8003/xiaozhi/v1/ or "
+                f"wss://voice.example/xiaozhi/v1/; the value is not quoted back here, "
+                f"since it may carry a credential"
             )
         return url
 

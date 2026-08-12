@@ -3,19 +3,24 @@
 `server.onboarding` (the switch and the pinned key), `server.public_url`
 (the origin the startup banner names), and what `server.ota_path` gains:
 null to unmount the legacy route, and `/x/` reserved beside `/api/`.
+`server.websocket_url` is here too, because what made its refusals
+stricter is this milestone: the OTA endpoint's GET renders it verbatim,
+and the short path serves that GET to anyone holding the onboarding URL.
 
-Two values here are credentials of a sort and are checked never to be
+Three values here are credentials of a sort and are checked never to be
 quoted back: a pinned onboarding key is the segment the token issuer is
-served under, and a public URL a person pasted may carry userinfo. The
-sentinel below is checked against everything a refusal can reach, the way
-`test_config_env_names.py` does it.
+served under, and a public or websocket URL a person pasted may carry
+userinfo. The sentinel below is checked against everything a refusal can
+reach, the way `test_config_env_names.py` does it.
 """
 
 import logging
+from pathlib import Path
 
 import pytest
 
 from samtal_server.config import Config, ConfigError
+from samtal_server.config.cli import main
 from samtal_server.config.models import ONBOARDING_MOUNT_PATH
 from tests.unit.test_config import load_config_from_data
 
@@ -74,6 +79,53 @@ def test_the_refused_key_is_not_quoted_back(caplog: pytest.LogCaptureFixture) ->
     assert PASTED not in str(caught.value)
     assert PASTED not in _chain(caught.value)
     assert all(PASTED not in record.getMessage() for record in caplog.records)
+
+
+def test_a_websocket_url_carrying_credentials_is_refused(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The leak this closes: the OTA endpoint's GET renders this value
+    verbatim, and the short onboarding path serves that same GET, so a
+    user:password written here was readable by anyone who had the
+    onboarding URL. Refused at load, so no server serves it at all."""
+    with caplog.at_level(logging.DEBUG), pytest.raises(ConfigError) as caught:
+        load_config_from_data(
+            {"server": {"websocket_url": f"wss://admin:{PASTED}@voice.example/xiaozhi/v1/"}}
+        )
+
+    message = str(caught.value)
+    assert "not a usable websocket URL" in message
+    assert "user:password" in message
+    assert PASTED not in message
+    assert PASTED not in _chain(caught.value)
+    assert all(PASTED not in record.getMessage() for record in caplog.records)
+
+
+def test_a_credentialed_websocket_url_reaches_no_stderr_through_the_cli(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole boundary: the CLI reads the same file half, and prints
+    its refusal to stderr."""
+    monkeypatch.delenv("SAMTAL_CONFIG", raising=False)
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        f"server:\n  websocket_url: wss://admin:{PASTED}@voice.example/xiaozhi/v1/\n",
+        encoding="utf-8",
+    )
+
+    assert main(["--config", str(path), "list"]) == 1
+
+    captured = capsys.readouterr()
+    assert "not a usable websocket URL" in captured.err
+    assert PASTED not in captured.err
+    assert PASTED not in captured.out
+
+
+def test_an_ordinary_websocket_url_still_passes() -> None:
+    config = load_config_from_data(
+        {"server": {"websocket_url": " wss://voice.example/xiaozhi/v1/ "}}
+    )
+    assert config.server.websocket_url == "wss://voice.example/xiaozhi/v1/"
 
 
 def test_public_url_is_unset_by_default() -> None:
