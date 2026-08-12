@@ -4,17 +4,18 @@ The request shapes here mirror `Board::GetSystemInfoJson` and the headers
 `Ota::SetupHttp` sets in 78/xiaozhi-esp32.
 """
 
+import logging
 from datetime import datetime
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-from samtal_server import __version__
+from samtal_server import __version__, logs
 from samtal_server.app import create_app
 from samtal_server.build_info import REVISION_ENV, revision
 from samtal_server.config import Config
-from samtal_server.ota import OTA_PATH
+from samtal_server.ota import DEVICE_ID_PROBLEM, OTA_PATH
 
 MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")}
 MOCK_AGENT = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
@@ -198,7 +199,7 @@ def test_missing_identity_headers_are_rejected(
 def test_device_id_that_is_not_a_mac_is_rejected() -> None:
     response = post_system_info(client_for(), device_id="not-a-mac")
     assert response.status_code == 400
-    assert "is not a MAC address" in response.json()["error"]
+    assert "does not hold a MAC address" in response.json()["error"]
 
 
 def test_dashed_and_uppercase_macs_resolve_the_same_device(
@@ -322,3 +323,51 @@ def test_a_path_that_was_never_served_still_answers_404() -> None:
     assert client.post("/xiaozhi/ota/wrong-segment/", json=SYSTEM_INFO).status_code == 404
     assert client.post("/xiaozhi/ota/wrong-segment", json=SYSTEM_INFO).status_code == 404
     assert client.post(f"{SECRET_PATH}activate/x", json={}).status_code == 404
+
+
+# A rejected Device-Id is text a stranger chose
+
+
+DEVICE_ID_SENTINEL = "sentinel-4b7f\nWARNING forged entry"
+
+
+@pytest.mark.parametrize("path", [OTA_PATH, f"{OTA_PATH}activate"])
+def test_a_device_id_that_is_not_a_mac_is_never_quoted_back(
+    path: str, caplog: pytest.LogCaptureFixture, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """This endpoint is unauthenticated and reachable by anything that
+    finds the path, so its headers are attacker-controlled text. The
+    validator's own sentence quotes what it refused, which would put a
+    chosen string into a response body, into the log, and into whatever
+    ships the log."""
+    client = client_for()
+
+    with caplog.at_level(logging.DEBUG):
+        refused = client.post(
+            path,
+            json=SYSTEM_INFO,
+            headers={"Device-Id": DEVICE_ID_SENTINEL, "Client-Id": DEVICE_UUID},
+        )
+
+    assert refused.status_code == 400
+    assert refused.json()["error"] == DEVICE_ID_PROBLEM
+    rendered = (
+        refused.text
+        + str(refused.headers)
+        + caplog.text
+        + "".join(logs.JsonFormatter().format(record) for record in caplog.records)
+        + "".join(capsys.readouterr())
+    )
+    assert "sentinel-4b7f" not in rendered
+    assert "forged entry" not in rendered
+    # And the line that was written is still a usable diagnostic.
+    assert "Device-Id" in caplog.text
+
+
+def test_a_device_id_that_is_not_a_mac_still_says_what_is_expected() -> None:
+    refused = client_for().post(
+        OTA_PATH, json=SYSTEM_INFO, headers={"Device-Id": "nope", "Client-Id": DEVICE_UUID}
+    )
+
+    assert "six colon-separated hex pairs" in refused.json()["error"]
+    assert "aa:bb:cc:dd:ee:ff" in refused.json()["error"]
