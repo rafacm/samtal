@@ -76,6 +76,22 @@ ACTIVATION_VERSION_HEADER = "activation-version"
 # greater, so a device that hides its version is never offered an update.
 UNKNOWN_VERSION = "0.0.0"
 
+# Said to a device whose Device-Id is not a MAC, and logged in place of
+# what it sent.
+#
+# Deliberately not `normalize_mac`'s own sentence, which quotes the
+# value it refused. This endpoint is unauthenticated and reachable by
+# anything that finds the path, so the header is attacker-controlled
+# text: quoting it puts a chosen string into a response body and into
+# every log line and log shipper behind it. The rule the rest of this
+# codebase holds for a rejected configuration value holds here for a
+# rejected header.
+DEVICE_ID_PROBLEM = (
+    "the Device-Id header does not hold a MAC address; it has to be six "
+    "colon-separated hex pairs, for example aa:bb:cc:dd:ee:ff. What was sent is not "
+    "quoted back, since a header that missed the MAC may hold anything at all"
+)
+
 
 def websocket_url_for(config: Config, request: Request) -> str:
     """The websocket URL to hand this device: the configured one, or the
@@ -185,8 +201,10 @@ async def check_version(request: Request) -> Response:
 
     try:
         mac = normalize_mac(device_id)
-    except ValueError as exc:
-        return _bad_request(f"Device-Id header: {exc}")
+    except ValueError:
+        # Deliberately not the validator's own sentence, which quotes
+        # what it refused: see DEVICE_ID_PROBLEM.
+        return _bad_request(DEVICE_ID_PROBLEM)
     # The live view rather than the boot snapshot, and awaited off the
     # event loop: a device bound a moment ago gets its token at this
     # check-in rather than after a restart. What it resolves to is the
@@ -381,8 +399,10 @@ async def activate(request: Request) -> Response:
         return _bad_request("the Device-Id header is required and holds the device MAC")
     try:
         mac = normalize_mac(device_id)
-    except ValueError as exc:
-        return _bad_request(f"Device-Id header: {exc}")
+    except ValueError:
+        # Deliberately not the validator's own sentence, which quotes
+        # what it refused: see DEVICE_ID_PROBLEM.
+        return _bad_request(DEVICE_ID_PROBLEM)
 
     bindings: DeviceBindings = request.app.state.bindings
     resolution = await bindings.resolve(mac)
@@ -478,7 +498,15 @@ async def describe(request: Request) -> Response:
 
 
 def _bad_request(message: str) -> JSONResponse:
-    logger.warning("rejected OTA request: %s", message)
+    """One refusal, said once to the caller and once to the log.
+
+    Every caller passes a fixed sentence: nothing a request carried is
+    interpolated into either channel, which is what keeps a header this
+    endpoint could not read out of the log a deployment ships.
+    """
+    logger.warning(
+        "rejected OTA request: %s", message, extra={"event": "ota_request_rejected"}
+    )
     return JSONResponse({"error": message}, status_code=400)
 
 
