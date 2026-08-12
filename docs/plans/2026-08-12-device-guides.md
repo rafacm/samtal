@@ -428,6 +428,11 @@ addressing it lands.
    hardware-checked in the milestone. The ePaper stub states the
    long-press threshold from the shared button component (2 s
    default), with the milestone checking for a board override.
+   [Postscript, after the milestone: it ran without the board, so
+   the gestures are documented from the board code and classified
+   unverified rather than hardware-checked, and they are tracked
+   in #114. The ePaper override check was done in the source,
+   where the board sets no threshold of its own.]
 
 4. **P2: the MCP inventories omit board-specific commands and
    overpromise availability.** All three boards also publish a
@@ -501,6 +506,12 @@ addressing it lands.
    gating in the board code), and verification checks the timers
    on hardware with the tested power state recorded in the
    provenance matrix.
+   [Postscript, after the milestone: it ran without the board, so
+   no power state was tested, the matrix records that, and the
+   check is tracked in #114. Reading the board code also showed
+   the gating runs the opposite way to the obvious reading: the
+   timers are enabled when the board starts running on battery and
+   disabled when external power returns.]
 
 9. **P2: the AMOLED recovery procedure is not a full power cycle
    when a battery is attached.** The board has battery-aware PMIC
@@ -543,4 +554,9 @@ addressing it lands.
   repointed; `docs/README.md` index section; CHANGELOG entry; the
   implementation doc section. Accept: the verification list above
   passes, with the hardware-verified claims called out in the
-  implementation doc.
+  implementation doc. The hardware checks this plan asks for run when
+  the session doing the work has the board; a session without it does
+  not block on them, and instead classifies those claims as unverified
+  in the provenance matrix, hedges them in the guide text where they
+  are stated at all, and collects them into a tracked follow-up issue.
+  That is what happened here, and the issue is #114.
