@@ -337,3 +337,191 @@ Three consequences worth carrying forward.
   only be a conflict for the branch that carries it. The unit lane
   records the current behavior as characterization, named as such, so
   the state is visible rather than implied.
+
+## Milestone 2: live device bindings
+
+The one hole in the boot-time snapshot, opened exactly wide enough for
+the onboarding ceremony to work: the `devices` rows and `default_agent`,
+read by the running server at the two moments a device asks. No
+activation object, no pending table, no `/activate`, no new API route
+and no new CLI command.
+
+### What landed
+
+**`DeviceBindings` (`device/bindings.py`).** Built by `create_app` from
+the composed snapshot and a read engine of its own, disposed in the
+lifespan. `agents_for(mac)` reads the device's row and `default_agent`
+in one transaction, resolves by the rule `Config.agents_for_device`
+applies (the bound list, else the default agent, else nothing), and
+returns a `DeviceAgents` carrying two tuples: the names the boot
+snapshot loaded, and the names it did not. Two fields rather than one
+list, because the two states they separate need different sentences said
+to the operator. `resolve(mac)` is `agents_for` awaited through
+`asyncio.to_thread`, and is what both async call sites use. A read that
+fails logs `device_bindings_unreadable` at warning level, naming the
+driver's own message, and answers from the snapshot.
+
+**The read engine (`db.read_engine`).** A second engine factory beside
+`open_database`, which does three things a device path must not: it
+migrates, it begins every transaction `BEGIN IMMEDIATE`, and it creates
+the directory. The read engine does none of them. It sets
+`busy_timeout` and leaves `journal_mode` alone (the pragma is a property
+of the file, and setting it would be a write from the read path), hands
+transaction control to SQLAlchemy, and emits a plain `BEGIN`, spelled
+out rather than left to the default because the default for this project
+is the immediate one.
+
+**The consumers (`ota.py`, `device/session.py`, `ws.py`).**
+`check_version` and the session's connect check both await
+`bindings.resolve(mac)`; the session drops the loaded-agent filter it
+applied by hand, since the view applies the same one. Each edge logs the
+bound-but-unloaded state distinctly ("bound to agent X, which this
+server has not loaded; restart to load it") rather than the generic bind
+advice, and the `ota_check` record carries the unloaded names as a
+field. `DeviceSession` takes the view as an optional constructor
+argument.
+
+**The notice split (`config/writes.py`, `config/api.py`,
+`config/cli.py`).** `BINDING_NOTICE` beside `RESTART_NOTICE`, and
+`binding_notice(unloaded)` choosing between them. Device writes and
+default-agent writes carry the binding notice when every agent they name
+is loaded and the restart sentence when one is not; both deletes carry
+the binding notice unconditionally, having no agent to load. `build_api`
+takes the loaded agent names, `_acknowledge` takes a notice with the
+restart sentence as its default, and `docs/reference/api-openapi.json`
+was regenerated with
+`uv run samtal-server config openapi > ../docs/reference/api-openapi.json`.
+
+**The contract sentences.** `config/boot.py` (where the contract lives),
+the API description, the `Acknowledgement.notice` documentation, the
+`--local` banner, and the four places in `samtal-server/README.md` that
+stated the always-restart rule.
+
+**Tests.** `tests/unit/test_device_bindings.py` (a bind seen by the next
+check-in and the next connection on one app with no rebuild; the default
+agent equally live; a delete stopping the next token while a
+conversation in flight finishes; the unloaded-agent filter with its
+distinct line at both edges and a partial binding still answering; the
+unreadable database logging and resolving from the snapshot, including
+that the fallback is the snapshot and not an empty answer; a missing
+database as a quiet state; the read path leaving an unmigrated file
+unmigrated; and the contention case).
+`tests/unit/test_config_api_writes.py` and `tests/unit/test_config_cli.py`
+gained the notice cases at the API and through the CLI, `--local`
+included. `tests/integration/test_device_bindings.py` binds an unbound
+board over the served `/api` and watches the same process hand it a
+token and then a conversation.
+
+### Deviations from the plan
+
+Three, all narrow.
+
+**The unloaded case reuses `RESTART_NOTICE` verbatim** rather than
+getting a sentence of its own. The plan says the acknowledgement
+"carries the restart sentence" in that case, and it is accurate as
+written (the agent set is what is read once at boot); a third sentence
+would have been a third thing to keep true. What names the specific
+problem is the log line at the OTA and session edges, which is where an
+operator is when the device does not connect.
+
+**`DeviceBindings` also has a snapshot-only mode.** The plan describes
+the component with a read engine. A configuration composed in memory has
+no database to read, which is what most of the unit lane is and what an
+embedding of this server would be, and the honest view of it is the
+snapshot itself. `open` takes that branch when the database file is
+absent, saying so once at debug level rather than warning at every
+lookup; `snapshot_only` is the same object, and is what a `DeviceSession`
+constructed without a view uses, so resolution has one implementation
+rather than a live one and a fallback one that could come to disagree.
+
+**The `--local` device delete says the same sentence the API does.**
+The plan scopes the notice change to the API's writes. Leaving the
+break-glass path saying "restart" for a row the server reads live would
+be the two paths describing one act differently, which is the thing
+`writes.py` exists to prevent, so `--local delete device` prints the
+binding notice and the `--local` banner names the exception.
+
+### Resolutions of what the plan left open
+
+**Where the offloading happens.** The plan says each call site awaits
+the lookup off the loop. It is `DeviceBindings.resolve` that calls
+`asyncio.to_thread`, and both call sites await that: one implementation
+rather than a convention every future caller has to remember, and the
+synchronous `agents_for` stays available to the threadpool callers a
+later milestone may add.
+
+**A partial binding resolves to what is loaded.** A device bound to a
+loaded agent and an unloaded one talks to the loaded one, and the
+unloaded name still travels in `DeviceAgents.unloaded` and in the
+`ota_check` record. The restart-naming log line fires only when nothing
+resolved, because that is when the operator has a device that will not
+connect.
+
+**The websocket close text is one sentence for both refusals.** The two
+states differ in what an operator must do, not in anything the device
+can act on, so they differ in the log line and in the `session_rejected`
+reason (`agent_not_loaded` beside `no_agent`) rather than in what is
+said down the socket.
+
+**How the API learns what its server loaded.** `build_api` takes the
+names as an argument, defaulting to none, and the routes read them
+through a dependency the way they read the store. The document is
+rendered from an application built without a server, so nothing a route
+declares may depend on there being one; an application told nothing
+answers every write with the restart sentence, which is the conservative
+direction.
+
+### Discoveries
+
+**The completeness rule shapes every test in this milestone.** Boot
+refuses a configuration with agents that no device and no default agent
+reaches, so "an agent is loaded and the device under test is unbound"
+needs a second, already-bound device in the database. That is the
+ordinary shape of onboarding a second board, and both new test modules
+carry it.
+
+**The integration lane's `booted` could not be reused.** It seeds a
+scratch database inside a `TemporaryDirectory` and composes a config
+still naming the packaged default directory, so a write through the
+served app's own API would address a different file. `booted_in` and
+`running_app_in` (fixture `serve_app_in`) keep the directory and compose
+it onto the file half. This is the fixture variant the plan's review
+finding 6 asks for, and M3's restart assertion can boot a second app
+from the same directory through it.
+
+**No new parameters leaked into the OpenAPI document.** The loaded-agent
+dependency is a plain `Depends`, so the regenerated document differs
+only in the description strings, which is worth knowing before adding
+the next dependency to a documented route.
+
+**A test-built app now looks at `server.database.dir`.** Most of the
+unit lane composes a `Config` in memory and never names a directory, so
+the view falls to its snapshot-only branch on the packaged default
+(`/var/lib/samtal`), which no development machine or runner has. On a
+machine that did have a database there, those tests would read it. The
+mitigations considered (a read-only URI, refusing to look outside a
+temporary directory) each cost more than they buy: `mode=ro` cannot
+create the `-shm` file a WAL database needs a reader to have, and a
+test-shaped exception in production code is worse than the exposure. It
+is recorded rather than fixed.
+
+### Notes for the milestones that follow
+
+- `app.state.bindings` is the seam M3's `/activate` answers from: a MAC
+  resolving to a loaded agent is the 200, and the plan's 202 is
+  everything else.
+- Activation gates on database truth rather than on this resolution
+  (plan review findings 4 and 8), so M3 needs a lookup that reports the
+  raw row and the default agent as well. `DeviceAgents.unloaded` being
+  non-empty is the bound-but-unloaded state; a device with neither is
+  the one that gets a code.
+- `binding_notice(unloaded)` is what M3's add-by-code answers with, and
+  the API already knows which agents its server loaded.
+
+### Verification
+
+`uv run ruff check .`, `uv run pytest tests/unit -q` and
+`uv run pytest tests/integration -q` from `samtal-server/`, all green,
+plus the OpenAPI regeneration diff CI runs. Nothing here needs hardware:
+the milestone is server-side, and the M5 checkpoint still owns every
+claim about a board.
