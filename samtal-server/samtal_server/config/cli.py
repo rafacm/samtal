@@ -181,6 +181,17 @@ ONBOARDING_OFF_FOR_DOCTOR = (
     "Give the URL to check as an argument: samtal-server config doctor URL."
 )
 
+# What a URL given to `doctor` is called in every line it prints.
+#
+# The one URL these commands may show is the derived short one, whose
+# key is the recorded exception to "a path segment in front of the token
+# issuer is a credential". A URL an operator passes is not that: the
+# documented way to check a deployment with onboarding turned off is to
+# pass the legacy `ota_path` URL, which is exactly the segment nothing
+# may print. So a supplied URL is never displayed, in any verdict, and
+# this stands in for it.
+SUPPLIED_ENDPOINT = "the supplied OTA endpoint"
+
 # How much of anything that arrived in a response may be repeated back.
 # What `doctor` reaches may be a proxy, a captive portal or anything
 # else that answers, so its body, the URL it names and the version it
@@ -381,22 +392,28 @@ def _doctor(args: argparse.Namespace) -> None:
     `ws://` URL from behind TLS, or it is healthy and this says what a
     device is handed. Only the first three are failures, and they leave
     the way every other failure does.
+
+    Every line names the endpoint by `shown` rather than by the URL: a
+    derived URL is the one this command may print, and anything an
+    operator passed may be the deployment's secret `ota_path`.
     """
     if args.url:
         url = _device_url(args.url, "the URL given to doctor")
+        shown = SUPPLIED_ENDPOINT
     else:
         derived, _ = _onboarding_url(_server_config(args), ONBOARDING_OFF_FOR_DOCTOR)
         url = _device_url(derived, "the onboarding URL this configuration derives")
-    response = _probed(url)
+        shown = url
+    response = _probed(url, shown)
     reported = _describe(response.text)
     if reported is None:
-        raise ConfigError(_not_samtal_server(url, response))
+        raise ConfigError(_not_samtal_server(shown, response))
     websocket = _shown_url(reported["websocket"])
     if url.startswith("https://") and reported["websocket"].startswith("ws://"):
-        raise ConfigError(_plain_websocket(url, websocket))
+        raise ConfigError(_plain_websocket(shown, websocket))
     print(
-        f"{url} is samtal-server {_printable(reported['version'])}, and sends devices to "
-        f"{websocket} (protocol version {_printable(reported['protocol'])})."
+        f"{shown} is samtal-server {_printable(reported['version'])}, and sends devices "
+        f"to {websocket} (protocol version {_printable(reported['protocol'])})."
     )
 
 
@@ -846,20 +863,28 @@ def _device_url(url: str, source: str) -> str:
     a device is pointed at.
 
     What does apply is the rest of the policy: a URL that cannot be read
-    is refused without quoting what was typed, and userinfo is refused
-    rather than carried, because anything in a URL ends up in shell
-    history, in process lists and in access logs.
+    is refused, and userinfo is refused rather than carried, because
+    anything in a URL ends up in shell history, in process lists and in
+    access logs.
+
+    No refusal repeats the address, not even with the userinfo taken
+    off, which is where this is stricter than the API's policy: an OTA
+    URL carries the path segment that stands in front of the token
+    issuer, and on a deployment with onboarding turned off that segment
+    is the whole protection the endpoint has.
     """
     parsed = _parsed(url, source)
-    shown = _without_userinfo(parsed)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        raise ConfigError(f"{source} is not an http:// or https:// URL with a host: {shown}")
+        raise ConfigError(
+            f"{source} is not an http:// or https:// URL with a host. It is not quoted "
+            f"back, since an OTA URL can be the deployment's own secret."
+        )
     if parsed.username or parsed.password:
         raise ConfigError(
             f"{source} carries a username or a password in the URL, which is refused: the "
             f"OTA endpoint takes no credential in its URL, and anything in one ends up in "
-            f"shell history, process lists and access logs. The address without it is "
-            f"{shown}."
+            f"shell history, process lists and access logs. The address is not repeated "
+            f"here either."
         )
     # Returned exactly as it was given, trailing slash included: the
     # short path and the OTA path both end in one, and a device types
@@ -867,7 +892,7 @@ def _device_url(url: str, source: str) -> str:
     return url
 
 
-def _probed(url: str) -> httpx.Response:
+def _probed(url: str, shown: str) -> httpx.Response:
     """One GET of the OTA endpoint, and never anything else.
 
     A GET is the handler that describes the endpoint; the POST beside it
@@ -893,7 +918,7 @@ def _probed(url: str) -> httpx.Response:
             # says what happened. Raised after the handler, so nothing
             # walking a chain finds the original behind it.
             problem = (
-                f"cannot reach the OTA endpoint at {url}: the request did not complete "
+                f"cannot reach {shown}: the request did not complete "
                 f"({type(exc).__name__}). Check that the server is running, that this is "
                 f"the address it serves, and that the network a device sits on can reach "
                 f"it."
@@ -920,20 +945,20 @@ def _describe(body: str) -> Mapping[str, str] | None:
     return {**named.groupdict(), **sent.groupdict()}
 
 
-def _not_samtal_server(url: str, response: httpx.Response) -> str:
+def _not_samtal_server(shown: str, response: httpx.Response) -> str:
     glimpse = _printable(response.text)
     return (
-        f"{url} answered {response.status_code}, but not as a samtal-server OTA endpoint: "
-        f"a device pointed here would take its configuration from something else, or from "
-        f"nothing. Of what came back, only the first {GLIMPSE_LENGTH} printable "
-        f"characters are repeated, since it is whatever that address serves: "
+        f"{shown} answered {response.status_code}, but not as a samtal-server OTA "
+        f"endpoint: a device pointed here would take its configuration from something "
+        f"else, or from nothing. Of what came back, only the first {GLIMPSE_LENGTH} "
+        f"printable characters are repeated, since it is whatever that address serves: "
         + (f"{glimpse!r}" if glimpse else "nothing at all")
     )
 
 
-def _plain_websocket(url: str, websocket: str) -> str:
+def _plain_websocket(shown: str, websocket: str) -> str:
     return (
-        f"{url} answers over https, and it sends devices to {websocket}, which is a plain "
+        f"{shown} answers over https, and it sends devices to {websocket}, which is a plain "
         f"ws:// URL. That is the TLS-proxy misconfiguration: the server behind the proxy "
         f"only ever sees plain HTTP, so a websocket URL derived from the request says "
         f"ws://, and a device told to connect that way fails with nothing else looking "
