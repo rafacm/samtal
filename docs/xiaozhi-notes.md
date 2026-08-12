@@ -195,14 +195,25 @@ by the device rather than by the problem.
   playback reference is available on the device side, where cancelling it is
   a signal-processing problem rather than a statistical one.
 
-- **The wake word is spotted on the chip, and its audio never reaches the
-  server.** ESP-SR decides on-device, and no server work changes that: the
+- **The wake word is spotted on the chip, and the server takes no part in
+  it.** ESP-SR decides on-device, and no server work changes that: the
   planned English wake word (`wn9_hiesp`) is a custom build and nothing
-  else. What the server does get is an after-the-fact report: the firmware
-  sends `listen` `detect` with the fired word in `text`, which
+  else. The detection itself is not something the server can hear, tune,
+  or substitute for. What the server does get is an after-the-fact report:
+  the firmware sends `listen` `detect` with the fired word in `text`, which
   samtal-server currently debug-logs (`device/session.py`) and does not
-  retain. The detection itself is not something the server can hear, tune,
-  or substitute for.
+  retain.
+
+  The trigger audio is a build-time question rather than a settled one.
+  `CONFIG_SEND_WAKE_WORD_DATA` defaults to `y` for AFE wake-word builds,
+  and under it `ContinueWakeWordInvoke` drains an Opus-encoded copy of the
+  audio cached around the trigger into `SendAudio` before sending the
+  `detect` report, so such a build does send that span as the
+  conversation's first audio. None of our three boards overrides the flag,
+  and nothing has been observed on the wire from the prebuilt images we
+  actually run, so what those do is open (#112). Earlier versions of this
+  note said flatly that the audio never reaches the server; that was read
+  from the wrong end of this code path.
 
 - **The device is the MCP server, and discovery is a race.** Tools are
   fetched in a background task after `hello`, deliberately so, because the
