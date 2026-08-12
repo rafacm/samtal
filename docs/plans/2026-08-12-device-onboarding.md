@@ -784,7 +784,7 @@ Milestone 5 is documentation-only and may land directly on `main`
 per repository convention.
 
 - [x] **[M1: the short path and the banner](2026-08-12-device-onboarding-implementation.md#milestone-1-the-short-path-and-the-banner)**
-  (PR TBD, branch
+  (PR #115, branch
   `feature/device-onboarding`): this plan; `OnboardingConfig`
   (`enabled`, `key`) and `server.public_url`; nullable `ota_path`
   with the `/x/` reservation and the null-plus-disabled boot
