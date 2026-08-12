@@ -20,6 +20,17 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **The stock activation ceremony, documented** (#40):
+  `docs/xiaozhi-notes.md` now records the 6-digit code flow
+  reconstructed from the vendored firmware and manager-api sources
+  (the optional `activation` object, the `/activate` poll and its two
+  `Activation-Version` forms, the challenge that makes polling fast,
+  and the loop that makes binding take effect without a power cycle),
+  plus why the OTA URL is the only place a stock board can carry a
+  secret, and that the OTA response cannot change the device language.
+  The captive-portal note is corrected: current factory firmware has a
+  Custom OTA URL field on its Advanced tab, which v2.4.0 lacked.
+
 - **Device guides** (#93): `docs/devices/`, one user-facing guide per
   supported board plus a common page for what every board running the
   upstream firmware shares. The Touch-LCD-1.54 guide is written in
