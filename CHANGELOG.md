@@ -123,6 +123,27 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   cached from the last OTA check-in, nor the session's protocol
   version, all of which the manifest actually carries.
 
+### Removed
+
+- The pipecat spike code under `spikes/pipecat-alignment/`, 3,714
+  lines across 15 files, throwaway by the declared policy of its own
+  plan and now that its findings are written down. The record of
+  reference is unchanged: `docs/plans/2026-08-11-pipecat-alignment-spike.md`
+  and its implementation doc still hold both gate verdicts, the line
+  counts, the 23-item seam-obligation map, the offsets and drift
+  figures, and the pinned pipecat-ai 1.7.0. The code stays recoverable
+  from the annotated tag `spike/pipecat-alignment`, on the last commit
+  that contains it, and from PR #90. Removing it costs nothing
+  structural (no README, AGENTS.md or workflow referred to the
+  directory, and no CI step ran it) and settles a standing ambiguity:
+  a second uv project beside `samtal-server/` reads as a component,
+  and unlinted code pinned to a release it can no longer be measured
+  on only drifts. The pipecat issues stay open on their own terms and
+  none of them is v1 work: #84 is a decision record that already
+  concludes "not now", #91 promotes the serializer as an external
+  showcase that never touches `samtal_server/`, and #92 is a design
+  note whose later stages wait for a driving use case.
+
 ## 2026-08-11
 
 ### Added
