@@ -17,8 +17,9 @@ verified at all**, which is stated rather than guessed around.
 
 What every board shares is on the [common page](README.md). Read from
 the board support code: this board's build enables echo cancellation,
-so it runs in **realtime** listening mode, where the microphone streams
-for the whole session and a reply can be interrupted.
+so it starts in **realtime** listening mode, where the microphone
+streams for the whole session and a reply can be interrupted. The BOOT
+double-click below moves it out of that mode.
 
 ## Controls
 
