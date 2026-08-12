@@ -13,9 +13,15 @@ devices from ever being asked to activate.
 
 This endpoint is the token issuer, so it cannot itself require a token.
 What protects it instead is stinginess and a configurable path: a token
-is issued only to a device the configuration resolves to an agent, and
-an operator exposing the server publicly hides the endpoint behind a
-long random path segment.
+is issued only to a device the configuration resolves to an agent this
+server has loaded, and an operator exposing the server publicly hides
+the endpoint behind a long random path segment.
+
+Which agents a device resolves to is the one question here that is not
+answered from the boot snapshot. `DeviceBindings` reads it from the
+database at every check-in, so a board bound while the server runs is
+handed its token at the next one it makes, seconds later, rather than
+after a restart.
 
 Upstream reference: `main/ota.cc` in 78/xiaozhi-esp32 parses this response.
 """
@@ -34,6 +40,7 @@ from samtal_server.auth import DeviceAuth
 from samtal_server.build_info import revision
 from samtal_server.config import Config
 from samtal_server.config.models import normalize_mac
+from samtal_server.device.bindings import DeviceBindings
 from samtal_server.ws import WEBSOCKET_PATH
 
 logger = logging.getLogger(__name__)
@@ -133,7 +140,14 @@ async def check_version(request: Request) -> Response:
         mac = normalize_mac(device_id)
     except ValueError as exc:
         return _bad_request(f"Device-Id header: {exc}")
-    agents = config.agents_for_device(mac)
+    # The live view rather than the boot snapshot, and awaited off the
+    # event loop: a device bound a moment ago gets its token at this
+    # check-in rather than after a restart. What it resolves to is the
+    # allowlist this endpoint is stingy by, so the answer decides both
+    # the token below and what is said about the device here.
+    bindings: DeviceBindings = request.app.state.bindings
+    resolution = await bindings.resolve(mac)
+    agents = list(resolution.agents)
 
     payload = await _read_json_object(request)
     version = reported_version(payload)
@@ -153,9 +167,25 @@ async def check_version(request: Request) -> Response:
         "board": board,
         "firmware": version,
         "agents": agents,
+        # Named in every record rather than only in the one that
+        # complains about it, so a query for devices waiting on a
+        # restart is one field rather than a log-message search.
+        "unloaded": list(resolution.unloaded),
     }
 
-    if not agents:
+    if not agents and resolution.unloaded:
+        # A different problem from having no agent, and a different
+        # answer: the binding is there, this process is what is behind.
+        logger.warning(
+            "device %s (%s, firmware %s) is bound to agent %s, which this server has "
+            "not loaded; restart to load it",
+            device_id,
+            board,
+            version,
+            ", ".join(resolution.unloaded),
+            extra=event,
+        )
+    elif not agents:
         logger.warning(
             "device %s (%s, firmware %s) has no agent: bind it under devices "
             "or set default_agent",
