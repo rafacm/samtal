@@ -93,7 +93,14 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     # variable must be refused here rather than serve an admin surface
     # its own operator cannot reach. Passed straight into the gate and
     # kept nowhere else, least of all on app.state, and never logged.
-    api = build_api(api_token(app.state.config), app.state.config.server.database.dir)
+    # The agents go with it because a device write's acknowledgement
+    # says whether the device can reach what it was just bound to, and
+    # only this server knows what it loaded.
+    api = build_api(
+        api_token(app.state.config),
+        app.state.config.server.database.dir,
+        app.state.config.agents,
+    )
     # One registry per app: what decides whether there is room for the
     # next conversation, and what the drain reaches the live ones through.
     app.state.sessions = SessionRegistry(app.state.config.server.limits.max_sessions)

@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "samtal-server configuration API",
-    "description": "The domain half of one samtal-server deployment's configuration: providers, MCP servers, agents, devices, and the credentials they use. Every request carries a bearer token, whose value is the environment variable `server.api.secret_env` names.\n\nConfiguration is a boot-time snapshot, so a successful write applies at the next server start rather than immediately, and every write says so.\n\nA provider entry carries whatever options its `type` takes, and those are passed through rather than declared, so no schema can list them. Until typed option models land (#88) they are documented in the example fragments under `samtal-server/examples/`, which is also where the measured numbers behind each default are kept.",
+    "description": "The domain half of one samtal-server deployment's configuration: providers, MCP servers, agents, devices, and the credentials they use. Every request carries a bearer token, whose value is the environment variable `server.api.secret_env` names.\n\nConfiguration is a boot-time snapshot, so a successful write applies at the next server start rather than immediately. Device bindings are the one exception: a running server reads them, and the default agent, as a device asks for them, so binding or unbinding a device applies at that device's next OTA check or connection. The exception ends where the agent does, since a server builds an agent's providers at boot: a binding naming an agent this server has not loaded waits for the restart that loads it. Every write says which of the two happened, in its `notice`.\n\nA provider entry carries whatever options its `type` takes, and those are passed through rather than declared, so no schema can list them. Until typed option models land (#88) they are documented in the example fragments under `samtal-server/examples/`, which is also where the measured numbers behind each default are kept.",
     "version": "1"
   },
   "servers": [
@@ -1207,7 +1207,7 @@
       },
       "put": {
         "summary": "Write Device",
-        "description": "Bind one device to one or more agents. The MAC is normalized\nbefore it is written, so the two spellings reach one row.",
+        "description": "Bind one device to one or more agents. The MAC is normalized\nbefore it is written, so the two spellings reach one row.\n\nThe running server reads this binding, so the device meets it at\nits next check-in rather than at the next restart; what the\nacknowledgement says depends on whether the agents named are\nones that server loaded.",
         "operationId": "write_device_devices__mac__put",
         "parameters": [
           {
@@ -1285,7 +1285,7 @@
       },
       "delete": {
         "summary": "Remove Device",
-        "description": "Remove one device's binding, which with no default agent set\nmeans the device is refused at the handshake.",
+        "description": "Remove one device's binding, which with no default agent set\nmeans the device is refused at the handshake. Live, with no\nagent to be loaded or not: the device stops being served at its\nnext check-in, though a conversation already running is left to\nfinish.",
         "operationId": "remove_device_devices__mac__delete",
         "parameters": [
           {
@@ -1412,7 +1412,7 @@
       },
       "put": {
         "summary": "Write Default Agent",
-        "description": "Set the agent an unbound device reaches.",
+        "description": "Set the agent an unbound device reaches. Read by the running\nserver the way a binding is, so it applies to the next device\nthat asks unless the agent it names was written since boot.",
         "operationId": "write_default_agent_default_agent_put",
         "requestBody": {
           "content": {
@@ -1479,7 +1479,7 @@
       },
       "delete": {
         "summary": "Remove Default Agent",
-        "description": "Unset it, leaving the devices map as the allowlist.\nIdempotent, like the CLI: there is no such thing as a default\nagent that was already not set.",
+        "description": "Unset it, leaving the devices map as the allowlist.\nIdempotent, like the CLI: there is no such thing as a default\nagent that was already not set. Live, like the delete above:\nthe next unbound device to ask is turned away.",
         "operationId": "remove_default_agent_default_agent_delete",
         "responses": {
           "200": {
@@ -1928,7 +1928,7 @@
           "notice": {
             "type": "string",
             "title": "Notice",
-            "description": "When the change takes effect. Configuration is a boot-time snapshot, so this is always the same sentence: it applies at the next server start."
+            "description": "When the change takes effect, as one of two sentences. Configuration is a boot-time snapshot, so most writes apply at the next server start. A device binding and the default agent are read by the running server, so they apply at the device's next OTA check or connection with no restart, unless they name an agent this server has not loaded, which is the case that carries the restart sentence again."
           }
         },
         "additionalProperties": false,

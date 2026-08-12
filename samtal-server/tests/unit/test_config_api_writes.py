@@ -33,7 +33,7 @@ from samtal_server.config.secrets import (
     load_keys,
 )
 from samtal_server.config.store import ConfigStore
-from samtal_server.config.writes import RESTART_NOTICE
+from samtal_server.config.writes import BINDING_NOTICE, RESTART_NOTICE
 from samtal_server.db import DATABASE_FILENAME, open_database
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
@@ -124,7 +124,13 @@ def test_a_write_says_what_it_did_and_when_it_applies(
     client: TestClient, method: str, path: str, body: object
 ) -> None:
     """Configuration is a boot-time snapshot, so a write that answered
-    only "ok" would leave the one operational trap of that design open."""
+    only "ok" would leave the one operational trap of that design open.
+
+    This application is built with no loaded agents, which is what an
+    API with no server around it honestly has, so every write here that
+    could have been live names an agent nothing loaded and carries the
+    restart sentence. What the two notices depend on is asserted below,
+    against an application told what its server loaded."""
     _pipeline(client)
 
     response = client.request(method.upper(), path, json=body)
@@ -132,8 +138,82 @@ def test_a_write_says_what_it_did_and_when_it_applies(
     assert response.status_code == 200
     answer = response.json()
     assert set(answer) == {"wrote", "notice"}
-    assert answer["notice"] == RESTART_NOTICE
+    assert answer["notice"] == (
+        BINDING_NOTICE if (method, path) == ("delete", "/default-agent") else RESTART_NOTICE
+    )
     assert answer["wrote"]
+
+
+# Which of the two notices a write carries
+#
+# The split is the whole operational difference this makes: a binding is
+# read by the running server, everything else waits for a restart, and
+# the acknowledgement is where an operator finds out which they just
+# did.
+
+
+@pytest.fixture
+def serving_client(directory: Path) -> TestClient:
+    """A client of an API told which agents its server loaded, which is
+    what the server passes at build."""
+    api = build_api(TOKEN, directory, {"sam"})
+    return TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"})
+
+
+def test_a_binding_to_a_loaded_agent_needs_no_restart(serving_client: TestClient) -> None:
+    _pipeline(serving_client)
+
+    answer = serving_client.put("/devices/aa:bb:cc:dd:ee:ff", json={"agents": ["sam"]})
+
+    assert answer.json()["notice"] == BINDING_NOTICE
+
+
+def test_a_binding_to_an_agent_the_server_has_not_loaded_names_the_restart(
+    serving_client: TestClient,
+) -> None:
+    """The write lands, and the device cannot reach it until this server
+    builds that agent's providers, which happens at a start."""
+    _pipeline(serving_client)
+    serving_client.put("/agents/poet", json={"prompt": "You are a poet."})
+
+    answer = serving_client.put("/devices/aa:bb:cc:dd:ee:ff", json={"agents": ["poet"]})
+
+    assert answer.status_code == 200
+    assert answer.json()["notice"] == RESTART_NOTICE
+
+
+def test_the_default_agent_follows_the_same_rule(serving_client: TestClient) -> None:
+    _pipeline(serving_client)
+    serving_client.put("/agents/poet", json={"prompt": "You are a poet."})
+
+    assert serving_client.put("/default-agent", json={"name": "sam"}).json()["notice"] == (
+        BINDING_NOTICE
+    )
+    assert serving_client.put("/default-agent", json={"name": "poet"}).json()["notice"] == (
+        RESTART_NOTICE
+    )
+
+
+def test_removing_a_binding_is_always_live(serving_client: TestClient) -> None:
+    """Nothing has to be loaded for a device to stop being served, so
+    neither delete has a case where it waits for a restart."""
+    _pipeline(serving_client)
+    serving_client.put("/devices/aa:bb:cc:dd:ee:ff", json={"agents": ["sam"]})
+
+    assert serving_client.delete("/devices/aa:bb:cc:dd:ee:ff").json()["notice"] == (
+        BINDING_NOTICE
+    )
+    assert serving_client.delete("/default-agent").json()["notice"] == BINDING_NOTICE
+
+
+def test_everything_else_still_waits_for_a_restart(serving_client: TestClient) -> None:
+    """The exception is device bindings, and the loaded agents do not
+    widen it: writing the agent itself is still a boot-time change."""
+    _pipeline(serving_client)
+
+    answer = serving_client.put("/agents/sam", json={"prompt": "You are Sam still."})
+
+    assert answer.json()["notice"] == RESTART_NOTICE
 
 
 def test_an_empty_database_becomes_a_working_configuration(

@@ -29,7 +29,7 @@ Nothing logs the token, a request body, or an Authorization header.
 import hmac
 import logging
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Collection, Iterator, Sequence
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -61,9 +61,11 @@ from samtal_server.config.models import (
 from samtal_server.config.secrets import SecretLocation, load_keys
 from samtal_server.config.store import ConfigStore
 from samtal_server.config.writes import (
+    BINDING_NOTICE,
     CLEARED_DEFAULT_AGENT,
     RESTART_NOTICE,
     WROTE_AGENT_DEFAULTS,
+    binding_notice,
     bound_device,
     cleared_secret,
     deleted_agent,
@@ -101,7 +103,13 @@ API_DESCRIPTION = (
     "carries a bearer token, whose value is the environment variable "
     "`server.api.secret_env` names.\n\n"
     "Configuration is a boot-time snapshot, so a successful write applies at the "
-    "next server start rather than immediately, and every write says so.\n\n"
+    "next server start rather than immediately. Device bindings are the one "
+    "exception: a running server reads them, and the default agent, as a device "
+    "asks for them, so binding or unbinding a device applies at that device's "
+    "next OTA check or connection. The exception ends where the agent does, "
+    "since a server builds an agent's providers at boot: a binding naming an "
+    "agent this server has not loaded waits for the restart that loads it. Every "
+    "write says which of the two happened, in its `notice`.\n\n"
     f"{API_OPTIONS_NOTE}"
 )
 
@@ -394,24 +402,38 @@ class Acknowledgement(BaseModel):
     )
     notice: str = Field(
         description=(
-            "When the change takes effect. Configuration is a boot-time snapshot, so "
-            "this is always the same sentence: it applies at the next server start."
+            "When the change takes effect, as one of two sentences. Configuration is a "
+            "boot-time snapshot, so most writes apply at the next server start. A "
+            "device binding and the default agent are read by the running server, so "
+            "they apply at the device's next OTA check or connection with no restart, "
+            "unless they name an agent this server has not loaded, which is the case "
+            "that carries the restart sentence again."
         )
     )
 
 
-def build_api(token: str, database_dir: Path) -> FastAPI:
+def build_api(
+    token: str, database_dir: Path, loaded_agents: Collection[str] = ()
+) -> FastAPI:
     """The sub-application the server mounts: the routes, gated.
 
     `token` is compared against every request's bearer token, and is
     resolved once at app build by `api_token` below rather than read per
     request, so a deployment that forgot the variable is refused at boot
     instead of at the first call.
+
+    `loaded_agents` are the agents the server around this application
+    built providers for at boot, which is what a device write's
+    acknowledgement needs in order to say whether the write is live: a
+    binding to an agent nothing loaded waits for a restart. Empty is the
+    honest answer for an application built without a server around it,
+    and answers every write with the restart sentence.
     """
     api = _application()
     # Attached rather than closed over: the read and write routes take
     # it with Depends(...), and milestone 1 has none of them yet.
     api.state.store = store_dependency(database_dir)
+    api.state.loaded_agents = frozenset(loaded_agents)
     # Added last is outermost, so a failure inside the gate itself
     # answers as sanitized as one inside a handler.
     api.add_middleware(_BearerGate, token=token)
@@ -487,6 +509,19 @@ def _store(request: Request) -> Iterator[ConfigStore]:
 
 
 StoreDep = Annotated[ConfigStore, Depends(_store)]
+
+
+def _loaded_agents(request: Request) -> frozenset[str]:
+    """Which agents the server around this application loaded at boot.
+
+    Taken from the application for the reason the store is: the document
+    is rendered from an application built without a server, and nothing
+    a route declares may depend on there being one.
+    """
+    return request.app.state.loaded_agents
+
+
+LoadedAgentsDep = Annotated[frozenset[str], Depends(_loaded_agents)]
 
 
 def _problems(*statuses: int) -> dict[int | str, dict[str, Any]]:
@@ -772,12 +807,21 @@ def _writes(api: FastAPI) -> None:
         responses=_problems(401, 409, 422, 500),
         openapi_extra=_request_body(DeviceBinding),
     )
-    def write_device(mac: str, body: RawBody, store: StoreDep) -> dict[str, str]:
+    def write_device(
+        mac: str, body: RawBody, store: StoreDep, loaded: LoadedAgentsDep
+    ) -> dict[str, str]:
         """Bind one device to one or more agents. The MAC is normalized
-        before it is written, so the two spellings reach one row."""
+        before it is written, so the two spellings reach one row.
+
+        The running server reads this binding, so the device meets it at
+        its next check-in rather than at the next restart; what the
+        acknowledgement says depends on whether the agents named are
+        ones that server loaded."""
         agents = _agents(body)
         store.bind_device(mac, agents)
-        return _acknowledge(bound_device(_mac(mac), agents))
+        return _acknowledge(
+            bound_device(_mac(mac), agents), binding_notice(_unloaded(agents, loaded))
+        )
 
     @api.delete(
         "/devices/{mac}",
@@ -786,9 +830,12 @@ def _writes(api: FastAPI) -> None:
     )
     def remove_device(mac: str, store: StoreDep) -> dict[str, str]:
         """Remove one device's binding, which with no default agent set
-        means the device is refused at the handshake."""
+        means the device is refused at the handshake. Live, with no
+        agent to be loaded or not: the device stops being served at its
+        next check-in, though a conversation already running is left to
+        finish."""
         store.delete_device(mac)
-        return _acknowledge(deleted_device(_mac(mac)))
+        return _acknowledge(deleted_device(_mac(mac)), BINDING_NOTICE)
 
     @api.put(
         "/default-agent",
@@ -796,11 +843,17 @@ def _writes(api: FastAPI) -> None:
         responses=_problems(401, 409, 422, 500),
         openapi_extra=_request_body(DefaultAgentName),
     )
-    def write_default_agent(body: RawBody, store: StoreDep) -> dict[str, str]:
-        """Set the agent an unbound device reaches."""
+    def write_default_agent(
+        body: RawBody, store: StoreDep, loaded: LoadedAgentsDep
+    ) -> dict[str, str]:
+        """Set the agent an unbound device reaches. Read by the running
+        server the way a binding is, so it applies to the next device
+        that asks unless the agent it names was written since boot."""
         name = _name(body)
         store.set_default_agent(name)
-        return _acknowledge(wrote_default_agent(name))
+        return _acknowledge(
+            wrote_default_agent(name), binding_notice(_unloaded([name], loaded))
+        )
 
     @api.delete(
         "/default-agent",
@@ -810,13 +863,24 @@ def _writes(api: FastAPI) -> None:
     def remove_default_agent(store: StoreDep) -> dict[str, str]:
         """Unset it, leaving the devices map as the allowlist.
         Idempotent, like the CLI: there is no such thing as a default
-        agent that was already not set."""
+        agent that was already not set. Live, like the delete above:
+        the next unbound device to ask is turned away."""
         store.clear_default_agent()
-        return _acknowledge(CLEARED_DEFAULT_AGENT)
+        return _acknowledge(CLEARED_DEFAULT_AGENT, BINDING_NOTICE)
 
 
-def _acknowledge(what: str) -> dict[str, str]:
-    return {"wrote": what, "notice": RESTART_NOTICE}
+def _acknowledge(what: str, notice: str = RESTART_NOTICE) -> dict[str, str]:
+    """What a write answers with. The restart sentence is the default
+    because it is the contract for everything except the two the running
+    server re-reads, and a new write route should have to say that it is
+    one of them."""
+    return {"wrote": what, "notice": notice}
+
+
+def _unloaded(agents: Sequence[str], loaded: Collection[str]) -> list[str]:
+    """The names a write mentioned that this server has not built an
+    agent for, which is what stands between the write and the device."""
+    return [name for name in agents if name not in loaded]
 
 
 def _mac(mac: str) -> str:
