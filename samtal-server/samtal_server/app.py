@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
 
-from samtal_server import __version__, ota, ws
+from samtal_server import __version__, onboarding, ota, ws
 from samtal_server.auth import build_device_auth
 from samtal_server.build_info import revision
 from samtal_server.capture import CaptureStore, DeviceFacts
@@ -148,8 +148,18 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
 
     # The OTA router is built here rather than imported ready-made: its
     # path is configuration, and a module-level router would have been
-    # decided before the config was read.
-    app.include_router(ota.build_router(app.state.config.server.ota_path))
+    # decided before the config was read. A null path unmounts it, which
+    # is how a deployment retires it once every board it serves has been
+    # moved to the onboarding path below.
+    if app.state.config.server.ota_path is not None:
+        app.include_router(ota.build_router(app.state.config.server.ota_path))
+    # The same handlers at the short alias an operator types into a
+    # captive portal. Its key is derived from the device-auth secret, so
+    # there is nothing to configure and nothing to store; with auth off
+    # there is no secret and the route mounts keyless.
+    if app.state.config.server.onboarding.enabled:
+        key = onboarding.onboarding_key(app.state.config)
+        app.include_router(onboarding.build_router(key))
     app.include_router(ws.router)
 
     # Mounted last, so the device-facing routes are what this app is
