@@ -87,8 +87,17 @@ and subagents run no GitHub commands.
 `grep -in` for `hello`, `mcp`, `wake`, `detect`, `listen` and `facts`
 across the three documents, with every hit read: 30 hits in
 `docs/concepts.md`, 15 in `docs/xiaozhi-notes.md`, 21 in
-`docs/glossary.md`. No contradiction remained, and no further edit was
-needed.
+`docs/glossary.md`. The pass concluded that no contradiction remained
+and that no further edit was needed.
+
+That conclusion was wrong, and the PR review found what it missed: the
+protocol notes' pre-existing discovery-race entry promised that a first
+utterance beating discovery "runs without device tools and the next one
+has them", which guarantees a delivery the plan's own resolution says
+is not guaranteed, since discovery is backgrounded precisely because a
+board may never answer. The entry now says that a first utterance can
+run without the tools and that later utterances have them if discovery
+completes. See the PR review round below for the fix and its commit.
 
 The entries that were verified and deliberately left alone:
 
@@ -101,10 +110,8 @@ The entries that were verified and deliberately left alone:
   terms, and its Listening modes entry ("the firmware picks realtime
   whenever AEC is on") matches the concepts bullet's AEC claim.
 - The glossary's MCP entry ("the device publishes its own controls to
-  the server over it") and the protocol notes' "The device is the MCP
-  server, and discovery is a race" entry agree with the concepts
-  bullet's deferral, which is why the concepts page does not restate
-  the race.
+  the server over it") agrees with the concepts bullet's deferral,
+  which is why the concepts page does not restate the race.
 - The glossary's OTA endpoint entry describes the reply (WebSocket URL
   and auth token) and says nothing about what the request reports, so
   it neither agrees nor disagrees with the new phase list. Adding the

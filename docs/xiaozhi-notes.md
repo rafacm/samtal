@@ -205,9 +205,11 @@ by the device rather than by the problem.
   or substitute for.
 
 - **The device is the MCP server, and discovery is a race.** Tools are
-  fetched in a background task after `hello`, so a first utterance that
-  beats discovery runs without device tools and the next one has them. A
-  device that declared its tools in `hello` would remove the race.
+  fetched in a background task after `hello`, deliberately so, because the
+  conversation must not wait on a board that may never answer. A first
+  utterance that beats discovery runs without device tools; if discovery
+  completes, later utterances have them, possibly only from the second one
+  on. A device that declared its tools in `hello` would remove the race.
 
 - **We serve configuration through OTA and never images**, but that is our
   choice rather than a limit: the update channel is fully built on the
