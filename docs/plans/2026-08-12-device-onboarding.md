@@ -463,7 +463,15 @@ legacy segment is a credential the logs must not carry (the derived
 key is the recorded exception, the `ota_path` segment is not). The
 GET describe handler prints the same URL line for the path it was
 reached on. `public_url` is validated as an `http(s)` origin,
-optionally with a path prefix, trailing slash normalized.
+optionally with a path prefix, trailing slash normalized, and it
+refuses userinfo, a query, or a fragment without quoting the
+rejected value, the same no-echo posture the config validators
+already hold. The `websocket_url` fallback constructs its origin
+from the parsed hostname and port, never from the raw `netloc`,
+because the current websocket validator accepts any
+`ws://`/`wss://` string and a `user:password@host` must not reach
+a log line through the banner. Sentinel no-leak assertions cover
+the validation errors, the banner, and describe responses.
 
 ## Module layout
 
@@ -515,7 +523,10 @@ New coverage, by milestone:
   byte-identical body between short and legacy paths; the 404 hint
   logged with nothing about the correct key in any response; the
   trailing-slash 307 preserving POST bodies on both paths; banner
-  source selection naming which origin it used; the describe line.
+  source selection naming which origin it used; the `public_url`
+  refusals (userinfo, query, fragment) without the value echoed,
+  and a sentinel-userinfo `websocket_url` never reaching the
+  banner or describe; the describe line.
 - **Unit, M2**: a bind through the repository observed by the next
   OTA check and websocket connect on the same app with no rebuild;
   delete stopping issuance; the unloaded-agent filter with its
@@ -738,6 +749,11 @@ addressing it lands.
    websocket URL validator accepts userinfo, and a naive origin
    derivation from `netloc` would log `user:password@host`; the
    API client already strips and refuses userinfo.
+   *Resolution*: `public_url` refuses userinfo, query, and
+   fragment without quoting the rejected value; the websocket
+   fallback builds its origin from parsed hostname and port,
+   never raw `netloc`; sentinel no-leak assertions cover the
+   validation errors, the banner line, and describe responses.
 10. **P2: the pending listing route can be shadowed by the
     existing MAC route.** Starlette matches in registration
     order, so `GET /api/devices/pending` registered after
