@@ -846,3 +846,133 @@ with the OpenAPI drift check inside the unit lane. Nothing here is
 claimed about hardware: the ceremony has been driven only against the
 simulator and the served app, and whether a factory board shows the code,
 speaks it, and connects after a claim is milestone 5's checkpoint.
+
+### PR #117 review round
+
+One external review of the pull request's diff: codex CLI, model
+gpt-5.6-sol, read-only, 2026-08-12. Eight findings, verdict mergeable
+after fixes; each is fixed with a commit of its own. Five of the eight
+are one shape, and it is worth saying once: this milestone gave three
+attacker-reachable strings a new reader (a header, a path segment, and
+an agent name typed beside a code), and gave one in-memory fact a new
+authority (an empty resolution now decides whether a claim ticket is
+minted). Every P1 below is a place where the old handling of such a
+value was right for its old reader and wrong for the new one.
+
+1. **P1: production access logs exposed secrets and rejected values.**
+   Uvicorn's access log was on and its loggers propagate into the root
+   handler, so the legacy request line carried the secret `ota_path`
+   and a claim's carried the rejected code.
+   *Resolution*, 481cf28: `access_log=False` in the one uvicorn
+   configuration `serve()` now builds, rather than a sanitized
+   route-template access log. An access line was never part of the
+   observability surface this project decided on
+   (`docs/adr/2026-08-04-json-logs-are-the-observability-surface.md`):
+   what an operator reads is the structured events, which name the
+   device, the agent and the outcome, and are written by handlers that
+   know which of their values may be said out loud. A second vocabulary
+   to keep sanitized would be a second one to get wrong. The test runs a
+   real server through that configuration at INFO with both sentinels in
+   real request paths and asserts both formats are clean; it fails with
+   the access log on, which is how the assertion is known to be about
+   something.
+2. **P1: the legacy activation redirect returned the OTA credential in a
+   `Location` header.** Only one spelling of each legacy route was
+   registered, so Starlette's own trailing-slash handling answered the
+   other with a 307 whose `Location` was the corrected URL, which on
+   this router is the deployment's secret path. The base route had the
+   same shape, reachable by a portal that stripped the slash.
+   *Resolution*, 2d8412f: both spellings of all three legacy routes are
+   registered and dispatched directly, so there is no redirect left to
+   carry anything. The short onboarding path keeps its guarded redirect,
+   because its key is deliberately printable and the miss branch is what
+   the key check exists for. The parametrized trailing-slash test splits:
+   the short path still asserts the 307, and the legacy one asserts the
+   reply, no `Location`, and the segment absent from the headers.
+3. **P1: a rejected `Device-Id` reached the log and the response.**
+   `normalize_mac`'s refusal names the value it refused, which is right
+   for a configuration file and wrong for a header on an
+   unauthenticated endpoint; a newline in it forged a log entry.
+   *Resolution*, d076387, with the integration lane's own assertion in
+   fd71771: one fixed sentence on both the configuration check and the
+   activation poll, saying what a Device-Id has to be and that what
+   arrived is not repeated. The rule is stated on the refusal
+   helper rather than at the two call sites, since it is about every
+   caller of it. Sentinel assertions over the body, the headers, both
+   log formats and the process's own streams.
+4. **P1: add-by-code echoed the agent names it refused.** The
+   repository's unresolved-reference refusal names them, and this is
+   the one route where an agent name is typed by hand beside an
+   activation code.
+   *Resolution*, 7e5f580: the claim answers with a sentence naming the
+   field rather than its contents and pointing at `config list`. Only
+   that refusal is re-worded: one about the server rather than the
+   request (a busy database, unreadable stored state) travels out as
+   itself, or a retryable failure would read as a bad agent name. It is
+   recorded and re-raised outside the handler, since `from None` clears
+   the cause and leaves the context. Identifying the failing *index*
+   was considered and declined: the handler cannot know which name the
+   repository objected to without either parsing its sentence or
+   restating its rule, and both are worse than naming the field.
+   `PUT /devices/{mac}` keeps the repository's own wording, per the
+   reviewer's scope note; the leak there is the same shape and predates
+   this work, and is recorded here rather than fixed out of scope.
+5. **P1: a failed database read could mint a code for a bound device.**
+   The live view's fallback answered from the boot snapshot in the same
+   shape as a successful read, so the activation gate could not tell
+   "nothing is bound" from "this server could not find out", and a
+   device bound after boot was offered a code while the read was
+   failing.
+   *Resolution*, 3818942: `DeviceAgents` carries whether it is
+   authoritative. Token issuance keeps the fallback unchanged, since a
+   stale answer there only repeats what boot decided; activation refuses
+   to act on one and says so. A view with no database behind it is
+   authoritative, the snapshot being the whole truth there is, which is
+   what the unit lane and an embedded server have.
+6. **P1: a stale code could overwrite a newer binding.** The claim
+   called `bind_device`, an upsert, and pending entries survived a
+   covering write, so a code issued minutes earlier replaced a binding
+   made by another request.
+   *Resolution*, 203c1d0: the repository grows `claim_device`, a
+   conditional bind that reads the device row and the default agent
+   inside the same transaction as the write and refuses if either has
+   taken the device, raising `DeviceAlreadyBoundError`. Two decisions
+   recorded: the refusal has its own sentences rather than reusing the
+   read-the-screen one, because what happened is worth knowing and the
+   MAC may be named (it is already in the acknowledgement and the log);
+   and it maps to 404, since what the request addressed, a device
+   waiting to be claimed under this code, is not there. The entry is
+   consumed rather than released on that refusal, being claimable by
+   nobody now. Beside it is housekeeping: a device bound by its MAC
+   leaves the listing, and setting a default agent empties it. The
+   condition is the guarantee and the housekeeping is not: a write made
+   where the table cannot be reached (`--local`, a second process)
+   reconciles nothing, which is how both race tests write.
+7. **P2: the claim's acknowledgement was built from the request.** A
+   name sent with spaces bound the loaded agent while the answer named
+   the spaced string and demanded a restart.
+   *Resolution*, 2e1fccb: it answers with the `BoundDevice` the
+   repository returns, which is what binding by MAC was already changed
+   to do in the previous milestone's review round. One rule for both
+   routes: what a write says it did is about the row.
+8. **P2: a failed claim near expiry was not claimable again.** Release
+   only cleared the flag, and a write that fails on a busy database
+   takes the ten-second busy timeout, long enough to step over a
+   deadline with seconds left, so "run the command again" was answered
+   with "no device is waiting".
+   *Resolution*, e507a9e: a release moves the deadline out to at least
+   a minute from now, which is what makes that advice true. Extension
+   only, so a code with most of its ten minutes left keeps them, and it
+   is a grace rather than a reprieve: a code nobody claims afterwards
+   expires the way every other one does. The alternative considered was
+   pausing the clock across the reservation, which preserves the total
+   lifetime exactly but can hand back milliseconds, which is the same
+   unactionable answer in a smaller font.
+
+One discovery from the round, recorded because a later reader will meet
+it: restoring a file with `git checkout <file>` during this work
+discarded uncommitted edits to it, exactly as `AGENTS.md` warns, and
+`claim_device` had to be written twice.
+
+Full lanes after the fixes: ruff clean, both suites green, both drift
+checks unchanged (counts in the PR's verification section).
