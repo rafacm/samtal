@@ -101,11 +101,13 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     # kept nowhere else, least of all on app.state, and never logged.
     # The agents go with it because a device write's acknowledgement
     # says whether the device can reach what it was just bound to, and
-    # only this server knows what it loaded.
+    # only this server knows what it loaded, and the pending table goes
+    # with it because claiming a code is how a device is bound.
     api = build_api(
         api_token(app.state.config),
         app.state.config.server.database.dir,
         app.state.config.agents,
+        app.state.pending,
     )
     # One registry per app: what decides whether there is room for the
     # next conversation, and what the drain reaches the live ones through.

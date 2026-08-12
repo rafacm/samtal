@@ -30,8 +30,9 @@ import hmac
 import logging
 import os
 from collections.abc import Callable, Collection, Iterator, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import Body, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -79,6 +80,17 @@ from samtal_server.config.writes import (
 )
 from samtal_server.db import open_database
 
+if TYPE_CHECKING:
+    # For the reader, never at runtime. The pending table is a device
+    # concern, and its module imports the OTA endpoint, which imports
+    # the websocket session and everything a conversation needs; this
+    # application is also what `config openapi` renders a document from,
+    # with no server anywhere, and it must not have to load any of that
+    # to do it. The table arrives as an argument and is used through the
+    # small surface named here.
+    from samtal_server.onboarding import PendingDevice as PendingRecord
+    from samtal_server.onboarding import PendingDevices
+
 logger = logging.getLogger(__name__)
 
 # Where the sub-application is mounted on the server's own port. A
@@ -109,6 +121,13 @@ API_DESCRIPTION = (
     "since a server builds an agent's providers at boot: a binding naming an "
     "agent this server has not loaded waits for the restart that loads it. Every "
     "write says which of the two happened, in its `notice`.\n\n"
+    "A device with no binding and no default agent to cover it is answered at its "
+    "configuration check with a six-digit activation code, which it shows on its "
+    "screen and speaks. `/devices/pending` lists the devices showing one, keyed by "
+    "the code, and posting to `/devices/pending/{code}` binds the device showing it. "
+    "That listing is the running server's own state rather than stored "
+    "configuration: a restart forgets it, and the devices come back with fresh "
+    "codes.\n\n"
     f"{API_OPTIONS_NOTE}"
 )
 
@@ -116,12 +135,24 @@ API_DESCRIPTION = (
 # document-level requirement, so both come from one string.
 BEARER_SCHEME = "bearerToken"
 
+class ClaimInFlightError(ConfigError):
+    """Another request is in the middle of claiming the same activation
+    code. Nothing was changed, and the same call may be retried.
+
+    A transport concern rather than a repository one, which is why it
+    lives here: the pending table is runtime state of the server this
+    application is mounted on, and this is the one refusal that comes
+    out of it rather than out of the database.
+    """
+
+
 # What a refusal maps to. Plain ConfigError is the default: a fragment
 # whose shape is wrong, a reference that would be left unresolved, a
 # slot that is not a credential slot, a stage that is not a stage.
 REFUSAL_STATUS: dict[type[ConfigError], int] = {
     UnknownEntityError: 404,
     DatabaseBusyError: 409,
+    ClaimInFlightError: 409,
     StorageError: 500,
     ConfigError: 422,
 }
@@ -245,6 +276,23 @@ SECRET_BODY = (
     "endpoint is the point"
 )
 
+# The two refusals a claim by code can meet. Neither quotes the code
+# back: it is what arrived in the path, and what is worth saying about
+# it is what the operator should read instead.
+UNKNOWN_CODE = (
+    "no device is waiting with that activation code. A code lasts ten minutes and is "
+    "retired the moment it is claimed, and a device that has been waiting longer is "
+    "already showing a fresh one: read the code currently on the device's screen and "
+    "use that. `samtal-server config pending` lists the codes this server is showing "
+    "right now."
+)
+
+CODE_IN_FLIGHT = (
+    "that activation code is being claimed by another request right now. Nothing was "
+    "changed; run the command again in a moment, when the code will either have been "
+    "bound by that request or be free again."
+)
+
 # How the document describes each refusal a route can answer with. The
 # sentence a caller actually receives is the repository's own; these say
 # what the status means.
@@ -252,8 +300,9 @@ PROBLEM_DESCRIPTIONS: dict[int, str] = {
     401: "The request carried no bearer token, or not the one this server was given.",
     404: "Nothing of that identity exists.",
     409: (
-        "Another process holds the configuration database's write lock. Nothing was "
-        "changed and the request can be retried."
+        "Something this request needs is held by another one: the configuration "
+        "database's write lock, or the activation code a concurrent claim is already "
+        "binding. Nothing was changed and the request can be retried."
     ),
     422: (
         "The request names something that cannot be addressed, such as a stage that is "
@@ -359,6 +408,52 @@ class ConfigDocument(BaseModel):
     )
 
 
+class PendingDevice(BaseModel):
+    """One device waiting to be claimed, as the listing shows it.
+
+    The listing is keyed by the code, because the code is what the
+    operator has: they are holding a board with six digits on it, and
+    the question the board model and the firmware version answer is
+    which of these entries is that board.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mac: str = Field(
+        description=(
+            "The device's MAC in canonical form, which is the row a successful claim "
+            "writes."
+        )
+    )
+    client_id: str = Field(
+        description="The UUID the device sent as its Client-Id at its last check-in."
+    )
+    board: str = Field(
+        description=(
+            "The board type the device reported, such as "
+            "waveshare-esp32-s3-touch-lcd-1.54, or `unknown` when it reported none. "
+            "Whatever the device said, bounded in length and stripped of anything "
+            "unprintable."
+        )
+    )
+    firmware: str = Field(
+        description=(
+            "The firmware version the device reported, or 0.0.0 when it reported none."
+        )
+    )
+    first_seen: str = Field(
+        description="When this device first checked in, as an ISO-8601 instant in UTC."
+    )
+    last_seen: str = Field(description="Its most recent check-in, in the same form.")
+    expires_at: str = Field(
+        description=(
+            "When this code stops being claimable. The device re-checks every couple of "
+            "minutes and displays whatever the fresh reply carries, so an expired code "
+            "is replaced on the screen rather than leaving the device stranded."
+        )
+    )
+
+
 class DefaultAgent(BaseModel):
     """The agent an unbound device reaches."""
 
@@ -412,7 +507,10 @@ class Acknowledgement(BaseModel):
 
 
 def build_api(
-    token: str, database_dir: Path, loaded_agents: Collection[str] = ()
+    token: str,
+    database_dir: Path,
+    loaded_agents: Collection[str] = (),
+    pending: "PendingDevices | None" = None,
 ) -> FastAPI:
     """The sub-application the server mounts: the routes, gated.
 
@@ -427,17 +525,36 @@ def build_api(
     binding to an agent nothing loaded waits for a restart. Empty is the
     honest answer for an application built without a server around it,
     and answers every write with the restart sentence.
+
+    `pending` is the serving app's table of devices showing activation
+    codes, shared rather than copied: the OTA endpoint writes it and the
+    claim route reads it, and they are the same object or the ceremony
+    does not work. An application built without a server gets a table of
+    its own, which is empty and stays empty, so every code is unknown.
     """
     api = _application()
     # Attached rather than closed over: the read and write routes take
     # it with Depends(...), and milestone 1 has none of them yet.
     api.state.store = store_dependency(database_dir)
     api.state.loaded_agents = frozenset(loaded_agents)
+    api.state.pending = pending if pending is not None else _empty_pending()
     # Added last is outermost, so a failure inside the gate itself
     # answers as sanitized as one inside a handler.
     api.add_middleware(_BearerGate, token=token)
     api.add_middleware(_SanitizedErrors)
     return api
+
+
+def _empty_pending() -> "PendingDevices":
+    """A table for an application built without a server around it.
+
+    Imported here rather than at module scope, which is the point of the
+    seam: `document()` never calls this, so rendering the contract still
+    loads nothing of the device stack.
+    """
+    from samtal_server.onboarding import PendingDevices
+
+    return PendingDevices()
 
 
 def document() -> dict[str, Any]:
@@ -521,6 +638,41 @@ def _loaded_agents(request: Request) -> frozenset[str]:
 
 
 LoadedAgentsDep = Annotated[frozenset[str], Depends(_loaded_agents)]
+
+
+def _pending(request: Request) -> "PendingDevices":
+    """The devices waiting to be claimed, from the server this
+    application is mounted on. Taken from the application for the reason
+    the store is."""
+    return request.app.state.pending
+
+
+# Annotated `Any` rather than the real type on purpose: FastAPI resolves
+# a route's annotations at import, so a forward reference to a class
+# this module deliberately does not import at runtime would fail to
+# resolve. The dependency function above carries the honest type.
+PendingDep = Annotated[Any, Depends(_pending)]
+
+
+def _pending_view(device: "PendingRecord") -> dict[str, Any]:
+    """One waiting device as the listing shows it. The code is the key
+    it is filed under and is deliberately not repeated inside."""
+    return {
+        "mac": device.mac,
+        "client_id": device.client_id,
+        "board": device.board,
+        "firmware": device.firmware,
+        "first_seen": _instant(device.first_seen),
+        "last_seen": _instant(device.last_seen),
+        "expires_at": _instant(device.expires_at),
+    }
+
+
+def _instant(when: float) -> str:
+    """One of the table's timestamps, as a person reads it. UTC, because
+    a listing compared against a server's log is compared against a
+    server's clock."""
+    return datetime.fromtimestamp(when, UTC).isoformat()
 
 
 def _problems(*statuses: int) -> dict[int | str, dict[str, Any]]:
@@ -612,8 +764,29 @@ def _reads(api: FastAPI) -> None:
 
     @api.get("/devices", response_model=dict[str, Envelope], responses=_problems(401, 409, 500))
     def read_devices(store: StoreDep) -> dict[str, Any]:
-        """Every device binding, by the canonical form of its MAC."""
+        """Every device binding, by the canonical form of its MAC. Bound
+        devices only: the ones waiting to be claimed are the listing
+        below, since they have no binding to show."""
         return views.devices(store.load())
+
+    # Registered before `/devices/{mac}`, and this is the whole reason
+    # the two are not written in the order they read: Starlette matches
+    # in registration order, so the other way round the literal word
+    # `pending` would enter MAC normalization and answer 422.
+    @api.get(
+        "/devices/pending", response_model=dict[str, PendingDevice], responses=_problems(401)
+    )
+    def read_pending_devices(pending: PendingDep) -> dict[str, Any]:
+        """Every device showing an activation code, by the code it is
+        showing.
+
+        Runtime state of the server this application is mounted on
+        rather than stored configuration, so it touches no database and
+        cannot answer the refusals a read of the configuration can. A
+        server that restarts forgets it, and the devices come back
+        within a couple of minutes with fresh codes.
+        """
+        return {device.code: _pending_view(device) for device in pending.listing()}
 
     @api.get(
         "/devices/{mac}", response_model=Envelope, responses=_problems(401, 404, 409, 422, 500)
@@ -799,6 +972,55 @@ def _writes(api: FastAPI) -> None:
         there is nothing to delete."""
         store.set_agent_defaults(body)
         return _acknowledge(WROTE_AGENT_DEFAULTS)
+
+    # Before `/devices/{mac}` for the reason the read above is, even
+    # though these two paths cannot collide (one segment against two):
+    # the pair is easier to keep right as a rule than as a case
+    # analysis, and a later route under this prefix inherits it.
+    @api.post(
+        "/devices/pending/{code}",
+        response_model=Acknowledgement,
+        responses=_problems(401, 404, 409, 422, 500),
+        openapi_extra=_request_body(DeviceBinding),
+    )
+    def add_device(
+        code: str,
+        body: RawBody,
+        store: StoreDep,
+        loaded: LoadedAgentsDep,
+        pending: PendingDep,
+    ) -> dict[str, str]:
+        """Bind the device showing this activation code, and retire the
+        code.
+
+        The MAC comes from the pending entry, so the operator binds what
+        the board in front of them is showing rather than a MAC they
+        have to go and find. The write itself is the same repository
+        call `PUT /devices/{mac}` makes, so reference checking and
+        transactionality are inherited rather than restated, and the
+        acknowledgement is the same one, naming the MAC that was bound.
+
+        The claim is atomic: the code is reserved before the write and
+        consumed after it, so two operators racing one code produce one
+        bind and one retryable refusal. A write that fails releases the
+        reservation, leaving the code claimable again, because the
+        device is still showing it.
+        """
+        agents = _agents(body)
+        claim = pending.reserve(code)
+        if claim.in_flight:
+            raise ClaimInFlightError(CODE_IN_FLIGHT)
+        if claim.device is None:
+            raise UnknownEntityError(UNKNOWN_CODE)
+        try:
+            store.bind_device(claim.device.mac, agents)
+        except BaseException:
+            pending.release(code)
+            raise
+        pending.consume(code)
+        return _acknowledge(
+            bound_device(claim.device.mac, agents), binding_notice(_unloaded(agents, loaded))
+        )
 
     @api.put(
         "/devices/{mac}",
