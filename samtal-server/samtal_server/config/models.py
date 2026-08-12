@@ -790,7 +790,7 @@ class FillerConfig(BaseModel):
 class AgentDefaults(BaseModel):
     """Provider references every agent inherits unless it names its own.
 
-    Deliberately no prompt: a persona's prompt is its identity, and
+    Deliberately no prompt: an agent's prompt is its identity, and
     inheriting one silently would make two agents the same agent.
     """
 
@@ -855,12 +855,12 @@ class AgentDefaults(BaseModel):
 
 
 class AgentConfig(AgentDefaults):
-    """One persona: a prompt, plus whichever stages it overrides."""
+    """One agent: a prompt, plus whichever stages it overrides."""
 
     prompt: str = Field(
         default="",
         description=(
-            "The persona instruction this agent replies under, sent as the system "
+            "The instruction this agent replies under, sent as the system "
             "prompt on every turn. State the reply language explicitly: a model "
             "otherwise picks one by its training bias."
         ),
@@ -933,7 +933,7 @@ DOMAIN_DESCRIPTIONS: dict[str, str] = {
         "agents the same one."
     ),
     "agents": (
-        "The personas this deployment serves, keyed by agent name. An agent is a "
+        "The agents this deployment serves, keyed by name. An agent is a "
         "prompt plus whichever stages it overrides, and every stage must resolve to "
         "a provider, here or in agent_defaults, for the server to start."
     ),

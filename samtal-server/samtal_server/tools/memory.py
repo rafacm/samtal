@@ -2,7 +2,7 @@
 
 One file per agent, one `- fact` line per remembered item, injected into
 the agent's system prompt on every reply. Memory is keyed by agent and
-not by agent and device, because a persona is one entity across rooms:
+not by agent and device, because an agent is one entity across rooms:
 "remember I am vegetarian", said in the kitchen, holds in the bedroom.
 Telling people apart on a shared device is the voiceprint problem, and
 keying by device would fragment memory without solving it.
