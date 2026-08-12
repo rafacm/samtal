@@ -90,24 +90,37 @@ class DrainingServer(uvicorn.Server):
             super().handle_exit(sig, frame)
 
 
+def uvicorn_config(app: FastAPI, config: Config) -> uvicorn.Config:
+    """How this server is served. Built here rather than inline so that
+    what a deployment runs is one object a test can also run."""
+    return uvicorn.Config(
+        app,
+        host=config.server.host,
+        port=config.server.port,
+        ws_ping_interval=PING_INTERVAL_S,
+        ws_ping_timeout=PING_TIMEOUT_S,
+        timeout_graceful_shutdown=UVICORN_GRACEFUL_SHUTDOWN_S,
+        # Leave uvicorn's loggers to propagate into the root handler
+        # configured at startup, so its lines share our format and
+        # level instead of arriving in a second, fixed one.
+        log_config=None,
+        # And leave the access log off, which is what makes that
+        # propagation safe. An access line is a request line, and two of
+        # this server's request lines are things nothing may print: the
+        # OTA path carries the deployment's secret segment, and an
+        # activation code arrives in the path of a claim, rejected value
+        # and all. Neither was ever part of the observability surface
+        # either (docs/adr/2026-08-04-json-logs-are-the-observability-surface.md):
+        # what an operator reads is the structured events, which name
+        # the device, the agent and the outcome, and are written by
+        # handlers that know which of their values may be said out loud.
+        access_log=False,
+    )
+
+
 def serve(app: FastAPI, config: Config) -> None:
     """Run the server until it is signalled to stop."""
-    server = DrainingServer(
-        uvicorn.Config(
-            app,
-            host=config.server.host,
-            port=config.server.port,
-            ws_ping_interval=PING_INTERVAL_S,
-            ws_ping_timeout=PING_TIMEOUT_S,
-            timeout_graceful_shutdown=UVICORN_GRACEFUL_SHUTDOWN_S,
-            # Leave uvicorn's loggers to propagate into the root handler
-            # configured at startup, so its lines share our format and
-            # level instead of arriving in a second, fixed one.
-            log_config=None,
-        ),
-        app,
-        config.server.drain_s,
-    )
+    server = DrainingServer(uvicorn_config(app, config), app, config.server.drain_s)
     server.run()
 
 
