@@ -195,10 +195,14 @@ by the device rather than by the problem.
   playback reference is available on the device side, where cancelling it is
   a signal-processing problem rather than a statistical one.
 
-- **The wake word is spotted on the chip and never reaches the server.**
-  ESP-SR decides; the server learns only that a session opened. The planned
-  English wake word (`wn9_hiesp`) is a custom build and nothing else, so no
-  amount of server work substitutes for it.
+- **The wake word is spotted on the chip, and its audio never reaches the
+  server.** ESP-SR decides on-device, and no server work changes that: the
+  planned English wake word (`wn9_hiesp`) is a custom build and nothing
+  else. What the server does get is an after-the-fact report: the firmware
+  sends `listen` `detect` with the fired word in `text`, which
+  samtal-server currently debug-logs (`device/session.py`) and does not
+  retain. So the word that fired is knowable; the detection itself is not
+  something the server can hear, tune, or substitute for.
 
 - **The device is the MCP server, and discovery is a race.** Tools are
   fetched in a background task after `hello`, so a first utterance that
