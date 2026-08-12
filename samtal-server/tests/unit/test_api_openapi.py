@@ -139,9 +139,22 @@ def test_the_document_describes_every_route_the_api_serves() -> None:
         "/agents/{name}": ["delete", "get", "put"],
         "/agent-defaults": ["get", "put"],
         "/devices": ["get"],
+        "/devices/pending": ["get"],
+        "/devices/pending/{code}": ["post"],
         "/devices/{mac}": ["delete", "get", "put"],
         "/default-agent": ["delete", "get", "put"],
     }
+
+
+def test_the_pending_listing_is_described_before_the_mac_route() -> None:
+    """Starlette matches in registration order, and the document is
+    generated from that order, so a route registered the wrong way round
+    shows up here as a contract change rather than as a puzzling 422 at
+    runtime. What a request actually meets is asserted in
+    test_config_api_pending.py."""
+    paths = list(json.loads(docgen.openapi())["paths"])
+
+    assert paths.index("/devices/pending") < paths.index("/devices/{mac}")
 
 
 def test_a_write_declares_the_entity_schema_it_takes() -> None:
@@ -158,6 +171,9 @@ def test_a_write_declares_the_entity_schema_it_takes() -> None:
         ("/agents/{name}", "put", "AgentConfig"),
         ("/agent-defaults", "put", "AgentDefaults"),
         ("/devices/{mac}", "put", "DeviceBinding"),
+        # Add-by-code takes the same body as bind-by-MAC: the code names
+        # the device, and the agents are the same argument.
+        ("/devices/pending/{code}", "post", "DeviceBinding"),
         ("/default-agent", "put", "DefaultAgentName"),
         ("/providers/{stage}/{name}/secrets/{slot}", "put", "SecretValue"),
         ("/mcp-servers/{name}/secrets/{slot}", "put", "SecretValue"),
@@ -224,6 +240,15 @@ def test_every_field_a_read_always_answers_with_is_required() -> None:
     }
     assert set(schemas["Envelope"]["required"]) == {"entity", "secrets"}
     assert schemas["ConfigDocument"]["required"] == ["config", "secrets"]
+    assert set(schemas["PendingDevice"]["required"]) == {
+        "mac",
+        "client_id",
+        "board",
+        "firmware",
+        "first_seen",
+        "last_seen",
+        "expires_at",
+    }
 
 
 def test_the_entity_schemas_are_registered_with_their_definitions() -> None:
