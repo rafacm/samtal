@@ -279,13 +279,19 @@ docs/plans/2026-08-12-device-guides-implementation.md
 CI does not trigger, so the checks are run and reported by hand,
 honestly:
 
-- Every claim in the Touch-LCD-1.54 guide is either validated
-  experience already recorded in the repository (the moved README
-  section), verified against the upstream board support code in
-  `vendor/xiaozhi-esp32` (button wiring, power-save timings, MCP
-  tool set), or verified on the physical board during the
-  milestone (the idle-screen description, touch behavior). The
-  implementation doc records which claims got which treatment.
+- Every claim in every guide, stubs included, is classified in a
+  claim-by-claim provenance matrix in the implementation doc:
+  source-derived (verified against the upstream board support
+  code), hardware-verified (validated experience already recorded
+  in the repository, or checked on the physical board during the
+  milestone), or still unverified, in which case the guide itself
+  says so. The matrix records the exact commit of the
+  `vendor/xiaozhi-esp32` checkout the source-derived claims were
+  read from, since `vendor/` is uncommitted and re-cloned; and
+  each wake-word claim names the firmware it was observed on as
+  precisely as known (the tested firmware version, or the factory
+  image filename), because "upstream prebuilt" and "Waveshare
+  shipped" are channels, not versions.
 - The two hardware tables are diffed against each other for the
   agreed shared content, and every link in the new and edited
   files is resolved (a scripted relative-link check over the
@@ -416,6 +422,13 @@ addressing it lands.
    version or factory-image filename for wake-word claims; the
    implementation doc distinguishes source-derived,
    hardware-verified, and still-unverified facts per board.
+   *Resolution*: adopted. Verification now requires the
+   claim-by-claim provenance matrix for all three guides in the
+   implementation doc, classifying each claim as source-derived,
+   hardware-verified, or still unverified (with the guide saying
+   so in the last case), recording the exact vendor checkout
+   commit, and naming the observed firmware as precisely as known
+   for every wake-word claim.
 
 6. **P2: the per-board onboarding sections use a pointer to a
    pointer.** The issue requires each guide to contain an
