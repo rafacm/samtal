@@ -23,7 +23,9 @@ start. It covers four commands (show, delete, clear-secret, set-secret),
 opens the database directly, and says so on stderr every time: a change
 made that way is not observed by a running server until its next start,
 which is the boot-time snapshot contract rather than a hazard, but it is
-not something to discover.
+not something to discover. Device bindings are the exception the server
+side makes, so a `--local` device delete says the device meets it at its
+next check-in, the same sentence the API answers that delete with.
 
 Every failure leaves as a ConfigError printed to stderr with exit code
 1, naming the location and the kind of failure without quoting the value
@@ -60,6 +62,7 @@ from samtal_server.config.secrets import (
 )
 from samtal_server.config.store import ConfigStore, check_transportable
 from samtal_server.config.writes import (
+    BINDING_NOTICE,
     RESTART_NOTICE,
     cleared_secret,
     deleted_agent,
@@ -96,7 +99,8 @@ READ_TIMEOUT_S = 30.0
 LOCAL_NOTICE = (
     "--local is the break-glass path: it reads and writes the database directly, "
     "bypassing the configuration API, and a running server will not observe a change "
-    "made this way until its next start."
+    "made this way until its next start, device bindings excepted: those it reads as "
+    "a device asks for them."
 )
 
 # What --local does not cover, said by naming what it does. The subset is
@@ -228,7 +232,11 @@ def _delete_device(args: argparse.Namespace) -> None:
     if args.local:
         with _store(args) as store:
             store.delete_device(args.mac)
-        _report(deleted_device(_mac(args.mac)))
+        # The same sentence the API answers this delete with. A running
+        # server reads the devices table, so the removal reaches the
+        # device at its next check-in whether the row was deleted
+        # through the API or, as here, underneath it.
+        _report(deleted_device(_mac(args.mac)), BINDING_NOTICE)
         return
     _wrote(_call(args, "DELETE", _path("devices", args.mac)))
 

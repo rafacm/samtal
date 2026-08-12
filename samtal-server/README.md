@@ -757,8 +757,18 @@ is stored, with every secret masked.
 **A change applies at the next server start.** The configuration is read
 once at boot, so an edit made while the server runs is picked up when it
 is restarted, and every mutating command says so. The API says the same
-sentence in the answer to every successful write, because it does not
-hot apply either. Hot apply is a later change; until then, restart.
+sentence in the answer to that write, because it does not hot apply
+either. Hot apply is a later change; until then, restart.
+
+**Device bindings are the exception.** A running server reads the
+devices table and the default agent as a device asks for them, so
+binding a board, unbinding it, or changing the default agent applies at
+that device's next OTA check or connection, with no restart. Those
+writes say so instead. The exception ends where the agent does: a
+binding naming an agent created since the server started resolves to
+nothing until the restart that builds that agent's providers, and the
+acknowledgement says that rather than promising otherwise. A
+conversation already running is never touched by either.
 
 Since a voice is a `tts` provider entry, two agents that should sound
 different reference two entries, and a typical agent is a prompt plus a
@@ -869,10 +879,14 @@ than a fragment: that one, a device binding (`{"agents": [...]}`), and
 the default agent (`{"name": "..."}`), whose DELETE clears it.
 
 **A successful write says when it takes effect.** It answers
-`{"wrote": "...", "notice": "..."}`, and the notice is always the same
-sentence: the configuration is a boot-time snapshot, read once at boot,
-so a write applies at the next server start. Nothing about a running
-conversation changes when a write lands.
+`{"wrote": "...", "notice": "..."}`, and the notice is one of two
+sentences. Most writes carry the boot-time snapshot one: the
+configuration is read once at boot, so the write applies at the next
+server start. A device binding and the default agent carry the other,
+because a running server reads them: they apply at the device's next OTA
+check or connection, unless they name an agent this server has not
+loaded, which brings the first sentence back. Nothing about a running
+conversation changes when a write lands, in either case.
 
 **A refusal carries the sentence the CLI prints**, in `detail`, with a
 status code: 404 for an entity that does not exist, 409 for the
@@ -1531,7 +1545,9 @@ And the operational one, said again because it is the trap of a
 boot-time snapshot: **an edit applies at the next server start.** A
 `config set` against a running deployment is accepted by that server and
 changes nothing it is doing until the process restarts, which both the
-command and the API's answer say every time they write.
+command and the API's answer say every time they write. Binding a device
+is the exception, and says so: the running server reads the binding at
+that device's next check-in.
 
 ### The configuration API in a deployment
 
@@ -1639,7 +1655,7 @@ reaches the API.
 
 Every `--local` invocation prints one line on stderr saying that it
 bypasses the API and that a running server will not observe the change
-until its next start. That is not a warning about a hazard: it is the
+until its next start, device bindings excepted. That is not a warning about a hazard: it is the
 boot-time snapshot contract, said out loud at the one moment an operator
 is most likely to expect otherwise. It is printed rather than enforced
 because there is no reliable way to tell whether a server is running

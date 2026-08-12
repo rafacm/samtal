@@ -38,6 +38,7 @@ from samtal_server.config import cli
 from samtal_server.config.api import MOUNT_PATH, build_api, mount_api
 from samtal_server.config.loader import ConfigError, load_file_config
 from samtal_server.config.secrets import MASK, MASTER_KEY_ENV, generate_key
+from samtal_server.config.writes import BINDING_NOTICE
 from samtal_server.db import DATABASE_FILENAME, open_database, schema
 
 # Not real credentials, and shaped so a substring check for one cannot
@@ -209,6 +210,38 @@ def test_every_mutating_command_says_when_the_write_applies(
     # A read is not a write, and says nothing.
     run("list")
     assert cli.RESTART_NOTICE not in capsys.readouterr().err
+
+
+def test_a_device_write_says_the_device_meets_it_itself(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The exception to the boot-time snapshot, printed verbatim from
+    what the API answered: a running server reads the devices table, so
+    a delete reaches the device at its next check-in rather than at the
+    next start."""
+    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run("set", "agent", "sam", "-f", "-", stdin="llm: claude\n")
+    run("bind-device", "aa:bb:cc:dd:ee:ff", "sam")
+    capsys.readouterr()
+
+    assert run("delete", "device", "aa:bb:cc:dd:ee:ff") == 0
+
+    assert BINDING_NOTICE in capsys.readouterr().err
+
+
+def test_a_local_device_delete_says_the_same_thing(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The break-glass path writes the same row, so it says the same
+    sentence: the two paths must not describe one act differently."""
+    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run("set", "agent", "sam", "-f", "-", stdin="llm: claude\n")
+    run("bind-device", "aa:bb:cc:dd:ee:ff", "sam")
+    capsys.readouterr()
+
+    assert run("--local", "delete", "device", "aa:bb:cc:dd:ee:ff") == 0
+
+    assert BINDING_NOTICE in capsys.readouterr().err
 
 
 def test_a_refused_write_exits_one_with_the_reason(
