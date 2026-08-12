@@ -772,6 +772,10 @@ addressing it lands.
 11. **P3: M1's "no behavior change" acceptance is false.**
     Onboarding defaults on, so M1 adds a reachable route and a
     new startup log line to every deployment.
+    *Resolution*: the acceptance now says legacy OTA behavior is
+    unchanged and names the short route and the banner as the two
+    deliberate additions an upgrading deployment sees.
+
 ## Milestones
 
 One PR per milestone, stacked, ticked with its PR number, each
@@ -786,8 +790,11 @@ per repository convention.
   refusal; key derivation and the short-path router with the
   404-and-hint mismatch branch; the startup banner and the describe
   line; both example configs updated in the same change; CHANGELOG.
-  Accept: the unit M1 coverage above; both lanes and lint green; no
-  behavior change for any configured deployment. Merge gate: the
+  Accept: the unit M1 coverage above; both lanes and lint green;
+  legacy OTA behavior unchanged for every configured deployment,
+  with exactly two deliberate additions visible to an upgrading
+  one, the short route answering beside the legacy path and the
+  banner line at startup. Merge gate: the
   portal-retype hardware check recorded in `docs/xiaozhi-notes.md`.
 - [ ] **M2: live device bindings** (branch
   `feature/device-onboarding-m2`): `DeviceBindings` consumed by the
