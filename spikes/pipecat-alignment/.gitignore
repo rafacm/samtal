@@ -1,9 +1,0 @@
-# Capture artifacts. The measured numbers live in the implementation
-# doc; audio and raw runs do not belong in git.
-runs/
-audio/
-*.wav
-*.aiff
-*.jsonl
-.venv/
-__pycache__/
