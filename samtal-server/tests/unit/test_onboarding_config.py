@@ -196,6 +196,35 @@ def test_a_public_url_that_is_not_an_http_origin_is_refused(url: str) -> None:
 
 
 @pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        (f"https://voice.example:{PASTED}/", "port is not a whole number"),
+        ("https://voice.example:99999/", "port is not a whole number"),
+        (f"https://[::1:{PASTED}/", "cannot be read as a URL"),
+        ("http://[not-an-address/", "cannot be read as a URL"),
+    ],
+)
+def test_a_public_url_with_an_unreadable_host_or_port_is_refused(
+    url: str, expected: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Printed at startup and by the OTA GET, so a value that cannot be
+    read is a value republished verbatim to whoever asks."""
+    with caplog.at_level(logging.DEBUG), pytest.raises(ConfigError) as caught:
+        load_config_from_data({"server": {"public_url": url}})
+
+    message = str(caught.value)
+    assert expected in message
+    assert PASTED not in message
+    assert PASTED not in _chain(caught.value)
+    assert all(PASTED not in record.getMessage() for record in caplog.records)
+
+
+def test_an_ordinary_port_is_kept() -> None:
+    config = load_config_from_data({"server": {"public_url": "http://192.168.1.10:8003"}})
+    assert config.server.public_url == "http://192.168.1.10:8003"
+
+
+@pytest.mark.parametrize(
     "url",
     [
         f"https://admin:{PASTED}@voice.example",

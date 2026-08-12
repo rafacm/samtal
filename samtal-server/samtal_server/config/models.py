@@ -546,26 +546,24 @@ class ServerConfig(BaseModel):
         type, so userinfo is refused rather than stripped: a URL carrying
         a password is a mistake worth naming, and printing it with the
         password quietly removed would hide it. The rejected value is
-        never quoted back, for the same reason.
+        never quoted back, for the same reason. The shared check is what
+        refuses a host that cannot be read and a port that is not a
+        number, both of which would otherwise be republished verbatim by
+        the banner and by the OTA GET.
         """
         if value is None:
             return None
-        parts = urlsplit(value.strip())
-        problem: str | None = None
-        if parts.scheme not in ("http", "https"):
-            problem = "it must start with http:// or https://"
-        elif not parts.hostname:
-            problem = "it names no host"
-        elif "@" in parts.netloc:
-            problem = (
-                "it carries a user:password, which this key must not, since its value "
-                "is printed at startup and handed to a person to type"
-            )
-        elif parts.query or parts.fragment:
-            problem = (
-                "it carries a query or a fragment, and this is an origin with an "
-                "optional path prefix rather than a whole URL"
-            )
+        url = value.strip()
+        problem = url_problem(url, ("http", "https"))
+        if problem is None:
+            # Safe to parse: the shared check answers None only for a
+            # value `urlsplit` read without raising.
+            parts = urlsplit(url)
+            if parts.query or parts.fragment:
+                problem = (
+                    "it carries a query or a fragment, and this is an origin with an "
+                    "optional path prefix rather than a whole URL"
+                )
         if problem is not None:
             raise ValueError(
                 f"this is not a usable public URL: {problem}. Write the origin devices "
