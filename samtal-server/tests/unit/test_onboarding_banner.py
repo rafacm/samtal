@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from samtal_server import onboarding
 from samtal_server.app import create_app
 from samtal_server.config import Config
+from samtal_server.config.models import ServerConfig
 from samtal_server.ota import OTA_PATH
 
 AUTH_SECRET_ENV = "SAMTAL_AUTH_SECRET"
@@ -145,16 +146,22 @@ def test_onboarding_off_names_the_ota_path_without_quoting_it(
     assert "8f3a9c2b1d4e5f60" not in line
 
 
-def test_a_websocket_url_with_userinfo_never_reaches_the_banner(
+def credentialed_config() -> Config:
+    """A configuration no file can produce: the websocket validator
+    refuses userinfo outright (`test_onboarding_config.py` holds that
+    refusal and its no-leak assertions). Built by hand, it is what proves
+    the second line of defence, that the origin is derived from the
+    parsed hostname and port and never from the raw netloc."""
+    server = ServerConfig.model_construct(
+        websocket_url=f"wss://admin:{PASTED}@voice.example/xiaozhi/v1/"
+    )
+    return Config.model_construct(server=server)
+
+
+def test_userinfo_never_reaches_the_banner_even_if_it_slipped_past(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """The websocket validator accepts any ws:// string, userinfo
-    included, so the origin is built from the parsed hostname and port
-    and never from the raw netloc."""
-    config = Config(
-        server={"websocket_url": f"wss://admin:{PASTED}@voice.example/xiaozhi/v1/"}
-    )
-    line = banner_for(config, caplog)
+    line = banner_for(credentialed_config(), caplog)
     assert f"https://voice.example/x/{KEY}/" in line
     assert PASTED not in line
     assert "admin" not in line
@@ -177,11 +184,8 @@ def test_the_describe_line_names_the_path_it_was_reached_on(
     assert f"https://voice.example{OTA_PATH}" in legacy.text
 
 
-def test_the_describe_line_carries_no_userinfo_either() -> None:
-    config = Config(
-        server={"websocket_url": f"wss://admin:{PASTED}@voice.example/xiaozhi/v1/"}
-    )
-    response = TestClient(create_app(config)).get(f"/x/{KEY}/")
+def test_the_describe_portal_line_carries_no_userinfo_either() -> None:
+    response = TestClient(create_app(credentialed_config())).get(f"/x/{KEY}/")
 
     portal = [
         line for line in response.text.splitlines() if line.startswith("Type this into")
