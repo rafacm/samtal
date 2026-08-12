@@ -6,6 +6,7 @@ configuration refusals and live in `test_onboarding_config.py`; what is
 here is what a request meets.
 """
 
+import json
 import logging
 import re
 from typing import Any
@@ -13,6 +14,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from samtal_server import logs
 from samtal_server.app import create_app
 from samtal_server.config import Config
 from samtal_server.onboarding import KEY_LENGTH, derive_key, onboarding_key
@@ -164,6 +166,77 @@ def test_a_wrong_key_says_nothing_about_the_right_one(
         assert answered.status_code == 404
         assert KEY not in answered.text
         assert KEY not in str(answered.headers)
+
+
+def _rendered(records: list[logging.LogRecord]) -> tuple[str, list[dict]]:
+    """The captured records in both shipped formats: the human one, and
+    the JSON one a container writes. A record is only safe when it is
+    safe in both."""
+    text = logging.Formatter(logs.TEXT_FORMAT)
+    formatter = logs.JsonFormatter()
+    lines = [formatter.format(record) for record in records]
+    return "\n".join(text.format(record) for record in records), [
+        json.loads(line) for line in lines
+    ]
+
+
+def test_an_over_typed_key_is_still_quoted_back(caplog: pytest.LogCaptureFixture) -> None:
+    """The rule has to keep the mistake it exists for: a key typed with
+    a character too many is a typo, not an attack."""
+    with caplog.at_level(logging.WARNING):
+        client_for().get(f"/x/{KEY}X/")
+    assert f"{KEY}X" in caplog.text
+    assert KEY in caplog.text
+
+
+@pytest.mark.parametrize(
+    "segment",
+    [
+        # A forged second log entry, which a raw value would produce in
+        # the text format.
+        "AAAA%0ABBBB",
+        "AAAA%0D%0ABBBB",
+        # A control character, invisible in a terminal.
+        "AAAA%00BBBB",
+        # Longer than anything a person types at an eight-character key.
+        "A" * 500,
+        # Right alphabet, still too long to be a typo of one.
+        "AAAAAAAAAAAAAAAA",
+        # An escape sequence, which a terminal would act on.
+        "%1B%5B31mAAAA",
+    ],
+)
+def test_an_unshaped_key_is_counted_rather_than_repeated(
+    segment: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.WARNING):
+        response = client_for().get(f"/x/{segment}/")
+    assert response.status_code == 404
+
+    text, objects = _rendered(caplog.records)
+    assert objects, "the mismatch went unlogged"
+    # Nothing of the attempt in either format, in the message or in the
+    # structured fields.
+    assert "AAAA" not in text
+    assert all("AAAA" not in json.dumps(payload) for payload in objects)
+    # And nothing forged: one object per record, each a single line.
+    assert all(payload["event"] == "onboarding_key_unshaped" for payload in objects)
+    assert all("attempted" not in payload for payload in objects)
+    assert len(text.splitlines()) == len(caplog.records)
+
+
+def test_the_correct_key_is_not_broadcast_at_unshaped_probes(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The key is deliberately logged for a typo, which is a person who
+    is holding it already. A scanner is not, so its line carries the
+    length and nothing else."""
+    with caplog.at_level(logging.WARNING):
+        client_for().get("/x/" + "A" * 500 + "/")
+    text, objects = _rendered(caplog.records)
+    assert KEY not in text
+    assert all(KEY not in json.dumps(payload) for payload in objects)
+    assert objects[0]["attempted_length"] == 500
 
 
 @pytest.mark.parametrize("method", ["get", "post"])
