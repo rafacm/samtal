@@ -19,7 +19,7 @@ import uvicorn
 from dotenv import find_dotenv, load_dotenv
 from fastapi import FastAPI
 
-from samtal_server import logs
+from samtal_server import logs, onboarding
 from samtal_server.app import create_app
 from samtal_server.config import Config, ConfigError
 from samtal_server.config.boot import load_boot_config
@@ -153,6 +153,12 @@ def main() -> None:
     except (ConfigError, ProviderError) as exc:
         print(exc, file=sys.stderr)
         raise SystemExit(1) from None
+
+    # The URL to type into a device's captive portal, said out loud once
+    # the app has been built and before it starts serving. Here rather
+    # than inside create_app, because an app built for a test lane or an
+    # external ASGI server has no operator reading its startup output.
+    onboarding.log_banner(config)
 
     serve(app, config)
 
