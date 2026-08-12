@@ -158,21 +158,41 @@ the `devices` table and `default_agent` (the two inputs of
 else stay boot-snapshot, restart notice unchanged.
 
 The mechanism is a `DeviceBindings` component on `app.state`,
-constructed at boot with the composed snapshot and the database
-directory. Its `agents_for(mac)` opens the database, reads the
-`devices` rows and `default_agent`, and resolves with the same rule
+constructed at app build with the composed snapshot and a read
+engine of its own, created after boot has already run migrations
+and disposed in the app's lifespan. `agents_for(mac)` reads the
+`devices` rows and `default_agent` in one ordinary deferred read
+transaction and resolves with the same rule
 `Config.agents_for_device` applies today (bound list, else default
-agent, else nothing). Three deliberate properties:
+agent, else nothing). Five deliberate properties:
 
-- **Per-lookup read, no cache, no cross-app wiring.** The
+- **Reads never block the event loop and never migrate.** The OTA
+  and session handlers are async, so a lookup that ran
+  `open_database()` inline would put an Alembic check inside
+  `BEGIN IMMEDIATE`, a write lock with a 10-second busy timeout,
+  on the loop (the REST API tolerates exactly that because its
+  handlers run on the threadpool; device paths cannot). The read
+  engine skips the migration check, boot already performed it, and
+  every lookup is awaited off the loop (`asyncio.to_thread` or the
+  threadpool equivalent at each call site). Under WAL a deferred
+  read transaction takes no write lock and does not block on
+  writers, so a held write lock cannot stall a lookup; a
+  contention test holds a real write lock and asserts lookups and
+  unrelated conversations stay live.
+- **Per-lookup transactions, no cache, no cross-app wiring.** The
   alternative (refresh callbacks from the API sub-application into
   the parent app) is less code on the hot path but couples the two
-  apps and misses `--local` writes entirely. A per-lookup open is
-  the API's own per-request pattern, and the call sites are
+  apps and misses `--local` writes entirely. The call sites are
   low-rate: OTA check-ins (boot plus the activation loop's
   re-checks), `/activate` polls (3 s bursts per pending device), and
   websocket connects. If a future fleet makes this measurable the
   change is local to `DeviceBindings`.
+- **The boot contract changes by exactly this much.** `boot.py`'s
+  "nothing after boot reads the database" narrows to "nothing
+  after boot reads the database except `DeviceBindings`, which
+  reads only the `devices` and `domain_settings` tables through
+  its own read engine"; the sentence changes where the contract
+  lives, in the same commit that adds the component.
 - **Resolution filters to agents the boot snapshot loaded.** A
   binding written after boot can name an agent created after boot,
   whose providers were never built; issuing a token for it would
@@ -432,7 +452,9 @@ New coverage, by milestone:
   OTA check and websocket connect on the same app with no rebuild;
   delete stopping issuance; the unloaded-agent filter with its
   distinct log line; the database-failure fallback logging and
-  resolving from the snapshot; the changed write notices.
+  resolving from the snapshot; the contention case, a held write
+  lock while lookups and the loop stay live; the changed write
+  notices.
 - **Unit, M3**: activation object contents for an unbound device
   (code, challenge equals MAC, message layout, empty token beside
   it) and its absence for bound devices and when onboarding is off;
@@ -474,10 +496,11 @@ New coverage, by milestone:
   short URL still helps every new device but is not a recovery path
   for a rotated secret, and the docs say so.
 - **The OTA and websocket paths gain a database read.** Bounded by
-  call rate (boot check-ins, activation bursts, connects) and by
-  the snapshot fallback on failure; the per-lookup open is the
-  API's own accepted pattern, and the component is the single seam
-  if it ever needs a cache.
+  call rate (boot check-ins, activation bursts, connects), run off
+  the event loop through the boot-created read engine with no
+  migration check, unable to block on writers under WAL, and
+  covered by the snapshot fallback on failure; the component is
+  the single seam if it ever needs a cache.
 - **Probing mints codes.** The pending table caps at 128, one live
   code per MAC, entries expire in 10 minutes, and the cap answers
   with today's silence plus a warning, so an outsider who already
@@ -542,6 +565,16 @@ addressing it lands.
    threadpool. Introduce a nonblocking read seam that never runs
    migrations on device paths, and prove a locked database cannot
    stall conversations or the loop.
+   *Resolution*: `DeviceBindings` now holds a read engine created
+   at app build, after boot has already migrated, and disposed in
+   the lifespan; lookups are awaited off the event loop and use
+   ordinary deferred read transactions, which under WAL take no
+   write lock and do not block on writers, and no migration check
+   runs on any device path. The scoped exception to the "nothing
+   after boot reads the database" contract is stated where the
+   contract lives, and the M2 coverage gains the contention test
+   holding a real write lock while lookups and the loop stay
+   live.
 3. **P1: the pending table has no concurrency or single-consumer
    design.** OTA handlers mutate pending state on the event loop
    while API handlers run on the threadpool; two concurrent
