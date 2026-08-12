@@ -177,8 +177,13 @@ verified on hardware" where that is the truth:
   "nǐ hǎo xiǎo zhì" model instead, so reflashing it silently
   changes the wake word. Known quirk: the board can wedge during
   power-management init so that USB still enumerates but nothing
-  responds; no software reset recovers it, a full power cycle
-  (unplug, wait about ten seconds, replug) does.
+  responds; no software reset recovers it, only removing power
+  completely. That means unplugging USB and disconnecting any
+  battery (or holding PWR about 4 seconds for the
+  power-management chip's hardware power-off, if it still
+  responds), waiting about ten seconds, and restoring power; a
+  bare unplug-and-replug is only verified for a setup with no
+  battery attached, and the guide says so.
 
 Device identifiers (MAC addresses, client UUIDs) and deployment
 specifics stay out of the guides; they are user-facing public
@@ -492,6 +497,11 @@ addressing it lands.
    power including any battery, or use the PMIC's four-second
    hardware power-off if it still works; limit "unplug and replug"
    to a verified no-battery setup.
+   *Resolution*: adopted. The stub's recovery wording now says
+   remove all power including any battery, offers the 4-second
+   hardware power-off as the alternative when the
+   power-management chip still responds, and scopes
+   unplug-and-replug to the no-battery setup it was verified on.
 
 10. **P2: the no-leak rule does not cover verification
     artifacts.** The plan excludes identifiers only from the
