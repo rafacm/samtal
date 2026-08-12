@@ -440,6 +440,75 @@ def test_a_plain_websocket_url_behind_tls_is_the_named_misconfiguration(
     assert "Traceback" not in captured.err
 
 
+@pytest.mark.parametrize(
+    ("what", "probe", "websocket"),
+    [
+        ("the probe's scheme upper-cased", "HTTPS", "ws"),
+        ("the reported scheme upper-cased", "https", "WS"),
+        ("both upper-cased", "HTTPS", "WS"),
+        ("mixed case on both", "Https", "Ws"),
+    ],
+)
+def test_the_tls_verdict_compares_schemes_rather_than_prefixes(
+    endpoint, capsys: pytest.CaptureFixture[str], what: str, probe: str, websocket: str
+) -> None:
+    """A scheme is case-insensitive, so `startswith("https://")` on what
+    an operator typed and `startswith("ws://")` on what a server printed
+    were two ways for the misconfiguration this command exists to catch
+    to be reported as healthy."""
+    endpoint(
+        DESCRIBE.format(
+            websocket=f"{websocket}://voice.example/xiaozhi/v1/", url="https://voice.example"
+        )
+    )
+
+    assert cli.main(["doctor", f"{probe}://voice.example/x/ABCDEFGH/"]) == 1, what
+
+    assert "server.websocket_url" in capsys.readouterr().err, what
+
+
+def test_an_upper_case_secure_websocket_url_is_still_healthy(
+    endpoint, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other direction of the same normalization: a `WSS://` behind
+    TLS is right, and must not be read as the fault."""
+    endpoint(
+        DESCRIBE.format(websocket="WSS://voice.example/xiaozhi/v1/", url="https://voice.example")
+    )
+
+    assert cli.main(["doctor", "HTTPS://voice.example/x/ABCDEFGH/"]) == 0
+
+    assert "voice.example/xiaozhi/v1/" in capsys.readouterr().out
+
+
+def test_the_verdict_reads_the_url_the_response_came_from(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A URL typed without its trailing slash is answered by the
+    server's own redirect, and the decision is made on where the
+    response came from rather than on the string that was typed."""
+    app = FastAPI()
+
+    @app.get("/x/ABCDEFGH/")
+    async def described() -> Response:
+        return Response(
+            DESCRIBE.format(
+                websocket="ws://voice.example/xiaozhi/v1/", url="https://voice.example"
+            ),
+            media_type="text/plain",
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "build_client",
+        lambda base_url, token=None: TestClient(app, base_url=base_url),
+    )
+
+    assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH"]) == 1
+
+    assert "server.websocket_url" in capsys.readouterr().err
+
+
 def test_a_plain_websocket_url_behind_plain_http_is_healthy(
     endpoint, capsys: pytest.CaptureFixture[str]
 ) -> None:

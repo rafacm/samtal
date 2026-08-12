@@ -409,10 +409,15 @@ def _doctor(args: argparse.Namespace) -> None:
     reported = _describe(response.text)
     if reported is None:
         raise ConfigError(_not_samtal_server(shown, response))
-    websocket = _reported_websocket(reported["websocket"])
-    if websocket is None:
+    answered = _reported_websocket(reported["websocket"])
+    if answered is None:
         raise ConfigError(_unreadable_websocket(shown))
-    if url.startswith("https://") and reported["websocket"].startswith("ws://"):
+    scheme, websocket = answered
+    # Both sides normalized, and the probe's side taken from the
+    # response rather than from the string an operator typed: `HTTPS://`
+    # is the same scheme as `https://`, and a URL that redirected is
+    # answered by wherever it ended up.
+    if response.url.scheme == "https" and scheme == "ws":
         raise ConfigError(_plain_websocket(shown, websocket))
     print(
         f"{shown} is samtal-server {_printable(reported['version'])}, and sends devices "
@@ -999,9 +1004,14 @@ def _plain_websocket(shown: str, websocket: str) -> str:
     )
 
 
-def _reported_websocket(url: str) -> str | None:
-    """The websocket URL a response named, as it may be printed, or None
-    when it is not a websocket URL this command can read.
+def _reported_websocket(url: str) -> tuple[str, str] | None:
+    """The websocket URL a response named: its normalized scheme and the
+    form that may be printed, or None when it is not a websocket URL
+    this command can read.
+
+    The scheme is returned rather than re-derived by the caller, and it
+    is the parser's normalized one, because a comparison against the
+    literal `ws://` is a comparison a `WS://` walks past.
 
     What arrived is whatever the far end sent, and identifying the far
     end is the whole point of the command, so it is parsed before it is
@@ -1018,9 +1028,11 @@ def _reported_websocket(url: str) -> str | None:
         _ = parsed.port
     except ValueError:
         return None
-    if parsed.scheme.lower() not in ("ws", "wss") or not parsed.hostname:
+    # `urlsplit` lower-cases the scheme it parsed, which is what makes
+    # this a normalization rather than a hope.
+    if parsed.scheme not in ("ws", "wss") or not parsed.hostname:
         return None
-    return _printable(_without_userinfo(parsed))
+    return parsed.scheme, _printable(_without_userinfo(parsed))
 
 
 def _unreadable_websocket(shown: str) -> str:
