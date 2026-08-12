@@ -265,9 +265,18 @@ after expiry (the device re-checks every half minute to two minutes,
 so the screen heals itself; the operator always types what is
 currently displayed). The table caps at 128 pending MACs; at the
 cap, a new unbound device gets today's behavior (empty token, no
-activation object) and a warning names the cap. One live code per
-MAC bounds per-device issuance; the cap bounds the total. These are
-constants in `onboarding.py`, not configuration: nobody has field
+activation object) and a warning names the cap. Minting is also
+rate-limited globally, independently of how many entries are live:
+at most 30 new codes in any sliding 10-minute window, counting
+mints and re-issues but not re-displays of a live code, so an
+attacker who fills and refills the table is bounded per window,
+not only per snapshot. At an exhausted budget a new device gets
+the same silent response and a warning names the budget. One live
+code per MAC per TTL bounds per-device issuance; the cap bounds
+the standing table; the budget bounds the mint rate. The table
+takes an injected clock so expiry and the window are tested
+deterministically. These are constants in `onboarding.py`, not
+configuration: nobody has field
 evidence to tune them by, and a knob nobody can reason about is
 schema noise. If the field says otherwise they graduate to config
 then.
@@ -499,8 +508,10 @@ New coverage, by milestone:
   the bound-but-unloaded state (no code, no token, the
   restart-naming log line, `/activate` staying 202) and both
   add-by-code notices;
-  expiry, re-issue, code uniqueness, the cap answering with today's
-  behavior plus a warning; `/activate` 202/200 on both routers; the
+  expiry, re-issue, code uniqueness, the cap and the global mint
+  budget each answering with today's behavior plus their own
+  warning, driven through the injected clock; `/activate` 202/200
+  on both routers; the
   version-2 checks (bad body, unknown algorithm, challenge
   mismatch) each refused with a distinct reason; add-by-code
   through the API including unknown/expired code wording and
@@ -546,7 +557,8 @@ New coverage, by milestone:
   covered by the snapshot fallback on failure; the component is
   the single seam if it ever needs a cache.
 - **Probing mints codes.** The pending table caps at 128, one live
-  code per MAC, entries expire in 10 minutes, and the cap answers
+  code per MAC, entries expire in 10 minutes, minting is bounded
+  to 30 codes per sliding 10-minute window, and both bounds answer
   with today's silence plus a warning, so an outsider who already
   found the key can at worst fill a table the operator can read;
   binding still requires the API token and a code read off a
@@ -656,6 +668,13 @@ addressing it lands.
    limit.** An attacker fills 128 slots and repeats every ten
    minutes; the issue requires per-MAC and global rate limits, and
    the tests cover only the cap.
+   *Resolution*: code minting gains a global sliding-window budget
+   (30 new codes per 10 minutes, a constant beside the others)
+   independent of the live-entry cap; at exhaustion a new device
+   gets today's silent response and a warning names the budget.
+   One live code per MAC per TTL stays the per-MAC bound. The
+   table takes an injected clock, and the budget, the cap, and
+   expiry are tested deterministically.
 6. **P2: the reused integration fixture deletes the database
    needed for live writes.** `booted` seeds a scratch database,
    exits the temporary directory, and composes a config that
