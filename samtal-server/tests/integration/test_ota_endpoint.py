@@ -133,4 +133,8 @@ def test_unknown_device_is_still_configured(server: str) -> None:
 def test_malformed_device_id_is_refused(server: str) -> None:
     status, body = check_version(server, device_id="not-a-mac")
     assert status == 400
-    assert "is not a MAC address" in body["error"]
+    assert "does not hold a MAC address" in body["error"]
+    # And says what one is, without repeating what arrived: the header
+    # is attacker-controlled text on an unauthenticated endpoint.
+    assert "six colon-separated hex pairs" in body["error"]
+    assert "not-a-mac" not in body["error"]
