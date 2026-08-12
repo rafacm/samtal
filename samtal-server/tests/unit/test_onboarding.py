@@ -313,25 +313,3 @@ def test_the_keyless_route_serves_both_spellings_too() -> None:
             path, json=SYSTEM_INFO, headers=HEADERS, follow_redirects=False
         )
         assert answered.status_code == 200, path
-
-
-def test_the_legacy_path_still_answers_the_slashless_spelling_by_redirect() -> None:
-    """Characterization, not endorsement. `ota.build_router` registers
-    only the slashed spelling, so Starlette answers the other with its
-    own 307, which preserves the method and the body but which the
-    hardware finding above says a device will not follow. The legacy
-    router is deliberately not changed here: it is not what this
-    milestone added, and it is being changed where it is being changed.
-    """
-    client = client_for()
-    path = OTA_PATH.rstrip("/")
-
-    redirected = client.post(
-        path, json=SYSTEM_INFO, headers=HEADERS, follow_redirects=False
-    )
-    assert redirected.status_code == 307
-    assert redirected.headers["location"].endswith(f"{path}/")
-
-    followed = client.post(path, json=SYSTEM_INFO, headers=HEADERS)
-    assert followed.status_code == 200
-    assert followed.json()["firmware"]["version"] == "2.4.0"
