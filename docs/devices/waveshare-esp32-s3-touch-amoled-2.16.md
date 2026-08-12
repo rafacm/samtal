@@ -114,9 +114,14 @@ the next section.
   on its own has only been verified on a setup with no battery
   attached; with a battery connected, USB removal does not remove
   power.
-- **The NVS partition on this board is larger than the example.**
-  Verified in hands-on use: it is `0x6000`, where the walkthrough in
-  [`../xiaozhi-notes.md`](../xiaozhi-notes.md) uses `0x4000` for
-  another board. Generating a replacement partition at the example's
-  size truncates it, so take the size from this board rather than from
-  the example when regenerating.
+- **The NVS partition size is a property of the image, not of the
+  board.** Verified in hands-on use: on the firmware Waveshare ships,
+  the NVS partition is `0x6000`, where the walkthrough in
+  [`../xiaozhi-notes.md`](../xiaozhi-notes.md) uses `0x4000`.
+  Upstream's own images use `0x4000` as well, and put the OTA
+  bookkeeping and the radio calibration data immediately behind it, so
+  a `0x6000` partition written onto an upstream image would overwrite
+  both. The size is not something to copy from this page or from the
+  walkthrough: read the partition table of the image actually flashed
+  on the board in front of you, and use the size it gives, before
+  writing anything to flash.
