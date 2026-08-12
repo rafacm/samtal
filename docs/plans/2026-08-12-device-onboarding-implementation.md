@@ -612,3 +612,237 @@ row is called.
 
 Full lanes after the fixes: ruff clean, both suites green, both
 generated documents current (counts in the PR's verification section).
+
+## Milestone 3: the activation ceremony
+
+The feature the previous two milestones were the ground for: an unbound
+board is answered with a six-digit code instead of an empty token, shows
+and speaks it, and polls until an operator claims it with one command.
+The table of waiting devices, the `activation` section of the OTA reply,
+`/activate` on both routers, the two `/api/devices/pending` routes and
+the two commands that use them.
+
+### The upstream constants, verified
+
+The plan asks the implementer to check `timeout_ms` and the exact
+`message` layout against the vendored sources and record what was found.
+Both were read in `vendor/xiaozhi-esp32` (device) and
+`vendor/xiaozhi-esp32-server` (manager-api).
+
+**`message` is the host, a newline, then the code.**
+`DeviceServiceImpl.buildActivation` sets
+`code.setMessage(frontedUrl + "\n" + cachedCode)`, where `frontedUrl` is
+the console URL from the `server.fronted_url` system parameter, and sets
+`challenge` to the device id (the MAC) in both the fresh and the cached
+branch. `Ota::ParseVersionResponse` stores the string and
+`Application::ShowActivationCode` hands it to the display verbatim.
+samtal sends the same two lines with the origin M1 resolves in place of
+the console URL.
+
+**`timeout_ms` is not sent by upstream at all, and the firmware never
+reads it.** `DeviceReportRespDTO.Activation` has exactly three fields,
+`code`, `message` and `challenge`; nothing in the manager-api sets a
+timeout. On the device, `ota.cc` parses the key into
+`activation_timeout_ms_`, declared in `ota.h` with a default of `30000`,
+and that member appears nowhere else in `main/`: no accessor, no use in
+`application.cc`, no effect on the poll loop, which is a fixed burst of
+ten attempts three seconds apart (`ESP_ERR_TIMEOUT` from a 202) or ten
+seconds apart (any other failure). So `ACTIVATION_TIMEOUT_MS = 30000` is
+the firmware's own default sent back to it: it keeps the object the
+shape issue #40 documents and changes nothing on any board. Recorded
+rather than dropped, because a field that is inert today is exactly the
+kind of thing a later firmware could start reading.
+
+Two more things the same reading settled. The device appends the segment
+itself (`Ota::Activate` adds `/activate` or `activate` depending on
+whether the stored URL ends in a slash), so both spellings arrive as one
+path. And the activation loop exits only when the fresh OTA reply
+carries neither a code nor a challenge, which is why the reply to a
+bound device must omit the whole section rather than send an empty one.
+
+### What landed
+
+**The pending table (`onboarding.py`).** `PendingDevices`, one per app,
+holding `PendingDevice` records keyed by normalized MAC with a code
+index beside them. Constants in the same module: six digits, a
+ten-minute TTL, a cap of 128 waiting devices, and a sliding budget of 30
+mints per ten minutes. The clock is injected. Every operation is one
+step under one `threading.Lock`, held only for in-memory work, and
+records are handed out as copies, so a listing is a moment of the table
+rather than a walk over one being written. `observe` returns an `Offer`
+(a record to show, or the bound that fired, in the words its warning
+prints); `reserve` returns a `Claim` (the record, or `in_flight`), and
+`consume` and `release` end it. Anything a device says about itself
+(`board`, `firmware`, `client_id`, `serial_number`) is truncated to 64
+characters and made printable before it is kept.
+
+**The activation object (`ota.py`).** `check_version` gains
+`_activation(...)`, which gates on onboarding being enabled and on the
+live view resolving to neither a loaded nor an unloaded agent, that
+being database truth: the two together are empty exactly when the
+database holds no binding row for the MAC and no default agent.
+`onboarding.activation_object` renders the four fields. The empty token
+stays beside it, and the reply's `activation` key is absent rather than
+empty whenever there is no ceremony.
+
+**`/activate` (`ota.py`, `onboarding.py`).** `ota.activate` beside
+`check_version` and `describe`, registered by `ota.build_router` at
+`<ota_path>activate` and by `onboarding.build_router` at
+`/x/<key>/activate` behind the same key guard. 200 when the live view
+resolves the MAC to a loaded agent, 202 otherwise. A version-2 body is
+checked for what can be checked (it parses, names a known algorithm,
+echoes the issued challenge), each failure with its own `reason` on an
+`activation_refused` record and none of the body quoted; the serial
+number of a body that passes is recorded as an observed fact.
+
+**The API (`config/api.py`).** `GET /devices/pending` returning the
+listing keyed by code, and `POST /devices/pending/{code}` claiming it.
+The listing route is registered immediately after `/devices` and before
+`/devices/{mac}`. The claim parses its body, reserves, calls
+`ConfigStore.bind_device`, and consumes or releases; it answers with
+`bound_device(...)` and `binding_notice(...)`, the M2 sentences
+unchanged. `build_api` takes the table as a fourth argument the way it
+took the loaded agents.
+
+**The CLI (`config/cli.py`).** `pending` renders a five-column listing
+(code, device, board, firmware, expires) or a sentence saying nothing is
+waiting; `add-device CODE AGENT...` posts the claim. `bind-device`'s
+help now says it takes the MAC you already know and `add-device`'s says
+it takes the code the device is showing, each naming the other.
+
+**Documentation.** `docs/reference/api-openapi.json` regenerated;
+`CHANGELOG.md` under 2026-08-12.
+
+**Tests.** `tests/unit/test_onboarding_pending.py` (the code's shape,
+re-display, expiry and re-issue including the instant of expiry,
+uniqueness, the cap and the budget with their words, re-displays costing
+nothing, the window refilling, the claim lifecycle, a reservation
+outliving its entry's expiry, eight threads racing one code, a listing
+racing a writer, and the bounding of what a device says).
+`tests/unit/test_onboarding_activation.py` (the object's contents and
+the message layout, the empty token beside it, its absence for a bound
+device, for an unknown device under a default agent, with onboarding
+off, and for a bound-but-unloaded device; both bounds through the real
+endpoint; the code in the log with the command that binds it and no code
+in a bound device's record; `/activate` 202 and 200 on both routers, the
+wrong key and the trailing slash; the three version-2 refusals with
+their distinct reasons and no part of the body in either log format).
+`tests/unit/test_config_api_pending.py` (the listing's shape and
+expiry, the route-order regression at the route and through the mount,
+both notices, the retirement of a claimed code, the unknown, expired and
+in-flight refusals, a deterministic two-claim race through the real
+routes, a refused write leaving the code claimable, and codes absent
+from every response they do not belong in).
+`tests/unit/test_config_cli.py` gained the two commands, and
+`tests/unit/test_api_openapi.py` the two routes.
+`tests/integration/test_activation.py` runs the firmware's loop against
+a served app and ends with the restart assertion.
+
+### Deviations from the plan
+
+Three, all narrow.
+
+**`/activate` lives in `ota.py`, not `onboarding.py`.** The plan's
+module layout puts the handler in `onboarding.py`; M1's own note for the
+milestones that follow says the short router registers `ota.check_version`
+and `ota.describe` by reference and that "M3's `/activate` registers on
+both routers the same way", which it cannot do if the handler is in the
+module doing the registering. The handler is therefore the third OTA
+handler, beside the two it is a sibling of, and `onboarding.py` keeps
+the table, the constants and the object rendering. The one import that
+crosses in the other direction (`activation_object`) sits in the
+function body with the comment `describe` already carries.
+
+**The API models the two claim refusals with a new `ConfigError`
+subclass rather than reusing `DatabaseBusyError`.** `ClaimInFlightError`
+lives in `config/api.py` and maps to 409. It is defined there rather
+than in `config/loader.py` because it is the one refusal that comes out
+of the serving app's runtime state instead of the database, and calling
+it a busy database would have been the wrong sentence in a place where
+the sentences are the contract. The document's 409 description now
+covers both.
+
+**The pending table reaches the sub-application as an argument, and the
+type does not.** `build_api(token, dir, loaded_agents, pending)` is the
+seam the plan asks for. What the plan does not anticipate is that
+`config/api.py` must not import `onboarding` at module scope: that
+module imports `ota`, which imports the websocket session and everything
+a conversation needs, and the same application is what `config openapi`
+renders the committed document from with no server anywhere. So the
+import is under `TYPE_CHECKING`, the route's dependency is annotated
+`Any` (FastAPI resolves a route's annotations at import, so a forward
+reference would fail to resolve), and the default empty table is built
+by a function-body import nothing on the document path calls.
+
+### Resolutions of what the plan left open
+
+**Database truth is read through the M2 view, not through a second
+lookup.** `DeviceAgents.agents` and `.unloaded` together are every name
+the database resolved for this MAC before the loaded-agent filter split
+them, so "no binding row and no default agent" is exactly "both are
+empty". No new query, and no second way for the two to disagree.
+
+**The listing publishes instants as ISO-8601 in UTC**, and the table's
+clock is therefore the wall clock rather than a monotonic one: these
+timestamps are read by a person deciding whether the number on the
+screen is this entry, and compared against a server's log.
+
+**The code is the listing's key and is not repeated inside the entry.**
+One place per fact.
+
+**A cap that cannot fire, kept.** With the shipped constants the budget
+strictly dominates the cap: at most 30 codes are minted per ten minutes
+and an entry lives ten minutes, so no more than 30 devices can ever be
+waiting and the cap of 128 can never be reached. Both are implemented
+and tested (the cap with the budget lifted, which the test says out
+loud) because they bound different things and the plan asks for both:
+the cap is what still holds if the budget is ever raised.
+
+**Both bounds log and then fall through.** A device that is refused a
+code gets the `activation_not_offered` warning naming the bound and
+pointing at `bind-device`, and then the ordinary "has no agent" warning,
+because both facts are true and an operator reading either one is where
+they need to be.
+
+### Discoveries
+
+**Upstream's activation object has no `timeout_ms`.** Recorded above,
+because the plan's text and the issue's both name four fields and only
+three of them exist upstream.
+
+**Starlette's slash redirect leaks the key on the activate route too,
+in the other direction.** M1's finding 3 was about `/x/<key>` redirecting
+to `/x/<key>/`; the canonical activate path has no trailing slash, so the
+same mechanism answers `/x/<key>/activate/` with a 307 whose `Location`
+echoes the attempted key. The route is registered behind the guard and
+the redirect issued by hand, which is M1's fix applied in reverse, and
+both directions are asserted.
+
+**A version-1 body and an unreadable one had to be told apart.**
+`_read_json_object` answers `{}` for both, which is right for
+`check_version` and wrong here: `{}` is exactly what a version-1 board
+sends. The reader is now `_json_object`, which returns `None` for a body
+that is not a JSON object, with the old helper built on it.
+
+**The activation loop exits on the reply, not on the poll.** The
+firmware breaks out of `CheckNewVersion` only when a fresh OTA reply
+carries neither a code nor a challenge. A 200 from `/activate` ends the
+inner burst; what ends the ceremony is the check-in after it. That is
+why the integration test asserts the order it does, and why sending an
+empty `activation` object to a bound device would leave a board looping
+forever.
+
+**The CLI's own test fixture builds an application per request.** It
+had to grow one pending table shared across the requests of a test,
+since on a deployment the table is state of the running server and a
+command that could not see what the previous one left in it would be
+exercising a table nobody has.
+
+### Verification
+
+`uv run ruff check .`, `uv run pytest tests/unit -q` and
+`uv run pytest tests/integration -q` from `samtal-server/`, all green,
+with the OpenAPI drift check inside the unit lane. Nothing here is
+claimed about hardware: the ceremony has been driven only against the
+simulator and the served app, and whether a factory board shows the code,
+speaks it, and connects after a claim is milestone 5's checkpoint.

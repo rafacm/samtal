@@ -816,7 +816,8 @@ per repository convention.
   M2 coverage; a bind through the real API observed by a served
   app's next OTA check without restart in the integration lane;
   lanes green.
-- [ ] **M3: the activation ceremony** (branch
+- [x] **[M3: the activation ceremony](2026-08-12-device-onboarding-implementation.md#milestone-3-the-activation-ceremony)**
+  (PR TBD, branch
   `feature/device-onboarding-m3`): the pending table; the
   activation object; `/activate` on both routers; the two
   `/api/devices/pending` routes and the regenerated OpenAPI
