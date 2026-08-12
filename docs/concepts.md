@@ -1,6 +1,6 @@
 # Domain concepts
 
-**Date:** 2026-08-11
+**Date:** 2026-08-12
 
 The domain model of samtal from the user's point of view: the nouns,
 how they relate, and the semantics that were decided on purpose. The
@@ -40,14 +40,28 @@ distinct on purpose:
 - **Identity and declaration.** The `Device-Id` on the wire is what
   bindings key on, and the operator's configuration says what was
   *declared* for it: which agents, which default.
-- **Observed facts**: what the device itself reports. Board model and
-  firmware version arrive with the OTA request; protocol version, a
-  feature map, and the device's own MCP tool list arrive at hello;
-  the listening mode arrives with the first listen message and is the
-  empirical echo-cancellation signal, since the firmware chooses
-  realtime exactly when AEC is on; a fired wake word is reported by
-  word. Today these are parsed and dropped; keeping them per device
-  is planned (issue #96).
+- **Observed facts**: what the device itself reports, arriving in
+  phases rather than all at once. The OTA check-in carries the board
+  model and the firmware version. The hello carries the protocol
+  version and a feature map. After the hello, when the feature map
+  advertises MCP, the server asks the device for its own tool list
+  over a separate background MCP handshake, which a first utterance
+  can beat; [xiaozhi-notes](xiaozhi-notes.md) describes that race.
+  The first listen message carries the listening mode, the empirical
+  echo-cancellation signal, since the firmware chooses realtime
+  exactly when AEC is on. A `listen` `detect` message reports a fired
+  wake word, by word. What survives differs by fact: board model and
+  firmware version cross the OTA-to-session boundary in a bounded
+  in-memory cache, which holds the latest report per device until it
+  is overwritten by the next check-in, evicted by the cache's bound,
+  or lost when the server restarts, and which a session reads into
+  its capture manifest when capture is enabled; the protocol version,
+  the discovered MCP tools, and the listening mode are retained and
+  consumed for the life of the session, the protocol version also
+  entering an enabled capture's manifest; the wake-word report alone
+  is merely debug-logged. None of it enters a durable, queryable
+  per-device record; the record that would keep all of it is planned
+  (issue #96).
 - **Hardware facts from the board catalog**: what the model implies
   but the wire never says: microphone count, echo cancellation,
   display, button layout. Keyed by the reported board model; the
