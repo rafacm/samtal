@@ -188,7 +188,7 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     # there is nothing to configure and nothing to store; with auth off
     # there is no secret and the route mounts keyless.
     if app.state.config.server.onboarding.enabled:
-        key = onboarding.onboarding_key(app.state.config)
+        key = onboarding.onboarding_key(app.state.config.server)
         app.include_router(onboarding.build_router(key))
     app.include_router(ws.router)
 

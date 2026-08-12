@@ -41,6 +41,14 @@ reply that puts the code on a screen. A code is not a token: it is a
 claim ticket a person reads off a board they are holding, and binding
 still needs the API's own bearer token, so codes may appear in logs
 where device tokens never may.
+
+The key derivation and the origin resolution take the file half of the
+configuration (`server`) rather than the composed whole, because they
+read nothing else and because `samtal-server config ota-url` has
+nothing else: it prints the URL to type before any server runs, from
+the same file and the same environment, by calling these functions. A
+second implementation of the derivation is the one thing that could
+send an operator to a URL this server does not serve.
 """
 
 import base64
@@ -60,8 +68,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from samtal_server import ota
-from samtal_server.config import Config
-from samtal_server.config.models import ONBOARDING_MOUNT_PATH
+from samtal_server.config.models import ONBOARDING_MOUNT_PATH, ServerConfig
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +166,7 @@ def derive_key(secret: str) -> str:
     return base64.b32encode(digest).decode("ascii")[:KEY_LENGTH]
 
 
-def onboarding_key(config: Config) -> str | None:
+def onboarding_key(server: ServerConfig) -> str | None:
     """The key this server's short route is served under, or None when
     there is none to derive and none pinned.
 
@@ -168,17 +175,23 @@ def onboarding_key(config: Config) -> str | None:
     the endpoint from that an open websocket does not already hand over).
     A pinned key is honoured either way, since it replaces the derivation
     rather than depending on it.
+
+    None is also what an enabled auth with no secret in the environment
+    answers. Inside the server that state cannot be reached, since it
+    has already refused the boot; `samtal-server config ota-url` runs
+    with no server and does reach it, and tells the three cases apart by
+    the two fields it can read (a pinned key, and whether auth is on)
+    without ever asking this module for the secret.
     """
-    onboarding = config.server.onboarding
+    onboarding = server.onboarding
     if onboarding.key is not None:
         return onboarding.key
-    if not config.server.auth.enabled:
+    if not server.auth.enabled:
         return None
     # The same variable `build_device_auth` reads, and read again rather
     # than taken from it, so the secret stays where it is used and no
-    # object grows a property that hands it out. An enabled auth with no
-    # secret has already refused the boot by the time this runs.
-    secret = os.environ.get(config.server.auth.secret_env, "").strip()
+    # object grows a property that hands it out.
+    secret = os.environ.get(server.auth.secret_env, "").strip()
     return derive_key(secret) if secret else None
 
 
@@ -208,7 +221,7 @@ class Origin:
         return f"{prefix} {self.source}{self.note}"
 
 
-def public_origin(config: Config) -> Origin:
+def public_origin(server: ServerConfig) -> Origin:
     """Where a device reaches this server, in the order the plan sets:
     `public_url` as written, else the origin of `websocket_url`, else the
     listen address, which is a guess and says so.
@@ -218,7 +231,6 @@ def public_origin(config: Config) -> Origin:
     fields that cannot fail, so an operator never meets this as a
     traceback at startup.
     """
-    server = config.server
     if server.public_url:
         return Origin(server.public_url, "server.public_url")
     unreadable = False
@@ -281,14 +293,14 @@ def _bracketed(host: str) -> str:
     return host
 
 
-def portal_url_line(config: Config, path: str) -> str:
+def portal_url_line(server: ServerConfig, path: str) -> str:
     """The one line naming the URL to type into a device's captive
     portal, for the path it is served on."""
-    origin = public_origin(config)
+    origin = public_origin(server)
     return f"Type this into the device's captive portal: {origin.url}{path} ({origin.provenance})"
 
 
-def log_banner(config: Config) -> None:
+def log_banner(server: ServerConfig) -> None:
     """Say the onboarding URL out loud at startup.
 
     With onboarding on this is the short URL, key and all: the key is a
@@ -297,8 +309,7 @@ def log_banner(config: Config) -> None:
     the line names `server.ota_path` without quoting it, because that
     segment is a credential and the logs must not carry it.
     """
-    server = config.server
-    origin = public_origin(config)
+    origin = public_origin(server)
     if not server.onboarding.enabled:
         logger.info(
             "device onboarding is off: devices are configured at the server.ota_path "
@@ -314,7 +325,7 @@ def log_banner(config: Config) -> None:
             },
         )
         return
-    key = onboarding_key(config)
+    key = onboarding_key(server)
     url = f"{origin.url}{onboarding_path(key)}"
     logger.info(
         "device onboarding URL: %s (%s)",
@@ -623,7 +634,7 @@ def _fact(value: str, limit: int = FACT_LENGTH) -> str:
     )
 
 
-def activation_object(config: Config, device: PendingDevice) -> dict[str, object]:
+def activation_object(server: ServerConfig, device: PendingDevice) -> dict[str, object]:
     """The OTA reply's `activation` section, in upstream's shape.
 
     `message` is what the firmware puts on the screen verbatim: upstream
@@ -636,7 +647,7 @@ def activation_object(config: Config, device: PendingDevice) -> dict[str, object
     server can influence.
     """
     return {
-        "message": f"{public_origin(config).url}\n{device.code}",
+        "message": f"{public_origin(server).url}\n{device.code}",
         "code": device.code,
         # Without a challenge the firmware fails `Activate()` outright
         # and waits ten seconds between polls instead of three.
