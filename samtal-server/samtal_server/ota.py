@@ -7,9 +7,16 @@ to NVS: the websocket URL with its token and protocol version, the wall
 clock, and whether a firmware update is waiting.
 
 samtal-server serves no firmware images, so the firmware section always
-answers "up to date" by echoing back the version the device reported. The
-reply also never carries an `activation` section, which is what keeps
-devices from ever being asked to activate.
+answers "up to date" by echoing back the version the device reported.
+
+A device the database has nothing to say about is answered with an
+`activation` section instead of a token: a six-digit code it shows on
+its screen and speaks, which an operator reads off the board and binds
+with one command. The device polls `/activate` every three seconds
+while it waits, so a bind takes effect with no power cycle and no
+button press. A device that is bound, or that a default agent already
+covers, is never asked to activate, which is what keeps every existing
+deployment answering exactly what it answered before.
 
 This endpoint is the token issuer, so it cannot itself require a token.
 What protects it instead is stinginess and a configurable path: a token
@@ -30,7 +37,7 @@ import logging
 import time
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -40,14 +47,30 @@ from samtal_server.auth import DeviceAuth
 from samtal_server.build_info import revision
 from samtal_server.config import Config
 from samtal_server.config.models import normalize_mac
-from samtal_server.device.bindings import DeviceBindings
+from samtal_server.device.bindings import DeviceAgents, DeviceBindings
 from samtal_server.ws import WEBSOCKET_PATH
+
+if TYPE_CHECKING:
+    # Names only, and quoted where they are used: the onboarding module
+    # imports this one to serve its handlers, so a module-scope import
+    # in this direction would not load. Nothing here runs at runtime.
+    from samtal_server.onboarding import PendingDevice, PendingDevices
 
 logger = logging.getLogger(__name__)
 
 # The default path, and the one every test and the README use. An operator
 # who exposes the server publicly overrides it with server.ota_path.
 OTA_PATH = "/xiaozhi/ota/"
+
+# What a waiting device appends to its OTA URL to poll. The firmware
+# builds the URL itself (`Ota::Activate`), adding a slash first when the
+# stored one lacks it, so both spellings arrive here as one path.
+ACTIVATE_SEGMENT = "activate"
+
+# What the version header carries when a body is worth reading. A board
+# with no serial number burned, which every consumer board is, announces
+# version 1 and sends `{}`; upstream's own server never reads that body.
+ACTIVATION_VERSION_HEADER = "activation-version"
 
 # What a device reports when it tells us nothing usable. Any real version is
 # greater, so a device that hides its version is never offered an update.
@@ -123,6 +146,11 @@ def build_router(path: str = OTA_PATH) -> APIRouter:
     router = APIRouter()
     router.post(path)(check_version)
     router.get(path)(describe)
+    # `path` always ends in a slash (the validator says so), and the
+    # firmware appends the segment to whatever it holds, so this is the
+    # URL a waiting device polls. The short onboarding router registers
+    # the same three handlers by reference.
+    router.post(f"{path}{ACTIVATE_SEGMENT}")(activate)
     return router
 
 
@@ -173,7 +201,25 @@ async def check_version(request: Request) -> Response:
         "unloaded": list(resolution.unloaded),
     }
 
-    if not agents and resolution.unloaded:
+    activation = _activation(request, config, resolution, mac, client_id, board, version)
+    if activation is not None:
+        # A code is a claim ticket read off a screen, not a credential:
+        # it belongs in the log line an operator greps for the board
+        # they are holding. A device token never does.
+        event["code"] = activation["code"]
+
+    if activation is not None:
+        logger.warning(
+            "device %s (%s, firmware %s) has no agent and is showing activation code "
+            "%s; bind it with: samtal-server config add-device %s <agent>",
+            device_id,
+            board,
+            version,
+            activation["code"],
+            activation["code"],
+            extra=event,
+        )
+    elif not agents and resolution.unloaded:
         # A different problem from having no agent, and a different
         # answer: the binding is there, this process is what is behind.
         logger.warning(
@@ -205,7 +251,13 @@ async def check_version(request: Request) -> Response:
             extra=event,
         )
 
-    return JSONResponse(
+    body: dict[str, Any] = {}
+    if activation is not None:
+        # First, the way upstream's own reply carries it, and present
+        # only for a device that has to activate: the firmware treats
+        # the key's absence as "no activation is ever required".
+        body["activation"] = activation
+    body.update(
         {
             "server_time": {
                 "timestamp": int(time.time() * 1000),
@@ -220,12 +272,171 @@ async def check_version(request: Request) -> Response:
             # knows and ignores the rest, so this is additive.
             "server": {"name": "samtal-server", "version": __version__, "revision": revision()},
             "websocket": {
+                # The empty token stays beside the activation object: a
+                # device showing a code has nothing to reach yet, and the
+                # firmware persists what it is handed, so an empty string
+                # clears one another server left in NVS.
                 "url": websocket_url_for(config, request),
                 "token": token_for(request.app.state.device_auth, client_id, mac, agents),
                 "version": config.server.protocol_version,
             },
         }
     )
+    return JSONResponse(body)
+
+
+def _activation(
+    request: Request,
+    config: Config,
+    resolution: DeviceAgents,
+    mac: str,
+    client_id: str,
+    board: str,
+    firmware: str,
+) -> dict[str, Any] | None:
+    """The `activation` section for this check-in, or None when the
+    device is not one to activate.
+
+    The gate is database truth rather than the loaded-agent filter: the
+    two disagree exactly when a binding or a default agent was written
+    after boot naming an agent this server never loaded, and that state
+    must not mint a code for a device an operator has already added.
+    Such a device gets no code and no token, and the caller says which
+    restart will serve it. The other side of the same coin is upgrade
+    compatibility: a deployment with a default agent covers every
+    unknown MAC by design, so its devices keep receiving a token and no
+    activation object, exactly as before.
+    """
+    if not config.server.onboarding.enabled:
+        return None
+    # `agents` are the names the boot snapshot loaded and `unloaded` the
+    # ones it did not, so the two being empty together is the database
+    # holding neither a binding row for this MAC nor a default agent.
+    if resolution.agents or resolution.unloaded:
+        return None
+    # Imported here for the reason `describe` imports it below: the
+    # onboarding module serves these handlers, so it imports this one.
+    from samtal_server.onboarding import activation_object
+
+    offer = request.app.state.pending.observe(mac, client_id, board, firmware)
+    if offer.device is None:
+        logger.warning(
+            "device %s is unbound but was offered no activation code: %s. It is "
+            "answered exactly as it was before onboarding existed, with no token; "
+            "bind it by its MAC with: samtal-server config bind-device %s <agent>",
+            mac,
+            offer.refused,
+            mac,
+            extra={"event": "activation_not_offered", "device": mac, "reason": offer.refused},
+        )
+        return None
+    return activation_object(config, offer.device)
+
+
+async def activate(request: Request) -> Response:
+    """Where a waiting device polls, in bursts of ten three seconds
+    apart, until it is claimed.
+
+    200 means the MAC resolves to an agent this server has loaded, so a
+    200 always means the next OTA check hands the device its real
+    configuration. 202 is everything else, which is what upstream's own
+    "keep waiting" is: a device still unbound, a device bound to an
+    agent this process has not loaded (which flips to 200 at the restart
+    that loads it), and a device this server has no pending entry for at
+    all, since a restart loses the table and the device's own loop
+    fetches a fresh code within a couple of minutes.
+
+    What a version-2 body claims cannot be authenticated. Its HMAC is
+    computed with a key burned into the device's eFuses, which the
+    vendor's cloud knows from registration and samtal has no copy of, so
+    the code ceremony governs both versions (the plan's fourth
+    author-approved deviation from issue #40). What is checked while the
+    MAC is pending is what can be: the body parses, names an algorithm
+    this server knows, and echoes the challenge this server issued. A
+    poll answering somebody else's challenge is not evidence of
+    anything, so it is refused with the 202 it would have got anyway and
+    a log line naming which check failed.
+    """
+    device_id = request.headers.get("device-id", "").strip()
+    if not device_id:
+        return _bad_request("the Device-Id header is required and holds the device MAC")
+    try:
+        mac = normalize_mac(device_id)
+    except ValueError as exc:
+        return _bad_request(f"Device-Id header: {exc}")
+
+    bindings: DeviceBindings = request.app.state.bindings
+    resolution = await bindings.resolve(mac)
+    if resolution.agents:
+        logger.info(
+            "device %s is activated: its next configuration check hands it a token",
+            mac,
+            extra={
+                "event": "activation_complete",
+                "device": mac,
+                "agents": list(resolution.agents),
+            },
+        )
+        return Response(status_code=200)
+
+    pending = request.app.state.pending
+    waiting = pending.waiting_for(mac)
+    if waiting is not None:
+        await _version_two(request, pending, waiting)
+    logger.debug(
+        "device %s is still waiting to be claimed",
+        mac,
+        extra={
+            "event": "activation_pending",
+            "device": mac,
+            "code": None if waiting is None else waiting.code,
+            "unloaded": list(resolution.unloaded),
+        },
+    )
+    return Response(status_code=202)
+
+
+async def _version_two(
+    request: Request, pending: "PendingDevices", waiting: "PendingDevice"
+) -> None:
+    """The checks a version-2 poll can be held to, and the serial number
+    it carries, recorded as an observed fact."""
+    from samtal_server.onboarding import ACTIVATION_ALGORITHMS
+
+    if request.headers.get(ACTIVATION_VERSION_HEADER, "").strip() != "2":
+        # Version 1 is `{}` and upstream's own server never reads it.
+        return
+    payload = await _json_object(request)
+    record = {"event": "activation_refused", "device": waiting.mac, "code": waiting.code}
+    if payload is None:
+        logger.warning(
+            "device %s sent a version-2 activation body that is not a JSON object; it "
+            "is answered as still waiting. Nothing of the body is quoted here",
+            waiting.mac,
+            extra={**record, "reason": "unreadable_body"},
+        )
+        return
+    algorithm = payload.get("algorithm")
+    if not isinstance(algorithm, str) or algorithm not in ACTIVATION_ALGORITHMS:
+        logger.warning(
+            "device %s sent a version-2 activation body naming an algorithm this "
+            "server does not know; it is answered as still waiting. The value is not "
+            "quoted here, since it is whatever the request carried",
+            waiting.mac,
+            extra={**record, "reason": "unknown_algorithm"},
+        )
+        return
+    if payload.get("challenge") != waiting.challenge:
+        logger.warning(
+            "device %s sent a version-2 activation body answering a challenge this "
+            "server did not issue for it; it is answered as still waiting",
+            waiting.mac,
+            extra={**record, "reason": "challenge_mismatch"},
+        )
+        return
+    serial_number = payload.get("serial_number")
+    if isinstance(serial_number, str) and serial_number.strip():
+        pending.record_serial(waiting.mac, serial_number)
 
 
 async def describe(request: Request) -> Response:
@@ -256,8 +467,19 @@ async def _read_json_object(request: Request) -> dict[str, Any]:
     """The device's system info, or an empty mapping. Nothing in the reply
     depends on it beyond the firmware version and logging, so a device that
     sends a malformed body is still answered rather than turned away."""
+    payload = await _json_object(request)
+    return {} if payload is None else payload
+
+
+async def _json_object(request: Request) -> dict[str, Any] | None:
+    """The request's body as a JSON object, or None when it is not one.
+
+    None and the empty object are kept apart here, unlike above: the
+    activation checks have to tell a body that could not be read from
+    one that was read and said nothing.
+    """
     try:
         payload = await request.json()
     except (ValueError, UnicodeDecodeError):
-        return {}
-    return payload if isinstance(payload, dict) else {}
+        return None
+    return payload if isinstance(payload, dict) else None

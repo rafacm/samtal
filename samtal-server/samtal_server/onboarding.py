@@ -610,13 +610,25 @@ def build_router(key: str | None) -> APIRouter:
     """
     router = APIRouter()
     if key is None:
-        for path in _spellings(onboarding_path(None)):
+        base = onboarding_path(None)
+        for path in _spellings(base):
             router.post(path)(ota.check_version)
             router.get(path)(ota.describe)
+        # Where a waiting device polls, which is its OTA URL with
+        # `activate` after it. Both spellings answer directly, like
+        # every other device-facing route: the firmware is not a
+        # browser, and a portal that dropped the trailing slash from the
+        # endpoint dropped it from this too.
+        for path in _spellings(f"{base}{ota.ACTIVATE_SEGMENT}/"):
+            router.post(path)(ota.activate)
         return router
     for path in _spellings(f"{ONBOARDING_MOUNT_PATH}/{{key}}/"):
         router.post(path)(_guarded(key, ota.check_version))
         router.get(path)(_guarded(key, ota.describe))
+    # Guarded like everything else on this path: a wrong key must meet
+    # the same 404 here as at the endpoint itself, on either spelling.
+    for path in _spellings(f"{ONBOARDING_MOUNT_PATH}/{{key}}/{ota.ACTIVATE_SEGMENT}/"):
+        router.post(path)(_guarded(key, ota.activate))
     return router
 
 

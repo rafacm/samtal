@@ -106,8 +106,20 @@ def test_reply_names_the_server_build_the_device_will_talk_to(
     }
 
 
-def test_reply_never_asks_for_activation() -> None:
-    response = post_system_info(client_for())
+def test_a_device_the_configuration_covers_is_never_asked_to_activate() -> None:
+    """The activation section exists for a device nothing has bound and
+    no default agent covers; everything else is answered as it always
+    was. The ceremony's own coverage is test_onboarding_activation.py."""
+    config = Config(
+        providers=MOCK_PROVIDERS, agents={"assistant": MOCK_AGENT}, default_agent="assistant"
+    )
+    response = post_system_info(client_for(config))
+    assert "activation" not in response.json()
+
+
+def test_activation_is_not_asked_for_with_onboarding_off() -> None:
+    config = Config(server={"onboarding": {"enabled": False}})
+    response = post_system_info(client_for(config))
     assert "activation" not in response.json()
 
 
