@@ -52,10 +52,10 @@ server, ESP-SR decides on-device, and the planned English wake word
 (`wn9_hiesp`) is a custom build and nothing else. The addition is what
 the code receives: the firmware sends `listen` `detect` with the fired
 word in `text`, which samtal-server currently debug-logs
-(`device/session.py`) and does not retain, so the word that fired is
-knowable while the detection itself stays something the server cannot
-hear, tune, or substitute for. The entry is still a constraint entry
-and what owning the firmware would change is untouched.
+(`device/session.py`) and does not retain. The detection itself stays
+something the server cannot hear, tune, or substitute for. The entry
+is still a constraint entry and what owning the firmware would change
+is untouched.
 
 **`docs/glossary.md`, the Manifest entry.** "device, firmware" became
 what `_manifest` in `device/session.py` actually writes: the device

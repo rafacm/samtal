@@ -201,8 +201,8 @@ by the device rather than by the problem.
   else. What the server does get is an after-the-fact report: the firmware
   sends `listen` `detect` with the fired word in `text`, which
   samtal-server currently debug-logs (`device/session.py`) and does not
-  retain. So the word that fired is knowable; the detection itself is not
-  something the server can hear, tune, or substitute for.
+  retain. The detection itself is not something the server can hear, tune,
+  or substitute for.
 
 - **The device is the MCP server, and discovery is a race.** Tools are
   fetched in a background task after `hello`, so a first utterance that
