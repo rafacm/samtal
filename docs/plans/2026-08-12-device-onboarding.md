@@ -490,6 +490,79 @@ New coverage, by milestone:
 - Whether `GET /api/devices` should merge pending devices once a UI
   exists; the CLI merges client-side meanwhile.
 
+## Plan review round
+
+One external review of the plan as first committed (b174c4c): codex
+CLI 0.147.0, model gpt-5.6-sol, read-only against this repository
+with the issue #40 body supplied, 2026-08-12. Verdict: not ready,
+naming the version-2 requirement, the hot database reads, and the
+pending-state lifecycle as the blockers. Findings as received,
+condensed; each carries its resolution once the amendment
+addressing it lands.
+
+1. **P1: version-2 activation contradicts a settled requirement and
+   cannot work as described.** The issue requires verifying the
+   HMAC before 200; the plan replaces verification with checks of
+   the public algorithm and challenge, a fourth deviation beyond
+   the three approved ones, and not authentication. The plan also
+   retires the pending entry on binding, so the challenge is gone
+   when the subsequent version-2 poll arrives. Say how per-device
+   keys would be provisioned and verified, or declare version 2
+   unsupported; either way this needs an explicit issue-author
+   decision.
+2. **P1: synchronous database work would block the server event
+   loop.** The live view opens the database per lookup, but OTA
+   and session resolution run in async handlers, and
+   `open_database()` runs an Alembic check inside
+   `BEGIN IMMEDIATE` with a 10-second busy timeout; the API
+   precedent is inapplicable because its handlers run on the
+   threadpool. Introduce a nonblocking read seam that never runs
+   migrations on device paths, and prove a locked database cannot
+   stall conversations or the loop.
+3. **P1: the pending table has no concurrency or single-consumer
+   design.** OTA handlers mutate pending state on the event loop
+   while API handlers run on the threadpool; two concurrent
+   add-by-code requests can both resolve one code and both report
+   success, and expiry, uniqueness, listing and re-issue are
+   multi-step. Define an atomic claim lifecycle with rollback and
+   race tests.
+4. **P1: fresh-deployment onboarding cannot satisfy the claimed
+   no-restart ceremony.** A first start loads an empty snapshot;
+   an agent written afterward is not loaded, so a device bound by
+   code to it stays at 202 and cannot connect, while the plan
+   promises add-by-code applies with no restart. Specify the
+   initial workflow, differentiated notices, and the ordering in
+   the deployment docs.
+5. **P2: a capacity cap is not the required global issuance rate
+   limit.** An attacker fills 128 slots and repeats every ten
+   minutes; the issue requires per-MAC and global rate limits, and
+   the tests cover only the cap.
+6. **P2: the reused integration fixture deletes the database
+   needed for live writes.** `booted` seeds a scratch database,
+   exits the temporary directory, and composes a config that
+   still points at the default directory, so live API writes
+   would address the wrong database; the plan also omits the
+   issue's binding-survives-restart assertion.
+7. **P2: M2 would publish a false API contract.** The API
+   description, the acknowledgement schema, and `_acknowledge()`
+   all hardcode the restart sentence, and the plan postponed
+   document regeneration to M3 while every merge publishes an
+   image.
+8. **P2: "unbound" and "resolves to no loaded agent" are different
+   states.** `agents_for_device` gives every unknown MAC the
+   default agent, and the plan's activation gate would have minted
+   codes for devices the default agent already covers.
+9. **P2: the public-URL fallback can log credentials.** The
+   websocket URL validator accepts userinfo, and a naive origin
+   derivation from `netloc` would log `user:password@host`; the
+   API client already strips and refuses userinfo.
+10. **P2: the pending listing route can be shadowed by the
+    existing MAC route.** Starlette matches in registration
+    order, so `GET /api/devices/pending` registered after
+    `GET /api/devices/{mac}` would enter MAC validation.
+11. **P3: M1's "no behavior change" acceptance is false.**
+    Onboarding defaults on, so M1 adds a reachable route and a
+    new startup log line to every deployment.
 ## Milestones
 
 One PR per milestone, stacked, ticked with its PR number, each
