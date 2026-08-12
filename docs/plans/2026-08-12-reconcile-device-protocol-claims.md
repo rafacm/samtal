@@ -328,9 +328,9 @@ addressing it lands.
 
 ## Milestones
 
-- [ ] **Reconcile the device-fact documentation** (PR TBD): the
-  concepts page's Observed facts bullet rewritten by phase with the
-  two retention tiers; the protocol notes' wake-word entry
+- [x] **[Reconcile the device-fact documentation](2026-08-12-reconcile-device-protocol-claims-implementation.md#milestone-1-reconcile-the-device-fact-documentation)**
+  (PR TBD): the concepts page's Observed facts bullet rewritten by
+  phase with the two retention tiers; the protocol notes' wake-word entry
   separating unreachable trigger audio from the reported word; the
   glossary's Manifest entry rewritten to name what the manifest
   records (device identity, cached OTA board and firmware when
