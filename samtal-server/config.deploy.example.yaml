@@ -41,40 +41,50 @@ server:
   # of the OTA endpoint.
   public_url: https://voice.example.com
 
-  # The OTA endpoint issues the device tokens, so it cannot itself
-  # require one. Exposed publicly it hides behind a random path segment
-  # instead (openssl rand -hex 16); the same full URL goes into each
-  # device's NVS ota_url, and rewriting NVS wipes a board's wifi
-  # provisioning, so the segment is chosen once and never rotates.
-  # That makes it a credential. When the adapted file is
-  # version-controlled, as a container deployment's usually is, do not
-  # write the segment here: inject the whole path from the secret
-  # store instead, relying on environment overrides beating the file.
+  # How a board is onboarded: the short path /x/<key>/, which serves the
+  # same OTA endpoint as ota_path below. This is the string a person
+  # types into a board's captive portal, so it is eight characters in an
+  # alphabet with no 0/O and no 1/I/l to misread off a small display.
   #
-  #   SAMTAL_SERVER__OTA_PATH=/xiaozhi/ota/<random-segment>/
+  # The key is derived from SAMTAL_AUTH_SECRET, the secret this
+  # deployment already has: nothing here holds it, nothing stores it, it
+  # survives restarts, and it changes only when that secret does. So
+  # there is no segment to inject from a secret store and none to keep
+  # out of version control. Print it with
   #
-  # Set it to null once every board this deployment serves has been
-  # onboarded through the short path below, which unmounts this route
-  # and leaves one way in. The websocket path never moves: the token is
-  # what protects it.
-  # ota_path: /xiaozhi/ota/replace-with-a-random-segment/
-
-  # The short onboarding path, /x/<key>/, serving the same endpoint as
-  # ota_path. This is what a person types into a board's captive portal:
-  # eight characters, in an alphabet with no 0/O and no 1/I/l to
-  # misread. The key is derived from SAMTAL_AUTH_SECRET below, so
-  # nothing here holds it and nothing stores it, and the server prints
-  # the whole URL at startup.
+  #   samtal-server config ota-url
+  #
+  # which reads this file and contacts nothing, and the server prints
+  # the same URL at startup.
   onboarding:
     enabled: true
     # Pin the key only across a rotation of SAMTAL_AUTH_SECRET, to keep
-    # already provisioned boards reaching the URL they were given. A
-    # pinned key stands in front of the endpoint that issues device
-    # tokens, so treat it like the OTA path segment above: inject it
-    # from the secret store rather than committing it with this file.
+    # a board being onboarded through a URL written down before the
+    # rotation reaching this server. A pinned key stands in front of the
+    # endpoint that issues device tokens, so inject it from the secret
+    # store rather than committing it with this file.
     #
     #   SAMTAL_SERVER__ONBOARDING__KEY=<the previous key>
     # key: AB2C4D5E
+
+  # The legacy full OTA path, for boards already carrying one in NVS.
+  # The endpoint issues the device tokens, so it cannot itself require
+  # one; exposed publicly it hides behind a random path segment
+  # (openssl rand -hex 16). That segment is a credential: the same full
+  # URL sits in each device's NVS ota_url, and rewriting NVS wipes a
+  # board's wifi provisioning, so it is chosen once and never rotates.
+  # When the adapted file is version-controlled, as a container
+  # deployment's usually is, do not write it here: inject the whole path
+  # from the secret store, relying on environment overrides beating the
+  # file.
+  #
+  #   SAMTAL_SERVER__OTA_PATH=/xiaozhi/ota/<random-segment>/
+  #
+  # A deployment whose boards were all onboarded through the short path
+  # above needs none of that: leave this null, which unmounts the route
+  # and leaves one way in. The websocket path never moves: the token is
+  # what protects it.
+  # ota_path: /xiaozhi/ota/replace-with-a-random-segment/
 
   # On by default, and the server refuses to boot without the secret in
   # the environment. Listed so the deployment remembers to provide it:
