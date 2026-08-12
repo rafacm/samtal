@@ -817,7 +817,7 @@ per repository convention.
   app's next OTA check without restart in the integration lane;
   lanes green.
 - [x] **[M3: the activation ceremony](2026-08-12-device-onboarding-implementation.md#milestone-3-the-activation-ceremony)**
-  (PR TBD, branch
+  (PR #117, branch
   `feature/device-onboarding-m3`): the pending table; the
   activation object; `/activate` on both routers; the two
   `/api/devices/pending` routes and the regenerated OpenAPI
