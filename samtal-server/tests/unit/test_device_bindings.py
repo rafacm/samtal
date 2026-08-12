@@ -622,3 +622,58 @@ async def test_a_held_write_lock_stalls_neither_the_lookup_nor_the_loop(
     assert resolution.agents == ("assistant",)
     assert during > 0
     assert still_held
+
+
+# What a stale answer may and may not be used for
+
+
+def test_a_failed_read_answers_but_does_not_call_a_device_unbound(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The fallback keeps a fleet's check-ins served, and that is all it
+    may do. An empty answer out of it is not the database saying nothing
+    is bound; it is this server not having been able to find out, and
+    the activation ceremony reads exactly that emptiness as an invitation
+    to mint a claim ticket."""
+    config = booted(tmp_path, devices={BOUND_MAC: ["assistant"]})
+    with TestClient(create_app(config)) as client:
+        # Bound after boot, so the snapshot this server holds knows
+        # nothing about it: the database is the only place it exists.
+        with store_at(tmp_path) as store:
+            store.bind_device(DEVICE_MAC, ["assistant"])
+        (tmp_path / "samtal.db").write_bytes(b"this is not a database")
+
+        with caplog.at_level(logging.WARNING):
+            body = check_in(client)
+
+    # No token, since the snapshot has no binding for it, and no code
+    # either, since the snapshot is not what decides that.
+    assert body["websocket"]["token"] == ""
+    assert "activation" not in body
+    assert "no activation code was issued" in caplog.text
+    assert any(
+        record.__dict__.get("reason") == "unreadable" for record in caplog.records
+    )
+
+
+def test_a_stale_answer_still_carries_the_snapshots_binding(tmp_path: Path) -> None:
+    """The other half: what the fallback is for. A device bound at boot
+    keeps being served through a database hiccup, which is why the
+    fallback exists at all."""
+    config = booted(tmp_path, devices={DEVICE_MAC: ["assistant"]})
+    with TestClient(create_app(config)) as client:
+        (tmp_path / "samtal.db").write_bytes(b"this is not a database")
+
+        body = check_in(client)
+
+    assert body["websocket"]["token"] != ""
+    assert "activation" not in body
+
+
+def test_a_view_with_no_database_answers_authoritatively(tmp_path: Path) -> None:
+    """A configuration composed in memory has no database to be stale
+    against: the snapshot is the whole truth there is, which is what the
+    unit lane and an embedded server have, and a code is minted there."""
+    snapshot_only = DeviceBindings.snapshot_only(Config())
+
+    assert snapshot_only.agents_for(DEVICE_MAC).authoritative is True

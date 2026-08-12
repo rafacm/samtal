@@ -67,6 +67,22 @@ class DeviceAgents:
 
     agents: tuple[str, ...]
     unloaded: tuple[str, ...] = ()
+    # Whether this answer is the database's or the boot snapshot's.
+    #
+    # False only when a live read failed and the snapshot answered in
+    # its place, which is a fallback that keeps a fleet's check-ins
+    # served and cannot be trusted about what it does not say. The
+    # difference matters to exactly one caller: an empty resolution is
+    # what the activation ceremony reads as "no operator has bound this
+    # device", and from a fallback it means "this server could not
+    # find out". Issuing a token off a stale answer only ever repeats
+    # what boot already decided; minting a code off one would offer a
+    # stranger a claim ticket for somebody's bound board.
+    #
+    # A configuration with no database behind it is authoritative: the
+    # snapshot is then the whole truth there is, which is what a test
+    # lane and an embedded server have.
+    authoritative: bool = True
 
     def __bool__(self) -> bool:
         return bool(self.agents)
@@ -142,7 +158,7 @@ class DeviceBindings:
         """The agents this device may talk to, from the database when it
         can be read and from the boot snapshot when it cannot."""
         normalized = normalize_mac(mac)
-        stored = self._stored(normalized)
+        stored, authoritative = self._stored(normalized)
         if stored is None:
             bound = tuple(self._config.devices.get(normalized, ()))
             default = self._config.default_agent
@@ -152,22 +168,31 @@ class DeviceBindings:
         return DeviceAgents(
             tuple(name for name in names if name in self._loaded),
             tuple(name for name in names if name not in self._loaded),
+            authoritative,
         )
 
-    def _stored(self, mac: str) -> LiveBinding | None:
+    def _stored(self, mac: str) -> tuple[LiveBinding | None, bool]:
         """This device's binding and the default agent as the database
-        holds them, or None when they cannot be read.
+        holds them, and whether the answer came from the database at
+        all.
 
         The reading itself belongs to the repository, which is where
         what a stored row means is decided; this is the caller that says
         what to do when it cannot be read, which is to answer from the
         boot snapshot rather than to refuse a device.
+
+        The second half of the answer separates the two ways of having
+        no row to return. No database behind this view at all is an
+        ordinary state and its answer is authoritative, the snapshot
+        being the whole truth there is; a read that failed is not, and
+        a caller that reads "nothing is bound" as a fact has to be able
+        to tell the two apart.
         """
         if self._engine is None:
-            return None
+            return None, True
         problem: Exception | None = None
         try:
-            return read_live_binding(self._engine, mac)
+            return read_live_binding(self._engine, mac), True
         # Deliberately everything. This is the fleet's boot dependency,
         # and the point of the fallback is that whatever went wrong with
         # the file or with what is in it, the device still gets the
@@ -178,7 +203,7 @@ class DeviceBindings:
         except Exception as exc:
             problem = exc
         self._warn(mac, problem)
-        return None
+        return None, False
 
     def _warn(self, mac: str, exc: Exception) -> None:
         """The fallback, said out loud and in fixed words.
