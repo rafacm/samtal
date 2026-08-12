@@ -40,6 +40,7 @@ from samtal_server.config.loader import ConfigError, load_file_config
 from samtal_server.config.secrets import MASK, MASTER_KEY_ENV, generate_key
 from samtal_server.config.writes import BINDING_NOTICE
 from samtal_server.db import DATABASE_FILENAME, open_database, schema
+from samtal_server.onboarding import PendingDevices
 
 # Not real credentials, and shaped so a substring check for one cannot
 # match by accident.
@@ -73,6 +74,11 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
 
     reached: list[str] = []
+    # One table across the whole test, unlike the application, which is
+    # built per request: on a deployment this is state of the running
+    # server, and a command that could not see what a previous one left
+    # in it would be testing a table nobody has.
+    pending = PendingDevices()
 
     def factory(base_url: str, token: str) -> TestClient:
         reached.append(base_url)
@@ -82,7 +88,7 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         # to send would make every token the right one, and the
         # token-resolution tests would be asserting nothing: the wrong
         # variable, a stale value and a typo would all authenticate.
-        api = build_api(TOKEN, directory)
+        api = build_api(TOKEN, directory, pending=pending)
         # A base URL with a path prefix is the deployed shape, where the
         # sub-application is mounted on the server's own port, so the
         # fixture mounts it exactly where the server does rather than
@@ -106,6 +112,7 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         return cli.main(list(argv))
 
     _run.reached = reached
+    _run.pending = pending
     return _run
 
 
@@ -242,6 +249,120 @@ def test_a_local_device_delete_says_the_same_thing(
     assert run("--local", "delete", "device", "aa:bb:cc:dd:ee:ff") == 0
 
     assert BINDING_NOTICE in capsys.readouterr().err
+
+
+def _an_agent(run) -> None:
+    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+    run("set", "agent", "sam", "-f", "-", stdin="llm: claude\n")
+
+
+def _showing(run, mac: str = "aa:bb:cc:dd:ee:ff") -> str:
+    """One device waiting, put there the way the OTA endpoint puts it."""
+    return run.pending.observe(
+        mac,
+        "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8",
+        "waveshare-esp32-s3-touch-lcd-1.54",
+        "2.4.0",
+    ).device.code
+
+
+def test_pending_lists_nothing_when_nothing_is_waiting(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run("pending") == 0
+
+    assert capsys.readouterr().out.startswith("no device is waiting to be claimed")
+
+
+def test_pending_lists_the_code_each_device_is_showing(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """What an operator reads while holding a board: the digits to type,
+    the MAC they will bind, and what tells two boards apart."""
+    first = _showing(run)
+    second = _showing(run, "11:22:33:44:55:66")
+
+    assert run("pending") == 0
+
+    printed = capsys.readouterr().out
+    assert printed.splitlines()[0].split() == ["code", "device", "board", "firmware", "expires"]
+    assert first in printed
+    assert second in printed
+    assert "aa:bb:cc:dd:ee:ff" in printed
+    assert "waveshare-esp32-s3-touch-lcd-1.54" in printed
+    assert "2.4.0" in printed
+
+
+def test_add_device_binds_the_board_showing_the_code(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _an_agent(run)
+    code = _showing(run)
+    capsys.readouterr()
+
+    assert run("add-device", code, "sam") == 0
+
+    captured = capsys.readouterr()
+    # The operator never had to find the MAC; the acknowledgement names
+    # the row that was written.
+    assert captured.out == "wrote device aa:bb:cc:dd:ee:ff bound to sam\n"
+    # The restart sentence rather than the no-restart one, because the
+    # application this fixture builds is told of no loaded agents, which
+    # is the honest answer for one built without a server around it. The
+    # two notices are told apart in test_config_api_pending.py.
+    assert cli.RESTART_NOTICE in captured.err
+
+
+def test_add_device_retires_the_code(run, capsys: pytest.CaptureFixture[str]) -> None:
+    _an_agent(run)
+    code = _showing(run)
+
+    run("add-device", code, "sam")
+    capsys.readouterr()
+
+    assert run("pending") == 0
+    assert capsys.readouterr().out.startswith("no device is waiting to be claimed")
+
+
+def test_add_device_with_a_stale_code_says_to_read_the_screen(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The API's sentence, printed verbatim, as every refusal is."""
+    _an_agent(run)
+    capsys.readouterr()
+
+    assert run("add-device", "000000", "sam") == 1
+
+    captured = capsys.readouterr()
+    assert captured.err.startswith("no device is waiting with that activation code")
+    assert "on the device's screen" in captured.err
+    assert captured.out == ""
+    assert "Traceback" not in captured.err
+
+
+def test_add_device_inherits_the_reference_check(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The repository decides what an agent is, here as everywhere: the
+    claim route calls the same method bind-device calls."""
+    code = _showing(run)
+
+    assert run("add-device", code, "ghost") == 1
+
+    assert 'agent "ghost" is not a defined agent' in capsys.readouterr().err
+    # And the board is still showing the number, so the number still
+    # works.
+    _an_agent(run)
+    assert run("add-device", code, "sam") == 0
+
+
+def test_the_two_ways_to_bind_a_board_say_which_is_which() -> None:
+    """A pair a person picks wrongly once and then remembers wrongly,
+    so each names what the other takes."""
+    help_text = cli._parser().format_help()  # noqa: SLF001
+
+    assert "by the MAC you already know" in help_text
+    assert "showing this activation code" in help_text
 
 
 def test_a_refused_write_exits_one_with_the_reason(
