@@ -51,6 +51,25 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   quoted back. This is a behavior change for a configuration that was
   already leaking, and no other websocket URL is affected.
 
+- **Binding a device no longer needs a restart** (#40): a running
+  server now reads the `devices` table and `default_agent` as a device
+  asks for them, so binding a board, unbinding it, or changing the
+  default agent applies at that device's next OTA check or connection.
+  Everything else stays a boot-time snapshot with its restart notice
+  unchanged, and the acknowledgement for a device write says which of
+  the two happened: it names the restart when the binding points at an
+  agent this server has not loaded, which is what a binding written
+  after boot to a newly created agent does. A conversation already
+  running is never touched, and a delete stops the next token and the
+  next connection rather than reaching into one in progress. The read
+  runs off the event loop through a connection of its own that never
+  migrates and takes no write lock, so an operator's write cannot stall
+  a device's check-in, and a database that cannot be read falls back to
+  the configuration the server started with, saying so in the log. The
+  configuration API's description, its acknowledgement schema, the
+  committed OpenAPI document and the server README carry the two
+  notices.
+
 - The word "persona" is gone from the server's own voice: model
   docstrings and field descriptions, the generated domain reference
   and OpenAPI document, the example config's memory comments, two
