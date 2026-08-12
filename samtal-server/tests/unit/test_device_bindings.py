@@ -18,8 +18,10 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import OperationalError
 from starlette.websockets import WebSocketDisconnect
 
+from samtal_server import logs
 from samtal_server.app import create_app
 from samtal_server.config import Config, FileConfig, compose_config
 from samtal_server.config.models import domain_fields
@@ -38,6 +40,11 @@ DEVICE_UUID = "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
 # agent reaches. Onboarding a second board is therefore the ordinary
 # shape of these tests, not a contrivance.
 BOUND_MAC = "11:22:33:44:55:01"
+
+# Not a real credential, and shaped so a substring check for it cannot
+# match by accident. It stands for whatever a database error carries
+# that nobody wrote for a log line.
+SENTINEL = "sk-test-4f8b2c9e-never-a-real-credential"
 
 STAGES = ("llm", "asr", "tts", "vad")
 AGENT = dict.fromkeys(STAGES, "mock")
@@ -320,6 +327,70 @@ def test_an_unreadable_database_answers_from_the_boot_snapshot(
         getattr(record, "event", None) == "device_bindings_unreadable"
         for record in caplog.records
     )
+
+
+def _rendered(records: list[logging.LogRecord]) -> tuple[str, list[dict]]:
+    """The captured records in both shipped formats: the human one, and
+    the JSON one a container writes. A record is only safe when it is
+    safe in both, the discipline the M1 review settled on."""
+    text = logging.Formatter(logs.TEXT_FORMAT)
+    formatter = logs.JsonFormatter()
+    return "\n".join(text.format(record) for record in records), [
+        json.loads(formatter.format(record)) for record in records
+    ]
+
+
+class _FailingEngine:
+    """An engine whose every connection fails, carrying what a real one
+    can carry.
+
+    A DBAPI error is not a sentence somebody wrote for a log: SQLAlchemy
+    attaches the statement and the parameters bound to it, and a driver
+    message quotes the path or the value it choked on. This one puts the
+    sentinel in all three places a naive log line would have reached
+    for, which is what makes the assertion below about the rule rather
+    than about SQLite's fixed "not a database" text.
+    """
+
+    def connect(self) -> object:
+        raise OperationalError(
+            f"SELECT agents FROM devices WHERE mac = ? -- {SENTINEL}",
+            {"mac": SENTINEL},
+            RuntimeError(f"disk I/O error near {SENTINEL}"),
+        )
+
+    def dispose(self) -> None:
+        return None
+
+
+def test_a_failed_read_repeats_nothing_the_failure_carried(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The warning is written on a path anything in the stored
+    configuration can reach, so it is a fixed sentence plus the
+    exception's class name, and nothing else."""
+    config = Config(
+        server={"database": {"dir": "/nowhere/at/all"}},
+        providers={stage: {"mock": {"type": "mock"}} for stage in STAGES},
+        agents={"assistant": AGENT},
+        devices={DEVICE_MAC: ["assistant"]},
+    )
+    bindings = DeviceBindings(config, _FailingEngine())
+
+    with caplog.at_level(logging.WARNING):
+        # The snapshot answered, which is the other half of the rule.
+        assert bindings.agents_for(DEVICE_MAC).agents == ("assistant",)
+
+    text, objects = _rendered(caplog.records)
+    assert objects, "the fallback went unlogged"
+    assert SENTINEL not in text
+    assert all(SENTINEL not in json.dumps(payload) for payload in objects)
+    # What is said instead: the fallback, and the kind of failure.
+    assert objects[0]["event"] == "device_bindings_unreadable"
+    assert objects[0]["failure"] == "OperationalError"
+    assert objects[0]["device"] == DEVICE_MAC
+    # And nothing forged: one object per record, each a single line.
+    assert len(text.splitlines()) == len(caplog.records)
 
 
 def test_the_fallback_is_the_snapshot_and_not_an_empty_answer(tmp_path: Path) -> None:

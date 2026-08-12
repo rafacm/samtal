@@ -25,11 +25,16 @@ Three properties this component exists to keep:
   ordinary deferred transactions (see `db.read_engine`); every lookup
   from async code goes through `resolve`, which awaits it on a worker
   thread.
-- **A failed read is loud, not fatal.** The OTA endpoint is every
-  device's boot dependency, so a `/data` hiccup must not refuse the
-  fleet's check-ins. A lookup that cannot read the database logs a
-  warning naming the fallback and resolves from the boot snapshot, so
-  staleness is in the log rather than in nobody's knowledge.
+- **A failed read is loud, not fatal, and says nothing of the failure
+  but its kind.** The OTA endpoint is every device's boot dependency, so
+  a `/data` hiccup must not refuse the fleet's check-ins. A lookup that
+  cannot read the database logs a fixed warning and resolves from the
+  boot snapshot, so staleness is in the log rather than in nobody's
+  knowledge. What the exception says is not in that line: a database
+  error carries the statement, its bound parameters and whatever the
+  driver quoted, and this path is reachable by anything the stored
+  configuration holds. Only the exception's class name is recorded, in
+  a field of its own.
 - **A live session is not touched.** Resolution happens at token
   issuance and at connect. Deleting a binding stops the next one of
   each; it does not reach into a conversation already happening.
@@ -173,18 +178,29 @@ class DeviceBindings:
         return None
 
     def _warn(self, mac: str, exc: Exception) -> None:
-        # The driver's own line, never SQLAlchemy's, which wraps it in
-        # the statement and the parameters bound to it. These statements
-        # bind a MAC and nothing else, but the rule that log lines carry
-        # no bound parameters is worth keeping where it is cheap.
-        detail = str(getattr(exc, "orig", "")) or type(exc).__name__
+        """The fallback, said out loud and in fixed words.
+
+        Nothing of the exception is rendered but its class name. A
+        database error is not a sentence somebody wrote for a log: a
+        DBAPI error carries the statement that failed and the parameters
+        bound to it, a driver message can quote the file path or the
+        value it choked on, and this warning is written on a path
+        anything in the stored configuration can reach. The class name
+        is a code identifier, which is the most that can be said here
+        that a stored value could not have written, and it goes in a
+        structured field rather than into the sentence so the sentence
+        is the same string every time.
+        """
         logger.warning(
-            "cannot read the device bindings for %s (%s); answering from the "
-            "configuration this server started with, which may be older than the "
-            "database",
+            "cannot read the device bindings for %s; answering from the configuration "
+            "this server started with, which may be older than the database. The "
+            "failure's kind is recorded beside this line",
             mac,
-            detail,
-            extra={"event": "device_bindings_unreadable", "device": mac},
+            extra={
+                "event": "device_bindings_unreadable",
+                "device": mac,
+                "failure": type(exc).__name__,
+            },
         )
 
 
