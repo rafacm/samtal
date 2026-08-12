@@ -12,6 +12,7 @@ literal word `pending` never enters MAC normalization.
 import logging
 import threading
 from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -32,6 +33,7 @@ from samtal_server.config.loader import DatabaseBusyError
 from samtal_server.config.secrets import MASTER_KEY_ENV, generate_key
 from samtal_server.config.store import ConfigStore
 from samtal_server.config.writes import BINDING_NOTICE, RESTART_NOTICE
+from samtal_server.db import open_database
 from samtal_server.onboarding import CODE_TTL_S, PendingDevices
 from tests.unit.test_onboarding_pending import Clock
 
@@ -55,11 +57,16 @@ def pending(clock: Clock) -> PendingDevices:
 
 
 @pytest.fixture
+def directory(tmp_path: Path) -> Path:
+    return tmp_path / "db"
+
+
+@pytest.fixture
 def client(
-    tmp_path: Path, pending: PendingDevices, monkeypatch: pytest.MonkeyPatch
+    directory: Path, pending: PendingDevices, monkeypatch: pytest.MonkeyPatch
 ) -> Iterator[TestClient]:
     monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
-    api = build_api(TOKEN, tmp_path / "db", ["assistant"], pending)
+    api = build_api(TOKEN, directory, ["assistant"], pending)
     with TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"}) as client:
         _agents(client)
         yield client
@@ -145,14 +152,14 @@ def test_the_literal_word_pending_never_enters_mac_normalization(
 
 
 def test_the_listing_is_reachable_where_the_server_mounts_it(
-    tmp_path: Path, pending: PendingDevices
+    directory: Path, pending: PendingDevices
 ) -> None:
     """The same route through the mount, since the route order that
     matters is the one inside the sub-application and the prefix is what
     a client actually types."""
     _waiting(pending)
     served = FastAPI()
-    mount_api(served, build_api(TOKEN, tmp_path / "db", ["assistant"], pending))
+    mount_api(served, build_api(TOKEN, directory, ["assistant"], pending))
     client = TestClient(served, headers={"Authorization": f"Bearer {TOKEN}"})
 
     response = client.get(f"{MOUNT_PATH}/devices/pending")
@@ -272,14 +279,14 @@ def test_two_concurrent_claims_of_one_code_bind_it_once(
     """
     code = _waiting(pending)
     writing, proceed = threading.Event(), threading.Event()
-    write = ConfigStore.bind_device
+    write = ConfigStore.claim_device
 
     def held(self: ConfigStore, mac: str, agents: list[str]) -> None:
         writing.set()
         assert proceed.wait(timeout=30)
         write(self, mac, agents)
 
-    monkeypatch.setattr(ConfigStore, "bind_device", held)
+    monkeypatch.setattr(ConfigStore, "claim_device", held)
     first: list = []
     claim = threading.Thread(target=lambda: first.append(_claim(client, code)))
     claim.start()
@@ -348,7 +355,7 @@ def test_a_busy_database_still_answers_as_itself(
     def busy(self: ConfigStore, mac: str, agents: list[str]) -> None:
         raise DatabaseBusyError("the configuration database is busy")
 
-    monkeypatch.setattr(ConfigStore, "bind_device", busy)
+    monkeypatch.setattr(ConfigStore, "claim_device", busy)
 
     refused = _claim(client, code)
 
@@ -389,3 +396,101 @@ def test_each_waiting_device_is_claimed_by_its_own_code(
 
     assert _claim(client, second).json()["wrote"] == f"device {OTHER_MAC} bound to assistant"
     assert client.get("/devices/pending").json()[first]["mac"] == MAC
+
+
+# A code outlives the state it was issued in
+
+
+@contextmanager
+def _beside(directory: Path) -> Iterator[ConfigStore]:
+    """The repository opened directly on the same database, which is
+    what the CLI's --local recovery path is and what a second process
+    would be: a writer this table cannot be told about."""
+    engine = open_database(directory)
+    try:
+        yield ConfigStore(engine)
+    finally:
+        engine.dispose()
+
+
+def test_a_claim_will_not_replace_a_binding_made_underneath_it(
+    client: TestClient, pending: PendingDevices, directory: Path
+) -> None:
+    """A code sits on a screen for minutes, and the configuration may
+    move under it. Bound by MAC where this table cannot be reached, so
+    the entry survives and the write itself is what has to refuse: an
+    upsert would have replaced the newer decision with the older one,
+    silently."""
+    code = _waiting(pending)
+    with _beside(directory) as store:
+        store.bind_device(MAC, ["written-since-boot"])
+
+    refused = _claim(client, code, "assistant")
+
+    assert refused.status_code == 404
+    assert "has been bound since it started showing" in refused.json()["detail"]
+    # The newer decision stands.
+    assert client.get(f"/devices/{MAC}").json()["entity"] == {
+        "agents": ["written-since-boot"]
+    }
+    # And the code is retired rather than left claimable: it is not one
+    # anybody may use now.
+    assert client.get("/devices/pending").json() == {}
+
+
+def test_a_claim_will_not_bind_a_device_a_default_agent_now_covers(
+    client: TestClient, pending: PendingDevices, directory: Path
+) -> None:
+    code = _waiting(pending)
+    with _beside(directory) as store:
+        store.set_default_agent("assistant")
+
+    refused = _claim(client, code, "written-since-boot")
+
+    assert refused.status_code == 404
+    assert "a default agent has been set" in refused.json()["detail"]
+    assert client.get("/devices").json() == {}
+
+
+def test_binding_a_device_by_its_mac_takes_it_out_of_the_listing(
+    client: TestClient, pending: PendingDevices
+) -> None:
+    """The housekeeping half: the listing answers "which of these may I
+    claim", so a board somebody has just configured does not belong in
+    it."""
+    code = _waiting(pending)
+    _waiting(pending, OTHER_MAC)
+
+    assert client.put(f"/devices/{MAC}", json={"agents": ["assistant"]}).status_code == 200
+
+    entries = client.get("/devices/pending").json()
+    assert code not in entries
+    assert len(entries) == 1
+
+
+def test_setting_a_default_agent_empties_the_listing(
+    client: TestClient, pending: PendingDevices
+) -> None:
+    """It covers every device that has no binding of its own, which is
+    every device in this table."""
+    _waiting(pending)
+    _waiting(pending, OTHER_MAC)
+
+    assert client.put("/default-agent", json={"name": "assistant"}).status_code == 200
+
+    assert client.get("/devices/pending").json() == {}
+
+
+def test_unsetting_a_default_agent_leaves_the_listing_alone(
+    client: TestClient, pending: PendingDevices
+) -> None:
+    """Uncovering a device is not configuring it: a board that was
+    waiting is still waiting, and its code still works."""
+    code = _waiting(pending)
+    client.put("/default-agent", json={"name": "assistant"})
+    second = _waiting(pending)
+
+    assert client.delete("/default-agent").status_code == 200
+
+    assert client.get("/devices/pending").json()[second]["mac"] == MAC
+    assert second != code

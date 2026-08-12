@@ -42,6 +42,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from samtal_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
+    DeviceAlreadyBoundError,
     StorageError,
     UnknownEntityError,
 )
@@ -457,6 +458,52 @@ class ConfigStore:
         # One binding in, one row out, so there is exactly one to
         # describe.
         written, names = next(iter(binding.items()))
+        return BoundDevice(written, tuple(names))
+
+    def claim_device(self, mac: str, agents: Sequence[str]) -> BoundDevice:
+        """Bind a device that nothing has configured yet, or refuse.
+
+        `bind_device` with a condition, and the condition is the whole
+        of it: the row must not exist, and no default agent may be set,
+        both read inside the same transaction as the write. That is what
+        an activation code needs and what a MAC does not. A code is
+        issued to a device the database had nothing to say about, and it
+        then sits on a screen for minutes while anything may happen to
+        the configuration underneath it: another operator binding the
+        same board by its MAC, or a default agent being set that covers
+        every board at once. An upsert would let the older decision
+        replace the newer one, silently, and whoever made the newer one
+        would have no reason to look.
+
+        Refused rather than merged, because there is no merge to make:
+        the two writes say different things about one device and only
+        the person holding the board knows which is meant. What the
+        refusal costs is one command, and the device is configured
+        either way: it reaches its agent at its next check.
+        """
+        binding = _binding(mac, list(agents))
+        written, names = next(iter(binding.items()))
+        with self._transaction() as connection:
+            domain = _read_domain(connection)
+            if written in domain.devices:
+                raise DeviceAlreadyBoundError(
+                    f"devices.{written}: this device has been bound since it started "
+                    f"showing that activation code, so the code binds nothing now. "
+                    f"Nothing was changed, and the device reaches its agents at its "
+                    f"next check. Run `samtal-server config show device {written}` to "
+                    f"see what it is bound to, or bind it again by its MAC"
+                )
+            if domain.default_agent is not None:
+                raise DeviceAlreadyBoundError(
+                    f"devices.{written}: a default agent has been set since this device "
+                    f"started showing that activation code, and it covers every device "
+                    f"that has no binding of its own, so the code binds nothing now. "
+                    f"Nothing was changed. To give this device an agent of its own, "
+                    f"bind it by its MAC"
+                )
+            domain.devices.update(binding)
+            _refuse_unresolved(domain)
+            _upsert(connection, schema.devices, {"mac": written}, {"agents": names})
         return BoundDevice(written, tuple(names))
 
     def delete_device(self, mac: str) -> str:
