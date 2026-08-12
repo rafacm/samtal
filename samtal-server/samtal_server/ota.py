@@ -201,11 +201,19 @@ async def check_version(request: Request) -> Response:
 async def describe(request: Request) -> Response:
     """A human check that the endpoint is reachable and pointed somewhere
     sensible. Devices only ever POST here."""
+    # Imported here rather than at module scope: the onboarding module
+    # serves these same handlers at its short path, so it imports this
+    # one, and the pair would not load in that order.
+    from samtal_server.onboarding import portal_url_line
+
     config: Config = request.app.state.config
     return PlainTextResponse(
         f"samtal-server {__version__} (revision {revision()}) OTA endpoint.\n"
         f"Devices are sent to {websocket_url_for(config, request)} "
         f"(protocol version {config.server.protocol_version}).\n"
+        # The path this was reached on, so the line is the URL that
+        # works rather than the one this server would recommend.
+        f"{portal_url_line(config, request.url.path)}\n"
     )
 
 
