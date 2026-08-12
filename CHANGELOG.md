@@ -41,6 +41,26 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **A short onboarding path and a startup banner** (#40): the OTA
+  endpoint is now also served at `/x/<key>/`, where the key is eight
+  base32 characters derived from the device authentication secret, so
+  onboarding a board means typing eight unambiguous characters into its
+  captive portal instead of a long random path segment. Nothing about
+  the key is configured or stored: it is stable across restarts and
+  rotates only when the secret does, `server.onboarding.key` pins the
+  previous one across a rotation, and a wrong key answers the same 404 a
+  path that was never served answers while logging the attempted key
+  beside the correct one, so a typo diagnoses itself. With device
+  authentication off there is no secret, so the route is served keyless
+  at `/x/`. `server.onboarding.enabled` (on by default) switches the
+  route off, `server.ota_path` accepts null to unmount the legacy route,
+  and unmounting both refuses the boot. The server now prints the whole
+  URL to type at startup and on a GET of the OTA endpoint, naming the
+  origin it came from: the new `server.public_url`, else the origin of
+  `server.websocket_url`, else the listen address, which reads as the
+  guess it is. Legacy OTA behavior is unchanged; the short route and the
+  startup line are what an upgrading deployment sees.
+
 - **The stock activation ceremony, documented** (#40):
   `docs/xiaozhi-notes.md` now records the 6-digit code flow
   reconstructed from the vendored firmware and manager-api sources
