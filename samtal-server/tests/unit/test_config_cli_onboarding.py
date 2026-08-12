@@ -17,6 +17,7 @@ applied to a reader that did not exist then: a terminal.
 """
 
 import socket
+from collections.abc import Mapping
 from pathlib import Path
 
 import httpx
@@ -653,6 +654,120 @@ def test_a_scheme_no_device_speaks_is_refused(capsys: pytest.CaptureFixture[str]
     assert cli.main(["doctor", "wss://voice.example/xiaozhi/v1/"]) == 1
 
     assert "http:// or https:// URL" in capsys.readouterr().err
+
+
+# Where a redirect may send this
+
+
+@pytest.fixture
+def redirecting(monkeypatch: pytest.MonkeyPatch):
+    """An endpoint that answers some paths with a redirect of its own
+    choosing, and the describe body everywhere else."""
+
+    def _serve(locations: Mapping[str, str]):
+        app = FastAPI()
+        seen: list[Request] = []
+
+        @app.get("/{path:path}")
+        async def answer(request: Request) -> Response:
+            seen.append(request)
+            location = locations.get(request.url.path)
+            if location is not None:
+                return Response(status_code=307, headers={"location": location})
+            return Response(
+                DESCRIBE.format(
+                    websocket="wss://voice.example/xiaozhi/v1/", url="https://voice.example"
+                ),
+                media_type="text/plain",
+            )
+
+        monkeypatch.setattr(
+            cli,
+            "build_client",
+            lambda base_url, token=None: TestClient(app, base_url=base_url),
+        )
+        return seen
+
+    return _serve
+
+
+def test_the_canonical_trailing_slash_redirect_is_followed(
+    redirecting, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The one redirect a deployment produces, and the reason any are
+    followed at all."""
+    seen = redirecting({"/x/ABCDEFGH": "https://voice.example/x/ABCDEFGH/"})
+
+    assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH"]) == 0
+
+    assert [request.url.path for request in seen] == ["/x/ABCDEFGH", "/x/ABCDEFGH/"]
+    assert "samtal-server 9.9.9" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("what", "location"),
+    [
+        ("another host", "https://metadata.example/latest/meta-data/"),
+        ("another port", "https://voice.example:9999/x/ABCDEFGH/"),
+        ("another scheme", "http://voice.example/x/ABCDEFGH/"),
+        ("another path on the same host", "https://voice.example/somewhere-else/"),
+        ("a path that is not the canonical one", "https://voice.example/x/OTHERKEY/"),
+        ("no Location at all", ""),
+    ],
+)
+def test_any_other_redirect_is_refused_without_naming_the_target(
+    redirecting, capsys: pytest.CaptureFixture[str], what: str, location: str
+) -> None:
+    """A redirect is the far end choosing where this request goes next,
+    and this command runs inside the network a deployment sits in."""
+    seen = redirecting({"/x/ABCDEFGH": location})
+
+    assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH"]) == 1, what
+
+    captured = capsys.readouterr()
+    assert captured.out == "", what
+    assert "does not follow" in captured.err, what
+    assert "metadata.example" not in captured.err, what
+    assert "somewhere-else" not in captured.err, what
+    assert "OTHERKEY" not in captured.err, what
+    assert "Traceback" not in captured.err, what
+    # And it was never sent: the refusal is in front of the second
+    # request, not after it.
+    assert [request.url.path for request in seen] == ["/x/ABCDEFGH"], what
+
+
+def test_a_location_that_cannot_be_read_is_not_a_canonical_slash() -> None:
+    """Asserted on the rule rather than through the command, because the
+    test client is built on a different httpx distribution than the CLI
+    is (httpx2 beside httpx), and it raises its own protocol error for
+    an unreadable Location before this rule is ever consulted. Through
+    the real client that error is a transport failure, which the probe
+    already reports without quoting anything."""
+    response = httpx.Response(
+        307,
+        headers={"location": f"http://[::{PASTED}"},
+        request=httpx.Request("GET", "https://voice.example/x/ABCDEFGH"),
+    )
+
+    assert cli._canonical_slash(response) is None  # noqa: SLF001
+
+
+def test_a_second_redirect_is_one_too_many(
+    redirecting, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Each hop is canonical on its own, and the chain is still somebody
+    else deciding how far this goes."""
+    seen = redirecting(
+        {
+            "/x/ABCDEFGH": "https://voice.example/x/ABCDEFGH/",
+            "/x/ABCDEFGH/": "https://voice.example/x/ABCDEFGH//",
+        }
+    )
+
+    assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH"]) == 1
+
+    assert "does not follow" in capsys.readouterr().err
+    assert len(seen) == 2
 
 
 # A URL somebody passed is never displayed

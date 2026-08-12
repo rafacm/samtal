@@ -202,6 +202,12 @@ SUPPLIED_ENDPOINT = "the supplied OTA endpoint"
 # all, bounded or otherwise.
 GLIMPSE_LENGTH = 120
 
+# How many redirects `doctor` follows. One, because one is what a
+# deployment produces: a URL typed without its trailing slash. The
+# limit is explicit rather than left to the client's default of twenty,
+# since every hop past the first is a hop somebody else chose.
+CANONICAL_REDIRECTS = 1
+
 # How much of a body is looked at at all. The description this reads is
 # three short lines, so a few kilobytes is generous; what the bound is
 # for is a megabyte of anything, which nothing should walk a pattern
@@ -922,10 +928,13 @@ def _probed(url: str, shown: str) -> httpx.Response:
     and spend the mint budget would be a diagnosis nobody could run
     twice, so this method is not a default but a rule.
 
-    Redirects are followed, because the one an operator meets is the
-    server's own: a URL typed without its trailing slash is answered
-    with a 307 to the canonical form, and reporting that as "not
-    samtal-server" would be this command's own worst answer.
+    One redirect is followed, and only one shape of it: the server's
+    own, from a URL typed without its trailing slash to the canonical
+    path on the same origin. Reporting that one as "not samtal-server"
+    would be this command's worst answer, and following any other would
+    let whatever answers at an address choose where this request goes
+    next, which inside the network a deployment sits in is worth
+    refusing rather than reasoning about.
 
     Building the client is inside the boundary with the request and the
     close. httpx validates a URL when it is given one, so construction
@@ -937,7 +946,17 @@ def _probed(url: str, shown: str) -> httpx.Response:
     try:
         try:
             client = build_client(url)
-            return client.request("GET", url, follow_redirects=True)
+            response = client.request("GET", url, follow_redirects=False)
+            for _ in range(CANONICAL_REDIRECTS):
+                if not response.is_redirect:
+                    return response
+                target = _canonical_slash(response)
+                if target is None:
+                    raise ConfigError(_redirect_refused(shown))
+                response = client.request("GET", target, follow_redirects=False)
+            if response.is_redirect:
+                raise ConfigError(_redirect_refused(shown))
+            return response
         except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
             # The exception's class name and nothing else. httpx puts the
             # request into its exceptions, its InvalidURL quotes the
@@ -956,6 +975,44 @@ def _probed(url: str, shown: str) -> httpx.Response:
         if client is not None:
             client.close()
     raise ConfigError(problem)
+
+
+def _canonical_slash(response: httpx.Response) -> str | None:
+    """The target of the one redirect this command follows, or None for
+    every other redirect there is.
+
+    Same scheme, same host, same port, the same query, and a path that
+    is the one just asked for with a slash after it. That is what
+    Starlette answers a missing trailing slash with, and it is the only
+    redirect an operator meets on the way to an OTA endpoint. A
+    `Location` this cannot read is refused the same way one pointing
+    elsewhere is, and neither is repeated back.
+    """
+    current = response.request.url
+    try:
+        target = current.join(response.headers.get("location", ""))
+    except (httpx.InvalidURL, ValueError):
+        return None
+    if (target.scheme, target.host, target.port) != (
+        current.scheme,
+        current.host,
+        current.port,
+    ):
+        return None
+    if target.path != f"{current.path}/" or target.query != current.query:
+        return None
+    return str(target)
+
+
+def _redirect_refused(shown: str) -> str:
+    return (
+        f"{shown} answered with a redirect this command does not follow. The only one it "
+        f"follows is the server's own, from a URL typed without its trailing slash to the "
+        f"canonical path on the same address; following any other would let whatever "
+        f"answers there choose which host this request reaches next, and this command "
+        f"runs inside the network a deployment sits in. The target is not repeated here: "
+        f"ask the address you meant directly."
+    )
 
 
 def _describe(body: str) -> Mapping[str, str] | None:
