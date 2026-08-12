@@ -22,6 +22,14 @@ is a deliberate, recorded trade: the key is a deployment-scoped path
 segment, not a per-device token, so the rule that tokens are never
 logged is untouched. The configured `server.ota_path` segment is not
 printed anywhere, and neither is any device token.
+
+The attempt itself is attacker-controlled text out of a URL, so what
+may be repeated is bounded: after case folding, one to ten characters
+of the base32 alphabet, and nothing else. That is a mistyped or
+over-typed key, which is what the line is for; anything longer or
+carrying a newline, a control character or any other byte is counted
+rather than quoted, so no request can forge a log entry or choose how
+long one is.
 """
 
 import base64
@@ -29,6 +37,7 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from urllib.parse import urlsplit
@@ -51,6 +60,17 @@ KEY_LABEL = b"samtal-onboarding-key-v1"
 # an endpoint whose stinginess is what actually protects it, and it is
 # short enough to type off a screen without a mistake.
 KEY_LENGTH = 8
+
+# What a mismatch may repeat back into the log, as an exact rule rather
+# than an impression: after case folding, one to ten characters, every
+# one of them in the base32 alphabet. Ten because a key mistyped with a
+# character or two too many is exactly the mistake the log line exists to
+# diagnose, and the upper bound is what keeps an attacker from choosing
+# how long a log entry is. The alphabet excludes everything a forged
+# entry needs, newlines and control characters first among them.
+LOGGABLE_ATTEMPT_LENGTH = KEY_LENGTH + 2
+
+_LOGGABLE_ATTEMPT_RE = re.compile(rf"^[A-Z2-7]{{1,{LOGGABLE_ATTEMPT_LENGTH}}}$")
 
 Handler = Callable[[Request], Awaitable[Response]]
 
@@ -282,25 +302,50 @@ def _guarded(expected: str, handler: Handler) -> Handler:
     """
 
     async def guarded(request: Request) -> Response:
-        attempted = str(request.path_params.get("key", ""))
-        if not hmac.compare_digest(
-            attempted.upper().encode("utf-8"), expected.encode("utf-8")
-        ):
-            # The one place the correct key is printed, and it is printed
-            # next to the attempted one so a typo reads off the pair. A
-            # rotated secret diagnoses itself here too.
-            logger.warning(
-                "onboarding key %s does not match this server's key %s: check the URL "
-                "typed into the device's captive portal, character by character",
-                attempted,
-                expected,
-                extra={
-                    "event": "onboarding_key_mismatch",
-                    "attempted": attempted,
-                    "expected": expected,
-                },
-            )
+        # Case folded once: it is what the comparison uses, and it is
+        # also the only form that is ever logged, which is what makes
+        # the shape check below a guarantee about the output rather than
+        # about the input (an upper-casing of some Unicode characters is
+        # an ASCII letter, and the folded string is what is rendered).
+        folded = str(request.path_params.get("key", "")).upper()
+        if not hmac.compare_digest(folded.encode("utf-8"), expected.encode("utf-8")):
+            _log_mismatch(folded, expected)
             raise HTTPException(status_code=404)
         return await handler(request)
 
     return guarded
+
+
+def _log_mismatch(folded: str, expected: str) -> None:
+    """The diagnostic for a wrong key, which repeats the attempt only
+    when the attempt is something a person could have typed at a key.
+
+    The correct key beside the attempted one is what makes a typo and a
+    rotated secret diagnose themselves, and it is the recorded trade
+    from issue #40. The attempt, though, is attacker-controlled text
+    arriving in a URL, and a raw one carries a newline into the log as a
+    forged second entry, or a megabyte of anything. So it is repeated
+    only when it matches the shape a mistyped key has; anything else is
+    counted rather than quoted, and the correct key is left out of that
+    line too, so probing cannot turn the log into a broadcast of it.
+    """
+    if _LOGGABLE_ATTEMPT_RE.match(folded):
+        logger.warning(
+            "onboarding key %s does not match this server's key %s: check the URL "
+            "typed into the device's captive portal, character by character",
+            folded,
+            expected,
+            extra={
+                "event": "onboarding_key_mismatch",
+                "attempted": folded,
+                "expected": expected,
+            },
+        )
+        return
+    logger.warning(
+        "a request reached the onboarding path carrying %d characters that are not "
+        "shaped like a key at all, so they are not repeated here; the URL to type is "
+        "in the startup line",
+        len(folded),
+        extra={"event": "onboarding_key_unshaped", "attempted_length": len(folded)},
+    )
