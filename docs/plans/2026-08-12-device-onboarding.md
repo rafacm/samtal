@@ -237,7 +237,11 @@ was written after boot naming an agent the running server never
 loaded, and that state must not mint codes for a device an
 operator already added. Such a device gets no token, no activation
 object, and a log line and acknowledgement naming the restart that
-will load its agent.
+will load its agent. The other side of the same coin is upgrade
+compatibility: a deployment with a configured default agent covers
+every unknown MAC by design, so its devices keep receiving a token
+and no activation object, exactly today's behavior, and an upgrade
+regression test pins that state.
 
 Fresh deployments make that state ordinary rather than exotic: a
 first start boots an empty domain, and an agent written afterward
@@ -521,7 +525,9 @@ New coverage, by milestone:
   notices.
 - **Unit, M3**: activation object contents for an unbound device
   (code, challenge equals MAC, message layout, empty token beside
-  it) and its absence for bound devices and when onboarding is off;
+  it) and its absence for bound devices, for unknown devices under
+  a configured default agent (the upgrade regression: token, no
+  activation), and when onboarding is off;
   the bound-but-unloaded state (no code, no token, the
   restart-naming log line, `/activate` staying 202) and both
   add-by-code notices;
@@ -722,6 +728,12 @@ addressing it lands.
    states.** `agents_for_device` gives every unknown MAC the
    default agent, and the plan's activation gate would have minted
    codes for devices the default agent already covers.
+   *Resolution*: folded into the finding-4 gate and made explicit:
+   activation applies only when the database holds no binding row
+   and no default agent, so a deployment with a default agent
+   keeps today's behavior for unknown MACs (token, no activation
+   object), pinned by an upgrade regression test in the M3
+   coverage.
 9. **P2: the public-URL fallback can log credentials.** The
    websocket URL validator accepts userinfo, and a naive origin
    derivation from `netloc` would log `user:password@host`; the
