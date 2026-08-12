@@ -159,7 +159,7 @@ Sequencing stand.
 
 The server already sees most of what there is to know about a device, and keeps almost none of it. The OTA request reports identity and build facts (`Device-Id` = MAC, `Client-Id` = UUID, `application.version`, `board.type`), parsed in `ota.py`. Board model and firmware version already survive that request: they are kept in a bounded in-memory cache (`DeviceFacts` in `capture.py`), keyed by MAC, holding the latest report until it is overwritten by the next check-in, evicted by the cache's 256-entry bound, or lost with the process. When capture is enabled, the session that follows copies them into its capture manifest. That survival is thin: in-memory, bounded, and read only by capture; nothing else can ask what a device last reported.
 
-The `hello` message carries the protocol version and a features map; when the features advertise MCP, the device's tool list arrives shortly after over a separate MCP handshake and says which controls (volume, brightness) this board actually has. The listening mode arrives with the first `listen` message and is the empirical echo-cancellation signal, since the firmware picks realtime exactly when AEC is on. A fired wake word is reported as `listen` `detect` with the word in `text`, currently debug-logged in `device/session.py`. All of these survive at best for the life of the session that carried them: the protocol version, the discovered tool list, and the listening mode are held and consumed while the session runs (the protocol version also enters an enabled capture's manifest), and the wake-word report is only debug-logged. None of it enters a durable, queryable per-device record, and the OTA exchange and the WebSocket session are joined only by `Device-Id`.
+The `hello` message carries the protocol version and a features map; when the features advertise MCP, the server starts a separate background MCP handshake and asks for the device's tool list, and when discovery completes, possibly after the first utterance, the list says which controls (volume, brightness) this board actually has. The listening mode arrives with the first `listen` message and is the empirical echo-cancellation signal, since the firmware picks realtime exactly when AEC is on. A fired wake word is reported as `listen` `detect` with the word in `text`, currently debug-logged in `device/session.py`. All of these survive at best for the life of the session that carried them: the protocol version, the discovered tool list, and the listening mode are held and consumed while the session runs (the protocol version also enters an enabled capture's manifest), and the wake-word report is only debug-logged. None of it enters a durable, queryable per-device record, and the OTA exchange and the WebSocket session are joined only by `Device-Id`.
 ```
 
 ### Housekeeping in the same PR
@@ -267,6 +267,11 @@ addressing it lands.
    background handshake and requests the list; if discovery
    completes, the tools become available, possibly after the first
    utterance.
+   *Resolution*: adopted. The issue #96 replacement now describes
+   a background request whose completion is not guaranteed and
+   may land after the first utterance; the concepts bullet
+   already framed discovery as a race and defers to the protocol
+   notes for it.
 4. **P2: "joined only by `Device-Id`" is too broad.** OTA
    authentication signs both client ID and MAC, and WebSocket
    authentication verifies both. Scope the claim to the facts
