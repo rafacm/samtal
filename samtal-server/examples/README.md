@@ -71,7 +71,7 @@ the reference it displaces.
 | `mcp-server-stdio.yaml` | `mcp_servers`, a spawned command |
 | `mcp-server-streamable-http.yaml` | `mcp_servers`, an HTTP endpoint |
 | `agent-defaults.yaml` | `agent_defaults`, the singleton |
-| `agent.yaml` | `agents`, one persona |
+| `agent.yaml` | `agents`, one agent |
 
 Devices and the default agent have no fragments: they are written with
 `config bind-device` and `config set-default-agent`, which take

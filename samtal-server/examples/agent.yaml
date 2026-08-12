@@ -1,10 +1,10 @@
-# One persona. An agent combines a prompt with one provider per stage,
+# One agent: a prompt combined with one provider per stage,
 # and every stage must resolve to a provider (here or in agent_defaults)
 # for the server to start, so a typical agent is a prompt and a voice.
 #
 #   samtal-server config set agent assistant -f examples/agent.yaml
 #
-# The same file installed under a second name is a second persona; edit
+# The same file installed under a second name is a second agent; edit
 # the prompt and the voice and nothing else has to move.
 
 # State the reply language explicitly: models otherwise pick one by
