@@ -74,6 +74,37 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   of which offered `config list` as an example of a command that opens
   it directly, which it no longer is.
 
+- `docs/concepts.md` claiming that the protocol version, the feature
+  map and the device's own MCP tool list all arrive at `hello` (#109):
+  the tool list comes from a separate background MCP handshake started
+  after the hello, which a first utterance can beat, so the Observed
+  facts bullet now names the arrival phases in wire order (OTA
+  check-in, hello, background discovery, first listen, `listen`
+  `detect`) and defers to the protocol notes for the race.
+
+- The same bullet's "today these are parsed and dropped" (#109), which
+  understated retention: board model and firmware version cross the
+  OTA-to-session boundary in the bounded in-memory cache, which a
+  session reads into its manifest when capture is enabled, and the
+  protocol version, the discovered MCP tools and the listening mode
+  are retained for the life of the session, the protocol version also
+  entering an enabled capture's manifest. Only the wake-word report is
+  merely debug-logged, and what none of it enters is a durable,
+  queryable per-device record (#96).
+
+- `docs/xiaozhi-notes.md` saying that the server "learns only that a
+  session opened" when a wake word fires (#109). The trigger audio is
+  genuinely unreachable, since ESP-SR decides on-device, but the
+  firmware sends `listen` `detect` with the fired word in `text`,
+  which `device/session.py` receives and debug-logs; the entry now
+  separates the constraint from the report and gives the report its
+  tier.
+
+- The glossary's Manifest entry (#109), which listed "device,
+  firmware" and named neither the client ID, nor the board model
+  cached from the last OTA check-in, nor the session's protocol
+  version, all of which the manifest actually carries.
+
 ## 2026-08-11
 
 ### Added
