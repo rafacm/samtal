@@ -153,7 +153,9 @@ verified on hardware" where that is the truth:
   support code, none of it validated on hardware, and the stub
   says so. BOOT toggles the conversation (and enters WiFi
   provisioning when pressed during startup); PWR long-press powers
-  off. Single microphone and no echo cancellation, which means the
+  off, with the threshold stated from the shared button component
+  (2 s default) unless the board overrides it, which the milestone
+  checks. Single microphone and no echo cancellation, which means the
   device cannot listen while it speaks, so there is no barge-in on
   this board. No backlight, so the screen-brightness voice command
   does not exist here. The wake word status of the prebuilt
@@ -182,13 +184,22 @@ documentation.
 Written from validated experience plus the upstream board support
 code, organized under the standard skeleton:
 
-- **Controls**: the existing button table moves here as-is (short
-  press PWR toggles the conversation and is the deliberate way to
-  stop streaming; long press of about 2 s powers off; idle 5
-  minutes powers off; volume click, hold-for-max, hold-for-mute
-  semantics, with mute being the speaker, never the microphone).
-  The milestone verifies from the upstream board code what the
-  touch layer actually does on this board and documents that,
+- **Controls**: the existing button table moves here and is
+  completed against the board code, which implements more than the
+  table lists. The full inventory: short press PWR toggles the
+  conversation and is the deliberate way to stop streaming; long
+  press of about 2 s powers off; double-click PWR turns the screen
+  off and back on; triple-click PWR reboots into WiFi
+  provisioning; idle 5 minutes powers off; volume click steps by
+  10, hold volume-up is maximum, hold volume-down mutes the
+  speaker, never the microphone; and on builds with device-side
+  AEC, double-clicking volume-down while idle toggles echo
+  cancellation, which also changes the listening mode and with it
+  whether barge-in exists, so the guide documents it with that
+  side effect and its idle-only restriction. Every gesture is
+  documented with its state restrictions and hardware-checked
+  during the milestone. The milestone also verifies from the board
+  code what the touch layer actually does and documents that,
   which may honestly be "nothing you need".
 - **Wake word**: the upstream prebuilt firmware ships the Chinese
   wake word ("nǐ hǎo xiǎo zhì"); an English model ("Hi ESP") exists
@@ -354,6 +365,14 @@ addressing it lands.
    state restrictions and side effects; and state the ePaper PWR
    long-press threshold instead of a bare "long-press", since the
    issue requires actual timings.
+   *Resolution*: adopted. The Touch-LCD controls inventory now
+   lists the full implemented set (PWR double-click screen off/on,
+   PWR triple-click WiFi provisioning, the idle-only volume-down
+   double-click AEC toggle with its listening-mode and barge-in
+   side effect), each with state restrictions, all
+   hardware-checked in the milestone. The ePaper stub states the
+   long-press threshold from the shared button component (2 s
+   default), with the milestone checking for a board override.
 
 4. **P2: the MCP inventories omit board-specific commands and
    overpromise availability.** All three boards also publish a
