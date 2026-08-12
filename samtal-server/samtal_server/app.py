@@ -12,6 +12,7 @@ from samtal_server.config import Config
 from samtal_server.config.api import api_token, build_api, mount_api
 from samtal_server.config.boot import load_boot_config
 from samtal_server.config.secrets import SecretStore
+from samtal_server.device.bindings import DeviceBindings
 from samtal_server.filler import build_agent_fillers
 from samtal_server.providers import build_agent_providers
 from samtal_server.registry import SessionRegistry
@@ -32,7 +33,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     because synthesis is async and create_app is not: startup is still
     before the first conversation, which is what "at boot" is for. An
     agent whose synthesis fails runs with the feature off rather than
-    failing the boot."""
+    failing the boot.
+
+    The way out also disposes the device bindings' read engine, the one
+    thing on a running server that still holds the configuration
+    database open."""
     app.state.agent_fillers.update(
         await build_agent_fillers(app.state.config, app.state.agent_providers)
     )
@@ -41,6 +46,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await app.state.mcp_servers.stop_all()
+        # The one database connection pool a running server holds, let
+        # go here so a process on its way out leaves no handle on the
+        # data volume.
+        app.state.bindings.dispose()
 
 
 def create_app(config: Config | None = None, secrets: SecretStore | None = None) -> FastAPI:
@@ -73,6 +82,12 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     # secret in the environment, so a deployment that forgot one never
     # comes up serving every device that connects.
     app.state.device_auth = build_device_auth(app.state.config)
+    # Which agents a device may talk to, and the only thing this server
+    # re-reads while it runs: an operator binds a board with the board
+    # in front of them, and its next check-in is seconds away. Built
+    # here because boot has already migrated the database, so nothing on
+    # a device path ever has to; disposed in the lifespan above.
+    app.state.bindings = DeviceBindings.open(app.state.config)
     # The configuration API's token is resolved beside it and for the
     # same reason: it is always mounted, so a deployment that forgot the
     # variable must be refused here rather than serve an admin surface

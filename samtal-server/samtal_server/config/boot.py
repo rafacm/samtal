@@ -15,8 +15,12 @@ otherwise fail later:
    which is the same last line of defence it has always been.
 
 The engine is closed here: the configuration is a boot-time snapshot,
-so nothing after this reads the database. A CLI write while the server
-runs is picked up at the next start, by design.
+so nothing after this reads the database except `DeviceBindings`
+(`samtal_server.device.bindings`), which reads only the `devices` and
+`domain_settings` tables, through a read engine of its own, so that
+binding a device applies at that device's next OTA check or connection.
+A CLI write to anything else while the server runs is picked up at the
+next start, by design.
 """
 
 from dataclasses import dataclass

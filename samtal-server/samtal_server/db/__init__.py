@@ -68,6 +68,64 @@ def open_database(directory: str | Path) -> Engine:
     return engine
 
 
+def read_engine(directory: str | Path) -> Engine:
+    """An engine for reading a database somebody else has already
+    migrated, which on a running server means the one boot opened.
+
+    Everything `open_database` does beyond creating an engine is exactly
+    what a device path must not do. It migrates, which is an Alembic
+    round trip; it takes the write lock before it reads, so a lookup
+    would queue behind whichever writer holds it for up to the busy
+    timeout; and it creates the directory, so a lookup against a
+    misconfigured path would leave a database behind rather than fail.
+    This does none of the three: no migration, ordinary deferred read
+    transactions, and nothing created but the engine.
+
+    Deferred rather than immediate is the whole point. Under WAL a
+    deferred transaction that only reads takes no lock at all and reads
+    the last committed snapshot, so a CLI or API write in progress
+    cannot stall a device asking which agent it may talk to.
+
+    The caller owns the engine and disposes it. The file is not opened
+    here: SQLAlchemy connects lazily, so a database that cannot be read
+    is a failure at the first lookup, where the caller can fall back,
+    rather than at app build.
+    """
+    engine = create_engine(
+        # Echo off for the reason it is off above: a statement log is a
+        # place values end up.
+        URL.create("sqlite+pysqlite", database=str(Path(directory) / DATABASE_FILENAME)),
+        echo=False,
+    )
+
+    @event.listens_for(engine, "connect")
+    def _configure_connection(dbapi_connection: object, _record: object) -> None:
+        # Transaction control to SQLAlchemy, so the BEGIN below is the
+        # one that happens. Without it pysqlite opens transactions of
+        # its own and each SELECT would read its own snapshot, which is
+        # what would let a lookup see a device's binding from before a
+        # write and the default agent from after it.
+        dbapi_connection.isolation_level = None  # type: ignore[attr-defined]
+        cursor = dbapi_connection.cursor()  # type: ignore[attr-defined]
+        try:
+            # No journal_mode pragma: the database is already WAL, set
+            # by whoever created it, and it is a property of the file
+            # rather than of a connection. Setting it from here would be
+            # a write from the read path.
+            cursor.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+        finally:
+            cursor.close()
+
+    @event.listens_for(engine, "begin")
+    def _begin_deferred(connection: object) -> None:
+        # Spelled out rather than left to the default, because the
+        # default for this project is the immediate one above and the
+        # difference is the reason this engine exists.
+        connection.exec_driver_sql("BEGIN")  # type: ignore[attr-defined]
+
+    return engine
+
+
 def _failure(exc: Exception, path: Path) -> ConfigError:
     """The lock that did not arrive inside the busy timeout, told from
     everything else. The distinction is the only one a caller answering
@@ -170,4 +228,4 @@ def _upgrade_to_head(engine: Engine) -> None:
         connection.commit()
 
 
-__all__ = ["BUSY_TIMEOUT_MS", "DATABASE_FILENAME", "open_database"]
+__all__ = ["BUSY_TIMEOUT_MS", "DATABASE_FILENAME", "open_database", "read_engine"]
