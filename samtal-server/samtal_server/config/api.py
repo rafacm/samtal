@@ -293,6 +293,18 @@ CODE_IN_FLIGHT = (
     "bound by that request or be free again."
 )
 
+# And what a claim refused by the repository says instead of the
+# repository's own sentence, which names the agent it could not resolve.
+# This is the one route where an agent name is typed beside an
+# activation code rather than read out of stored configuration, so it is
+# the one route where a mistake puts something else there.
+CLAIM_REFUSED = (
+    "the device showing that code could not be bound: the request's agents name at "
+    "least one agent this deployment does not have. Nothing was changed and the code "
+    "is still claimable. What was sent is not quoted back; run "
+    "`samtal-server config list` to see the agents that exist."
+)
+
 # How the document describes each refusal a route can answer with. The
 # sentence a caller actually receives is the repository's own; these say
 # what the status means.
@@ -1012,11 +1024,36 @@ def _writes(api: FastAPI) -> None:
             raise ClaimInFlightError(CODE_IN_FLIGHT)
         if claim.device is None:
             raise UnknownEntityError(UNKNOWN_CODE)
+        # A refusal is the repository's decision and its own sentence
+        # everywhere else in this file, and here it is the decision but
+        # not the sentence. `bind_device` refuses an unresolved
+        # reference by naming the agent it could not find, and on this
+        # route those names arrived in a request body that a mistake can
+        # put a credential into. So the plain refusal is replaced by one
+        # naming the field rather than its contents, and the refusals
+        # that are not about the request (a busy database, unreadable
+        # stored state) travel out as themselves, carrying nothing a
+        # caller sent.
+        #
+        # Recorded and re-raised outside the handler, the rule this
+        # codebase settled on: `from None` clears the cause and leaves
+        # the context, so the rejected value would still be reachable on
+        # the exception that travels out.
+        refused = False
+        bound = None
         try:
-            store.bind_device(claim.device.mac, agents)
-        except BaseException:
-            pending.release(code)
+            bound = store.bind_device(claim.device.mac, agents)
+        except (UnknownEntityError, DatabaseBusyError, StorageError):
             raise
+        except ConfigError:
+            refused = True
+        finally:
+            # Every way out but the successful one leaves the device
+            # showing its number, so the number has to still work.
+            if bound is None:
+                pending.release(code)
+        if refused:
+            raise ConfigError(CLAIM_REFUSED)
         pending.consume(code)
         return _acknowledge(
             bound_device(claim.device.mac, agents), binding_notice(_unloaded(agents, loaded))

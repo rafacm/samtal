@@ -344,12 +344,18 @@ def test_add_device_inherits_the_reference_check(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """The repository decides what an agent is, here as everywhere: the
-    claim route calls the same method bind-device calls."""
+    claim route calls the same method bind-device calls. What differs is
+    the sentence, which on this route does not repeat the names it
+    refused: a code is typed by hand, and so is whatever is typed beside
+    it."""
     code = _showing(run)
 
     assert run("add-device", code, "ghost") == 1
 
-    assert 'agent "ghost" is not a defined agent' in capsys.readouterr().err
+    captured = capsys.readouterr()
+    assert "at least one agent this deployment does not have" in captured.err
+    assert "ghost" not in captured.err
+    assert "Traceback" not in captured.err
     # And the board is still showing the number, so the number still
     # works.
     _an_agent(run)
