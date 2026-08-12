@@ -160,8 +160,11 @@ NOTHING_PENDING = (
 # that stdout holds the URL and nothing else.
 OTA_URL_GUIDANCE = (
     "Type this into the device's captive portal, under its advanced settings, as the "
-    "server address. The board then shows a six-digit code and speaks it; bind it with: "
-    "samtal-server config add-device <code> <agent>"
+    "server address. If the board then shows a six-digit activation code, it has no "
+    "agent yet: bind "
+    "it with samtal-server config add-device <code> <agent>. A deployment with "
+    "default_agent set covers every board already, so its boards show no code and start "
+    "talking as soon as they connect."
 )
 
 # Said when there is no short URL to print, with the fix the command

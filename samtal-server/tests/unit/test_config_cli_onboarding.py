@@ -164,6 +164,38 @@ def test_the_url_is_alone_on_stdout_and_the_advice_is_not(
     assert "add-device" in captured.err
 
 
+def test_the_guidance_promises_only_what_the_readme_does(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The guidance said the board "then shows a six-digit code", full
+    stop, while the documented walkthrough sets a default agent, which
+    covers every unknown board and produces no code at all. A person
+    following both would have waited for a number that was never coming.
+
+    Asserted against the README's own section rather than in isolation,
+    because the failure was not a wrong sentence but two documents
+    saying different things about one behavior.
+    """
+    section = (
+        (Path(__file__).resolve().parents[2] / "README.md")
+        .read_text(encoding="utf-8")
+        .split("## Onboarding a device")[1]
+        .split("\n## ")[0]
+    )
+
+    assert cli.main(["ota-url"]) == 0
+    printed = capsys.readouterr().err
+
+    # Conditional in both, and the condition named the same way.
+    assert "If the board" in printed
+    assert "if it shows any" in section
+    for vocabulary in ("activation code", "default_agent", "add-device"):
+        assert vocabulary in printed, vocabulary
+        assert vocabulary in section, vocabulary
+    # The promise that was there before.
+    assert "The board then shows" not in printed
+
+
 def test_a_guessed_origin_reads_as_a_guess(capsys: pytest.CaptureFixture[str]) -> None:
     """The banner's rule, on the command that is read before the banner
     exists: an origin nobody configured must not be printed as fact."""
