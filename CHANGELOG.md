@@ -81,6 +81,35 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **Onboarding a board by the code it shows** (#40): a device the
+  database holds no binding for, on a deployment with no default agent
+  to cover it, is now answered at its configuration check with a
+  six-digit activation code instead of an empty token. Stock firmware
+  shows that code on screen, speaks it digit by digit, and polls the
+  server every three seconds, so an operator reads the code off the
+  board in front of them, runs `samtal-server config add-device CODE
+  AGENT`, and the board connects seconds later with no power cycle and
+  no button press. `samtal-server config pending` lists the boards
+  waiting, with the model and firmware version each reported, which is
+  what tells two boards on one desk apart; `add-device` sits beside
+  `bind-device`, which still takes a MAC you already know. The two
+  routes behind them are `GET /api/devices/pending` and
+  `POST /api/devices/pending/{code}`, both in the committed OpenAPI
+  document, and the claim writes through the same repository call
+  binding by MAC uses, so its reference checks and its acknowledgement
+  are the same. Nothing changes for a deployment with a default agent
+  set: it covers every unknown MAC by design, so its devices keep
+  receiving a token and no activation object. Codes last ten minutes,
+  are re-issued at the next check-in after that (the board displays
+  whatever the fresh reply carries), are forgotten when the server
+  restarts, and are bounded both in how many devices may wait at once
+  and in how many may be minted per ten minutes, so an unauthenticated
+  endpoint cannot be made to mint without limit. A version-2 activation
+  poll is answered by the same ceremony: its HMAC is computed with a
+  key burned into the device, which this server has no copy of and
+  cannot verify, so what is checked instead is that the body parses,
+  names a known algorithm, and echoes the challenge this server issued.
+
 - **A short onboarding path and a startup banner** (#40): the OTA
   endpoint is now also served at `/x/<key>/`, where the key is eight
   base32 characters derived from the device authentication secret, so
