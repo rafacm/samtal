@@ -156,9 +156,25 @@ docker restart samtal
 
 **5. Flash** the prebuilt xiaozhi merged binary for your board at offset `0x0`.
 
-**6. Point** the device at your server by writing one NVS key (`wifi/ota_url` = `http://<server-host>:8003/xiaozhi/ota/`) over USB.
+**6. Ask for the URL to type**, and check that something sensible answers on it. No cable is involved in either. The URL is derived from the device-auth secret you generated in step 2, so `ota-url` reaches nothing to answer and the string is the same at every start.
 
-**7. Provision WiFi** from the device's captive portal, press the button, and talk. Which button that is depends on the board (PWR on the Touch-LCD-1.54, BOOT on the others), so start from your board's guide in [`docs/devices/`](docs/devices/README.md), which also covers its wake word, its display, and the rest of its controls.
+```bash
+samtal config ota-url     # http://192.168.1.10:8003/x/AB2C4D5E/
+samtal config doctor      # says what a device would be told, or what is wrong
+```
+
+Eight characters, in an alphabet with no `0`/`O` and no `1`/`I`/`l`, because this string gets typed on a phone off a small display. If the origin was guessed rather than configured, the command says so: set `server.public_url` to name the deployment exactly.
+
+**7. Provision WiFi** from the device's captive portal, putting that URL in the portal's advanced section as the server address. Which button brings the portal up depends on the board (PWR on the Touch-LCD-1.54, BOOT on the others), so start from your board's guide in [`docs/devices/`](docs/devices/README.md), which also covers its wake word, its display, and the rest of its controls.
+
+**8. Bind the board.** Step 3 set a `default_agent`, so any board that reaches the server is already covered and this one starts talking as soon as it connects: press the button and talk. Leave `default_agent` unset instead and the `devices` map becomes an allowlist, where an unbound board is answered with a six-digit activation code it shows and speaks, and one command binds it:
+
+```bash
+samtal config pending                       # which board is showing what
+samtal config add-device 418293 assistant   # bind the one showing 418293
+```
+
+The device polls while it waits, so it connects seconds later with no restart and no power cycle. `bind-device` is the same write for a MAC you already know; `add-device` is for the board in front of you. A board provisioned earlier with a full `ota_url` in NVS keeps reaching the server exactly as before.
 
 The complete procedure, including a fully local zero-API-key pipeline and every serial gotcha, is in [`docs/xiaozhi-notes.md`](docs/xiaozhi-notes.md); the server's own options, security defaults, and container details are in [`samtal-server/README.md`](samtal-server/README.md). samtal has no versioned releases yet: images are tagged `latest`, the build time (`2026-08-03-1200`, UTC), and the commit SHA (`sha-3f9362a`). Only `latest` moves; deploy from one of the other two.
 
