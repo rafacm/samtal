@@ -56,6 +56,15 @@ change takes effect at the next server start: the configuration is read
 once at boot, so an edit made while the server runs applies when it is
 restarted.
 
+Device bindings are the exception. A running server re-reads the
+`devices` map and `default_agent` as a device asks for them, so binding
+a device, unbinding it, or changing the default agent applies at that
+device's next OTA check or connection, with no restart. The exception
+ends where the agent does: a binding naming an agent that was created
+after the server started resolves to nothing until the restart that
+builds that agent's providers. Every write says which of the two
+happened.
+
 `samtal-server config schema [entity]` prints the same field descriptions
 as JSON Schema, which is what a machine reads before writing a fragment.
 The API's document carries the same schemas under `components`, where a
