@@ -26,10 +26,13 @@ until a button opens the channel. Each guide says which of the two its
 board is, and for which firmware.
 
 **In conversation.** Once the channel is open, what the microphone does
-follows the listening mode the firmware picked for the board. The mode
-is a build-time property of the device: the device owns it and the
-server cannot change it. Each guide names the mode its board actually
-uses.
+follows the board's listening mode. Which mode a board starts in is
+settled when its firmware is built, by whether echo cancellation is on.
+The mode belongs to the device either way: the server is told which one
+it is and cannot change it, while on the boards that have the
+echo-cancellation gesture the user can, and switching it moves the
+board between the two modes below. Each guide names the mode its board
+starts in.
 
 - **Realtime**, the mode on boards with echo cancellation. The
   microphone streams continuously for the whole session, silence
@@ -47,8 +50,12 @@ uses.
   microphone is stopped while the device speaks and re-armed for the
   next turn once the reply has been played, so a reply cannot be
   interrupted by talking over it, and the device stops sending when it
-  hears you finish. The channel is not held open through the silence,
-  so the server's idle timeout is not the thing you meet here.
+  hears you finish. The session itself stays open across all of that:
+  it is the microphone that pauses and re-arms, not the connection. The
+  server's idle timeout does not apply here, because an auto-mode board
+  is not streaming a room to anybody between turns; what ends an
+  auto-mode session is the conversation button, losing the network, the
+  server's session cap, or powering off.
 - **Manual** is push to talk. None of the boards above uses it.
 
 No board here has a microphone mute, in hardware or in firmware. The

@@ -9,10 +9,12 @@ working status.
 What every board shares, and this guide does not repeat, is on the
 [common page](README.md): what the microphone does while idle and in
 conversation, the WiFi network rules, and how the device's own controls
-reach the assistant. This board runs in **realtime** listening mode,
+reach the assistant. This board starts in **realtime** listening mode,
 the mode described there for boards with echo cancellation: while a
 conversation is open the microphone streams continuously, and the
-assistant can be interrupted while it is speaking.
+assistant can be interrupted while it is speaking. The
+echo-cancellation gesture below is the one thing that moves it out of
+that mode.
 
 Unless a section says otherwise, what follows describes the board
 running upstream's prebuilt firmware, which is what samtal uses today.
