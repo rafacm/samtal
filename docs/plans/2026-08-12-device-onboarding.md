@@ -221,8 +221,28 @@ in flight, the same line the session-boundary work drew.
 ### Activation gates on being unbound, with onboarding on
 
 The OTA response carries `activation` exactly when
-`server.onboarding.enabled` is true and the presented MAC resolves
-to no loaded agent. Auth state does not gate it: with `auth.enabled`
+`server.onboarding.enabled` is true and the database holds neither
+a binding row for the presented MAC nor a configured default
+agent. That is deliberately database truth, not the loaded-agent
+filter: the two disagree exactly when a binding or a default agent
+was written after boot naming an agent the running server never
+loaded, and that state must not mint codes for a device an
+operator already added. Such a device gets no token, no activation
+object, and a log line and acknowledgement naming the restart that
+will load its agent.
+
+Fresh deployments make that state ordinary rather than exotic: a
+first start boots an empty domain, and an agent written afterward
+is not loaded, so add-by-code cannot promise a no-restart bind
+there. The acknowledgement therefore says which case happened:
+when every agent it bound is loaded, the notice says the device
+connects with no restart; otherwise it carries the restart
+sentence, and after the restart the device's own loop completes
+the ceremony with no device-side action. The onboarding docs and
+the deployment profile state the ordering out loud: configure the
+domain, restart, then onboard devices restart-free.
+
+Auth state does not gate activation: with `auth.enabled`
 false the token is always empty and the websocket accepts anyone,
 but an unbound device still resolves to no agent and is refused at
 session start, so the code ceremony is how a trial network binds a
@@ -277,10 +297,13 @@ which the server cannot influence.
 
 `/activate` is registered on both routers (the short path and the
 legacy `ota_path`), reads the MAC from `Device-Id`, and answers by
-the live view: 200 when bound, 202 otherwise, including for MACs
-with no pending entry (a restart loses the table; the device's loop
-re-checks OTA and gets a fresh code, and answering 202 meanwhile
-matches upstream's "keep waiting").
+the live view: 200 when the MAC resolves to a loaded agent, so
+that a 200 always means the next OTA check hands the device its
+real configuration; 202 otherwise, including bound-but-unloaded
+MACs (which flip to 200 at the restart that loads their agent) and
+MACs with no pending entry (a restart loses the table; the
+device's loop re-checks OTA and gets a fresh code, and answering
+202 meanwhile matches upstream's "keep waiting").
 
 The issue says a version-2 poll's HMAC is verified before 200. It
 cannot be: the HMAC is computed with an eFuse-burned per-device key
@@ -304,9 +327,9 @@ echo the challenge this server issued for that MAC; a mismatch is
 refused with 202 and a distinct log reason, because a poll
 answering someone else's challenge is not evidence of anything. The
 challenge check is scoped to the pending state: once the MAC is
-bound the pending entry is gone and `/activate` answers 200 with
-nothing left to check, which is also what keeps the
-post-binding poll working. The serial number a version-2 body
+bound and its agent loaded, the pending entry is gone and
+`/activate` answers 200 with nothing left to check, which is also
+what keeps the post-binding poll working. The serial number a version-2 body
 carries is recorded in the pending entry as an observed fact.
 
 ### The admin surface: two routes under `/api/devices`
@@ -473,6 +496,9 @@ New coverage, by milestone:
 - **Unit, M3**: activation object contents for an unbound device
   (code, challenge equals MAC, message layout, empty token beside
   it) and its absence for bound devices and when onboarding is off;
+  the bound-but-unloaded state (no code, no token, the
+  restart-naming log line, `/activate` staying 202) and both
+  add-by-code notices;
   expiry, re-issue, code uniqueness, the cap answering with today's
   behavior plus a warning; `/activate` 202/200 on both routers; the
   version-2 checks (bad body, unknown algorithm, challenge
@@ -615,6 +641,17 @@ addressing it lands.
    promises add-by-code applies with no restart. Specify the
    initial workflow, differentiated notices, and the ordering in
    the deployment docs.
+   *Resolution*: activation now gates on database truth (no
+   binding row and no configured default agent) while token
+   issuance keeps the loaded-agent filter, so a bound-but-unloaded
+   device gets no new code, no token, a restart-naming log line
+   and acknowledgement, and a 202 that flips to 200 at the restart
+   that loads its agent. Add-by-code answers with the no-restart
+   notice only when every bound agent is loaded and with the
+   restart sentence otherwise; the onboarding docs and the
+   deployment profile state the ordering (configure the domain,
+   restart, then onboard devices restart-free); both notices and
+   the bound-but-unloaded state are tested.
 5. **P2: a capacity cap is not the required global issuance rate
    limit.** An attacker fills 128 slots and repeats every ten
    minutes; the issue requires per-MAC and global rate limits, and
