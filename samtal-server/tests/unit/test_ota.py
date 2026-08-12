@@ -272,3 +272,53 @@ def test_get_describes_where_devices_are_sent() -> None:
     # A human checking the endpoint is reachable is also a human who
     # wants to know which build answered.
     assert revision() in response.text
+
+
+# The configured path is a credential, so nothing may hand it back
+
+
+SECRET_SEGMENT = "3f9a1c7e-never-a-real-ota-segment"
+
+SECRET_PATH = f"/xiaozhi/ota/{SECRET_SEGMENT}/"
+
+
+def _secret_client() -> TestClient:
+    return client_for(Config(server={"ota_path": SECRET_PATH}))
+
+
+@pytest.mark.parametrize(
+    "method, path, expected",
+    [
+        ("post", SECRET_PATH.rstrip("/"), 200),
+        ("get", SECRET_PATH.rstrip("/"), 200),
+        ("post", f"{SECRET_PATH}activate/", 202),
+    ],
+)
+def test_a_slash_that_is_off_by_one_is_answered_not_redirected(
+    method: str, path: str, expected: int
+) -> None:
+    """Starlette answers a trailing-slash miss with a 307 whose Location
+    is the corrected URL, and here the corrected URL is the deployment's
+    secret path: a request that had only guessed at the segment would
+    have been handed the whole of it in a header. Both spellings are
+    registered instead, so there is no redirect to carry it."""
+    client = _secret_client()
+    headers = {"Device-Id": DEVICE_MAC, "Client-Id": DEVICE_UUID}
+
+    body = {"json": SYSTEM_INFO} if method == "post" else {}
+
+    answer = getattr(client, method)(path, headers=headers, follow_redirects=False, **body)
+
+    assert answer.status_code == expected
+    assert "location" not in answer.headers
+    assert SECRET_SEGMENT not in str(answer.headers)
+
+
+def test_a_path_that_was_never_served_still_answers_404() -> None:
+    """The corollary: dispatching both spellings must not turn the
+    router into one that answers anything."""
+    client = _secret_client()
+
+    assert client.post("/xiaozhi/ota/wrong-segment/", json=SYSTEM_INFO).status_code == 404
+    assert client.post("/xiaozhi/ota/wrong-segment", json=SYSTEM_INFO).status_code == 404
+    assert client.post(f"{SECRET_PATH}activate/x", json={}).status_code == 404

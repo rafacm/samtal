@@ -151,6 +151,25 @@ def build_router(path: str = OTA_PATH) -> APIRouter:
     # URL a waiting device polls. The short onboarding router registers
     # the same three handlers by reference.
     router.post(f"{path}{ACTIVATE_SEGMENT}")(activate)
+    # Both spellings of both, dispatched rather than redirected.
+    #
+    # Starlette answers a trailing-slash miss with a 307 whose Location
+    # is the corrected URL, and on this router the corrected URL is the
+    # configured `ota_path`, which is this deployment's secret. So
+    # `<ota_path minus its slash>` and `<ota_path>activate/` would each
+    # hand the whole segment back in a header, to a request that had
+    # only guessed at it. The short onboarding path answers such a miss
+    # with a redirect of its own because its key is deliberately
+    # printable; this one has nothing it may put in a Location at all,
+    # so it answers with the reply instead. A device gains a round trip
+    # either way.
+    slashless = path.rstrip("/")
+    if slashless:
+        # Empty only for an `ota_path` of "/", which the validator
+        # permits and which needs no second spelling.
+        router.post(slashless)(check_version)
+        router.get(slashless)(describe)
+    router.post(f"{path}{ACTIVATE_SEGMENT}/")(activate)
     return router
 
 
