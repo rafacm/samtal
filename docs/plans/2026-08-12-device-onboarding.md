@@ -485,6 +485,15 @@ Reuse, do not restate: the unit OTA suites (`test_ota.py`,
 allowlist semantics; the integration lane's `booted`/`running_app`
 machinery and the `xiaozhi_sdk` simulator drive the end-to-end
 cases; the OpenAPI drift test covers the new routes by regeneration.
+One piece cannot be reused as is: `booted` seeds a scratch database
+inside a `TemporaryDirectory` that is gone by the time the app
+runs, and composes a config still pointing at the default database
+directory, so a live write through the served app would address the
+wrong database. The lane gains a fixture variant that keeps one
+database directory alive for the app's lifetime, composes
+`server.database.dir` to it, and can boot a second app from the
+same directory afterward, which is what the restart assertion
+needs.
 
 New coverage, by milestone:
 
@@ -525,7 +534,10 @@ New coverage, by milestone:
   `/activate` answers 202, add-by-code lands, `/activate` answers
   200, the next OTA check yields a real token and no activation
   object, and a whole conversation then runs with the simulator's
-  `ota_url` pointed at the short path.
+  `ota_url` pointed at the short path. Then the restart assertion
+  from the issue's verification list: boot a second app from the
+  same database directory and the binding still applies with the
+  onboarding URL unchanged.
 - **Unit, M4**: `ota-url` output equals the server's derivation for
   the same file config and environment, offline; `doctor`'s four
   verdicts against canned responses; both commands' failure wording.
@@ -681,6 +693,13 @@ addressing it lands.
    still points at the default directory, so live API writes
    would address the wrong database; the plan also omits the
    issue's binding-survives-restart assertion.
+   *Resolution*: the tests section now names the fixture change (a
+   variant keeping one database directory alive for the app's
+   lifetime, composing `server.database.dir` to it, able to boot a
+   second app from the same directory), and the M3 integration
+   coverage ends with the restart assertion: bind through the API,
+   boot a second app from the same directory, and the binding
+   holds with the onboarding URL unchanged.
 7. **P2: M2 would publish a false API contract.** The API
    description, the acknowledgement schema, and `_acknowledge()`
    all hardcode the restart sentence, and the plan postponed
