@@ -533,8 +533,9 @@ addressing it lands.
 
 ## Milestones
 
-- [ ] **Write the device guides and link them from the hardware
-  tables**: the common page and three guides under `docs/devices/`
+- [x] **[Write the device guides and link them from the hardware
+  tables](2026-08-12-device-guides-implementation.md#write-the-device-guides-and-link-them-from-the-hardware-tables)**
+  (PR TBD): the common page and three guides under `docs/devices/`
   with the section skeleton above (one full, two stubs); the
   "Using the device" content moved out of `samtal-esp32/README.md`
   with a pointer left behind; both hardware tables linking the
