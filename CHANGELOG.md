@@ -9,6 +9,23 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- `docs/concepts.md`, the domain model from the user's point of view:
+  device, agent, binding, conversation, session, and users as a later
+  stage, with the decided semantics. The wake word wakes the device
+  and the default agent answers; a mid-session switch lasts for the
+  session and starts clean by default, carrying context only on
+  explicit request; conversations suspend rather than end, can resume
+  from another device, and are cross-linked with the sessions that
+  touched them, which makes the session transcript its own artifact;
+  turns that are only meta requests are recorded as session events,
+  not conversation entries; memory stays agent-keyed with a planned
+  shared user profile; meta questions are built-in tools in every
+  agent with conversation search scoped to the asking agent; a
+  built-in help agent explains the device and the system, reading
+  observed device facts (#96) and the per-board guides (#93). The
+  glossary gains entries for the new nouns and links them to the
+  page.
+
 - **Documentation for the configuration API** (#101). The server README
   gains a section on it under Configuration: what mounts at `/api`, the
   bearer token and how to generate one, the routes a noun at a time,

@@ -83,11 +83,13 @@ A binding connects a device to the agents reachable from it, with one
 designated default. Bindings are many-to-many: one agent can serve
 several devices (the same home agent in every room), and one device
 can reach several agents. Today the binding is the device's agent list
-in configuration, and the first entry is the default. A fresh wake
-always gets the default agent; reaching another bound agent is a
-[handover](glossary.md#handover), and a planned meta capability lets
-the user change a device's default by voice ("make Nadia the default
-agent on this device").
+in the domain configuration, and the first entry is the default. A
+device with no binding reaches the deployment's `default_agent` when
+one is set, and is turned away otherwise, so the devices map doubles
+as an allowlist. A fresh wake always gets the default agent; reaching
+another bound agent is a [handover](glossary.md#handover), and a
+planned meta capability lets the user change a device's default by
+voice ("make Nadia the default agent on this device").
 
 ## Conversation and session
 
