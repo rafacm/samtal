@@ -409,7 +409,9 @@ def _doctor(args: argparse.Namespace) -> None:
     reported = _describe(response.text)
     if reported is None:
         raise ConfigError(_not_samtal_server(shown, response))
-    websocket = _shown_url(reported["websocket"])
+    websocket = _reported_websocket(reported["websocket"])
+    if websocket is None:
+        raise ConfigError(_unreadable_websocket(shown))
     if url.startswith("https://") and reported["websocket"].startswith("ws://"):
         raise ConfigError(_plain_websocket(shown, websocket))
     print(
@@ -997,19 +999,37 @@ def _plain_websocket(shown: str, websocket: str) -> str:
     )
 
 
-def _shown_url(url: str) -> str:
-    """A URL out of a response, as it may be printed. What arrived is
-    whatever the far end sent, and identifying the far end is the whole
-    point of the command, so it is bounded, made printable, and stripped
-    of any credential somebody wrote into it."""
+def _reported_websocket(url: str) -> str | None:
+    """The websocket URL a response named, as it may be printed, or None
+    when it is not a websocket URL this command can read.
+
+    What arrived is whatever the far end sent, and identifying the far
+    end is the whole point of the command, so it is parsed before it is
+    shown: bounded, made printable, and stripped of any credential
+    written into it. There is deliberately no fallback to the raw
+    string. A URL that will not parse is exactly the one whose userinfo
+    could not be taken off, so falling back would print the credential
+    in precisely the case the stripping exists for.
+    """
     try:
         parsed = urlsplit(url)
+        # Read here, since it parses on access and raises for a port
+        # that is not a number in range.
         _ = parsed.port
     except ValueError:
-        return _printable(url)
-    if not parsed.scheme or not parsed.hostname:
-        return _printable(url)
+        return None
+    if parsed.scheme.lower() not in ("ws", "wss") or not parsed.hostname:
+        return None
     return _printable(_without_userinfo(parsed))
+
+
+def _unreadable_websocket(shown: str) -> str:
+    return (
+        f"{shown} answers as samtal-server, but the websocket URL it reports is not a "
+        f"ws:// or wss:// URL this client can read, so a device pointed here would be "
+        f"handed an address it cannot connect to. It is not quoted back, since it is "
+        f"whatever that address returned. Check server.websocket_url on that deployment."
+    )
 
 
 def _printable(value: str, limit: int = GLIMPSE_LENGTH) -> str:

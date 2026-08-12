@@ -742,17 +742,33 @@ def test_a_credential_in_the_answer_is_not_read_back_out(
     assert "wss://voice.example/xiaozhi/v1/" in printed
 
 
-def test_an_unreadable_websocket_url_is_still_bounded(
-    endpoint, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize(
+    ("what", "websocket"),
+    [
+        ("an unclosed IPv6 literal", f"wss://user:{PASTED}@[::"),
+        ("a malformed IPv6 literal", f"wss://[bad::{PASTED}::x]:8443/xiaozhi/v1/"),
+        ("a port that is not a number", f"wss://voice.example:{PASTED}/xiaozhi/v1/"),
+        ("a port out of range", f"wss://voice.example:99999{PASTED}/xiaozhi/v1/"),
+        ("no scheme a device speaks", f"https://user:{PASTED}@voice.example/xiaozhi/v1/"),
+        ("no host at all", f"wss:///xiaozhi/v1/{PASTED}"),
+    ],
+)
+def test_a_websocket_url_that_cannot_be_read_is_a_failure_not_a_fallback(
+    endpoint, capsys: pytest.CaptureFixture[str], what: str, websocket: str
 ) -> None:
-    """What the far end sends need not parse as a URL at all."""
-    endpoint(DESCRIBE.format(websocket="wss://[::" + PASTED, url="https://voice.example"))
+    """The URL that will not parse is exactly the one whose userinfo
+    could not be taken off, so printing the raw string as a fallback
+    published the credential in the one case the stripping exists for.
+    It is now a verdict of its own, and it quotes nothing."""
+    endpoint(DESCRIBE.format(websocket=websocket, url="https://voice.example"))
 
-    assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH/"]) == 0
+    assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH/"]) == 1, what
 
-    printed = capsys.readouterr().out
-    assert len(printed) < 400
-    assert "\x1b" not in printed
+    captured = capsys.readouterr()
+    assert captured.out == "", what
+    assert PASTED not in captured.err, what
+    assert "server.websocket_url" in captured.err, what
+    assert "Traceback" not in captured.err, what
 
 
 def test_a_response_that_is_not_text_at_all_is_handled(
