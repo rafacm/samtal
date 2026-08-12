@@ -124,6 +124,19 @@ UNRECOGNIZED_ANSWER = "a body this client does not recognize"
 # as though it could.
 SECRETS_HEADING = "# stored secrets, set with: samtal-server config set-secret"
 
+# The pending listing's columns, and what a listing of nothing says. The
+# fields are also what a body has to carry to be read as a listing at
+# all.
+PENDING_COLUMNS = ("code", "device", "board", "firmware", "expires")
+
+PENDING_FIELDS = frozenset({"mac", "board", "firmware", "expires_at"})
+
+NOTHING_PENDING = (
+    "no device is waiting to be claimed. A board shows its code within a couple of "
+    "minutes of being pointed at this server, and codes are forgotten when the server "
+    "restarts, so a board that has been waiting a while shows a fresh one"
+)
+
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run one config command. Returns the process exit code.
@@ -244,6 +257,21 @@ def _delete_device(args: argparse.Namespace) -> None:
 
 def _bind_device(args: argparse.Namespace) -> None:
     _wrote(_call(args, "PUT", _path("devices", args.mac), {"agents": list(args.agents)}))
+
+
+def _add_device(args: argparse.Namespace) -> None:
+    _wrote(
+        _call(
+            args,
+            "POST",
+            _path("devices", "pending", args.code),
+            {"agents": list(args.agents)},
+        )
+    )
+
+
+def _pending(args: argparse.Namespace) -> None:
+    print(_pending_listing(_call(args, "GET", _path("devices", "pending"))), end="")
 
 
 def _set_default_agent(args: argparse.Namespace) -> None:
@@ -682,6 +710,47 @@ def _bodies(config: Mapping[str, object]) -> dict[tuple[str, str], Mapping[str, 
     return bodies
 
 
+def _pending_listing(answer: object) -> str:
+    """The devices waiting to be claimed, one line each.
+
+    Columns rather than YAML, because the question this answers is
+    which of several boards is the one being held, and the answer is
+    read across a line: the code to type, the MAC it will bind, and the
+    board and firmware that tell two boards apart.
+    """
+    entries = _pending_entries(answer)
+    if not entries:
+        return f"{NOTHING_PENDING}\n"
+    rows = [PENDING_COLUMNS] + [
+        (
+            code,
+            str(entry["mac"]),
+            str(entry["board"]),
+            str(entry["firmware"]),
+            str(entry["expires_at"]),
+        )
+        for code, entry in entries.items()
+    ]
+    widths = [max(len(row[column]) for row in rows) for column in range(len(PENDING_COLUMNS))]
+    return "".join(
+        "  ".join(
+            cell.ljust(width) for cell, width in zip(row, widths, strict=True)
+        ).rstrip()
+        + "\n"
+        for row in rows
+    )
+
+
+def _pending_entries(answer: object) -> Mapping[str, Mapping[str, object]]:
+    """The listing, as the API returns it: code to device facts."""
+    if isinstance(answer, Mapping) and all(
+        isinstance(code, str) and isinstance(entry, Mapping) and PENDING_FIELDS <= set(entry)
+        for code, entry in answer.items()
+    ):
+        return answer
+    raise ConfigError(f"the configuration API answered a read with {UNRECOGNIZED_ANSWER}")
+
+
 def _summary(document: Mapping[str, object]) -> str:
     """The tree `config list` prints: one line per entity, with the
     slots that hold a stored secret named but never their values.
@@ -1000,12 +1069,42 @@ def _parser() -> argparse.ArgumentParser:
     entity.add_argument("mac", metavar="MAC")
     entity.set_defaults(run=_delete_device)
 
+    # Two ways to bind a board, and which one an operator wants depends
+    # on what they are holding: a MAC they already know, or a device in
+    # front of them showing six digits. The help text says exactly that,
+    # because the pair is otherwise the kind of thing a person picks
+    # wrongly once and then remembers wrongly.
     bind = commands.add_parser(
-        "bind-device", parents=[common], help="bind a device to one or more agents"
+        "bind-device",
+        parents=[common],
+        help="bind a device by the MAC you already know, to one or more agents",
     )
     bind.add_argument("mac", metavar="MAC")
     bind.add_argument("agents", metavar="AGENT", nargs="+")
     bind.set_defaults(run=_bind_device)
+
+    add = commands.add_parser(
+        "add-device",
+        parents=[common],
+        help=(
+            "bind the device showing this activation code, which is the six digits on "
+            "its screen; use bind-device when you know the MAC instead"
+        ),
+    )
+    add.add_argument(
+        "code",
+        metavar="CODE",
+        help="the six digits the device is showing and speaking",
+    )
+    add.add_argument("agents", metavar="AGENT", nargs="+")
+    add.set_defaults(run=_add_device)
+
+    waiting = commands.add_parser(
+        "pending",
+        parents=[common],
+        help="the devices showing an activation code, and the code each is showing",
+    )
+    waiting.set_defaults(run=_pending)
 
     default = commands.add_parser(
         "set-default-agent", parents=[common], help="the agent an unbound device reaches"
