@@ -166,6 +166,52 @@ def test_a_wrong_key_says_nothing_about_the_right_one(
         assert KEY not in str(answered.headers)
 
 
+@pytest.mark.parametrize("method", ["get", "post"])
+def test_a_wrong_key_without_the_slash_is_answered_the_same_way(method: str) -> None:
+    """Starlette's own trailing-slash redirect runs before any handler
+    and echoes the attempted key in its Location header, which would
+    make a wrong key distinguishable from a path that was never served.
+    The slashless routes therefore check the key first."""
+    client = client_for()
+    # The device's POST carries a body; a person checking the URL by
+    # hand sends a GET with none. Both must miss the same way.
+    body = {"json": SYSTEM_INFO} if method == "post" else {}
+
+    missed = getattr(client, method)(
+        "/x/AAAAAAAA", headers=HEADERS, follow_redirects=False, **body
+    )
+    unserved = getattr(client, method)(
+        "/no/such/route", headers=HEADERS, follow_redirects=False, **body
+    )
+
+    assert missed.status_code == unserved.status_code == 404
+    assert missed.content == unserved.content
+    assert missed.headers["content-type"] == unserved.headers["content-type"]
+    assert "location" not in missed.headers
+    assert "AAAAAAAA" not in str(missed.headers)
+
+
+def test_the_right_key_without_the_slash_still_redirects() -> None:
+    client = client_for()
+    for method in ("get", "post"):
+        body = {"json": SYSTEM_INFO} if method == "post" else {}
+        redirected = getattr(client, method)(
+            f"/x/{KEY}", headers=HEADERS, follow_redirects=False, **body
+        )
+        assert redirected.status_code == 307, method
+        assert redirected.headers["location"].endswith(f"/x/{KEY}/")
+
+
+def test_the_slashless_redirect_keeps_the_query_it_was_given() -> None:
+    """The redirect Starlette would have issued preserves the query, and
+    so does this one: a portal that appends anything must not lose it."""
+    redirected = client_for().get(
+        f"/x/{KEY}?probe=1", headers=HEADERS, follow_redirects=False
+    )
+    assert redirected.status_code == 307
+    assert redirected.headers["location"].endswith(f"/x/{KEY}/?probe=1")
+
+
 @pytest.mark.parametrize("path", [f"/x/{KEY}", OTA_PATH.rstrip("/")])
 def test_a_missing_trailing_slash_still_reaches_the_handler(path: str) -> None:
     """A captive portal may strip the trailing slash. Starlette answers

@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import RedirectResponse
 
 from samtal_server import ota
 from samtal_server.config import Config
@@ -249,7 +250,27 @@ def build_router(key: str | None) -> APIRouter:
     path = f"{ONBOARDING_MOUNT_PATH}/{{key}}/"
     router.post(path)(_guarded(key, ota.check_version))
     router.get(path)(_guarded(key, ota.describe))
+    # A captive portal may drop the trailing slash, and Starlette answers
+    # that with a 307 of its own. Left to it, the redirect happens before
+    # any handler runs and its Location header echoes the attempted key,
+    # so a wrong key would be answered differently from a path that was
+    # never served, which is the one thing the miss branch must not do.
+    # These routes put the key check in front of the redirect: the
+    # correct key gets the same 307, a wrong one gets the same 404 as
+    # everywhere else.
+    slashless = path.rstrip("/")
+    router.post(slashless)(_guarded(key, _redirect_to_slash))
+    router.get(slashless)(_guarded(key, _redirect_to_slash))
     return router
+
+
+async def _redirect_to_slash(request: Request) -> Response:
+    """The redirect Starlette would have issued, once the key is known
+    to be right. 307 rather than 302 or 303: it preserves the method and
+    the body, and what arrives here is a device's POST."""
+    return RedirectResponse(
+        str(request.url.replace(path=f"{request.url.path}/")), status_code=307
+    )
 
 
 def _guarded(expected: str, handler: Handler) -> Handler:
