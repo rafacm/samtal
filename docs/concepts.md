@@ -180,11 +180,17 @@ Three decided semantics:
 
 This is settled by hardware reality, and the documentation should say
 it plainly wherever wake words appear. The wake word is spotted
-on-chip by ESP-SR; the audio never reaches the server, which at most
-is told which word fired, after the fact (the firmware's `listen`
-`detect` report; [xiaozhi-notes](xiaozhi-notes.md)). Wake words are
-also a fixed compiled set, so per-agent wake words are impossible on
-stock firmware, which is the compatibility floor.
+on-chip by ESP-SR, and the server takes no part in the decision: it
+cannot hear, tune, or substitute for it. What it is told is which word
+fired, after the fact (the firmware's `listen` `detect` report;
+[xiaozhi-notes](xiaozhi-notes.md)). Builds with the firmware's
+send-wake-word-data option enabled, which is the default in current
+upstream sources, additionally send the short span of buffered trigger
+audio as the conversation's first audio; whether the prebuilt images
+on our boards do has not been checked on the wire and is open (issue
+#112). Wake words are also a fixed compiled set, so per-agent wake
+words are impossible on stock firmware, which is the compatibility
+floor.
 
 So the wake word is the doorbell: it opens a session, and the device's
 default agent answers. When a board's wake word happens to be "Sophia"
