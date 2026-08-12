@@ -95,7 +95,7 @@ Generating either one inline in the `docker run` would mint a new secret on ever
 
 This start is quick: with nothing configured there is no engine to build. Speech models download into the `/data` volume when the providers naming them are first built, which is the restart in step 4, so that one takes a few minutes and later ones take seconds.
 
-**3. Say what the assistant is.** The other half of the configuration (which engines, which persona, which devices) lives in a database on the data volume, written with `samtal-server config`, the CLI the image ships. It writes through the configuration API on the running server, so run it inside the container, where the token and the loopback address are already in its environment. This assistant is fully local and needs no account anywhere: Silero, faster-whisper, [Ollama](https://ollama.com) and Piper.
+**3. Say what the assistant is.** The other half of the configuration (which engines, which agents, which devices) lives in a database on the data volume, written with `samtal-server config`, the CLI the image ships. It writes through the configuration API on the running server, so run it inside the container, where the token and the loopback address are already in its environment. This assistant is fully local and needs no account anywhere: Silero, faster-whisper, [Ollama](https://ollama.com) and Piper.
 
 ```bash
 # The CLI, inside the container started above.

@@ -32,7 +32,7 @@ api_key_env: OPENAI_API_KEY
 # base_url: http://localhost:8000/v1
 
 # A list of words the transcriber should expect. Not the agent's prompt:
-# that one is the persona instruction on an agent entry, and these two
+# that one is the agent's instruction on its own entry, and these two
 # unrelated options happen to share a name.
 #
 # Words the engine would not otherwise guess: names, places, the

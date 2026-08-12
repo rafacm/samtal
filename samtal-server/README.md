@@ -182,7 +182,7 @@ Keys are named, never written, exactly as for the TTS types above.
 
 **This `prompt` is not the agent's prompt.** Two unrelated options share
 the name: the one here is a list of words the transcriber should expect,
-and the one under `agents:` is the persona instruction sent to the LLM.
+and the one under `agents:` is the agent's instruction sent to the LLM.
 This one is a hint about vocabulary, not a request for behaviour, which
 is exactly what makes the failure below surprising.
 
@@ -201,7 +201,7 @@ under a second came back as the prompt word for word. A prompt of plain
 vocabulary makes that harmless noise. A prompt naming your agents makes
 it an instruction, and in a field session it was one: a 0.9 s utterance
 transcribed as `samtal, Oliver, Greta, Mateo`, and the model read the
-persona names as a request and handed over to an agent nobody had
+agent names as a request and handed over to an agent nobody had
 asked for. The server never hands a transcript that is the prompt and
 nothing else (trimmed, case-insensitive, and ignoring a full stop the
 model added) to the LLM as if spoken. Nor does it treat the echo as
@@ -214,7 +214,7 @@ real short answer survives that retry and is heard normally, genuine
 silence comes back empty and is discarded, and each trip logs one
 `asr_prompt_echo` event saying which it was. The rule stands anyway:
 wake words, agent names and anything imperative do not belong here.
-Recognising a persona's name when it is genuinely spoken is worth less
+Recognising an agent's name when it is genuinely spoken is worth less
 than never acting on one that was not.
 
 **Set `language` unless the household speaks English.** This is the
@@ -569,7 +569,7 @@ memory:
 One file per agent, created on first write and injected into that
 agent's system prompt on every reply, capped at 8 KiB or 200 lines with
 the oldest dropped first. Memory is keyed by agent and not by device: a
-persona is one entity across rooms. Leave the section out and there is
+agent is one entity across rooms. Leave the section out and there is
 no `remember` tool and no injection.
 
 A tool that fails, times out, or does not exist comes back to the model

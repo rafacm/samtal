@@ -11,11 +11,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 - The word "persona" is gone from the server's own voice: model
   docstrings and field descriptions, the generated domain reference
-  and OpenAPI document, the example config's memory comments, and two
-  code comments now say agent, matching the terminology decision
-  recorded in `docs/concepts.md` and the glossary. Historical
-  records (old changelog entries, plans, issues) keep their original
-  wording.
+  and OpenAPI document, the example config's memory comments, two
+  code comments, both READMEs, and the example fragments now say
+  agent, matching the terminology decision recorded in
+  `docs/concepts.md` and the glossary. Historical records (old
+  changelog entries, plans, issues) keep their original wording, and
+  tests keep their internal persona identifiers.
 
 ### Added
 
