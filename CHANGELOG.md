@@ -20,6 +20,24 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **Device guides** (#93): `docs/devices/`, one user-facing guide per
+  supported board plus a common page for what every board running the
+  upstream firmware shares. The Touch-LCD-1.54 guide is written in
+  full (the complete control inventory read against the board support
+  code, including the gestures the old firmware README never listed
+  and the idle-only echo-cancellation toggle that takes barge-in with
+  it; the wake word with an exact account of what the server does and
+  does not learn; the voice commands the board publishes as MCP tools;
+  the display's two power-saving timers with their real conditions);
+  the ePaper and AMOLED guides are stubs marked 🚧 whose every section
+  names its source, hands-on or read from the firmware. The
+  "Using the device" section moves out of `samtal-esp32/README.md`,
+  correcting on the way its claim that the listening behavior it
+  described was universal, and leaves a pointer behind. Both hardware
+  tables link the guides as `guide · wiki`, the root README's Getting
+  Started sends the reader to their board's guide for which button to
+  press, and `docs/README.md` indexes the new directory.
+
 - `docs/concepts.md`, the domain model from the user's point of view:
   device, agent, binding, conversation, session, and users as a later
   stage, with the decided semantics. The wake word wakes the device
