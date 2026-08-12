@@ -807,7 +807,7 @@ per repository convention.
   banner line at startup. Merge gate: the
   portal-retype hardware check recorded in `docs/xiaozhi-notes.md`.
 - [x] **[M2: live device bindings](2026-08-12-device-onboarding-implementation.md#milestone-2-live-device-bindings)**
-  (PR TBD, branch
+  (PR #116, branch
   `feature/device-onboarding-m2`): `DeviceBindings` consumed by the
   OTA handlers and the session layer; the no-restart write notices
   for device and default-agent writes, with the API description,
