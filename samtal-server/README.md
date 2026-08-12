@@ -1771,11 +1771,35 @@ samtal-server config ota-url
 
 The command contacts nothing: it reads the same config file the server
 reads and derives the same key from the same device-auth secret, so it
-answers before the first start, from a laptop, or while a board waits
-on a bench. On stderr it says where the origin came from, and an origin
-nobody configured reads as the guess it is: set `server.public_url` to
-name the deployment exactly. The running server prints the same URL at
-startup, and a GET of the endpoint repeats it.
+answers before the first start and while a board waits on a bench. On
+stderr it says where the origin came from, and an origin nobody
+configured reads as the guess it is: set `server.public_url` to name the
+deployment exactly. The running server prints the same URL at startup,
+and a GET of the endpoint repeats it.
+
+The two inputs are the file and the secret, so it runs wherever both
+are. Inside the container they already are:
+
+```bash
+docker exec -i samtal samtal-server config ota-url
+```
+
+On a machine with neither a checkout nor an installed server, `uvx`
+fetches the CLI, and the file and the secret are yours to hand it:
+
+```bash
+SAMTAL_AUTH_SECRET=$(cat ~/.samtal-auth-secret) \
+  uvx --from "git+https://github.com/rafacm/samtal#subdirectory=samtal-server" \
+  samtal-server config --config ./config.yaml ota-url
+```
+
+That resolves the whole server, dependencies and all, to run a command
+that opens no socket; a slim redistribution of the CLI is a follow-up
+rather than a thing that exists. It also resolves without this
+repository's lockfile, so it takes the newest dependencies its
+constraints allow rather than the tested ones. In a checkout,
+`uv run samtal-server config ota-url` from `samtal-server/` is the
+lockfile's own environment and the one this repository tests.
 
 Eight characters, in an alphabet with no `0`/`O` and no `1`/`I`/`l`,
 because this string gets typed on a phone keyboard off a small display.
