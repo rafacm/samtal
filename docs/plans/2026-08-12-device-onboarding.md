@@ -381,6 +381,11 @@ mac it bound; the device's next poll flips to 200.
 `GET /api/devices` keeps its shape (bound devices only); the CLI
 merges the two listings for display. Both routes join the committed
 OpenAPI document under the existing regenerate-and-diff discipline.
+One mechanical constraint is stated because Starlette matches
+routes in registration order: `/devices/pending` must be
+registered before `/devices/{mac}`, or the literal word `pending`
+would enter MAC normalization and 400; a regression test pins that
+the static path never reaches the MAC handler.
 
 ### The CLI: four new commands in the existing grammar
 
@@ -552,8 +557,10 @@ New coverage, by milestone:
   reference-check inheritance; the claim races (two concurrent
   claims of one code yield one success and one retryable refusal,
   a failed repository write releases the reservation, issuance
-  races expiry, listing races mutation); codes absent from
-  responses they do not belong in.
+  races expiry, listing races mutation); the route-order
+  regression (`GET /api/devices/pending` never enters MAC
+  normalization); codes absent from responses they do not belong
+  in.
 - **Integration, M3**: the firmware's activation loop simulated
   over HTTP against a served app: OTA check yields a code,
   `/activate` answers 202, add-by-code lands, `/activate` answers
@@ -758,6 +765,10 @@ addressing it lands.
     existing MAC route.** Starlette matches in registration
     order, so `GET /api/devices/pending` registered after
     `GET /api/devices/{mac}` would enter MAC validation.
+    *Resolution*: the plan now requires registering
+    `/devices/pending` before `/devices/{mac}` and adds the
+    regression test proving the literal path never reaches MAC
+    normalization.
 11. **P3: M1's "no behavior change" acceptance is false.**
     Onboarding defaults on, so M1 adds a reachable route and a
     new startup log line to every deployment.
