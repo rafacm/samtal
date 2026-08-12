@@ -88,6 +88,12 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     # here because boot has already migrated the database, so nothing on
     # a device path ever has to; disposed in the lifespan above.
     app.state.bindings = DeviceBindings.open(app.state.config)
+    # The devices waiting to be claimed, and the codes they are showing.
+    # Runtime state owned by this app and shared with the configuration
+    # API below, which is where a code becomes a binding. Always built,
+    # even with onboarding off, so no handler needs a branch for its
+    # absence; with onboarding off nothing ever puts anything in it.
+    app.state.pending = onboarding.PendingDevices()
     # The configuration API's token is resolved beside it and for the
     # same reason: it is always mounted, so a deployment that forgot the
     # variable must be refused here rather than serve an admin surface
