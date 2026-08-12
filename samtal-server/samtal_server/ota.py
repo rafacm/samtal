@@ -351,6 +351,24 @@ def _activation(
     # holding neither a binding row for this MAC nor a default agent.
     if resolution.agents or resolution.unloaded:
         return None
+    if not resolution.authoritative:
+        # An empty answer from the snapshot fallback is not the database
+        # saying nothing is bound; it is this server not having been
+        # able to find out. Issuing a token off a stale answer only
+        # repeats what boot decided, which is why that side keeps the
+        # fallback, but minting a code off one would offer a claim
+        # ticket for a board an operator has already bound, to whoever
+        # is holding the endpoint. The warning naming the failure is
+        # already in the log, from the view itself.
+        logger.warning(
+            "device %s is unbound in the configuration this server started with, but "
+            "the database could not be read, so no activation code was issued: this "
+            "device may already be bound. Fix the database and it is offered one at "
+            "its next check",
+            mac,
+            extra={"event": "activation_not_offered", "device": mac, "reason": "unreadable"},
+        )
+        return None
     # Imported here for the reason `describe` imports it below: the
     # onboarding module serves these handlers, so it imports this one.
     from samtal_server.onboarding import activation_object
