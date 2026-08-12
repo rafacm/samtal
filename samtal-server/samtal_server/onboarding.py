@@ -517,6 +517,29 @@ class PendingDevices:
         with self._lock:
             self._forget(code)
 
+    def retire(self, mac: str) -> None:
+        """Forget one device, because something else has configured it.
+
+        The listing exists to answer "which of these boards may I
+        claim", so a board that has just been bound by its MAC does not
+        belong in it. This is housekeeping and not the guarantee: a
+        write made where this table cannot be reached (the `--local`
+        recovery path, or a second process) reconciles nothing, which is
+        why the claim itself refuses to bind a device that is already
+        configured.
+        """
+        with self._lock:
+            device = self._by_mac.get(mac)
+            if device is not None:
+                self._forget(device.code)
+
+    def retire_all(self) -> None:
+        """Forget every device, because a default agent now covers all
+        of them at once."""
+        with self._lock:
+            self._by_mac.clear()
+            self._by_code.clear()
+
     def release(self, code: str) -> None:
         """Put a reserved code back, for a claim whose write failed. The
         operator can run the same command again."""

@@ -47,6 +47,7 @@ from samtal_server.config.docgen import API_OPTIONS_NOTE
 from samtal_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
+    DeviceAlreadyBoundError,
     StorageError,
     UnknownEntityError,
 )
@@ -135,6 +136,7 @@ API_DESCRIPTION = (
 # document-level requirement, so both come from one string.
 BEARER_SCHEME = "bearerToken"
 
+
 class ClaimInFlightError(ConfigError):
     """Another request is in the middle of claiming the same activation
     code. Nothing was changed, and the same call may be retried.
@@ -151,6 +153,9 @@ class ClaimInFlightError(ConfigError):
 # slot that is not a credential slot, a stage that is not a stage.
 REFUSAL_STATUS: dict[type[ConfigError], int] = {
     UnknownEntityError: 404,
+    # The same status for the same reason: what the request addressed,
+    # a device waiting to be claimed under this code, is not there.
+    DeviceAlreadyBoundError: 404,
     DatabaseBusyError: 409,
     ClaimInFlightError: 409,
     StorageError: 500,
@@ -1040,17 +1045,28 @@ def _writes(api: FastAPI) -> None:
         # the context, so the rejected value would still be reachable on
         # the exception that travels out.
         refused = False
+        superseded = False
         bound = None
         try:
-            bound = store.bind_device(claim.device.mac, agents)
+            bound = store.claim_device(claim.device.mac, agents)
+        except DeviceAlreadyBoundError:
+            # The code named a device that was unbound when it was
+            # issued, and a code outlives the state it was issued in.
+            # The entry goes rather than being released: this one is not
+            # claimable again by anybody.
+            superseded = True
+            raise
         except (UnknownEntityError, DatabaseBusyError, StorageError):
             raise
         except ConfigError:
             refused = True
         finally:
             # Every way out but the successful one leaves the device
-            # showing its number, so the number has to still work.
-            if bound is None:
+            # showing its number, so the number has to still work,
+            # except the one way that says the number means nothing now.
+            if superseded:
+                pending.consume(code)
+            elif bound is None:
                 pending.release(code)
         if refused:
             raise ConfigError(CLAIM_REFUSED)
@@ -1066,7 +1082,7 @@ def _writes(api: FastAPI) -> None:
         openapi_extra=_request_body(DeviceBinding),
     )
     def write_device(
-        mac: str, body: RawBody, store: StoreDep, loaded: LoadedAgentsDep
+        mac: str, body: RawBody, store: StoreDep, loaded: LoadedAgentsDep, pending: PendingDep
     ) -> dict[str, str]:
         """Bind one device to one or more agents. The MAC is normalized
         before it is written, so the two spellings reach one row.
@@ -1076,6 +1092,13 @@ def _writes(api: FastAPI) -> None:
         acknowledgement says depends on whether the agents named are
         ones that server loaded."""
         bound = store.bind_device(mac, _agents(body))
+        # This device is configured now, so it is not one an operator
+        # may still claim by the code it was showing. Housekeeping
+        # rather than a guarantee: a claim itself refuses to bind a
+        # device that is already configured, which is what covers a
+        # write made where this table cannot be reached, such as the
+        # CLI's --local path or a second process.
+        pending.retire(bound.mac)
         # Both the line and the notice are built from what the row
         # holds, never from what the request sent: a name arriving with
         # spaces around it binds the agent it names, and an
@@ -1107,12 +1130,17 @@ def _writes(api: FastAPI) -> None:
         openapi_extra=_request_body(DefaultAgentName),
     )
     def write_default_agent(
-        body: RawBody, store: StoreDep, loaded: LoadedAgentsDep
+        body: RawBody, store: StoreDep, loaded: LoadedAgentsDep, pending: PendingDep
     ) -> dict[str, str]:
         """Set the agent an unbound device reaches. Read by the running
         server the way a binding is, so it applies to the next device
         that asks unless the agent it names was written since boot."""
         name = store.set_default_agent(_name(body))
+        # A default agent covers every device that has no binding of its
+        # own, which is every device in the pending table, so none of
+        # them is waiting to be claimed any more. Housekeeping, for the
+        # reason the device write above says.
+        pending.retire_all()
         return _acknowledge(
             wrote_default_agent(name), binding_notice(_unloaded([name], loaded))
         )
