@@ -252,6 +252,19 @@ evidence to tune them by, and a knob nobody can reason about is
 schema noise. If the field says otherwise they graduate to config
 then.
 
+The table is shared between the device-facing handlers on the
+event loop and the API handlers on the threadpool, so every
+operation on it happens under one mutex, held only for in-memory
+work (microseconds, so holding it briefly on the loop is fine) and
+never across a database write. A claim follows a live, reserved,
+consumed lifecycle: `add-device` reserves the code under the lock,
+performs the repository write with the lock released, then
+consumes the entry on success or releases the reservation on
+failure. A concurrent claim of a reserved code is refused with
+retryable wording rather than reported bound, so two operators
+racing one code cannot both succeed; expiry, uniqueness, re-issue,
+and the listing are single lock-held steps.
+
 `timeout_ms` and the exact `message` layout mirror what upstream's
 manager-api sends and the firmware renders (host on one line, code
 under it); the implementer verifies both against the vendored
@@ -309,15 +322,17 @@ POST /api/devices/pending/{code}   body {"agents": [...]}; binds the
 Keyed by code because the code is what the operator has: the listing
 answers "which of these is the thing on my desk" with the board
 model and firmware version the OTA POST reported. The add-by-code
-handler looks the code up in the pending table (runtime state owned
+handler claims the code in the pending table (runtime state owned
 by the serving app and shared with the sub-application at mount
-time), then calls `ConfigStore.bind_device`, the same repository
-method `PUT /api/devices/{mac}` uses, so reference checking and
+time, under the table's claim lifecycle), then calls
+`ConfigStore.bind_device`, the same repository method
+`PUT /api/devices/{mac}` uses, so reference checking and
 transactionality are inherited, not restated. An unknown, expired,
-or already-used code is a 404 whose detail says to read the code
-currently on the device's screen. A successful bind removes the
-pending entry and answers with the mac it bound and the
-no-restart-needed notice; the device's next poll flips to 200.
+or already-consumed code is a 404 whose detail says to read the
+code currently on the device's screen; a code mid-claim by a
+concurrent request is a retryable refusal, never a second success.
+A successful bind consumes the pending entry and answers with the
+mac it bound; the device's next poll flips to 200.
 
 `GET /api/devices` keeps its shape (bound devices only); the CLI
 merges the two listings for display. Both routes join the committed
@@ -463,8 +478,11 @@ New coverage, by milestone:
   version-2 checks (bad body, unknown algorithm, challenge
   mismatch) each refused with a distinct reason; add-by-code
   through the API including unknown/expired code wording and
-  reference-check inheritance; codes absent from responses they do
-  not belong in.
+  reference-check inheritance; the claim races (two concurrent
+  claims of one code yield one success and one retryable refusal,
+  a failed repository write releases the reservation, issuance
+  races expiry, listing races mutation); codes absent from
+  responses they do not belong in.
 - **Integration, M3**: the firmware's activation loop simulated
   over HTTP against a served app: OTA check yields a code,
   `/activate` answers 202, add-by-code lands, `/activate` answers
@@ -582,6 +600,14 @@ addressing it lands.
    success, and expiry, uniqueness, listing and re-issue are
    multi-step. Define an atomic claim lifecycle with rollback and
    race tests.
+   *Resolution*: the table is one mutex-guarded structure with a
+   live, reserved, consumed lifecycle: a claim reserves the code
+   under the lock before the database write, a failed write
+   releases the reservation, success consumes it, and a
+   concurrent claim of a reserved code is refused with retryable
+   wording. The lock is held only for in-memory steps, never
+   across the repository write. The M3 coverage races two claims,
+   issuance against expiry, and listing against mutation.
 4. **P1: fresh-deployment onboarding cannot satisfy the claimed
    no-restart ceremony.** A first start loads an empty snapshot;
    an agent written afterward is not loaded, so a device bound by
