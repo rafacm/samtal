@@ -281,6 +281,108 @@ honestly:
   tool identifiers; the tool inventory lives in code and in the
   notes, not in user-facing prose.
 
+## Plan review round
+
+One external review of the plan as first committed (49c3714): codex
+CLI 0.147.0, model gpt-5.6-sol, read-only against this repository
+with the vendor clones present and the body of issue #93 supplied,
+2026-08-12. Verdict: ready after the P1/P2 amendments. Findings as
+received, condensed; each carries its resolution once the amendment
+addressing it lands.
+
+1. **P1: the wake-word wording contradicts the newly reconciled
+   protocol documentation.** The plan says the server only learns
+   that a session opened, while `docs/concepts.md`,
+   `docs/xiaozhi-notes.md`, and the firmware
+   (`application.cc`) agree the firmware may send a `listen`
+   `detect` report naming the fired word, which the server
+   debug-logs and does not retain. Say that detection and trigger
+   audio stay on-device, and the server may receive an
+   after-the-fact word report it currently only debug-logs.
+
+2. **P1: the proposed common listening description is not common
+   to all three boards.** The plan makes idle wake-word monitoring
+   and continuous open-channel streaming universal, while itself
+   admitting the ePaper board has no AEC and an unknown wake-word
+   status. The firmware selects realtime mode only when AEC is on,
+   auto mode otherwise; the glossary documents the distinction.
+   Make wake-word monitoring conditional on a wake word being
+   enabled, describe streaming by listening mode (realtime streams
+   continuously; auto stops microphone input during playback and
+   re-arms per turn; manual is push-to-talk), and do not present
+   the idle-timeout and privacy story as identical for all modes.
+
+3. **P2: the Touch-LCD controls inventory omits implemented
+   button actions.** The board code gives PWR double-click a
+   screen off/on action, PWR triple-click WiFi provisioning, and
+   volume-down double-click an AEC toggle while idle, which also
+   changes the listening mode and barge-in behavior. Require all
+   implemented gestures documented and hardware-checked, with
+   state restrictions and side effects; and state the ePaper PWR
+   long-press threshold instead of a bare "long-press", since the
+   issue requires actual timings.
+
+4. **P2: the MCP inventories omit board-specific commands and
+   overpromise availability.** All three boards also publish a
+   WiFi-reconfiguration tool from their `InitializeTools`; the
+   notes say background discovery can lose the first-utterance
+   race or never complete. Derive each board's model-visible
+   inventory from `AddCommonTools` plus the board's
+   `InitializeTools`, exclude user-only tools, include WiFi
+   reconfiguration, and qualify voice commands as available only
+   once MCP discovery completes.
+
+5. **P2: verification covers only the full guide and leaves both
+   stubs' claims unreproducible.** The stubs make detailed
+   assertions, `vendor/` is an uncommitted checkout, and "upstream
+   prebuilt" and "Waveshare shipped" are not versions. Require a
+   claim-by-claim provenance matrix for all three guides, record
+   the exact upstream commit, and record the tested firmware
+   version or factory-image filename for wake-word claims; the
+   implementation doc distinguishes source-derived,
+   hardware-verified, and still-unverified facts per board.
+
+6. **P2: the per-board onboarding sections use a pointer to a
+   pointer.** The issue requires each guide to contain an
+   onboarding pointer to the standard NVS `ota_url` procedure; the
+   plan routes the reader through the common page, which then
+   points to the notes. Each guide should link the canonical
+   procedure directly and name `wifi/ota_url` in one sentence.
+
+7. **P2: the navigation work omits two existing entry points that
+   become misleading.** The root README's Getting Started ends
+   with the board-ambiguous "press the button" (BOOT on ePaper,
+   PWR on Touch-LCD), and the docs index's introduction says
+   user-facing documentation lives in the READMEs, which becomes
+   false once the guides exist. Update Getting Started to send
+   readers to their board guide for the final control, and update
+   the docs-index introduction to name `docs/devices/`.
+
+8. **P2: automatic dim and shutdown behavior is stated without
+   its runtime conditions.** The power-save timer is disabled when
+   the NVS `sleep_mode` flag is false, and the Touch-LCD board
+   also gates it on charging state transitions. State that the
+   timers apply only while power saving is enabled for the current
+   power state, and verify battery and externally powered behavior
+   rather than only the constructor arguments.
+
+9. **P2: the AMOLED recovery procedure is not a full power cycle
+   when a battery is attached.** The board has battery-aware PMIC
+   support, so USB removal need not remove power. Say remove all
+   power including any battery, or use the PMIC's four-second
+   hardware power-off if it still works; limit "unplug and replug"
+   to a verified no-battery setup.
+
+10. **P2: the no-leak rule does not cover verification
+    artifacts.** The plan excludes identifiers only from the
+    guides while requiring hardware evidence in the implementation
+    doc, and the NVS procedure can expose WiFi credentials, UUIDs,
+    persisted WebSocket data, and deployment endpoints. Prohibit
+    raw NVS dumps, boot logs, OTA responses, credentials, tokens,
+    real URLs and IPs, MACs, and UUIDs from every committed file
+    and the PR description, and add a full-diff identifier scan to
+    verification.
+
 ## Milestones
 
 - [ ] **Write the device guides and link them from the hardware
