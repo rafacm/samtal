@@ -688,8 +688,8 @@ how the process runs is decided when it is deployed, and what it says
 and to whom is decided while it runs.
 
 **The server half is one YAML file.** `server:` (host, port, auth,
-limits, logging, capture, where the database lives) and an optional
-`memory:`. It is passed as `--config /path/to/config.yaml` or through
+onboarding, limits, logging, capture, where the database lives) and an
+optional `memory:`. It is passed as `--config /path/to/config.yaml` or through
 the `SAMTAL_CONFIG` environment variable; with neither set, defaults
 apply, and it is handled by
 [pydantic-settings](https://docs.pydantic.dev/latest/concepts/pydantic_settings/).
@@ -728,6 +728,11 @@ samtal-server config bind-device aa:bb:cc:dd:ee:ff assistant
 samtal-server config set-default-agent assistant
 samtal-server config list
 ```
+
+A board in front of you needs neither its MAC nor that `bind-device`
+line: `config pending` lists what is waiting and `config add-device`
+binds one by the code on its screen. That is
+[Onboarding a device](#onboarding-a-device).
 
 That order is not a style: a write whose references do not resolve is
 refused, so providers and MCP servers come first, then the agents, then
@@ -1057,20 +1062,38 @@ and the `devices` map becomes an allowlist: an unknown MAC is issued
 nothing and turned away. There is no second list to keep in sync.
 
 **The OTA endpoint is the token issuer, so it cannot require a token.**
-What protects it instead is stingy issuance and a path you choose. When
-the server is reachable from outside your network, hide it behind a long
-random segment and write that whole URL into the device's NVS:
+What protects it instead is stingy issuance and a path you choose. It is
+served at two of them, and both are the same handler:
 
-```yaml
-server:
-  ota_path: /xiaozhi/ota/8f3a9c2b1d4e5f60/   # openssl rand -hex 8
-```
+- `/x/<key>/`, the short path an operator types into a board's captive
+  portal, where the key is eight base32 characters derived from the
+  device-auth secret. Derived, so nothing configures or stores it, it
+  survives restarts, and it changes only when that secret does. With
+  device authentication off there is no secret to derive from and the
+  route is served keyless at `/x/`.
+- `server.ota_path`, the legacy full path, for boards already carrying
+  one in NVS. Exposed publicly it should be a long random segment
+  (`openssl rand -hex 8`), and it is nullable, so a deployment whose
+  boards have all been onboarded through the short path can unmount it:
+
+  ```yaml
+  server:
+    ota_path: /xiaozhi/ota/8f3a9c2b1d4e5f60/   # or null to unmount
+  ```
+
+The two segments are treated differently on purpose. The derived key is
+printed at startup and repeated in the log line a wrong key produces,
+which is what makes a typo and a rotated secret diagnose themselves; it
+is a deployment-scoped path segment rather than a per-device
+credential, and that trade is deliberate and recorded. The `ota_path`
+segment is never printed anywhere, and neither is any device token.
 
 The WebSocket path never moves: the token is what protects it.
 
-**Nothing else is exposed.** `/xiaozhi/ota/` (or wherever you put it),
-`/xiaozhi/v1/`, `/healthz`, and the configuration API under `/api/`,
-which answers 401 to anything not carrying its bearer token. FastAPI's
+**Nothing else is exposed.** `/x/<key>/`, `/xiaozhi/ota/` (or wherever
+you put it), each with an `activate` beneath it that a waiting board
+polls, `/xiaozhi/v1/`, `/healthz`, and the configuration API under
+`/api/`, which answers 401 to anything not carrying its bearer token. FastAPI's
 `/docs`, `/redoc`, and `/openapi.json` are turned off on both
 applications, and `server.ota_path` refuses a path under `/api/`: the
 OTA route is registered before the API is mounted, so it would be found
@@ -1728,25 +1751,127 @@ server. That is aggregation, not a derived work; the slim variant
 contains no GPL component at all. See
 [`../THIRD_PARTY_LICENSES.md`](../THIRD_PARTY_LICENSES.md).
 
-## Pointing a device at the server
+## Onboarding a device
 
-A device running stock xiaozhi firmware knows only its OTA URL, held in NVS
-(namespace `wifi`, key `ota_url`); see
-[`../docs/xiaozhi-notes.md`](../docs/xiaozhi-notes.md) for how to write it.
-Point it at `http://<server-host>:8003/xiaozhi/ota/` and everything else
-reaches the device from the reply: the WebSocket URL, its token and protocol
-version, and the wall clock.
+A device running stock xiaozhi firmware knows one thing about its
+backend: the OTA URL, held in NVS (namespace `wifi`, key `ota_url`).
+Everything else reaches it from the reply to that URL: the WebSocket
+URL, its token and protocol version, and the wall clock. So onboarding
+a board is two questions: what URL does it get, and which agent does it
+talk to.
 
-By default the WebSocket URL is derived from the address the device reached
-the OTA endpoint on, so a LAN deployment needs no extra configuration. Set
-`server.websocket_url` when the server sits behind a proxy or a name the
-request headers do not carry.
+Both are answered without a cable and without looking up a MAC address.
 
-Opening `http://<server-host>:8003/xiaozhi/ota/` in a browser reports where
-devices are being sent, which is the quickest way to check a deployment.
+**1. Ask for the URL to type.**
 
-samtal-server serves no firmware images: the reply always tells the device it
-is up to date, and never asks it to activate.
+```bash
+samtal-server config ota-url
+# http://192.168.1.10:8003/x/AB2C4D5E/
+```
+
+The command contacts nothing: it reads the same config file the server
+reads and derives the same key from the same device-auth secret, so it
+answers before the first start, from a laptop, or while a board waits
+on a bench. On stderr it says where the origin came from, and an origin
+nobody configured reads as the guess it is: set `server.public_url` to
+name the deployment exactly. The running server prints the same URL at
+startup, and a GET of the endpoint repeats it.
+
+Eight characters, in an alphabet with no `0`/`O` and no `1`/`I`/`l`,
+because this string gets typed on a phone keyboard off a small display.
+It is derived rather than stored, so it survives restarts and changes
+only when the device-auth secret does.
+
+**2. Check what answers there**, before typing it into anything:
+
+```bash
+samtal-server config doctor
+# http://192.168.1.10:8003/x/AB2C4D5E/ is samtal-server 0.1.0, and sends
+# devices to ws://192.168.1.10:8003/xiaozhi/v1/ (protocol version 1).
+```
+
+With no argument it checks the URL above; give it one to check any
+other. It is a GET and never a POST, so it mints nothing, and it
+reports what a device would be told: nothing answers there, something
+other than samtal-server answers, samtal-server answers but sends
+devices to a plain `ws://` URL from behind TLS (see
+[Behind a reverse proxy](#behind-a-reverse-proxy)), or it is healthy.
+Healthy exits 0 and the rest exit 1.
+
+**3. Type it into the board's captive portal.** A board with no Wi-Fi
+provisioning brings up its own access point; join it, and the portal
+offers the network form plus an advanced section holding the server
+address. Put the URL there. Which button starts that portal and what
+the board shows while it waits are per-board facts, and they are in
+[`../docs/devices/`](../docs/devices/README.md).
+
+**4. Read the six digits off the board.** A device the configuration
+resolves to no agent is answered with an activation code instead of a
+token: the firmware shows it and speaks it, and re-checks every half
+minute to two minutes, so the number on the screen is always the
+current one. `samtal-server config pending` lists every board waiting,
+with the board type and firmware version each one reported, which is
+how two boards on one desk are told apart.
+
+**5. Bind it, by the code rather than by the MAC:**
+
+```bash
+samtal-server config add-device 418293 assistant
+# wrote device aa:bb:cc:dd:ee:ff bound to assistant
+```
+
+The device polls every three seconds while it waits, so it connects
+seconds later with no restart and no power cycle. `bind-device` is the
+same write for a MAC you already know; `add-device` is for the board in
+front of you.
+
+**Which devices are offered a code.** Exactly those the database
+resolves to nothing: no binding row of their own, and no
+`default_agent` set. A deployment with a default agent covers every
+unknown board by design, so its devices are handed a token straight
+away and never see a code, which is also why nothing changes for a
+deployment that upgraded into this. Turning `server.onboarding.enabled`
+off removes both the short URL and the code ceremony.
+
+**On a fresh deployment, configure first.** The domain half is read at
+boot, so an agent written into an empty database is not loaded by the
+server that is running: bind a board to it and the acknowledgement says
+a restart is needed rather than promising otherwise. The order that
+avoids it is the order the [Configuration](#configuration) section
+uses: write the providers and the agent, restart once, then onboard
+boards restart-free for as long as the deployment lives.
+
+**Already-provisioned boards keep working.** A board carrying a full
+`ota_url` in NVS reaches `server.ota_path` exactly as before, and both
+routes serve the same endpoint. Rewriting NVS wipes a board's Wi-Fi
+provisioning, so there is no need to move a fleet at all; a board that
+is being reprovisioned anyway can be given the short URL instead. Once
+no board needs it, `ota_path: null` unmounts the legacy route and
+leaves one way in.
+
+**A rotated device-auth secret changes the key**, because the key is
+derived from it. Boards already connected do not care: they hold their
+own full URL. What needs the old key is a board being onboarded through
+the URL somebody wrote down before the rotation, and
+`server.onboarding.key` pins it for exactly that. A wrong key answers
+404, byte for byte what a path that was never served answers, while
+logging the attempted key beside the correct one, so a typo and a
+rotation both diagnose themselves in the server's own log.
+
+**The WebSocket URL** is derived from the address the device reached
+the OTA endpoint on, so a LAN deployment needs no extra configuration.
+Set `server.websocket_url` when the server sits behind a proxy or a
+name the request headers do not carry.
+
+samtal-server serves no firmware images: the reply always tells the
+device it is up to date.
+
+The ceremony above has been driven end to end against a simulated
+device and a served server. The checkpoint on a factory-firmware board,
+which is what turns "the firmware shows the code" from a reading of
+upstream's sources into an observation, is still open; the procedure
+and every serial gotcha are in
+[`../docs/xiaozhi-notes.md`](../docs/xiaozhi-notes.md).
 
 ## Transports
 
@@ -1809,7 +1934,14 @@ differently. Four things to get right:
   variable, which uvicorn reads when the setting is not passed. There is
   no config key for it: `server.websocket_url` is the explicit answer, and
   the environment variable covers the rest without a second way to say the
-  same thing.
+  same thing. `samtal-server config doctor` is what says this has
+  happened: it names a `ws://` websocket URL behind an `https://` OTA
+  URL as the fault it is, rather than leaving a board failing at the
+  handshake with every other line looking right.
+- **Set `server.public_url` too.** TLS ends at the proxy, so nothing a
+  request carries says what a person should type; without it the
+  onboarding URL is derived from `server.websocket_url`, and failing
+  that guessed from the listen address, which is a guess that says so.
 - **One idle timeout is enough, above 20 seconds.** The server pings every
   connected device every 20 seconds, so a conversation WebSocket is never
   actually idle even when nobody is speaking. A proxy therefore needs only
@@ -1834,7 +1966,8 @@ because they are told where to go.
 
 samtal-server serves conversations end to end: OTA and WebSocket
 endpoints, the VAD/ASR/LLM/TTS pipeline on pluggable providers, agents
-bound to devices, MCP tools on both sides, device authentication, limits,
+bound to devices, MCP tools on both sides, device authentication,
+onboarding by a short URL and an activation code, limits,
 structured logging, and a published multi-arch container image. The v1
 plan and its per-milestone implementation notes live in
 [`docs/plans/`](../docs/plans/); setup notes for a device on your desk are
