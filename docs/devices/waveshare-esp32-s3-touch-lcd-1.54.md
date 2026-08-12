@@ -69,13 +69,16 @@ because an always-on microphone deserves a precise answer:
   the word that fired, after the fact, as a message naming it.
   samtal debug-logs that message and does not retain it; the report is
   described in [`../xiaozhi-notes.md`](../xiaozhi-notes.md).
-- The upstream firmware's default build setting also sends the short
-  span of audio it had buffered around the trigger phrase as the first
-  audio of the conversation, so that the assistant can react to what
-  was said in the same breath as the wake word. This is read from the
-  firmware's sources and its default configuration rather than
-  observed on the wire, and it is the one part of this section that has
-  not been checked against a running device.
+- One thing is unsettled, and worth knowing rather than glossing over.
+  The firmware has a build setting, on by default in its sources, that
+  also sends the short span of audio it had buffered around the trigger
+  phrase as the conversation's first audio, so that the assistant can
+  react to whatever was said in the same breath as the wake word.
+  samtal's own protocol notes describe only the after-the-fact word
+  report reaching the server. Which of the two the prebuilt image
+  actually does has not been checked on the wire, so treat the exact
+  extent of what leaves the board at the moment of waking as an open
+  question until it has been.
 
 ## Voice commands the device answers
 
