@@ -42,6 +42,10 @@ def test_example_config_parses() -> None:
     config = load_file_config(EXAMPLE_CONFIG)
     assert config.server.host == "0.0.0.0"
     assert config.server.port == 8003
+    # The short onboarding path ships on, with nothing pinned: its key
+    # is derived from the device-auth secret.
+    assert config.server.onboarding.enabled is True
+    assert config.server.onboarding.key is None
     assert config.memory is not None
     assert config.memory.dir == Path("/var/lib/samtal/memory")
 
@@ -50,6 +54,9 @@ def test_deploy_example_config_parses() -> None:
     config = load_file_config(DEPLOY_EXAMPLE_CONFIG)
     # The deployment profile sets what a plain LAN run leaves defaulted.
     assert config.server.websocket_url == "wss://voice.example.com/xiaozhi/v1/"
+    # Behind a TLS proxy nothing about a request says what a person
+    # should type, so the profile names the origin explicitly.
+    assert config.server.public_url == "https://voice.example.com"
     assert config.server.auth.enabled is True
     # Memory sits on the data volume, the writable place in the image.
     assert config.memory is not None

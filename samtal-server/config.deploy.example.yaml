@@ -34,6 +34,13 @@ server:
   # devices would fail to connect with nothing obviously misconfigured.
   websocket_url: wss://voice.example.com/xiaozhi/v1/
 
+  # The origin devices reach this deployment on, set for the same reason
+  # the websocket URL is: TLS ends at the proxy, so nothing the server
+  # sees about a request says what a person should type. This is the
+  # origin the onboarding URL is printed with, at startup and on a GET
+  # of the OTA endpoint.
+  public_url: https://voice.example.com
+
   # The OTA endpoint issues the device tokens, so it cannot itself
   # require one. Exposed publicly it hides behind a random path segment
   # instead (openssl rand -hex 16); the same full URL goes into each
@@ -46,8 +53,28 @@ server:
   #
   #   SAMTAL_SERVER__OTA_PATH=/xiaozhi/ota/<random-segment>/
   #
-  # The websocket path never moves: the token is what protects it.
+  # Set it to null once every board this deployment serves has been
+  # onboarded through the short path below, which unmounts this route
+  # and leaves one way in. The websocket path never moves: the token is
+  # what protects it.
   # ota_path: /xiaozhi/ota/replace-with-a-random-segment/
+
+  # The short onboarding path, /x/<key>/, serving the same endpoint as
+  # ota_path. This is what a person types into a board's captive portal:
+  # eight characters, in an alphabet with no 0/O and no 1/I/l to
+  # misread. The key is derived from SAMTAL_AUTH_SECRET below, so
+  # nothing here holds it and nothing stores it, and the server prints
+  # the whole URL at startup.
+  onboarding:
+    enabled: true
+    # Pin the key only across a rotation of SAMTAL_AUTH_SECRET, to keep
+    # already provisioned boards reaching the URL they were given. A
+    # pinned key stands in front of the endpoint that issues device
+    # tokens, so treat it like the OTA path segment above: inject it
+    # from the secret store rather than committing it with this file.
+    #
+    #   SAMTAL_SERVER__ONBOARDING__KEY=<the previous key>
+    # key: AB2C4D5E
 
   # On by default, and the server refuses to boot without the secret in
   # the environment. Listed so the deployment remembers to provide it:

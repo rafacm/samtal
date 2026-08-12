@@ -48,6 +48,16 @@ server:
   # server sits behind a proxy or a name the request headers do not carry.
   # websocket_url: ws://192.168.1.10:8003/xiaozhi/v1/
   #
+  # The origin devices reach this server on, written the way a person
+  # types it: scheme, host, optional port, and a path prefix when a
+  # proxy serves the server under one. Its only job is the onboarding
+  # URL the server prints at startup and on a GET of the OTA endpoint.
+  # Left unset, that origin is taken from websocket_url, and failing
+  # that guessed from the listen address, which is a guess the line says
+  # is one (0.0.0.0 is where the server listens, not somewhere a device
+  # can go).
+  # public_url: https://voice.example
+  #
   # Binary protocol version advertised to devices: 1 is bare Opus frames,
   # 2 and 3 add timestamp headers.
   # protocol_version: 1
@@ -58,7 +68,10 @@ server:
   #
   #   openssl rand -hex 16
   #
-  # The websocket path never moves: the token is what protects it.
+  # Set it to null to unmount this route entirely, which a deployment
+  # does once every board it serves has been moved to the short
+  # onboarding path below. The websocket path never moves: the token is
+  # what protects it.
   # ota_path: /xiaozhi/ota/
   #
   # Minutes east of UTC, sent so the device can set its clock to local time.
@@ -89,6 +102,33 @@ server:
     # How long an issued token stays valid (30 days). Devices re-check
     # OTA on every boot, so one in normal use is re-issued long before.
     # token_expire_s: 2592000
+
+  # The short onboarding path, /x/<key>/, which serves the same OTA
+  # endpoint as ota_path above. Onboarding a board means typing its
+  # backend URL into a captive portal on a phone, with nothing on the
+  # far side to say a typo happened, so this is the string a person
+  # actually types: eight characters, in an alphabet with no 0/O and no
+  # 1/I/l to misread off a small display.
+  #
+  # The key is derived from the device authentication secret this
+  # deployment already has, so there is nothing to configure and nothing
+  # stored: it is stable across restarts and changes only when that
+  # secret does. The server prints the whole URL at startup, and a
+  # wrong key answers 404 while logging the attempted key beside the
+  # correct one, which is how a typo (and a rotated secret) diagnoses
+  # itself. With auth turned off there is no secret, so the route is
+  # served keyless at /x/.
+  onboarding:
+    enabled: true
+    # The key, pinned. Its one use is a secret rotation: pinning the
+    # previous key keeps already provisioned boards reaching the URL
+    # they were given while the new secret takes over everything else.
+    # Eight base32 characters (A-Z and 2-7), and better injected from
+    # the environment than written here, since it stands in front of the
+    # endpoint that issues device tokens:
+    #
+    #   SAMTAL_SERVER__ONBOARDING__KEY=AB2C4D5E
+    # key: AB2C4D5E
 
   # The configuration REST API, served under /api on the port above.
   # It is always mounted and always behind a bearer token: there is no
