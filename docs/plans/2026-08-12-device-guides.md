@@ -97,7 +97,12 @@ firmware, so it is written once instead of three times:
 - The voice-command model: the device publishes its own controls
   as MCP tools over the conversation channel, so "set the volume
   to 40" works on every board; which controls exist varies by
-  board and is listed in each guide.
+  board and is listed in each guide. The common page also carries
+  the honest availability caveat: the server discovers the
+  device's tools in the background after the session opens, so a
+  first request can arrive before discovery completes, and
+  discovery is not guaranteed to complete at all; asking again a
+  moment later is the user-visible remedy.
 
 Each per-board guide links to the common page early and covers
 only what is specific to its board: controls, wake word, its own
@@ -213,12 +218,22 @@ code, organized under the standard skeleton:
   [`../xiaozhi-notes.md`](../xiaozhi-notes.md), and the
   consistency pass holds the guides to it.
 - **Voice commands**: what this board's firmware publishes as MCP
-  tools, phrased as things to say: current status including volume
-  and battery, setting the volume (0 to 100; the buttons step by
-  10, the voice command sets an exact level), screen brightness (0
-  to 100), and the light or dark screen theme. Worded to survive
-  tool-name changes: names like `self.audio_speaker.set_volume`
-  stay out of the user-facing text.
+  tools, phrased as things to say. The inventory is derived from
+  the firmware's common tool set plus this board's own
+  `InitializeTools`, excluding user-only tools, which the firmware
+  keeps out of the list handed to the model: current status
+  including volume and battery, setting the volume (0 to 100; the
+  buttons step by 10, the voice command sets an exact level),
+  screen brightness (0 to 100), the light or dark screen theme,
+  and asking the device to reboot into WiFi provisioning, which
+  the firmware itself instructs the assistant to confirm before
+  doing. The section carries the common page's availability
+  caveat (commands work once background tool discovery has
+  completed). Worded to survive tool-name changes: names like
+  `self.audio_speaker.set_volume` stay out of the user-facing
+  text. The stubs derive their inventories the same way (the
+  ePaper board publishes WiFi re-provisioning but no brightness or
+  theme, having no backlight).
 - **Display**: recognized speech and replies render as the
   conversation happens; what the idle screen shows; the dim after
   60 s idle and self power-off after 300 s, with the note that
@@ -383,6 +398,14 @@ addressing it lands.
    `InitializeTools`, exclude user-only tools, include WiFi
    reconfiguration, and qualify voice commands as available only
    once MCP discovery completes.
+   *Resolution*: adopted. Each guide's inventory is derived from
+   the firmware's common tool set plus that board's own
+   `InitializeTools`, user-only tools excluded; the WiFi
+   re-provisioning command is listed, with the firmware's own
+   confirm-first instruction; and both the common page and the
+   per-board sections carry the availability caveat that commands
+   work once background discovery has completed, which a first
+   utterance can beat and which is not guaranteed to complete.
 
 5. **P2: verification covers only the full guide and leaves both
    stubs' claims unreproducible.** The stubs make detailed
