@@ -71,6 +71,19 @@ def _config_file(tmp_path: Path, body: str) -> str:
     return str(path)
 
 
+def _chain(exc: BaseException) -> str:
+    """Everything an exception carries, including what a chain walker
+    would find behind it."""
+    parts: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        parts += [repr(current), str(current)]
+        current = current.__cause__ or current.__context__
+    return "\n".join(parts)
+
+
 # What the URL is, and that it is the one this configuration serves
 
 
@@ -491,6 +504,68 @@ def test_a_url_that_cannot_be_read_is_refused_inside_the_boundary(
     assert cli.main(["doctor", f"http://voice.example:{PASTED}/x/ABCDEFGH/"]) == 1
 
     captured = capsys.readouterr()
+    assert PASTED not in captured.err
+    assert "Traceback" not in captured.err
+
+
+@pytest.mark.parametrize(
+    ("what", "url"),
+    [
+        ("a newline", f"https://voice.example/xiaozhi/ota/{{}}\n{PASTED}/"),
+        ("a carriage return", f"https://voice.example/xiaozhi/ota/{{}}\r{PASTED}/"),
+        ("a tab", f"https://voice.example/xiaozhi/ota/{{}}\t{PASTED}/"),
+        ("a null byte", f"https://voice.example/xiaozhi/ota/{{}}\x00{PASTED}/"),
+        ("an escape sequence", f"https://voice.example/x/\x1b[2K{PASTED}/"),
+        ("a space", f"https://voice.example/x/AB CD{PASTED}/"),
+    ],
+)
+def test_a_url_carrying_a_control_character_is_refused_not_raised(
+    capsys: pytest.CaptureFixture[str], what: str, url: str
+) -> None:
+    """`urlsplit` deletes tabs, carriage returns and newlines instead of
+    refusing them, so a URL carrying one parses cleanly and then reaches
+    httpx, whose InvalidURL is not an HTTPError and was not caught: the
+    command exited with a traceback quoting the address. Now it is a
+    sentence."""
+    assert cli.main(["doctor", url.format("")]) == 1, what
+
+    captured = capsys.readouterr()
+    assert captured.out == "", what
+    assert PASTED not in captured.err, what
+    assert "\x1b" not in captured.err, what
+    assert "Traceback" not in captured.err, what
+    # One line, whatever the URL tried to put in it.
+    assert captured.err.count("\n") == 1, what
+
+
+def test_the_url_refusals_carry_no_library_exception() -> None:
+    """The chain, not just the message: httpx's InvalidURL quotes the
+    character it refused and its position, and anything that walks a
+    chain reads what it holds."""
+    with pytest.raises(cli.ConfigError) as caught:
+        cli._device_url(f"https://voice.example/x/AB\n{PASTED}/", "the URL given to doctor")  # noqa: SLF001
+
+    assert PASTED not in _chain(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+def test_a_client_that_will_not_be_built_is_a_sentence_too(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The boundary covers building the client, not only sending
+    through it: httpx validates a URL when it is handed one, and a
+    refusal there is the same failure to a person."""
+
+    def refuse(base_url: str, token: str | None = None) -> httpx.Client:
+        raise httpx.InvalidURL(f"Invalid character in URL {PASTED}")
+
+    monkeypatch.setattr(cli, "build_client", refuse)
+
+    assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH/"]) == 1
+
+    captured = capsys.readouterr()
+    assert "InvalidURL" in captured.err
     assert PASTED not in captured.err
     assert "Traceback" not in captured.err
 
