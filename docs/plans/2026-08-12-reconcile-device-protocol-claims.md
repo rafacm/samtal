@@ -63,9 +63,11 @@ would create exactly the interim divergence the issue exists to
 remove. The plan, its review round, and the doc edits all ride the
 one PR on `feature/reconcile-device-protocol-claims`.
 
-CI does not run on this PR: the workflow triggers only on
-`samtal-server/**` and on the workflow file itself. The
-verification section defines what stands in for it.
+CI does not run on this PR: it touches none of the workflow's
+filtered paths (`samtal-server/**`, `docs/reference/**`, or the
+workflow file itself). The same filter means the
+documentation-only merge to `main` runs no workflow and publishes
+no image. The verification section defines what stands in for CI.
 
 ### The issue #96 edit happens after the merge, with wording fixed here
 
@@ -320,6 +322,9 @@ addressing it lands.
    for the planned file set; state the full filter, and note the
    same filter means this documentation-only merge to `main`
    publishes no image.
+   *Resolution*: adopted. The decision section now names all
+   three filtered paths and states that the merge runs no
+   workflow and publishes no image.
 
 ## Milestones
 
