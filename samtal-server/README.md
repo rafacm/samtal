@@ -1805,13 +1805,15 @@ address. Put the URL there. Which button starts that portal and what
 the board shows while it waits are per-board facts, and they are in
 [`../docs/devices/`](../docs/devices/README.md).
 
-**4. Read the six digits off the board.** A device the configuration
-resolves to no agent is answered with an activation code instead of a
-token: the firmware shows it and speaks it, and re-checks every half
-minute to two minutes, so the number on the screen is always the
-current one. `samtal-server config pending` lists every board waiting,
-with the board type and firmware version each one reported, which is
-how two boards on one desk are told apart.
+**4. Read the six digits off the board, if it shows any.** A device the
+configuration resolves to no agent is answered with an activation code
+instead of a token: the firmware shows it and speaks it, and re-checks
+every half minute to two minutes, so the number on the screen is always
+the current one. A board a `default_agent` already covers shows no code
+and connects straight away, which is the case just below.
+`samtal-server config pending` lists every board waiting, with the board
+type and firmware version each one reported, which is how two boards on
+one desk are told apart.
 
 **5. Bind it, by the code rather than by the MAC:**
 
