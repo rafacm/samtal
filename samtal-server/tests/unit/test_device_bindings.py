@@ -517,6 +517,35 @@ def test_a_missing_database_is_the_snapshot_without_a_warning(
     assert caplog.records == []
 
 
+def test_a_database_that_goes_away_is_not_created_again(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The engine connects lazily, so the file can disappear between the
+    app being built and the first device asking: a volume unmounts, a
+    restore moves it aside. What must not happen then is a new empty
+    database, which would answer every device "bound to nothing" for as
+    long as nobody noticed."""
+    config = booted(tmp_path, devices={DEVICE_MAC: ["assistant"]})
+    bindings = DeviceBindings.open(config)
+    try:
+        for sidecar in tmp_path.glob("samtal.db*"):
+            sidecar.unlink()
+
+        with caplog.at_level(logging.WARNING):
+            resolved = bindings.agents_for(DEVICE_MAC)
+    finally:
+        bindings.dispose()
+
+    # The loud fallback, and no database where one was deleted.
+    assert resolved.agents == ("assistant",)
+    assert any(
+        getattr(record, "event", None) == "device_bindings_unreadable"
+        for record in caplog.records
+    )
+    assert not (tmp_path / "samtal.db").exists()
+    assert sorted(path.name for path in tmp_path.iterdir()) == []
+
+
 def test_the_read_path_never_migrates(tmp_path: Path) -> None:
     """No Alembic on a device path, asserted rather than assumed: an
     empty file stays an empty file, where `open_database` would have

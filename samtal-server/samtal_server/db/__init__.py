@@ -16,6 +16,7 @@ the server.
 
 import os
 from pathlib import Path
+from urllib.parse import quote
 
 from alembic import command
 from alembic.config import Config as AlembicConfig
@@ -86,15 +87,33 @@ def read_engine(directory: str | Path) -> Engine:
     the last committed snapshot, so a CLI or API write in progress
     cannot stall a device asking which agent it may talk to.
 
+    Creating nothing is not a matter of care either: an ordinary SQLite
+    filename creates the file when it is missing, whoever opens it, so
+    the database is named as a URI with `mode=rw`, which opens an
+    existing file for reading and writing and refuses a missing one. WAL
+    needs that much write access (a reader maps the `-shm` index and may
+    extend it), so read-only would be the wrong mode as well as a
+    stronger claim than this makes: what is promised here is that no
+    lookup brings a database into existence, and the caller's fallback
+    is what a missing one produces.
+
     The caller owns the engine and disposes it. The file is not opened
     here: SQLAlchemy connects lazily, so a database that cannot be read
     is a failure at the first lookup, where the caller can fall back,
-    rather than at app build.
+    rather than at app build. That laziness is also why the mode matters
+    rather than a check at construction: a volume can go away between
+    the two, and the answer must not be a new empty database.
     """
+    # Percent-encoded because this is a URI now: a `?` or a `#` in the
+    # path would otherwise end it, and the open would land somewhere
+    # else entirely. `quote` leaves the separators alone.
+    name = quote(str(Path(directory) / DATABASE_FILENAME))
     engine = create_engine(
         # Echo off for the reason it is off above: a statement log is a
         # place values end up.
-        URL.create("sqlite+pysqlite", database=str(Path(directory) / DATABASE_FILENAME)),
+        URL.create(
+            "sqlite+pysqlite", database=f"file:{name}?mode=rw", query={"uri": "true"}
+        ),
         echo=False,
     )
 
