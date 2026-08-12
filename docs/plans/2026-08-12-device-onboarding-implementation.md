@@ -1208,3 +1208,135 @@ banner exactly, `doctor` reported it healthy, `/healthz` as not this
 endpoint, and a dead port as unreachable. The `ws://`-behind-TLS verdict
 has been exercised only against a canned endpoint, since this tree has
 no TLS proxy in front of it. Nothing is claimed about hardware.
+
+### PR #118 review round
+
+One external review of the pull request's diff: codex CLI, model
+gpt-5.6-sol, read-only, 2026-08-12. Verdict not mergeable; eight
+findings, a commit each. Five of them share one shape, and it is worth
+saying once. This milestone added a command that takes a URL from an
+operator and repeats what a stranger returned, onto a reader nothing
+else in this repository writes to: a terminal, and the shell history
+and scrollback behind it. Every no-leak rule the earlier rounds
+established was written for a log line or an HTTP response, and each of
+the five findings is a place where the old rule was applied to the new
+reader by analogy rather than by argument.
+
+1. **P1: every verdict printed the URL it was given.** A URL passed to
+   `doctor` may be the legacy `ota_path` URL, whose segment is the whole
+   protection that endpoint has, and the documented way to check a
+   deployment with onboarding turned off is to pass exactly that. All
+   four verdicts and both URL refusals interpolated it.
+   *Resolution*, 0b127fa: a supplied URL is called "the supplied OTA
+   endpoint" in every line, and the refusals in front of the request no
+   longer quote the address even with its userinfo removed, since what
+   is left still holds the segment. The derived short URL is still
+   shown, which is the recorded exception for its key and the reason an
+   operator ran the command. Sentinel tests carry a secret legacy
+   segment through all four verdicts and both refusals.
+2. **P1: an accepted control character escaped as a traceback.**
+   `urlsplit` deletes tabs, carriage returns and newlines rather than
+   refusing them, so a URL carrying one passed every check and reached
+   httpx, whose `InvalidURL` is not an `HTTPError` and was caught by
+   nothing; the command exited with a traceback quoting the address.
+   *Resolution*, 312d95a, in both places, since either alone leaves a
+   way in: a URL with a space, a control character or anything else
+   unprintable is refused before it is parsed and without being quoted,
+   and building the client joined the request and the close inside the
+   sanitizing boundary, because httpx validates a URL when it is handed
+   one. The tests drive the real streams through `cli.main` and assert
+   the exception carries no chain.
+3. **P1: the wrong-service verdict relayed an untrusted body.** It
+   printed the first 120 printable characters of whatever answered,
+   which contradicts the fixed sentence the API client uses for a body
+   it cannot read, and a proxy or a metadata endpoint can put a
+   credential in a first line.
+   *Resolution*, adcb37f: the status code and a fixed sentence, reusing
+   `UNRECOGNIZED_ANSWER` verbatim so the two policies are one policy.
+   The test that asserted a captive portal's page was echoed back is
+   now the test that asserts it is not.
+4. **P1: an unreadable reported websocket URL leaked and passed.** The
+   display form fell back to the raw string when the parse failed,
+   which is exactly the case whose userinfo could not be stripped, and
+   the committed test embedded a password in one, expected exit 0, and
+   never asserted the password was absent. It was not.
+   *Resolution*, a626bc0: no fallback. A reported URL that will not
+   parse, names no host, or is not `ws`/`wss` is a verdict of its own,
+   quoting nothing and pointing at `server.websocket_url` on that
+   deployment. Six unreadable shapes are tested, each carrying the
+   sentinel where the leak was.
+5. **P2: the TLS verdict compared raw prefixes.** Case-sensitive
+   `startswith` on the typed string and on the reported text, so
+   `HTTPS://` with `WS://` was reported healthy, and a URL that
+   redirected was judged by where it started.
+   *Resolution*, 2fc9e39: both sides are normalized parses, the probe's
+   from `response.url` (where the answer came from) and the reported
+   one from the parse that already had to happen to strip credentials.
+   Upper-case and mixed-case cases both ways, and a redirected probe
+   judged on its final URL.
+6. **P2: unrestricted redirect following is a pivot.** The probe
+   followed anything, up to the client's default of twenty, though only
+   samtal's own trailing-slash 307 is needed; a public endpoint could
+   steer it at an internal or metadata address.
+   *Resolution*, 7443a9f: the client follows none, and the probe
+   follows exactly one whose target is the same scheme, host, port and
+   query with the path just asked for plus a slash. Everything else is
+   refused without repeating the target, in front of the second request
+   rather than after it, which the tests assert by counting what the
+   endpoint saw. This also answers the cross-scheme half of finding 5
+   by refusing the case rather than reasoning about it.
+7. **P2: the guidance promised a code many boards never show.** It said
+   the board "then shows a six-digit code", while the documented
+   walkthrough sets `default_agent`, which covers every unknown board
+   and produces no code at all.
+   *Resolution*, bbfda1c: the sentence is conditional and names why the
+   other branch exists, the README's step says the same in the same
+   words, and a test reads the README's own section and asserts the two
+   keep agreeing, since the failure was two documents describing one
+   behavior differently.
+8. **P2: the laptop invocation was claimed and not shown.** The plan
+   keeps `uvx --from` the server package as the documented laptop path
+   until a slim CLI redistribution exists; the section claimed "from a
+   laptop" and showed only an installed invocation.
+   *Resolution*, f707fd6: the exact command, with the git URL and its
+   subdirectory, the config file and the secret, plus two caveats that
+   are true: it resolves the whole server to run a command that opens
+   no socket, and it resolves without this repository's lockfile. What
+   was verified is in the verification note below.
+
+### Discoveries from this round
+
+**The test client is a different httpx.** Starlette's `TestClient` in
+this environment is built on `httpx2` 2.9.1 while the CLI uses `httpx`
+0.28.1, so an exception raised by the double is not an exception the
+CLI's boundary catches. Anything asserting transport-error handling
+therefore has to go through the real client (the dead-port test) or
+raise httpx's own class explicitly (the InvalidURL test), and a double
+that raised "an httpx error" would prove nothing.
+
+**httpx builds the redirect request even when not following it.** With
+`follow_redirects=False` it still parses `Location` to fill
+`response.next_request`, so an unreadable `Location` surfaces as a
+transport error before the canonical-slash rule is consulted. The rule
+still refuses it, and is asserted directly on a hand-built response
+rather than through the command.
+
+**`uvx --from` does not use this repository's lockfile.** Verified
+offline against the local path (`uvx --offline --from ./samtal-server`),
+which resolved an `mcp` release incompatible with the code and failed at
+import. That is evidence for the caveat in the README rather than for
+the invocation: the git URL form needs the network and was not run, and
+the documented shape of the command (`config --config PATH ota-url`)
+was verified through `uv run` instead.
+
+### Verification after the round
+
+`uv run ruff check .`, `uv run pytest tests/unit -q` and
+`uv run pytest tests/integration -q` from `samtal-server/`, all green,
+with both generated documents still diffing clean. `doctor` was also run
+read-only against a server already running from this worktree: the
+healthy verdict names the endpoint without repeating the URL it was
+given, and the same URL typed without its trailing slash still reaches
+the endpoint, which is the one redirect that is still followed. The
+`uvx` invocation is not verified: it needs the network, and it is
+documented with the caveats above rather than claimed to have been run.
