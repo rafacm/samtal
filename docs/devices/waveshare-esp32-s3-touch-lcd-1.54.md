@@ -49,12 +49,12 @@ this one alone.
 
 ## Wake word
 
-Upstream's prebuilt firmware ships the Chinese wake word,
-"nǐ hǎo xiǎo zhì", and it is enabled: saying it opens a session without
-touching a button. An English model ("Hi ESP", ESP-SR `wn9_hiesp`)
-exists in the firmware sources but not in any prebuilt image, so
-switching to it means building the firmware; samtal's own build will
-use it. 🚧
+The upstream prebuilt firmware this board was tested on, version 2.4.0,
+ships the Chinese wake word, "nǐ hǎo xiǎo zhì", and it is enabled:
+saying it opens a session without touching a button. An English model
+("Hi ESP", ESP-SR `wn9_hiesp`) exists in the firmware sources, and no
+prebuilt image inspected for this project has carried it, so reaching
+it means building the firmware; samtal's own build will use it. 🚧
 
 The wake word wakes the device, and never a particular agent. It is
 spotted on the chip by a model compiled into the firmware, the server
