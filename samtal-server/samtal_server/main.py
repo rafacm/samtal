@@ -150,15 +150,17 @@ def main() -> None:
         # read (from --config, which reaches nothing else) has to be the one
         # the app serves from.
         app = create_app(config, booted.secrets)
+        # The URL to type into a device's captive portal, said out loud
+        # once the app is built and before it serves. Here rather than
+        # inside create_app, because an app built for a test lane or an
+        # external ASGI server has no operator reading its startup
+        # output, and inside this block rather than after it, so that a
+        # configuration problem reaching it is one printed sentence like
+        # every other, never a traceback.
+        onboarding.log_banner(config)
     except (ConfigError, ProviderError) as exc:
         print(exc, file=sys.stderr)
         raise SystemExit(1) from None
-
-    # The URL to type into a device's captive portal, said out loud once
-    # the app has been built and before it starts serving. Here rather
-    # than inside create_app, because an app built for a test lane or an
-    # external ASGI server has no operator reading its startup output.
-    onboarding.log_banner(config)
 
     serve(app, config)
 

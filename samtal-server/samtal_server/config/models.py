@@ -307,6 +307,46 @@ class DatabaseConfig(BaseModel):
     dir: Path = Path("/var/lib/samtal")
 
 
+def url_problem(url: str, schemes: tuple[str, ...]) -> str | None:
+    """What makes this URL unusable as an address a device is given, or
+    None when nothing does.
+
+    The answer is never the value itself: both callers render a refusal
+    that must not repeat what it was handed. That is also why the parse
+    happens here rather than at each call site. `urlsplit` defers the
+    IPv6 bracket check and the port check to parse and attribute access
+    respectively, and the ValueError each raises quotes the input in its
+    own message, so an unhandled one would print exactly what the
+    refusal is careful not to.
+
+    Reading the port here is what keeps the rest of the server total: a
+    value that parses at load is a value the banner can take a hostname
+    and a port from without raising.
+    """
+    try:
+        parts = urlsplit(url)
+        netloc, hostname = parts.netloc, parts.hostname
+    except ValueError:
+        return (
+            "it cannot be read as a URL; check the host, and the brackets around it "
+            "if it is an IPv6 address"
+        )
+    if parts.scheme not in schemes:
+        return "it must start with " + " or ".join(f"{scheme}://" for scheme in schemes)
+    if not hostname:
+        return "it names no host"
+    if "@" in netloc:
+        return (
+            "it carries a user:password, which cannot be written here: this value is "
+            "printed back to whoever asks the server what it serves"
+        )
+    try:
+        _ = parts.port
+    except ValueError:
+        return "its port is not a whole number in 1 to 65535"
+    return None
+
+
 class ServerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -468,26 +508,24 @@ class ServerConfig(BaseModel):
     @field_validator("websocket_url")
     @classmethod
     def _check_websocket_url(cls, value: str | None) -> str | None:
-        """A ws or wss URL, carrying no credentials.
+        """A ws or wss URL, with a host, a readable port, and no
+        credentials.
 
         This value is handed to every device and rendered verbatim by the
         OTA endpoint's own GET, which anyone holding the onboarding URL
         can reach, so a `user:password@host` written here would be read
         back out by whoever asks. Refused rather than stripped, and never
         quoted back: the same posture public_url holds.
+
+        The host and port are checked here rather than where they are
+        read, because the startup banner derives its origin from them: a
+        value that only fails at that point would fail as a traceback
+        during boot instead of as a configuration refusal.
         """
         if value is None:
             return value
         url = value.strip()
-        problem: str | None = None
-        if not url.startswith(("ws://", "wss://")):
-            problem = "it must start with ws:// or wss://"
-        elif "@" in urlsplit(url).netloc:
-            problem = (
-                "it carries a user:password, which this key must not, since the OTA "
-                "endpoint hands this value to every device and prints it back to "
-                "anyone who asks it what it serves"
-            )
+        problem = url_problem(url, ("ws", "wss"))
         if problem is not None:
             raise ValueError(
                 f"this is not a usable websocket URL: {problem}. Write the address "

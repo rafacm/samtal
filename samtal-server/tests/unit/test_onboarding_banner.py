@@ -184,6 +184,33 @@ def test_the_describe_line_names_the_path_it_was_reached_on(
     assert f"https://voice.example{OTA_PATH}" in legacy.text
 
 
+@pytest.mark.parametrize(
+    "websocket_url",
+    [
+        f"wss://voice.example:{PASTED}/xiaozhi/v1/",
+        "wss://voice.example:99999/xiaozhi/v1/",
+        f"wss://[::1:{PASTED}/xiaozhi/v1/",
+        "ws://[not-an-address/xiaozhi/v1/",
+    ],
+)
+def test_an_unreadable_websocket_url_falls_back_instead_of_raising(
+    websocket_url: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The validator refuses all of these, so none can come from a file.
+    The banner is total anyway: reading a port or a host is what used to
+    raise a library ValueError, and a startup line is no place to learn
+    that a URL cannot be parsed."""
+    server = ServerConfig.model_construct(websocket_url=websocket_url)
+    line = banner_for(Config.model_construct(server=server), caplog)
+
+    assert f"http://0.0.0.0:8003/x/{KEY}/" in line
+    # A guess that had a better source and could not use it is not the
+    # same guess as one that never had a source, and says so.
+    assert "guessed from" in line
+    assert "server.websocket_url could not be read" in line
+    assert PASTED not in line
+
+
 def test_the_describe_portal_line_carries_no_userinfo_either() -> None:
     response = TestClient(create_app(credentialed_config())).get(f"/x/{KEY}/")
 

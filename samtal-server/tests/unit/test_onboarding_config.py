@@ -121,6 +121,34 @@ def test_a_credentialed_websocket_url_reaches_no_stderr_through_the_cli(
     assert PASTED not in captured.out
 
 
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        # A port that is not a number. urlsplit defers this to attribute
+        # access, and the ValueError it raises quotes the port, so an
+        # unvalidated one used to surface as a traceback at startup: the
+        # banner is what reads the port.
+        (f"wss://voice.example:{PASTED}/xiaozhi/v1/", "port is not a whole number"),
+        ("wss://voice.example:99999/xiaozhi/v1/", "port is not a whole number"),
+        ("wss://voice.example:-1/xiaozhi/v1/", "port is not a whole number"),
+        # A malformed IPv6 host, which urlsplit refuses at parse time.
+        (f"wss://[::1:{PASTED}/xiaozhi/v1/", "cannot be read as a URL"),
+        ("ws://[not-an-address/xiaozhi/v1/", "cannot be read as a URL"),
+    ],
+)
+def test_a_websocket_url_the_banner_could_not_read_is_refused_at_load(
+    url: str, expected: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.DEBUG), pytest.raises(ConfigError) as caught:
+        load_config_from_data({"server": {"websocket_url": url}})
+
+    message = str(caught.value)
+    assert expected in message
+    assert PASTED not in message
+    assert PASTED not in _chain(caught.value)
+    assert all(PASTED not in record.getMessage() for record in caplog.records)
+
+
 def test_an_ordinary_websocket_url_still_passes() -> None:
     config = load_config_from_data(
         {"server": {"websocket_url": " wss://voice.example/xiaozhi/v1/ "}}
