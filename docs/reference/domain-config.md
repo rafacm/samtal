@@ -134,7 +134,7 @@ Examples:
 
 `agents.<name>`
 
-One persona: a prompt, plus whichever stages it overrides. Every stage must
+One agent: a prompt, plus whichever stages it overrides. Every stage must
 resolve to a provider, on the agent or through agent_defaults, for the server
 to start, so a typical agent is a prompt and a voice.
 
@@ -150,7 +150,7 @@ samtal-server config set agent <name> -f fragment.yaml
 | `vad` | `str \| null` | `null` | The voice activity detector, by the name it is defined under in providers.vad. An agent that leaves it unset inherits the agent_defaults entry. |
 | `mcp` | `list[str] \| null` | `null` | The MCP servers whose tools this layer offers the model, by entry name. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. |
 | `filler` | `FillerConfig \| null` | `null` | Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly rather than merging with it, so `filler: {enabled: false}` opts an agent out. |
-| `prompt` | `str` | `""` | The persona instruction this agent replies under, sent as the system prompt on every turn. State the reply language explicitly: a model otherwise picks one by its training bias. |
+| `prompt` | `str` | `""` | The instruction this agent replies under, sent as the system prompt on every turn. State the reply language explicitly: a model otherwise picks one by its training bias. |
 
 An agent's name is also the key its remembered facts are stored under, so
 renaming an agent orphans its memory: the old file stays on disk and the
@@ -260,6 +260,6 @@ config show` prints and what the server loads at boot.
 | `providers` | `ProvidersConfig` | `{}` | The provider entries agents reference, one group per pipeline stage (llm, asr, tts, vad). |
 | `mcp_servers` | `dict[str, McpServerConfig]` | `{}` | The MCP servers agents may be given tools from, keyed by entry name. The name becomes the prefix its tools are offered to the model under (home__turn_on_light), so it must match [A-Za-z0-9_-]+ and must not be one of the names the merged tool list already uses. |
 | `agent_defaults` | `AgentDefaults` | `{}` | What every agent uses unless it names something else. One entry for the whole deployment, and deliberately without a prompt: a prompt is what makes an agent that agent, so inheriting one silently would make two agents the same one. |
-| `agents` | `dict[str, AgentConfig]` | `{}` | The personas this deployment serves, keyed by agent name. An agent is a prompt plus whichever stages it overrides, and every stage must resolve to a provider, here or in agent_defaults, for the server to start. |
+| `agents` | `dict[str, AgentConfig]` | `{}` | The agents this deployment serves, keyed by name. An agent is a prompt plus whichever stages it overrides, and every stage must resolve to a provider, here or in agent_defaults, for the server to start. |
 | `devices` | `dict[str, list[str]]` | `{}` | Which agents each device may talk to, keyed by MAC address as the Device-Id header sends it. The first name in a list is the agent a conversation starts on and the rest are the ones it may be switched to. |
 | `default_agent` | `str \| null` | `null` | The agent an unknown device reaches. Leaving it unset makes the devices map an allowlist: a device with no binding is then turned away. |

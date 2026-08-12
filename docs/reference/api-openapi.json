@@ -2260,7 +2260,7 @@
       },
       "AgentConfig": {
         "additionalProperties": false,
-        "description": "One persona: a prompt, plus whichever stages it overrides.",
+        "description": "One agent: a prompt, plus whichever stages it overrides.",
         "properties": {
           "llm": {
             "anyOf": [
@@ -2349,7 +2349,7 @@
           },
           "prompt": {
             "default": "",
-            "description": "The persona instruction this agent replies under, sent as the system prompt on every turn. State the reply language explicitly: a model otherwise picks one by its training bias.",
+            "description": "The instruction this agent replies under, sent as the system prompt on every turn. State the reply language explicitly: a model otherwise picks one by its training bias.",
             "title": "Prompt",
             "type": "string"
           }
@@ -2359,7 +2359,7 @@
       },
       "AgentDefaults": {
         "additionalProperties": false,
-        "description": "Provider references every agent inherits unless it names its own.\n\nDeliberately no prompt: a persona's prompt is its identity, and\ninheriting one silently would make two agents the same agent.",
+        "description": "Provider references every agent inherits unless it names its own.\n\nDeliberately no prompt: an agent's prompt is its identity, and\ninheriting one silently would make two agents the same agent.",
         "properties": {
           "llm": {
             "anyOf": [

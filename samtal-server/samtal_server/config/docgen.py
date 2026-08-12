@@ -151,7 +151,7 @@ ENTITIES: tuple[Entity, ...] = (
         location="agents.<name>",
         model=AgentConfig,
         purpose=(
-            "One persona: a prompt, plus whichever stages it overrides. Every stage "
+            "One agent: a prompt, plus whichever stages it overrides. Every stage "
             "must resolve to a provider, on the agent or through agent_defaults, for "
             "the server to start, so a typical agent is a prompt and a voice."
         ),

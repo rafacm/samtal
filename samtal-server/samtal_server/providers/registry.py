@@ -242,7 +242,7 @@ def build_provider(
     # as a traceback from inside somebody else's library with no
     # mention of which entry was being built. Survivable while a
     # configuration had one provider per stage; a deployment running
-    # language-locked personas has three ASR entries and three TTS
+    # language-locked agents has three ASR entries and three TTS
     # entries that differ only in a pinned language and a voice.
     #
     # ProviderError passes through untouched, so the messages the rest
