@@ -281,10 +281,10 @@ def test_two_concurrent_claims_of_one_code_bind_it_once(
     writing, proceed = threading.Event(), threading.Event()
     write = ConfigStore.claim_device
 
-    def held(self: ConfigStore, mac: str, agents: list[str]) -> None:
+    def held(self: ConfigStore, mac: str, agents: list[str]) -> object:
         writing.set()
         assert proceed.wait(timeout=30)
-        write(self, mac, agents)
+        return write(self, mac, agents)
 
     monkeypatch.setattr(ConfigStore, "claim_device", held)
     first: list = []
@@ -494,3 +494,28 @@ def test_unsetting_a_default_agent_leaves_the_listing_alone(
 
     assert client.get("/devices/pending").json()[second]["mac"] == MAC
     assert second != code
+
+
+# What the acknowledgement is about
+
+
+def test_the_acknowledgement_is_about_the_row_and_not_the_request(
+    client: TestClient, pending: PendingDevices
+) -> None:
+    """The repository strips the names it stores, so the request's
+    spelling and the row's are different strings. Both halves of the
+    acknowledgement are about the row: a name sent with spaces around it
+    binds the loaded agent, and saying "restart" there would send an
+    operator to restart a server that is already serving it."""
+    code = _waiting(pending)
+
+    answer = _claim(client, code, "  assistant  ")
+
+    assert answer.status_code == 200, answer.text
+    assert answer.json() == {
+        "wrote": f"device {MAC} bound to assistant",
+        "notice": BINDING_NOTICE,
+    }
+    # And the row really does hold the stripped name, which is what
+    # makes the notice the true one.
+    assert client.get(f"/devices/{MAC}").json()["entity"] == {"agents": ["assistant"]}

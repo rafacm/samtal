@@ -1071,8 +1071,16 @@ def _writes(api: FastAPI) -> None:
         if refused:
             raise ConfigError(CLAIM_REFUSED)
         pending.consume(code)
+        # Both the line and the notice are built from what the row
+        # holds, never from what the request sent, exactly as the write
+        # by MAC below builds them: a name arriving with spaces around
+        # it binds the agent it names, and an acknowledgement derived
+        # from the request would have called that agent unloaded and
+        # sent the operator to restart a server that is already serving
+        # it.
         return _acknowledge(
-            bound_device(claim.device.mac, agents), binding_notice(_unloaded(agents, loaded))
+            bound_device(bound.mac, bound.agents),
+            binding_notice(_unloaded(bound.agents, loaded)),
         )
 
     @api.put(
