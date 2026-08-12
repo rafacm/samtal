@@ -95,7 +95,7 @@ def activate(
 
 
 def short_path(client: TestClient) -> str:
-    return onboarding_path(onboarding_key(client.app.state.config))
+    return onboarding_path(onboarding_key(client.app.state.config.server))
 
 
 # What an unbound device receives

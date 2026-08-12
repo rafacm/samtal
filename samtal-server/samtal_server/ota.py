@@ -396,7 +396,7 @@ def _activation(
             extra={"event": "activation_not_offered", "device": mac, "reason": offer.refused},
         )
         return None
-    return activation_object(config, offer.device)
+    return activation_object(config.server, offer.device)
 
 
 async def activate(request: Request) -> Response:
@@ -522,7 +522,7 @@ async def describe(request: Request) -> Response:
         f"(protocol version {config.server.protocol_version}).\n"
         # The path this was reached on, so the line is the URL that
         # works rather than the one this server would recommend.
-        f"{portal_url_line(config, request.url.path)}\n"
+        f"{portal_url_line(config.server, request.url.path)}\n"
     )
 
 

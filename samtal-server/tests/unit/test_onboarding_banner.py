@@ -37,7 +37,7 @@ def _fixed_secret(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def banner_for(config: Config, caplog: pytest.LogCaptureFixture) -> str:
     with caplog.at_level(logging.INFO):
-        onboarding.log_banner(config)
+        onboarding.log_banner(config.server)
     return caplog.text
 
 

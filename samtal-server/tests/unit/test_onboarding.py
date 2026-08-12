@@ -73,14 +73,14 @@ def test_the_key_is_derived_from_the_configured_secret_variable(
 ) -> None:
     monkeypatch.setenv("SOME_OTHER_VARIABLE", "a-different-secret")
     config = Config(server={"auth": {"secret_env": "SOME_OTHER_VARIABLE"}})
-    assert onboarding_key(config) == derive_key("a-different-secret")
+    assert onboarding_key(config.server) == derive_key("a-different-secret")
 
 
 def test_a_pinned_key_replaces_the_derivation() -> None:
     """What a secret rotation uses: the previous key kept alive so
     provisioned boards keep reaching the URL they were given."""
     config = Config(server={"onboarding": {"key": "AB2C4D5E"}})
-    assert onboarding_key(config) == "AB2C4D5E"
+    assert onboarding_key(config.server) == "AB2C4D5E"
 
     client = client_for(config)
     assert client.post("/x/AB2C4D5E/", json=SYSTEM_INFO, headers=HEADERS).status_code == 200
@@ -89,7 +89,7 @@ def test_a_pinned_key_replaces_the_derivation() -> None:
 
 def test_auth_turned_off_leaves_no_secret_and_mounts_the_route_keyless() -> None:
     config = Config(server={"auth": {"enabled": False}})
-    assert onboarding_key(config) is None
+    assert onboarding_key(config.server) is None
 
     client = client_for(config)
     assert client.post("/x/", json=SYSTEM_INFO, headers=HEADERS).status_code == 200

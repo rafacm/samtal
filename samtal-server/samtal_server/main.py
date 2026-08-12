@@ -170,7 +170,7 @@ def main() -> None:
         # output, and inside this block rather than after it, so that a
         # configuration problem reaching it is one printed sentence like
         # every other, never a traceback.
-        onboarding.log_banner(config)
+        onboarding.log_banner(config.server)
     except (ConfigError, ProviderError) as exc:
         print(exc, file=sys.stderr)
         raise SystemExit(1) from None
