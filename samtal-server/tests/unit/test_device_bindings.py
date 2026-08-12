@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, text, update
 from sqlalchemy.exc import OperationalError
 from starlette.websockets import WebSocketDisconnect
 
@@ -26,7 +26,7 @@ from samtal_server.app import create_app
 from samtal_server.config import Config, FileConfig, compose_config
 from samtal_server.config.models import domain_fields
 from samtal_server.config.store import ConfigStore
-from samtal_server.db import open_database, read_engine
+from samtal_server.db import open_database, read_engine, schema
 from samtal_server.device.bindings import DeviceBindings
 from samtal_server.ota import OTA_PATH
 from samtal_server.ws import WEBSOCKET_PATH
@@ -385,12 +385,101 @@ def test_a_failed_read_repeats_nothing_the_failure_carried(
     assert objects, "the fallback went unlogged"
     assert SENTINEL not in text
     assert all(SENTINEL not in json.dumps(payload) for payload in objects)
-    # What is said instead: the fallback, and the kind of failure.
+    # What is said instead: the fallback, and the kind of failure as the
+    # repository classifies it.
     assert objects[0]["event"] == "device_bindings_unreadable"
-    assert objects[0]["failure"] == "OperationalError"
+    assert objects[0]["failure"] == "StorageError"
     assert objects[0]["device"] == DEVICE_MAC
     # And nothing forged: one object per record, each a single line.
     assert len(text.splitlines()) == len(caplog.records)
+
+
+def _write_agents_column(directory: Path, mac: str, value: object) -> None:
+    """A row put beyond what any write could have produced, which is the
+    state a live reader has to have an answer for."""
+    engine = open_database(directory)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                update(schema.devices).where(schema.devices.c.mac == mac).values(agents=value)
+            )
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        # A string, the dangerous one: iterating it succeeds and yields
+        # its characters, so a reader that skipped the array check would
+        # bind this device to eleven one-character agents.
+        "assistant",
+        # An empty binding, which the write path refuses and which would
+        # otherwise read as "this device is bound to nothing".
+        [],
+        # A blank name, and a name repeated, both refused everywhere else.
+        ["   "],
+        ["assistant", "assistant"],
+        # Not names at all.
+        [17],
+        {"agents": ["assistant"]},
+    ],
+)
+def test_a_row_no_write_could_have_made_falls_back_rather_than_refusing(
+    stored: object, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The rules that govern a binding are the repository's, and the live
+    reader runs them. A row that breaks one is unreadable, not empty:
+    reading it as "bound to nothing" would turn a device away over a
+    fact nobody established."""
+    config = booted(tmp_path, devices={DEVICE_MAC: ["assistant"]})
+    bindings = DeviceBindings.open(config)
+    try:
+        _write_agents_column(tmp_path, DEVICE_MAC, stored)
+
+        with caplog.at_level(logging.WARNING):
+            resolved = bindings.agents_for(DEVICE_MAC)
+    finally:
+        bindings.dispose()
+
+    assert resolved.agents == ("assistant",)
+    assert any(
+        getattr(record, "event", None) == "device_bindings_unreadable"
+        for record in caplog.records
+    )
+
+
+def test_a_default_agent_that_is_not_a_name_falls_back_too(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The other row, and the one that used to be read as None: a
+    malformed default agent would have quietly turned every unbound
+    device away."""
+    config = booted(tmp_path, devices={BOUND_MAC: ["assistant"]}, default_agent="assistant")
+    bindings = DeviceBindings.open(config)
+    try:
+        engine = open_database(tmp_path)
+        try:
+            with engine.begin() as connection:
+                connection.execute(
+                    update(schema.domain_settings)
+                    .where(schema.domain_settings.c.key == schema.DEFAULT_AGENT_KEY)
+                    .values(value=17)
+                )
+        finally:
+            engine.dispose()
+
+        with caplog.at_level(logging.WARNING):
+            resolved = bindings.agents_for(DEVICE_MAC)
+    finally:
+        bindings.dispose()
+
+    # The snapshot's default agent, rather than silence.
+    assert resolved.agents == ("assistant",)
+    assert any(
+        getattr(record, "event", None) == "device_bindings_unreadable"
+        for record in caplog.records
+    )
 
 
 def test_the_fallback_is_the_snapshot_and_not_an_empty_answer(tmp_path: Path) -> None:

@@ -43,13 +43,13 @@ Three properties this component exists to keep:
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Any
 
-from sqlalchemy import Connection, Engine, select
+from sqlalchemy import Engine
 
 from samtal_server.config import Config
 from samtal_server.config.models import normalize_mac
-from samtal_server.db import DATABASE_FILENAME, read_engine, schema
+from samtal_server.config.store import LiveBinding, read_live_binding
+from samtal_server.db import DATABASE_FILENAME, read_engine
 
 logger = logging.getLogger(__name__)
 
@@ -144,34 +144,37 @@ class DeviceBindings:
         normalized = normalize_mac(mac)
         stored = self._stored(normalized)
         if stored is None:
-            bound, default = self._config.devices.get(normalized), self._config.default_agent
+            bound = tuple(self._config.devices.get(normalized, ()))
+            default = self._config.default_agent
         else:
-            bound, default = stored
+            bound, default = stored.agents, stored.default_agent
         names = list(bound) if bound else ([default] if default is not None else [])
         return DeviceAgents(
             tuple(name for name in names if name in self._loaded),
             tuple(name for name in names if name not in self._loaded),
         )
 
-    def _stored(self, mac: str) -> tuple[list[str] | None, str | None] | None:
+    def _stored(self, mac: str) -> LiveBinding | None:
         """This device's binding and the default agent as the database
-        holds them, or None when it cannot be read.
+        holds them, or None when they cannot be read.
 
-        Both in one transaction, so a write landing between them cannot
-        produce a resolution that never existed: a device that has just
-        lost its binding resolves to the default agent of the same
-        moment.
+        The reading itself belongs to the repository, which is where
+        what a stored row means is decided; this is the caller that says
+        what to do when it cannot be read, which is to answer from the
+        boot snapshot rather than to refuse a device.
         """
         if self._engine is None:
             return None
         problem: Exception | None = None
         try:
-            with self._engine.connect() as connection:
-                return _read(connection, mac)
+            return read_live_binding(self._engine, mac)
         # Deliberately everything. This is the fleet's boot dependency,
         # and the point of the fallback is that whatever went wrong with
-        # the file, the device still gets the answer boot would have
-        # given it. What must not be silent is that it happened.
+        # the file or with what is in it, the device still gets the
+        # answer boot would have given it. A row that cannot be
+        # understood is included on purpose: reading it as "bound to
+        # nothing" would refuse a device over a fact nobody established.
+        # What must not be silent is that it happened.
         except Exception as exc:
             problem = exc
         self._warn(mac, problem)
@@ -202,33 +205,6 @@ class DeviceBindings:
                 "failure": type(exc).__name__,
             },
         )
-
-
-def _read(connection: Connection, mac: str) -> tuple[list[str] | None, str | None]:
-    bound = connection.execute(
-        select(schema.devices.c.agents).where(schema.devices.c.mac == mac)
-    ).scalar()
-    default = connection.execute(
-        select(schema.domain_settings.c.value).where(
-            schema.domain_settings.c.key == schema.DEFAULT_AGENT_KEY
-        )
-    ).scalar()
-    return _names(bound), default if isinstance(default, str) else None
-
-
-def _names(bound: Any) -> list[str] | None:
-    """A device row's agents column as a list of names.
-
-    A row that does not hold one is a stored-state problem the same way
-    it is for the repository, and it travels out as the error that puts
-    this lookup on the boot snapshot: an unreadable row must not resolve
-    to "this device is bound to nothing", which is a different fact.
-    """
-    if bound is None:
-        return None
-    if not isinstance(bound, list) or not all(isinstance(name, str) for name in bound):
-        raise ValueError("the agents column does not hold a list of agent names")
-    return bound
 
 
 __all__ = ["DeviceAgents", "DeviceBindings"]
