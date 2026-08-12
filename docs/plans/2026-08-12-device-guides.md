@@ -185,9 +185,15 @@ verified on hardware" where that is the truth:
   bare unplug-and-replug is only verified for a setup with no
   battery attached, and the guide says so.
 
-Device identifiers (MAC addresses, client UUIDs) and deployment
-specifics stay out of the guides; they are user-facing public
-documentation.
+Device identifiers and deployment specifics stay out of every
+committed file and out of the PR description, not only out of the
+guides: no raw NVS dumps, boot logs, or OTA responses, no
+credentials or tokens, no real URLs or IP addresses, no MAC
+addresses, no client UUIDs. Hardware evidence recorded in the
+implementation doc is described, or quoted redacted, never pasted
+raw; the onboarding procedure being referenced can expose WiFi
+credentials and deployment endpoints, which is exactly why the
+guides point at it instead of walking through it.
 
 ### The Touch-LCD-1.54 guide, content inventory
 
@@ -325,6 +331,11 @@ honestly:
   confirming no sentence contradicts them.
 - `grep` for em-dashes and for issue or PR references over
   `docs/devices/`, both must come back empty.
+- A scan of the full branch diff, implementation doc included,
+  for identifiers and secrets: MAC addresses, UUIDs, IP
+  addresses, non-example URLs, and credential-shaped strings,
+  coming back empty; plus a read of the PR description against
+  the same list before posting.
 - `uv run ruff check .` and both test lanes from `samtal-server/`
   still pass, as a no-code-changed sentinel rather than as
   meaningful coverage.
@@ -512,6 +523,13 @@ addressing it lands.
     real URLs and IPs, MACs, and UUIDs from every committed file
     and the PR description, and add a full-diff identifier scan to
     verification.
+    *Resolution*: adopted. The no-leak paragraph now covers every
+    committed file and the PR description, names the artifact
+    classes (raw NVS dumps, boot logs, OTA responses, credentials,
+    tokens, real URLs and IPs, MACs, UUIDs), requires
+    implementation-doc evidence to be described or redacted, and
+    verification gains a full-diff identifier scan plus a
+    PR-description read against the same list.
 
 ## Milestones
 
