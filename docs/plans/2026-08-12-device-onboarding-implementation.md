@@ -187,3 +187,97 @@ reading its startup output, and `create_app` runs in both.
 The hardware items are not verifiable from code and are not claimed: the
 milestone's merge gate, the portal-retype check on a real board, and
 everything in milestone 5 remain open.
+
+### PR #115 review round
+
+One external review of the pull request's diff: codex CLI, model
+gpt-5.6-sol, read-only, 2026-08-12. Six findings; the five code ones
+are fixed with a commit each, and the sixth is procedural. Four of the
+five are the same shape, and it is worth saying once: this milestone
+gave two configuration values a new reader (a log line and a page a
+person is handed) and gave one URL segment a new writer (whoever types
+it), and every finding below is a place where the old handling of that
+value was fine for its old reader and not for the new one.
+
+1. **P1: the short endpoint served WebSocket credentials.** `describe`
+   renders `websocket_url_for(...)` verbatim, and this milestone put
+   that handler on `/x/<key>/`, so a `wss://admin:secret@host/` was
+   read back by anyone holding the onboarding URL; the banner tests
+   scoped around exactly that line, which is how the leak passed a
+   suite about not leaking.
+   *Resolution*, a26e00f: `server.websocket_url` refuses userinfo at
+   load, without quoting the value, the posture `public_url` already
+   held. Refused rather than stripped, because a configuration carrying
+   a password is a mistake to name rather than to quietly repair. The
+   sentinel is asserted absent from the refusal message, the exception
+   chain, the log records and the CLI's stderr; the response-level
+   assertion is the boot refusal itself, since the only configuration
+   that could put the sentinel in a response is one that no longer
+   loads. The banner tests keep their coverage of the derivation as a
+   second line of defence, building the credentialed configuration by
+   hand with `model_construct` because no file can produce one. The
+   behavior change is in the changelog: it is a refusal for a
+   configuration that was already leaking, and no other websocket URL
+   is affected.
+2. **P1: a malformed port crashed the boot with a library traceback.**
+   The validator checked the scheme alone while the banner reads
+   `parts.port`, which raises for `wss://voice.example:hunter2/`, and
+   the banner ran outside `main.py`'s handled boot block, so the
+   ValueError reached stderr as a traceback, quoting the port the
+   refusals are careful not to.
+   *Resolution*, 137a33f, in the three places the reviewer named,
+   because any one alone leaves a way in. A shared `url_problem` helper
+   parses once and names the scheme, a missing host, userinfo and an
+   unreadable port without the value; `public_origin` and `_origin_of`
+   are total, falling through to the listen address and saying that the
+   better source could not be read, so a configuration built in code
+   cannot crash a startup either; and the banner call moved inside the
+   `try` block, where anything it can still raise is one printed
+   sentence. Malformed-port, out-of-range-port and malformed-IPv6 cases
+   with sentinel no-leak assertions, at the config boundary and again
+   at the banner.
+3. **P1: the missing-slash redirect bypassed the key guard.** Only the
+   trailing-slash route was registered, so Starlette's own
+   `redirect_slashes` answered `/x/WRONGKEY` with a 307 whose
+   `Location` echoed the attempted key, before any handler ran: a wrong
+   key was distinguishable from a path that was never served, which is
+   the one thing the miss branch must not be.
+   *Resolution*, f2175b4: the router registers the slashless keyed
+   routes itself, behind the same guard. The correct key gets the 307
+   Starlette would have issued, query string included; a wrong one gets
+   the same 404 body and headers as any unserved path, with no
+   `Location`. Asserted for GET and POST, on the body and the headers.
+4. **P1: a malformed attempted key was injected verbatim into logs.**
+   The decoded path parameter went into the message and the structured
+   fields, so `/x/AAAA%0ABBB/` forged a second log entry (the decoded
+   parameter really does arrive holding a raw newline, checked by hand)
+   and an oversized segment let a caller choose how long an entry was.
+   *Resolution*, fa7f08a, with the rule stated exactly rather than
+   approximately, in the module docstring and in the tests: after case
+   folding, one to ten characters of the base32 alphabet are repeated
+   back, which covers the mistyped and the over-typed key the line
+   exists to diagnose. Ten is `KEY_LENGTH + 2`. The folded form is both
+   what is compared and what is logged, which is what makes the shape
+   check a guarantee about the output rather than about the input,
+   since upper-casing some Unicode characters yields ASCII letters.
+   Anything else is counted under its own event with no raw value, and
+   that line also leaves out the correct key, so probing cannot turn
+   the log into a broadcast of it. Control-character, escape-sequence
+   and oversized cases assert both shipped formats, the human one and
+   the JSON one a container writes.
+5. **P2: `public_url` accepted a non-numeric port and republished
+   it.** The validator read the hostname but never the port, so
+   `https://voice.example:hunter2` was accepted and printed by the
+   banner and the describe line.
+   *Resolution*, 48749f1: it goes through the same shared check, which
+   refuses an unreadable host and a port that is not a whole number in
+   range, without quoting either. The query and fragment refusal stays
+   its own, because that rule is about this key being an origin rather
+   than about a value being readable.
+6. **P3: the hardware merge gate.** Deferred, as it must be: the
+   portal-retype check on a real board is milestone 1's recorded merge
+   gate and cannot be answered from code. The driving session carries
+   it.
+
+Full lanes after the fixes: ruff clean, both suites green (counts in
+the PR's verification section).
