@@ -111,13 +111,16 @@ with what it carries:
   exactly when AEC is on (unchanged claim).
 - **listen detect**: a fired wake word, reported by word.
 
-The retention sentence distinguishes the two tiers instead of
-flattening them: board model and firmware version survive from OTA
-check-in to the following session in a bounded in-memory cache,
-where capture manifests read them; everything else is parsed and
-dropped, and the durable, enriched per-device record that would
-keep all of it is planned (issue #96). The page's date header moves
-to 2026-08-12.
+The retention sentence distinguishes what actually survives
+instead of flattening it: board model and firmware version cross
+the OTA-to-session boundary in the bounded in-memory cache;
+protocol version, the discovered MCP tools, and the listening mode
+are retained and consumed for the life of the session, with the
+protocol version also entering an enabled capture's manifest; the
+wake-word report alone is merely debug-logged. None of it enters a
+durable, queryable per-device record; the record that would keep
+all of it is planned (issue #96). The page's date header moves to
+2026-08-12.
 
 ### `docs/xiaozhi-notes.md`: the wake-word entry separates audio from report
 
@@ -153,7 +156,7 @@ Sequencing stand.
 
 The server already sees most of what there is to know about a device, and keeps almost none of it. The OTA request reports identity and build facts (`Device-Id` = MAC, `Client-Id` = UUID, `application.version`, `board.type`), parsed in `ota.py`. Board model and firmware version already survive that request: they are kept in a bounded in-memory cache (`DeviceFacts` in `capture.py`), keyed by MAC, until the session that follows reads them into its capture manifest. That cache is the only survival there is: in-memory (gone on restart), bounded, and read only by capture; nothing else can ask what a device last reported.
 
-The `hello` message carries the protocol version and a features map; when the features advertise MCP, the device's tool list arrives shortly after over a separate MCP handshake and says which controls (volume, brightness) this board actually has. The listening mode arrives with the first `listen` message and is the empirical echo-cancellation signal, since the firmware picks realtime exactly when AEC is on. A fired wake word is reported as `listen` `detect` with the word in `text`, currently debug-logged in `device/session.py`. All of these are parsed and dropped, no per-device record is durable, and the OTA exchange and the WebSocket session are joined only by `Device-Id`.
+The `hello` message carries the protocol version and a features map; when the features advertise MCP, the device's tool list arrives shortly after over a separate MCP handshake and says which controls (volume, brightness) this board actually has. The listening mode arrives with the first `listen` message and is the empirical echo-cancellation signal, since the firmware picks realtime exactly when AEC is on. A fired wake word is reported as `listen` `detect` with the word in `text`, currently debug-logged in `device/session.py`. All of these survive at best for the life of the session that carried them: the protocol version, the discovered tool list, and the listening mode are held and consumed while the session runs (the protocol version also enters an enabled capture's manifest), and the wake-word report is only debug-logged. None of it enters a durable, queryable per-device record, and the OTA exchange and the WebSocket session are joined only by `Device-Id`.
 ```
 
 ### Housekeeping in the same PR
@@ -233,6 +236,13 @@ addressing it lands.
    and listening mode are retained or consumed during the live
    session; board and firmware additionally cross the
    OTA-to-session boundary through `DeviceFacts`.
+   *Resolution*: adopted. The concepts retention wording and the
+   issue #96 replacement now say session-scoped retention out
+   loud: protocol version, discovered MCP tools, and listening
+   mode are held and consumed for the life of the session, the
+   protocol version also enters an enabled capture's manifest,
+   the wake-word report alone is merely debug-logged, and what
+   nothing gets is a durable, queryable per-device record.
 2. **P2: the proposed cache lifetime and manifest read are false.**
    The replacement says facts remain "until the session that
    follows reads them into its capture manifest", but
