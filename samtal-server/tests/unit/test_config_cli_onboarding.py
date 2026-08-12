@@ -384,17 +384,27 @@ def test_no_bearer_token_is_sent_to_a_device_facing_address(
     assert "authorization" not in {name.lower() for name in seen[0].headers}
 
 
-def test_something_else_answering_there_is_named_as_such(
+def test_something_else_answering_there_is_named_without_quoting_it(
     endpoint, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    endpoint("<html><body>Sign in to the guest network</body></html>", media_type="text/html")
+    """The status code and a fixed sentence. What answers at an address
+    a device was pointed at may be a proxy, a captive portal or a cloud
+    metadata endpoint, and a bounded prefix of one of those is still
+    whatever its first line holds."""
+    endpoint(
+        f"<html><body>Sign in to the guest network, token={PASTED}</body></html>",
+        media_type="text/html",
+    )
 
     assert cli.main(["doctor", "http://192.168.1.1/x/ABCDEFGH/"]) == 1
 
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "not as a samtal-server OTA endpoint" in captured.err
-    assert "Sign in to the guest network" in captured.err
+    assert cli.UNRECOGNIZED_ANSWER in captured.err
+    assert PASTED not in captured.err
+    assert "Sign in to the guest network" not in captured.err
+    assert "<html>" not in captured.err
     assert "Traceback" not in captured.err
 
 
@@ -754,7 +764,7 @@ def test_a_response_that_is_not_text_at_all_is_handled(
 
     err = capsys.readouterr().err
     assert "answered 204" in err
-    assert "nothing at all" in err
+    assert cli.UNRECOGNIZED_ANSWER in err
 
 
 def test_doctor_is_a_get_and_only_a_get(endpoint) -> None:

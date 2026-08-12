@@ -194,11 +194,12 @@ SUPPLIED_ENDPOINT = "the supplied OTA endpoint"
 
 # How much of anything that arrived in a response may be repeated back.
 # What `doctor` reaches may be a proxy, a captive portal or anything
-# else that answers, so its body, the URL it names and the version it
-# claims are all attacker-controlled text: bounded and printable, or not
-# printed. The rule is the one `onboarding._fact` applies to what a
-# device says about itself, kept here rather than imported for the
-# reason the onboarding import is in a function body.
+# else that answers, so the version it claims and the URL it names are
+# attacker-controlled text: bounded and printable, or not printed. The
+# rule is the one `onboarding._fact` applies to what a device says about
+# itself, kept here rather than imported for the reason the onboarding
+# import is in a function body. The body itself is never repeated at
+# all, bounded or otherwise.
 GLIMPSE_LENGTH = 120
 
 # How much of a body is looked at at all. The description this reads is
@@ -968,13 +969,20 @@ def _describe(body: str) -> Mapping[str, str] | None:
 
 
 def _not_samtal_server(shown: str, response: httpx.Response) -> str:
-    glimpse = _printable(response.text)
+    """The status code and a fixed sentence, and nothing of the body.
+
+    The same policy `_unreadable` states for the API, for the same
+    reason and with more force: what answers at an address a device was
+    pointed at may be a proxy, a captive portal or a cloud metadata
+    endpoint, and relaying a bounded prefix of that onto a terminal
+    still relays whatever the first line happens to hold.
+    """
     return (
         f"{shown} answered {response.status_code}, but not as a samtal-server OTA "
         f"endpoint: a device pointed here would take its configuration from something "
-        f"else, or from nothing. Of what came back, only the first {GLIMPSE_LENGTH} "
-        f"printable characters are repeated, since it is whatever that address serves: "
-        + (f"{glimpse!r}" if glimpse else "nothing at all")
+        f"else, or from nothing. It answered with {UNRECOGNIZED_ANSWER}, which is not "
+        f"quoted back: what a proxy or a gateway returns is not this server's own "
+        f"output."
     )
 
 
