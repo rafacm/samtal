@@ -873,6 +873,19 @@ def _device_url(url: str, source: str) -> str:
     issuer, and on a deployment with onboarding turned off that segment
     is the whole protection the endpoint has.
     """
+    # Before anything parses it: `urlsplit` deletes tabs, carriage
+    # returns and newlines rather than refusing them (WHATWG's rule), so
+    # a URL carrying one parses cleanly here and then reaches httpx,
+    # which raises InvalidURL naming the character and its position. A
+    # URL a person could have typed has no control characters and no
+    # spaces in it, so this is where they stop.
+    if any(character.isspace() or not character.isprintable() for character in url):
+        raise ConfigError(
+            f"{source} carries a space, a newline or another character a URL cannot "
+            f"hold. It is not quoted back, both because an OTA URL can be the "
+            f"deployment's own secret and because repeating a control character is how "
+            f"one line of output becomes two."
+        )
     parsed = _parsed(url, source)
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
         raise ConfigError(
@@ -905,18 +918,26 @@ def _probed(url: str, shown: str) -> httpx.Response:
     server's own: a URL typed without its trailing slash is answered
     with a 307 to the canonical form, and reporting that as "not
     samtal-server" would be this command's own worst answer.
+
+    Building the client is inside the boundary with the request and the
+    close. httpx validates a URL when it is given one, so construction
+    is a place a URL refused by a library rather than by the check above
+    would otherwise leave as a traceback with the address in it.
     """
-    client = build_client(url)
     problem: str | None = None
+    client: httpx.Client | None = None
     try:
         try:
+            client = build_client(url)
             return client.request("GET", url, follow_redirects=True)
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, httpx.InvalidURL, ValueError) as exc:
             # The exception's class name and nothing else. httpx puts the
-            # request into its exceptions and drivers put whatever they
-            # like into their messages, and the class is the part that
-            # says what happened. Raised after the handler, so nothing
-            # walking a chain finds the original behind it.
+            # request into its exceptions, its InvalidURL quotes the
+            # character it refused, and drivers put whatever they like
+            # into their messages; the class is the part that says what
+            # happened. Raised after the handler, so nothing walking a
+            # chain finds the original behind it. ValueError covers the
+            # UnicodeError an IDNA host raises on its way down.
             problem = (
                 f"cannot reach {shown}: the request did not complete "
                 f"({type(exc).__name__}). Check that the server is running, that this is "
@@ -924,7 +945,8 @@ def _probed(url: str, shown: str) -> httpx.Response:
                 f"it."
             )
     finally:
-        client.close()
+        if client is not None:
+            client.close()
     raise ConfigError(problem)
 
 
