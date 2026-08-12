@@ -81,6 +81,33 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **`samtal-server config ota-url` and `samtal-server config doctor`**
+  (#40): the two commands the onboarding ceremony is run with.
+  `ota-url` prints the URL to type into a board's captive portal and
+  contacts nothing at all: no server, no database, no API token. It
+  reads the same config file the server reads, takes the device
+  authentication secret from the same environment variable, and derives
+  the key and the origin with the server's own functions, so the string
+  it prints is the string that server answers on; the URL goes to
+  stdout alone and the guidance goes to stderr, with an origin nobody
+  configured reading as the guess it is. Onboarding turned off names
+  `server.ota_path` without quoting the segment, a missing secret names
+  the variable, and a key pinned under `server.onboarding.key` prints
+  its URL with no secret at all. `doctor` GETs that URL, or one given
+  as an argument, and reports what a device would be told: nothing
+  answers there, something other than samtal-server answers,
+  samtal-server answers but sends devices to a plain `ws://` URL from
+  behind TLS (the proxy misconfiguration that fails at the handshake
+  with every other line looking right), or it is healthy, naming the
+  websocket URL, server version and protocol version it reported. It is
+  a GET and never a POST, so it mints no activation code and spends
+  none of the issuance budget, and it carries no bearer token, since
+  the token issuer cannot require one. Both READMEs and both example
+  configs are rewritten around the ceremony, and the deployment
+  profile's advice to inject the OTA path segment from a secret store
+  is replaced by the derived key, with the legacy `ota_path` kept
+  documented for boards already carrying one.
+
 - **Onboarding a board by the code it shows** (#40): a device the
   database holds no binding for, on a deployment with no default agent
   to cover it, is now answered at its configuration check with a
