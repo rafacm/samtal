@@ -69,11 +69,24 @@ defines what stands in for CI.
 behavior that is identical on every board running the upstream
 firmware, so it is written once instead of three times:
 
-- What the device listens to, and when: microphone live on-device
-  for wake-word detection, no server connection while idle, the
-  open channel streaming until something closes it, the server's
-  idle timeout being the closer you normally meet, no microphone
-  mute in hardware or firmware.
+- What the device listens to, and when, described honestly by
+  case rather than as one universal story. While idle: no server
+  connection at all, and on boards with a wake word enabled the
+  microphone is monitored on-device for it; a board without one
+  listens for nothing until a button opens the channel. In
+  conversation, behavior follows the listening mode the firmware
+  chose for the board: realtime (boards with echo cancellation)
+  streams the microphone continuously, silence included, until
+  something closes the channel, and the server's idle timeout is
+  the closer you normally meet; auto (boards without echo
+  cancellation) stops microphone input while the device is
+  speaking and re-arms after each reply, so there is no barge-in;
+  manual is push-to-talk. The idle-timeout and privacy notes are
+  scoped to the modes they apply to, and each guide names the mode
+  its board actually uses. No board has a microphone mute in
+  hardware or firmware. The section the firmware README loses
+  claimed all of this was universal; the move corrects that claim
+  rather than carrying it.
 - Networks: up to ten stored WiFi networks, the 2.4 GHz-only
   radio, the 5 GHz phone-hotspot trap, byte-for-byte SSID matching
   and the typographic-apostrophe trap.
@@ -322,6 +335,15 @@ addressing it lands.
    continuously; auto stops microphone input during playback and
    re-arms per turn; manual is push-to-talk), and do not present
    the idle-timeout and privacy story as identical for all modes.
+   *Resolution*: adopted. The common-page listening bullet is
+   rewritten by case: idle behavior conditional on a wake word
+   being enabled, in-conversation behavior described per listening
+   mode (realtime streams continuously; auto stops microphone
+   input during playback and re-arms per turn, with no barge-in;
+   manual is push-to-talk), the idle-timeout and privacy notes
+   scoped to the modes they apply to, and each guide naming its
+   board's actual mode. The moved README section's universality
+   claim is corrected in the move rather than carried.
 
 3. **P2: the Touch-LCD controls inventory omits implemented
    button actions.** The board code gives PWR double-click a
