@@ -21,6 +21,7 @@ import tempfile
 import threading
 import time
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -35,6 +36,7 @@ from samtal_server.config.models import (
     PROVIDER_STAGES,
     AgentConfig,
     AgentDefaults,
+    DatabaseConfig,
     McpServerConfig,
     ProviderConfig,
     domain_fields,
@@ -66,6 +68,33 @@ def booted(config: Config):
         FileConfig(server=config.server, memory=config.memory),
         domain_fields(snapshot.domain),
         "the test's scratch database",
+    )
+    return create_app(composed, snapshot.secrets)
+
+
+def booted_in(directory, config: Config):
+    """`booted`, with the database left where the app can reach it.
+
+    The difference is the whole point: `booted` seeds a scratch database
+    and lets it go, which is a true picture of a boot and a false one for
+    anything that writes while the server runs. That write would land in
+    a database at `server.database.dir`, which for a composed test config
+    is the packaged default rather than the directory the seeding used.
+    So this one takes the directory, composes it onto the file half, and
+    leaves it standing: what the app reads afterwards is what a write
+    through its own API wrote.
+    """
+    directory = Path(directory)
+    engine = open_database(directory)
+    try:
+        snapshot = _seeded(ConfigStore(engine), config)
+    finally:
+        engine.dispose()
+    server = config.server.model_copy(update={"database": DatabaseConfig(dir=directory)})
+    composed = compose_config(
+        FileConfig(server=server, memory=config.memory),
+        domain_fields(snapshot.domain),
+        str(directory),
     )
     return create_app(composed, snapshot.secrets)
 
@@ -103,7 +132,20 @@ async def running_app(config: Config):
     it serves, torn down on the way out. The app is what a test needs
     when it has to reach server-side state (the session registry) that a
     device could not."""
-    app = booted(config)
+    async with _serving(booted(config)) as served:
+        yield served
+
+
+@contextlib.asynccontextmanager
+async def running_app_in(directory, config: Config):
+    """The same, on a database that stays where it was seeded, for a
+    test that writes to it while the server runs."""
+    async with _serving(booted_in(directory, config)) as served:
+        yield served
+
+
+@contextlib.asynccontextmanager
+async def _serving(app):
     server = uvicorn.Server(
         uvicorn.Config(app, host="127.0.0.1", port=0, log_level="warning")
     )
@@ -243,6 +285,14 @@ def serve():
 def serve_app():
     """The same, plus the app: `async with serve_app(c) as (port, app):`."""
     return running_app
+
+
+@pytest.fixture
+def serve_app_in():
+    """A server whose database outlives its seeding, for a test that
+    writes to it while the server runs:
+    `async with serve_app_in(directory, config) as (port, app):`."""
+    return running_app_in
 
 
 @pytest.fixture
