@@ -3,7 +3,8 @@
 Reference material and working notes. User-facing documentation lives in the
 READMEs: [the project overview](../README.md),
 [samtal-server](../samtal-server/README.md), and
-[samtal-esp32](../samtal-esp32/README.md).
+[samtal-esp32](../samtal-esp32/README.md), and in
+[`devices/`](devices/README.md), the per-board guides below.
 
 ## Research notes
 
@@ -17,6 +18,23 @@ READMEs: [the project overview](../README.md),
   it is and why samtal touches it, with the license terms left in
   [`THIRD_PARTY_LICENSES.md`](../THIRD_PARTY_LICENSES.md). Entries are
   added as a project is actually read, never assumed.
+
+## Device guides
+
+[**devices/**](devices/README.md) holds one user-facing guide per board
+samtal targets, describing the hardware in front of the user: which
+button starts and stops a conversation, how long to hold PWR to power
+off, whether a wake word is enabled and which word it is, the commands
+the device answers by voice, what the display shows, and the board's
+known quirks. Its common page carries what every board running the
+upstream firmware shares, so a guide covers only what is specific to
+its board. Only the Touch-LCD-1.54 guide is written in full; the other
+two are stubs marked 🚧 that grow as those boards reach working status.
+Each section says whether its facts are read from the upstream board
+support code, verified in hands-on use, or not verified at all. These
+guides are also the knowledge source the planned built-in help agent
+reads to explain the device it is speaking through, which is why they
+are reviewable markdown rather than prompt text.
 
 ## Reference
 
