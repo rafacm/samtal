@@ -1013,3 +1013,198 @@ discarded uncommitted edits to it, exactly as `AGENTS.md` warns, and
 
 Full lanes after the fixes: ruff clean, both suites green, both drift
 checks unchanged (counts in the PR's verification section).
+
+## Milestone 4: `ota-url`, `doctor`, and the onboarding docs
+
+The two commands the ceremony is actually run with, and the
+documentation that describes it as a ceremony rather than as an NVS
+write. No new route, no new API surface, nothing on the device path.
+
+### What landed
+
+**The onboarding helpers take the server half (`onboarding.py`).**
+`onboarding_key`, `public_origin`, `portal_url_line`, `log_banner` and
+`activation_object` read `config.server` and nothing else, so they now
+take a `ServerConfig`. That is what lets the CLI call them: a command
+holds a `FileConfig`, and the alternative was either composing a whole
+`Config` around an empty domain to satisfy a type or reimplementing the
+derivation, the second of which is the one thing that could send an
+operator to a URL this server does not serve.
+
+**`config ota-url` (`config/cli.py`).** Reads the file half through
+`load_file_config`, resolves the origin and the key through the two
+functions above, and prints `<origin><path>` to stdout alone, so
+`$(samtal-server config ota-url)` is a URL. The guidance and the
+origin's provenance go to stderr, the way every other notice does, and a
+guessed origin reads as a guess because `Origin.provenance` is the
+banner's own rendering. Three states are refusals rather than URLs:
+onboarding disabled (naming `server.ota_path` without quoting the
+segment), a missing device-auth secret (naming the variable and the
+pinned-key way out), and, inherited, any file the loader refuses. A
+pinned `onboarding.key` prints its URL with no secret in the
+environment at all.
+
+**`config doctor` (`config/cli.py`).** GETs the given URL, or the
+derived one, through `build_client` with no token, and answers with one
+of the plan's four verdicts: unreachable, not samtal-server, a `ws://`
+websocket URL behind an `https://` OTA URL, or healthy with the
+websocket URL, server version and protocol version the endpoint
+reported. Healthy exits 0; the other three are `ConfigError`s and exit
+1. It never POSTs, so it mints no code and spends none of the mint
+budget. `_device_url` applies the parts of the API's transport policy
+that are about the URL (unreadable refused without quoting it, userinfo
+refused) and not the part that is about the token (loopback-or-TLS),
+because no credential crosses this request and a plain `http://` LAN
+address is exactly what a device is pointed at.
+
+**Everything the far end says is bounded before it is printed.**
+`_printable` truncates to 120 characters and replaces anything
+unprintable, the rule `onboarding._fact` applies to what a device says
+about itself; `_shown_url` additionally strips userinfo from the
+websocket URL a response names; and only the first 4 KB of a body is
+ever matched against a pattern.
+
+**Documentation.** `samtal-server/README.md` gains "Onboarding a
+device" in place of "Pointing a device at the server": the five steps,
+which devices are offered a code (only those the database resolves to
+nothing, so a deployment with `default_agent` never sees one), the
+fresh-deployment ordering, already-provisioned boards, and a rotated
+secret. Its security section now describes two paths to one endpoint
+and why the derived key is printed where the `ota_path` segment is not;
+its reverse-proxy list names `config doctor` and `public_url`; the
+configuration section points at the ceremony from the `bind-device`
+line. The root README's steps 6 to 8 follow the same path.
+`config.deploy.example.yaml` leads with the onboarding block and the
+derived key, and the legacy `ota_path` keeps its own paragraph with the
+secret-store advice that is still right for it.
+`config.example.yaml` gains the two commands and the sentence about
+`default_agent`. `CHANGELOG.md` under 2026-08-12.
+
+**Tests.** `tests/unit/test_config_cli_onboarding.py`: for `ota-url`,
+the printed URL served by an app built from the same file, the printed
+URL equal to the banner's for the same file, no socket and no database
+and no API token, the URL alone on stdout, the guess reading as a
+guess, the keyless URL with auth off, the pinned key with no secret,
+the missing secret naming the variable, the configured secret variable,
+and onboarding off naming `ota_path` without its segment; for `doctor`,
+the four verdicts, the real describe body recognized (the drift guard),
+`ws://` behind plain `http://` staying healthy, the slashless URL
+following the server's own 307, no Authorization header reaching a
+device-facing address, GET and only GET, the URL refusals, and the
+hostile endpoint (an oversized body, a body of control characters, a
+credential in the websocket URL, an unreadable websocket URL).
+
+### Deviations from the plan
+
+Five, all narrow.
+
+**The helpers were narrowed to `ServerConfig`.** The plan says the
+command derives "key and URL with the same functions the server uses;
+same package, so there is nothing to drift". It does, and this is what
+that costs: five signatures and their call sites. Recorded because the
+plan describes a new command and this is a change to three existing
+modules.
+
+**Onboarding disabled is exit 1, not exit 0.** The plan says the
+command "says so and points at `ota_path`". It does, on stderr, through
+the same `ConfigError` boundary every other refusal leaves by. The
+alternative, a sentence on stdout and exit 0, would put prose where a
+caller capturing the output expects a URL.
+
+**`doctor` with no URL and onboarding disabled refuses rather than
+probing the legacy path.** It could construct the `ota_path` URL and
+check it, but every verdict names the URL it checked, and that segment
+is the one string these commands may not print. So it says onboarding is
+off and asks for the URL as an argument, which is the same sentence
+`ota-url` prints with a different fix at the end.
+
+**The transport error is named by its exception class only.** The
+plan's verdict is "unreachable (with the transport error)". httpx puts
+the request into its exceptions and drivers put whatever they like into
+their messages, which is the M2 review's first finding; the class name
+is the part that says what happened (`ConnectError`, `ReadTimeout`,
+`ConnectTimeout`) and carries nothing else.
+
+**`doctor` follows redirects.** Not in the plan either way. A URL typed
+without its trailing slash is answered by the server's own 307, and
+reporting that as "not samtal-server" would be this command's worst
+answer; the redirect is asserted against a real Starlette one.
+
+### Resolutions of what the plan left open
+
+**The missing-secret state is told apart without reading the secret.**
+`onboarding_key` answers `None` for three different situations: no key
+pinned and auth off, no key pinned and the secret variable empty, and
+(inside a server) never, because that second one has already refused the
+boot. The CLI separates them with the two fields that decide it,
+`server.auth.enabled` and `server.onboarding.key`, so nothing in the
+command reads or holds the secret, which is the posture M1 chose when it
+kept the environment read inside `onboarding_key`.
+
+**The describe body is parsed, not shared.** `doctor` is a client of an
+HTTP endpoint, the way the rest of the CLI is a client of the API, so it
+matches two patterns against what came back rather than importing a
+format string from `ota.py` (which it cannot import anyway, see below).
+What keeps the two in step is a test that runs the real handler's
+output through the real patterns.
+
+**Both commands take `--config` and nothing else.** `--api-url` and
+`--local` address the configuration API, which neither command touches,
+and offering the flags would say otherwise. The top-level parser still
+accepts them before the command, which is where the grammar has always
+allowed them.
+
+**`build_client` grew an optional token.** One seam rather than two, so
+the acceptance suite replaces one function; without a token there is no
+Authorization header, which is what a device-facing GET needs.
+
+### Discoveries
+
+**`config/cli.py` cannot import `onboarding` at module scope either.**
+The same constraint M3 found for `config/api.py`: `onboarding` imports
+`ota`, which imports the websocket session and everything a
+conversation needs, and `config reference` and `config openapi` are
+rendered from the models and the routes with none of that loaded. The
+import sits in `_onboarding_url`'s body, with `Origin` imported under
+`TYPE_CHECKING` for the annotation.
+
+**A test double for the client seam has to carry the header logic.**
+The "no bearer token is sent" assertion is only worth something if the
+factory the test installs would have sent one; a double that ignored its
+`token` argument would have made the assertion vacuous. The fixture
+mirrors `build_client` instead.
+
+**`create_app` needs `SAMTAL_API_SECRET`, and `ota-url` does not.** The
+acceptance test sets the variable only after the command has run, which
+turns an ordering detail into the assertion that the command needs no
+token.
+
+**The root README's own walkthrough never reaches the ceremony.** Its
+step 3 sets `default_agent`, which covers every unknown board by design,
+so no board following those instructions is ever offered a code. That is
+correct behavior and would have read as a broken feature, so both
+READMEs now say which devices are offered a code and what unsetting
+`default_agent` changes.
+
+### Notes for the milestone that follows
+
+- `config ota-url` is what M5 reads the URL off, and `config doctor`
+  is what it checks the deployment with before typing anything into a
+  board; neither needs the server that is about to be tested.
+- The claim "the firmware shows the code and speaks it" is still a
+  reading of upstream's sources. The server README says so in one
+  sentence, which is the sentence M5 gets to delete.
+
+### Verification
+
+`uv run ruff check .`, `uv run pytest tests/unit -q` and
+`uv run pytest tests/integration -q` from `samtal-server/`, all green,
+plus both generated documents diffed clean (`config reference` against
+`docs/reference/domain-config.md`, `config openapi` against
+`docs/reference/api-openapi.json`), which is what a milestone that adds
+no route has to show. Both commands were also run by hand against a
+real server started from this tree: the derived URL matched the startup
+banner exactly, `doctor` reported it healthy, `/healthz` as not this
+endpoint, and a dead port as unreachable. The `ws://`-behind-TLS verdict
+has been exercised only against a canned endpoint, since this tree has
+no TLS proxy in front of it. Nothing is claimed about hardware.
