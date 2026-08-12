@@ -825,7 +825,7 @@ per repository convention.
   Accept: the unit and integration M3 coverage, including the whole
   conversation over the short path; lanes green.
 - [x] **[M4: `ota-url`, `doctor`, and the onboarding docs](2026-08-12-device-onboarding-implementation.md#milestone-4-ota-url-doctor-and-the-onboarding-docs)**
-  (PR TBD, branch
+  (PR #118, branch
   `feature/device-onboarding-m4`): the two commands; the onboarding
   rewrite in the server README and the root README's device step;
   `config.deploy.example.yaml` guidance replacing the
