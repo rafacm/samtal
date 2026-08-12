@@ -146,9 +146,9 @@ code actually receives, in substance:
   custom build and nothing else (unchanged claim).
 - What the server does get is an after-the-fact report: the
   firmware sends `listen` `detect` with the fired word in `text`,
-  which samtal-server currently debug-logs (`device/session.py`).
-  The server can know which word opened the session; it cannot
-  hear, tune, or substitute for the detection.
+  which samtal-server currently debug-logs (`device/session.py`)
+  and does not retain. The server cannot hear, tune, or substitute
+  for the detection.
 
 The entry stays a constraint entry: what owning the firmware would
 change is unaffected.
@@ -218,8 +218,9 @@ honestly:
   today, not a feature; wording that promises the server "knows"
   the wake word would overstate retention the same way "all
   dropped" understated it. Mitigation: the wording above says
-  reported and debug-logged, and the retention tiers in the
-  concepts page keep the fact in the dropped tier.
+  received, debug-logged, and not retained, and the retention
+  wording in the concepts page keeps the report in the
+  merely-debug-logged tier.
 - **Issue #96 drifts again once #96 is implemented.** Its Problem
   section describes a baseline that its own implementation will
   change. Accepted: that is what implementing an issue does to its
@@ -310,6 +311,9 @@ addressing it lands.
    the word; the code binds the value only long enough to
    debug-log it. Say instead: the server receives which word fired
    and currently debug-logs it; it does not retain the report.
+   *Resolution*: adopted. The proposed protocol-notes wording now
+   says received, debug-logged, and not retained, and the risk
+   entry's mitigation matches it.
 7. **P3: the CI path-filter inventory is incomplete.** The
    workflow also triggers on `docs/reference/**`, not only
    `samtal-server/**` and the workflow file. The conclusion holds
