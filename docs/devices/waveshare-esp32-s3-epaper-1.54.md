@@ -60,10 +60,14 @@ Read from the upstream board support code, not verified on hardware:
 - Current device state (volume, screen, battery, network).
 - Setting the speaker volume, 0 to 100. On a board with no volume
   buttons this is the only way to change it.
-- Rebooting into WiFi provisioning. The board registers this command
-  with a description written in Chinese, so ask for it in plain terms
-  ("reconfigure the WiFi") and expect the assistant's phrasing of the
-  confirmation to vary.
+- Switching into WiFi provisioning, which closes the conversation and
+  raises the board's access point rather than restarting it. Two
+  warnings about this one. The board registers the command with a
+  description written in Chinese, so ask for it in plain terms
+  ("reconfigure the WiFi"). And unlike the other two boards, this one's
+  command carries no instruction to confirm first, so an assistant may
+  act on it straight away: expect the conversation to end without being
+  asked whether you meant it.
 - **No screen brightness command.** The board declares no backlight,
   which is what the brightness command is registered against, so it
   does not exist here.

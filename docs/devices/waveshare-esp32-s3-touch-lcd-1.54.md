@@ -26,7 +26,7 @@ running upstream's prebuilt firmware, which is what samtal uses today.
 | Short press PWR | Starts a conversation, or ends the one that is open. While the assistant is speaking, it stops the reply immediately. |
 | Long press PWR (about 2 s) | Powers the board off. |
 | Double-click PWR | Turns the screen off, and turns it back on at half brightness. The board keeps running either way. |
-| Triple-click PWR | Reboots into WiFi provisioning, where the board raises its own access point and serves the captive portal. |
+| Triple-click PWR | Switches into WiFi provisioning without restarting: the board drops its connection, raises its own access point, and serves the captive portal. |
 | Click volume up or volume down | Changes the volume by 10, showing the new level on the screen. |
 | Hold volume up | Maximum volume. |
 | Hold volume down | Mutes the speaker. It never mutes the microphone; there is no microphone mute on this board. |
@@ -98,10 +98,11 @@ works.
 - **"Set the screen brightness to 30."** Also 0 to 100.
 - **"Switch to the dark theme", "use the light theme."** Changes the
   screen theme.
-- **"Reconfigure the WiFi."** Reboots the board into WiFi provisioning,
-  the same place the PWR triple-click leads. The firmware asks the
-  assistant to confirm with you before doing it, so expect to be asked,
-  and note that it ends the conversation.
+- **"Reconfigure the WiFi."** Switches the board into WiFi
+  provisioning, the same place the PWR triple-click leads and by the
+  same route: it closes the conversation and raises the access point
+  rather than restarting the board. The firmware asks the assistant to
+  confirm with you before doing it, so expect to be asked.
 
 As on every board, these become available once the server has finished
 discovering the device's tools in the background, which a request made
