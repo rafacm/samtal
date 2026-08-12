@@ -213,7 +213,15 @@ The write acknowledgements for `PUT /api/devices/{mac}`,
 their notice: device bindings now apply to the device's next OTA
 check or connection with no restart, while everything else keeps the
 restart sentence. The notice text lives in `config/writes.py`, one
-place, and the CLI prints it verbatim as today. Live sessions are
+place, and the CLI prints it verbatim as today. The API's own
+contract states the restart rule in three more places, and all of
+them change in the same milestone the behavior does: the
+sub-application's description, the `Acknowledgement` model's
+`notice` documentation, and the `_acknowledge` helper that
+hardcodes the sentence gain the two-notice reality, and
+`docs/reference/api-openapi.json` is regenerated in M2, because
+every merge publishes an image and a published contract must not
+describe behavior the release no longer has. Live sessions are
 deliberately untouched by a binding change: deleting a binding stops
 the next token issuance and the next connection, not a conversation
 in flight, the same line the session-boundary work drew.
@@ -705,6 +713,11 @@ addressing it lands.
    all hardcode the restart sentence, and the plan postponed
    document regeneration to M3 while every merge publishes an
    image.
+   *Resolution*: M2 now carries the API description, the
+   acknowledgement schema documentation, and the `_acknowledge`
+   change alongside the notice split, and regenerates
+   `docs/reference/api-openapi.json` in the same milestone; the M2
+   coverage asserts both notices.
 8. **P2: "unbound" and "resolves to no loaded agent" are different
    states.** `agents_for_device` gives every unknown MAC the
    default agent, and the plan's activation gate would have minted
@@ -740,7 +753,9 @@ per repository convention.
 - [ ] **M2: live device bindings** (branch
   `feature/device-onboarding-m2`): `DeviceBindings` consumed by the
   OTA handlers and the session layer; the no-restart write notices
-  for device and default-agent writes; CHANGELOG. Accept: the unit
+  for device and default-agent writes, with the API description,
+  the acknowledgement schema, and the regenerated OpenAPI document
+  in the same change; CHANGELOG. Accept: the unit
   M2 coverage; a bind through the real API observed by a served
   app's next OTA check without restart in the integration lane;
   lanes green.
