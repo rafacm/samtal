@@ -20,6 +20,7 @@ from collections.abc import Mapping
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, Literal, Protocol
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import (
     AfterValidator,
@@ -68,6 +69,19 @@ PROVIDER_STAGES = ("llm", "asr", "tts", "vad")
 # API is mounted, so a route matching under this prefix would be found
 # first and would answer a request the API's token gate never saw.
 API_MOUNT_PATH = "/api"
+
+# Where the onboarding short route is served: /x/<key>/, the alias of the
+# OTA endpoint an operator types into a device's captive portal. It lives
+# here for the same reason the API mount path does: ota_path's validator
+# has to reserve it, since a configured OTA path under this prefix would
+# collide with the onboarding router.
+ONBOARDING_MOUNT_PATH = "/x"
+
+# The alphabet a pinned onboarding key may be written in, and how long it
+# is. Base32 because A-Z2-7 has no 0/O and no 1/I/l, the pairs a person
+# misreads off a small display, and eight characters because that is what
+# the derivation truncates to.
+_ONBOARDING_KEY_RE = re.compile(r"^[A-Z2-7]{8}$")
 
 # The logging level names, most to least verbose. NOTSET is left out: on
 # the root logger it means WARNING, which is not what writing it says.
@@ -150,6 +164,51 @@ class AuthConfig(BaseModel):
     # default; the firmware re-checks OTA on every boot, so a device in
     # normal use is re-issued long before it gets near this.
     token_expire_s: int = Field(default=2592000, gt=0)
+
+
+class OnboardingConfig(BaseModel):
+    """The short onboarding path, /x/<key>/, an alias of the OTA endpoint.
+
+    Onboarding a stock board means typing its backend URL into a captive
+    portal on a phone, with no feedback on a typo, so the string has to
+    be short and its alphabet unambiguous. The key is derived from the
+    device-auth secret the deployment already has, never stored and never
+    written here: it is stable across restarts and rotates only when the
+    secret does.
+
+    On by default. The legacy path keeps working beside it, and a
+    deployment that wants only the legacy one turns this off.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+
+    # The derived key, pinned. Its one use is a secret rotation: the
+    # derivation follows the secret, so pinning the previous key keeps
+    # provisioned boards reaching the same URL while the new secret takes
+    # over everything else. Left unset, which is the normal case, the key
+    # is derived and nothing about it is stored.
+    key: str | None = None
+
+    @field_validator("key")
+    @classmethod
+    def _check_key(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        key = value.strip().upper()
+        if not _ONBOARDING_KEY_RE.match(key):
+            # Not quoted back: a pinned key is a path segment that stands
+            # in front of the token issuer, so it belongs in no message
+            # this refusal can reach.
+            raise ValueError(
+                "this key must be eight base32 characters (A-Z and 2-7), the shape "
+                "the derivation produces; the value is not quoted back here, since "
+                "it is the segment the OTA endpoint is served under. Leave it unset "
+                "to derive it from the device-auth secret, and pin it only to keep a "
+                "previous key alive across a secret rotation"
+            )
+        return key
 
 
 class LimitsConfig(BaseModel):
@@ -260,12 +319,26 @@ class ServerConfig(BaseModel):
     # server sits behind a proxy or a name the request headers do not carry.
     websocket_url: str | None = None
 
+    # The origin devices reach this server on, written exactly as a person
+    # would type it: scheme, host, optional port, and an optional path
+    # prefix when a proxy serves the server under one. Its only job is to
+    # say the onboarding URL out loud at startup and on the OTA GET.
+    # Unset, the origin is derived from websocket_url, and failing that
+    # guessed from the listen address, which is a guess that says so.
+    public_url: str | None = None
+
     # Where the OTA endpoint is served. It is the token issuer, so it cannot
     # itself require a token; an operator exposing the server publicly hides
     # it behind a long random segment (/xiaozhi/ota/8f3a.../) and writes that
     # URL into the device's NVS. The websocket path is fixed: the token is
     # what protects it.
-    ota_path: str = "/xiaozhi/ota/"
+    #
+    # Null unmounts it, which a deployment does once every board it serves
+    # has been moved to the onboarding path below.
+    ota_path: str | None = "/xiaozhi/ota/"
+
+    # The short onboarding alias of the OTA endpoint. On by default.
+    onboarding: OnboardingConfig = Field(default_factory=OnboardingConfig)
 
     # Binary protocol version advertised to devices. The firmware defaults to
     # 1 (bare Opus frames); 2 and 3 add timestamp headers.
@@ -362,7 +435,9 @@ class ServerConfig(BaseModel):
 
     @field_validator("ota_path")
     @classmethod
-    def _check_ota_path(cls, value: str) -> str:
+    def _check_ota_path(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         path = value.strip()
         if not path.startswith("/") or not path.endswith("/"):
             raise ValueError(
@@ -381,6 +456,13 @@ class ServerConfig(BaseModel):
                 f"and would answer a request the API's token gate never saw. Serve it "
                 f"somewhere else, for example /xiaozhi/ota/"
             )
+        if path.startswith(f"{ONBOARDING_MOUNT_PATH}/"):
+            raise ValueError(
+                f"{ONBOARDING_MOUNT_PATH}/ is reserved for the short onboarding route, "
+                f"which serves the same endpoint at {ONBOARDING_MOUNT_PATH}/<key>/, so "
+                f"the OTA endpoint cannot also be served there or anywhere under it. "
+                f"Serve it somewhere else, for example /xiaozhi/ota/"
+            )
         return path
 
     @field_validator("websocket_url")
@@ -394,6 +476,62 @@ class ServerConfig(BaseModel):
                 f'"{value}" is not a websocket URL; it must start with ws:// or wss://'
             )
         return url
+
+    @field_validator("public_url")
+    @classmethod
+    def _check_public_url(cls, value: str | None) -> str | None:
+        """An http or https origin, optionally with a path prefix, and
+        nothing that a log line must not carry.
+
+        This one value is printed at startup and handed to a person to
+        type, so userinfo is refused rather than stripped: a URL carrying
+        a password is a mistake worth naming, and printing it with the
+        password quietly removed would hide it. The rejected value is
+        never quoted back, for the same reason.
+        """
+        if value is None:
+            return None
+        parts = urlsplit(value.strip())
+        problem: str | None = None
+        if parts.scheme not in ("http", "https"):
+            problem = "it must start with http:// or https://"
+        elif not parts.hostname:
+            problem = "it names no host"
+        elif "@" in parts.netloc:
+            problem = (
+                "it carries a user:password, which this key must not, since its value "
+                "is printed at startup and handed to a person to type"
+            )
+        elif parts.query or parts.fragment:
+            problem = (
+                "it carries a query or a fragment, and this is an origin with an "
+                "optional path prefix rather than a whole URL"
+            )
+        if problem is not None:
+            raise ValueError(
+                f"this is not a usable public URL: {problem}. Write the origin devices "
+                f"reach this server on, for example https://voice.example or "
+                f"https://voice.example/samtal; the value is not quoted back here, "
+                f"since it may carry a credential"
+            )
+        # The trailing slash goes, so the paths appended to this (the
+        # onboarding route, the OTA path) join it without doubling it.
+        return urlunsplit((parts.scheme, parts.netloc, parts.path.rstrip("/"), "", ""))
+
+    @model_validator(mode="after")
+    def _check_something_is_discoverable(self) -> "ServerConfig":
+        """A server no device can reach its configuration on is a
+        misconfiguration rather than a choice: unmounting the legacy path
+        is how a deployment moves to the short one, so unmounting it with
+        the short one off leaves nothing serving."""
+        if self.ota_path is None and not self.onboarding.enabled:
+            raise ValueError(
+                "server.ota_path is null and server.onboarding.enabled is false, so "
+                "no device could fetch its configuration from this server at all. "
+                "Keep one of the two: an ota_path for the boards already provisioned "
+                "with it, or onboarding enabled for the short /x/<key>/ route"
+            )
+        return self
 
 
 def is_secret_option(name: str) -> bool:
