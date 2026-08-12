@@ -113,7 +113,10 @@ with what it carries:
 
 The retention sentence distinguishes what actually survives
 instead of flattening it: board model and firmware version cross
-the OTA-to-session boundary in the bounded in-memory cache;
+the OTA-to-session boundary in the bounded in-memory cache, which
+holds the latest report per device until it is overwritten,
+evicted by the cache's bound, or lost at restart, and which a
+session reads into its manifest when capture is enabled;
 protocol version, the discovered MCP tools, and the listening mode
 are retained and consumed for the life of the session, with the
 protocol version also entering an enabled capture's manifest; the
@@ -154,7 +157,7 @@ Sequencing stand.
 ```markdown
 ## Problem
 
-The server already sees most of what there is to know about a device, and keeps almost none of it. The OTA request reports identity and build facts (`Device-Id` = MAC, `Client-Id` = UUID, `application.version`, `board.type`), parsed in `ota.py`. Board model and firmware version already survive that request: they are kept in a bounded in-memory cache (`DeviceFacts` in `capture.py`), keyed by MAC, until the session that follows reads them into its capture manifest. That cache is the only survival there is: in-memory (gone on restart), bounded, and read only by capture; nothing else can ask what a device last reported.
+The server already sees most of what there is to know about a device, and keeps almost none of it. The OTA request reports identity and build facts (`Device-Id` = MAC, `Client-Id` = UUID, `application.version`, `board.type`), parsed in `ota.py`. Board model and firmware version already survive that request: they are kept in a bounded in-memory cache (`DeviceFacts` in `capture.py`), keyed by MAC, holding the latest report until it is overwritten by the next check-in, evicted by the cache's 256-entry bound, or lost with the process. When capture is enabled, the session that follows copies them into its capture manifest. That survival is thin: in-memory, bounded, and read only by capture; nothing else can ask what a device last reported.
 
 The `hello` message carries the protocol version and a features map; when the features advertise MCP, the device's tool list arrives shortly after over a separate MCP handshake and says which controls (volume, brightness) this board actually has. The listening mode arrives with the first `listen` message and is the empirical echo-cancellation signal, since the firmware picks realtime exactly when AEC is on. A fired wake word is reported as `listen` `detect` with the word in `text`, currently debug-logged in `device/session.py`. All of these survive at best for the life of the session that carried them: the protocol version, the discovered tool list, and the listening mode are held and consumed while the session runs (the protocol version also enters an enabled capture's manifest), and the wake-word report is only debug-logged. None of it enters a durable, queryable per-device record, and the OTA exchange and the WebSocket session are joined only by `Device-Id`.
 ```
@@ -253,6 +256,10 @@ addressing it lands.
    firmware per MAC until overwritten, evicted by its 256-entry
    bound, or lost at restart; when capture is enabled, a session
    copies the available facts into its manifest.
+   *Resolution*: adopted. Both the concepts wording and the issue
+   #96 replacement now give the cache its real lifetime
+   (overwrite, eviction, restart; reads do not consume) and
+   condition the manifest read on capture being enabled.
 3. **P2: MCP discovery is not guaranteed to deliver a list
    "shortly after".** Discovery is deliberately backgrounded
    because the board may never answer, and the protocol notes
