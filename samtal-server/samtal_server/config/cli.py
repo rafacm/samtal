@@ -27,6 +27,11 @@ not something to discover. Device bindings are the exception the server
 side makes, so a `--local` device delete says the device meets it at its
 next check-in, the same sentence the API answers that delete with.
 
+One command stands outside all of this, because onboarding a board
+happens before there is anything to configure: `ota-url` derives the
+string a person types into a captive portal from the file half and the
+environment, and contacts nothing whatsoever.
+
 Every failure leaves as a ConfigError printed to stderr with exit code
 1, naming the location and the kind of failure without quoting the value
 that caused it, and no traceback from pydantic, PyYAML, SQLAlchemy,
@@ -41,7 +46,7 @@ import sys
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
 from urllib.parse import SplitResult, quote, urlsplit, urlunsplit
 
 import httpx
@@ -53,6 +58,7 @@ from samtal_server.config.models import (
     API_MOUNT_PATH,
     PROVIDER_STAGES,
     FileConfig,
+    ServerConfig,
 )
 from samtal_server.config.secrets import (
     MASK,
@@ -71,6 +77,14 @@ from samtal_server.config.writes import (
     wrote_secret,
 )
 from samtal_server.db import open_database
+
+if TYPE_CHECKING:
+    # Names only. The onboarding module serves the OTA handlers, so
+    # importing it pulls in a whole conversation's worth of machinery;
+    # the command that needs it imports it in its own body, and
+    # `config reference` and `config openapi` keep loading nothing but
+    # the models and the routes.
+    from samtal_server.onboarding import Origin
 
 # Where the API is, when nothing says otherwise: the loopback address of
 # this machine, on the port the server half of the configuration names,
@@ -136,6 +150,27 @@ NOTHING_PENDING = (
     "minutes of being pointed at this server, and codes are forgotten when the server "
     "restarts, so a board that has been waiting a while shows a fresh one"
 )
+
+# What to do with the URL `ota-url` prints, said beside it on stderr so
+# that stdout holds the URL and nothing else.
+OTA_URL_GUIDANCE = (
+    "Type this into the device's captive portal, under its advanced settings, as the "
+    "server address. The board then shows a six-digit code and speaks it; bind it with: "
+    "samtal-server config add-device <code> <agent>"
+)
+
+# Said when there is no short URL to print, with the fix the command
+# that asked for one needs. The configured `ota_path` segment is named
+# and never quoted: it is a credential, and the derived key is the one
+# recorded exception to that rule.
+ONBOARDING_OFF = (
+    "device onboarding is off (server.onboarding.enabled is false), so this "
+    "configuration serves no short URL. Devices are configured at the path "
+    "server.ota_path names, on {origin} ({provenance}), and that segment is not printed "
+    "here, since it is this deployment's secret. {fix}"
+)
+
+ONBOARDING_OFF_FOR_URL = "Turn onboarding on for a URL short enough to type."
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -272,6 +307,28 @@ def _add_device(args: argparse.Namespace) -> None:
 
 def _pending(args: argparse.Namespace) -> None:
     print(_pending_listing(_call(args, "GET", _path("devices", "pending"))), end="")
+
+
+def _ota_url(args: argparse.Namespace) -> None:
+    """The URL to type into a board's captive portal.
+
+    The one command here that talks to nothing: no server, no database,
+    no encryption key and no API token, because none of them holds any
+    part of the answer. It reads the file half the way every other
+    command reads it, takes the device-auth secret from the environment
+    the server takes it from, and derives the key and the origin with
+    the functions the server itself calls, so what it prints is what
+    that server answers on rather than a second opinion about it.
+
+    The URL goes to stdout alone, so it can be captured; what to do with
+    it, and where its origin came from, go to stderr the way every
+    other notice does.
+    """
+    url, origin = _onboarding_url(_server_config(args), ONBOARDING_OFF_FOR_URL)
+    print(url)
+    sys.stdout.flush()
+    print(OTA_URL_GUIDANCE, file=sys.stderr)
+    print(f"The URL above is {origin.provenance}.", file=sys.stderr)
 
 
 def _set_default_agent(args: argparse.Namespace) -> None:
@@ -646,6 +703,59 @@ def _document(answer: object) -> dict[str, object]:
     raise ConfigError(f"the configuration API answered a read with {UNRECOGNIZED_ANSWER}")
 
 
+# The onboarding URL
+#
+# Not about the domain configuration and nowhere near the API: a string
+# derived from the file half and the environment, printed for somebody
+# to type into a board.
+
+
+def _server_config(args: argparse.Namespace) -> ServerConfig:
+    """The file half's `server` section, read the way every command
+    reads it. No database is opened and no config file has to exist:
+    without one the field defaults and the SAMTAL_ environment are the
+    whole answer."""
+    return load_file_config(args.config).server
+
+
+def _onboarding_url(server: ServerConfig, fix: str) -> tuple[str, "Origin"]:
+    """The short URL this configuration serves, and where its origin
+    came from.
+
+    Nothing here is a second implementation of anything: the key comes
+    from `onboarding.onboarding_key` and the origin from
+    `onboarding.public_origin`, which are what the server mounts the
+    route with and what the startup banner prints. `fix` is what to do
+    when onboarding is off, which differs by the command that asked.
+    """
+    # Imported in the body rather than at module scope: the onboarding
+    # module serves the OTA handlers, so it imports `ota` and everything
+    # a conversation needs, and `config reference` and `config openapi`
+    # are rendered from the models and the routes with none of that
+    # loaded.
+    from samtal_server import onboarding
+
+    origin = onboarding.public_origin(server)
+    if not server.onboarding.enabled:
+        raise ConfigError(
+            ONBOARDING_OFF.format(origin=origin.url, provenance=origin.provenance, fix=fix)
+        )
+    key = onboarding.onboarding_key(server)
+    # The one state the server itself cannot be in, since it refuses the
+    # boot: auth is on, no key is pinned, and the variable the secret
+    # would come from holds nothing. It is told apart from the keyless
+    # case by the two fields that decide it, so no secret is read here.
+    if key is None and server.auth.enabled and server.onboarding.key is None:
+        raise ConfigError(
+            f"{server.auth.secret_env} is not set, and the onboarding URL's key is "
+            f"derived from it. It is the same variable the server is started with: exec "
+            f"into the running container, where it is already in the environment, or "
+            f"export it here. A deployment that pinned a key under "
+            f"server.onboarding.key needs no secret to print its URL."
+        )
+    return f"{origin.url}{onboarding.onboarding_path(key)}", origin
+
+
 # Rendering
 
 
@@ -1009,6 +1119,12 @@ def _parser() -> argparse.ArgumentParser:
     common.add_argument(
         "--local", action="store_true", default=argparse.SUPPRESS, help=local_help
     )
+    # For the commands that read the file half and reach no API: the
+    # same --config, and none of the flags that address one.
+    file_only = argparse.ArgumentParser(add_help=False)
+    file_only.add_argument(
+        "--config", metavar="PATH", default=argparse.SUPPRESS, help=config_help
+    )
     fragment = argparse.ArgumentParser(add_help=False)
     fragment.add_argument(
         "-f",
@@ -1105,6 +1221,19 @@ def _parser() -> argparse.ArgumentParser:
         help="the devices showing an activation code, and the code each is showing",
     )
     waiting.set_defaults(run=_pending)
+
+    # This one takes --config and nothing else: it contacts nothing at
+    # all, so it has nothing to do with --api-url or the bearer token,
+    # and offering the flags would say it had.
+    portal = commands.add_parser(
+        "ota-url",
+        parents=[file_only],
+        help=(
+            "the URL to type into a device's captive portal; derived from this "
+            "configuration and the device-auth secret, and it contacts nothing"
+        ),
+    )
+    portal.set_defaults(run=_ota_url)
 
     default = commands.add_parser(
         "set-default-agent", parents=[common], help="the agent an unbound device reaches"
