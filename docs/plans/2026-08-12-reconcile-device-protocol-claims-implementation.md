@@ -84,11 +84,16 @@ and subagents run no GitHub commands.
 
 ### What the consistency pass found
 
-`grep -in` for `hello`, `mcp`, `wake`, `detect`, `listen` and `facts`
-across the three documents, with every hit read: 30 hits in
-`docs/concepts.md`, 15 in `docs/xiaozhi-notes.md`, 21 in
-`docs/glossary.md`. The pass concluded that no contradiction remained
-and that no further edit was needed.
+The pass is one command, run from the repository root:
+
+```sh
+grep -in 'hello\|mcp\|wake\|detect\|listen\|facts' \
+  docs/concepts.md docs/xiaozhi-notes.md docs/glossary.md
+```
+
+Every hit it prints is read. The first run of it, before the PR review
+round, concluded that no contradiction remained and that no further
+edit was needed.
 
 That conclusion was wrong, and the PR review found what it missed: the
 protocol notes' pre-existing discovery-race entry promised that a first
@@ -98,6 +103,21 @@ is not guaranteed, since discovery is backgrounded precisely because a
 board may never answer. The entry now says that a first utterance can
 run without the tools and that later utterances have them if discovery
 completes. See the PR review round below for the fix and its commit.
+
+That first run also reported hit counts (30, 15 and 21) that were
+eyeballed off the printed output rather than counted, and were simply
+wrong. The pass was rerun after the two fixes, on the same command,
+with the counts taken from the same expression under `grep -ic`: 33
+matching lines in `docs/concepts.md`, 24 in `docs/xiaozhi-notes.md`,
+25 in `docs/glossary.md`, 82 in total, which reproduces what the
+reviewer counted. They are matching lines rather than matches, which
+`grep -o` counts higher (41, 27 and 27). Every one of them was read
+again, and this time nothing further contradicted another document or
+the code. The two wake-word statements that survive elsewhere are
+receipt claims rather than retention claims and stay correct: the
+concepts page's "at most is told which word fired, after the fact" and
+the glossary's Wake word entry, which says the same thing in the same
+terms.
 
 The entries that were verified and deliberately left alone:
 
@@ -129,7 +149,9 @@ documentation-only change touch server code.
 
 ### Verification
 
-- Consistency pass: run and recorded above, no contradictions found.
+- Consistency pass: run, missed one contradiction the PR review found,
+  and rerun after the fixes with every hit read again and nothing
+  further found. Command, counts and outcome are recorded above.
 - Code references spot-checked against the claims, all confirming the
   documented wording: `_receive_hello` (protocol version, transport,
   audio params, feature map; no tool list),
@@ -152,3 +174,43 @@ documentation-only change touch server code.
   this change touches none of them. The runs above are the substitute,
   and they are a sentinel rather than coverage of anything this change
   did.
+
+### PR #110 review round
+
+One external review of the pull request's diff (`origin/main...2b16556`):
+codex CLI, model gpt-5.6-sol, read-only, 2026-08-12. Three findings,
+two P2 and one P3, each fixed with its own commit.
+
+1. **P2: the new wake-word sentence promised knowledge of the fired
+   word.** The entry ended "So the word that fired is knowable", which
+   is exactly the wording the plan's own review round rejected: the
+   code binds the value only long enough to debug-log it, and the
+   plan's risk section warns that promising the server "knows" the
+   word overstates retention the same way "all dropped" understated
+   it. Fixed in e7a9326: the entry stops at received, debug-logged,
+   and not retained, keeps the sentence saying the detection is not
+   something the server can hear, tune, or substitute for, and the
+   implementation doc's paraphrase of it moved in the same commit.
+2. **P2: the discovery-race entry guaranteed a delivery that is not
+   guaranteed.** The pre-existing bullet said a first utterance that
+   beats discovery "runs without device tools and the next one has
+   them". `_start_device_discovery` backgrounds the handshake
+   precisely because a board may never answer, and the plan's third
+   review resolution says discovery may never complete. This is
+   pre-existing text the consistency pass read and cleared, which is
+   what makes it a finding against this PR rather than against #94.
+   Fixed in c09a516: the first utterance may run without the tools,
+   later utterances have them if discovery completes, and the entry
+   keeps its constraint framing (a device that declared its tools in
+   `hello` would remove the race). The consistency-pass section now
+   records the miss.
+3. **P3: the recorded consistency-pass hit counts did not
+   reproduce.** The doc reported 30, 15 and 21 hits; the reviewer's
+   own run counted 33, 24 and 25. The counts had been eyeballed off
+   the printed output instead of counted, so they were wrong, and a
+   verification record nobody can reproduce is worth nothing. Fixed in
+   the commit carrying this section: the pass is recorded as the exact
+   command it is, its counts come from `grep -ic` over the same
+   expression and are named as matching lines rather than matches, and
+   the pass was rerun over the two fixed documents with every hit read
+   again, reproducing 33, 24 and 25 and finding nothing further.
