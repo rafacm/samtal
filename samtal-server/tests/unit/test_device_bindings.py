@@ -574,7 +574,15 @@ async def test_a_held_write_lock_stalls_neither_the_lookup_nor_the_loop(
     """The property the read engine exists for. Every repository write
     holds the write lock for its whole transaction, and under WAL a
     deferred read takes no lock at all, so a device asking which agent
-    it may talk to cannot queue behind an operator's write."""
+    it may talk to cannot queue behind an operator's write.
+
+    The counter is read on both sides of the lookup rather than at the
+    end, so what is asserted is that the loop ran other coroutines
+    during it, and the writer is asked whether it is still in its
+    transaction after the lookup returned, so the interval the lookup
+    ran in is the interval the lock was held. That a whole conversation
+    also stays live under the same lock is the integration lane's, where
+    there is a device to have one with."""
     config = booted(tmp_path, devices={DEVICE_MAC: ["assistant"]})
     bindings = DeviceBindings.open(config)
     writer = open_database(tmp_path)
@@ -592,10 +600,18 @@ async def test_a_held_write_lock_stalls_neither_the_lookup_nor_the_loop(
             # BEGIN IMMEDIATE fires on the first statement, so the write
             # lock is held from here until this block exits.
             held.execute(text("SELECT 1"))
+            assert held.in_transaction()
+            before = ticks
 
             # Well inside the 10 second busy timeout a blocked read
             # would spend before failing.
             resolution = await asyncio.wait_for(bindings.resolve(DEVICE_MAC), timeout=2)
+
+            # Both facts about the same interval: the loop kept going
+            # while the lookup was in the database, and the lock was
+            # still held when the lookup came back with its answer.
+            during = ticks - before
+            still_held = held.in_transaction()
     finally:
         ticker.cancel()
         with contextlib.suppress(asyncio.CancelledError):
@@ -604,6 +620,5 @@ async def test_a_held_write_lock_stalls_neither_the_lookup_nor_the_loop(
         bindings.dispose()
 
     assert resolution.agents == ("assistant",)
-    # The lookup ran on a worker thread, so the loop kept running other
-    # coroutines while it was in the database.
-    assert ticks > 0
+    assert during > 0
+    assert still_held

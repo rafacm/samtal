@@ -9,7 +9,9 @@ check-in is an HTTP request the firmware makes, and the conversation is
 the device simulator, all against one uvicorn on a loopback port.
 """
 
+import asyncio
 import os
+import sqlite3
 from pathlib import Path
 
 import httpx
@@ -17,7 +19,9 @@ import pytest
 
 from samtal_server.config import Config
 from samtal_server.config.writes import BINDING_NOTICE
+from samtal_server.db import DATABASE_FILENAME
 from samtal_server.ota import OTA_PATH
+from tests.integration.conftest import spoken
 
 MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")}
 MOCK_AGENT = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
@@ -86,3 +90,45 @@ async def test_a_bind_over_the_api_reaches_the_devices_next_check_in(
         # at the handshake, and the session resolves the same binding.
         events, _ = await simulate(port, DEVICE_MAC)
     assert any(event.get("type") == "tts" for event in events)
+
+
+@pytest.mark.asyncio
+async def test_a_held_write_lock_stops_neither_a_lookup_nor_a_conversation(
+    serve_app_in, simulate, tmp_path: Path
+) -> None:
+    """The property the read engine exists for, at the size it matters.
+
+    Every repository write holds the database's write lock for its whole
+    transaction, and the two device paths now read that database. If the
+    read took a lock of its own, or waited for one, an operator's write
+    would stall the fleet's check-ins and every connect behind them. It
+    cannot: under WAL a deferred read takes no lock and reads the last
+    committed snapshot.
+
+    So a real lock is held here, by another connection, across a whole
+    conversation: the OTA check that resolves the binding, the
+    handshake, the utterance and the spoken reply, plus a lookup on the
+    server's own view. The lock is still held when all of it has
+    finished, which is what makes this about the interval rather than
+    about the order things happened to run in.
+    """
+    directory = tmp_path / "db"
+    async with serve_app_in(directory, CONFIG) as (port, app):
+        holder = sqlite3.connect(directory / DATABASE_FILENAME, isolation_level=None)
+        try:
+            # Taken before anything starts, and held until the assertions
+            # below have run.
+            holder.execute("BEGIN IMMEDIATE")
+            assert holder.in_transaction
+
+            conversation = asyncio.create_task(simulate(port, BOUND_MAC))
+            resolved = await asyncio.wait_for(app.state.bindings.resolve(BOUND_MAC), timeout=10)
+            events, _ = await asyncio.wait_for(conversation, timeout=60)
+
+            # The whole of it happened while the writer sat on the lock.
+            assert holder.in_transaction
+        finally:
+            holder.close()
+
+    assert resolved.agents == ("assistant",)
+    assert spoken(events), "the conversation produced no reply"
