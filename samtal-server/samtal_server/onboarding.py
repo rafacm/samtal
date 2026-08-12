@@ -117,6 +117,13 @@ MINT_BUDGET = 30
 
 MINT_WINDOW_S = 600.0
 
+# How long a code has left after a claim of it failed, at least. A
+# minute, because that is what makes the refusal's own advice ("run the
+# command again in a moment") true for a code whose deadline the failed
+# attempt stepped over. It only ever extends, so a code that had longer
+# keeps what it had.
+RELEASED_GRACE_S = 60.0
+
 # What the OTA reply's `timeout_ms` carries. Upstream's manager-api does
 # not send the field at all (its Activation DTO has code, message and
 # challenge and nothing else), and the firmware parses it into
@@ -541,13 +548,27 @@ class PendingDevices:
             self._by_code.clear()
 
     def release(self, code: str) -> None:
-        """Put a reserved code back, for a claim whose write failed. The
-        operator can run the same command again."""
+        """Put a reserved code back, for a claim whose write failed, and
+        give it long enough to be used.
+
+        The deadline moves out, which is the difference between "the
+        operator can run the same command again" and being able to. A
+        claim holds a reservation for as long as its write takes, and a
+        write that fails on a busy database takes the busy timeout, ten
+        seconds, which is long enough to step over a deadline that had
+        three seconds left. The refusal the operator just read says to
+        try again; answering that with "no device is waiting" would be
+        both wrong, since the device is still showing the number, and
+        unactionable.
+        """
         with self._lock:
             mac = self._by_code.get(code)
             device = None if mac is None else self._by_mac.get(mac)
             if device is not None:
                 device.claiming = False
+                device.expires_at = max(
+                    device.expires_at, self._clock() + RELEASED_GRACE_S
+                )
 
     def _expire(self, now: float) -> None:
         """Drop what has timed out. An entry in the middle of a claim is

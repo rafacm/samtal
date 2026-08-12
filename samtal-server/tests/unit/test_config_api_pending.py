@@ -519,3 +519,25 @@ def test_the_acknowledgement_is_about_the_row_and_not_the_request(
     # And the row really does hold the stripped name, which is what
     # makes the notice the true one.
     assert client.get(f"/devices/{MAC}").json()["entity"] == {"agents": ["assistant"]}
+
+
+def test_a_write_that_failed_after_the_code_expired_leaves_it_claimable(
+    client: TestClient, pending: PendingDevices, clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The realistic shape of the release: the write meets a busy
+    database, waits out the ten-second busy timeout, and by the time it
+    gives up the code has run out. The operator is told to run the
+    command again, so running it again has to work."""
+    code = _waiting(pending)
+    clock.advance(CODE_TTL_S - 1)
+    write = ConfigStore.claim_device
+
+    def slow(self: ConfigStore, mac: str, agents: list[str]) -> object:
+        clock.advance(10)
+        raise DatabaseBusyError("the configuration database is busy")
+
+    monkeypatch.setattr(ConfigStore, "claim_device", slow)
+    assert _claim(client, code).status_code == 409
+
+    monkeypatch.setattr(ConfigStore, "claim_device", write)
+    assert _claim(client, code).status_code == 200
