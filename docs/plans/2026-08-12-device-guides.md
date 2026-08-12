@@ -255,8 +255,15 @@ code, organized under the standard skeleton:
 
 ### Housekeeping in the same PR
 
+- The root README's Getting Started closes with the
+  board-ambiguous "press the button, and talk"; the button differs
+  by board (PWR on the Touch-LCD, BOOT on the others), so the
+  final step now sends the reader to their board's guide for
+  which button that is.
 - `docs/README.md` gains a Device guides section pointing at
-  `docs/devices/`.
+  `docs/devices/`, and its introduction, which says user-facing
+  documentation lives in the READMEs, is updated to name
+  `docs/devices/` as user-facing too.
 - `CHANGELOG.md`: an entry under `## 2026-08-12`, `### Added`.
 - `docs/concepts.md` is verified for consistency (its Device
   section already names the per-board guides as the help agent's
@@ -271,9 +278,9 @@ docs/devices/README.md                                  new
 docs/devices/waveshare-esp32-s3-epaper-1.54.md          new, stub
 docs/devices/waveshare-esp32-s3-touch-lcd-1.54.md       new, full
 docs/devices/waveshare-esp32-s3-touch-amoled-2.16.md    new, stub
-README.md                                               hardware table links
+README.md                                               table links; Getting Started final step
 samtal-esp32/README.md                                  table links; section moves out
-docs/README.md                                          index section
+docs/README.md                                          index section; introduction
 CHANGELOG.md
 docs/plans/2026-08-12-device-guides.md
 docs/plans/2026-08-12-device-guides-implementation.md
@@ -454,6 +461,11 @@ addressing it lands.
    false once the guides exist. Update Getting Started to send
    readers to their board guide for the final control, and update
    the docs-index introduction to name `docs/devices/`.
+   *Resolution*: adopted. The housekeeping list now updates the
+   Getting Started final step to send the reader to their board's
+   guide for which button to press, and the docs-index
+   introduction to name `docs/devices/` as user-facing; the
+   files-touched annotations follow.
 
 8. **P2: automatic dim and shutdown behavior is stated without
    its runtime conditions.** The power-save timer is disabled when
