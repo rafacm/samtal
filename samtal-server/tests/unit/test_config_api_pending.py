@@ -9,6 +9,7 @@ and the one mechanical constraint the plan names out loud, that the
 literal word `pending` never enters MAC normalization.
 """
 
+import logging
 import threading
 from collections.abc import Iterator
 from datetime import datetime
@@ -18,13 +19,16 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from samtal_server import logs
 from samtal_server.config.api import (
+    CLAIM_REFUSED,
     CODE_IN_FLIGHT,
     MOUNT_PATH,
     UNKNOWN_CODE,
     build_api,
     mount_api,
 )
+from samtal_server.config.loader import DatabaseBusyError
 from samtal_server.config.secrets import MASTER_KEY_ENV, generate_key
 from samtal_server.config.store import ConfigStore
 from samtal_server.config.writes import BINDING_NOTICE, RESTART_NOTICE
@@ -296,17 +300,61 @@ def test_a_refused_write_leaves_the_code_claimable(
     client: TestClient, pending: PendingDevices
 ) -> None:
     """Reference checking is the repository's, inherited rather than
-    restated, and its refusal is the repository's own sentence. The
-    device is still showing the number, so the number has to still
-    work."""
+    restated. The device is still showing the number, so the number has
+    to still work."""
     code = _waiting(pending)
 
     refused = _claim(client, code, "no-such-agent")
 
     assert refused.status_code == 422
-    assert "no-such-agent" in refused.json()["detail"]
     assert client.get("/devices/pending").json()[code]["mac"] == MAC
     assert _claim(client, code).status_code == 200
+
+
+def test_a_refused_claim_does_not_quote_the_names_it_refused(
+    client: TestClient, pending: PendingDevices, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The repository's refusal names the agent it could not resolve,
+    which is right for a fragment an operator wrote into a file and
+    wrong here: this is the one route where an agent name is typed
+    beside an activation code, which is where a paste goes wrong."""
+    sentinel = "sk-test-4f8b2c9e-never-a-real-credential"
+    code = _waiting(pending)
+
+    with caplog.at_level(logging.DEBUG):
+        refused = _claim(client, code, sentinel)
+
+    assert refused.status_code == 422
+    assert refused.json()["detail"] == CLAIM_REFUSED
+    rendered = (
+        refused.text
+        + str(refused.headers)
+        + caplog.text
+        + "".join(logs.JsonFormatter().format(record) for record in caplog.records)
+    )
+    assert sentinel not in rendered
+    # And the refusal is still one an operator can act on.
+    assert "config list" in refused.json()["detail"]
+
+
+def test_a_busy_database_still_answers_as_itself(
+    client: TestClient, pending: PendingDevices, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only the refusal that is about the request is re-worded. One that
+    is about the server keeps its own sentence and its own status, or a
+    retryable failure would read as a bad agent name."""
+    code = _waiting(pending)
+
+    def busy(self: ConfigStore, mac: str, agents: list[str]) -> None:
+        raise DatabaseBusyError("the configuration database is busy")
+
+    monkeypatch.setattr(ConfigStore, "bind_device", busy)
+
+    refused = _claim(client, code)
+
+    assert refused.status_code == 409
+    assert refused.json()["detail"] == "the configuration database is busy"
+    assert client.get("/devices/pending").json()[code]["mac"] == MAC
 
 
 def test_a_malformed_body_neither_binds_nor_burns_the_code(
