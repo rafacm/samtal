@@ -23,9 +23,13 @@ git clone --depth 1 https://github.com/xinnan-tech/xiaozhi-esp32-server.git vend
   (default `https://api.tenclass.net/xiaozhi/ota/`). Everything else
   (WebSocket URL, token, protocol version, firmware updates) is delivered by
   the OTA response and persisted to NVS.
-- The v2.4.0 captive portal (WiFi provisioning AP `Xiaozhi-XXXX`,
-  `http://192.168.4.1`) has **no OTA-URL field**, but the URL can be written
-  directly to NVS over USB (partition at `0x9000`, size `0x4000`):
+- The captive portal (WiFi provisioning AP `Xiaozhi-XXXX`,
+  `http://192.168.4.1`) grew a **Custom OTA URL field** on its Advanced
+  tab at some point after v2.4.0, which had none: the factory firmware on
+  the AMOLED-2.16 board shows it (observed 2026-08-12), so a current
+  build can be pointed at a backend with no USB cable at all. Where the
+  field is absent, the URL can still be written directly to NVS over USB
+  (partition at `0x9000`, size `0x4000`):
 
   ```csv
   # nvs_input.csv
@@ -155,6 +159,59 @@ wants an interactive terminal). The port is `/dev/cu.usbmodem101` at
   (emotion), `mcp` (tool calls), `system`, `alert`. Documented upstream in
   `docs/websocket.md` and `docs/mcp-protocol.md`.
 
+### Activation, the 6-digit code ceremony
+
+How an unbound device gets claimed on xiaozhi.me, reconstructed from the
+vendored sources because no public spec exists: `main/ota.cc` cites a
+Feishu wiki that answers 404 anonymously, and upstream's `docs/` never
+describes the OTA HTTP exchange. Device side: `main/ota.cc` and
+`main/application.cc` in `vendor/xiaozhi-esp32`; server side:
+`OTAController.java` and `DeviceServiceImpl.java` in the manager-api of
+`vendor/xiaozhi-esp32-server`. Issue #40 builds samtal's onboarding on
+this ceremony.
+
+- The OTA response may carry an optional `activation {message, code,
+  challenge, timeout_ms}` object. Omitting it, which is what
+  samtal-server does today, means no activation is ever required and the
+  device proceeds straight to the websocket.
+- When it is present, the device shows `message` on screen with the
+  activation jingle and speaks `code` digit by digit, each digit an OGG
+  clip from the firmware's compiled language assets
+  (`Application::ShowActivationCode`). Upstream sets `message` to the
+  frontend host, a newline, then the code, and the screen renders it
+  exactly that way.
+- The device then POSTs `<ota_url>/activate` with
+  `{algorithm: "hmac-sha256", serial_number, challenge, hmac}`, the HMAC
+  computed over `challenge` with an eFuse-burned key and announced with
+  `Activation-Version: 2`. A board with no serial number burned, which
+  is what consumer boards like ours are, sends `Activation-Version: 1`
+  and a body of `{}`, so the server can identify the poll only by its
+  `Device-Id` header; upstream's manager-api does exactly that and never
+  reads the body. `202` means keep waiting, `200` means activated,
+  anything else counts as a failure.
+- **Send `challenge` or the poll is slow.** Without one the firmware
+  fails `Activate()` immediately and waits 10 s between attempts instead
+  of 3 s. Upstream sets `challenge` to the device's MAC.
+- **A device waiting on activation re-checks OTA in a loop.** Activation
+  is not a dead end: `Application::CheckNewVersion` polls `/activate` in
+  bursts of ten, 3 s apart, then re-runs the whole OTA check and
+  re-displays whatever code the fresh response carries, indefinitely.
+  Binding a device server-side therefore takes effect within seconds,
+  with no power cycle and no button press; only a bound, idle board
+  waits for its next boot to re-check OTA. Two consequences: codes can
+  be short-lived on the server, since the device fetches and displays a
+  fresh one within a couple of minutes, and losing server-side pending
+  state costs nothing but a changed number on the screen.
+- **The OTA response cannot set the device language.** The parser reads
+  exactly `activation`, `mqtt`, `websocket`, `server_time` and
+  `firmware`; screen chrome, jingle and digit voices are all compiled
+  language assets. The device announces its build language in
+  `Accept-Language` (`zh-CN` factory, `en-US` ours), so a server can
+  localize `message`, but a factory board titles the screen 激活设备 and
+  speaks Chinese digits regardless. The one runtime lever is the
+  user-only MCP tool `self.assets.set_download_url` plus a reboot, which
+  swaps the whole assets bundle and requires hosting one per board.
+
 ## What running stock firmware costs the server
 
 samtal-server implements the server half of the protocol above and changes
@@ -221,6 +278,19 @@ by the device rather than by the problem.
   utterance that beats discovery runs without device tools; if discovery
   completes, later utterances have them, possibly only from the second one
   on. A device that declared its tools in `hello` would remove the race.
+
+- **The OTA URL is the only field an operator can put a secret into.**
+  Every request identifies the board by `Device-Id`, a MAC printed on
+  the box and broadcast in the clear in every Wi-Fi frame, and a stock
+  board can present no other credential at its first OTA call. The
+  token issuer therefore has to be protected by the URL path itself,
+  which is why `server.ota_path` carries a long random segment and why
+  onboarding means typing a secret into a captive portal. Activation
+  (#40) changes what an unknown MAC receives, a claim code instead of
+  an empty token, but a bound MAC presented by anyone still gets that
+  device's real token, so the path stays load-bearing. Owning the
+  firmware would let a device hold a real per-device credential
+  instead.
 
 - **We serve configuration through OTA and never images**, but that is our
   choice rather than a limit: the update channel is fully built on the
