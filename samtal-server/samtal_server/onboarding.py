@@ -116,44 +116,65 @@ class Origin:
 def public_origin(config: Config) -> Origin:
     """Where a device reaches this server, in the order the plan sets:
     `public_url` as written, else the origin of `websocket_url`, else the
-    listen address, which is a guess and says so."""
+    listen address, which is a guess and says so.
+
+    Total by construction. Every step that could raise falls through to
+    the next source instead, and the last source is two configuration
+    fields that cannot fail, so an operator never meets this as a
+    traceback at startup.
+    """
     server = config.server
     if server.public_url:
         return Origin(server.public_url, "server.public_url")
+    unreadable = False
     if server.websocket_url:
         derived = _origin_of(server.websocket_url)
         if derived is not None:
             return Origin(derived, "server.websocket_url")
-    note = ""
+        unreadable = True
+
+    reasons: list[str] = []
+    if unreadable:
+        # Reachable only for a configuration built in code, since the
+        # validator refuses one a file could hold. Said out loud anyway:
+        # a guess that had a better source and could not use it is not
+        # the same guess as one that never had a source.
+        reasons.append("server.websocket_url could not be read as a URL")
     if server.host in ("0.0.0.0", "::", "[::]"):
-        note = (
-            f", and {server.host} is where the server listens rather than a name a "
-            f"device can reach, so put this host's own address on the network in "
-            f"server.public_url"
+        reasons.append(
+            f"{server.host} is where the server listens rather than a name a device "
+            f"can reach"
         )
+    reasons.append("set server.public_url to name this deployment exactly")
     return Origin(
         f"http://{_bracketed(server.host)}:{server.port}",
         "the listen address (server.host and server.port)",
         guessed=True,
-        note=note or ", so set server.public_url to name it exactly",
+        note=", " + "; ".join(reasons),
     )
 
 
 def _origin_of(websocket_url: str) -> str | None:
-    """The http origin behind a `ws://` or `wss://` URL, or None when it
-    carries no host.
+    """The http origin behind a `ws://` or `wss://` URL, or None when
+    there is none to take.
 
-    Built from the parsed hostname and port, never from the raw netloc:
-    the websocket validator accepts any well-schemed string, so a
-    `user:password@host` would otherwise ride into a log line through
-    the banner.
+    Built from the parsed hostname and port, never from the raw netloc,
+    so a `user:password@host` cannot ride into a log line through the
+    banner. Both of the parse steps that raise are caught: `urlsplit`
+    itself for a malformed IPv6 host, and `.port` for one that is not a
+    number in range. The configuration validator refuses both, and this
+    is what keeps a configuration built in code from crashing a startup
+    the validator would have refused.
     """
-    parts = urlsplit(websocket_url)
-    if not parts.hostname:
+    try:
+        parts = urlsplit(websocket_url)
+        hostname, port = parts.hostname, parts.port
+    except ValueError:
+        return None
+    if not hostname:
         return None
     scheme = "https" if parts.scheme == "wss" else "http"
-    port = f":{parts.port}" if parts.port is not None else ""
-    return f"{scheme}://{_bracketed(parts.hostname)}{port}"
+    return f"{scheme}://{_bracketed(hostname)}{'' if port is None else f':{port}'}"
 
 
 def _bracketed(host: str) -> str:
