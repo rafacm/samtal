@@ -17,8 +17,9 @@ the CHANGELOG entry.
 
 ### Deviations from the plan
 
-Three, all of them the plan's factual expectations meeting the board
-support code at the recorded commit.
+Four. The first three are the plan's factual expectations meeting the
+board support code at the recorded commit; the fourth came out of the
+pull request's review round.
 
 1. **The ePaper board does publish a screen-theme command.** The plan
    says its inventory is "WiFi re-provisioning but no brightness or
@@ -48,6 +49,16 @@ support code at the recorded commit.
    presents the extent of what is sent at the moment of waking as an
    open question, which is what the evidence supports.
 
+4. **The milestone is ticked with the plan's hardware checks
+   unperformed.** Raised by the PR review round (finding 3) and
+   resolved by amending the plan rather than by unticking the
+   milestone: the acceptance wording now says the hardware checks run
+   when the session has the board, and that a session without it
+   classifies the claims as unverified, hedges them in the guides, and
+   collects them into a tracked follow-up, which is issue #114. The two
+   plan-round resolutions that promised hardware checks carry a
+   bracketed postscript each saying what actually happened.
+
 Everything else follows the plan, including its review-round
 resolutions.
 
@@ -62,13 +73,15 @@ resolutions.
   board config in this repository's three boards overrides the flag.
 
   This contradicts `docs/concepts.md`, `docs/glossary.md` and
-  `docs/xiaozhi-notes.md`, which all say the wake-word audio never
-  reaches the server. None of the three was edited here: the reading is
-  source-derived and nothing has been observed on the wire, and a
-  protocol claim that three documents agree on should be corrected with
-  evidence rather than with a code read. The guide presents it as
-  unsettled; confirming it on the wire is follow-up work, and it is
-  listed under the unverified claims below.
+  `docs/xiaozhi-notes.md`, which all said the wake-word audio never
+  reaches the server. The milestone as first pushed left all three
+  alone, on the reasoning that a claim three documents agree on should
+  be corrected with wire evidence rather than with a code read. The PR
+  review round rejected that (finding 2): an unconditional claim the
+  sources contradict is wrong whether or not the replacement is
+  complete, and the honest form is the build-conditioned one. All three
+  now carry it, with the wire check tracked as issue #112. The guide
+  presents it as unsettled, and it stays on the unverified list below.
 
 - **The Touch-LCD power-save timers follow the charging state, and not
   in the obvious direction.** `GetBatteryLevel` calls
@@ -113,7 +126,7 @@ Firmware identity behind the wake-word claims:
 | --- | --- |
 | Touch-LCD-1.54 wake word is Chinese ("nǐ hǎo xiǎo zhì") and enabled | upstream prebuilt merged binary, firmware version 2.4.0 |
 | Touch-LCD-1.54 interface language is Chinese | the same 2.4.0 prebuilt |
-| An English model ("Hi ESP", `wn9_hiesp`) exists only in source builds | firmware sources at the recorded commit; no prebuilt observed carrying it |
+| An English model ("Hi ESP", `wn9_hiesp`) exists in the sources, and no inspected prebuilt carried it | firmware sources at the recorded commit; the prebuilt images inspected for this project, which is the scope the guide now states |
 | AMOLED-2.16 wake word is "Sophia" (`wn9_sophia_tts`) | the firmware Waveshare shipped on the board, as received; no version string recorded |
 | Waveshare's factory image carries `wn9_nihaoxiaozhi_tts` instead | the downloadable image `ESP32-S3-Touch-AMOLED-2.16-FactoryOnly-260318.bin` |
 | ePaper-1.54 wake word | none: not observed on any firmware, and the stub says so |
@@ -124,9 +137,11 @@ Firmware identity behind the wake-word claims:
 | --- | --- |
 | Idle device holds no connection to the server | source-derived (`application.cc`: the channel opens on wake or button), and consistent with the repository's protocol notes |
 | Wake-word monitoring happens on-board, only where a wake word is enabled | source-derived |
-| Listening mode is build-time, device-owned, server cannot change it | source-derived (`GetDefaultListeningMode`, `listen` is device to server only) and already recorded in `docs/xiaozhi-notes.md` |
+| The mode a board starts in is build-selected, the mode is device-owned, and the echo-cancellation gesture changes it at runtime | source-derived (`GetDefaultListeningMode` reads `aec_mode_`, which `SetAecMode` writes from the button handler; `listen` is device to server only). Corrected in the PR review round, which caught the first wording calling the mode itself build-time and unchangeable |
 | Realtime streams continuously, allows interrupting a reply | source-derived; matches `docs/glossary.md` |
 | Auto stops the microphone during playback and re-arms per turn, no barge-in | source-derived (`HandleStateChangedEvent` disables voice processing when speaking outside realtime) |
+| An auto-mode session stays open between turns; the device sends a fresh `listen start` after each reply | source-derived (the `tts` `stop` handler returns to listening rather than closing) |
+| The server's idle timeout does not apply to auto sessions; the button, network loss, the session cap and power-off are what end them | read from samtal-server (`device/session.py`: the watchdog marks activity continuously unless the session is realtime) |
 | Idle timeout, two minutes by default, counted from the last thing said | samtal-server behavior, already documented in the repository |
 | No microphone mute on any board | source-derived (no such control in any of the three board files) |
 | Ten stored networks, 2.4 GHz only, 5 GHz hotspot trap, byte-for-byte SSID matching | hardware-verified: carried unchanged from the firmware README section this page absorbs, which was written from hands-on provisioning |
@@ -144,16 +159,16 @@ Firmware identity behind the wake-word claims:
 | Long press PWR (about 2 s) powers off | hardware-verified for the behavior and the rough timing; the board sets no explicit threshold, so the figure is the observed one, not a source constant |
 | Volume click steps by 10, hold up is maximum, hold down mutes the speaker | hardware-verified (the existing README table, validated as written) and source-derived |
 | Double-click PWR turns the screen off and back on at half brightness | source-derived, **still unverified on hardware** |
-| Triple-click PWR reboots into WiFi provisioning | source-derived, **still unverified on hardware** |
+| Triple-click PWR switches into WiFi provisioning in place, without restarting | source-derived (`WifiBoard::EnterWifiConfigMode` resets the protocol, stops the station and starts the access point). The first wording said "reboots", corrected in the PR review round. **Still unverified on hardware** |
 | Double-click volume-down toggles echo cancellation, idle only, closes the open channel, changes the listening mode | source-derived (`SetAecMode`, `GetDefaultListeningMode`, and the build config that enables device AEC in this board's prebuilt), **still unverified on hardware** |
 | PWR gestures arm on the first release after boot | source-derived, **still unverified on hardware** |
 | The board runs in realtime listening mode | source-derived (`CONFIG_USE_DEVICE_AEC=y` in the board's build config, and AEC on selects realtime) |
 | Chinese wake word active in the 2.4.0 prebuilt | hardware-verified |
-| English "Hi ESP" model exists only in source builds | source-derived |
+| The English "Hi ESP" model exists in the sources and no inspected prebuilt carried it | source-derived for the model's existence; the negative half is scoped to the images inspected, not to every image upstream publishes |
 | The wake word wakes the device, the default agent answers | decided semantics, recorded in `docs/concepts.md` |
 | The word report is sent after the fact and only debug-logged | source-derived plus samtal-server code, already documented |
 | The default build also sends the buffered trigger audio | source-derived, **still unverified on the wire**, and stated in the guide as an open question |
-| Voice commands: status, volume, brightness, theme, WiFi re-provisioning | source-derived (`AddCommonTools` plus this board's `InitializeTools`, user-only tools excluded) |
+| Voice commands: status, volume, brightness, theme, WiFi re-provisioning (which switches in place rather than rebooting, and whose firmware description asks for confirmation first) | source-derived (`AddCommonTools` plus this board's `InitializeTools`, user-only tools excluded, and `EnterWifiConfigMode` for what the WiFi one does) |
 | Firmware upgrade is kept out of the model-visible tool set | source-derived, already documented in `docs/xiaozhi-notes.md` |
 | Interface language is Chinese and compile-time | hardware-verified |
 | Speech and replies render as the conversation happens | hardware-verified (the validated end-to-end demo) |
@@ -163,7 +178,7 @@ Firmware identity behind the wake-word claims:
 | Both timers depend on the NVS `sleep_mode` flag, default true | source-derived (`PowerSaveTimer::SetEnabled`) |
 | The timers follow charging-state transitions | source-derived, **still unverified on hardware**, and the tested power state is therefore recorded as: none |
 | The dim leaves wake-word detection running on this board | source-derived (the `-1` CPU frequency argument skips the audio-input shutdown) |
-| What the idle screen shows | source-derived (`HandleStateChangedEvent`), **still unverified on hardware**, and the guide says so |
+| What the idle screen shows | source-derived (`HandleStateChangedEvent`), **still unverified on hardware**, and the guide says so. The same source-derived description is now in both stubs, which had omitted it |
 
 #### ePaper-1.54 stub
 
@@ -180,11 +195,12 @@ unless marked otherwise.
 | No volume buttons, no touch layer | source-derived |
 | Single microphone, no echo cancellation, auto listening mode, no barge-in | source-derived (the board's codec construction and build config) |
 | Wake word status | **not verified at all**, and the stub says so instead of guessing |
-| Voice commands: status, volume, WiFi re-provisioning (Chinese description) | source-derived |
+| Voice commands: status, volume, WiFi re-provisioning, which switches in place rather than rebooting and whose description is Chinese with no confirm-first instruction, unlike the other two boards | source-derived (the board's `InitializeTools` and `EnterWifiConfigMode`) |
 | No brightness command | source-derived (the board returns no backlight) |
 | A theme command is expected to exist | source-derived; see deviation 1 |
 | 200x200 e-paper with partial refresh, no backlight | source-derived |
-| No automatic dim or self power-off | source-derived; see deviation 2 |
+| No automatic dim or self power-off, so an idle board sits on its screen indefinitely | source-derived; see deviation 2 |
+| What the idle screen shows | source-derived from the shared application code; what an e-paper panel settles on is **not verified at all**, and the stub says so |
 | Two prebuilt variants, 4 MB and 8 MB | source-derived (the board's build configuration) |
 
 #### AMOLED-2.16 stub
@@ -201,11 +217,12 @@ unless marked otherwise.
 | Wake word is "Sophia" on the shipped firmware | hardware-verified |
 | The factory image carries the Chinese model instead | hardware-verified |
 | Upstream prebuilt's wake word | **not verified at all**, and the stub says so |
-| Voice commands: status, volume, brightness, theme, WiFi re-provisioning | source-derived, **still unverified on hardware** |
+| Voice commands: status, volume, brightness, theme, WiFi re-provisioning (in place, not a reboot, and confirmed first) | source-derived, **still unverified on hardware** |
 | 480x480 panel, brightness is a panel command | source-derived |
 | Dim at 60 s, self power-off at 300 s with the same conditions | source-derived, **still unverified on hardware** |
+| What the idle screen shows | source-derived from the shared application code, **still unverified on hardware** |
 | The power-management init wedge, and the recovery | hardware-verified; the recovery by unplug and replug was verified on a setup with no battery attached, which the stub states |
-| The NVS partition on this board is `0x6000` | hardware-verified |
+| The NVS partition of the Waveshare-shipped image is `0x6000`, while upstream's own images use `0x4000` with the OTA bookkeeping and PHY data directly behind it | hardware-verified for the observed image; source-derived for upstream's layout (`partitions/v2/16m.csv`). The first wording made `0x6000` a property of the board, which the PR review round caught as a way to corrupt an upstream image |
 
 ### Verification
 
@@ -235,10 +252,12 @@ CI does not trigger on this branch (it filters on `samtal-server/**`,
   `docs/xiaozhi-notes.md` for every mention of the wake word,
   listening, the idle timeout and MCP tools in the new files: agreeing
   everywhere except the wake-word audio question recorded under
-  Discoveries, which the guide presents as unsettled rather than
-  asserting against them. `docs/concepts.md` needed no edit: its Device
-  section already names the per-board guides as the help agent's prose
-  source.
+  Discoveries. That one was left as a documented disagreement in the
+  first push and closed in the review round, which moved the two
+  documents (and the glossary) to the build-conditioned wording, so
+  the four now agree. `docs/concepts.md` needed no other edit: its
+  Device section already names the per-board guides as the help
+  agent's prose source.
 - **`uv run ruff check .`** from `samtal-server/`: all checks passed.
 - **`uv run pytest tests/unit -q`** from `samtal-server/`: 1130 passed,
   15 skipped.
@@ -275,3 +294,103 @@ than quietly dropping them:
    echo-cancellation double-click.
 10. ePaper: everything. No part of that board has been powered on for
     this project.
+
+### PR review round
+
+One external review of the milestone diff on PR #113. Verdict:
+mergeable after fixes. Findings as received, condensed; each carries
+its resolution and the commit that made it. Every code claim in the
+findings was re-checked against the pinned vendor checkout before the
+fix was written, and all four checkable ones held.
+
+1. **P1: the AMOLED guide treats the NVS size as a board property.**
+   `0x6000` was observed on the firmware Waveshare ships. Upstream's
+   own images use `partitions/v2/16m.csv`, where NVS at `0x9000` is
+   `0x4000` with `otadata` and `phy_init` immediately behind it, so
+   writing `0x6000` onto such an image overwrites both.
+   *Resolution*: adopted, and the layout confirmed in the partition
+   table at the recorded commit. The quirk now scopes the figure to
+   the image it came from, states what upstream's images do, and tells
+   the reader to take the size from the partition table of the image
+   actually flashed. *Scope the AMOLED NVS size to the image it came
+   from.*
+
+2. **P1: the three canonical documents still assert the trigger audio
+   never reaches the server**, which the pinned sources contradict.
+   *Resolution*: adopted. `docs/concepts.md`, `docs/glossary.md` and
+   `docs/xiaozhi-notes.md` now carry the build-conditioned truth in
+   their own voices: detection is on-device and the server cannot
+   hear, tune, or substitute for it; builds with the send option
+   enabled, the current upstream default, also send the buffered
+   trigger audio as the conversation's first audio; what our prebuilt
+   images do is unchecked on the wire and tracked as #112. The
+   debug-logged detect-report wording is untouched, and the guide's
+   open-question bullet already said this. *Stop asserting the trigger
+   audio stays on the board.*
+
+3. **P1: the milestone is ticked while the plan's hardware-check
+   acceptance items are unperformed.**
+   *Resolution*: adopted in mechanism rather than by unticking, per
+   this repository's convention of collecting a run's unverifiable
+   hardware claims into one tracked issue, filed as #114. The plan's
+   acceptance wording now says the checks run when the session has the
+   board and otherwise the claims are classified unverified, hedged in
+   the guides, and tracked; the two plan-round resolutions that
+   promised hardware checks carry a bracketed postscript each. Also
+   recorded as deviation 4 above. *Say what happens when a milestone
+   has no hardware.*
+
+4. **P2: the common page overstates how fixed the listening mode is,
+   and misdescribes auto mode.** The echo-cancellation gesture changes
+   the mode at runtime, and an auto-mode session stays open while the
+   microphone pauses and re-arms per turn.
+   *Resolution*: adopted, and both halves confirmed: `SetAecMode`
+   writes the mode the default-mode getter reads, and the `tts` `stop`
+   handler returns an auto device to listening over the existing
+   channel. samtal-server's idle watchdog was checked as the finding
+   asked, and it does exclude auto sessions, so the page names the
+   closers that really apply to them (button, network loss, session
+   cap, power off) and drops the idle timeout from that list. The two
+   guides that named a mode now say it is the mode the board starts
+   in. *Correct what the listening mode is, and what auto does.*
+
+5. **P2: the WiFi re-provisioning command does not reboot.**
+   `WifiBoard::EnterWifiConfigMode` resets the protocol, stops the
+   station and raises the access point in place. The ePaper board's
+   tool also carries only a Chinese description with no confirm-first
+   instruction.
+   *Resolution*: adopted, both confirmed in the sources. All three
+   guides and the Touch-LCD triple-click row now say it switches in
+   place rather than restarting, and the ePaper stub warns that its
+   command may be acted on without being confirmed. *Stop calling WiFi
+   provisioning a reboot.*
+
+6. **P2: both stubs omit what the display shows while idle**, which
+   the issue's inventory requires of every guide.
+   *Resolution*: adopted. Both stubs now carry the source-derived idle
+   description from the shared application code (conversation text
+   cleared, a standby line, a neutral face, status icons above), each
+   saying it was read rather than seen; the ePaper stub adds that an
+   e-paper panel's actual settled state is unchecked, and that with no
+   power-saving timer an idle board stays on that screen. *Say what
+   the stubs show when nothing is happening.*
+
+7. **P2: "not in any prebuilt image" is broader than the evidence**,
+   which is the images inspected for this project.
+   *Resolution*: adopted. The section names the tested 2.4.0 prebuilt
+   as the one carrying the Chinese model and says no inspected
+   prebuilt carried the English one. *Scope the wake-word claims to
+   the images inspected.*
+
+The provenance matrix above was updated with the rows these fixes
+changed, rather than left describing the first version of the guides.
+
+Re-run of the doc checks after the seven fixes: **relative links** 103
+across 13 files, all resolving; **em-dash grep** over `docs/devices/`
+empty, and empty over the branch diff; **issue and PR reference grep**
+over `docs/devices/` empty, with the trackers cited only in `docs/`
+and in the plan, as the review round's dispositions allow;
+**identifier and secret scan** over the review-round diff clean, with
+no absolute URLs added at all. The code lanes were not re-run: the
+fixes touch documentation only, and no file under `samtal-server/`
+changed.
