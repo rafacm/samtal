@@ -236,11 +236,17 @@ code, organized under the standard skeleton:
   theme, having no backlight).
 - **Display**: recognized speech and replies render as the
   conversation happens; what the idle screen shows; the dim after
-  60 s idle and self power-off after 300 s, with the note that
-  neither timer runs while a conversation channel is open and that
-  the dim leaves wake-word detection running on this board. The
-  idle-screen description is verified on hardware during the
-  milestone, not asserted from memory.
+  60 s idle and self power-off after 300 s, with their real
+  conditions: neither timer runs while a conversation channel is
+  open, both apply only while automatic sleep is enabled (the NVS
+  `sleep_mode` flag the firmware README already names), the board
+  code also switches timer enablement on charging and discharging
+  transitions, and the dim leaves wake-word detection running on
+  this board. The idle-screen description and the timer behavior
+  are verified on hardware during the milestone, not asserted
+  from the constructor arguments, with the tested power state
+  (externally powered, on battery, or both) recorded in the
+  provenance matrix.
 - **Onboarding**: one sentence naming the standard procedure
   (writing the server's address into the NVS `wifi/ota_url`
   entry) and linking [`../xiaozhi-notes.md`](../xiaozhi-notes.md)
@@ -474,6 +480,11 @@ addressing it lands.
    timers apply only while power saving is enabled for the current
    power state, and verify battery and externally powered behavior
    rather than only the constructor arguments.
+   *Resolution*: adopted. The display inventory now states both
+   conditions (the NVS `sleep_mode` gate and the charging-state
+   gating in the board code), and verification checks the timers
+   on hardware with the tested power state recorded in the
+   provenance matrix.
 
 9. **P2: the AMOLED recovery procedure is not a full power cycle
    when a battery is attached.** The board has battery-aware PMIC
