@@ -211,6 +211,74 @@ honestly:
   change. Accepted: that is what implementing an issue does to its
   Problem section, and no mitigation is needed.
 
+## Plan review round
+
+One external review of the plan as first committed (3790677): codex
+CLI 0.147.0, model gpt-5.6-sol, read-only against this repository
+with the bodies of issues #109 and #96 supplied, 2026-08-12.
+Verdict: ready after the P1/P2 amendments. Findings as received,
+condensed; each carries its resolution once the amendment
+addressing it lands.
+
+1. **P1: "parsed and dropped" still misstates facts retained or
+   used by the session.** The proposed concepts wording and issue
+   replacement classify everything except board and firmware as
+   dropped. In fact the protocol version is retained on the
+   session, logged, and written to enabled capture manifests
+   (`session.py`); discovered MCP tools remain callable during the
+   session; the listening mode is retained and controls behavior.
+   Only the wake-word text is merely debug-logged. Say instead:
+   none of the WebSocket observations enters a durable, queryable
+   per-device record; protocol version, MCP capability and tools,
+   and listening mode are retained or consumed during the live
+   session; board and firmware additionally cross the
+   OTA-to-session boundary through `DeviceFacts`.
+2. **P2: the proposed cache lifetime and manifest read are false.**
+   The replacement says facts remain "until the session that
+   follows reads them into its capture manifest", but
+   `DeviceFacts.get` does not remove the entry, so later sessions
+   can read it until overwrite, eviction, or restart; and a session
+   does not read it at all when capture is disabled, which is the
+   default. Say instead: the cache retains the latest board and
+   firmware per MAC until overwritten, evicted by its 256-entry
+   bound, or lost at restart; when capture is enabled, a session
+   copies the available facts into its manifest.
+3. **P2: MCP discovery is not guaranteed to deliver a list
+   "shortly after".** Discovery is deliberately backgrounded
+   because the board may never answer, and the protocol notes
+   promise only a race. Say instead: the server starts a separate
+   background handshake and requests the list; if discovery
+   completes, the tools become available, possibly after the first
+   utterance.
+4. **P2: "joined only by `Device-Id`" is too broad.** OTA
+   authentication signs both client ID and MAC, and WebSocket
+   authentication verifies both. Scope the claim to the facts
+   correlation: the cached board and firmware reach the following
+   session only through the normalized `Device-Id`; do not
+   generalize to the whole OTA-to-WebSocket relationship.
+5. **P2: the glossary contains relevant drift, so its edit cannot
+   remain optional.** The Manifest entry vaguely lists "device,
+   firmware" and omits both the cached board model and the
+   per-session protocol version, although both appear in the
+   manifest (`session.py`). Require a Manifest-entry edit naming
+   device identity, cached OTA board and firmware when available,
+   and the session protocol version, with the glossary date bumped
+   in the same edit; the other named entries stay
+   verification-only.
+6. **P2: the wake-word wording contradicts the plan's own
+   retention safeguard.** The proposed protocol note says "the
+   server can know which word opened the session" while the risk
+   section warns against wording that promises the server "knows"
+   the word; the code binds the value only long enough to
+   debug-log it. Say instead: the server receives which word fired
+   and currently debug-logs it; it does not retain the report.
+7. **P3: the CI path-filter inventory is incomplete.** The
+   workflow also triggers on `docs/reference/**`, not only
+   `samtal-server/**` and the workflow file. The conclusion holds
+   for the planned file set; state the full filter, and note the
+   same filter means this documentation-only merge to `main`
+   publishes no image.
+
 ## Milestones
 
 - [ ] **Reconcile the device-fact documentation** (PR TBD): the
