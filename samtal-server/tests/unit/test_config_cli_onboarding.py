@@ -440,7 +440,8 @@ def test_an_address_nothing_answers_on_says_so(capsys: pytest.CaptureFixture[str
 
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert "cannot reach the OTA endpoint at http://127.0.0.1:1/x/ABCDEFGH/" in captured.err
+    assert f"cannot reach {cli.SUPPLIED_ENDPOINT}" in captured.err
+    assert "ConnectError" in captured.err
     assert "Traceback" not in captured.err
 
 
@@ -498,6 +499,104 @@ def test_a_scheme_no_device_speaks_is_refused(capsys: pytest.CaptureFixture[str]
     assert cli.main(["doctor", "wss://voice.example/xiaozhi/v1/"]) == 1
 
     assert "http:// or https:// URL" in capsys.readouterr().err
+
+
+# A URL somebody passed is never displayed
+#
+# The derived short URL is the one URL these commands print: its key is
+# a deployment-scoped path segment, deliberately shown so a typo
+# diagnoses itself. A URL passed as an argument is a different thing.
+# The documented way to check a deployment with onboarding turned off is
+# to pass the legacy `ota_path` URL, and that segment is the whole
+# protection its OTA endpoint has, so no verdict may echo it, whether it
+# succeeded, failed, or never connected.
+
+SECRET_SEGMENT = "8f3a9c2b1d4e5f60"
+
+LEGACY_URL = f"https://voice.example/xiaozhi/ota/{SECRET_SEGMENT}/"
+
+
+@pytest.mark.parametrize(
+    ("verdict", "body", "code"),
+    [
+        (
+            "healthy",
+            DESCRIBE.format(
+                websocket="wss://voice.example/xiaozhi/v1/", url="https://voice.example"
+            ),
+            0,
+        ),
+        ("not samtal-server", "<html>Sign in to the guest network</html>", 1),
+        (
+            "a plain websocket URL behind TLS",
+            DESCRIBE.format(
+                websocket="ws://voice.example/xiaozhi/v1/", url="https://voice.example"
+            ),
+            1,
+        ),
+    ],
+)
+def test_no_verdict_repeats_a_supplied_url(
+    endpoint, capsys: pytest.CaptureFixture[str], verdict: str, body: str, code: int
+) -> None:
+    endpoint(body)
+
+    assert cli.main(["doctor", LEGACY_URL]) == code, verdict
+
+    captured = capsys.readouterr()
+    assert SECRET_SEGMENT not in captured.out, verdict
+    assert SECRET_SEGMENT not in captured.err, verdict
+    assert cli.SUPPLIED_ENDPOINT in captured.out + captured.err, verdict
+
+
+def test_an_unreachable_supplied_url_is_not_repeated_either(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The fourth verdict, which no canned endpoint can produce: a real
+    connection to a port nothing is listening on."""
+    assert cli.main(["doctor", f"http://127.0.0.1:1/xiaozhi/ota/{SECRET_SEGMENT}/"]) == 1
+
+    captured = capsys.readouterr()
+    assert SECRET_SEGMENT not in captured.err
+    assert "127.0.0.1" not in captured.err
+    assert cli.SUPPLIED_ENDPOINT in captured.err
+
+
+def test_a_refused_supplied_url_is_not_repeated_either(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The refusals in front of the request are the other half: the
+    address is not quoted back even with its userinfo taken off, since
+    what is left still holds the segment."""
+    credentialed = f"https://user:{PASTED}@voice.example/xiaozhi/ota/{SECRET_SEGMENT}/"
+    assert cli.main(["doctor", credentialed]) == 1
+    first = capsys.readouterr()
+
+    assert cli.main(["doctor", f"ftp://voice.example/xiaozhi/ota/{SECRET_SEGMENT}/"]) == 1
+    second = capsys.readouterr()
+
+    for captured in (first, second):
+        assert SECRET_SEGMENT not in captured.err
+        assert PASTED not in captured.err
+        assert captured.out == ""
+
+
+def test_the_derived_url_is_still_shown(
+    endpoint, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The other side of the rule: an operator who ran this without an
+    argument is looking at the URL they are about to type, and the key
+    in it is the one segment these commands do print."""
+    path = _config_file(tmp_path, "server:\n  public_url: https://voice.example\n")
+    endpoint(
+        DESCRIBE.format(websocket="wss://voice.example/xiaozhi/v1/", url="https://voice.example")
+    )
+
+    assert cli.main(["--config", path, "doctor"]) == 0
+
+    printed = capsys.readouterr().out
+    assert f"https://voice.example/x/{KEY}/" in printed
+    assert cli.SUPPLIED_ENDPOINT not in printed
 
 
 # What a hostile address gets to put on a terminal
