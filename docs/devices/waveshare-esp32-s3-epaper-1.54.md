@@ -86,11 +86,20 @@ the device's tools in the background.
 Read from the board support code, not verified on hardware. Recognized
 speech and replies render as the conversation happens, as on every
 board, on a 200x200 e-paper panel that supports partial refreshes for
-the parts of the screen that change. There is no backlight, so there is
-no dimming, and this board registers no automatic power-saving timer at
-all: unlike the LCD and AMOLED boards, it does not dim after a minute
-or power itself off after five. Powering it off is the PWR button's
-job.
+the parts of the screen that change.
+
+Between conversations the shared firmware clears the conversation text
+and leaves a standby line and a neutral face, with the status icons for
+network and battery above it. That is what the shared application code
+does on every board; what an e-paper panel actually settles on, and how
+much of the previous screen it keeps until the next refresh, has not
+been checked here.
+
+There is no backlight, so there is no dimming, and this board registers
+no automatic power-saving timer at all: unlike the LCD and AMOLED
+boards, it does not dim after a minute or power itself off after five.
+An idle board therefore sits on that screen indefinitely. Powering it
+off is the PWR button's job.
 
 ## Getting this board onto your server
 

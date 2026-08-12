@@ -85,7 +85,15 @@ the device's tools in the background.
 Not verified on hardware. Read from the board support code: recognized
 speech and replies render as the conversation happens, as on every
 board; the panel is driven at 480x480 and its brightness is a panel
-command rather than a backlight pin; the board dims the screen after 60
+command rather than a backlight pin.
+
+Between conversations the shared firmware clears the conversation text
+and leaves a standby line and a neutral face, with the status icons for
+network and battery above it, which is the same idle screen every board
+running this firmware shows. That is read from the shared application
+code rather than seen on this panel.
+
+The board dims the screen after 60
 seconds idle and powers itself off after 300 seconds, under the same
 conditions as elsewhere (neither timer runs while a conversation
 channel is open, both depend on the NVS `sleep_mode` flag, and the
