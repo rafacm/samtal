@@ -25,6 +25,7 @@ from samtal_server.onboarding import (
     MINT_BUDGET,
     MINT_WINDOW_S,
     PENDING_CAPACITY,
+    RELEASED_GRACE_S,
     PendingDevices,
 )
 
@@ -315,6 +316,50 @@ def test_a_released_reservation_is_claimable_again(pending: PendingDevices) -> N
     pending.release(code)
 
     assert pending.reserve(code).device.mac == MAC
+
+
+def test_a_release_gives_a_code_that_expired_mid_claim_time_to_be_used(
+    pending: PendingDevices, clock: Clock
+) -> None:
+    """A claim holds a reservation for as long as its write takes, and a
+    write that fails on a busy database takes the busy timeout, which is
+    long enough to step over a deadline that had seconds left. The
+    refusal an operator reads says to try again, so the code has to
+    still be there when they do."""
+    code = _observe(pending).device.code
+    pending.reserve(code)
+    clock.advance(CODE_TTL_S * 2)
+
+    pending.release(code)
+
+    assert pending.reserve(code).device.mac == MAC
+    pending.release(code)
+    assert pending.waiting_for(MAC).expires_at == clock.now + RELEASED_GRACE_S
+
+
+def test_a_release_never_shortens_a_code(pending: PendingDevices) -> None:
+    """The grace only ever extends: a code with most of its ten minutes
+    left keeps them."""
+    device = _observe(pending).device
+    pending.reserve(device.code)
+
+    pending.release(device.code)
+
+    assert pending.waiting_for(MAC).expires_at == device.expires_at
+
+
+def test_a_released_code_still_expires(pending: PendingDevices, clock: Clock) -> None:
+    """The grace is a grace, not a reprieve: a code nobody claims after
+    the failed attempt goes the way every other one does."""
+    code = _observe(pending).device.code
+    pending.reserve(code)
+    clock.advance(CODE_TTL_S)
+    pending.release(code)
+
+    clock.advance(RELEASED_GRACE_S)
+
+    assert pending.listing() == ()
+    assert pending.reserve(code).device is None
 
 
 def test_an_unknown_code_is_neither_found_nor_in_flight(pending: PendingDevices) -> None:
