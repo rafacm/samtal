@@ -78,16 +78,22 @@ round changes anything. The replacement text is committed in this
 plan (below), so it passes through the same review as the docs; the
 orchestrator applies it verbatim.
 
-### The glossary is verified, not assumed to need edits
+### The glossary's Manifest entry is edited; the rest is verified
 
 PR #94 already corrected the glossary's wake-word entry ("at most
-told which word fired, after the fact"), and its Manifest entry
-already reflects what `DeviceFacts` feeds the capture manifest. The
-milestone verifies the glossary against the final wording of the
-other two documents and edits it only where actual drift is found,
-rather than rewording entries that are already right. The same
-applies to the concepts page's "wake word wakes the device" section,
-whose citation of the protocol notes becomes accurate the moment the
+told which word fired, after the fact"), and entries that are
+already right are not reworded. One entry has real drift and is
+edited: the Manifest entry says the manifest records "device,
+firmware", while the manifest actually records the device identity
+(MAC and client ID), the cached OTA board model and firmware
+version when available, and the session's protocol version
+(`session.py`, `_manifest`). The entry is rewritten to name those,
+and the glossary's date header moves in the same edit. Every other
+named entry (Wake word, Listening modes, MCP, OTA endpoint) is
+verified against the final wording of the other two documents and
+edited only where actual drift is found. The same applies to the
+concepts page's "wake word wakes the device" section, whose
+citation of the protocol notes becomes accurate the moment the
 notes are fixed.
 
 ## The edits
@@ -174,7 +180,9 @@ The `hello` message carries the protocol version and a features map; when the fe
 ```
 docs/concepts.md                 the Observed facts bullet; date header
 docs/xiaozhi-notes.md            the wake-word constraint entry
-docs/glossary.md                 only if the consistency pass finds drift
+docs/glossary.md                 the Manifest entry; date header;
+                                 more only if the consistency pass
+                                 finds drift
 docs/plans/2026-08-12-reconcile-device-protocol-claims.md
 docs/plans/2026-08-12-reconcile-device-protocol-claims-implementation.md
 CHANGELOG.md
@@ -291,6 +299,10 @@ addressing it lands.
    and the session protocol version, with the glossary date bumped
    in the same edit; the other named entries stay
    verification-only.
+   *Resolution*: adopted. The glossary section of the plan now
+   requires the Manifest-entry rewrite with exactly those fields
+   and the date bump, the files-touched list carries the glossary
+   unconditionally, and the milestone acceptance names the edit.
 6. **P2: the wake-word wording contradicts the plan's own
    retention safeguard.** The proposed protocol note says "the
    server can know which word opened the session" while the risk
@@ -311,8 +323,11 @@ addressing it lands.
   concepts page's Observed facts bullet rewritten by phase with the
   two retention tiers; the protocol notes' wake-word entry
   separating unreachable trigger audio from the reported word; the
-  glossary and the concepts wake-word section verified for
-  consistency and edited only on found drift; CHANGELOG entry; the
+  glossary's Manifest entry rewritten to name what the manifest
+  records (device identity, cached OTA board and firmware when
+  available, session protocol version); the rest of the glossary
+  and the concepts wake-word section verified for consistency and
+  edited only on found drift; CHANGELOG entry; the
   implementation doc section. Accept: the consistency pass finds no
   contradiction among the three documents and the code references;
   lint and both test lanes still green as a sentinel. After the
