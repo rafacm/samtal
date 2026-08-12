@@ -241,8 +241,13 @@ code, organized under the standard skeleton:
   the dim leaves wake-word detection running on this board. The
   idle-screen description is verified on hardware during the
   milestone, not asserted from memory.
-- **Onboarding**: one sentence pointing at the common page's
-  pointer to the standard procedure.
+- **Onboarding**: one sentence naming the standard procedure
+  (writing the server's address into the NVS `wifi/ota_url`
+  entry) and linking [`../xiaozhi-notes.md`](../xiaozhi-notes.md)
+  directly; the same sentence pattern appears in each stub. The
+  common page may add context, but the required path from any
+  guide to the canonical procedure is one link, not a pointer to
+  a pointer.
 - **Known quirks**: the 5 GHz hotspot trap lives in the common
   page's networks section; this section carries whatever is truly
   board-specific and validated, and says so honestly if that list
@@ -436,6 +441,10 @@ addressing it lands.
    plan routes the reader through the common page, which then
    points to the notes. Each guide should link the canonical
    procedure directly and name `wifi/ota_url` in one sentence.
+   *Resolution*: adopted. Every guide's onboarding section, stubs
+   included, names `wifi/ota_url` and links the notes' procedure
+   directly; the common page may add context but is no longer on
+   the required path.
 
 7. **P2: the navigation work omits two existing entry points that
    become misleading.** The root README's Getting Started ends
