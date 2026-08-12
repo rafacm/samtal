@@ -56,7 +56,6 @@ from samtal_server.config.models import (
     Config,
     McpServerConfig,
     ProviderConfig,
-    normalize_mac,
 )
 from samtal_server.config.secrets import SecretLocation, load_keys
 from samtal_server.config.store import ConfigStore
@@ -817,10 +816,16 @@ def _writes(api: FastAPI) -> None:
         its next check-in rather than at the next restart; what the
         acknowledgement says depends on whether the agents named are
         ones that server loaded."""
-        agents = _agents(body)
-        store.bind_device(mac, agents)
+        bound = store.bind_device(mac, _agents(body))
+        # Both the line and the notice are built from what the row
+        # holds, never from what the request sent: a name arriving with
+        # spaces around it binds the agent it names, and an
+        # acknowledgement derived from the request would have called
+        # that agent unloaded and sent the operator to restart a server
+        # that is already serving it.
         return _acknowledge(
-            bound_device(_mac(mac), agents), binding_notice(_unloaded(agents, loaded))
+            bound_device(bound.mac, bound.agents),
+            binding_notice(_unloaded(bound.agents, loaded)),
         )
 
     @api.delete(
@@ -834,8 +839,7 @@ def _writes(api: FastAPI) -> None:
         agent to be loaded or not: the device stops being served at its
         next check-in, though a conversation already running is left to
         finish."""
-        store.delete_device(mac)
-        return _acknowledge(deleted_device(_mac(mac)), BINDING_NOTICE)
+        return _acknowledge(deleted_device(store.delete_device(mac)), BINDING_NOTICE)
 
     @api.put(
         "/default-agent",
@@ -849,8 +853,7 @@ def _writes(api: FastAPI) -> None:
         """Set the agent an unbound device reaches. Read by the running
         server the way a binding is, so it applies to the next device
         that asks unless the agent it names was written since boot."""
-        name = _name(body)
-        store.set_default_agent(name)
+        name = store.set_default_agent(_name(body))
         return _acknowledge(
             wrote_default_agent(name), binding_notice(_unloaded([name], loaded))
         )
@@ -881,14 +884,6 @@ def _unloaded(agents: Sequence[str], loaded: Collection[str]) -> list[str]:
     """The names a write mentioned that this server has not built an
     agent for, which is what stands between the write and the device."""
     return [name for name in agents if name not in loaded]
-
-
-def _mac(mac: str) -> str:
-    """The canonical spelling of a MAC, for the acknowledgement: what a
-    write says it did should name the row it wrote, not the spelling the
-    request happened to use. A MAC that is not one has already been
-    refused by the repository before this runs."""
-    return normalize_mac(mac)
 
 
 def _request_body(model: type[BaseModel]) -> dict[str, Any]:
