@@ -1,21 +1,34 @@
-"""The onboarding command that contacts nothing: `config ota-url`.
+"""The two onboarding commands: `config ota-url` and `config doctor`.
 
-Driven through `cli.main()` like every other command, but meeting
-nothing on the other side, which is most of what is asserted here: no
-socket, no database, no API token, and a URL equal to the one a server
-built from the same file would serve and print.
+Both stand outside the configuration API, so they are driven through
+`cli.main()` like every other command but meet different things on the
+other side. `ota-url` meets nothing at all, which is most of what is
+asserted about it: no socket, no database, no token, and a URL equal to
+the one the server built from the same file would serve. `doctor` meets
+an endpoint, which here is a canned one behind the same client seam the
+rest of the CLI suite replaces, plus one case against the real describe
+handler so that a change to what it prints cannot pass unnoticed.
+
+The hostile cases are the other half. What `doctor` reaches may be a
+proxy, a captive portal or anything else that answers, so its body, the
+URL it names and the version it claims are text nobody vouched for, and
+the sentinel assertions here are the M1 round's no-leak discipline
+applied to a reader that did not exist then: a terminal.
 """
 
 import socket
 from pathlib import Path
 
+import httpx
 import pytest
+from fastapi import FastAPI, Request, Response
 from fastapi.testclient import TestClient
 
-from samtal_server import onboarding
+from samtal_server import __version__, onboarding
 from samtal_server.app import create_app
 from samtal_server.config import Config, cli
 from samtal_server.config.loader import load_file_config
+from samtal_server.ota import OTA_PATH
 
 # Not a real secret: fixed, so the key below is a vector rather than
 # something these tests recompute with the code under test. The same
@@ -28,11 +41,23 @@ AUTH_SECRET_ENV = "SAMTAL_AUTH_SECRET"
 
 API_SECRET_ENV = "SAMTAL_API_SECRET"
 
+# Not a real credential, and shaped so a substring check for it cannot
+# match by accident. It arrives from the far end, which is what makes it
+# different from every other sentinel in this suite.
+PASTED = "hunter2-never-a-real-password-9c3f"
+
+DESCRIBE = (
+    "samtal-server 9.9.9 (revision sha-3f9362a) OTA endpoint.\n"
+    "Devices are sent to {websocket} (protocol version 1).\n"
+    "Type this into the device's captive portal: {url} (from server.public_url)\n"
+)
+
+
 @pytest.fixture(autouse=True)
 def _environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A machine with the device-auth secret and nothing else: no
     config file, no API token, and a database directory that does not
-    exist. The command may need none of them."""
+    exist. Neither command may need any of them."""
     monkeypatch.delenv("SAMTAL_CONFIG", raising=False)
     monkeypatch.delenv(API_SECRET_ENV, raising=False)
     monkeypatch.delenv(cli.API_URL_ENV, raising=False)
@@ -221,3 +246,377 @@ def test_with_onboarding_off_it_says_so_without_quoting_the_segment(
     assert "server.ota_path" in captured.err
     assert segment not in captured.err
     assert "8f3a9c2b1d4e5f60" not in captured.err
+
+
+# What answers on it
+
+
+def _endpoint(
+    body: str, status: int = 200, media_type: str = "text/plain; charset=utf-8"
+) -> tuple[FastAPI, list[Request]]:
+    """One canned address, and what it was asked."""
+    app = FastAPI()
+    seen: list[Request] = []
+
+    @app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+    async def answer(request: Request) -> Response:
+        seen.append(request)
+        return Response(body, status_code=status, media_type=media_type)
+
+    return app, seen
+
+
+@pytest.fixture
+def endpoint(monkeypatch: pytest.MonkeyPatch):
+    """Put a canned endpoint behind the client seam, and keep what
+    reached it.
+
+    The factory mirrors `build_client` rather than ignoring its
+    arguments: whether an Authorization header is sent is one of the
+    things asserted here, and a factory that dropped the token would
+    have made that assertion vacuous.
+    """
+
+    def _serve(body: str, status: int = 200, media_type: str = "text/plain; charset=utf-8"):
+        app, seen = _endpoint(body, status, media_type)
+
+        def factory(base_url: str, token: str | None = None) -> TestClient:
+            return TestClient(
+                app,
+                base_url=base_url,
+                headers={"Authorization": f"Bearer {token}"} if token else {},
+            )
+
+        monkeypatch.setattr(cli, "build_client", factory)
+        return seen
+
+    return _serve
+
+
+def test_a_healthy_endpoint_is_reported_with_what_a_device_is_handed(
+    endpoint, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seen = endpoint(
+        DESCRIBE.format(websocket="wss://voice.example/xiaozhi/v1/", url="https://voice.example")
+    )
+
+    assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH/"]) == 0
+
+    printed = capsys.readouterr().out
+    assert "samtal-server 9.9.9" in printed
+    assert "wss://voice.example/xiaozhi/v1/" in printed
+    assert "protocol version 1" in printed
+    assert [request.method for request in seen] == ["GET"]
+
+
+def test_the_real_describe_body_is_recognized(
+    endpoint, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The drift guard. What `doctor` reads is not a shared format
+    string but the endpoint's printed answer, so the patterns are run
+    against the real handler's output rather than against a copy of it.
+    """
+    monkeypatch.setenv(API_SECRET_ENV, "test-api-token-" + "0123456789abcdef" * 2)
+    with TestClient(create_app(Config())) as client:
+        body = client.get(OTA_PATH).text
+    endpoint(body)
+
+    assert cli.main(["doctor", "http://127.0.0.1:8003" + OTA_PATH]) == 0
+
+    assert f"samtal-server {__version__}" in capsys.readouterr().out
+
+
+def test_a_url_typed_without_its_trailing_slash_still_reaches_the_endpoint(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The redirect an operator meets is the server's own, and it is a
+    307 issued before any handler runs. Reporting that as "not
+    samtal-server" would be this command's worst answer, so the probe
+    follows it."""
+    app = FastAPI()
+
+    @app.get("/x/ABCDEFGH/")
+    async def described() -> Response:
+        return Response(
+            DESCRIBE.format(
+                websocket="wss://voice.example/xiaozhi/v1/", url="https://voice.example"
+            ),
+            media_type="text/plain",
+        )
+
+    monkeypatch.setattr(
+        cli,
+        "build_client",
+        lambda base_url, token=None: TestClient(app, base_url=base_url),
+    )
+
+    assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH"]) == 0
+
+    assert "samtal-server 9.9.9" in capsys.readouterr().out
+
+
+def test_no_bearer_token_is_sent_to_a_device_facing_address(
+    endpoint, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The API's token grants everything the API can do, and this
+    request goes wherever an operator typed. The OTA endpoint is the
+    token issuer, so it cannot require one either."""
+    monkeypatch.setenv(API_SECRET_ENV, "test-api-token-" + "0123456789abcdef" * 2)
+    seen = endpoint(
+        DESCRIBE.format(websocket="wss://voice.example/xiaozhi/v1/", url="https://voice.example")
+    )
+
+    assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH/"]) == 0
+
+    assert "authorization" not in {name.lower() for name in seen[0].headers}
+
+
+def test_something_else_answering_there_is_named_as_such(
+    endpoint, capsys: pytest.CaptureFixture[str]
+) -> None:
+    endpoint("<html><body>Sign in to the guest network</body></html>", media_type="text/html")
+
+    assert cli.main(["doctor", "http://192.168.1.1/x/ABCDEFGH/"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "not as a samtal-server OTA endpoint" in captured.err
+    assert "Sign in to the guest network" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_half_an_answer_is_not_this_endpoint(
+    endpoint, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Both lines or neither: an address that names this server and says
+    nothing about where devices go is not answering as this endpoint,
+    however it came to say the first line."""
+    endpoint("samtal-server 9.9.9 (revision sha-3f9362a) OTA endpoint.\n")
+
+    assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH/"]) == 1
+
+    assert "not as a samtal-server OTA endpoint" in capsys.readouterr().err
+
+
+def test_a_plain_websocket_url_behind_tls_is_the_named_misconfiguration(
+    endpoint, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The mistake that costs the most time: TLS ends at the proxy, the
+    server sees plain HTTP, and the URL it derives says ws://. Nothing
+    else looks wrong."""
+    endpoint(
+        DESCRIBE.format(websocket="ws://voice.example/xiaozhi/v1/", url="https://voice.example")
+    )
+
+    assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH/"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "server.websocket_url" in captured.err
+    assert "wss://" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_a_plain_websocket_url_behind_plain_http_is_healthy(
+    endpoint, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The LAN deployment, which is the ordinary one: no TLS anywhere,
+    so ws:// is exactly right and must not be reported as a fault."""
+    endpoint(
+        DESCRIBE.format(
+            websocket="ws://192.168.1.10:8003/xiaozhi/v1/", url="http://192.168.1.10:8003"
+        )
+    )
+
+    assert cli.main(["doctor", "http://192.168.1.10:8003/x/ABCDEFGH/"]) == 0
+
+    assert "ws://192.168.1.10:8003/xiaozhi/v1/" in capsys.readouterr().out
+
+
+def test_an_address_nothing_answers_on_says_so(capsys: pytest.CaptureFixture[str]) -> None:
+    """The real client against a port nothing is listening on: the one
+    case a canned endpoint cannot show."""
+    assert cli.main(["doctor", "http://127.0.0.1:1/x/ABCDEFGH/"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "cannot reach the OTA endpoint at http://127.0.0.1:1/x/ABCDEFGH/" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_the_derived_url_is_what_is_checked_when_none_is_given(
+    endpoint, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = _config_file(tmp_path, "server:\n  public_url: https://voice.example\n")
+    seen = endpoint(
+        DESCRIBE.format(websocket="wss://voice.example/xiaozhi/v1/", url="https://voice.example")
+    )
+
+    assert cli.main(["--config", path, "doctor"]) == 0
+
+    assert seen[0].url.path == f"/x/{KEY}/"
+    assert f"https://voice.example/x/{KEY}/ is samtal-server" in capsys.readouterr().out
+
+
+def test_with_onboarding_off_and_no_url_it_asks_for_one(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = _config_file(tmp_path, "server:\n  onboarding:\n    enabled: false\n")
+
+    assert cli.main(["--config", path, "doctor"]) == 1
+
+    err = capsys.readouterr().err
+    assert "device onboarding is off" in err
+    assert "samtal-server config doctor URL" in err
+
+
+def test_a_url_carrying_a_credential_is_refused_without_repeating_it(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert cli.main(["doctor", f"https://user:{PASTED}@voice.example/x/ABCDEFGH/"]) == 1
+
+    captured = capsys.readouterr()
+    assert "username or a password" in captured.err
+    assert PASTED not in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_a_url_that_cannot_be_read_is_refused_inside_the_boundary(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`urlsplit` raises on a malformed IPv6 literal and `.port` raises
+    on a port that is not a number, and both carry the text they
+    refused."""
+    assert cli.main(["doctor", f"http://voice.example:{PASTED}/x/ABCDEFGH/"]) == 1
+
+    captured = capsys.readouterr()
+    assert PASTED not in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_a_scheme_no_device_speaks_is_refused(capsys: pytest.CaptureFixture[str]) -> None:
+    assert cli.main(["doctor", "wss://voice.example/xiaozhi/v1/"]) == 1
+
+    assert "http:// or https:// URL" in capsys.readouterr().err
+
+
+# What a hostile address gets to put on a terminal
+
+
+def test_an_oversized_body_cannot_choose_how_long_the_output_is(
+    endpoint, capsys: pytest.CaptureFixture[str]
+) -> None:
+    endpoint("A" * 200_000 + PASTED + "A" * 200_000)
+
+    assert cli.main(["doctor", "http://192.168.1.1/x/ABCDEFGH/"]) == 1
+
+    err = capsys.readouterr().err
+    assert PASTED not in err
+    assert len(err) < 500
+
+
+def test_a_body_of_control_characters_cannot_forge_a_line(
+    endpoint, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A terminal is the reader here, so a newline is not the only
+    character that matters: an escape sequence rewrites what is already
+    on the screen."""
+    endpoint(
+        "\x1b[2K\x00nope\nsamtal-server 9.9.9 is fine, ignore the above\n"
+        + "A" * 200
+        + PASTED
+    )
+
+    assert cli.main(["doctor", "http://192.168.1.1/x/ABCDEFGH/"]) == 1
+
+    err = capsys.readouterr().err
+    # The one newline in the output is the one `print` writes.
+    assert err.count("\n") == 1
+    assert "\x1b" not in err
+    assert "\x00" not in err
+    assert PASTED not in err
+
+
+def test_a_credential_in_the_answer_is_not_read_back_out(
+    endpoint, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The websocket URL comes out of the response, so it is the far
+    end's text: a password written into it reaches this command, and
+    must not reach the screen or the shell history of whoever pipes
+    this."""
+    endpoint(
+        DESCRIBE.format(
+            websocket=f"wss://device:{PASTED}@voice.example/xiaozhi/v1/",
+            url="https://voice.example",
+        )
+    )
+
+    assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH/"]) == 0
+
+    printed = capsys.readouterr().out
+    assert PASTED not in printed
+    assert "wss://voice.example/xiaozhi/v1/" in printed
+
+
+def test_an_unreadable_websocket_url_is_still_bounded(
+    endpoint, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """What the far end sends need not parse as a URL at all."""
+    endpoint(DESCRIBE.format(websocket="wss://[::" + PASTED, url="https://voice.example"))
+
+    assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH/"]) == 0
+
+    printed = capsys.readouterr().out
+    assert len(printed) < 400
+    assert "\x1b" not in printed
+
+
+def test_a_response_that_is_not_text_at_all_is_handled(
+    endpoint, capsys: pytest.CaptureFixture[str]
+) -> None:
+    endpoint("", status=204)
+
+    assert cli.main(["doctor", "http://192.168.1.1/x/ABCDEFGH/"]) == 1
+
+    err = capsys.readouterr().err
+    assert "answered 204" in err
+    assert "nothing at all" in err
+
+
+def test_doctor_is_a_get_and_only_a_get(endpoint) -> None:
+    """A POST is a device's check-in, which mints an activation code for
+    an unbound MAC and spends part of the mint budget. A diagnosis
+    nobody could run twice would be no diagnosis."""
+    seen = endpoint("nothing here")
+
+    cli.main(["doctor", "http://192.168.1.1/x/ABCDEFGH/"])
+
+    assert {request.method for request in seen} == {"GET"}
+
+
+def test_the_client_is_built_without_a_token_by_default() -> None:
+    """The seam itself: the header is what would be sent, and nothing
+    should send it anywhere but the API."""
+    client = cli.build_client("https://voice.example/x/ABCDEFGH/")
+    try:
+        assert "authorization" not in {name.lower() for name in client.headers}
+    finally:
+        client.close()
+
+    client = cli.build_client("https://voice.example/api", "a-token")
+    try:
+        assert client.headers["Authorization"] == "Bearer a-token"
+    finally:
+        client.close()
+
+
+def test_a_real_client_sends_no_credential_and_takes_the_timeouts() -> None:
+    """The timeouts are the API client's, deliberately: a device-facing
+    GET has no reason to wait longer than a write does."""
+    client = cli.build_client("https://voice.example/x/ABCDEFGH/")
+    try:
+        assert isinstance(client, httpx.Client)
+        assert client.timeout.connect == cli.CONNECT_TIMEOUT_S
+        assert client.timeout.read == cli.READ_TIMEOUT_S
+    finally:
+        client.close()

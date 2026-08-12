@@ -27,10 +27,14 @@ not something to discover. Device bindings are the exception the server
 side makes, so a `--local` device delete says the device meets it at its
 next check-in, the same sentence the API answers that delete with.
 
-One command stands outside all of this, because onboarding a board
-happens before there is anything to configure: `ota-url` derives the
+Two commands stand outside all of this, because onboarding a board
+happens before there is anything to configure. `ota-url` derives the
 string a person types into a captive portal from the file half and the
-environment, and contacts nothing whatsoever.
+environment, and contacts nothing whatsoever. `doctor` asks one URL what
+it would tell a device, which is a GET of the OTA endpoint rather than an
+API call: no bearer token is sent, and a plain http:// address is
+ordinary rather than refused, since that is exactly what a device on a
+LAN is pointed at.
 
 Every failure leaves as a ConfigError printed to stderr with exit code
 1, naming the location and the kind of failure without quoting the value
@@ -42,6 +46,7 @@ import argparse
 import getpass
 import ipaddress
 import os
+import re
 import sys
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -81,7 +86,7 @@ from samtal_server.db import open_database
 if TYPE_CHECKING:
     # Names only. The onboarding module serves the OTA handlers, so
     # importing it pulls in a whole conversation's worth of machinery;
-    # the command that needs it imports it in its own body, and
+    # the two commands that need it import it in their own bodies, and
     # `config reference` and `config openapi` keep loading nothing but
     # the models and the routes.
     from samtal_server.onboarding import Origin
@@ -171,6 +176,41 @@ ONBOARDING_OFF = (
 )
 
 ONBOARDING_OFF_FOR_URL = "Turn onboarding on for a URL short enough to type."
+
+ONBOARDING_OFF_FOR_DOCTOR = (
+    "Give the URL to check as an argument: samtal-server config doctor URL."
+)
+
+# How much of anything that arrived in a response may be repeated back.
+# What `doctor` reaches may be a proxy, a captive portal or anything
+# else that answers, so its body, the URL it names and the version it
+# claims are all attacker-controlled text: bounded and printable, or not
+# printed. The rule is the one `onboarding._fact` applies to what a
+# device says about itself, kept here rather than imported for the
+# reason the onboarding import is in a function body.
+GLIMPSE_LENGTH = 120
+
+# How much of a body is looked at at all. The description this reads is
+# three short lines, so a few kilobytes is generous; what the bound is
+# for is a megabyte of anything, which nothing should walk a pattern
+# over.
+PARSED_BODY_LENGTH = 4096
+
+# The endpoint's own description of itself, which is what tells a
+# samtal-server from anything else answering at that address. Parsed
+# rather than shared as a format string: this is a client of an HTTP
+# endpoint, the way the API answers above are parsed, and a unit test
+# runs the real handler's body through these patterns so that a change
+# to what it prints cannot pass unnoticed.
+DESCRIBE_FIRST_LINE = re.compile(
+    r"^samtal-server (?P<version>\S{1,64}) \(revision [^)\n]{0,64}\) OTA endpoint\."
+)
+
+DESCRIBE_WEBSOCKET_LINE = re.compile(
+    r"^Devices are sent to (?P<websocket>\S{1,256}) "
+    r"\(protocol version (?P<protocol>[^)\n]{0,32})\)\.",
+    re.MULTILINE,
+)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -331,6 +371,35 @@ def _ota_url(args: argparse.Namespace) -> None:
     print(f"The URL above is {origin.provenance}.", file=sys.stderr)
 
 
+def _doctor(args: argparse.Namespace) -> None:
+    """What a device pointed at a URL would be told, asked from where a
+    device stands.
+
+    Four answers, which are the four states worth telling apart: the
+    address cannot be reached, something other than samtal-server
+    answers there, samtal-server answers but sends devices to a plain
+    `ws://` URL from behind TLS, or it is healthy and this says what a
+    device is handed. Only the first three are failures, and they leave
+    the way every other failure does.
+    """
+    if args.url:
+        url = _device_url(args.url, "the URL given to doctor")
+    else:
+        derived, _ = _onboarding_url(_server_config(args), ONBOARDING_OFF_FOR_DOCTOR)
+        url = _device_url(derived, "the onboarding URL this configuration derives")
+    response = _probed(url)
+    reported = _describe(response.text)
+    if reported is None:
+        raise ConfigError(_not_samtal_server(url, response))
+    websocket = _shown_url(reported["websocket"])
+    if url.startswith("https://") and reported["websocket"].startswith("ws://"):
+        raise ConfigError(_plain_websocket(url, websocket))
+    print(
+        f"{url} is samtal-server {_printable(reported['version'])}, and sends devices to "
+        f"{websocket} (protocol version {_printable(reported['protocol'])})."
+    )
+
+
 def _set_default_agent(args: argparse.Namespace) -> None:
     _wrote(_call(args, "PUT", _path("default-agent"), {"name": args.name}))
 
@@ -444,17 +513,23 @@ def _openapi(args: argparse.Namespace) -> None:
 # front of it and are what those tests are checking.
 
 
-def build_client(base_url: str, token: str) -> httpx.Client:
-    """The connection to the configuration API.
+def build_client(base_url: str, token: str | None = None) -> httpx.Client:
+    """The connection to the configuration API, or to the OTA endpoint.
 
     The one seam in this module. `cli.main()` is and stays synchronous,
     and httpx's ASGI transport is async-only, so the tests replace this
     with Starlette's TestClient: itself a synchronous `httpx.Client`
     subclass that drives an ASGI application through its own portal.
+
+    Without a token there is no Authorization header, which is what
+    `doctor` needs: the OTA endpoint is the token issuer, so it cannot
+    require one, and sending the API's bearer token to a device-facing
+    address (or to whatever answers there instead) would hand it to
+    something that never asked.
     """
     return httpx.Client(
         base_url=base_url,
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"Authorization": f"Bearer {token}"} if token else {},
         timeout=httpx.Timeout(READ_TIMEOUT_S, connect=CONNECT_TIMEOUT_S),
     )
 
@@ -703,11 +778,15 @@ def _document(answer: object) -> dict[str, object]:
     raise ConfigError(f"the configuration API answered a read with {UNRECOGNIZED_ANSWER}")
 
 
-# The onboarding URL
+# The onboarding URL, and what answers on it
 #
-# Not about the domain configuration and nowhere near the API: a string
-# derived from the file half and the environment, printed for somebody
-# to type into a board.
+# Neither of these two commands is about the domain configuration, and
+# neither goes near the API: one derives a string from the file half and
+# the environment, and the other asks a device-facing endpoint what it
+# would tell a device. What they share with the rest of this module is
+# its discipline about values that came from somewhere else, which is
+# stricter here than anywhere: a URL an operator types and a body some
+# unknown address returns are both text nobody vouched for.
 
 
 def _server_config(args: argparse.Namespace) -> ServerConfig:
@@ -754,6 +833,142 @@ def _onboarding_url(server: ServerConfig, fix: str) -> tuple[str, "Origin"]:
             f"server.onboarding.key needs no secret to print its URL."
         )
     return f"{origin.url}{onboarding.onboarding_path(key)}", origin
+
+
+def _device_url(url: str, source: str) -> str:
+    """A URL this client may GET the way a device would.
+
+    The API's transport policy deliberately does not apply. It exists
+    because the bearer token rides on every request to the API, and this
+    request carries no credential at all: the OTA endpoint is the token
+    issuer, so it cannot require one. Refusing a plain http:// address
+    here would refuse the ordinary LAN deployment, which is exactly what
+    a device is pointed at.
+
+    What does apply is the rest of the policy: a URL that cannot be read
+    is refused without quoting what was typed, and userinfo is refused
+    rather than carried, because anything in a URL ends up in shell
+    history, in process lists and in access logs.
+    """
+    parsed = _parsed(url, source)
+    shown = _without_userinfo(parsed)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise ConfigError(f"{source} is not an http:// or https:// URL with a host: {shown}")
+    if parsed.username or parsed.password:
+        raise ConfigError(
+            f"{source} carries a username or a password in the URL, which is refused: the "
+            f"OTA endpoint takes no credential in its URL, and anything in one ends up in "
+            f"shell history, process lists and access logs. The address without it is "
+            f"{shown}."
+        )
+    # Returned exactly as it was given, trailing slash included: the
+    # short path and the OTA path both end in one, and a device types
+    # what it is given.
+    return url
+
+
+def _probed(url: str) -> httpx.Response:
+    """One GET of the OTA endpoint, and never anything else.
+
+    A GET is the handler that describes the endpoint; the POST beside it
+    is a device's check-in, which mints an activation code for an
+    unbound MAC. A diagnosis that could put a number on a board's screen
+    and spend the mint budget would be a diagnosis nobody could run
+    twice, so this method is not a default but a rule.
+
+    Redirects are followed, because the one an operator meets is the
+    server's own: a URL typed without its trailing slash is answered
+    with a 307 to the canonical form, and reporting that as "not
+    samtal-server" would be this command's own worst answer.
+    """
+    client = build_client(url)
+    problem: str | None = None
+    try:
+        try:
+            return client.request("GET", url, follow_redirects=True)
+        except httpx.HTTPError as exc:
+            # The exception's class name and nothing else. httpx puts the
+            # request into its exceptions and drivers put whatever they
+            # like into their messages, and the class is the part that
+            # says what happened. Raised after the handler, so nothing
+            # walking a chain finds the original behind it.
+            problem = (
+                f"cannot reach the OTA endpoint at {url}: the request did not complete "
+                f"({type(exc).__name__}). Check that the server is running, that this is "
+                f"the address it serves, and that the network a device sits on can reach "
+                f"it."
+            )
+    finally:
+        client.close()
+    raise ConfigError(problem)
+
+
+def _describe(body: str) -> Mapping[str, str] | None:
+    """What the OTA endpoint said about itself, or None when this is not
+    that endpoint's answer at all.
+
+    Both lines have to be there. The first names the server and its
+    version, the second what a device is handed, and an address that
+    produces one without the other is not answering as this endpoint
+    however it got there.
+    """
+    head = body[:PARSED_BODY_LENGTH]
+    named = DESCRIBE_FIRST_LINE.match(head)
+    sent = DESCRIBE_WEBSOCKET_LINE.search(head)
+    if named is None or sent is None:
+        return None
+    return {**named.groupdict(), **sent.groupdict()}
+
+
+def _not_samtal_server(url: str, response: httpx.Response) -> str:
+    glimpse = _printable(response.text)
+    return (
+        f"{url} answered {response.status_code}, but not as a samtal-server OTA endpoint: "
+        f"a device pointed here would take its configuration from something else, or from "
+        f"nothing. Of what came back, only the first {GLIMPSE_LENGTH} printable "
+        f"characters are repeated, since it is whatever that address serves: "
+        + (f"{glimpse!r}" if glimpse else "nothing at all")
+    )
+
+
+def _plain_websocket(url: str, websocket: str) -> str:
+    return (
+        f"{url} answers over https, and it sends devices to {websocket}, which is a plain "
+        f"ws:// URL. That is the TLS-proxy misconfiguration: the server behind the proxy "
+        f"only ever sees plain HTTP, so a websocket URL derived from the request says "
+        f"ws://, and a device told to connect that way fails with nothing else looking "
+        f"wrong. Set server.websocket_url to the wss:// address the proxy serves and "
+        f"restart the server."
+    )
+
+
+def _shown_url(url: str) -> str:
+    """A URL out of a response, as it may be printed. What arrived is
+    whatever the far end sent, and identifying the far end is the whole
+    point of the command, so it is bounded, made printable, and stripped
+    of any credential somebody wrote into it."""
+    try:
+        parsed = urlsplit(url)
+        _ = parsed.port
+    except ValueError:
+        return _printable(url)
+    if not parsed.scheme or not parsed.hostname:
+        return _printable(url)
+    return _printable(_without_userinfo(parsed))
+
+
+def _printable(value: str, limit: int = GLIMPSE_LENGTH) -> str:
+    """Text that arrived in a response, bounded before it is printed.
+
+    Truncated first and then made printable, so no answer can choose how
+    long this command's output is or put a newline, an escape sequence
+    or a terminal control code into it. Unprintable characters become a
+    question mark rather than disappearing, because something that
+    arrived mangled should read as mangled.
+    """
+    return "".join(
+        character if character.isprintable() else "?" for character in value.strip()[:limit]
+    )
 
 
 # Rendering
@@ -1222,9 +1437,10 @@ def _parser() -> argparse.ArgumentParser:
     )
     waiting.set_defaults(run=_pending)
 
-    # This one takes --config and nothing else: it contacts nothing at
-    # all, so it has nothing to do with --api-url or the bearer token,
-    # and offering the flags would say it had.
+    # The two onboarding commands take --config and nothing else. One
+    # contacts nothing at all and the other reaches a device-facing
+    # endpoint, so neither has anything to do with --api-url or the
+    # bearer token, and offering the flags would say they had.
     portal = commands.add_parser(
         "ota-url",
         parents=[file_only],
@@ -1234,6 +1450,19 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     portal.set_defaults(run=_ota_url)
+
+    check = commands.add_parser(
+        "doctor",
+        parents=[file_only],
+        help="ask an OTA URL what it would tell a device, and say what is wrong",
+    )
+    check.add_argument(
+        "url",
+        metavar="URL",
+        nargs="?",
+        help="the OTA URL to check (default: the one ota-url prints)",
+    )
+    check.set_defaults(run=_doctor)
 
     default = commands.add_parser(
         "set-default-agent", parents=[common], help="the agent an unbound device reaches"
