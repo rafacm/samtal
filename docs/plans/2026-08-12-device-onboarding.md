@@ -250,18 +250,31 @@ re-checks OTA and gets a fresh code, and answering 202 meanwhile
 matches upstream's "keep waiting").
 
 The issue says a version-2 poll's HMAC is verified before 200. It
-cannot be, and the plan records the honest resolution rather than
-pretending: the HMAC is computed with an eFuse-burned per-device key
+cannot be: the HMAC is computed with an eFuse-burned per-device key
 that upstream's cloud knows from vendor registration and samtal has
-no copy of. What the server can check, it does: a version-2 body
-must parse, must name a known algorithm, and must echo the challenge
-this server issued for that MAC; a mismatch is refused with 202 and
-a distinct log reason, because a poll answering someone else's
-challenge is not evidence of anything. Beyond that, version 1 and
-version 2 rest on the same authority the issue itself names:
-possession of the code is possession of the device's screen. The
-serial number a version-2 body carries is recorded in the pending
-entry as an observed fact.
+no copy of. This is therefore the fourth deviation from the issue's
+text, put to the issue's author with the plan review and decided on
+2026-08-12: the code ceremony governs both versions. The rationale
+is that a 200 carries no secret, and a device token only ever
+arrives over the key-protected OTA path, so verifying an HMAC the
+server has no key for would authenticate nothing; the authority for
+binding is the one the issue itself names, possession of the code
+on the physical screen plus the API token. A per-device key
+registry was considered and declined as speculative (no version-2
+hardware to test, no key source), and declaring version 2
+unsupported was declined because it would shut version-2 boards out
+of the ceremony to defend a property the server cannot have.
+
+What the server can check while a MAC is pending, it does: a
+version-2 body must parse, must name a known algorithm, and must
+echo the challenge this server issued for that MAC; a mismatch is
+refused with 202 and a distinct log reason, because a poll
+answering someone else's challenge is not evidence of anything. The
+challenge check is scoped to the pending state: once the MAC is
+bound the pending entry is gone and `/activate` answers 200 with
+nothing left to check, which is also what keeps the
+post-binding poll working. The serial number a version-2 body
+carries is recorded in the pending entry as an observed fact.
 
 ### The admin surface: two routes under `/api/devices`
 
@@ -510,6 +523,16 @@ addressing it lands.
    keys would be provisioned and verified, or declare version 2
    unsupported; either way this needs an explicit issue-author
    decision.
+   *Resolution*: put to the issue's author on 2026-08-12 and
+   decided: the code ceremony governs both versions, recorded in
+   the plan as a fourth author-approved deviation with its
+   rationale (a 200 carries no secret, and the token only ever
+   arrives over the key-protected OTA path, so an unverifiable
+   HMAC adds nothing enforceable); the registry and unsupported
+   alternatives are recorded as considered and declined. The
+   challenge check is scoped to the pending state, which also
+   fixes the mechanical bug: once the MAC is bound, `/activate`
+   answers 200 with nothing left to check.
 2. **P1: synchronous database work would block the server event
    loop.** The live view opens the database per lookup, but OTA
    and session resolution run in async handlers, and
