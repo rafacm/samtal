@@ -60,6 +60,7 @@ from samtal_server.capture import (
 )
 from samtal_server.config import Config
 from samtal_server.config.models import normalize_mac
+from samtal_server.device.bindings import DeviceBindings
 from samtal_server.device.boundary import (
     PIPELINE_SAMPLE_RATE,
     DeviceGone,
@@ -113,9 +114,17 @@ class DeviceSession:
         runtime_factory: RuntimeFactory,
         captures: CaptureStore | None = None,
         device_facts: DeviceFacts | None = None,
+        bindings: DeviceBindings | None = None,
     ) -> None:
         self.websocket = websocket
         self.config = config
+        # Which agents this device may talk to, asked at connect. A
+        # caller that has no live view (a test with a configuration in
+        # hand and no database behind it) gets the snapshot-only one,
+        # which resolves what the configuration says: one resolution
+        # path, rather than a live one and a fallback one that could
+        # come to disagree about a rule they both implement.
+        self._bindings = bindings if bindings is not None else DeviceBindings.snapshot_only(config)
         self._captures = captures
         self._device_facts = device_facts if device_facts is not None else DeviceFacts()
         self._capture: SessionCapture | None = None
@@ -249,21 +258,37 @@ class DeviceSession:
             await self._close(POLICY_VIOLATION, "Device-Id must be the device MAC")
             return
 
-        # Filtered against the configured agents rather than against
-        # built providers: the registry builds exactly one entry per
-        # `agents` key, so the two sets are the same, and which agents
-        # exist is configuration the edge may read.
-        agents = [
-            name for name in self.config.agents_for_device(mac) if name in self.config.agents
-        ]
+        # Read from the live view rather than from the boot snapshot, so
+        # a device bound while this server runs connects on its next
+        # attempt; awaited off the event loop, because every other
+        # conversation in this process is waiting on it. The view
+        # filters to the agents boot loaded, the filter this line used
+        # to apply itself: the registry builds exactly one entry per
+        # `agents` key, so a name outside that set has no conversation
+        # behind it.
+        resolution = await self._bindings.resolve(mac)
+        agents = list(resolution.agents)
         if not agents:
-            logger.warning(
-                "session %s rejected: device %s has no agent: bind it under devices "
-                "or set default_agent",
-                self.session_id,
-                mac,
-                extra=self._event("session_rejected", reason="no_agent"),
-            )
+            if resolution.unloaded:
+                logger.warning(
+                    "session %s rejected: device %s is bound to agent %s, which this "
+                    "server has not loaded; restart to load it",
+                    self.session_id,
+                    mac,
+                    ", ".join(resolution.unloaded),
+                    extra=self._event("session_rejected", reason="agent_not_loaded"),
+                )
+            else:
+                logger.warning(
+                    "session %s rejected: device %s has no agent: bind it under devices "
+                    "or set default_agent",
+                    self.session_id,
+                    mac,
+                    extra=self._event("session_rejected", reason="no_agent"),
+                )
+            # One sentence for both: the difference is between two
+            # things an operator does, and the device can act on
+            # neither.
             await self._close(POLICY_VIOLATION, "no agent is configured for this device")
             return
         self._agents = agents
