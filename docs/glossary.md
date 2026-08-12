@@ -1,6 +1,6 @@
 # Glossary
 
-**Date:** 2026-08-09
+**Date:** 2026-08-12
 
 The concepts, techniques, and technologies this project is built on:
 a short definition of each as samtal uses it, with pointers for going
@@ -227,9 +227,12 @@ token, and token counts (`llm_round`).
 
 ### Manifest
 
-The JSON sidecar of a capture: device, firmware,
-resolved provider entries verbatim, completeness flag. What makes a
-recording attributable to an exact stack long after the fact.
+The JSON sidecar of a capture: the device identity (MAC
+and client ID), the board model and firmware version cached from the
+device's last OTA check-in when they are available, the session's
+protocol version, resolved provider entries verbatim, completeness
+flag. What makes a recording attributable to an exact stack long
+after the fact.
 
 ### Marker phrase
 
