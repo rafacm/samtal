@@ -525,3 +525,90 @@ is recorded rather than fixed.
 plus the OpenAPI regeneration diff CI runs. Nothing here needs hardware:
 the milestone is server-side, and the M5 checkpoint still owns every
 claim about a board.
+
+### PR #116 review round
+
+One external review of the pull request's diff: codex CLI, model
+gpt-5.6-sol, read-only, 2026-08-12. Verdict mergeable after fixes; six
+findings, a commit each. Two of them share a shape worth naming once:
+this milestone gave the `devices` and `domain_settings` rows a second
+reader, on a path that is not the CLI's or the API's, and the first
+version of that reader carried its own copy of two things the
+repository already owned, what a stored row means and what a written
+row is called.
+
+1. **P1: the fallback logged unsanitized library text.** The warning
+   copied the DBAPI exception's own message into the line, and that
+   message carries the statement, the parameters bound to it and
+   whatever the driver quoted; the test that covered it exercised
+   SQLite's fixed "file is not a database", which carries nothing, so
+   it proved nothing about the rule.
+   *Resolution*, 1b15d85: the sentence is fixed, and the only thing
+   recorded about a failure is its class name, a code identifier, in a
+   structured field of its own. The new test injects an engine whose
+   failure carries a sentinel in all three places (statement, bound
+   parameters, driver message) and asserts it is absent from both
+   shipped log formats, in the message and in the structured fields,
+   while the snapshot still answered.
+2. **P2: the live reader restated and weakened repository semantics.**
+   It parsed the rows itself and so accepted an empty binding, a
+   duplicate, a blank name and a string where an array belongs
+   (iterating a string succeeds and yields its characters), and read a
+   malformed `default_agent` as unset. Each turns a row nobody could
+   have written into a device refused for a fact nobody established,
+   and the loud fallback that exists for exactly that never fired.
+   *Resolution*, 3688585: `read_live_binding` moved into `store.py`,
+   taking the deferred read engine rather than a `ConfigStore`, reading
+   both rows in one transaction and validating them through the same
+   array check and the same `DomainConfig` model the boot load uses. A
+   row that will not validate is a `StorageError`, answered the way a
+   database that will not open is: warn, and resolve from the boot
+   snapshot. Six impossible rows and a malformed default agent are
+   tested.
+3. **P2: notices were computed from raw request values.** With `sam`
+   loaded, `{"agents": [" sam "]}` bound `sam` and then answered that a
+   restart was needed, sending an operator to restart a server that was
+   already serving that agent; the default-agent route had the same bug,
+   and the API normalized the MAC a second time to build its line.
+   *Resolution*, 81030e2: the repository answers with what it wrote (a
+   `BoundDevice` for a bind, the canonical name or MAC for the other
+   two), and both halves of the acknowledgement are built from that.
+   The second normalizations in the API and the CLI are gone rather
+   than corrected, so there is nothing left to drift.
+4. **P2: the read engine could create a database.** An ordinary SQLite
+   filename creates the file when it is missing, and the existence
+   check at construction does not cover a file that goes away before
+   the first lazy connection, which is a volume unmounting or a restore
+   moving it aside.
+   *Resolution*, a3475ac: the database is named as a URI with
+   `mode=rw`, which opens an existing file and refuses a missing one.
+   Not read-only, which would be the wrong mode as well as a stronger
+   claim: a WAL reader maps the `-shm` index and may extend it. The
+   path is percent-encoded, because a URI ends at a `?` or a `#` and a
+   path holding one would otherwise open somewhere else entirely
+   (checked: it does). The new test deletes the database between
+   construction and the first lookup and asserts the loud fallback and
+   an empty directory.
+5. **P2: the generated domain reference still promised restart-only
+   writes.** The page a person reads before writing any of this
+   configuration said a change takes effect at the next server start,
+   full stop.
+   *Resolution*, 17c27a5: the generator names the exception and where
+   it ends, and `docs/reference/domain-config.md` is regenerated in the
+   same change, so its drift check stays green.
+6. **P2: the contention test did not prove conversations stay live.**
+   A ticking coroutine is not a conversation, and nothing tied its
+   progress to the interval the lock was held.
+   *Resolution*, a7c4a98: the integration lane holds a real
+   `BEGIN IMMEDIATE` on the served app's own database across a whole
+   simulated conversation (the OTA check that resolves the binding, the
+   handshake, the utterance, the spoken reply) plus a lookup on the
+   app's own view, and asserts the writer is still in its transaction
+   when all of it has finished. The unit test keeps its narrower job
+   with the same discipline: the tick counter is read on both sides of
+   the lookup, and the lock is checked afterwards. Verified by
+   reverting the read engine to `BEGIN IMMEDIATE`, where the new test
+   fails on a conversation that cannot connect at all.
+
+Full lanes after the fixes: ruff clean, both suites green, both
+generated documents current (counts in the PR's verification section).
