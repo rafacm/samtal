@@ -185,14 +185,22 @@ def dominant_hz(audio: np.ndarray) -> float:
 
 
 async def converse(
-    port: int, mac: str, device_tools: Sequence[dict[str, Any]] | None = None
+    port: int,
+    mac: str,
+    device_tools: Sequence[dict[str, Any]] | None = None,
+    ota_path: str = "/xiaozhi/ota/",
 ) -> tuple[list[dict], np.ndarray]:
     """One device's whole conversation: OTA discovery, hello, an
     utterance, and the spoken reply collected until `tts stop`.
 
     `device_tools` are registered before connecting, so they are what
     the server's tools/list finds; each entry is an xiaozhi-sdk tool
-    (name, description, inputSchema, tool_func, is_async)."""
+    (name, description, inputSchema, tool_func, is_async).
+
+    `ota_path` is where the device was told to look, which for a board
+    onboarded by its short URL is `/x/<key>/` rather than the legacy
+    path: the same endpoint, and the whole conversation has to come out
+    of either."""
     events: list[dict] = []
     reply_finished = asyncio.Event()
 
@@ -203,7 +211,7 @@ async def converse(
 
     client = XiaoZhiWebsocket(
         on_message,
-        ota_url=f"http://127.0.0.1:{port}/xiaozhi/ota/",
+        ota_url=f"http://127.0.0.1:{port}{ota_path}",
         audio_sample_rate=SAMPLE_RATE,
     )
     try:
