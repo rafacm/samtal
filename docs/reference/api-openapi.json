@@ -2108,7 +2108,7 @@
             }
           },
           "422": {
-            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "description": "The stored configuration was refused: it does not compose into a valid snapshot, or a server it names could not be built (an environment reference nothing sets, a stored credential that will not decrypt, an entry `server.local_only` forbids). Nothing was stopped, started or swapped, and the running servers are exactly as they were.",
             "content": {
               "application/json": {
                 "schema": {

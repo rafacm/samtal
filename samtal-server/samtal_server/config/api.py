@@ -29,7 +29,7 @@ Nothing logs the token, a request body, or an Authorization header.
 import hmac
 import logging
 import os
-from collections.abc import Awaitable, Callable, Collection, Iterator, Sequence
+from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
@@ -376,6 +376,18 @@ PROBLEM_DESCRIPTIONS: dict[int, str] = {
         "namespace emptily and refuses the actions."
     ),
 }
+
+# The reload takes no body and addresses nothing, so the shared sentence
+# for 422 (a stage that is not a stage, a MAC that is not one) cannot be
+# what one of its own means. What it means instead is the whole of the
+# guarantee the endpoint makes about a refusal.
+RELOAD_REFUSED_DESCRIPTION = (
+    "The stored configuration was refused: it does not compose into a valid snapshot, "
+    "or a server it names could not be built (an environment reference nothing sets, a "
+    "stored credential that will not decrypt, an entry `server.local_only` forbids). "
+    "Nothing was stopped, started or swapped, and the running servers are exactly as "
+    "they were."
+)
 
 
 # The transport shapes
@@ -882,14 +894,22 @@ def _instant(when: float) -> str:
     return datetime.fromtimestamp(when, UTC).isoformat()
 
 
-def _problems(*statuses: int) -> dict[int | str, dict[str, Any]]:
+def _problems(
+    *statuses: int, instead: Mapping[int, str] | None = None
+) -> dict[int | str, dict[str, Any]]:
     """The refusals a route can answer with, as the document describes
     them. Declaring 422 here also replaces FastAPI's own
     validation-error response, which describes a body shape the
-    sanitized handler never sends."""
+    sanitized handler never sends.
+
+    `instead` replaces the shared description on one route, for a route
+    the shared one cannot be true of. The descriptions say what a status
+    means here, so a route whose 422 can only mean something else has to
+    say that rather than inherit a sentence about addressing.
+    """
+    described = {**PROBLEM_DESCRIPTIONS, **(instead or {})}
     return {
-        status: {"model": Problem, "description": PROBLEM_DESCRIPTIONS[status]}
-        for status in statuses
+        status: {"model": Problem, "description": described[status]} for status in statuses
     }
 
 
@@ -1052,7 +1072,9 @@ def _runtime(api: FastAPI) -> None:
     @api.post(
         "/runtime/mcp-servers/reload",
         response_model=McpReloadResult,
-        responses=_problems(401, 409, 422, 500, 503),
+        responses=_problems(
+            401, 409, 422, 500, 503, instead={422: RELOAD_REFUSED_DESCRIPTION}
+        ),
     )
     async def reload_mcp_servers(
         servers: McpServersDep, reload: McpReloadDep
