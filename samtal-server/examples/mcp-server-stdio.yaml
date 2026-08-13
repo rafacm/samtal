@@ -14,6 +14,9 @@
 
 transport: stdio
 
+# mcp-proxy here is also the bridge for an SSE-only server: SSE is
+# deprecated in the specification and has no transport of its own here,
+# so an SSE endpoint is proxied over stdio, as this one is.
 command: mcp-proxy
 
 args:

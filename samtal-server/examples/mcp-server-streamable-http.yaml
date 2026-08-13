@@ -8,6 +8,10 @@
 # The entry name is what its tools are prefixed with in the merged tool
 # list (`weather__forecast`), so it must be a plain [A-Za-z0-9_-]+ name
 # and cannot be `self`, `switch_agent`, or `remember`.
+#
+# This is the only HTTP transport there is. An endpoint that speaks the
+# deprecated SSE transport instead is configured as a stdio server
+# behind an mcp-proxy bridge; examples/mcp-server-stdio.yaml is that.
 
 transport: streamable_http
 

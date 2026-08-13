@@ -2543,7 +2543,7 @@
         "description": "One MCP server, named so agents can reference it.\n\n`transport` decides which of the two field groups applies: a stdio\nserver is a command this server spawns, a streamable_http one is a\nURL it connects to. Naming a field of the other transport is an\nerror rather than a silently ignored key, since the difference\nbetween \"my headers are ignored\" and \"my headers are wrong\" is a\ndebugging afternoon.",
         "properties": {
           "transport": {
-            "description": "Which field group applies: stdio spawns `command` as a subprocess, streamable_http connects to `url`. Naming a field of the other transport is an error rather than a silently ignored key.",
+            "description": "Which field group applies: stdio spawns `command` as a subprocess, streamable_http connects to `url`. Naming a field of the other transport is an error rather than a silently ignored key. An SSE-only endpoint is configured as a stdio server behind an mcp-proxy bridge, since the specification deprecated SSE in favour of streamable_http and there is no native arm for it here.",
             "enum": [
               "stdio",
               "streamable_http"
