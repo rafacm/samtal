@@ -35,6 +35,7 @@ from samtal_server.config.models import (
     ProviderConfig,
     is_mcp_secret_key,
     is_secret_option,
+    mcp_entry_fragment,
 )
 from samtal_server.config.secrets import mask
 from samtal_server.config.store import Entity, Snapshot, StoredSecret, stored_secrets
@@ -214,8 +215,11 @@ def layer_body(entry: AgentDefaults) -> dict[str, object]:
         for stage in PROVIDER_STAGES
         if getattr(entry, stage) is not None
     }
+    # Each entry in the form it was written in, so a read is a fragment
+    # a write of it accepts back: a plain name stays a name, and a grant
+    # stays {server, tools} rather than becoming one of them.
     if entry.mcp is not None:
-        data["mcp"] = list(entry.mcp)
+        data["mcp"] = [mcp_entry_fragment(item) for item in entry.mcp]
     if entry.filler is not None:
         data["filler"] = entry.filler.model_dump()
     return data

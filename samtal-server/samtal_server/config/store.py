@@ -59,6 +59,7 @@ from samtal_server.config.models import (
     check_references,
     is_env_name,
     is_secret_option,
+    mcp_entry_fragment,
     normalize_device_bindings,
     normalize_mac,
 )
@@ -923,7 +924,12 @@ def _layer_values(entry: AgentDefaults) -> dict[str, object]:
     # None means inherit and a list replaces rather than extends, so an
     # empty list and a null are different configurations and the column
     # has to keep them apart.
-    values["mcp"] = list(entry.mcp) if entry.mcp is not None else None
+    # Each entry as it was written, which is also what makes the column
+    # readable by a server running the code that predates the object
+    # form: a plain string list is still a plain string list.
+    values["mcp"] = (
+        [mcp_entry_fragment(item) for item in entry.mcp] if entry.mcp is not None else None
+    )
     values["filler"] = entry.filler.model_dump() if entry.filler is not None else None
     return values
 
