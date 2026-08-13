@@ -310,7 +310,7 @@ def test_pending_lists_the_code_each_device_is_showing(
 # and the shape the client insists on.
 
 
-def _configured(servers: dict[str, object], granted: list[str]) -> McpServers:
+def _configured(servers: dict[str, object], grants: dict[str, list[str]]) -> McpServers:
     """A registry built from a configuration, the way a server builds
     one, and never started, so everything referenced is down."""
     config = Config(
@@ -320,8 +320,10 @@ def _configured(servers: dict[str, object], granted: list[str]) -> McpServers:
         },
         mcp_servers=servers,
         agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
-        agents={"sam": {"prompt": "A", "mcp": granted}},
-        default_agent="sam",
+        agents={
+            name: {"prompt": "A", "mcp": entries} for name, entries in grants.items()
+        },
+        default_agent=next(iter(grants)),
     )
     return McpServers.build(config)
 
@@ -339,7 +341,7 @@ def test_status_shows_each_entry_its_state_and_who_may_reach_it(
 ) -> None:
     entry = {"transport": "streamable_http", "url": "http://127.0.0.1:9/mcp"}
     run.runtime["mcp_servers"] = _configured(
-        {"weather": entry, "shelved": entry}, ["weather"]
+        {"weather": entry, "shelved": entry}, {"sam": ["weather"]}
     )
 
     assert run("status") == 0
@@ -353,6 +355,32 @@ def test_status_shows_each_entry_its_state_and_who_may_reach_it(
     # A server with nothing published and nobody granted says so rather
     # than printing an empty line.
     assert "  tools: (none)" in printed
+
+
+def test_status_lists_the_agents_of_an_entry_in_name_order(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The order the README's sample output is written in, pinned here
+    so the two cannot drift."""
+    entry = {"transport": "streamable_http", "url": "http://127.0.0.1:9/mcp"}
+    run.runtime["mcp_servers"] = _configured(
+        {"home": entry}, {"kids": ["home"], "house": ["home"]}
+    )
+
+    assert run("status") == 0
+
+    assert "  agents: house, kids" in capsys.readouterr().out
+
+
+def test_the_status_help_names_every_state_it_can_print() -> None:
+    """`unused` is a state of its own and the one an operator has never
+    met before, so leaving it out of the help would leave it out of the
+    place they look first."""
+    # Whitespace collapsed, because argparse wraps the line it is
+    # printed on and where it wraps is not the contract.
+    help_text = " ".join(cli._parser().format_help().split())
+
+    assert "connected, down, or unused because no agent references it" in help_text
 
 
 def test_status_refuses_an_answer_it_cannot_read(

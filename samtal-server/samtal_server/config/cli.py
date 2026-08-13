@@ -1713,8 +1713,9 @@ def _parser() -> argparse.ArgumentParser:
         "status",
         parents=[common],
         help=(
-            "what each configured MCP server is doing on the running server: connected "
-            "or down, since when, and which tools it published"
+            "what each configured MCP server is doing on the running server: connected, "
+            "down, or unused because no agent references it, since when, and which "
+            "tools it published"
         ),
     )
     running.set_defaults(run=_status)
