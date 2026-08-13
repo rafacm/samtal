@@ -95,9 +95,14 @@ the existing revival, which is the boot behaviour (config errors fail,
 liveness does not) carried over. The diff against what is running:
 
 - an entry that is new, or newly referenced, is built and started;
-- an entry whose fragment or whose stored secret ciphertexts changed
-  is stopped, rebuilt with the fresh `SecretStore`, and started
-  (secret rotation therefore applies on reload, not just entry edits);
+- an entry whose fragment or whose stored secrets changed is stopped,
+  rebuilt with the fresh `SecretStore`, and started (secret rotation
+  therefore applies on reload, not just entry edits). "Changed" is
+  decided by a comparison primitive the store owns: `SecretStore`
+  grows an opaque per-entity fingerprint (a digest over the entity's
+  slot names and ciphertext envelopes), and the diff compares
+  fingerprints, so neither envelopes nor plaintext ever reach the
+  reload code, its response, its logs or an exception message;
 - an entry that is gone, or no longer referenced by any agent, is
   stopped and dropped;
 - an unchanged entry keeps its live connection untouched.
@@ -338,6 +343,8 @@ samtal_server/config/writes.py     the mcp reload notice
 samtal_server/config/cli.py        config status, config reload
 samtal_server/config/boot.py       the domain-slice re-read the reload
                                    shares with boot
+samtal_server/config/secrets.py    the opaque per-entity fingerprint
+                                   the reload diff compares
 samtal_server/app.py               wiring the hooks
 config.example.yaml                the object grant form, same change as
                                    the schema
@@ -527,6 +534,12 @@ its resolution once the amendment addressing it lands.
    envelopes internally) that never exposes envelopes or plaintext,
    and test that unchanged secrets preserve managers while rotated
    ciphertext rebuilds only the affected ones.
+   *Resolution*: adopted. The diff bullet now names the primitive: an
+   opaque per-entity fingerprint on `SecretStore`, a digest over slot
+   names and ciphertext envelopes, compared and never exposed;
+   `config/secrets.py` joins the module layout, and milestone 2's
+   diff tests already carry the unchanged-preserves and
+   rotated-rebuilds-only-affected cases.
 
 7. **P2: MCP secret writes would still falsely instruct operators to
    restart.** The plan changes notices for entry writes and deletes
