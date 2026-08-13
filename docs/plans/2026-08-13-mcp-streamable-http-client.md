@@ -208,8 +208,11 @@ shape or meaning.
   `uv run pytest tests/integration -q`, all from `samtal-server/`.
 - `uv lock --check` passes: the committed lock agrees with the
   edited requirement, so the frozen image build resolves.
-- `grep -rn streamablehttp_client samtal-server` finds nothing: no
-  call site and no lingering import of the deprecated name.
+- `grep -rn streamablehttp_client samtal-server/samtal_server
+  samtal-server/tests` finds nothing: no call site and no
+  lingering import of the deprecated name in first-party code. The
+  check is scoped because the synced venv necessarily contains the
+  SDK's own definition of the deprecated wrapper.
 - The unit lane's `filterwarnings = ["error", ...]` is itself the
   standing regression guard: with the per-test filter gone, any
   future deprecation of the replacement client fails the new
@@ -307,6 +310,8 @@ resolution once the amendment addressing it lands.
    `.venv`, where the pinned SDK necessarily defines the deprecated
    wrapper. Scope the check to first-party code
    (`samtal_server` and `tests`), expecting no matches.
+   *Resolution*: adopted. The verification command now names the
+   two first-party directories and says why the scoping exists.
 
 ## Milestones
 
@@ -322,6 +327,6 @@ resolution once the amendment addressing it lands.
   arrives with the in-process uvicorn fixture and the three
   transport cases; CHANGELOG entry under 2026-08-13; the
   implementation doc section written in the change that ticks this
-  box. Accept: lint and both lanes green; the deprecated name
-  absent from the tree; no `DeprecationWarning` filter anywhere in
-  the suite.
+  box. Accept: lint and both lanes green; `uv lock --check`
+  passes; the deprecated name absent from first-party code; no
+  `DeprecationWarning` filter anywhere in the suite.
