@@ -6,6 +6,7 @@ deterministic.
 """
 
 import asyncio
+import logging
 import re
 import socket
 import sys
@@ -30,6 +31,9 @@ from samtal_server.tools.mcp import (
 )
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
+
+# What this module logs under, which is what an operator reads.
+MANAGER_LOGGER = "samtal_server.tools.mcp"
 
 # What a reason may look like: type names, and a group's several joined
 # with commas. Anything a far side wrote has spaces, punctuation or
@@ -662,5 +666,81 @@ async def test_a_call_from_an_agent_with_no_grant_at_all_is_refused() -> None:
     try:
         with pytest.raises(McpToolNotGranted):
             await servers.call("tools__secret_word", {}, "stranger")
+    finally:
+        await servers.stop_all()
+
+
+# Allowed names that did not publish
+
+
+def unpublished_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == MANAGER_LOGGER and "not published" in record.getMessage()
+    ]
+
+
+async def test_a_grant_naming_a_tool_the_server_never_listed_is_warned_about(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An allow list cannot be checked when it is written, since only a
+    live connection knows what a server offers, so the mistake is said
+    out loud at the moment there is something to compare it against."""
+    config = config_with(
+        {"tools": entry_data()},
+        [{"server": "tools", "tools": ["secret_word", "no_such_tool"]}],
+    )
+    with caplog.at_level(logging.WARNING, logger=MANAGER_LOGGER):
+        servers = McpServers.build(config)
+        await servers.start_all()
+    try:
+        (warned,) = unpublished_warnings(caplog)
+
+        assert "no_such_tool" in warned
+        assert "tools" in warned
+        # The name that did publish is not in a warning about the one
+        # that did not.
+        assert "secret_word" not in warned
+    finally:
+        await servers.stop_all()
+
+
+async def test_a_grant_naming_a_tool_publication_dropped_is_warned_about(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The comparison is against what published, never against the raw
+    listing. This server lists a tool whose name is legal until the
+    entry prefix is added, so publication drops it: it is exactly as
+    unreachable as one the server never listed, and a check against the
+    listing would have stayed quiet."""
+    dropped = "b" * 60
+    config = config_with({"tools": entry_data()}, [{"server": "tools", "tools": [dropped]}])
+    with caplog.at_level(logging.WARNING, logger=MANAGER_LOGGER):
+        servers = McpServers.build(config)
+        await servers.start_all()
+    try:
+        # The server did list it, so this is the dropped case rather
+        # than the never-listed one.
+        assert names.qualified("tools", dropped) not in [
+            tool.name for tool in servers.tools_for(["tools"])
+        ]
+        (warned,) = unpublished_warnings(caplog)
+        assert dropped in warned
+        assert servers.tools_for_agent("assistant") == []
+    finally:
+        await servers.stop_all()
+
+
+async def test_a_whole_server_grant_is_warned_about_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # It names no tool, so it can name none that failed to arrive.
+    config = config_with({"tools": entry_data()}, ["tools"])
+    with caplog.at_level(logging.WARNING, logger=MANAGER_LOGGER):
+        servers = McpServers.build(config)
+        await servers.start_all()
+    try:
+        assert unpublished_warnings(caplog) == []
     finally:
         await servers.stop_all()
