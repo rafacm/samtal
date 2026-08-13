@@ -126,6 +126,14 @@ itself, small and local; the stdio support server exists as a file
 because a subprocess needs a file to run, and an in-process app
 needs no file.
 
+The fixture is function-scoped and builds a fresh `FastMCP`
+instance, app, and uvicorn server on every invocation, registering
+the module-level tool functions on the new instance each time.
+This is forced, not stylistic: `streamable_http_app()` memoizes
+one session manager on its `FastMCP` instance, and that manager's
+`run()` may be entered exactly once, so a shared instance would
+break the second test that starts the server.
+
 ### What the new tests cover
 
 A new module, `tests/unit/test_tools_mcp_http.py`, holding the
@@ -288,6 +296,12 @@ resolution once the amendment addressing it lands.
    second live-server test. Create a fresh `FastMCP` instance and
    app inside each function-scoped fixture invocation, or scope
    one server with an explicitly compatible event-loop scope.
+   *Resolution*: adopted, first option. The fixture section now
+   requires a fresh `FastMCP`, app, and uvicorn server per
+   invocation, with the one-shot session manager named as the
+   reason; the suite's function-scoped event loop (the project
+   default) makes the module-scoped alternative a trap not worth
+   configuring around.
 5. **P2: the deprecated-name acceptance command cannot succeed.**
    `grep -rn streamablehttp_client samtal-server` traverses
    `.venv`, where the pinned SDK necessarily defines the deprecated
