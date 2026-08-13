@@ -26,6 +26,7 @@ from samtal_server.tools.mcp import (
     McpServerDown,
     McpServerManager,
     McpServers,
+    McpToolNotGranted,
 )
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
@@ -322,7 +323,10 @@ async def test_the_registry_starts_lists_and_stops() -> None:
         assert "tools__secret_word" in offered
         # An entry nobody manages contributes nothing rather than raising.
         assert servers.tools_for(["ghost"]) == []
-        assert await servers.call("tools__secret_word", {}) == ("rhubarb", False)
+        assert await servers.call("tools__secret_word", {}, "assistant") == (
+            "rhubarb",
+            False,
+        )
         assert servers.timeout_for("tools") == 15.0
     finally:
         await servers.stop_all()
@@ -526,10 +530,137 @@ async def test_the_registry_routes_by_the_qualified_name() -> None:
     servers = McpServers.build(config)
     await servers.start_all()
     try:
-        assert await servers.call("tools__secret_word", {}) == ("rhubarb", False)
+        assert await servers.call("tools__secret_word", {}, "assistant") == (
+            "rhubarb",
+            False,
+        )
         with pytest.raises(McpServerDown):
-            await servers.call("ghost__secret_word", {})
+            await servers.call("ghost__secret_word", {}, "assistant")
         with pytest.raises(McpServerDown):
-            await servers.call("unqualified", {})
+            await servers.call("unqualified", {}, "assistant")
+    finally:
+        await servers.stop_all()
+
+
+# Per-tool grants: what an agent is offered, and what it may call
+
+
+async def test_a_whole_server_grant_offers_every_published_tool() -> None:
+    config = config_with({"tools": entry_data()}, ["tools"])
+    servers = McpServers.build(config)
+    await servers.start_all()
+    try:
+        assert [tool.name for tool in servers.tools_for_agent("assistant")] == [
+            tool.name for tool in servers.tools_for(["tools"])
+        ]
+    finally:
+        await servers.stop_all()
+
+
+async def test_an_allow_list_offers_only_the_tools_it_names() -> None:
+    config = config_with(
+        {"tools": entry_data()}, [{"server": "tools", "tools": ["secret_word"]}]
+    )
+    servers = McpServers.build(config)
+    await servers.start_all()
+    try:
+        offered = [tool.name for tool in servers.tools_for_agent("assistant")]
+
+        assert offered == ["tools__secret_word"]
+        # The server published more than that, so the list is narrowed
+        # rather than merely short.
+        assert len(servers.tools_for(["tools"])) > 1
+    finally:
+        await servers.stop_all()
+
+
+async def test_a_grant_names_the_published_name_after_sanitizing() -> None:
+    """The stdio server lists `weather.today/v2`, which publishes as
+    `tools__weather_today_v2`. The grant is written the way the operator
+    reads it off `config status`, and the raw listed name grants
+    nothing: it is not a name anything on this side ever answers to."""
+    config = config_with(
+        {"tools": entry_data()},
+        [{"server": "tools", "tools": ["weather_today_v2"]}],
+    )
+    servers = McpServers.build(config)
+    await servers.start_all()
+    try:
+        assert [tool.name for tool in servers.tools_for_agent("assistant")] == [
+            "tools__weather_today_v2"
+        ]
+    finally:
+        await servers.stop_all()
+
+    config = config_with(
+        {"tools": entry_data()},
+        [{"server": "tools", "tools": ["weather.today/v2"]}],
+    )
+    servers = McpServers.build(config)
+    await servers.start_all()
+    try:
+        assert servers.tools_for_agent("assistant") == []
+    finally:
+        await servers.stop_all()
+
+
+async def test_two_agents_get_the_subsets_their_own_grants_name() -> None:
+    config = config_granting(
+        {"tools": entry_data()},
+        {
+            "kids": [{"server": "tools", "tools": ["secret_word"]}],
+            "house": [{"server": "tools", "tools": ["add", "secret_word"]}],
+        },
+    )
+    servers = McpServers.build(config)
+    await servers.start_all()
+    try:
+        assert [tool.name for tool in servers.tools_for_agent("kids")] == [
+            "tools__secret_word"
+        ]
+        assert {tool.name for tool in servers.tools_for_agent("house")} == {
+            "tools__add",
+            "tools__secret_word",
+        }
+    finally:
+        await servers.stop_all()
+
+
+async def test_a_call_to_a_granted_away_tool_is_refused() -> None:
+    """The snapshot already left it out, so this is the case where a
+    model asked for a name it was never offered. The property that the
+    agent cannot reach the tool does not rest on the model."""
+    config = config_granting(
+        {"tools": entry_data()},
+        {
+            "kids": [{"server": "tools", "tools": ["secret_word"]}],
+            "house": ["tools"],
+        },
+    )
+    servers = McpServers.build(config)
+    await servers.start_all()
+    try:
+        assert await servers.call("tools__secret_word", {}, "kids") == ("rhubarb", False)
+
+        with pytest.raises(McpToolNotGranted, match="tools__add"):
+            await servers.call("tools__add", {"first": 2, "second": 3}, "kids")
+        # The same call from an agent granted the whole server runs.
+        assert await servers.call("tools__add", {"first": 2, "second": 3}, "house") == (
+            "5",
+            False,
+        )
+    finally:
+        await servers.stop_all()
+
+
+async def test_a_call_from_an_agent_with_no_grant_at_all_is_refused() -> None:
+    # Including an agent this world does not know, which is what a
+    # session holding a deleted agent is after a reload.
+    config = config_granting({"tools": entry_data()}, {"house": ["tools"]})
+    servers = McpServers.build(config)
+    await servers.start_all()
+    try:
+        with pytest.raises(McpToolNotGranted):
+            await servers.call("tools__secret_word", {}, "stranger")
     finally:
         await servers.stop_all()

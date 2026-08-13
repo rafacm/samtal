@@ -36,7 +36,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import get_default_environment, stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
-from samtal_server.config import Config, McpServerConfig
+from samtal_server.config import Config, McpGrant, McpServerConfig
 from samtal_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
@@ -116,6 +116,15 @@ class McpConfigError(ValueError):
 
 class McpServerDown(RuntimeError):
     """A call to a server that is not currently connected."""
+
+
+class McpToolNotGranted(LookupError):
+    """A call to a tool the speaking agent's grants do not name.
+
+    Not an unreachable state: the snapshot the model was given already
+    left the tool out, so this is what remains if a model calls a name
+    it was not offered. It travels to the session as the error result an
+    unknown tool produces, which the agent phrases in its own words."""
 
 
 class McpServerManager:
@@ -517,6 +526,21 @@ async def _stopped(manager: McpServerManager) -> None:
         await manager.stop(STOP_TIMEOUT_S)
 
 
+def _allowed(grant: McpGrant, tools: list[ToolDef]) -> list[ToolDef]:
+    """The tools of one server this grant reaches.
+
+    Matched by the published name without its entry prefix, which is the
+    identifier this application owns: it has been through the publishing
+    rule, the status surface prints it and the model calls it, so what
+    the operator wrote is compared against what the model would see and
+    never against what the server listed.
+    """
+    if grant.tools is None:
+        return tools
+    allowed = set(grant.tools)
+    return [tool for tool in tools if names.unqualified(grant.server, tool.name) in allowed]
+
+
 def _check_egress(name: str, entry: McpServerConfig) -> None:
     """Enforce server.local_only for one referenced MCP server (#30).
     Tool arguments carry conversation-derived data, and no transport
@@ -542,7 +566,7 @@ def _check_egress(name: str, entry: McpServerConfig) -> None:
 class McpSlice:
     """The configuration an `McpServers` was built from: every entry
     under `mcp_servers`, referenced or not, and what each agent may
-    reach.
+    reach of each.
 
     Kept rather than consulted again, so the status surface has one
     source and cannot disagree with what is running: an entry an
@@ -551,26 +575,30 @@ class McpSlice:
     """
 
     entries: tuple[str, ...] = ()
-    grants: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    grants: Mapping[str, tuple[McpGrant, ...]] = field(default_factory=dict)
 
     @classmethod
     def of(cls, config: Config) -> "McpSlice":
         return cls(
             entries=tuple(sorted(config.mcp_servers)),
             grants={
-                agent: tuple(grant.server for grant in config.mcp_for_agent(agent))
-                for agent in sorted(config.agents)
+                agent: tuple(config.mcp_for_agent(agent)) for agent in sorted(config.agents)
             },
         )
 
     def agents_for(self, entry: str) -> list[str]:
         """Which agents may reach one entry, in the order the grants
         were taken, which is agent-name order."""
-        return [agent for agent, entries in self.grants.items() if entry in entries]
+        return [
+            agent
+            for agent, grants in self.grants.items()
+            if any(grant.server == entry for grant in grants)
+        ]
 
-    def entries_for(self, agent: str) -> tuple[str, ...]:
-        """Which entries one agent may reach, and nothing for an agent
-        this slice does not know.
+    def grants_for(self, agent: str) -> tuple[McpGrant, ...]:
+        """What one agent may reach, entry by entry and with each
+        entry's allow list, and nothing for an agent this slice does not
+        know.
 
         Not an error, deliberately: a session is holding the agent it
         was built with, and a reload can have applied a configuration
@@ -578,6 +606,23 @@ class McpSlice:
         conversation talking without tools until it ends, which is what
         the rest of a deleted agent's session does too."""
         return tuple(self.grants.get(agent, ()))
+
+    def entries_for(self, agent: str) -> tuple[str, ...]:
+        """Which entries one agent may reach, whole or in part. What a
+        revive needs: an allow list narrows the tools, never whether the
+        connection is worth making."""
+        return tuple(grant.server for grant in self.grants_for(agent))
+
+    def allows(self, agent: str, entry: str, published: str) -> bool:
+        """Whether one agent's grants reach one published tool of one
+        entry. False for an agent this slice does not know and for an
+        entry it was never granted, so the question has one answer
+        rather than two."""
+        for grant in self.grants_for(agent):
+            if grant.server != entry:
+                continue
+            return grant.tools is None or names.unqualified(entry, published) in grant.tools
+        return False
 
 
 @dataclass(frozen=True)
@@ -673,7 +718,7 @@ class McpServers:
         ]
 
     def tools_for_agent(self, agent: str) -> list[ToolDef]:
-        """The tools one agent may reach right now.
+        """The tools one agent may reach right now, its grants applied.
 
         Asked by agent rather than handed a list of entries, because the
         list is part of what a reload replaces: a session was built on
@@ -682,7 +727,11 @@ class McpServers:
         managers they name. A snapshot taken through here therefore sees
         one world, and the next reply's snapshot sees the next one.
         """
-        return self.tools_for(self._configured.entries_for(agent))
+        return [
+            tool
+            for grant in self._configured.grants_for(agent)
+            for tool in _allowed(grant, self.tools_for([grant.server]))
+        ]
 
     def revive(self, entries: Iterable[str]) -> None:
         """Kick off a background reconnect for any of these that is
@@ -923,12 +972,26 @@ class McpServers:
         manager = self._managers.get(entry)
         return None if manager is None else manager.tool_timeout_s
 
-    async def call(self, published: str, arguments: dict[str, Any]) -> tuple[str, bool]:
-        """Run a tool under the qualified name the model was given. The
-        entry prefix says which server owns it, and the server maps the
-        rest back to whatever it actually listed."""
+    async def call(
+        self, published: str, arguments: dict[str, Any], agent: str
+    ) -> tuple[str, bool]:
+        """Run a tool under the qualified name the model was given, for
+        the agent that is speaking. The entry prefix says which server
+        owns it, and the server maps the rest back to whatever it
+        actually listed.
+
+        The grant is checked here as well as when the snapshot was
+        taken, so "this agent cannot reach that tool" does not rest on
+        the model only calling what it was shown. The agent is passed in
+        rather than remembered: one registry serves every session, and
+        the grants are the ones running now.
+        """
         split = names.split_qualified(published)
         manager = self._managers.get(split[0]) if split is not None else None
         if manager is None:
             raise McpServerDown(f'no MCP server owns a tool called "{published}"')
+        if not self._configured.allows(agent, manager.name, published):
+            raise McpToolNotGranted(
+                f'this assistant is not allowed to use the tool "{published}"'
+            )
         return await manager.call(published, arguments)
