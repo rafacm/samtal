@@ -372,13 +372,18 @@ def test_the_real_describe_body_is_recognized(
     assert f"samtal-server {__version__}" in capsys.readouterr().out
 
 
-def test_a_url_typed_without_its_trailing_slash_still_reaches_the_endpoint(
+def test_a_slash_an_older_server_would_redirect_still_reaches_it(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The redirect an operator meets is the server's own, and it is a
-    307 issued before any handler runs. Reporting that as "not
-    samtal-server" would be this command's worst answer, so the probe
-    follows it."""
+    """A server older than the 2026-08-13 checkpoint answers a missing
+    trailing slash with Starlette's own 307, issued before any handler
+    runs. A current one answers both spellings itself (the test below),
+    so this is what the followed redirect is for: reporting an older
+    deployment as "not samtal-server" would be this command's worst
+    answer.
+
+    The canned app registers only the slashed route, which is exactly
+    what those servers were."""
     app = FastAPI()
 
     @app.get("/x/ABCDEFGH/")
@@ -399,6 +404,35 @@ def test_a_url_typed_without_its_trailing_slash_still_reaches_the_endpoint(
     assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH"]) == 0
 
     assert "samtal-server 9.9.9" in capsys.readouterr().out
+
+
+def test_a_current_server_answers_both_spellings_with_no_redirect(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """What the checkpoint of 2026-08-13 changed underneath this
+    command: every device-facing route now serves both spellings of its
+    path itself, because the firmware does not follow a redirect on that
+    request. So a probe of a current server never meets one, whichever
+    way the URL was typed.
+
+    Asserted against the real routers rather than a canned app, since it
+    is their behavior the followed redirect is now only a fallback for.
+    """
+    monkeypatch.setenv(API_SECRET_ENV, "test-api-token-" + "0123456789abcdef" * 2)
+    app = create_app(Config())
+    with TestClient(app) as client:
+        for path in (f"/x/{KEY}", f"/x/{KEY}/"):
+            assert client.get(path, follow_redirects=False).status_code == 200, path
+
+    monkeypatch.setattr(
+        cli,
+        "build_client",
+        lambda base_url, token=None: TestClient(app, base_url=base_url),
+    )
+
+    assert cli.main(["doctor", f"http://192.168.1.10:8003/x/{KEY}"]) == 0
+
+    assert f"samtal-server {__version__}" in capsys.readouterr().out
 
 
 def test_no_bearer_token_is_sent_to_a_device_facing_address(
@@ -517,9 +551,9 @@ def test_an_upper_case_secure_websocket_url_is_still_healthy(
 def test_the_verdict_reads_the_url_the_response_came_from(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A URL typed without its trailing slash is answered by the
-    server's own redirect, and the decision is made on where the
-    response came from rather than on the string that was typed."""
+    """Behind a redirect (an older server, or a proxy that
+    canonicalizes), the verdict is decided on where the response came
+    from rather than on the string that was typed."""
     app = FastAPI()
 
     @app.get("/x/ABCDEFGH/")
@@ -726,8 +760,9 @@ def redirecting(monkeypatch: pytest.MonkeyPatch):
 def test_the_canonical_trailing_slash_redirect_is_followed(
     redirecting, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The one redirect a deployment produces, and the reason any are
-    followed at all."""
+    """The one redirect this follows, which is what a deployment older
+    than the 2026-08-13 checkpoint answers a missing trailing slash
+    with, and the reason any are followed at all."""
     seen = redirecting({"/x/ABCDEFGH": "https://voice.example/x/ABCDEFGH/"})
 
     assert cli.main(["doctor", "https://voice.example/x/ABCDEFGH"]) == 0
