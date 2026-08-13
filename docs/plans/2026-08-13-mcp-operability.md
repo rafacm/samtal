@@ -352,9 +352,15 @@ samtal_server/config/boot.py       the domain-slice re-read the reload
 samtal_server/config/secrets.py    the opaque per-entity fingerprint
                                    the reload diff compares
 samtal_server/app.py               wiring the hooks
-config.example.yaml                the object grant form, same change as
-                                   the schema
+samtal_server/config/docgen.py     the generated preamble's boot-time
+                                   sentence learns the MCP reload
+                                   exception
+config.example.yaml                its "applies at restart" wording
+                                   learns the same exception; domain
+                                   entities stay out of it, so no grant
+                                   example here
 examples/agent.yaml                a per-tool grant example
+examples/agent-defaults.yaml       the same, on the defaults layer
 docs/reference/domain-config.md    regenerated
 docs/reference/api-openapi.json    regenerated
 samtal-server/README.md            status, reload, grants, builtins,
@@ -573,6 +579,15 @@ its resolution once the amendment addressing it lands.
    `config/docgen.py`, the acknowledgement descriptions and
    `config.example.yaml`'s wording for the reload exception, and
    regenerate rather than hand-edit the committed references.
+   *Resolution*: adopted. The module layout now carries
+   `config/docgen.py`, the corrected role of `config.example.yaml`
+   (wording only, no domain examples) and
+   `examples/agent-defaults.yaml` beside `examples/agent.yaml`;
+   milestone 2 updates the two boot-time sentences in the same change
+   that makes them false and regenerates the reference; milestone 3's
+   grant examples live in the two example files. Committed references
+   are regenerated, never hand-edited, which the drift checks
+   enforce.
 
 9. **P2: reload has neither a bounded completion contract nor a
    defined response schema.** No concurrency bound, total deadline,
@@ -626,7 +641,9 @@ milestone is docs.
 - [ ] **Reload without restart**: the domain-slice re-read shared with
   boot; diff-and-apply on `McpServers`; grants behind the swap;
   pipeline asks by agent; `POST /runtime/mcp-servers/reload`;
-  `config reload`; the mcp-server write notices; OpenAPI regen;
+  `config reload`; the MCP write and secret notices; the boot-time
+  sentence in `config/docgen.py`'s preamble and `config.example.yaml`
+  learns the reload exception, reference regenerated; OpenAPI regen;
   README; CHANGELOG. Accept: lint and both lanes green; the
   integration proof that a written-and-granted entry is usable after
   one reload with no restart, and that an invalid snapshot refuses
@@ -634,8 +651,8 @@ milestone is docs.
 - [ ] **Per-tool grants**: the grant value and object entry form;
   snapshot filtering and the call-time check; the
   unpublished-allowed-name warning; status carries allow lists;
-  `config.example.yaml`, `examples/agent.yaml`, reference and OpenAPI
-  regen; README; CHANGELOG. Accept: lint and both lanes green; the
+  `examples/agent.yaml` and `examples/agent-defaults.yaml`, reference
+  and OpenAPI regen; README; CHANGELOG. Accept: lint and both lanes green; the
   integration proof that a restricted agent sees exactly its subset;
   string-form fragments still validate byte-identically.
 - [ ] **Documented decisions**: builtins structural rule, the SSE
