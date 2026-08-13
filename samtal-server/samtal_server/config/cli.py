@@ -48,7 +48,7 @@ import ipaddress
 import os
 import re
 import sys
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
