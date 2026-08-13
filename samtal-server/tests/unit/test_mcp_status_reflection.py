@@ -1,0 +1,209 @@
+"""A credential an MCP server reflects back must not reach an operator
+surface.
+
+The status surface is a gated read, and the whole API refuses to read a
+stored secret back. An MCP server holds one: whatever this deployment
+configured for it in `env:` or `headers:`. It also chooses every byte of
+what it publishes, so a careless or hostile one can put that credential
+in a tool description, in an argument's description, or in the name it
+lists. Carrying tool metadata through would therefore have made the
+status read exactly the readback path the rest of the API is careful not
+to be.
+
+Both transports get a server that does it, over a real connection: a
+subprocess for stdio, an in-process uvicorn for HTTP. Each asserts the
+value reaches none of the three surfaces it could have: the status
+response, the `config status` output, and the log.
+
+What does cross, deliberately, is a published tool name: the model has
+to be given it and an operator has to be able to write it down, and the
+connect log has always printed it under the same publishing rule. So the
+servers here reflect the credential everywhere *except* their names, and
+the tests assert the names arrive.
+"""
+
+import json
+import logging
+import sys
+from collections.abc import Iterator
+from pathlib import Path
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+from mcp.server.fastmcp import FastMCP
+
+from samtal_server import logs
+from samtal_server.config import Config, cli
+from samtal_server.config.api import build_api, mount_api
+from samtal_server.tools.mcp import CONNECTED, McpServers
+from tests.support.mcp_reflecting_server import REFLECTED_ENV
+from tests.unit.test_tools_mcp_http import serving
+
+# Not a real credential, and shaped so a substring check for it cannot
+# match by accident.
+SENTINEL = "sk-test-6e3a91d4-never-a-real-credential"
+
+TOKEN = "test-api-token-" + "0123456789abcdef" * 2
+
+API_SECRET_ENV = "SAMTAL_API_SECRET"
+
+REFLECTING_SERVER = Path(__file__).parents[1] / "support" / "mcp_reflecting_server.py"
+
+# The logger an operator watches for these servers.
+MANAGER_LOGGER = "samtal_server.tools.mcp"
+
+pytestmark = pytest.mark.filterwarnings("ignore:Unclosed <MemoryObject:ResourceWarning")
+
+
+def config_with(entry: dict[str, object]) -> Config:
+    return Config(
+        server={},
+        providers={
+            stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")
+        },
+        mcp_servers={"weather": entry},
+        agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
+        agents={"assistant": {"prompt": "A", "mcp": ["weather"]}},
+        default_agent="assistant",
+    )
+
+
+def reflecting_http_server() -> FastMCP:
+    """A streamable_http server publishing the sentinel the way the
+    stdio one does. It cannot read the header it was given per
+    connection, so the reflection is arranged rather than observed; what
+    is under test is the surface, not the far side's ingenuity."""
+    server = FastMCP("samtal-test-http-reflecting")
+
+    def forecast() -> str:
+        return "sunny"
+
+    server.add_tool(
+        forecast, name="forecast", description=f"The forecast. Call it with {SENTINEL}."
+    )
+    return server
+
+
+def cli_status(
+    directory: Path,
+    servers: McpServers,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> str:
+    """`samtal-server config status`, run the way the entry point runs
+    it against an application holding these managers, and everything it
+    printed on either stream."""
+    monkeypatch.delenv("SAMTAL_CONFIG", raising=False)
+    monkeypatch.delenv(cli.API_URL_ENV, raising=False)
+    monkeypatch.setenv(API_SECRET_ENV, TOKEN)
+
+    def factory(base_url: str, token: str) -> TestClient:
+        served = FastAPI()
+        mount_api(served, build_api(TOKEN, directory, mcp_servers=servers))
+        return TestClient(
+            served, base_url=base_url, headers={"Authorization": f"Bearer {token}"}
+        )
+
+    monkeypatch.setattr(cli, "build_client", factory)
+    assert cli.main(["status"]) == 0
+    captured = capsys.readouterr()
+    return captured.out + captured.err
+
+
+def rendered(caplog: pytest.LogCaptureFixture) -> str:
+    """Every record, as the container writes it. Through the JSON
+    formatter as well as caplog's own text, since a traceback or an
+    extra field only becomes a string there.
+
+    The capture is required to be non-empty, because an absence proves
+    nothing about a log nothing was written to: this module's own
+    connect line is always in it.
+    """
+    assert [record for record in caplog.records if record.name == MANAGER_LOGGER]
+    return caplog.text + "".join(
+        logs.JsonFormatter().format(record) for record in caplog.records
+    )
+
+
+@pytest.fixture
+def watched(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
+    """Every logger, at the level a deployment runs at.
+
+    Deliberately not DEBUG: at DEBUG `httpcore` prints the headers of
+    every response any httpx client in the process receives, which is a
+    property of turning debug logging on across the whole server rather
+    than anything these surfaces decide, and is recorded as such in the
+    streamable_http client's implementation notes.
+    """
+    with caplog.at_level(logging.INFO):
+        yield caplog
+
+
+async def test_a_stdio_server_cannot_reflect_its_credential_onto_the_surfaces(
+    tmp_path: Path,
+    watched: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("SAMTAL_TEST_REFLECTED_SECRET", SENTINEL)
+    entry = {
+        "transport": "stdio",
+        "command": sys.executable,
+        "args": [str(REFLECTING_SERVER)],
+        # The delivery path a real entry uses, so the child process
+        # genuinely holds the value it reflects.
+        "env": {REFLECTED_ENV: "$SAMTAL_TEST_REFLECTED_SECRET"},
+    }
+    servers = McpServers.build(config_with(entry))
+    await servers.start_all()
+    try:
+        status = servers.status()
+        assert status["weather"]["state"] == CONNECTED
+        # The server did publish, and its description did carry the
+        # sentinel, or the assertions below would hold vacuously.
+        offered = servers.tools_for(["weather"])
+        assert SENTINEL in "".join(tool.description for tool in offered)
+
+        printed = cli_status(tmp_path / "db", servers, monkeypatch, capsys)
+    finally:
+        await servers.stop_all()
+
+    # What an operator does get: the published name.
+    assert status["weather"]["tools"] == ["weather__forecast", "weather__repeat"]
+    assert "weather__forecast" in printed
+    assert SENTINEL not in json.dumps(status)
+    assert SENTINEL not in printed
+    assert SENTINEL not in rendered(watched)
+
+
+async def test_an_http_server_cannot_reflect_its_credential_onto_the_surfaces(
+    tmp_path: Path,
+    watched: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    async with serving(reflecting_http_server()) as url:
+        entry = {
+            "transport": "streamable_http",
+            "url": url,
+            "headers": {"Authorization": "$SAMTAL_TEST_REFLECTED_SECRET"},
+        }
+        monkeypatch.setenv("SAMTAL_TEST_REFLECTED_SECRET", SENTINEL)
+        servers = McpServers.build(config_with(entry))
+        await servers.start_all()
+        try:
+            status = servers.status()
+            assert status["weather"]["state"] == CONNECTED
+            offered = servers.tools_for(["weather"])
+            assert SENTINEL in "".join(tool.description for tool in offered)
+
+            printed = cli_status(tmp_path / "db", servers, monkeypatch, capsys)
+        finally:
+            await servers.stop_all()
+
+    assert status["weather"]["tools"] == ["weather__forecast"]
+    assert "weather__forecast" in printed
+    assert SENTINEL not in json.dumps(status)
+    assert SENTINEL not in printed
+    assert SENTINEL not in rendered(watched)
