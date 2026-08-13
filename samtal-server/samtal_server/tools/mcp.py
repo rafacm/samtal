@@ -59,6 +59,14 @@ CONNECT_TIMEOUT_S = 10.0
 # may be unwound.
 STOP_TIMEOUT_S = 5.0
 
+# And how long the cancellation itself gets. Cancelling is a request as
+# much as the stop event was: a cleanup handler may suppress its
+# cancellation or await something slow on the way out, and either would
+# put the far side back in charge of how long the reload takes. So the
+# whole stop is bounded at STOP_TIMEOUT_S plus this, after which the
+# task is left to finish in the background.
+CANCEL_TIMEOUT_S = 2.0
+
 # What a configured entry is doing, in the vocabulary the status surface
 # answers with. `unused` is not a manager state: no manager exists for
 # an entry no agent references, which is a likely answer to "why does
@@ -230,6 +238,22 @@ class McpServerManager:
                 timeout,
             )
             task.cancel()
+            # Cancelling is a request too. A cleanup handler that
+            # suppresses its cancellation, or one that awaits something
+            # slow on the way out, would otherwise take the caller's
+            # bound with it: the endpoint that asked for this reload is
+            # holding a request open, and a far side's manners are not
+            # what its client's timeout should be spent on.
+            done, _ = await asyncio.wait([task], timeout=CANCEL_TIMEOUT_S)
+            if not done:
+                logger.warning(
+                    "mcp server %s has not finished unwinding %.0f s after being "
+                    "cancelled; leaving it to finish in the background",
+                    self._name,
+                    CANCEL_TIMEOUT_S,
+                )
+                _abandon(task)
+                return
         # A cancelled task raises here, and a task whose own unwind
         # failed raises whatever that was; neither is the caller's to
         # meet, since this connection is being taken away either way.
@@ -447,6 +471,37 @@ def _managers_for(config: Config, secrets: SecretStore | None) -> dict[str, McpS
         except ValueError as exc:
             raise McpConfigError(f"mcp_servers.{name}: {exc}") from exc
     return managers
+
+
+# The tasks that would not finish unwinding inside their bound. Held
+# here because the event loop keeps only a weak reference to a task, so
+# a task nobody is awaiting can be collected mid-unwind, and because a
+# task that ends in an exception nobody retrieved prints one at
+# interpreter shutdown. Both are answered by keeping it until it is
+# done and consuming whatever it ended with.
+_abandoned: set[asyncio.Task[None]] = set()
+
+
+def _abandon(task: asyncio.Task[None]) -> None:
+    """Stop waiting for a manager's task, and let it finish on its own.
+
+    Not a violation of the rule the module docstring states. That rule
+    is about entering a transport in one task and exiting it in
+    another; this task is still the only thing unwinding its own exit
+    stack, and nothing here touches it again. What is given up is the
+    waiting, which belongs to a caller holding a request open.
+    """
+    _abandoned.add(task)
+    task.add_done_callback(_forget)
+
+
+def _forget(task: asyncio.Task[None]) -> None:
+    _abandoned.discard(task)
+    # Retrieved and dropped: a cancelled task raises here, and one whose
+    # unwind failed raises whatever that was, and neither has anyone
+    # left to tell.
+    with contextlib.suppress(Exception, asyncio.CancelledError):
+        task.exception()
 
 
 async def _stopped(manager: McpServerManager) -> None:

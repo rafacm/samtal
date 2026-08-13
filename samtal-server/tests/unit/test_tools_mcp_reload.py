@@ -22,15 +22,23 @@ from pathlib import Path
 import pytest
 from cryptography.fernet import Fernet, MultiFernet
 
+import samtal_server.tools.mcp as mcp_module
 from samtal_server.config import Config
 from samtal_server.config.loader import ConfigError, ReloadInProgressError
+from samtal_server.config.models import McpServerConfig
 from samtal_server.config.secrets import (
     SecretLocation,
     SecretStore,
     encrypt,
     generate_key,
 )
-from samtal_server.tools.mcp import CONNECTED, DOWN, UNUSED, McpServers
+from samtal_server.tools.mcp import (
+    CONNECTED,
+    DOWN,
+    UNUSED,
+    McpServerManager,
+    McpServers,
+)
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
 
@@ -43,6 +51,12 @@ def entry_data(**overrides: object) -> dict[str, object]:
         "command": sys.executable,
         "args": [str(STDIO_SERVER)],
     } | overrides
+
+
+def stdio_entry(**overrides: object) -> McpServerConfig:
+    """One entry as a model, for the tests that build a manager by hand
+    rather than through a configuration."""
+    return McpServerConfig.model_validate(entry_data(**overrides))
 
 
 def config_with(
@@ -433,3 +447,67 @@ async def test_an_agent_the_slice_does_not_know_reaches_nothing() -> None:
         servers.revive_for_agents(["nobody"])
     finally:
         await servers.stop_all()
+
+
+# The stop bound, all the way down
+#
+# Cancelling a task that will not end is a request, not a guarantee, so
+# the reload's envelope has to survive a cleanup handler that ignores
+# it. Both bounds are shortened here; what is asserted is the shape of
+# the outcome, not the wall clock of the production constants.
+
+
+class StubbornManager(McpServerManager):
+    """A manager whose task swallows its cancellation and goes on
+    unwinding, which is what an exit stack awaiting a far side that has
+    stopped answering looks like from here."""
+
+    def __init__(self, name: str, config: object, holding_s: float) -> None:
+        super().__init__(name, config)
+        self._holding_s = holding_s
+
+    async def _run(self) -> None:
+        self._became(CONNECTED, None)
+        self._settled.set()
+        try:
+            await self._stop.wait()
+            await asyncio.sleep(self._holding_s)
+        except asyncio.CancelledError:
+            # Suppressed on purpose, and then some.
+            await asyncio.sleep(self._holding_s)
+        finally:
+            self._became(DOWN, None)
+
+
+async def test_a_manager_that_will_not_stop_is_left_behind_inside_the_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stop that cancelled and then waited without a bound would hand
+    the far side the endpoint's whole envelope, and with it the client's
+    timeout. The wait after the cancellation is bounded too, and what
+    happens at that bound is that the task is left to finish while the
+    caller gets its answer."""
+    monkeypatch.setattr(mcp_module, "CANCEL_TIMEOUT_S", 0.05)
+    holding = 3.0
+    manager = StubbornManager("tools", stdio_entry(), holding)
+    await manager.start()
+    task = manager._task
+    assert task is not None
+
+    began = asyncio.get_running_loop().time()
+    await manager.stop(0.05)
+    elapsed = asyncio.get_running_loop().time() - began
+
+    # Well inside the two bounds, and nowhere near what the task is
+    # holding out for.
+    assert elapsed < holding / 2
+    assert not task.done()
+    # Held rather than dropped: the loop keeps only a weak reference to
+    # a task nobody awaits, and one ending in an exception nobody took
+    # prints about it at shutdown.
+    assert task in mcp_module._abandoned
+
+    # And once it does finish, nothing of it is held: the callback that
+    # consumes what it ended with drops it too.
+    await asyncio.wait_for(task, timeout=holding * 2)
+    assert task not in mcp_module._abandoned
