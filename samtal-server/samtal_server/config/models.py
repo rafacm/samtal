@@ -28,6 +28,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StringConstraints,
+    ValidationError,
     field_validator,
     model_validator,
 )
@@ -982,6 +983,112 @@ class FillerConfig(BaseModel):
         return self
 
 
+class McpGrant(BaseModel):
+    """One `mcp` list entry in its object form: a server, and which of
+    its tools the layer may reach.
+
+    A second spelling of the same list entry rather than a different
+    thing. A plain string names the whole server, and this names part of
+    one, so an agent that should switch the lights but not unlock the
+    door does not need a second server to say it in.
+
+    Tools are named by the published name without its entry prefix
+    (`turn_on_light` grants `home__turn_on_light`), matched exactly. That
+    identifier is this application's own: it has been through the
+    publishing rule, it is what `samtal-server config status` shows and
+    what the model calls, so an operator writes down the name they read.
+    What a server listed before the rule got to it never appears on a
+    samtal surface, and cannot be granted by.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    server: NonBlankStr = Field(
+        description=(
+            "The MCP server this grant is about, by the name it is defined under in "
+            "mcp_servers."
+        )
+    )
+    tools: list[NonBlankStr] | None = Field(
+        default=None,
+        description=(
+            "Which of that server's tools this layer may reach, by the published name "
+            "without its entry prefix (turn_on_light for home__turn_on_light), which "
+            "is the name `samtal-server config status` shows. Leaving it out grants "
+            "the whole server, exactly as naming the server as a plain string does. A "
+            "name that matches nothing the server published is not an error at write "
+            "time, since only a live connection knows the list; it is logged when the "
+            "server publishes and visible under grants on the status surface."
+        ),
+    )
+
+    @field_validator("tools")
+    @classmethod
+    def _check_tools(cls, value: list[str] | None) -> list[str] | None:
+        """An allow list that allows nothing, and one that says a name
+        twice, are both spellings of something else said plainly."""
+        if value is None:
+            return value
+        if not value:
+            raise ValueError(
+                'tools is empty, which grants nothing at all; leave "tools" out to '
+                'grant the whole server, or write "mcp: []" on the layer to give it '
+                "no servers"
+            )
+        repeated = sorted({name for name in value if value.count(name) > 1})
+        if repeated:
+            raise ValueError(f"tools names {', '.join(repeated)} more than once")
+        return value
+
+
+def read_mcp_entry(index: int, item: object) -> object:
+    """One written `mcp` list entry, with the object form parsed here
+    rather than by the field's union.
+
+    The union would report both of its branches, so the first thing an
+    operator read about a grant with an empty `tools` was that a mapping
+    is not a string, and the sentence about the mistake came second.
+    Parsing the mapping here makes the refusal the grant's own. Anything
+    that is neither form is passed through for the union to report, so
+    a number in the list still reads as one.
+    """
+    if isinstance(item, str | McpGrant) or not isinstance(item, Mapping):
+        return item
+    problem: str
+    try:
+        return McpGrant.model_validate(dict(item))
+    except ValidationError as exc:
+        problem = "; ".join(
+            f"{'.'.join(str(part) for part in error['loc'])}: "
+            f"{error['msg'].removeprefix('Value error, ')}"
+            for error in exc.errors()
+        )
+    raise ValueError(f"entry {index} ({item.get('server', 'unnamed')}): {problem}")
+
+
+def as_mcp_grant(entry: "str | McpGrant") -> McpGrant:
+    """One `mcp` list entry as the grant it means. The string form is
+    the whole server, which is a grant with no allow list."""
+    return McpGrant(server=entry) if isinstance(entry, str) else entry
+
+
+def mcp_entry_fragment(entry: "str | McpGrant") -> str | dict[str, object]:
+    """One `mcp` list entry in the shape it was written in, which is
+    what a read of it has to show and what a row has to hold.
+
+    Each form serializes as itself and invents no keys: a string stays a
+    string, so every row written before the object form existed loads
+    and is written back unchanged, and an object that granted the whole
+    server does not grow a `tools: null` it never had.
+    """
+    if isinstance(entry, str):
+        return entry
+    body: dict[str, object] = {"server": entry.server}
+    if entry.tools is not None:
+        body["tools"] = list(entry.tools)
+    return body
+
+
 class AgentDefaults(BaseModel):
     """Provider references every agent inherits unless it names its own.
 
@@ -1025,15 +1132,45 @@ class AgentDefaults(BaseModel):
     # The MCP servers this agent talks to. None means inherit; a list
     # replaces rather than extends the inherited one, like the stage
     # fields, so an agent naming an empty list opts out of tools.
-    mcp: list[NonBlankStr] | None = Field(
+    mcp: list[NonBlankStr | McpGrant] | None = Field(
         default=None,
         description=(
-            "The MCP servers whose tools this layer offers the model, by entry "
-            "name. Unset inherits the agent_defaults list; naming a list replaces "
-            "the inherited one rather than extending it, so an empty list opts an "
-            "agent out of the tools its siblings have."
+            "The MCP servers whose tools this layer offers the model. An entry is "
+            "either the entry name on its own, which is the whole server, or an "
+            "object naming the server and the tools of it this layer may reach "
+            "({server: home, tools: [turn_on_light]}), where a tool is named by its "
+            "published name without the entry prefix. Unset inherits the "
+            "agent_defaults list; naming a list replaces the inherited one rather "
+            "than extending it, so an empty list opts an agent out of the tools its "
+            "siblings have."
         ),
     )
+
+    @field_validator("mcp", mode="before")
+    @classmethod
+    def _read_mcp(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        return [read_mcp_entry(index, item) for index, item in enumerate(value)]
+
+    @field_validator("mcp")
+    @classmethod
+    def _check_mcp(
+        cls, value: list[str | McpGrant] | None
+    ) -> list[str | McpGrant] | None:
+        """One entry per server, whichever form each is written in. Two
+        entries for one server are two answers to a question with one:
+        which of its tools this layer reaches."""
+        if value is None:
+            return value
+        servers = [as_mcp_grant(entry).server for entry in value]
+        repeated = sorted({name for name in servers if servers.count(name) > 1})
+        if repeated:
+            raise ValueError(
+                f"mcp names {', '.join(repeated)} more than once; one entry per "
+                f"server, listing every tool it grants"
+            )
+        return value
 
     # Latency masking with a pre-synthesized filler clip. None means
     # inherit; a section replaces the inherited one wholly, like the
@@ -1210,14 +1347,18 @@ def check_references(snapshot: DomainSnapshot) -> list[str]:
                     else f"; no providers.{stage} entries are defined"
                 )
                 problems.append(f'{source}.{stage}: unknown {stage} provider "{ref}"{hint}')
+        # Both entry forms name a server, so both are checked here: an
+        # allow list on a server that does not exist is the same broken
+        # reference as a bare name that does not.
         for entry in layer.mcp or []:
-            if entry not in snapshot.mcp_servers:
+            server = as_mcp_grant(entry).server
+            if server not in snapshot.mcp_servers:
                 hint = (
                     f" (defined: {', '.join(sorted(snapshot.mcp_servers))})"
                     if snapshot.mcp_servers
                     else "; no mcp_servers entries are defined"
                 )
-                problems.append(f'{source}.mcp: unknown MCP server "{entry}"{hint}')
+                problems.append(f'{source}.mcp: unknown MCP server "{server}"{hint}')
 
     return problems
 
@@ -1372,15 +1513,18 @@ class Config(BaseModel):
             return own, f"agents.{agent}.{stage}"
         return getattr(self.agent_defaults, stage), f"agent_defaults.{stage}"
 
-    def mcp_for_agent(self, agent: str) -> list[str]:
-        """The MCP servers an agent talks to: its own list when it names
-        one, agent_defaults otherwise. A list replaces rather than
-        extends, so `mcp: []` is how an agent opts out of tools its
-        siblings have."""
+    def mcp_for_agent(self, agent: str) -> list[McpGrant]:
+        """The MCP servers an agent talks to and how much of each: its
+        own list when it names one, agent_defaults otherwise. A list
+        replaces rather than extends, so `mcp: []` is how an agent opts
+        out of tools its siblings have.
+
+        Every entry answers as a grant, whichever form it was written
+        in, so nothing downstream of here has to know that the whole
+        server has a shorter spelling."""
         own = self.agents[agent].mcp
-        if own is not None:
-            return list(own)
-        return list(self.agent_defaults.mcp or [])
+        entries = own if own is not None else self.agent_defaults.mcp or []
+        return [as_mcp_grant(entry) for entry in entries]
 
     def filler_for_agent(self, agent: str) -> FillerConfig | None:
         """The filler section that applies to an agent: its own when it
@@ -1394,8 +1538,12 @@ class Config(BaseModel):
     def referenced_mcp_servers(self) -> set[str]:
         """The entries some agent actually uses. Only these are
         connected at startup, the way only referenced providers are
-        built."""
-        return {entry for agent in self.agents for entry in self.mcp_for_agent(agent)}
+        built.
+
+        A server an agent reaches one tool of is referenced as much as
+        one it reaches all of: an allow list narrows the tool list, not
+        whether the connection is made."""
+        return {grant.server for agent in self.agents for grant in self.mcp_for_agent(agent)}
 
     def agents_for_device(self, mac: str) -> list[str]:
         """The agents a device may talk to, the first of them the one a
