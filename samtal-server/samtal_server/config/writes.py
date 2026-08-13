@@ -26,13 +26,26 @@ RESTART_NOTICE = (
     "This applies at the next server start: the configuration is read once at boot."
 )
 
-# The exception, and the only one: a running server reads device
-# bindings and the default agent as a device asks for them, so binding
-# a board is done with the board in front of you rather than at the next
-# maintenance window.
+# The first exception: a running server reads device bindings and the
+# default agent as a device asks for them, so binding a board is done
+# with the board in front of you rather than at the next maintenance
+# window.
 BINDING_NOTICE = (
     "This applies at the device's next OTA check or connection: a running server "
     "reads device bindings as it needs them, so no restart is needed."
+)
+
+# The second, and unlike the first it is asked for rather than noticed:
+# a running server re-reads the MCP entries, the secrets stored on them
+# and the agents' grant lists when the reload asks it to. Written on the
+# writes that the reload actually applies and nowhere else, because a
+# notice that is right about one field of a fragment and wrong about the
+# rest is worse than the conservative sentence.
+MCP_RELOAD_NOTICE = (
+    "This applies when the running server is asked to reload: run "
+    "`samtal-server config reload`, which re-reads the MCP servers and the agents' "
+    "grant lists and applies them without a restart and without dropping a "
+    "conversation."
 )
 
 
@@ -103,6 +116,7 @@ CLEARED_DEFAULT_AGENT = "default agent cleared; the devices map is now the allow
 __all__ = [
     "BINDING_NOTICE",
     "CLEARED_DEFAULT_AGENT",
+    "MCP_RELOAD_NOTICE",
     "RESTART_NOTICE",
     "WROTE_AGENT_DEFAULTS",
     "binding_notice",

@@ -65,6 +65,7 @@ from samtal_server.config.store import ConfigStore
 from samtal_server.config.writes import (
     BINDING_NOTICE,
     CLEARED_DEFAULT_AGENT,
+    MCP_RELOAD_NOTICE,
     RESTART_NOTICE,
     WROTE_AGENT_DEFAULTS,
     binding_notice,
@@ -660,12 +661,14 @@ class Acknowledgement(BaseModel):
     )
     notice: str = Field(
         description=(
-            "When the change takes effect, as one of two sentences. Configuration is a "
-            "boot-time snapshot, so most writes apply at the next server start. A "
+            "When the change takes effect, as one of three sentences. Configuration is "
+            "a boot-time snapshot, so most writes apply at the next server start. A "
             "device binding and the default agent are read by the running server, so "
             "they apply at the device's next OTA check or connection with no restart, "
             "unless they name an agent this server has not loaded, which is the case "
-            "that carries the restart sentence again."
+            "that carries the restart sentence again. A write to an MCP server entry "
+            "or to one of its secret slots names the reload instead, since that is "
+            "what applies it to a running server."
         )
     )
 
@@ -1187,9 +1190,10 @@ def _writes(api: FastAPI) -> None:
         openapi_extra=_request_body(McpServerConfig),
     )
     def write_mcp_server(name: str, body: RawBody, store: StoreDep) -> dict[str, str]:
-        """Create or replace one MCP server."""
+        """Create or replace one MCP server. The running server applies
+        it at the next reload, with no restart."""
         store.set_mcp_server(name, body)
-        return _acknowledge(wrote_mcp_server(name))
+        return _acknowledge(wrote_mcp_server(name), MCP_RELOAD_NOTICE)
 
     @api.delete(
         "/mcp-servers/{name}",
@@ -1197,9 +1201,10 @@ def _writes(api: FastAPI) -> None:
         responses=_problems(401, 404, 409, 422, 500),
     )
     def remove_mcp_server(name: str, store: StoreDep) -> dict[str, str]:
-        """Delete one MCP server, and the secrets stored on it."""
+        """Delete one MCP server, and the secrets stored on it. The
+        running server stops it at the next reload."""
         store.delete_mcp_server(name)
-        return _acknowledge(deleted_mcp_server(name))
+        return _acknowledge(deleted_mcp_server(name), MCP_RELOAD_NOTICE)
 
     @api.put(
         "/mcp-servers/{name}/secrets/{slot}",
@@ -1212,10 +1217,14 @@ def _writes(api: FastAPI) -> None:
     ) -> dict[str, str]:
         """Store one of this MCP server's credentials, encrypted. The
         slot is `env.<KEY>` or `headers.<Key>`, which is where the value
-        would otherwise have been written as a $VAR reference."""
+        would otherwise have been written as a $VAR reference.
+
+        Rotation is exactly what the ciphertext half of the reload's
+        diff applies, so this carries the reload notice too: the entry
+        is rebuilt with the fresh credential and reconnected."""
         location = SecretLocation.mcp_server(name, slot)
         store.set_secret(location, _secret(body))
-        return _acknowledge(wrote_secret(location.describe()))
+        return _acknowledge(wrote_secret(location.describe()), MCP_RELOAD_NOTICE)
 
     @api.delete(
         "/mcp-servers/{name}/secrets/{slot}",
@@ -1223,10 +1232,11 @@ def _writes(api: FastAPI) -> None:
         responses=_problems(401, 404, 409, 422, 500),
     )
     def remove_mcp_secret(name: str, slot: str, store: StoreDep) -> dict[str, str]:
-        """Remove one stored credential."""
+        """Remove one stored credential, which the next reload applies
+        by rebuilding the entry without it."""
         location = SecretLocation.mcp_server(name, slot)
         store.clear_secret(location)
-        return _acknowledge(cleared_secret(location.describe()))
+        return _acknowledge(cleared_secret(location.describe()), MCP_RELOAD_NOTICE)
 
     @api.put(
         "/agents/{name}",

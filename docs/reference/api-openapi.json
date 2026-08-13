@@ -513,7 +513,7 @@
       },
       "put": {
         "summary": "Write Mcp Server",
-        "description": "Create or replace one MCP server.",
+        "description": "Create or replace one MCP server. The running server applies\nit at the next reload, with no restart.",
         "operationId": "write_mcp_server_mcp_servers__name__put",
         "parameters": [
           {
@@ -591,7 +591,7 @@
       },
       "delete": {
         "summary": "Remove Mcp Server",
-        "description": "Delete one MCP server, and the secrets stored on it.",
+        "description": "Delete one MCP server, and the secrets stored on it. The\nrunning server stops it at the next reload.",
         "operationId": "remove_mcp_server_mcp_servers__name__delete",
         "parameters": [
           {
@@ -1765,7 +1765,7 @@
     "/mcp-servers/{name}/secrets/{slot}": {
       "put": {
         "summary": "Write Mcp Secret",
-        "description": "Store one of this MCP server's credentials, encrypted. The\nslot is `env.<KEY>` or `headers.<Key>`, which is where the value\nwould otherwise have been written as a $VAR reference.",
+        "description": "Store one of this MCP server's credentials, encrypted. The\nslot is `env.<KEY>` or `headers.<Key>`, which is where the value\nwould otherwise have been written as a $VAR reference.\n\nRotation is exactly what the ciphertext half of the reload's\ndiff applies, so this carries the reload notice too: the entry\nis rebuilt with the fresh credential and reconnected.",
         "operationId": "write_mcp_secret_mcp_servers__name__secrets__slot__put",
         "parameters": [
           {
@@ -1862,7 +1862,7 @@
       },
       "delete": {
         "summary": "Remove Mcp Secret",
-        "description": "Remove one stored credential.",
+        "description": "Remove one stored credential, which the next reload applies\nby rebuilding the entry without it.",
         "operationId": "remove_mcp_secret_mcp_servers__name__secrets__slot__delete",
         "parameters": [
           {
@@ -2153,7 +2153,7 @@
           "notice": {
             "type": "string",
             "title": "Notice",
-            "description": "When the change takes effect, as one of two sentences. Configuration is a boot-time snapshot, so most writes apply at the next server start. A device binding and the default agent are read by the running server, so they apply at the device's next OTA check or connection with no restart, unless they name an agent this server has not loaded, which is the case that carries the restart sentence again."
+            "description": "When the change takes effect, as one of three sentences. Configuration is a boot-time snapshot, so most writes apply at the next server start. A device binding and the default agent are read by the running server, so they apply at the device's next OTA check or connection with no restart, unless they name an agent this server has not loaded, which is the case that carries the restart sentence again. A write to an MCP server entry or to one of its secret slots names the reload instead, since that is what applies it to a running server."
           }
         },
         "additionalProperties": false,
