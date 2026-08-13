@@ -150,6 +150,17 @@ PENDING_COLUMNS = ("code", "device", "board", "firmware", "expires")
 
 PENDING_FIELDS = frozenset({"mac", "board", "firmware", "expires_at"})
 
+# What a status entry has to carry to be read as one at all. The same
+# rule the pending listing applies: a body that does not carry these did
+# not come from this API.
+STATUS_FIELDS = frozenset({"state", "reason", "since", "tools", "grants"})
+
+NOTHING_CONFIGURED = (
+    "this server has no MCP servers configured. An entry is written with "
+    "`samtal-server config set mcp-server`, and an agent reaches it by naming it in "
+    "its mcp list"
+)
+
 NOTHING_PENDING = (
     "no device is waiting to be claimed. A board shows its code within a couple of "
     "minutes of being pointed at this server, and codes are forgotten when the server "
@@ -373,6 +384,16 @@ def _add_device(args: argparse.Namespace) -> None:
 
 def _pending(args: argparse.Namespace) -> None:
     print(_pending_listing(_call(args, "GET", _path("devices", "pending"))), end="")
+
+
+def _status(args: argparse.Namespace) -> None:
+    """What the running server's MCP servers are doing.
+
+    A read of the server rather than of the database, so there is no
+    --local for it: what a database says about an entry is what `show
+    mcp-server` prints, and a stopped server has no state to report.
+    """
+    print(_status_listing(_call(args, "GET", _path("runtime", "mcp-servers"))), end="")
 
 
 def _ota_url(args: argparse.Namespace) -> None:
@@ -1232,6 +1253,60 @@ def _pending_entries(answer: object) -> Mapping[str, Mapping[str, object]]:
     raise ConfigError(f"the configuration API answered a read with {UNRECOGNIZED_ANSWER}")
 
 
+def _status_listing(answer: object) -> str:
+    """What every configured MCP server is doing, one block each.
+
+    A block rather than a row of columns, because two of the three
+    things worth reading are lists: the tools the server published, and
+    the agents that may reach it. A column holding a list is a column
+    that wraps, and the pending listing's shape only works because every
+    one of its fields is short.
+    """
+    entries = _status_entries(answer)
+    if not entries:
+        return f"{NOTHING_CONFIGURED}\n"
+    lines: list[str] = []
+    for name, entry in entries.items():
+        state = _printable(str(entry["state"]))
+        since = _printable(str(entry["since"]))
+        reason = entry["reason"]
+        lines.append(
+            f"{_printable(name)}: {state} since {since}"
+            + (f" ({_printable(reason)})" if isinstance(reason, str) else "")
+        )
+        lines.append("  tools: " + (_names(entry["tools"]) or "(none)"))
+        lines.append("  agents: " + (_names(sorted(_mapping(entry["grants"]))) or "(none)"))
+    return "\n".join(lines) + "\n"
+
+
+def _names(values: object) -> str:
+    """A list from a response, printed. Bounded and made printable one
+    by one, the rule everything that arrived from elsewhere is held to:
+    a published tool name is a safe-charset string this server derived,
+    and this is what keeps that true of what reaches a terminal even if
+    it one day is not."""
+    return ", ".join(_printable(str(value)) for value in _sequence(values))
+
+
+def _sequence(value: object) -> Sequence[object]:
+    return value if isinstance(value, Sequence) and not isinstance(value, str) else ()
+
+
+def _mapping(value: object) -> Mapping[str, object]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _status_entries(answer: object) -> Mapping[str, Mapping[str, object]]:
+    """The status document, as the API returns it: entry name to what
+    that entry is doing."""
+    if isinstance(answer, Mapping) and all(
+        isinstance(name, str) and isinstance(entry, Mapping) and STATUS_FIELDS <= set(entry)
+        for name, entry in answer.items()
+    ):
+        return answer
+    raise ConfigError(f"the configuration API answered a read with {UNRECOGNIZED_ANSWER}")
+
+
 def _summary(document: Mapping[str, object]) -> str:
     """The tree `config list` prints: one line per entity, with the
     slots that hold a stored secret named but never their values.
@@ -1592,6 +1667,19 @@ def _parser() -> argparse.ArgumentParser:
         help="the devices showing an activation code, and the code each is showing",
     )
     waiting.set_defaults(run=_pending)
+
+    # The other read of the running server rather than of the database,
+    # and the reason neither takes --local: there is no state to report
+    # when there is no server to ask.
+    running = commands.add_parser(
+        "status",
+        parents=[common],
+        help=(
+            "what each configured MCP server is doing on the running server: connected "
+            "or down, since when, and which tools it published"
+        ),
+    )
+    running.set_defaults(run=_status)
 
     # The two onboarding commands take --config and nothing else. One
     # contacts nothing at all and the other reaches a device-facing
