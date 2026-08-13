@@ -553,3 +553,157 @@ deployment, and no reload was made against a server holding a real MCP
 server over the network. The 60 s client timeout and the 5 s stop bound
 are asserted against the constants they have to outlast rather than
 measured under a slow server.
+
+### PR #126 review round
+
+One external review of the milestone's diff: codex CLI 0.147.0, model
+gpt-5.6-sol, read-only, 2026-08-14. Verdict: mergeable after the listed
+fixes. Findings as received, condensed; each carries the commit that
+addressed it, or the reason it did not.
+
+1. **P1: a reloaded HTTP MCP server can leak a credential through debug
+   logs.** With the root logger at `DEBUG`, httpcore prints the headers
+   of every response any httpx client in the process receives, so a
+   server that received a rotated credential and reflects it in a
+   response header would put it in the log during the reload's connect.
+   Suggested: suppress those records around the reload's connections.
+   *Resolution*: refused, and refused deliberately. The mechanism is
+   real and is not this milestone's: the same records flow at boot, at
+   every background reconnect, and for the cloud LLM and TTS providers,
+   which are HTTP clients in the same process. It is
+   [#124](https://github.com/rafacm/samtal/issues/124), filed after PR
+   #123's round recorded exactly this and put it out of that PR's scope
+   for the same reason, and it is recorded again in
+   [`2026-08-13-mcp-streamable-http-client-implementation.md`](2026-08-13-mcp-streamable-http-client-implementation.md)
+   as a whole-process property. What it needs is a decision about how
+   much of a debugging tool `DEBUG` stays, taken once and applied to
+   every third-party client this server holds. Suppressing it around
+   the reload only would be worse than leaving it: an operator's `DEBUG`
+   would then show one thing for a connection made at boot and another
+   for the same connection made ten seconds later by a reload, and the
+   half that still leaks would be the half nobody had been warned
+   about. Nothing about the reload widens the exposure either, since a
+   rotated credential reaches the same client through the same
+   transport whichever request opened it.
+2. **P1: the stop bound cancels and then waits without a bound.**
+   `stop(timeout)` cancelled the manager's task at `STOP_TIMEOUT_S` and
+   awaited it unbounded afterwards, so a cleanup handler that suppresses
+   its cancellation defeats the endpoint's envelope and can outlast the
+   CLI's 60 s. Suggested: a finite deadline on the post-cancellation
+   wait, and one warning plus abandonment to a background consumer if it
+   expires.
+   *Resolution*: adopted in 6dde230. `CANCEL_TIMEOUT_S` (2 s) bounds the
+   wait after the cancellation, so the whole stop is bounded at 7 s and
+   the endpoint's envelope is `CONNECT_TIMEOUT_S` plus that. A task that
+   is still unwinding then is left to finish: one warning naming the
+   entry, and the task held in a module-level set until it ends, because
+   the loop keeps only a weak reference to a task nobody awaits and one
+   ending in an exception nobody retrieved prints about it at
+   interpreter shutdown. Abandoning does not break the one-task rule,
+   which is about entering a transport in one task and exiting it in
+   another; the comment says so. The test builds a manager whose cleanup
+   swallows its cancellation and holds out for longer than either bound,
+   and asserts the stop returns inside the envelope, that the task is
+   held rather than dropped, and that nothing of it is held once it
+   ends. Checked for teeth against the unbounded wait, restored from a
+   copy and touched. The CLI's timeout test now takes the third constant
+   into its envelope, so the 60 s stays asserted against what it has to
+   outlast.
+3. **P1: a cancelled request can leave half a world behind.** A client
+   disconnecting cancels the handler awaiting the reload, and a
+   cancellation landing inside `_apply` would leave stopped managers in
+   the live set and started candidates reachable by nobody, with
+   `_reloading` cleared as though the reload were done. Suggested: make
+   the mutating phase commit to completion, hold the exclusion until it
+   finishes either way, and test cancellation in both halves.
+   *Resolution*: adopted in 5f61923. The apply runs in a task of its own
+   and the caller awaits it behind `asyncio.shield`, so cancelling the
+   request cancels the waiting rather than the work; the exclusion is
+   released by a done callback when the caller is already gone, which is
+   also where an outcome nobody is left to take is consumed. Two tests
+   cancel inside the stops and inside the starts and then assert on the
+   world rather than on the outcome the cancelled caller never receives:
+   one coherent manager set, the slice swapped with it, the unchanged
+   entry still the same object, nothing abandoned, and the next reload
+   answered rather than refused. Both fail without the shield.
+4. **P2: a read-stage refusal carried no guarantee.** A snapshot that
+   will not compose refused with the composition's own sentence, while a
+   candidate that would not build refused with that sentence led by "the
+   reload was refused and nothing was changed". Suggested: give the read
+   stage the same lead, raised outside the handling context, while the
+   two refusals whose type is the answer keep theirs.
+   *Resolution*: adopted in dc75667. `_read` wraps a `ConfigError` from
+   the re-read in the same sentence and re-raises it outside the
+   handler, so the chain is empty; `DatabaseBusyError` and
+   `StorageError` travel out as themselves, because a busy database is
+   retryable (409) and unreadable stored state is not the caller's fault
+   (500), and wrapping either would make both 422. Three tests: the
+   exact message, the two types preserved with their own sentences, and
+   the empty chain.
+5. **P2: the reload's 422 was described by a sentence about
+   addressing.** The shared problem text names a stage that is not a
+   stage and a MAC that is not one, and this endpoint addresses nothing
+   and carries no body. Suggested: a route-specific description,
+   regenerated into the committed document.
+   *Resolution*: adopted in 0c7e389. `_problems` takes a per-route
+   override, the reload uses one saying what its 422 does mean and that
+   nothing was stopped, started or swapped, and
+   `docs/reference/api-openapi.json` was regenerated with the command. A
+   test pins both halves, the reload's own sentence and an entity write
+   still carrying the shared one, so the override cannot quietly become
+   a global edit.
+6. **P3: the real-socket refusal test had nothing to lose.** It ran
+   against a deployment with nothing configured, so "nothing was
+   applied" was true of an empty registry whatever happened to it.
+   Suggested: seed it with a connected server and a live grant.
+   *Resolution*: adopted in 413f6ec. The proof moves to the integration
+   lane's reload module, against a server holding the stdio support
+   server connected, an agent granted it, and a device mid-conversation
+   using it. The invalid snapshot is provoked through the API by the one
+   route pair that leaves it open, and the assertions are that the
+   status document is identical instant for instant across the refusal,
+   that the conversation still reaches the tool, and that the repair
+   reloads the entry as `unchanged` rather than `restarted`. What stays
+   in the API suite is the answer's shape over a real connection.
+
+### What the round turned up
+
+**The only invalid snapshot this API can be talked into is one.** Every
+write route refuses a fragment that would leave a reference dangling and
+every delete refuses while something still names its subject, and
+`check_completeness` checks exactly one rule beyond that: a deployment
+with agents has to be reachable, by a bound device or by a default
+agent. So unbinding the board and then clearing the default agent is the
+whole of what an operator can do through the API to make the stored
+configuration uncomposable, which is what finding 6's test does. The
+milestone's own boot test asserted a message it described as a pipeline
+check and which was always this rule; its wording is corrected in the
+same commit as this section.
+
+### Verification after the review round
+
+Same commands, from `samtal-server/`, on the tree at the documentation
+commit.
+
+- `uv run ruff check .`: "All checks passed!".
+- `uv run pytest tests/unit -q`: 1533 passed, 15 skipped in 141.35s.
+  Seven more than the tree this round started from, which is what the
+  round added: the stubborn stop, the two cancellations, the read-stage
+  message, the two read refusals that keep their type, the empty chain,
+  and the route-specific 422. The absolute figure is not the
+  milestone's own above plus seven, because the branch was rebased onto
+  a `main` carrying the merged milestone 1 and its review round in
+  between.
+- `uv run pytest tests/integration -q`: 47 passed in 89.35s. One more:
+  the seeded refusal, beside the single-socket proof and the answer's
+  shape over a real socket.
+- Teeth, both restored from a copy and touched rather than with `git
+  checkout`: the stubborn-stop test fails with the post-cancellation
+  wait unbounded, and both cancellation tests fail with the apply
+  awaited directly instead of shielded.
+
+Not verified, and not claimed: nothing was run against hardware or a
+deployment. The bounds are asserted against the constants they have to
+outlast rather than measured against a slow server, and the abandonment
+path is exercised against a manager written to be stubborn rather than
+against a real transport that would not close.
