@@ -38,6 +38,7 @@ from samtal_server.tools.mcp import (
     UNUSED,
     McpServerManager,
     McpServers,
+    McpSlice,
 )
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
@@ -511,3 +512,104 @@ async def test_a_manager_that_will_not_stop_is_left_behind_inside_the_bound(
     # consumes what it ended with drops it too.
     await asyncio.wait_for(task, timeout=holding * 2)
     assert task not in mcp_module._abandoned
+
+
+# A caller that goes away mid-apply
+#
+# A client disconnecting cancels the handler awaiting the reload, and
+# the phase that stops and starts things must not be left half done by
+# that. Cancelled in each of its two halves, and asserted afterwards on
+# the world rather than on the outcome, which the cancelled caller never
+# receives.
+
+
+async def settled(servers: McpServers) -> None:
+    """Wait for an apply that outlived its caller to finish."""
+    async with asyncio.timeout(20):
+        while servers._reloading:
+            await asyncio.sleep(0.01)
+
+
+class SlowStopManager(McpServerManager):
+    """A manager that takes its time going away, so a reload can be
+    cancelled while it is being stopped."""
+
+    async def _run(self) -> None:
+        self._became(CONNECTED, None)
+        self._settled.set()
+        await self._stop.wait()
+        await asyncio.sleep(0.2)
+        self._became(DOWN, None)
+
+
+async def test_a_caller_that_goes_away_during_the_stops_leaves_one_world() -> None:
+    config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    after = config_with({"extra": entry_data()}, {"assistant": ["extra"]})
+    going = SlowStopManager("tools", stdio_entry())
+    servers = McpServers({"tools": going}, McpSlice.of(config))
+    await going.start()
+
+    asked = asyncio.create_task(servers.reload(reading(after)))
+    await asyncio.sleep(0.05)
+    asked.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asked
+
+    try:
+        await settled(servers)
+
+        # The apply ran to its end: the entry that went is gone from the
+        # managers and from the slice, and the one that arrived is
+        # connected and reachable by the agent that was granted it.
+        assert "tools" not in servers
+        assert set(servers.status()) == {"extra"}
+        assert servers.status()["extra"]["state"] == CONNECTED
+        assert servers.tools_for_agent("assistant")
+        # And nothing of the old world is still running.
+        assert going._task is None or going._task.done()
+        assert mcp_module._abandoned == set()
+        # The exclusion was held until the apply was over, so the next
+        # reload is answered rather than refused.
+        assert (await servers.reload(reading(after))).unchanged == ("extra",)
+    finally:
+        await servers.stop_all()
+
+
+async def test_a_caller_that_goes_away_during_the_starts_leaves_one_world(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = McpServerManager.start
+
+    async def slow_start(self: McpServerManager) -> None:
+        # Long enough to be cancelled inside, short enough that the
+        # test does not wait on it twice.
+        await asyncio.sleep(0.2)
+        await original(self)
+
+    monkeypatch.setattr(McpServerManager, "start", slow_start)
+    before = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    after = config_with(
+        {"tools": entry_data(), "extra": entry_data()},
+        {"assistant": ["tools", "extra"]},
+    )
+    servers = await started(before)
+    try:
+        kept = manager_of(servers, "tools")
+
+        asked = asyncio.create_task(servers.reload(reading(after)))
+        await asyncio.sleep(0.05)
+        asked.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asked
+        await settled(servers)
+
+        # The started candidate is in the world it was started for, and
+        # the unchanged entry was never touched.
+        assert servers.status()["extra"]["state"] == CONNECTED
+        assert manager_of(servers, "tools") is kept
+        assert {tool.name for tool in servers.tools_for_agent("assistant")} >= {
+            "extra__secret_word",
+            "tools__secret_word",
+        }
+    finally:
+        await servers.stop_all()

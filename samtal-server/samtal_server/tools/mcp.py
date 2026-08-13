@@ -622,6 +622,10 @@ class McpServers:
         # the first one's, to a world the first one is in the middle of
         # changing.
         self._reloading = False
+        # The apply in flight, if any. Held because it outlives the
+        # request that asked for it when that request is cancelled, and
+        # the loop keeps only a weak reference to a task nobody awaits.
+        self._applying: asyncio.Task[McpReload] | None = None
 
     @classmethod
     def build(cls, config: Config, secrets: SecretStore | None = None) -> "McpServers":
@@ -719,15 +723,58 @@ class McpServers:
         rather than queued, because it would carry a configuration read
         later than the first one's into a world the first one is halfway
         through changing.
+
+        The second phase finishes whatever happens to the caller. A
+        client that disconnects cancels the handler awaiting this, and a
+        cancellation landing between the stops and the swap would leave
+        stopped managers in the live set and started ones reachable by
+        nobody, with the exclusion released as though the reload were
+        done. So the apply runs in a task of its own behind a shield:
+        cancelling the request cancels the waiting, and the world still
+        arrives in one piece.
         """
         if self._reloading:
             raise ReloadInProgressError(RELOAD_IN_PROGRESS)
         self._reloading = True
+        applying: asyncio.Task[McpReload] | None = None
         try:
-            config, secrets = await asyncio.to_thread(read)
-            return await self._apply(config, self._prepared(config, secrets))
+            config, secrets = await self._read(read)
+            candidates = self._prepared(config, secrets)
+            applying = asyncio.create_task(
+                self._apply(config, candidates), name="mcp-reload"
+            )
+            self._applying = applying
+            return await asyncio.shield(applying)
         finally:
-            self._reloading = False
+            # Held until the apply itself is over, cancelled caller or
+            # not: a second reload starting against a world the first is
+            # still changing is exactly what the exclusion is for.
+            if applying is None or applying.done():
+                self._release(applying)
+            else:
+                applying.add_done_callback(self._release)
+
+    def _release(self, applying: "asyncio.Task[McpReload] | None") -> None:
+        """The reload is over, however it ended. Also where an apply
+        whose caller went away has its outcome consumed, so it does not
+        end as an unretrieved exception at shutdown."""
+        self._reloading = False
+        self._applying = None
+        if applying is not None and applying.done():
+            with contextlib.suppress(Exception, asyncio.CancelledError):
+                applying.exception()
+
+    @staticmethod
+    async def _read(
+        read: Callable[[], tuple[Config, SecretStore | None]],
+    ) -> tuple[Config, SecretStore | None]:
+        """The stored configuration, read off this loop.
+
+        In a worker thread because it takes the database's write lock
+        and waits out its busy timeout, and this coroutine is on the
+        loop every live conversation is on.
+        """
+        return await asyncio.to_thread(read)
 
     def _prepared(
         self, config: Config, secrets: SecretStore | None
