@@ -18,7 +18,13 @@ The engine is closed here: the configuration is a boot-time snapshot,
 so nothing after this reads the database except `DeviceBindings`
 (`samtal_server.device.bindings`), which reads only the `devices` and
 `domain_settings` tables, through a read engine of its own, so that
-binding a device applies at that device's next OTA check or connection.
+binding a device applies at that device's next OTA check or connection,
+and `reload_domain_config` below, which a running server runs on
+request to apply the MCP half of a change without restarting.
+
+Both exceptions are of the same shape, and it is the shape the boot
+contract keeps: a named, bounded slice of the domain half, re-read
+deliberately, with everything else still fixed at the moment this ran.
 A CLI write to anything else while the server runs is picked up at the
 next start, by design.
 """
@@ -27,7 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from samtal_server.config.loader import compose_config, load_file_config
-from samtal_server.config.models import Config, domain_fields
+from samtal_server.config.models import Config, FileConfig, domain_fields
 from samtal_server.config.secrets import SecretStore, load_keys
 from samtal_server.config.store import ConfigStore, verify_secrets
 from samtal_server.db import DATABASE_FILENAME, open_database
@@ -49,7 +55,33 @@ class BootConfig:
 
 def load_boot_config(path: str | Path | None = None) -> BootConfig:
     """The configuration to serve from, read once."""
-    file_half = load_file_config(path)
+    return _with_domain_half(load_file_config(path))
+
+
+def reload_domain_config(running: Config) -> BootConfig:
+    """The domain half again, for a server that is already up.
+
+    Steps 2 to 5 of the boot above, unchanged and shared rather than
+    written a second time: the same database, the same exhaustive
+    verification of the stored secrets, the same composition and the
+    same whole-snapshot validation, so entry names, references and
+    `server.local_only` declarations are judged by the code that judged
+    them at startup.
+
+    Step 1 is deliberately not repeated. The file half is this process's
+    own, down to the port it is listening on and the directory this
+    reads, so a changed file still means a restart; what comes back is
+    the stored half composed onto the running server section.
+
+    Synchronous, and blocking in a way that matters: `ConfigStore.load`
+    takes the database's write lock and waits out its busy timeout. A
+    caller on the event loop that runs conversations runs this in a
+    worker thread.
+    """
+    return _with_domain_half(FileConfig(server=running.server, memory=running.memory))
+
+
+def _with_domain_half(file_half: FileConfig) -> BootConfig:
     directory = file_half.server.database.dir
     engine = open_database(directory)
     try:
@@ -64,4 +96,4 @@ def load_boot_config(path: str | Path | None = None) -> BootConfig:
     return BootConfig(config, snapshot.secrets)
 
 
-__all__ = ["BootConfig", "load_boot_config"]
+__all__ = ["BootConfig", "load_boot_config", "reload_domain_config"]
