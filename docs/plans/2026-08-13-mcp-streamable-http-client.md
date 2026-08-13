@@ -79,14 +79,23 @@ streamable_http server may hold a GET stream open long-term, which
 is why it is deliberately longer than `CONNECT_TIMEOUT_S` (the
 connect-and-list budget, which stays the module's own and unchanged).
 
-### The dependency floor moves to `mcp>=1.24`
+### The dependency constraint becomes `mcp>=1.24,<2`
 
 The current floor (`mcp>=1.2`) predates the replacement client
 entirely: probing PyPI releases shows `streamable_http_client`
 absent in 1.23 and present in 1.24. A floor that admits an SDK
 without the symbol would make the boot fail on import for anyone
-resolving fresh with an older pin. `uv.lock` already holds 1.28.1
-and does not change.
+resolving fresh with an older pin.
+
+The range is capped below 2: MCP 2.0 is published as stable, its
+own metadata recommends `<2` for unmigrated v1 clients, it requires
+httpx 2, and its transport yields two streams where `_connect`
+unpacks three, so an uncapped range would let a fresh resolve of
+the published requirements pick an SDK the code cannot import
+against while CI stays green on the lock. Migrating to MCP 2 is
+separate work with its own issue when the project chooses to take
+it; this change is about leaving the deprecated 1.x client, not the
+1.x line.
 
 ### New coverage runs the shipping transport in-process
 
@@ -142,7 +151,7 @@ publish on push requires.
 
 ```
 samtal-server/samtal_server/tools/mcp.py        _connect, imports
-samtal-server/pyproject.toml                    mcp floor 1.2 -> 1.24
+samtal-server/pyproject.toml                    mcp 1.2 -> >=1.24,<2
 samtal-server/tests/unit/test_tools_mcp_http.py new
 samtal-server/tests/unit/test_secret_resolution.py  filter and comment removed
 CHANGELOG.md                                    2026-08-13 entry
@@ -204,6 +213,11 @@ resolution once the amendment addressing it lands.
    published requirements could pick 2.x and fail at startup while
    CI stays green on the lock. Require `mcp>=1.24,<2` and record
    that MCP 2 migration is separate work.
+   *Resolution*: adopted. The dependency decision is now
+   `mcp>=1.24,<2`, with the cap's reasons stated (stable 2.0,
+   `<2` recommended by its own metadata, httpx 2, a two-stream
+   transport), and MCP 2 migration named as separate work; the
+   files-touched list and the milestone carry the capped range.
 2. **P2: `uv.lock` must change with the dependency constraint.**
    The plan says the lockfile does not change, but the lock's
    project metadata records the requirement string (`mcp>=1.2`
@@ -239,7 +253,8 @@ resolution once the amendment addressing it lands.
   caller-managed `httpx.AsyncClient` (headers, the wrapper's
   timeout and redirect defaults, with the comment naming their
   origin) on the manager's exit stack and hands it to
-  `streamable_http_client`; the `mcp` floor moves to `>=1.24`; the
+  `streamable_http_client`; the `mcp` constraint moves to
+  `>=1.24,<2`; the
   per-test `DeprecationWarning` filter and its comment leave
   `test_secret_resolution.py`; `tests/unit/test_tools_mcp_http.py`
   arrives with the in-process uvicorn fixture and the three
