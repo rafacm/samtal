@@ -8,6 +8,12 @@ tools, and is reconnected in the background when a session that would
 use it opens, so a home automation box rebooting does not require the
 conversation server to reboot too.
 
+The set of managers is not fixed for the life of the process: a reload
+re-reads the entries and the agents' grants, and stops, starts and keeps
+connections accordingly, so an operator who writes an entry does not pay
+for it with every live conversation. It is still the only thing that
+changes them, and it is asked for rather than noticed.
+
 Each manager's whole lifecycle lives in one task: the SDK's clients are
 async context managers over anyio task groups, and entering them in one
 task while exiting in another is what breaks their cancel scopes. The
@@ -18,7 +24,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -31,6 +37,7 @@ from mcp.client.stdio import get_default_environment, stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
 from samtal_server.config import Config, McpServerConfig
+from samtal_server.config.loader import ConfigError, ReloadInProgressError
 from samtal_server.config.secrets import SecretStore, resolve_mcp_values
 from samtal_server.providers import ToolDef
 from samtal_server.tools import names
@@ -41,6 +48,16 @@ logger = logging.getLogger(__name__)
 # How long connecting and listing a server's tools may take. The boot
 # waits for this once per server, concurrently.
 CONNECT_TIMEOUT_S = 10.0
+
+# How long a manager gets to close its connection when a reload is
+# taking it away, before its task is cancelled instead. Short, because
+# nothing is waiting on the far side's manners: a stdio child that will
+# not read its own stdin closing, or an HTTP server that will not answer
+# the session delete, must not hold up the request that asked for the
+# reload. Cancellation is the backstop rather than the first move
+# because a task unwinds its own exit stack, which is the only place it
+# may be unwound.
+STOP_TIMEOUT_S = 5.0
 
 # What a configured entry is doing, in the vocabulary the status surface
 # answers with. `unused` is not a manager state: no manager exists for
@@ -110,6 +127,16 @@ class McpServerManager:
         # the child process or the request headers.
         self._resolve("env")
         self._resolve("headers")
+        # What the reload's diff compares this manager's stored
+        # credentials by. Taken here because this is where the store is
+        # in hand, and opaque by construction: it says whether two loads
+        # hold the same secrets for this entry and carries nothing of
+        # them. A deployment with no store at all is an empty one, so
+        # "no secrets" and "a store holding none for this entry" are the
+        # same world rather than two.
+        self._secrets_mark = (secrets if secrets is not None else SecretStore()).fingerprint(
+            "mcp_server", name
+        )
         self._session: ClientSession | None = None
         self._published = PublishedTools(tools=[], originals={})
         self._task: asyncio.Task[None] | None = None
@@ -163,11 +190,51 @@ class McpServerManager:
         self._begin()
         await self._settled.wait()
 
-    async def stop(self) -> None:
+    def same_as(self, other: "McpServerManager") -> bool:
+        """Whether these two were built from the same world: the same
+        entry fragment, and the same stored secrets behind it.
+
+        What the reload's diff asks, and the whole of what decides that
+        an entry keeps its live connection. Both halves matter: an
+        operator who rotates a credential has changed the server this
+        connects to as surely as one who edits its URL, and comparing
+        only the fragment would leave the old token in a process nobody
+        restarted.
+        """
+        return self._config == other._config and self._secrets_mark == other._secrets_mark
+
+    async def stop(self, timeout: float | None = None) -> None:
+        """Ask this server's task to end, and see it out.
+
+        `timeout` bounds the waiting, for a caller (the reload) that has
+        a request open and cannot wait on a far side's manners. What
+        happens at the bound is a cancellation of the manager's own
+        task, never anything done to a transport from here: a client of
+        the SDK is an async context manager over an anyio task group,
+        and unwinding one from another task is what breaks its cancel
+        scopes.
+        """
         self._stop.set()
-        if self._task is not None:
-            await self._task
-            self._task = None
+        task = self._task
+        if task is None:
+            return
+        self._task = None
+        if timeout is None:
+            await task
+            return
+        done, _ = await asyncio.wait([task], timeout=timeout)
+        if not done:
+            logger.warning(
+                "mcp server %s did not close within %.0f s; cancelling it",
+                self._name,
+                timeout,
+            )
+            task.cancel()
+        # A cancelled task raises here, and a task whose own unwind
+        # failed raises whatever that was; neither is the caller's to
+        # meet, since this connection is being taken away either way.
+        with contextlib.suppress(Exception, asyncio.CancelledError):
+            await task
 
     def ensure_reconnecting(self) -> None:
         """Start a background reconnect if this server is down and no
@@ -359,6 +426,37 @@ def _result_text(result: mcp.types.CallToolResult) -> str:
     return "\n".join(parts)
 
 
+def _managers_for(config: Config, secrets: SecretStore | None) -> dict[str, McpServerManager]:
+    """One manager per entry some agent references, built and not
+    started.
+
+    Everything that can refuse a configuration happens here: the egress
+    declaration `server.local_only` requires, the `$VAR` references an
+    entry's env and headers name, and the stored credentials behind
+    them. At boot that makes a bad entry a boot failure; on a reload it
+    makes one a refusal that has touched nothing, which is the same
+    property from the other side.
+    """
+    managers: dict[str, McpServerManager] = {}
+    for name in sorted(config.referenced_mcp_servers()):
+        entry = config.mcp_servers[name]
+        if config.server.local_only:
+            _check_egress(name, entry)
+        try:
+            managers[name] = McpServerManager(name, entry, secrets)
+        except ValueError as exc:
+            raise McpConfigError(f"mcp_servers.{name}: {exc}") from exc
+    return managers
+
+
+async def _stopped(manager: McpServerManager) -> None:
+    """One manager taken down as part of a reload, inside its bound and
+    never raising: a connection that will not close cleanly is still a
+    connection this server is finished with."""
+    with contextlib.suppress(Exception):
+        await manager.stop(STOP_TIMEOUT_S)
+
+
 def _check_egress(name: str, entry: McpServerConfig) -> None:
     """Enforce server.local_only for one referenced MCP server (#30).
     Tool arguments carry conversation-derived data, and no transport
@@ -409,6 +507,47 @@ class McpSlice:
         were taken, which is agent-name order."""
         return [agent for agent, entries in self.grants.items() if entry in entries]
 
+    def entries_for(self, agent: str) -> tuple[str, ...]:
+        """Which entries one agent may reach, and nothing for an agent
+        this slice does not know.
+
+        Not an error, deliberately: a session is holding the agent it
+        was built with, and a reload can have applied a configuration
+        that agent was deleted from. Answering "no servers" leaves that
+        conversation talking without tools until it ends, which is what
+        the rest of a deleted agent's session does too."""
+        return tuple(self.grants.get(agent, ()))
+
+
+@dataclass(frozen=True)
+class McpReload:
+    """What one reload did to the running servers, by entry name.
+
+    Four outcomes and no fifth: every configured entry the new world
+    references is one of the first three or unchanged, and an entry that
+    went away is stopped. What is deliberately not here is whether a
+    server that was started came up: that is the status surface's
+    answer, taken in the same breath by whoever asked for the reload,
+    because a start that connected to nothing is a reload that applied.
+    """
+
+    started: tuple[str, ...] = ()
+    restarted: tuple[str, ...] = ()
+    stopped: tuple[str, ...] = ()
+    unchanged: tuple[str, ...] = ()
+
+
+# What a reload refused during preparation says, in front of the
+# refusal's own sentence. The lead is the operationally important half:
+# a caller has to know that the servers are as they were, not half way
+# to something else.
+RELOAD_REFUSED = "the reload was refused and nothing was changed:"
+
+RELOAD_IN_PROGRESS = (
+    "a reload of this server's MCP servers is already running. Nothing was changed by "
+    "this request; make it again once the first has answered."
+)
+
 
 class McpServers:
     """Every MCP server some agent references, built at startup."""
@@ -422,6 +561,12 @@ class McpServers:
         # transitions, so the instant its status carries is when this
         # configuration took effect, which is what this is.
         self._since = time.time()
+        # Whether a reload is between its two phases right now. A plain
+        # flag rather than a lock because a second reload is refused
+        # rather than queued: it would apply a configuration read after
+        # the first one's, to a world the first one is in the middle of
+        # changing.
+        self._reloading = False
 
     @classmethod
     def build(cls, config: Config, secrets: SecretStore | None = None) -> "McpServers":
@@ -432,16 +577,7 @@ class McpServers:
 
         `secrets` is the store a snapshot was loaded with, or None for a
         deployment whose credentials are all environment references."""
-        managers: dict[str, McpServerManager] = {}
-        for name in sorted(config.referenced_mcp_servers()):
-            entry = config.mcp_servers[name]
-            if config.server.local_only:
-                _check_egress(name, entry)
-            try:
-                managers[name] = McpServerManager(name, entry, secrets)
-            except ValueError as exc:
-                raise McpConfigError(f"mcp_servers.{name}: {exc}") from exc
-        return cls(managers, McpSlice.of(config))
+        return cls(_managers_for(config, secrets), McpSlice.of(config))
 
     def __len__(self) -> int:
         return len(self._managers)
@@ -471,6 +607,18 @@ class McpServers:
             for tool in self._managers[entry].tools()
         ]
 
+    def tools_for_agent(self, agent: str) -> list[ToolDef]:
+        """The tools one agent may reach right now.
+
+        Asked by agent rather than handed a list of entries, because the
+        list is part of what a reload replaces: a session was built on
+        the configuration that was loaded at boot, and the grants that
+        decide what it may reach are the ones swapped in with the
+        managers they name. A snapshot taken through here therefore sees
+        one world, and the next reply's snapshot sees the next one.
+        """
+        return self.tools_for(self._configured.entries_for(agent))
+
     def revive(self, entries: Iterable[str]) -> None:
         """Kick off a background reconnect for any of these that is
         down. Called when a session opens."""
@@ -478,6 +626,131 @@ class McpServers:
             manager = self._managers.get(entry)
             if manager is not None:
                 manager.ensure_reconnecting()
+
+    def revive_for_agents(self, agents: Iterable[str]) -> None:
+        """The same, for everything the named agents may reach, through
+        the grants that are running now."""
+        self.revive(
+            [entry for agent in agents for entry in self._configured.entries_for(agent)]
+        )
+
+    async def reload(
+        self, read: Callable[[], tuple[Config, SecretStore | None]]
+    ) -> McpReload:
+        """Apply a freshly read configuration to what is running.
+
+        `read` is the re-read of the stored configuration, handed in
+        rather than done here: opening a database belongs to the layer
+        that owns one, and this layer owns where it runs. It runs in a
+        worker thread, because it takes the database's write lock and
+        waits out its busy timeout, and this coroutine is on the event
+        loop that every live conversation is on.
+
+        Two phases, and only the second touches anything running.
+        Preparation validates and builds every manager the new world
+        needs; any failure there (an unset `$VAR`, a credential that will
+        not decrypt, an egress declaration `server.local_only` forbids)
+        refuses with the managers and the grants exactly as they were.
+        Application then stops what is going, starts what is new, and
+        swaps the slice, so the grants change at one instant rather than
+        across one.
+
+        Being unreachable is not a preparation failure, which is the
+        boot's rule carried over: a candidate that connects to nothing
+        applies as a down manager with its reason on the status surface,
+        revived when a session that would use it opens.
+
+        One at a time. A second reload while one is running is refused
+        rather than queued, because it would carry a configuration read
+        later than the first one's into a world the first one is halfway
+        through changing.
+        """
+        if self._reloading:
+            raise ReloadInProgressError(RELOAD_IN_PROGRESS)
+        self._reloading = True
+        try:
+            config, secrets = await asyncio.to_thread(read)
+            return await self._apply(config, self._prepared(config, secrets))
+        finally:
+            self._reloading = False
+
+    def _prepared(
+        self, config: Config, secrets: SecretStore | None
+    ) -> dict[str, McpServerManager]:
+        """Every manager the new configuration needs, built while
+        nothing running has been touched.
+
+        The refusal is recorded and raised outside the handler, the rule
+        this codebase settled on: raised inside one, it would carry the
+        exception being handled as its context, and one of these is a
+        decryption failure. Its message names locations and never
+        values, which is what lets it travel out as the API's sanitized
+        sentence.
+        """
+        problem: str | None = None
+        try:
+            return _managers_for(config, secrets)
+        except (McpConfigError, ConfigError) as exc:
+            problem = f"{RELOAD_REFUSED} {exc}"
+        raise ConfigError(problem)
+
+    async def _apply(
+        self, config: Config, candidates: dict[str, McpServerManager]
+    ) -> McpReload:
+        """The second phase: the diff, the lifecycles, and the swap.
+
+        The lifecycle work is concurrent the way `start_all` already
+        connects at boot, so the whole of it is one connect timeout plus
+        small change rather than a sum over servers. Stops first and
+        starts after them, so an entry whose command was edited does not
+        have two copies of the same child process alive at once.
+        """
+        keep: dict[str, McpServerManager] = {}
+        started: list[str] = []
+        restarted: list[str] = []
+        unchanged: list[str] = []
+        going: list[McpServerManager] = []
+        arriving: list[McpServerManager] = []
+        for name, candidate in candidates.items():
+            running = self._managers.get(name)
+            if running is not None and running.same_as(candidate):
+                keep[name] = running
+                unchanged.append(name)
+                continue
+            if running is not None:
+                going.append(running)
+                restarted.append(name)
+            else:
+                started.append(name)
+            keep[name] = candidate
+            arriving.append(candidate)
+        stopped = sorted(set(self._managers) - set(candidates))
+        going += [self._managers[name] for name in stopped]
+
+        if going:
+            await asyncio.gather(*(_stopped(manager) for manager in going))
+        if arriving:
+            await asyncio.gather(*(manager.start() for manager in arriving))
+        # The swap, and everything it decides at once: which managers a
+        # tool snapshot reaches, and which entries an agent's grant
+        # names. Assigned rather than mutated, and with no await between
+        # the two, so no reply can be built on half of one world.
+        self._managers = keep
+        self._configured = McpSlice.of(config)
+        self._since = time.time()
+        logger.info(
+            "mcp servers reloaded: %d started, %d restarted, %d stopped, %d unchanged",
+            len(started),
+            len(restarted),
+            len(stopped),
+            len(unchanged),
+        )
+        return McpReload(
+            started=tuple(started),
+            restarted=tuple(restarted),
+            stopped=tuple(stopped),
+            unchanged=tuple(unchanged),
+        )
 
     def status(self) -> dict[str, dict[str, Any]]:
         """What every configured entry is doing right now, by name.

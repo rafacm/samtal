@@ -1,0 +1,435 @@
+"""Reloading the MCP servers of a running registry.
+
+The registry is the real one and the servers are the real stdio server
+spawned as a subprocess, so what is being diffed, stopped and started
+here is what a deployment diffs, stops and starts. What stands in for
+the database is the `read` callable the reload takes: the re-read is the
+configuration layer's, handed in, which is what lets these tests be
+about the two phases rather than about SQLite.
+
+Two properties carry most of the file. An unchanged entry keeps the
+connection it had, proven by identity rather than by state, because a
+manager that was stopped and started again would report the same state.
+And a refusal changes nothing, proven after each of the four ways
+preparation can fail.
+"""
+
+import asyncio
+import sys
+import threading
+from pathlib import Path
+
+import pytest
+from cryptography.fernet import Fernet, MultiFernet
+
+from samtal_server.config import Config
+from samtal_server.config.loader import ConfigError, ReloadInProgressError
+from samtal_server.config.secrets import (
+    SecretLocation,
+    SecretStore,
+    encrypt,
+    generate_key,
+)
+from samtal_server.tools.mcp import CONNECTED, DOWN, UNUSED, McpServers
+
+STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
+
+SECRET = "sk-test-4f8b2c9e-never-a-real-credential"
+
+
+def entry_data(**overrides: object) -> dict[str, object]:
+    return {
+        "transport": "stdio",
+        "command": sys.executable,
+        "args": [str(STDIO_SERVER)],
+    } | overrides
+
+
+def config_with(
+    servers: dict[str, object],
+    grants: dict[str, list[str]],
+    local_only: bool = False,
+) -> Config:
+    """One agent per grant list, so a test can move an entry between
+    agents as well as in and out of the configuration."""
+    return Config(
+        server={"local_only": local_only},
+        providers={
+            stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")
+        },
+        mcp_servers=servers,
+        agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
+        agents={name: {"prompt": "A", "mcp": mcp} for name, mcp in grants.items()},
+        default_agent=next(iter(grants)),
+    )
+
+
+def reading(config: Config, secrets: SecretStore | None = None):
+    """The re-read a reload is handed, standing in for the database."""
+    return lambda: (config, secrets)
+
+
+def manager_of(servers: McpServers, entry: str) -> object:
+    """The manager object behind one entry.
+
+    Reached through the registry's own attribute on purpose: what an
+    unchanged entry keeps is this object, and every visible property of
+    it (its state, its tools, its instant) would look the same on a
+    manager that had been stopped and started again.
+    """
+    return servers._managers[entry]
+
+
+async def started(config: Config, secrets: SecretStore | None = None) -> McpServers:
+    servers = McpServers.build(config, secrets)
+    await servers.start_all()
+    return servers
+
+
+# The diff
+
+
+async def test_a_new_entry_is_started_and_an_unchanged_one_is_left_alone() -> None:
+    before = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    after = config_with(
+        {"tools": entry_data(), "extra": entry_data()}, {"assistant": ["tools", "extra"]}
+    )
+    servers = await started(before)
+    try:
+        kept = manager_of(servers, "tools")
+        offered = servers.tools_for(["tools"])
+
+        applied = await servers.reload(reading(after))
+
+        assert applied.started == ("extra",)
+        assert applied.restarted == ()
+        assert applied.stopped == ()
+        assert applied.unchanged == ("tools",)
+        # The same manager, and the very same published tool objects on
+        # it: nothing reconnected, nothing was listed a second time.
+        assert manager_of(servers, "tools") is kept
+        assert servers.status()["tools"]["state"] == CONNECTED
+        assert all(
+            before is after
+            for before, after in zip(offered, servers.tools_for(["tools"]), strict=True)
+        )
+        assert servers.status()["extra"]["state"] == CONNECTED
+    finally:
+        await servers.stop_all()
+
+
+async def test_a_changed_fragment_is_stopped_rebuilt_and_started() -> None:
+    before = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    after = config_with(
+        {"tools": entry_data(tool_timeout_s=3.5)}, {"assistant": ["tools"]}
+    )
+    servers = await started(before)
+    try:
+        was = manager_of(servers, "tools")
+        assert servers.timeout_for("tools") == 15.0
+
+        applied = await servers.reload(reading(after))
+
+        assert applied.restarted == ("tools",)
+        assert (applied.started, applied.stopped, applied.unchanged) == ((), (), ())
+        assert manager_of(servers, "tools") is not was
+        assert servers.timeout_for("tools") == 3.5
+        assert servers.status()["tools"]["state"] == CONNECTED
+        assert await servers.call("tools__secret_word", {}) == ("rhubarb", False)
+    finally:
+        await servers.stop_all()
+
+
+async def test_rotated_stored_ciphertext_rebuilds_only_that_entry() -> None:
+    """Rotation applies on reload, and it applies to the one entry it
+    happened on: the fragment is byte-identical either side, so the
+    ciphertext is the whole of what the diff has to see."""
+    keys = MultiFernet([Fernet(generate_key())])
+    rotated = SecretLocation.mcp_server("tools", "env.API_TOKEN")
+    other = SecretLocation.mcp_server("extra", "env.API_TOKEN")
+    untouched = encrypt(other, SECRET, keys)
+    config = config_with(
+        {"tools": entry_data(), "extra": entry_data()},
+        {"assistant": ["tools", "extra"]},
+    )
+    before = SecretStore({rotated: encrypt(rotated, SECRET, keys), other: untouched}, keys)
+    after = SecretStore(
+        {rotated: encrypt(rotated, "a-new-value", keys), other: untouched}, keys
+    )
+    servers = await started(config, before)
+    try:
+        kept = manager_of(servers, "extra")
+
+        applied = await servers.reload(reading(config, after))
+
+        assert applied.restarted == ("tools",)
+        assert applied.unchanged == ("extra",)
+        assert manager_of(servers, "extra") is kept
+    finally:
+        await servers.stop_all()
+
+
+async def test_an_entry_that_is_gone_is_stopped_and_dropped() -> None:
+    before = config_with(
+        {"tools": entry_data(), "extra": entry_data()},
+        {"assistant": ["tools", "extra"]},
+    )
+    after = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    servers = await started(before)
+    try:
+        applied = await servers.reload(reading(after))
+
+        assert applied.stopped == ("extra",)
+        assert applied.unchanged == ("tools",)
+        assert "extra" not in servers
+        assert servers.tools_for(["extra"]) == []
+        # And it is gone from the surface too, since it is gone from the
+        # configuration.
+        assert set(servers.status()) == {"tools"}
+    finally:
+        await servers.stop_all()
+
+
+async def test_an_entry_no_agent_references_any_more_is_stopped_and_unused() -> None:
+    """The de-referenced case, which is not the deleted one: the entry
+    is still configured, so it is still on the status surface, with the
+    state that says why it has no connection."""
+    before = config_with(
+        {"tools": entry_data(), "extra": entry_data()},
+        {"assistant": ["tools", "extra"]},
+    )
+    after = config_with(
+        {"tools": entry_data(), "extra": entry_data()}, {"assistant": ["tools"]}
+    )
+    servers = await started(before)
+    try:
+        applied = await servers.reload(reading(after))
+
+        assert applied.stopped == ("extra",)
+        assert "extra" not in servers
+        assert servers.status()["extra"]["state"] == UNUSED
+        assert servers.status()["extra"]["grants"] == {}
+    finally:
+        await servers.stop_all()
+
+
+async def test_an_entry_granted_to_another_agent_keeps_its_connection() -> None:
+    """A grant moving from one agent to another changes who may reach
+    the server, not whether it is connected."""
+    before = config_with(
+        {"tools": entry_data()}, {"assistant": ["tools"], "helper": []}
+    )
+    after = config_with({"tools": entry_data()}, {"assistant": [], "helper": ["tools"]})
+    servers = await started(before)
+    try:
+        kept = manager_of(servers, "tools")
+
+        applied = await servers.reload(reading(after))
+
+        assert applied.unchanged == ("tools",)
+        assert manager_of(servers, "tools") is kept
+        assert servers.tools_for_agent("assistant") == []
+        assert servers.tools_for_agent("helper")
+        assert servers.status()["tools"]["grants"] == {"helper": None}
+    finally:
+        await servers.stop_all()
+
+
+# A refusal applies nothing
+#
+# Four ways preparation can fail, and the same assertion after each: the
+# managers, the grants and the status are exactly what they were. They
+# are separate tests rather than one parametrized one because the fourth
+# needs a different running configuration to be refused at all.
+
+
+async def unchanged_by(servers: McpServers, read) -> str:
+    """Run a reload that must be refused, and assert nothing moved."""
+    before = servers.status()
+    kept = dict(servers._managers)
+    granted = servers.tools_for_agent("assistant")
+
+    with pytest.raises(ConfigError) as caught:
+        await servers.reload(read)
+
+    assert servers.status() == before
+    assert servers._managers == kept
+    assert servers.tools_for_agent("assistant") == granted
+    return str(caught.value)
+
+
+async def test_a_snapshot_that_will_not_validate_changes_nothing() -> None:
+    """The re-read raises before a candidate is built at all, which is
+    what a stored configuration that no longer composes does."""
+    config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    servers = await started(config)
+
+    def refuse() -> tuple[Config, SecretStore | None]:
+        raise ConfigError("invalid config in the database: agents.sam has no llm")
+
+    try:
+        assert "agents.sam has no llm" in await unchanged_by(servers, refuse)
+    finally:
+        await servers.stop_all()
+
+
+async def test_an_unset_variable_changes_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SAMTAL_TEST_ABSENT_TOKEN", raising=False)
+    config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    broken = config_with(
+        {
+            "tools": entry_data(),
+            "extra": entry_data(env={"API_TOKEN": "$SAMTAL_TEST_ABSENT_TOKEN"}),
+        },
+        {"assistant": ["tools", "extra"]},
+    )
+    servers = await started(config)
+    try:
+        message = await unchanged_by(servers, reading(broken))
+
+        assert "nothing was changed" in message
+        assert "SAMTAL_TEST_ABSENT_TOKEN" in message
+        assert "extra" not in servers
+    finally:
+        await servers.stop_all()
+
+
+async def test_a_secret_that_will_not_decrypt_changes_nothing() -> None:
+    config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    location = SecretLocation.mcp_server("tools", "env.API_TOKEN")
+    written = encrypt(location, SECRET, MultiFernet([Fernet(generate_key())]))
+    # Stored under a key this store does not have, which is a rotation
+    # that dropped the key the token was written under.
+    unopenable = SecretStore({location: written}, MultiFernet([Fernet(generate_key())]))
+    servers = await started(config)
+    try:
+        message = await unchanged_by(servers, reading(config, unopenable))
+
+        assert "nothing was changed" in message
+        assert location.describe() in message
+        assert SECRET not in message
+    finally:
+        await servers.stop_all()
+
+
+async def test_an_egress_declaration_local_only_forbids_changes_nothing() -> None:
+    config = config_with(
+        {"tools": entry_data(egress=False)}, {"assistant": ["tools"]}, local_only=True
+    )
+    broken = config_with(
+        {"tools": entry_data(egress=False), "extra": entry_data()},
+        {"assistant": ["tools", "extra"]},
+        local_only=True,
+    )
+    servers = await started(config)
+    try:
+        message = await unchanged_by(servers, reading(broken))
+
+        assert "nothing was changed" in message
+        assert "mcp_servers.extra" in message
+        assert "local_only" in message
+    finally:
+        await servers.stop_all()
+
+
+# What is not a preparation failure
+
+
+async def test_a_candidate_that_cannot_connect_applies_as_down_and_revives() -> None:
+    """The boot's rule carried over: a configuration error refuses, a
+    dead box does not. It applies, says why it is down, and comes back
+    the way a server that was down at boot comes back."""
+    before = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    after = config_with(
+        {"tools": entry_data(), "extra": entry_data(command="/nonexistent/mcp", args=[])},
+        {"assistant": ["tools", "extra"]},
+    )
+    servers = await started(before)
+    try:
+        applied = await servers.reload(reading(after))
+
+        assert applied.started == ("extra",)
+        assert servers.status()["extra"]["state"] == DOWN
+        assert servers.status()["extra"]["reason"]
+        assert servers.tools_for(["extra"]) == []
+
+        # And it is revivable, the way any down server is: the box comes
+        # back, a session opens, and the tools arrive with no reload and
+        # no restart.
+        manager_of(servers, "extra")._config = servers._managers["tools"]._config
+        servers.revive_for_agents(["assistant"])
+        async with asyncio.timeout(20):
+            while servers.status()["extra"]["state"] != CONNECTED:
+                await asyncio.sleep(0.05)
+        assert servers.tools_for_agent("assistant")
+    finally:
+        await servers.stop_all()
+
+
+async def test_a_second_reload_while_one_is_running_is_refused() -> None:
+    """Refused rather than queued: the second one carries a
+    configuration read later than the first one's, into a world the
+    first one is halfway through changing."""
+    config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    servers = await started(config)
+    gate = threading.Event()
+
+    def held() -> tuple[Config, SecretStore | None]:
+        # Blocking a worker thread, which is where the reload runs its
+        # synchronous half, so the first reload is genuinely mid-flight.
+        gate.wait(30)
+        return config, None
+
+    first = asyncio.create_task(servers.reload(held))
+    try:
+        await asyncio.sleep(0)
+        with pytest.raises(ReloadInProgressError) as caught:
+            await servers.reload(reading(config))
+        assert "already running" in str(caught.value)
+    finally:
+        gate.set()
+        await first
+        await servers.stop_all()
+
+    # And once it has answered, the next one runs.
+    servers = await started(config)
+    try:
+        assert (await servers.reload(reading(config))).unchanged == ("tools",)
+    finally:
+        await servers.stop_all()
+
+
+# The grants behind the swap
+
+
+async def test_the_grants_swap_with_the_managers() -> None:
+    before = config_with({"tools": entry_data()}, {"assistant": []})
+    after = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    servers = await started(before)
+    try:
+        # Configured, referenced by nobody, so nothing was connected for
+        # it and the agent reaches nothing.
+        assert servers.tools_for_agent("assistant") == []
+        assert servers.status()["tools"]["state"] == UNUSED
+
+        applied = await servers.reload(reading(after))
+
+        assert applied.started == ("tools",)
+        assert {tool.name for tool in servers.tools_for_agent("assistant")} >= {
+            "tools__secret_word"
+        }
+    finally:
+        await servers.stop_all()
+
+
+async def test_an_agent_the_slice_does_not_know_reaches_nothing() -> None:
+    """A session outlives the configuration it was built on: the agent
+    it is talking as can have been deleted by the reload that just
+    landed, and that is not a reason to fail its next reply."""
+    config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    servers = await started(config)
+    try:
+        assert servers.tools_for_agent("nobody") == []
+        servers.revive_for_agents(["nobody"])
+    finally:
+        await servers.stop_all()

@@ -89,6 +89,17 @@ class DatabaseBusyError(ConfigError):
     retried."""
 
 
+class ReloadInProgressError(ConfigError):
+    """A reload was asked for while one was already running. Nothing was
+    changed by the second request, and it may be made again once the
+    first has answered.
+
+    Here rather than beside its raiser for the reason the busy error is:
+    what raises it is the MCP registry, on the conversation side of the
+    process, and what has to answer it with a status code is the
+    configuration API, which deliberately loads none of that."""
+
+
 class StorageError(ConfigError):
     """The stored state cannot be read as configuration, or the database
     could not be read or written at all. Not the caller's mistake."""
