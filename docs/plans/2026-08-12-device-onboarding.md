@@ -637,7 +637,7 @@ New coverage, by milestone:
 
 ## Plan review round
 
-One external review of the plan as first committed (b174c4c): codex
+One external review of the plan as first committed (baab8e7): codex
 CLI 0.147.0, model gpt-5.6-sol, read-only against this repository
 with the issue #40 body supplied, 2026-08-12. Verdict: not ready,
 naming the version-2 requirement, the hot database reads, and the

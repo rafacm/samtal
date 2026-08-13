@@ -205,7 +205,7 @@ value was fine for its old reader and not for the new one.
    read back by anyone holding the onboarding URL; the banner tests
    scoped around exactly that line, which is how the leak passed a
    suite about not leaking.
-   *Resolution*, a26e00f: `server.websocket_url` refuses userinfo at
+   *Resolution*, dc64bfd: `server.websocket_url` refuses userinfo at
    load, without quoting the value, the posture `public_url` already
    held. Refused rather than stripped, because a configuration carrying
    a password is a mistake to name rather than to quietly repair. The
@@ -225,7 +225,7 @@ value was fine for its old reader and not for the new one.
    the banner ran outside `main.py`'s handled boot block, so the
    ValueError reached stderr as a traceback, quoting the port the
    refusals are careful not to.
-   *Resolution*, 137a33f, in the three places the reviewer named,
+   *Resolution*, 0ec6a5d, in the three places the reviewer named,
    because any one alone leaves a way in. A shared `url_problem` helper
    parses once and names the scheme, a missing host, userinfo and an
    unreadable port without the value; `public_origin` and `_origin_of`
@@ -242,7 +242,7 @@ value was fine for its old reader and not for the new one.
    `Location` echoed the attempted key, before any handler ran: a wrong
    key was distinguishable from a path that was never served, which is
    the one thing the miss branch must not be.
-   *Resolution*, f2175b4: the router registers the slashless keyed
+   *Resolution*, 0b7faff: the router registers the slashless keyed
    routes itself, behind the same guard. The correct key gets the 307
    Starlette would have issued, query string included; a wrong one gets
    the same 404 body and headers as any unserved path, with no
@@ -252,7 +252,7 @@ value was fine for its old reader and not for the new one.
    fields, so `/x/AAAA%0ABBB/` forged a second log entry (the decoded
    parameter really does arrive holding a raw newline, checked by hand)
    and an oversized segment let a caller choose how long an entry was.
-   *Resolution*, fa7f08a, with the rule stated exactly rather than
+   *Resolution*, 2a663fd, with the rule stated exactly rather than
    approximately, in the module docstring and in the tests: after case
    folding, one to ten characters of the base32 alphabet are repeated
    back, which covers the mistyped and the over-typed key the line
@@ -269,7 +269,7 @@ value was fine for its old reader and not for the new one.
    it.** The validator read the hostname but never the port, so
    `https://voice.example:hunter2` was accepted and printed by the
    banner and the describe line.
-   *Resolution*, 48749f1: it goes through the same shared check, which
+   *Resolution*, cf29735: it goes through the same shared check, which
    refuses an unreadable host and a port that is not a whole number in
    range, without quoting either. The query and fragment refusal stays
    its own, because that rule is about this key being an origin rather
@@ -301,7 +301,7 @@ handler runs, so no `ota_check` line was ever emitted, and the access
 log is off by design, so the request itself left no trace. An operator
 watching the logs sees a device that never arrived.
 
-*Resolution*, 39e9e66: both spellings of the short path, with and
+*Resolution*, b7eacaf: both spellings of the short path, with and
 without the trailing slash, are registered on the same handlers behind
 the same key guard, so nothing device-facing on this route spends a
 round trip on a redirect. The keyless mount (auth off) gets the same
@@ -359,7 +359,7 @@ has no `Location` to put anything in.
 
 **The third bullet above is superseded at this milestone's tip.** The
 legacy `ota_path` router is no longer untouched: this milestone's own
-review round (finding 2, commit 2d8412f) had already given it both
+review round (finding 2, commit d797a8e) had already given it both
 spellings of both routes, for the narrower reason that the `Location`
 it would otherwise emit carries the deployment's secret path. The
 characterization test recording the legacy redirect is therefore
@@ -610,7 +610,7 @@ row is called.
    whatever the driver quoted; the test that covered it exercised
    SQLite's fixed "file is not a database", which carries nothing, so
    it proved nothing about the rule.
-   *Resolution*, 1b15d85: the sentence is fixed, and the only thing
+   *Resolution*, 82ecf26: the sentence is fixed, and the only thing
    recorded about a failure is its class name, a code identifier, in a
    structured field of its own. The new test injects an engine whose
    failure carries a sentinel in all three places (statement, bound
@@ -624,7 +624,7 @@ row is called.
    malformed `default_agent` as unset. Each turns a row nobody could
    have written into a device refused for a fact nobody established,
    and the loud fallback that exists for exactly that never fired.
-   *Resolution*, 3688585: `read_live_binding` moved into `store.py`,
+   *Resolution*, 801b7dc: `read_live_binding` moved into `store.py`,
    taking the deferred read engine rather than a `ConfigStore`, reading
    both rows in one transaction and validating them through the same
    array check and the same `DomainConfig` model the boot load uses. A
@@ -637,7 +637,7 @@ row is called.
    restart was needed, sending an operator to restart a server that was
    already serving that agent; the default-agent route had the same bug,
    and the API normalized the MAC a second time to build its line.
-   *Resolution*, 81030e2: the repository answers with what it wrote (a
+   *Resolution*, 9f3a1f2: the repository answers with what it wrote (a
    `BoundDevice` for a bind, the canonical name or MAC for the other
    two), and both halves of the acknowledgement are built from that.
    The second normalizations in the API and the CLI are gone rather
@@ -647,7 +647,7 @@ row is called.
    check at construction does not cover a file that goes away before
    the first lazy connection, which is a volume unmounting or a restore
    moving it aside.
-   *Resolution*, a3475ac: the database is named as a URI with
+   *Resolution*, 3da73c0: the database is named as a URI with
    `mode=rw`, which opens an existing file and refuses a missing one.
    Not read-only, which would be the wrong mode as well as a stronger
    claim: a WAL reader maps the `-shm` index and may extend it. The
@@ -660,13 +660,13 @@ row is called.
    writes.** The page a person reads before writing any of this
    configuration said a change takes effect at the next server start,
    full stop.
-   *Resolution*, 17c27a5: the generator names the exception and where
+   *Resolution*, 21d9992: the generator names the exception and where
    it ends, and `docs/reference/domain-config.md` is regenerated in the
    same change, so its drift check stays green.
 6. **P2: the contention test did not prove conversations stay live.**
    A ticking coroutine is not a conversation, and nothing tied its
    progress to the interval the lock was held.
-   *Resolution*, a7c4a98: the integration lane holds a real
+   *Resolution*, 9c27f6e: the integration lane holds a real
    `BEGIN IMMEDIATE` on the served app's own database across a whole
    simulated conversation (the OTA check that resolves the binding, the
    handshake, the utterance, the spoken reply) plus a lookup on the
@@ -930,7 +930,7 @@ value was right for its old reader and wrong for the new one.
    Uvicorn's access log was on and its loggers propagate into the root
    handler, so the legacy request line carried the secret `ota_path`
    and a claim's carried the rejected code.
-   *Resolution*, 481cf28: `access_log=False` in the one uvicorn
+   *Resolution*, 36762e0: `access_log=False` in the one uvicorn
    configuration `serve()` now builds, rather than a sanitized
    route-template access log. An access line was never part of the
    observability surface this project decided on
@@ -949,7 +949,7 @@ value was right for its old reader and wrong for the new one.
    other with a 307 whose `Location` was the corrected URL, which on
    this router is the deployment's secret path. The base route had the
    same shape, reachable by a portal that stripped the slash.
-   *Resolution*, 2d8412f: both spellings of all three legacy routes are
+   *Resolution*, d797a8e: both spellings of all three legacy routes are
    registered and dispatched directly, so there is no redirect left to
    carry anything. The short onboarding path keeps its guarded redirect,
    because its key is deliberately printable and the miss branch is what
@@ -960,8 +960,8 @@ value was right for its old reader and wrong for the new one.
    `normalize_mac`'s refusal names the value it refused, which is right
    for a configuration file and wrong for a header on an
    unauthenticated endpoint; a newline in it forged a log entry.
-   *Resolution*, d076387, with the integration lane's own assertion in
-   fd71771: one fixed sentence on both the configuration check and the
+   *Resolution*, bd9fb40, with the integration lane's own assertion in
+   04effbf: one fixed sentence on both the configuration check and the
    activation poll, saying what a Device-Id has to be and that what
    arrived is not repeated. The rule is stated on the refusal
    helper rather than at the two call sites, since it is about every
@@ -971,7 +971,7 @@ value was right for its old reader and wrong for the new one.
    repository's unresolved-reference refusal names them, and this is
    the one route where an agent name is typed by hand beside an
    activation code.
-   *Resolution*, 7e5f580: the claim answers with a sentence naming the
+   *Resolution*, 2340e64: the claim answers with a sentence naming the
    field rather than its contents and pointing at `config list`. Only
    that refusal is re-worded: one about the server rather than the
    request (a busy database, unreadable stored state) travels out as
@@ -990,7 +990,7 @@ value was right for its old reader and wrong for the new one.
    "nothing is bound" from "this server could not find out", and a
    device bound after boot was offered a code while the read was
    failing.
-   *Resolution*, 3818942: `DeviceAgents` carries whether it is
+   *Resolution*, 8d70cd0: `DeviceAgents` carries whether it is
    authoritative. Token issuance keeps the fallback unchanged, since a
    stale answer there only repeats what boot decided; activation refuses
    to act on one and says so. A view with no database behind it is
@@ -1000,7 +1000,7 @@ value was right for its old reader and wrong for the new one.
    called `bind_device`, an upsert, and pending entries survived a
    covering write, so a code issued minutes earlier replaced a binding
    made by another request.
-   *Resolution*, 203c1d0: the repository grows `claim_device`, a
+   *Resolution*, 976ac62: the repository grows `claim_device`, a
    conditional bind that reads the device row and the default agent
    inside the same transaction as the write and refuses if either has
    taken the device, raising `DeviceAlreadyBoundError`. Two decisions
@@ -1018,7 +1018,7 @@ value was right for its old reader and wrong for the new one.
 7. **P2: the claim's acknowledgement was built from the request.** A
    name sent with spaces bound the loaded agent while the answer named
    the spaced string and demanded a restart.
-   *Resolution*, 2e1fccb: it answers with the `BoundDevice` the
+   *Resolution*, f92c5a0: it answers with the `BoundDevice` the
    repository returns, which is what binding by MAC was already changed
    to do in the previous milestone's review round. One rule for both
    routes: what a write says it did is about the row.
@@ -1027,7 +1027,7 @@ value was right for its old reader and wrong for the new one.
    takes the ten-second busy timeout, long enough to step over a
    deadline with seconds left, so "run the command again" was answered
    with "no device is waiting".
-   *Resolution*, e507a9e: a release moves the deadline out to at least
+   *Resolution*, 970dacf: a release moves the deadline out to at least
    a minute from now, which is what makes that advice true. Extension
    only, so a code with most of its ten minutes left keeps them, and it
    is a grace rather than a reprieve: a code nobody claims afterwards
@@ -1257,7 +1257,7 @@ reader by analogy rather than by argument.
    protection that endpoint has, and the documented way to check a
    deployment with onboarding turned off is to pass exactly that. All
    four verdicts and both URL refusals interpolated it.
-   *Resolution*, 0b127fa: a supplied URL is called "the supplied OTA
+   *Resolution*, 7c4d72b: a supplied URL is called "the supplied OTA
    endpoint" in every line, and the refusals in front of the request no
    longer quote the address even with its userinfo removed, since what
    is left still holds the segment. The derived short URL is still
@@ -1269,7 +1269,7 @@ reader by analogy rather than by argument.
    refusing them, so a URL carrying one passed every check and reached
    httpx, whose `InvalidURL` is not an `HTTPError` and was caught by
    nothing; the command exited with a traceback quoting the address.
-   *Resolution*, 312d95a, in both places, since either alone leaves a
+   *Resolution*, 751f6ca, in both places, since either alone leaves a
    way in: a URL with a space, a control character or anything else
    unprintable is refused before it is parsed and without being quoted,
    and building the client joined the request and the close inside the
@@ -1281,7 +1281,7 @@ reader by analogy rather than by argument.
    which contradicts the fixed sentence the API client uses for a body
    it cannot read, and a proxy or a metadata endpoint can put a
    credential in a first line.
-   *Resolution*, adcb37f: the status code and a fixed sentence, reusing
+   *Resolution*, 5ef67b5: the status code and a fixed sentence, reusing
    `UNRECOGNIZED_ANSWER` verbatim so the two policies are one policy.
    The test that asserted a captive portal's page was echoed back is
    now the test that asserts it is not.
@@ -1290,7 +1290,7 @@ reader by analogy rather than by argument.
    which is exactly the case whose userinfo could not be stripped, and
    the committed test embedded a password in one, expected exit 0, and
    never asserted the password was absent. It was not.
-   *Resolution*, a626bc0: no fallback. A reported URL that will not
+   *Resolution*, 4e21433: no fallback. A reported URL that will not
    parse, names no host, or is not `ws`/`wss` is a verdict of its own,
    quoting nothing and pointing at `server.websocket_url` on that
    deployment. Six unreadable shapes are tested, each carrying the
@@ -1299,7 +1299,7 @@ reader by analogy rather than by argument.
    `startswith` on the typed string and on the reported text, so
    `HTTPS://` with `WS://` was reported healthy, and a URL that
    redirected was judged by where it started.
-   *Resolution*, 2fc9e39: both sides are normalized parses, the probe's
+   *Resolution*, cce6376: both sides are normalized parses, the probe's
    from `response.url` (where the answer came from) and the reported
    one from the parse that already had to happen to strip credentials.
    Upper-case and mixed-case cases both ways, and a redirected probe
@@ -1308,7 +1308,7 @@ reader by analogy rather than by argument.
    followed anything, up to the client's default of twenty, though only
    samtal's own trailing-slash 307 is needed; a public endpoint could
    steer it at an internal or metadata address.
-   *Resolution*, 7443a9f: the client follows none, and the probe
+   *Resolution*, dcccc72: the client follows none, and the probe
    follows exactly one whose target is the same scheme, host, port and
    query with the path just asked for plus a slash. Everything else is
    refused without repeating the target, in front of the second request
@@ -1319,7 +1319,7 @@ reader by analogy rather than by argument.
    the board "then shows a six-digit code", while the documented
    walkthrough sets `default_agent`, which covers every unknown board
    and produces no code at all.
-   *Resolution*, bbfda1c: the sentence is conditional and names why the
+   *Resolution*, 6eb1dd9: the sentence is conditional and names why the
    other branch exists, the README's step says the same in the same
    words, and a test reads the README's own section and asserts the two
    keep agreeing, since the failure was two documents describing one
@@ -1328,7 +1328,7 @@ reader by analogy rather than by argument.
    keeps `uvx --from` the server package as the documented laptop path
    until a slim CLI redistribution exists; the section claimed "from a
    laptop" and showed only an installed invocation.
-   *Resolution*, f707fd6: the exact command, with the git URL and its
+   *Resolution*, f9a1762: the exact command, with the git URL and its
    subdirectory, the config file and the secret, plus two caveats that
    are true: it resolves the whole server to run a command that opens
    no socket, and it resolves without this repository's lockfile. What
