@@ -281,3 +281,59 @@ value was fine for its old reader and not for the new one.
 
 Full lanes after the fixes: ruff clean, both suites green (counts in
 the PR's verification section).
+
+### Hardware checkpoint round, 2026-08-13
+
+One finding, from the first real onboarding of a factory Waveshare
+AMOLED board (firmware 2.2.4) over the short path. It is the one thing
+in this milestone that no test lane could have produced, and it
+invalidates a claim the plan and the milestone both made.
+
+**The device does not follow the trailing-slash redirect.** The
+operator typed the onboarding URL into the captive portal, the portal
+saved it without its trailing slash, and the board POSTed to
+`/x/<key>`. The router answered the guarded 307, which is correct HTTP
+and preserves the method and the body, and the firmware treated it as
+an error: the screen showed `code=307` and the board went into a
+restart loop. Server-side there was nothing at all to see, for two
+compounding reasons: the redirect is answered by the router before any
+handler runs, so no `ota_check` line was ever emitted, and the access
+log is off by design, so the request itself left no trace. An operator
+watching the logs sees a device that never arrived.
+
+*Resolution*, 39e9e66: both spellings of the short path, with and
+without the trailing slash, are registered on the same handlers behind
+the same key guard, so nothing device-facing on this route spends a
+round trip on a redirect. The keyless mount (auth off) gets the same
+treatment, because a trial network's portal behaves like every other
+portal. A wrong key still answers the stock 404 with no `Location` on
+either spelling, which is the review round's finding 3 and stays
+asserted. The tests that asserted the 307 for the correct key now
+assert direct dispatch with redirects disabled, which is what the
+device does, and compare the slashless reply with the slashed one under
+the same `server_time` exclusion the milestone established.
+
+Three consequences worth carrying forward.
+
+- **The trailing slash is no longer load-bearing for a typed URL.**
+  The docs and the banner can keep printing the canonical form with the
+  slash, because it is what a person should type, but nothing depends
+  on the portal preserving it any more.
+- **The plan's trailing-slash paragraph is superseded.** It says a
+  missing slash "must still reach the handler: Starlette's
+  `redirect_slashes` answers 307, which preserves method and body", and
+  asks for that to be asserted rather than assumed. It was asserted,
+  and the assertion was true and useless: what matters is not whether
+  the redirect is correct but whether the device follows it, and this
+  one does not. The rule this leaves behind is broader than one route:
+  a device-facing endpoint gets no redirects, because the firmware is
+  not a browser and its HTTP client is whatever upstream compiled.
+- **The legacy `ota_path` router is deliberately untouched here.** On
+  this branch it still registers only the slashed spelling, so
+  Starlette answers the other with the same unfollowed 307, and the
+  same failure is available to anyone whose portal strips the slash off
+  a legacy URL. It is not what this milestone added, the change to it
+  belongs where it is already being made, and duplicating it here would
+  only be a conflict for the branch that carries it. The unit lane
+  records the current behavior as characterization, named as such, so
+  the state is visible rather than implied.

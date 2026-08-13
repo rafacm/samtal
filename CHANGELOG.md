@@ -26,6 +26,19 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   labeled buttons, the white-screen quirk, and a portal-first
   onboarding section.
 
+### Fixed
+
+- **The short onboarding path answers with and without its trailing
+  slash** (#40): a captive portal saves the typed URL as it likes, and
+  the first factory board onboarded over this route saved it without
+  the slash, POSTed to `/x/<key>`, and refused the redirect the server
+  answered with, showing `code=307` on screen and restarting in a loop.
+  Both spellings are now served by the same handlers, so nothing a
+  device reaches depends on a redirect being followed. A wrong key
+  still answers the same 404 as any unserved path on either spelling.
+  Typing the URL with its trailing slash is still what the banner and
+  the docs print, but it is no longer load-bearing.
+
 ## 2026-08-12
 
 ### Changed
