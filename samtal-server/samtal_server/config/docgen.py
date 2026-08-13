@@ -38,6 +38,7 @@ from samtal_server.config.models import (
     AgentConfig,
     AgentDefaults,
     FillerConfig,
+    McpGrant,
     McpServerConfig,
     ProviderConfig,
 )
@@ -187,6 +188,33 @@ ENTITIES: tuple[Entity, ...] = (
             "out of the tools its siblings have. A `filler` section behaves the same "
             "way, replacing this one wholly rather than merging with it.",
         ),
+    ),
+    Entity(
+        name="mcp-grant",
+        title="MCP grant",
+        location="agent_defaults.mcp[], agents.<name>.mcp[]",
+        model=McpGrant,
+        purpose=(
+            "One entry of an `mcp` list, in the form that grants part of a server "
+            "rather than all of it. An entry written as a plain string is the whole "
+            "server; an entry written as this object is the tools it lists and "
+            "nothing else, so an agent can switch the lights without being able to "
+            "unlock the door. Tools are named by the published name without the "
+            "entry prefix (`turn_on_light` for `home__turn_on_light`), which is what "
+            "`samtal-server config status` prints and what the model calls."
+        ),
+        notes=(
+            "There is no deny list, deliberately. A denied set fails open: a server "
+            "that adds a tool would silently grant it to every agent that denied the "
+            "old ones, which is exactly wrong on the shared family device this "
+            "exists for.",
+            "A name that matches nothing cannot be refused when it is written, since "
+            "only a live connection knows what a server publishes. It is logged when "
+            "the server publishes its tools, and the status surface shows the allow "
+            "list beside the published list, so the mismatch is answerable in one "
+            "read.",
+        ),
+        fields_in_help=False,
     ),
     Entity(
         name="filler",

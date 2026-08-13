@@ -170,7 +170,7 @@ samtal-server config set agent <name> -f fragment.yaml
 | `asr` | `str \| null` | `null` | The speech recognizer, by the name it is defined under in providers.asr. An agent that leaves it unset inherits the agent_defaults entry. |
 | `tts` | `str \| null` | `null` | The voice, by the name it is defined under in providers.tts. An agent that leaves it unset inherits the agent_defaults entry. |
 | `vad` | `str \| null` | `null` | The voice activity detector, by the name it is defined under in providers.vad. An agent that leaves it unset inherits the agent_defaults entry. |
-| `mcp` | `list[str] \| null` | `null` | The MCP servers whose tools this layer offers the model, by entry name. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. |
+| `mcp` | `list[str \| McpGrant] \| null` | `null` | The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. |
 | `filler` | `FillerConfig \| null` | `null` | Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly rather than merging with it, so `filler: {enabled: false}` opts an agent out. |
 | `prompt` | `str` | `""` | The instruction this agent replies under, sent as the system prompt on every turn. State the reply language explicitly: a model otherwise picks one by its training bias. |
 
@@ -202,7 +202,7 @@ samtal-server config set agent-defaults -f fragment.yaml
 | `asr` | `str \| null` | `null` | The speech recognizer, by the name it is defined under in providers.asr. An agent that leaves it unset inherits the agent_defaults entry. |
 | `tts` | `str \| null` | `null` | The voice, by the name it is defined under in providers.tts. An agent that leaves it unset inherits the agent_defaults entry. |
 | `vad` | `str \| null` | `null` | The voice activity detector, by the name it is defined under in providers.vad. An agent that leaves it unset inherits the agent_defaults entry. |
-| `mcp` | `list[str] \| null` | `null` | The MCP servers whose tools this layer offers the model, by entry name. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. |
+| `mcp` | `list[str \| McpGrant] \| null` | `null` | The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have. |
 | `filler` | `FillerConfig \| null` | `null` | Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly rather than merging with it, so `filler: {enabled: false}` opts an agent out. |
 
 This entry is a singleton. There is one of it, writing it replaces it whole,
@@ -218,6 +218,32 @@ wholly rather than merging with it.
 Examples:
 
 - [`agent-defaults.yaml`](../../samtal-server/examples/agent-defaults.yaml)
+
+### MCP grant
+
+`agent_defaults.mcp[], agents.<name>.mcp[]`
+
+One entry of an `mcp` list, in the form that grants part of a server rather
+than all of it. An entry written as a plain string is the whole server; an
+entry written as this object is the tools it lists and nothing else, so an
+agent can switch the lights without being able to unlock the door. Tools are
+named by the published name without the entry prefix (`turn_on_light` for
+`home__turn_on_light`), which is what `samtal-server config status` prints and
+what the model calls.
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `server` | `str` | `required` | The MCP server this grant is about, by the name it is defined under in mcp_servers. |
+| `tools` | `list[str] \| null` | `null` | Which of that server's tools this layer may reach, by the published name without its entry prefix (turn_on_light for home__turn_on_light), which is the name `samtal-server config status` shows. Leaving it out grants the whole server, exactly as naming the server as a plain string does. A name that matches nothing the server published is not an error at write time, since only a live connection knows the list; it is logged when the server publishes and visible under grants on the status surface. |
+
+There is no deny list, deliberately. A denied set fails open: a server that
+adds a tool would silently grant it to every agent that denied the old ones,
+which is exactly wrong on the shared family device this exists for.
+
+A name that matches nothing cannot be refused when it is written, since only a
+live connection knows what a server publishes. It is logged when the server
+publishes its tools, and the status surface shows the allow list beside the
+published list, so the mismatch is answerable in one read.
 
 ### Filler
 

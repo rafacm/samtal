@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from samtal_server.config import Config, McpServerConfig, resolve_env_references
+from samtal_server.config.models import AgentConfig, mcp_entry_fragment
 
 
 def config_with(**overrides: object) -> Config:
@@ -100,6 +101,12 @@ def test_an_unset_env_reference_names_where_it_was_written(
         resolve_env_references("mcp_servers.ha.env", {"TOKEN": "$SAMTAL_TEST_MISSING"})
 
 
+def granted(config: Config, agent: str) -> list[tuple[str, list[str] | None]]:
+    """What an agent may reach, as pairs of server and allow list, which
+    is what a grant is."""
+    return [(grant.server, grant.tools) for grant in config.mcp_for_agent(agent)]
+
+
 def test_agents_inherit_the_default_mcp_list() -> None:
     config = config_with(
         mcp_servers={"ha": STDIO, "weather": HTTP},
@@ -107,9 +114,11 @@ def test_agents_inherit_the_default_mcp_list() -> None:
         | {"mcp": ["weather"]},
         agents={"assistant": {"prompt": "A"}, "home": {"prompt": "H", "mcp": ["ha", "weather"]}},
     )
-    assert config.mcp_for_agent("assistant") == ["weather"]
+    # A plain name is the whole server, which is a grant with no allow
+    # list, so nothing downstream has to know it was written short.
+    assert granted(config, "assistant") == [("weather", None)]
     # A list replaces rather than extends, like the stage fields.
-    assert config.mcp_for_agent("home") == ["ha", "weather"]
+    assert granted(config, "home") == [("ha", None), ("weather", None)]
     assert config.referenced_mcp_servers() == {"ha", "weather"}
 
 
@@ -119,8 +128,112 @@ def test_an_empty_list_opts_an_agent_out() -> None:
         agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock") | {"mcp": ["ha"]},
         agents={"assistant": {"prompt": "A"}, "quiet": {"prompt": "Q", "mcp": []}},
     )
-    assert config.mcp_for_agent("assistant") == ["ha"]
-    assert config.mcp_for_agent("quiet") == []
+    assert granted(config, "assistant") == [("ha", None)]
+    assert granted(config, "quiet") == []
+
+
+def test_an_object_entry_grants_the_tools_it_names() -> None:
+    config = config_with(
+        mcp_servers={"ha": STDIO},
+        agents={
+            "assistant": {"prompt": "A"},
+            "kids": {
+                "prompt": "K",
+                "mcp": [{"server": "ha", "tools": ["turn_on_light", "turn_off_light"]}],
+            },
+        },
+    )
+    assert granted(config, "kids") == [("ha", ["turn_on_light", "turn_off_light"])]
+    # An allow list narrows the tool list, never whether the connection
+    # is made: the server is referenced as much as a whole-server grant
+    # references it.
+    assert config.referenced_mcp_servers() == {"ha"}
+
+
+def test_an_object_entry_without_tools_is_the_whole_server() -> None:
+    config = config_with(
+        mcp_servers={"ha": STDIO},
+        agents={"assistant": {"prompt": "A", "mcp": [{"server": "ha"}]}},
+    )
+    assert granted(config, "assistant") == [("ha", None)]
+
+
+def test_both_entry_forms_live_in_one_list() -> None:
+    config = config_with(
+        mcp_servers={"ha": STDIO, "weather": HTTP},
+        agents={
+            "assistant": {
+                "prompt": "A",
+                "mcp": ["weather", {"server": "ha", "tools": ["turn_on_light"]}],
+            }
+        },
+    )
+    assert granted(config, "assistant") == [("weather", None), ("ha", ["turn_on_light"])]
+
+
+def test_an_empty_tools_list_is_refused_and_says_how_to_opt_out() -> None:
+    # "Granted, nothing allowed" is a confusing spelling of not granting,
+    # and the refusal names the plain one.
+    with pytest.raises(ValidationError, match=r"mcp: \[\]"):
+        config_with(
+            mcp_servers={"ha": STDIO},
+            agents={"assistant": {"prompt": "A", "mcp": [{"server": "ha", "tools": []}]}},
+        )
+
+
+def test_a_tool_named_twice_in_one_grant_is_refused() -> None:
+    with pytest.raises(ValidationError, match="tools names turn_on_light more than once"):
+        config_with(
+            mcp_servers={"ha": STDIO},
+            agents={
+                "assistant": {
+                    "prompt": "A",
+                    "mcp": [{"server": "ha", "tools": ["turn_on_light", "turn_on_light"]}],
+                }
+            },
+        )
+
+
+def test_a_blank_tool_name_is_refused() -> None:
+    with pytest.raises(ValidationError, match="tools.0"):
+        config_with(
+            mcp_servers={"ha": STDIO},
+            agents={"assistant": {"prompt": "A", "mcp": [{"server": "ha", "tools": ["  "]}]}},
+        )
+
+
+@pytest.mark.parametrize(
+    "entries",
+    [
+        ["ha", "ha"],
+        ["ha", {"server": "ha", "tools": ["turn_on_light"]}],
+        [{"server": "ha", "tools": ["a"]}, {"server": "ha", "tools": ["b"]}],
+    ],
+)
+def test_a_server_named_twice_in_one_list_is_refused(entries: list) -> None:
+    # Two entries for one server are two answers to a question that has
+    # one: which of its tools this layer reaches.
+    with pytest.raises(ValidationError, match="mcp names ha more than once"):
+        config_with(
+            mcp_servers={"ha": STDIO},
+            agents={"assistant": {"prompt": "A", "mcp": entries}},
+        )
+
+
+def test_agent_defaults_takes_the_object_form_and_an_agent_replaces_it() -> None:
+    config = config_with(
+        mcp_servers={"ha": STDIO, "weather": HTTP},
+        agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
+        | {"mcp": [{"server": "ha", "tools": ["turn_on_light"]}]},
+        agents={
+            "assistant": {"prompt": "A"},
+            "house": {"prompt": "H", "mcp": [{"server": "ha", "tools": ["unlock_door"]}]},
+        },
+    )
+    assert granted(config, "assistant") == [("ha", ["turn_on_light"])]
+    # Replace rather than merge, exactly as the string form does, so an
+    # agent's own list is all of its grants.
+    assert granted(config, "house") == [("ha", ["unlock_door"])]
 
 
 def test_an_unreferenced_server_is_not_connected() -> None:
@@ -128,6 +241,7 @@ def test_an_unreferenced_server_is_not_connected() -> None:
     assert config.referenced_mcp_servers() == set()
 
 
+@pytest.mark.parametrize("entry", ["nope", {"server": "nope", "tools": ["a"]}])
 @pytest.mark.parametrize(
     ("layer", "location"),
     [
@@ -136,16 +250,39 @@ def test_an_unreferenced_server_is_not_connected() -> None:
     ],
 )
 def test_an_unknown_server_reference_names_the_layer_that_holds_it(
-    layer: str, location: str
+    layer: str, location: str, entry: object
 ) -> None:
+    # Both entry forms go through the one reference check: an allow list
+    # on a server that does not exist is the same broken reference as a
+    # bare name that does not.
     stages = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
     overrides: dict[str, object] = (
-        {"agent_defaults": stages | {"mcp": ["nope"]}}
+        {"agent_defaults": stages | {"mcp": [entry]}}
         if layer == "agent_defaults"
-        else {"agents": {"assistant": {"prompt": "A", "mcp": ["nope"]}}}
+        else {"agents": {"assistant": {"prompt": "A", "mcp": [entry]}}}
     )
-    with pytest.raises(ValidationError, match=location):
+    with pytest.raises(ValidationError, match=location) as excinfo:
         config_with(**overrides)
+    assert 'unknown MCP server "nope"' in str(excinfo.value)
+
+
+def test_each_entry_form_serializes_as_itself() -> None:
+    """What a row holds and what a read shows. A string stays a string,
+    so every fragment written before the object form existed is written
+    back byte-identically; an object stays `{server, tools}` and grows
+    no key it was not given."""
+    entry = AgentConfig.model_validate(
+        {
+            "prompt": "A",
+            "mcp": ["weather", {"server": "ha", "tools": ["turn_on_light"]}, {"server": "x"}],
+        }
+    )
+    assert entry.mcp is not None
+    assert [mcp_entry_fragment(item) for item in entry.mcp] == [
+        "weather",
+        {"server": "ha", "tools": ["turn_on_light"]},
+        {"server": "x"},
+    ]
 
 
 def test_memory_is_optional_and_takes_a_directory(tmp_path: Path) -> None:

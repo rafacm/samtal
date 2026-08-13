@@ -558,7 +558,8 @@ class McpSlice:
         return cls(
             entries=tuple(sorted(config.mcp_servers)),
             grants={
-                agent: tuple(config.mcp_for_agent(agent)) for agent in sorted(config.agents)
+                agent: tuple(grant.server for grant in config.mcp_for_agent(agent))
+                for agent in sorted(config.agents)
             },
         )
 

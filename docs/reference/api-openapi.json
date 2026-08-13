@@ -2658,6 +2658,40 @@
         "title": "FillerConfig",
         "type": "object"
       },
+      "McpGrant": {
+        "additionalProperties": false,
+        "description": "One `mcp` list entry in its object form: a server, and which of\nits tools the layer may reach.\n\nA second spelling of the same list entry rather than a different\nthing. A plain string names the whole server, and this names part of\none, so an agent that should switch the lights but not unlock the\ndoor does not need a second server to say it in.\n\nTools are named by the published name without its entry prefix\n(`turn_on_light` grants `home__turn_on_light`), matched exactly. That\nidentifier is this application's own: it has been through the\npublishing rule, it is what `samtal-server config status` shows and\nwhat the model calls, so an operator writes down the name they read.\nWhat a server listed before the rule got to it never appears on a\nsamtal surface, and cannot be granted by.",
+        "properties": {
+          "server": {
+            "description": "The MCP server this grant is about, by the name it is defined under in mcp_servers.",
+            "minLength": 1,
+            "title": "Server",
+            "type": "string"
+          },
+          "tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Which of that server's tools this layer may reach, by the published name without its entry prefix (turn_on_light for home__turn_on_light), which is the name `samtal-server config status` shows. Leaving it out grants the whole server, exactly as naming the server as a plain string does. A name that matches nothing the server published is not an error at write time, since only a live connection knows the list; it is logged when the server publishes and visible under grants on the status surface.",
+            "title": "Tools"
+          }
+        },
+        "required": [
+          "server"
+        ],
+        "title": "McpGrant",
+        "type": "object"
+      },
       "AgentConfig": {
         "additionalProperties": false,
         "description": "One agent: a prompt, plus whichever stages it overrides.",
@@ -2722,8 +2756,15 @@
             "anyOf": [
               {
                 "items": {
-                  "minLength": 1,
-                  "type": "string"
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/components/schemas/McpGrant"
+                    }
+                  ]
                 },
                 "type": "array"
               },
@@ -2732,7 +2773,7 @@
               }
             ],
             "default": null,
-            "description": "The MCP servers whose tools this layer offers the model, by entry name. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have.",
+            "description": "The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have.",
             "title": "Mcp"
           },
           "filler": {
@@ -2821,8 +2862,15 @@
             "anyOf": [
               {
                 "items": {
-                  "minLength": 1,
-                  "type": "string"
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/components/schemas/McpGrant"
+                    }
+                  ]
                 },
                 "type": "array"
               },
@@ -2831,7 +2879,7 @@
               }
             ],
             "default": null,
-            "description": "The MCP servers whose tools this layer offers the model, by entry name. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have.",
+            "description": "The MCP servers whose tools this layer offers the model. An entry is either the entry name on its own, which is the whole server, or an object naming the server and the tools of it this layer may reach ({server: home, tools: [turn_on_light]}), where a tool is named by its published name without the entry prefix. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the tools its siblings have.",
             "title": "Mcp"
           },
           "filler": {

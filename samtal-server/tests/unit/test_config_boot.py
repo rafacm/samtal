@@ -62,7 +62,9 @@ def test_the_re_read_answers_with_what_the_database_holds_now(tmp_path: Path) ->
     reloaded = reload_domain_config(running)
 
     assert set(reloaded.config.mcp_servers) == {"weather"}
-    assert reloaded.config.mcp_for_agent("sam") == ["weather"]
+    assert [grant.server for grant in reloaded.config.mcp_for_agent("sam")] == [
+        "weather"
+    ]
     # The configuration the caller is holding is untouched: a re-read
     # answers with a new one rather than mutating the running snapshot.
     assert running.mcp_servers == {}
