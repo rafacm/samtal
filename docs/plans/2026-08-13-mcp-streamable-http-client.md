@@ -324,8 +324,9 @@ resolution once the amendment addressing it lands.
   `>=1.24,<2`; the
   per-test `DeprecationWarning` filter and its comment leave
   `test_secret_resolution.py`; `tests/unit/test_tools_mcp_http.py`
-  arrives with the in-process uvicorn fixture and the three
-  transport cases; CHANGELOG entry under 2026-08-13; the
+  arrives with the per-test uvicorn fixture, the three transport
+  cases, and the three policy-and-lifecycle cases; CHANGELOG entry
+  under 2026-08-13; the
   implementation doc section written in the change that ticks this
   box. Accept: lint and both lanes green; `uv lock --check`
   passes; the deprecated name absent from first-party code; no
