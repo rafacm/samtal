@@ -109,6 +109,16 @@ API_URL_ENV = "SAMTAL_API_URL"
 CONNECT_TIMEOUT_S = 5.0
 READ_TIMEOUT_S = 30.0
 
+# What `reload` waits instead, because it is the one request whose
+# server-side work is not a database call. The server's envelope is one
+# MCP connect timeout plus small change: stops run concurrently under a
+# short bound and starts run concurrently under the connect timeout, so
+# a slow server is reported down rather than waited for. This is
+# comfortably above that, because a client that gave up on a reload the
+# server then applied would recreate the exact ambiguity the whole
+# feature exists to remove: nobody would know what is running.
+RELOAD_READ_TIMEOUT_S = 60.0
+
 # Printed on stderr by every --local invocation, reads included. There
 # is no reliable way to tell whether a server is running against the same
 # file (a pid file lies after a crash and a lock probe races the answer),
@@ -159,6 +169,11 @@ STATUS_FIELDS = frozenset({"state", "reason", "since", "tools", "grants"})
 # rendering that printed whatever arrived there would be printing a word
 # chosen by whatever answered.
 STATUS_STATES = frozenset({"connected", "down", "unused"})
+
+# What a reload did, in the order a person reads it: what arrived, what
+# was made again, what went, and what nothing happened to. Also what a
+# body has to carry to be read as a reload's answer at all.
+RELOAD_OUTCOMES = ("started", "restarted", "stopped", "unchanged")
 
 NOTHING_CONFIGURED = (
     "this server has no MCP servers configured. An entry is written with "
@@ -401,6 +416,28 @@ def _status(args: argparse.Namespace) -> None:
     print(_status_listing(_call(args, "GET", _path("runtime", "mcp-servers"))), end="")
 
 
+def _reload(args: argparse.Namespace) -> None:
+    """Apply the stored MCP servers and grants to the running server.
+
+    The one command that changes what a server is doing without writing
+    anything, and it prints both halves of the answer: what the reload
+    did, and what every configured entry is doing now that it has been
+    done. No --local, for the reason `status` has none, and with more
+    force: there is nothing to reload when there is no server.
+    """
+    print(
+        _reload_listing(
+            _call(
+                args,
+                "POST",
+                _path("runtime", "mcp-servers", "reload"),
+                read_timeout_s=RELOAD_READ_TIMEOUT_S,
+            )
+        ),
+        end="",
+    )
+
+
 def _ota_url(args: argparse.Namespace) -> None:
     """The URL to type into a board's captive portal.
 
@@ -603,12 +640,26 @@ _NOTHING = object()
 
 
 def _call(
-    args: argparse.Namespace, method: str, path: str, body: object = _NOTHING
+    args: argparse.Namespace,
+    method: str,
+    path: str,
+    body: object = _NOTHING,
+    read_timeout_s: float = READ_TIMEOUT_S,
 ) -> object:
-    """One request, and its answer as this client understands it."""
+    """One request, and its answer as this client understands it.
+
+    `read_timeout_s` is how long this one endpoint may take to answer,
+    which for all but the reload is the same bound the client is built
+    with. Set on the client rather than passed with the request: a
+    per-request timeout is what httpx would want, and Starlette's
+    TestClient refuses one outright, which would take the seam the whole
+    acceptance suite runs through with it. Each call builds a client,
+    makes one request and closes it, so the two are the same thing here.
+    """
     file_config = load_file_config(args.config)
     base_url = _base_url(args, file_config)
     client = build_client(base_url, _token(file_config))
+    client.timeout = httpx.Timeout(read_timeout_s, connect=CONNECT_TIMEOUT_S)
     try:
         response = _sent(client, method, path, body, base_url)
     finally:
@@ -1293,6 +1344,31 @@ def _names(values: Iterable[str]) -> str:
     return ", ".join(_printable(name) for name in values)
 
 
+def _reload_listing(answer: object) -> str:
+    """What the reload did, and then what is running.
+
+    The outcomes first, because they are the answer to the question that
+    was asked, and the status underneath because it is the answer to the
+    one that follows: an entry that started is not thereby connected,
+    and the block below it says which.
+    """
+    applied = _reload_outcome(answer)
+    lines = [
+        f"{outcome}: " + (_names(applied[outcome]) or "(none)") for outcome in RELOAD_OUTCOMES
+    ]
+    return "\n".join(lines) + "\n\n" + _status_listing(applied["servers"])
+
+
+def _reload_outcome(answer: object) -> Mapping[str, object]:
+    """The reload's answer, as the API returns it: the four outcomes and
+    the status document."""
+    if isinstance(answer, Mapping) and all(
+        isinstance(answer.get(outcome), list) for outcome in RELOAD_OUTCOMES
+    ):
+        return answer
+    raise ConfigError(f"the configuration API answered the reload with {UNRECOGNIZED_ANSWER}")
+
+
 def _status_entries(answer: object) -> Mapping[str, Mapping[str, object]]:
     """The status document, as the API returns it: entry name to what
     that entry is doing, checked all the way down.
@@ -1719,6 +1795,20 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     running.set_defaults(run=_status)
+
+    # The one command that changes what the server is doing rather than
+    # what is stored, which is why it is a verb of its own rather than a
+    # flag on a write: an operator writes several entries and grant
+    # lists and applies them once.
+    applying = commands.add_parser(
+        "reload",
+        parents=[common],
+        help=(
+            "apply the stored MCP servers and the agents' grant lists to the running "
+            "server, without a restart and without dropping a conversation"
+        ),
+    )
+    applying.set_defaults(run=_reload)
 
     # The two onboarding commands take --config and nothing else. One
     # contacts nothing at all and the other reaches a device-facing
