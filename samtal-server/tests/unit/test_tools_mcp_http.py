@@ -21,6 +21,7 @@ import logging
 import socket
 import threading
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
@@ -76,7 +77,20 @@ async def server_url() -> AsyncIterator[str]:
     server = FastMCP("samtal-test-http-tools")
     server.add_tool(secret_word)
     server.add_tool(add)
+    async with serving(server) as url:
+        yield url
 
+
+@asynccontextmanager
+async def serving(server: FastMCP) -> AsyncIterator[str]:
+    """One `FastMCP` instance served over HTTP for the length of a
+    block, as its URL.
+
+    Separate from the fixture above so a test that needs a server
+    publishing something else of its own gets the awkward parts of this
+    (the startup race, the port, and the process-wide SSE flag below)
+    rather than a second copy of them.
+    """
     config = uvicorn.Config(
         server.streamable_http_app(),
         host="127.0.0.1",
