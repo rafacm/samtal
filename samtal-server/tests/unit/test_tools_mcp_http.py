@@ -167,10 +167,13 @@ async def test_a_tool_call_answers_with_its_text(server_url: str) -> None:
         await manager.stop()
 
 
-async def test_a_url_nobody_answers_does_not_fail_the_start() -> None:
+async def test_a_url_nobody_answers_does_not_fail_the_start(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     # The stdio suite's dead-command case, over HTTP: liveness is
     # forgiven, so the manager logs, publishes nothing, and stays down.
-    manager = await running(http_entry(unused_url()))
+    with caplog.at_level(logging.WARNING, logger=MANAGER_LOGGER):
+        manager = await running(http_entry(unused_url()))
     try:
         assert not manager.up
         assert manager.tools() == []
@@ -178,6 +181,18 @@ async def test_a_url_nobody_answers_does_not_fail_the_start() -> None:
             await manager.call("tools__secret_word", {})
     finally:
         await manager.stop()
+
+    # The logging half of "logs and stays down", which the state
+    # assertions above cannot see. Pinned to this server's own logger and
+    # to the level an operator watches, and to the entry name being in
+    # the line; the wording around it stays free to change.
+    (announced,) = [
+        record
+        for record in caplog.records
+        if record.name == MANAGER_LOGGER and record.levelno == logging.WARNING
+    ]
+    assert "tools" in announced.getMessage()
+    assert announced.exc_info is None
 
 
 async def test_a_redirecting_server_is_followed_to_its_tools(server_url: str) -> None:
