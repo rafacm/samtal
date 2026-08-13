@@ -1329,19 +1329,36 @@ def _status_listing(answer: object) -> str:
             + (f" ({_printable(str(reason))})" if reason is not None else "")
         )
         lines.append("  tools: " + (_names(entry["tools"]) or "(none)"))
-        lines.append("  agents: " + (_names(sorted(entry["grants"])) or "(none)"))
+        lines.append("  agents: " + (_granted(entry["grants"]) or "(none)"))
     return "\n".join(lines) + "\n"
 
 
-def _names(values: Iterable[str]) -> str:
-    """The names in one field of a validated entry, printed.
+def _granted(grants: object) -> str:
+    """Which agents may reach the server, and how much of it: a bare
+    name is the whole server, and a name followed by tools in
+    parentheses is the allow list that agent was given. Sorted by agent
+    name, so two reads of an unchanged world print the same block."""
+    return ", ".join(
+        f"{_printable(agent)} ({allowed})" if (allowed := _names(tools)) else _printable(agent)
+        for agent, tools in sorted(_mapping(grants).items())
+    )
 
-    Bounded and made printable one by one even though the shape check
-    below has established they are strings: what that check knows about
-    them is their type, not their length and not whether every
-    character in them can be written to a terminal.
-    """
-    return ", ".join(_printable(name) for name in values)
+
+def _names(values: object) -> str:
+    """A list from a response, printed. Bounded and made printable one
+    by one even though the shape check below has established they are
+    strings: what that check knows about them is their type, not their
+    length and not whether every character in them can be written to a
+    terminal."""
+    return ", ".join(_printable(str(value)) for value in _sequence(values))
+
+
+def _sequence(value: object) -> Sequence[object]:
+    return value if isinstance(value, Sequence) and not isinstance(value, str) else ()
+
+
+def _mapping(value: object) -> Mapping[str, object]:
+    return value if isinstance(value, Mapping) else {}
 
 
 def _reload_listing(answer: object) -> str:
