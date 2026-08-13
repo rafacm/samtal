@@ -210,13 +210,6 @@ async def test_the_manager_keeps_no_decrypted_credential() -> None:
         await manager.stop()
 
 
-# The SDK's streamablehttp_client is deprecated in the pinned mcp
-# version, and this lane turns warnings into errors, which would fail
-# the connection before it is made rather than because of anything under
-# test. The server still calls it (switching is its own change, on the
-# server's schedule); the filter is here so this test measures what it
-# says it measures.
-@pytest.mark.filterwarnings("ignore::DeprecationWarning")
 async def test_a_stored_header_reaches_a_real_request(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
