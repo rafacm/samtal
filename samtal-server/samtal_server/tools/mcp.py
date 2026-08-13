@@ -132,11 +132,20 @@ class McpServerManager:
     reconnection."""
 
     def __init__(
-        self, name: str, config: McpServerConfig, secrets: SecretStore | None = None
+        self,
+        name: str,
+        config: McpServerConfig,
+        secrets: SecretStore | None = None,
+        expected: frozenset[str] = frozenset(),
     ) -> None:
         self._name = name
         self._config = config
         self._secrets = secrets
+        # What some agent's allow list names of this entry, which is
+        # what this server's published tools are checked against. Held
+        # here rather than looked up, because the check happens whenever
+        # this connects and a background reconnect has nobody to ask.
+        self._expected = expected
         # Resolved once here and thrown away. Resolving at construction
         # is what makes an unset $VAR or a token that will not decrypt
         # fail the boot rather than the first conversation that needs
@@ -211,6 +220,44 @@ class McpServerManager:
         dead server is not a boot failure."""
         self._begin()
         await self._settled.wait()
+
+    def expect(self, allowed: frozenset[str]) -> None:
+        """The tool names the agents' grants name of this entry now.
+
+        Set by a reload as well as at construction, including on a
+        manager it left connected: an operator who adds a grant to a
+        server that is already up has published nothing new, and the
+        mismatch would otherwise go unmentioned until the next connect.
+        """
+        self._expected = allowed
+        if self.up:
+            self._warn_about_unpublished()
+
+    def _warn_about_unpublished(self) -> None:
+        """Say which allowed tools this server did not publish.
+
+        An allow list cannot be checked when it is written: only a live
+        connection knows what a server offers. It is checked against the
+        published mapping and never against the raw listing, because a
+        tool this server listed and publication dropped (an unusable
+        name, a collision, too long once prefixed) is exactly as
+        unreachable as one it never listed, and comparing against the
+        listing would stay quiet about it.
+
+        Only names the operator wrote are printed. What the server chose
+        to call things is its own bytes, and this line is not where they
+        start crossing.
+        """
+        published = {names.unqualified(self._name, tool.name) for tool in self._published.tools}
+        missing = sorted(self._expected - published)
+        if missing:
+            logger.warning(
+                "mcp server %s: %s allowed by a grant but not published by this server, "
+                "so no agent can reach %s",
+                self._name,
+                ", ".join(missing),
+                "it" if len(missing) == 1 else "them",
+            )
 
     def same_as(self, other: "McpServerManager") -> bool:
         """Whether these two were built from the same world: the same
@@ -328,6 +375,7 @@ class McpServerManager:
                     len(self._published.tools),
                     ", ".join(tool.name for tool in self._published.tools) or "none",
                 )
+                self._warn_about_unpublished()
                 self._settled.set()
                 await self._stop.wait()
         except asyncio.CancelledError:
@@ -464,7 +512,9 @@ def _result_text(result: mcp.types.CallToolResult) -> str:
     return "\n".join(parts)
 
 
-def _managers_for(config: Config, secrets: SecretStore | None) -> dict[str, McpServerManager]:
+def _managers_for(
+    config: Config, secrets: SecretStore | None, configured: "McpSlice"
+) -> dict[str, McpServerManager]:
     """One manager per entry some agent references, built and not
     started.
 
@@ -481,7 +531,9 @@ def _managers_for(config: Config, secrets: SecretStore | None) -> dict[str, McpS
         if config.server.local_only:
             _check_egress(name, entry)
         try:
-            managers[name] = McpServerManager(name, entry, secrets)
+            managers[name] = McpServerManager(
+                name, entry, secrets, configured.allowed_names(name)
+            )
         except ValueError as exc:
             raise McpConfigError(f"mcp_servers.{name}: {exc}") from exc
     return managers
@@ -624,6 +676,21 @@ class McpSlice:
             return grant.tools is None or names.unqualified(entry, published) in grant.tools
         return False
 
+    def allowed_names(self, entry: str) -> frozenset[str]:
+        """Every tool name some grant allows of one entry, unprefixed.
+
+        What a publication is checked against, so an allow list naming
+        something the server does not offer is visible. A whole-server
+        grant contributes nothing: it names no tool, so it can name none
+        that failed to arrive."""
+        return frozenset(
+            name
+            for grants in self.grants.values()
+            for grant in grants
+            if grant.server == entry and grant.tools is not None
+            for name in grant.tools
+        )
+
 
 @dataclass(frozen=True)
 class McpReload:
@@ -687,7 +754,8 @@ class McpServers:
 
         `secrets` is the store a snapshot was loaded with, or None for a
         deployment whose credentials are all environment references."""
-        return cls(_managers_for(config, secrets), McpSlice.of(config))
+        configured = McpSlice.of(config)
+        return cls(_managers_for(config, secrets, configured), configured)
 
     def __len__(self) -> int:
         return len(self._managers)
@@ -794,9 +862,13 @@ class McpServers:
         applying: asyncio.Task[McpReload] | None = None
         try:
             config, secrets = await self._read(read)
-            candidates = self._prepared(config, secrets)
+            # One slice, composed before preparation and applied after
+            # it, so the world the candidates were built for is the
+            # world that gets installed.
+            configured = McpSlice.of(config)
+            candidates = self._prepared(config, secrets, configured)
             applying = asyncio.create_task(
-                self._apply(config, candidates), name="mcp-reload"
+                self._apply(configured, candidates), name="mcp-reload"
             )
             self._applying = applying
             return await asyncio.shield(applying)
@@ -852,7 +924,7 @@ class McpServers:
         raise ConfigError(problem)
 
     def _prepared(
-        self, config: Config, secrets: SecretStore | None
+        self, config: Config, secrets: SecretStore | None, configured: McpSlice
     ) -> dict[str, McpServerManager]:
         """Every manager the new configuration needs, built while
         nothing running has been touched.
@@ -866,13 +938,13 @@ class McpServers:
         """
         problem: str | None = None
         try:
-            return _managers_for(config, secrets)
+            return _managers_for(config, secrets, configured)
         except (McpConfigError, ConfigError) as exc:
             problem = f"{RELOAD_REFUSED} {exc}"
         raise ConfigError(problem)
 
     async def _apply(
-        self, config: Config, candidates: dict[str, McpServerManager]
+        self, configured: McpSlice, candidates: dict[str, McpServerManager]
     ) -> McpReload:
         """The second phase: the diff, the lifecycles, and the swap.
 
@@ -891,6 +963,11 @@ class McpServers:
         for name, candidate in candidates.items():
             running = self._managers.get(name)
             if running is not None and running.same_as(candidate):
+                # The connection stands; only what the grants name of it
+                # may have moved, which the kept manager is told so a
+                # newly allowed name that never published is still said
+                # out loud.
+                running.expect(configured.allowed_names(name))
                 keep[name] = running
                 unchanged.append(name)
                 continue
@@ -913,7 +990,7 @@ class McpServers:
         # names. Assigned rather than mutated, and with no await between
         # the two, so no reply can be built on half of one world.
         self._managers = keep
-        self._configured = McpSlice.of(config)
+        self._configured = configured
         self._since = time.time()
         logger.info(
             "mcp servers reloaded: %d started, %d restarted, %d stopped, %d unchanged",

@@ -15,6 +15,7 @@ preparation can fail.
 """
 
 import asyncio
+import logging
 import sys
 import threading
 from pathlib import Path
@@ -519,6 +520,34 @@ async def test_a_narrowed_allow_list_applies_without_touching_the_connection() -
         ]
         with pytest.raises(McpToolNotGranted):
             await servers.call("tools__add", {"first": 1, "second": 2}, "assistant")
+    finally:
+        await servers.stop_all()
+
+
+async def test_a_grant_added_to_a_connected_server_is_checked_on_the_reload(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The entry is unchanged, so nothing reconnects and nothing
+    publishes again; the allow list arrived all the same, and a name in
+    it that no tool answers to is said out loud when it does rather than
+    at the next connect, which may be days away."""
+    before = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    after = config_with(
+        {"tools": entry_data()},
+        {"assistant": [{"server": "tools", "tools": ["no_such_tool"]}]},
+    )
+    servers = await started(before)
+    try:
+        with caplog.at_level(logging.WARNING, logger="samtal_server.tools.mcp"):
+            applied = await servers.reload(reading(after))
+
+        assert applied.unchanged == ("tools",)
+        (warned,) = [
+            record.getMessage()
+            for record in caplog.records
+            if "not published" in record.getMessage()
+        ]
+        assert "no_such_tool" in warned
     finally:
         await servers.stop_all()
 
