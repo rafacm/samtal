@@ -832,7 +832,8 @@ per repository convention.
   inject-the-segment advice with the derived key story; CHANGELOG.
   Accept: the unit M4 coverage; a reader can onboard a device from
   the docs alone; lanes green.
-- [ ] **M5: the hardware checkpoint**: on the factory-firmware
+- [x] **[M5: the hardware checkpoint](2026-08-12-device-onboarding-implementation.md#milestone-5-the-hardware-checkpoint)**
+  (no PR; run 2026-08-12/13, recorded directly on main): on the factory-firmware
   AMOLED-2.16 board, given only the short URL typed into the
   Advanced tab: the code is announced, `config add-device` binds
   it, and the device connects with no power cycle; the observed

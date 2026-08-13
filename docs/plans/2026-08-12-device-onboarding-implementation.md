@@ -1370,3 +1370,79 @@ given, and the same URL typed without its trailing slash still reaches
 the endpoint, which is the one redirect that is still followed. The
 `uvx` invocation is not verified: it needs the network, and it is
 documented with the caveats above rather than claimed to have been run.
+
+## Milestone 5: the hardware checkpoint
+
+Run 2026-08-12/13 by the driving session with the issue's author at
+the desk; everything below is that session's observed record. No PR:
+the checkpoint's code consequence (the no-redirect rule) landed
+through the still-open stack, and this section with its plan tick
+lands directly on main as documentation.
+
+The server under test was built from the milestone 4 tip and run on
+the LAN with a throwaway secret pair, an empty domain, and then a
+seeded mock agent; both boards therefore exercised the real endpoint
+chain (short path, activation, claim, live bindings) with no cloud
+and no reflash.
+
+**Stock Touch-LCD-1.54, firmware 2.4.0 (MAC 28:84:85:91:c2:8c).**
+Its captive portal has no Custom OTA URL field, which corrected the
+notes' earlier claim: the field is vendor-build-dependent, not a
+version threshold (`docs/xiaozhi-notes.md`, e000264). Onboarded over
+USB-written NVS (ssid, password, `ota_url`). The board checked in
+over the short path, received code 644354, and showed it; the
+server's pending listing named the same code beside the board model
+and firmware version from the OTA POST. `config add-device 644354
+assistant` answered with the restart notice, correctly: the agent
+had been written after boot, which is the fresh-deployment path the
+plan review's finding 4 forced into the design. After the server
+restart the poll flipped 202 to 200, the next OTA check carried a
+real token, and the board reached its idle screen with no
+device-side action.
+
+**Factory AMOLED-2.16, Waveshare launcher image, firmware 2.2.4
+(MAC 28:84:85:90:73:28).** The assistant on this image is the
+AIChats app inside an app launcher; its portal has the Custom OTA
+URL field. The board was factory-reset (NVS erased with a backup
+retained) and onboarded through the out-of-box portal alone. The
+first pass saved the URL without its trailing slash and the board
+displayed `code=307` in a restart loop, which is the checkpoint's
+load-bearing discovery: the firmware's OTA client does not follow
+redirects, not even a method-preserving 307. The fix (every
+device-facing route serves both slash spellings directly,
+`ota.spellings`) is recorded in the hardware checkpoint round above
+and landed across the stack. With the corrected URL the board
+received code 723992; `config add-device 723992 assistant` answered
+with the no-restart notice (the milestone 2 live bindings, on
+hardware), and the flip took 36 seconds from code-on-screen to
+activated, with no server restart, no power cycle, and no button
+press. Poll cadence matched the notes' 3-second bursts, and the
+activation message rendered host over code exactly as upstream
+renders it.
+
+**Resolved rather than verified.** The portal-retype recovery test
+the plan carried as the milestone 1 merge gate is not demonstrable
+on current field hardware: the board with a reachable portal lacks
+the field, and the board with the field offers no way back into its
+portal once provisioned. The gate was resolved by recording exactly
+that in `docs/xiaozhi-notes.md` (e000264) before the merge, with
+NVS-over-USB kept as the recovery story, the outcome the issue
+pre-authorized.
+
+**Deviations from the milestone as planned.** The checkpoint ran
+against a LAN server built from the branch rather than a deployed
+image, deliberately, so the ceremony was validated before anything
+merged. The stock-board item ran on the Touch-LCD as an NVS-path
+ceremony rather than the legacy-path regression the plan sketched,
+because the board turned out to carry no samtal `ota_url` at all.
+
+**Left open, collected per the unverified-claims convention.** The
+`Activation-Version` header the boards sent was not captured; the
+ceremony has not yet been re-run against a build carrying the
+no-redirect fix (both boards onboarded before it landed, so the
+slashed path is proven and the slashless fix is proven by tests
+only); the legacy `ota_path` route has no hardware exercise from
+this run; `doctor`'s TLS-mismatch verdict has met only canned
+responses; and the boards remain bound to the scratch server's mock
+agent, so the first onboarding against the real deployment is still
+ahead.
