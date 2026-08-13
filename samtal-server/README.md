@@ -647,6 +647,18 @@ what went wrong in its own voice and the user's language. The device
 hears silence while a tool runs, bounded by `tool_timeout_s` (15 seconds
 by default).
 
+**What a tool answers with is speakable text.** The output of this
+pipeline is a voice and its history is text throughout, so text is what
+a result contributes. A server that answers with an image, or with
+anything else the specification allows, has that part rendered as a
+named placeholder (`[unsupported image content]`) rather than dropped:
+the model can then say what it was given and that it cannot use it,
+which is better than a reply that reads as though the tool was ignored.
+The condition for revisiting this is the display: when the device path
+can render more than speech, a result can start carrying structured
+content to the board, and that work belongs beside the display protocol
+rather than inside the tool loop.
+
 ### What the MCP servers are doing
 
 The configuration says what should be running; `samtal-server config
