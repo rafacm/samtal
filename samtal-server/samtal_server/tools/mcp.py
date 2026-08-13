@@ -37,7 +37,12 @@ from mcp.client.stdio import get_default_environment, stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
 from samtal_server.config import Config, McpServerConfig
-from samtal_server.config.loader import ConfigError, ReloadInProgressError
+from samtal_server.config.loader import (
+    ConfigError,
+    DatabaseBusyError,
+    ReloadInProgressError,
+    StorageError,
+)
 from samtal_server.config.secrets import SecretStore, resolve_mcp_values
 from samtal_server.providers import ToolDef
 from samtal_server.tools import names
@@ -768,13 +773,33 @@ class McpServers:
     async def _read(
         read: Callable[[], tuple[Config, SecretStore | None]],
     ) -> tuple[Config, SecretStore | None]:
-        """The stored configuration, read off this loop.
+        """The stored configuration, read off this loop, refusing in the
+        words the other half of the preparation refuses in.
 
         In a worker thread because it takes the database's write lock
         and waits out its busy timeout, and this coroutine is on the
         loop every live conversation is on.
+
+        A stored snapshot that will not compose is as much a reload that
+        changed nothing as a candidate that would not build, and an
+        operator reading the two sentences should not have to work out
+        which half of the preparation they are in. The two exceptions
+        keep their own type because their type is the answer: a busy
+        database is retryable and answers 409, unreadable stored state
+        is not the caller's fault and answers 500.
+
+        Recorded and re-raised outside the handler, the rule this
+        codebase settled on: raised inside one, the refusal would carry
+        whatever the read was holding when it failed.
         """
-        return await asyncio.to_thread(read)
+        problem: str | None = None
+        try:
+            return await asyncio.to_thread(read)
+        except (DatabaseBusyError, StorageError):
+            raise
+        except ConfigError as exc:
+            problem = f"{RELOAD_REFUSED} {exc}"
+        raise ConfigError(problem)
 
     def _prepared(
         self, config: Config, secrets: SecretStore | None
