@@ -395,6 +395,40 @@ def test_a_server_without_a_token_refuses_to_boot(monkeypatch: pytest.MonkeyPatc
     assert API_SECRET_ENV in str(caught.value)
 
 
+def test_the_missing_token_is_what_a_boot_refuses_over_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A deployment can arrive with more than one thing wrong, and what
+    it is told about first is what its operator goes and fixes. The
+    admin surface's own credential comes before anything the
+    configuration references, so a forgotten variable is not reported as
+    somebody else's problem."""
+    monkeypatch.delenv(API_SECRET_ENV, raising=False)
+    config = Config(
+        providers={
+            stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")
+        },
+        mcp_servers={
+            "tools": {
+                "transport": "stdio",
+                "command": "/bin/true",
+                # A reference nothing set, which is the other refusal
+                # this boot has waiting for it.
+                "env": {"API_TOKEN": "$SAMTAL_TEST_UNSET_MCP_TOKEN"},
+            }
+        },
+        agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
+        agents={"assistant": {"prompt": "A", "mcp": ["tools"]}},
+        default_agent="assistant",
+    )
+    monkeypatch.delenv("SAMTAL_TEST_UNSET_MCP_TOKEN", raising=False)
+
+    with pytest.raises(ConfigError) as caught:
+        create_app(config)
+
+    assert API_SECRET_ENV in str(caught.value)
+
+
 # The token
 
 
