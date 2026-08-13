@@ -371,3 +371,15 @@ def test_a_device_id_that_is_not_a_mac_still_says_what_is_expected() -> None:
 
     assert "six colon-separated hex pairs" in refused.json()["error"]
     assert "aa:bb:cc:dd:ee:ff" in refused.json()["error"]
+
+
+def test_the_root_ota_path_has_only_one_spelling() -> None:
+    """An `ota_path` of "/" is a path the validator permits and whose
+    slashless spelling is the empty string, which is not a route. The
+    endpoint still answers, on the one spelling it has."""
+    client = client_for(Config(server={"ota_path": "/"}))
+    headers = {"Device-Id": DEVICE_MAC, "Client-Id": DEVICE_UUID}
+
+    assert client.post("/", json=SYSTEM_INFO, headers=headers).status_code == 200
+    assert client.post("/activate", json={}, headers=headers).status_code == 202
+    assert client.post("/activate/", json={}, headers=headers).status_code == 202

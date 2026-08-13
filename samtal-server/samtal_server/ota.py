@@ -160,33 +160,44 @@ def build_router(path: str = OTA_PATH) -> APIRouter:
     module-level router would have been decided before the config was
     read."""
     router = APIRouter()
-    router.post(path)(check_version)
-    router.get(path)(describe)
+    for spelling in spellings(path):
+        router.post(spelling)(check_version)
+        router.get(spelling)(describe)
     # `path` always ends in a slash (the validator says so), and the
     # firmware appends the segment to whatever it holds, so this is the
     # URL a waiting device polls. The short onboarding router registers
-    # the same three handlers by reference.
-    router.post(f"{path}{ACTIVATE_SEGMENT}")(activate)
-    # Both spellings of both, dispatched rather than redirected.
+    # the same three handlers by reference, through the same helper.
     #
-    # Starlette answers a trailing-slash miss with a 307 whose Location
-    # is the corrected URL, and on this router the corrected URL is the
-    # configured `ota_path`, which is this deployment's secret. So
-    # `<ota_path minus its slash>` and `<ota_path>activate/` would each
-    # hand the whole segment back in a header, to a request that had
-    # only guessed at it. The short onboarding path answers such a miss
-    # with a redirect of its own because its key is deliberately
-    # printable; this one has nothing it may put in a Location at all,
-    # so it answers with the reply instead. A device gains a round trip
-    # either way.
-    slashless = path.rstrip("/")
-    if slashless:
-        # Empty only for an `ota_path` of "/", which the validator
-        # permits and which needs no second spelling.
-        router.post(slashless)(check_version)
-        router.get(slashless)(describe)
-    router.post(f"{path}{ACTIVATE_SEGMENT}/")(activate)
+    # This router has a second reason not to redirect, beside the one
+    # the helper records: the corrected URL it would put in a Location
+    # is the configured `ota_path`, which is this deployment's secret,
+    # so a request that had merely guessed at the segment would have
+    # been handed the whole of it in a header.
+    for spelling in spellings(f"{path}{ACTIVATE_SEGMENT}/"):
+        router.post(spelling)(activate)
     return router
+
+
+def spellings(path: str) -> tuple[str, ...]:
+    """Every spelling of one device-facing path: as written, and without
+    its trailing slash, both served by the same handler.
+
+    Not a redirect between the two, which is what this was until a
+    factory board met it (2026-08-13): the captive portal saved the
+    typed URL without its trailing slash, the device POSTed to the
+    slashless spelling, and the firmware does not follow a redirect on
+    this request. It rendered "code=307" on its screen and restarted in
+    a loop, and nothing reached a handler, so the server had nothing to
+    say about it either. A device-facing endpoint cannot spend a round
+    trip on a redirect it has no evidence the device will follow, so
+    every spelling answers.
+
+    Lives here rather than beside either router because both of them
+    need it and this is the module the other imports. One spelling for
+    an `ota_path` of "/", which the validator permits and which has no
+    second one: an empty route path is not a route.
+    """
+    return tuple(dict.fromkeys(one for one in (path, path.rstrip("/")) if one))
 
 
 async def check_version(request: Request) -> Response:
