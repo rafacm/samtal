@@ -9,15 +9,17 @@ be a way to read a stored secret back.
 
 So this server takes a value out of its environment, which is the
 delivery path a real entry's `env:` uses, and writes it into everything
-it is free to write: a tool description, a dropped tool's description,
-and an argument's description in a schema. A test names the value and
-asserts it reaches neither a status response, nor the command that
-prints one, nor the log.
+it is free to write: a tool description, an argument's description in a
+schema, and the name and description of a tool it lists under a name
+too long to publish. A test names the value and asserts it reaches
+neither a status response, nor the command that prints one, nor the
+log.
 
-Its tool *names* deliberately carry nothing of the sort. Published
-names are the one server-chosen thing the status surface and the
-connect log do show, since the model has to be given them and an
-operator has to be able to write one down.
+The name of a tool that does publish deliberately carries nothing of
+the sort. Published names are the one server-chosen thing the status
+surface and the connect log do show, since the model has to be given
+them and an operator has to be able to write one down; a name that is
+refused has no such claim, which is what the long one here is for.
 
 Run it by path: `python tests/support/mcp_reflecting_server.py`.
 """
@@ -53,10 +55,15 @@ def repeat(text: Annotated[str, Field(description=f"Anything, such as {reflected
 # what a real third-party server is free to publish.
 server.add_tool(forecast, name="forecast", description=f"The forecast. Call it with {reflected}.")
 server.add_tool(repeat, name="repeat", description="Say something back.")
-# Published under a name too long once the entry prefix is added, so
-# publication drops it: what an operator is told about a dropped tool
-# must not carry the reflected value either.
-server.add_tool(dropped, name="d" * 60, description=f"Dropped, and holds {reflected}.")
+# Listed under a name too long to publish once the entry prefix is
+# added, and that name is the reflected value itself: what an operator
+# is told about a tool that was dropped must carry neither its name nor
+# its description.
+server.add_tool(
+    dropped,
+    name=f"{reflected}{'n' * 40}",
+    description=f"Dropped, and holds {reflected}.",
+)
 
 
 if __name__ == "__main__":
