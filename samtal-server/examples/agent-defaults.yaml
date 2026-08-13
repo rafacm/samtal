@@ -20,6 +20,18 @@ vad: silero
 # An agent that names its own list replaces this one rather than
 # extending it, so an agent's `mcp: []` opts it out of tools its
 # siblings have.
+#
+# This layer takes both entry forms, exactly as an agent does. A name on
+# its own is the whole server; the object form below is the server plus
+# which of its tools the layer may reach, named as the model is given
+# them minus the entry prefix, which is what `samtal-server config
+# status` prints. Written here it is the deployment-wide default, and an
+# agent that needs more (or less) of that server names its own list.
+#
+#   - server: home
+#     tools:
+#       - turn_on_light
+#       - turn_off_light
 mcp:
   - weather
 

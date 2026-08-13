@@ -540,6 +540,43 @@ tool_timeout_s: 15
 YAML
 ```
 
+**Per-tool grants.** An `mcp` entry is either the entry name on its own,
+which is the whole server, or an object naming the server and the tools
+of it that layer may reach:
+
+```bash
+samtal-server config set agent kids -f - <<'YAML'
+prompt: You are the assistant in the kids' room.
+mcp:
+  - weather
+  - server: home
+    tools: [turn_on_light, turn_off_light]
+YAML
+```
+
+The tools are named the way the model is given them minus the entry
+prefix (`turn_on_light` for `home__turn_on_light`), which is the name
+`samtal-server config status` prints, so an operator writes down the
+name they read; what the server called the tool before the publishing
+rule got to it is never a name this side answers to. Leaving `tools` out
+of the object means the whole server, the same as the string form, and
+an empty list is refused: "granted, nothing allowed" is a confusing
+spelling of `mcp: []`. It is an allow list and there is no deny list,
+because a denied set fails open: a kitchen-sink server that adds a tool
+would silently grant it to every agent that denied the old ones, which
+is exactly wrong on the shared family device the feature exists for. The
+same grant is checked again when a call arrives, so a tool an agent was
+not offered is refused rather than run if the model asks for it anyway.
+
+An allow list cannot be checked when it is written, since only a live
+connection knows what a server publishes. A name that matches nothing is
+logged when the server's tools come out of the publishing rule, and
+`config status` shows each agent's allowed tools beside the published
+ones, so the mismatch is answerable in one read. The comparison is
+against what published rather than against what the server listed: a
+tool dropped for a name collision or for being too long once prefixed is
+exactly as unreachable as one that was never offered.
+
 Secrets follow the same rule as everywhere else: a value of `$NAME` is
 read from that environment variable at startup, and any secret-looking
 key (`token`, `api_key`, `authorization`, ...) must use that form. An
