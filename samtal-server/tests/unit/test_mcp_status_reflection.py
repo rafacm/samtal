@@ -15,11 +15,12 @@ subprocess for stdio, an in-process uvicorn for HTTP. Each asserts the
 value reaches none of the three surfaces it could have: the status
 response, the `config status` output, and the log.
 
-What does cross, deliberately, is a published tool name: the model has
+What does cross, deliberately, is a name that publishes: the model has
 to be given it and an operator has to be able to write it down, and the
 connect log has always printed it under the same publishing rule. So the
-servers here reflect the credential everywhere *except* their names, and
-the tests assert the names arrive.
+servers here reflect the credential in everything else, including the
+name of a tool listed too long to publish, and the tests assert that the
+names which do publish arrive.
 """
 
 import json
@@ -79,8 +80,20 @@ def reflecting_http_server() -> FastMCP:
     def forecast() -> str:
         return "sunny"
 
+    def dropped() -> str:
+        return "never reachable"
+
     server.add_tool(
         forecast, name="forecast", description=f"The forecast. Call it with {SENTINEL}."
+    )
+    # Listed under a name too long to publish, and the name is the
+    # credential: the drop is reported by position rather than by
+    # anything the server wrote. It ends in a letter because the SDK's
+    # own server-side name validator logs the name it is unhappy with,
+    # and this server, alone among the ones a deployment meets, runs in
+    # this process, where its scaffolding would land in the capture.
+    server.add_tool(
+        dropped, name=f"{SENTINEL}{'n' * 40}", description=f"Dropped, holds {SENTINEL}."
     )
     return server
 
@@ -116,11 +129,12 @@ def rendered(caplog: pytest.LogCaptureFixture) -> str:
     formatter as well as caplog's own text, since a traceback or an
     extra field only becomes a string there.
 
-    The capture is required to be non-empty, because an absence proves
-    nothing about a log nothing was written to: this module's own
-    connect line is always in it.
+    The capture is required to hold both the connect line and the
+    warning for the tool whose name was too long to publish, because an
+    absence proves nothing about a log nothing was written to.
     """
     assert [record for record in caplog.records if record.name == MANAGER_LOGGER]
+    assert "in the listing" in caplog.text
     return caplog.text + "".join(
         logs.JsonFormatter().format(record) for record in caplog.records
     )

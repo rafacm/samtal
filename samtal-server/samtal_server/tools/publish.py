@@ -13,6 +13,16 @@ treatment: sanitize, drop what cannot be expressed at all, keep a
 reverse map so the call goes out under the far side's real name, and
 resolve collisions by keeping the first listed, so the outcome is the
 same on every run.
+
+What a drop is logged with is bounded by the same rule the rest of the
+observability surface keeps: the name a far side listed is bytes it
+chose, and one that received a credential of this deployment's can put
+it there. A name that publishes crosses anyway, because the model has
+to be given it and an operator has to be able to write it down. A name
+that does not publish has no such claim on anybody, so it is never
+written to the log: a dropped tool is identified by its position in the
+listing, which says which one it was without repeating anything it
+said.
 """
 
 import logging
@@ -49,33 +59,46 @@ def publish(
 ) -> PublishedTools:
     """Publish `(name, description, input_schema)` triples, optionally
     under an MCP server entry prefix. Whatever is dropped is logged with
-    the reason, because a tool silently missing from the list is a
-    question nobody can answer from the outside."""
+    its position in the listing and the reason, because a tool silently
+    missing from the list is a question nobody can answer from the
+    outside."""
     tools: list[ToolDef] = []
     originals: dict[str, str] = {}
-    for original, description, input_schema in listed:
+    for position, (original, description, input_schema) in enumerate(listed, start=1):
         sanitized = names.sanitize(original)
         published = names.qualified(prefix, sanitized) if prefix else sanitized
         if not sanitized:
-            logger.warning("%s: dropping a tool with no usable name (%r)", label, original)
+            # Sanitizing to nothing means it was nothing: every other
+            # character survives as itself or as an underscore. So there
+            # is no name here to name it by, and nothing to print.
+            logger.warning(
+                "%s: dropping tool %d in the listing, whose name is empty", label, position
+            )
             continue
         if len(published) > names.MAX_TOOL_NAME_LENGTH:
+            # The length rather than the name: this one never publishes,
+            # so its characters have no reason to reach a log, and what
+            # an operator needs is which tool and by how much.
             logger.warning(
-                "%s: dropping tool %s, %s is longer than the %d characters both LLM "
-                "APIs allow",
+                "%s: dropping tool %d in the listing, its published name would be %d "
+                "characters and both LLM APIs allow %d",
                 label,
-                original,
-                published,
+                position,
+                len(published),
                 names.MAX_TOOL_NAME_LENGTH,
             )
             continue
         if published in originals:
+            # The one published name a drop may print, because it is not
+            # this tool's: an earlier one already published under it, so
+            # it is on the connect line and in front of the model
+            # already.
             logger.warning(
-                "%s: dropping tool %s, it publishes as %s like %s",
+                "%s: dropping tool %d in the listing, it publishes as %s, which an "
+                "earlier one already took",
                 label,
-                original,
+                position,
                 published,
-                originals[published],
             )
             continue
         originals[published] = original

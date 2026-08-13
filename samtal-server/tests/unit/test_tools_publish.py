@@ -12,6 +12,10 @@ from samtal_server.tools.publish import publish
 
 SCHEMA = {"type": "object", "properties": {}}
 
+# Not a real credential, and shaped so a substring check for it cannot
+# match by accident.
+SENTINEL = "sk-live-3f2c8a1d-never-a-real-credential"
+
 
 def listing(*tool_names: str) -> list[tuple[str, str, dict]]:
     return [(name, f"does {name}", SCHEMA) for name in tool_names]
@@ -65,9 +69,43 @@ def test_what_is_dropped_is_logged(caplog: pytest.LogCaptureFixture) -> None:
     # A tool silently missing from the list is a question nobody can
     # answer from the outside.
     with caplog.at_level("WARNING"):
-        publish(listing("x" * 70), prefix="ha", label="mcp server ha")
+        publish(listing("kept", "x" * 70), prefix="ha", label="mcp server ha")
     assert "mcp server ha" in caplog.text
-    assert "longer than" in caplog.text
+    # Which one, and why. The position is what says which one, since the
+    # name itself is not printed.
+    assert "tool 2 in the listing" in caplog.text
+    assert "64" in caplog.text
+
+
+def test_a_name_that_does_not_publish_never_reaches_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A far side chooses the names it lists, and one holding a
+    credential this deployment gave it can put the credential there. A
+    name that publishes crosses anyway, because the model has to be
+    given it and an operator has to be able to write it down; a name
+    that is refused has no such claim, and the refusal must not be the
+    thing that publishes it."""
+    with caplog.at_level("WARNING"):
+        publish(listing("kept", SENTINEL + "n" * 70, ""), prefix="ha", label="mcp server ha")
+
+    # Both drops were reported, so the absence below is not the absence
+    # of any line at all.
+    assert len(caplog.records) == 2
+    assert SENTINEL not in caplog.text
+
+
+def test_a_collision_names_only_what_already_published(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The one drop that may print a name, because the name is not the
+    dropped tool's: an earlier one published under it, so it is on the
+    connect line and in front of the model already."""
+    with caplog.at_level("WARNING"):
+        publish(listing("weather.today", "weather/today"), prefix="ha", label="mcp server ha")
+
+    assert "weather/today" not in caplog.text
+    assert "ha__weather_today" in caplog.text
 
 
 def test_descriptions_and_schemas_pass_through() -> None:
