@@ -368,6 +368,84 @@ def test_status_refuses_an_answer_it_cannot_read(
     assert cli.UNRECOGNIZED_ANSWER in capsys.readouterr().err
 
 
+def _status_entry(**overrides: object) -> dict[str, object]:
+    """One entry as the API answers it, with one field replaced by
+    whatever a test wants to see refused."""
+    return {
+        "state": "connected",
+        "reason": None,
+        "since": "2026-08-13T09:12:03.104213+00:00",
+        "tools": ["weather__forecast"],
+        "grants": {"sam": None},
+    } | overrides
+
+
+# Not a real credential, and shaped so a substring check for it cannot
+# match by accident. Placed where a body's own values would be printed.
+ANSWERED = "sk-test-0c9b41ae-never-a-real-credential"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param({"weather": _status_entry(state={"leak": ANSWERED})}, id="state-object"),
+        pytest.param({"weather": _status_entry(state=ANSWERED)}, id="state-not-a-state"),
+        pytest.param({"weather": _status_entry(since={"leak": ANSWERED})}, id="since-object"),
+        pytest.param({"weather": _status_entry(reason={"leak": ANSWERED})}, id="reason-object"),
+        pytest.param({"weather": _status_entry(tools=[{"leak": ANSWERED}])}, id="tool-object"),
+        pytest.param({"weather": _status_entry(tools={"leak": ANSWERED})}, id="tools-object"),
+        pytest.param({"weather": _status_entry(grants=[ANSWERED])}, id="grants-list"),
+        pytest.param(
+            {"weather": _status_entry(grants={"sam": {"leak": ANSWERED}})}, id="grant-object"
+        ),
+        pytest.param({"weather": ANSWERED}, id="entry-not-an-object"),
+        pytest.param([{"leak": ANSWERED}], id="document-not-an-object"),
+    ],
+)
+def test_status_prints_nothing_from_an_answer_of_the_wrong_shape(
+    body: object, run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The renderer prints what it is given, so what it is given is
+    checked all the way down first. Every one of these carries a value
+    where a printed one belongs, and none of them may reach the
+    terminal: a body this client cannot recognize did not come from this
+    API's sanitized output, and what a proxy or a captive portal returns
+    is text nobody vouched for."""
+    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
+
+    assert run("status") == 1
+
+    captured = capsys.readouterr()
+    assert cli.UNRECOGNIZED_ANSWER in captured.err
+    assert ANSWERED not in captured.err + captured.out
+    assert "Traceback" not in captured.err
+
+
+def test_the_valid_shape_those_refusals_were_built_from_is_accepted(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The control for the parametrization above: each of those bodies
+    is this one with a single field replaced, so this is what makes the
+    refusals about the replacement."""
+    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: {"weather": _status_entry()})
+
+    assert run("status") == 0
+
+    assert "weather: connected since 2026-08-13T09:12" in capsys.readouterr().out
+
+
+def test_a_status_refusal_carries_nothing_of_the_body() -> None:
+    """The sentence and nothing behind it. A refusal raised while an
+    exception was being handled would keep that one as its context, and
+    anything walking the chain would find the body on it."""
+    body = {"weather": _status_entry(since={"leak": ANSWERED})}
+
+    with pytest.raises(ConfigError) as caught:
+        cli._status_listing(body)
+
+    assert ANSWERED not in _chain(caught.value)
+
+
 def test_add_device_binds_the_board_showing_the_code(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
