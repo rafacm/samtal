@@ -176,7 +176,10 @@ server:
   #
   # A write through the config commands applies at the next start: the
   # configuration is a boot-time snapshot, so restart the server after
-  # an edit.
+  # an edit. Two exceptions, and each write says which case it is in: a
+  # running server re-reads device bindings as a device asks for them,
+  # and `samtal-server config reload` has it re-read the MCP servers and
+  # the agents' grant lists without a restart.
   # database:
   #   dir: /var/lib/samtal
 
