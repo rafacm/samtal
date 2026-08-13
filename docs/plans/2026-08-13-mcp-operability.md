@@ -710,7 +710,7 @@ milestone is docs.
   tests; an entry named `status` still behaves as an entity; the
   drift checks pass.
 - [x] **[Reload without restart](2026-08-13-mcp-operability-implementation.md#milestone-2-reload-without-restart)**
-  (PR TBD): the domain-slice re-read shared with
+  (PR #126): the domain-slice re-read shared with
   boot; diff-and-apply on `McpServers`; grants behind the swap;
   pipeline asks by agent; `POST /runtime/mcp-servers/reload`;
   `config reload`; the MCP write and secret notices; the boot-time
