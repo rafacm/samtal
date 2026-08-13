@@ -609,6 +609,19 @@ the oldest dropped first. Memory is keyed by agent and not by device: a
 agent is one entity across rooms. Leave the section out and there is
 no `remember` tool and no injection.
 
+Neither builtin is granted the way an MCP server is. Each appears under
+a structural condition instead, and the conditions are not agent-shaped.
+`switch_agent`'s is the device's: it exists exactly when the board is
+bound to more than one agent, and withholding it from one of them would
+strand a conversation on whichever agent has no way back, which is the
+receptionist handoff the tool was written for. `remember`'s is the
+deployment's: memory is configured or it is not, and where it is, the
+injection into the system prompt is unconditional, so an agent with the
+tool withheld would recall for ever and never learn. Two tools with
+sound structural rules do not need a grant model on top of them; the day
+a builtin arrives whose availability is genuinely per-agent policy, the
+grant edge the `mcp` list already carries is where it lands.
+
 A tool that fails, times out, or does not exist comes back to the model
 as an error result rather than ending the reply, so the assistant says
 what went wrong in its own voice and the user's language. The device

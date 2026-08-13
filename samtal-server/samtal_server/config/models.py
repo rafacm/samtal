@@ -1200,7 +1200,9 @@ class AgentDefaults(BaseModel):
             "published name without the entry prefix. Unset inherits the "
             "agent_defaults list; naming a list replaces the inherited one rather "
             "than extending it, so an empty list opts an agent out of the tools its "
-            "siblings have."
+            "siblings have. The builtin tools are outside this model: switch_agent "
+            "and remember appear under a structural condition (a device bound to "
+            "more than one agent, memory configured) rather than by grant."
         ),
     )
 
