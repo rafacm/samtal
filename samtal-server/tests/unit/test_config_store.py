@@ -16,6 +16,7 @@ from sqlalchemy import select, update
 
 from samtal_server.config import ConfigError
 from samtal_server.config.loader import StorageError
+from samtal_server.config.models import mcp_entry_fragment
 from samtal_server.config.secrets import SecretLocation, generate_key
 from samtal_server.config.store import ConfigStore, verify_secrets
 from samtal_server.db import open_database, schema
@@ -120,6 +121,64 @@ def test_a_configuration_round_trips_through_the_rows(store: ConfigStore) -> Non
     assert domain.agents["sam"].mcp is None
     assert domain.devices == {"aa:bb:cc:dd:ee:ff": ["sam"]}
     assert domain.default_agent == "sam"
+
+
+def test_both_mcp_entry_forms_round_trip_through_the_row(store: ConfigStore) -> None:
+    """Each form is stored as itself. The column holds plain JSON, so
+    what a read shows is the fragment a write of it takes back, and the
+    object form gains no key it was not written with."""
+    _populate(store)
+    written = [
+        "home",
+        {"server": "weather", "tools": ["forecast"]},
+        {"server": "shed"},
+    ]
+    store.set_mcp_server("weather", {"transport": "stdio", "command": "uvx"})
+    store.set_mcp_server("shed", {"transport": "stdio", "command": "uvx"})
+    store.set_agent("poet", {"prompt": "You are a poet.", "mcp": written})
+
+    with store._engine.connect() as connection:
+        stored = connection.execute(
+            select(schema.agents.c.mcp).where(schema.agents.c.name == "poet")
+        ).scalar_one()
+    assert stored == written
+
+    entry = store.load().domain.agents["poet"]
+    assert entry.mcp is not None
+    assert [mcp_entry_fragment(item) for item in entry.mcp] == written
+
+
+def test_a_pre_upgrade_string_row_loads_and_is_written_back_unchanged(
+    store: ConfigStore,
+) -> None:
+    """Every row written before the object form existed holds a plain
+    list of names, which is why the string form is stored as a string
+    and not normalized into an object: there is no migration to run."""
+    _populate(store)
+    with store._engine.begin() as connection:
+        connection.execute(
+            update(schema.agents).where(schema.agents.c.name == "sam").values(mcp=["home"])
+        )
+
+    entry = store.load().domain.agents["sam"]
+    assert entry.mcp == ["home"]
+
+    # Written back through the same path the API writes with, which is
+    # where a normalization would have shown up.
+    store.set_agent("sam", {"prompt": "You are Sam.", "mcp": ["home"]})
+    with store._engine.connect() as connection:
+        stored = connection.execute(
+            select(schema.agents.c.mcp).where(schema.agents.c.name == "sam")
+        ).scalar_one()
+    assert stored == ["home"]
+
+
+def test_a_grant_on_an_unknown_server_is_refused_at_the_write(store: ConfigStore) -> None:
+    # The object form goes through the reference check the string form
+    # does, which is what forces the natural creation order.
+    _populate(store)
+    with pytest.raises(ConfigError, match='unknown MCP server "ghost"'):
+        store.set_agent("poet", {"prompt": "P", "mcp": [{"server": "ghost", "tools": ["a"]}]})
 
 
 def test_a_loaded_snapshot_has_no_unresolved_references(store: ConfigStore) -> None:

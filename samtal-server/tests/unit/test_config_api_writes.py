@@ -350,6 +350,35 @@ def test_an_empty_database_becomes_a_working_configuration(
     assert domain.default_agent == "sam"
 
 
+@pytest.mark.parametrize("path", ["/agents/sam", "/agent-defaults"])
+def test_an_mcp_list_reads_back_in_the_form_it_was_written(
+    client: TestClient, path: str
+) -> None:
+    """The envelope contract, on the list the grant model widened: a
+    read is the fragment a write of it takes. A plain name stays a plain
+    name and an object stays `{server, tools}`, so an operator can PUT
+    back what a GET answered without the shape drifting under them."""
+    _pipeline(client)
+    client.put("/mcp-servers/home", json={"transport": "stdio", "command": "uvx"})
+    written = ["weather", {"server": "home", "tools": ["turn_on_light"]}]
+    body = {"mcp": written} if path == "/agent-defaults" else {"prompt": "S", "mcp": written}
+
+    assert client.put(path, json=body).status_code == 200
+
+    assert client.get(path).json()["entity"]["mcp"] == written
+
+
+def test_a_grant_naming_an_unknown_server_is_refused_over_http(client: TestClient) -> None:
+    _pipeline(client)
+
+    response = client.put(
+        "/agents/sam", json={"prompt": "S", "mcp": [{"server": "ghost", "tools": ["a"]}]}
+    )
+
+    assert response.status_code == 422
+    assert 'unknown MCP server "ghost"' in response.json()["detail"]
+
+
 def test_a_put_replaces_an_entity_and_keeps_its_stored_secret(
     client: TestClient, store: ConfigStore
 ) -> None:
