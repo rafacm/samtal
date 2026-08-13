@@ -578,6 +578,50 @@ what went wrong in its own voice and the user's language. The device
 hears silence while a tool runs, bounded by `tool_timeout_s` (15 seconds
 by default).
 
+### What the MCP servers are doing
+
+The configuration says what should be running; `samtal-server config
+status` says what is:
+
+```console
+$ samtal-server config status
+home: connected since 2026-08-13T09:12:03.104213+00:00
+  tools: home__turn_on_light, home__turn_off_light
+  agents: kids, house
+weather: down since 2026-08-13T10:41:57.882014+00:00 (ConnectionRefusedError)
+  tools: (none)
+  agents: house
+archive: unused since 2026-08-13T09:12:02.991044+00:00
+  tools: (none)
+  agents: (none)
+```
+
+Three states. **connected** is offering the tools listed under it.
+**down** is not, with the reason beside it: the class of the failure, or
+`DroppedAfterFailedCall` for a connection dropped after a tool call
+failed on it, which is what a server restarting looks like from here. A
+down server contributes no tools and is reconnected in the background
+when a session that would use it opens, so this is a diagnosis rather
+than a chore. **unused** is configured and referenced by no agent, so no
+connection was ever built for it: the answer to "why does the agent not
+have that tool" when the entry looks right, and invisible everywhere
+else.
+
+It is a read of the running server rather than of the database, which is
+why there is no `--local` for it and why what it says cannot disagree
+with what is actually connected. Over the API it is
+`GET /api/runtime/mcp-servers`, keyed by entry name. The `/runtime`
+namespace is separate from the entity namespaces on purpose: an
+`mcp_servers` entry may legally be named `status`, and a runtime route
+under `/mcp-servers/` would have shadowed it.
+
+The tool lists are published names and nothing else, deliberately: a
+description, or the name a server listed before the publishing rule got
+to it, is bytes that server chose, and a server holding one of this
+deployment's credentials could reflect it in either. Published names
+are the exception because the model has to be given them and an
+operator has to be able to write one down.
+
 ## Stack
 
 Python 3.12 with [FastAPI](https://fastapi.tiangolo.com), managed with
@@ -865,6 +909,18 @@ GET                 /api/devices
 GET PUT DELETE      /api/devices/{mac}
 GET PUT DELETE      /api/default-agent
 ```
+
+**And one namespace that is not about stored configuration at all**,
+kept apart from the entity namespaces because an entity may legally be
+named after any word a route might want:
+
+```
+GET                 /api/runtime/mcp-servers
+```
+
+It answers what each configured MCP server is doing right now, which
+[What the MCP servers are doing](#what-the-mcp-servers-are-doing)
+describes and `samtal-server config status` prints.
 
 `GET /api/config` is the whole domain configuration, masked, with the
 location of every stored secret beside it, which is the JSON of what

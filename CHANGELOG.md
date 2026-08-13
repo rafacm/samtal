@@ -7,6 +7,23 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-08-13
 
+### Added
+
+- **A running server says what its MCP servers are doing** (#121):
+  `GET /api/runtime/mcp-servers`, and `samtal-server config status` as
+  its client, answer with one entry per configured `mcp_servers` entry:
+  whether it is connected or down, since when, the reason token if it
+  is down, the tools it published, and the agents that may reach it. An
+  entry no agent references reports `unused`, which is the answer to
+  "why does the agent not have that tool" when the entry itself looks
+  right and was invisible until now. The read is answered from the
+  running server's own managers rather than from the database, so it
+  cannot disagree with what is connected, and it carries published tool
+  names only: a description or a server's own listed name is bytes that
+  server chose, and one holding a credential of the deployment's could
+  reflect it there. `/runtime` is a namespace of its own because an
+  `mcp_servers` entry may legally be named `status`.
+
 ### Changed
 
 - **The MCP streamable_http transport left the SDK's deprecated
