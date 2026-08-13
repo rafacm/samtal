@@ -52,18 +52,31 @@ or from a named variable and never from an argument. A stored secret takes
 precedence over an environment reference for the same slot.
 
 `set` replaces an entity whole and leaves its stored secrets alone. A
-change takes effect at the next server start: the configuration is read
-once at boot, so an edit made while the server runs applies when it is
-restarted.
+change takes effect at the next server start unless it is one of the two
+exceptions below: the configuration is read once at boot, so an edit made
+while the server runs otherwise applies when it is restarted.
 
-Device bindings are the exception. A running server re-reads the
+There are two exceptions, and every write says which of the three
+cases it is in.
+
+Device bindings are the first. A running server re-reads the
 `devices` map and `default_agent` as a device asks for them, so binding
 a device, unbinding it, or changing the default agent applies at that
 device's next OTA check or connection, with no restart. The exception
 ends where the agent does: a binding naming an agent that was created
 after the server started resolves to nothing until the restart that
-builds that agent's providers. Every write says which of the two
-happened.
+builds that agent's providers.
+
+The MCP servers are the second, and unlike the first it is asked for
+rather than noticed. `samtal-server config reload` has a running server
+re-read the `mcp_servers` entries, the secrets stored on them, and the
+agents' effective `mcp` grant lists, and apply them: entries are
+started, restarted, stopped or left alone, and a conversation in
+progress picks the result up on its next utterance rather than being
+dropped. Nothing else moves with them. An agent's prompt, its
+providers, its memory and its filler still wait for a restart, which
+is why a write to an agent says so even when it changed only the
+`mcp` list.
 
 `samtal-server config schema [entity]` prints the same field descriptions
 as JSON Schema, which is what a machine reads before writing a fragment.
