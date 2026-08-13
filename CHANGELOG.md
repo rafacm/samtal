@@ -23,8 +23,37 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   server chose, and one holding a credential of the deployment's could
   reflect it there. `/runtime` is a namespace of its own because an
   `mcp_servers` entry may legally be named `status`.
+- **An MCP change applies without a restart** (#121):
+  `POST /api/runtime/mcp-servers/reload`, and `samtal-server config
+  reload` as its client, have a running server re-read the
+  `mcp_servers` entries, the secrets stored on them and the agents'
+  effective `mcp` grant lists, and apply them: an entry that is new or
+  newly referenced is started, one whose fragment or whose stored
+  secrets changed is stopped and rebuilt (so a rotated credential
+  applies here too), one that is gone or no longer referenced is
+  stopped, and an unchanged one keeps the connection it had. No session
+  is dropped: a conversation in progress picks the new world up on its
+  next utterance. The reply carries the four outcomes by entry name and
+  the whole status document, so one round trip both applies and
+  verifies. Nothing is stopped or started until every manager the new
+  configuration needs has been built, so a refusal (an unset `$VAR`, a
+  credential that will not decrypt, an egress declaration
+  `server.local_only` forbids, a snapshot that will not validate)
+  changes nothing at all; a server that merely will not connect applies
+  as `down` with its reason, revivable as ever. One reload runs at a
+  time, and a concurrent one is refused with the same retryable 409 a
+  contended write answers with.
 
 ### Changed
+
+- **MCP writes name the reload instead of a restart** (#121): the entry
+  writes and deletes, and the writes and clears of the secret slots on
+  them, answer with a notice naming `samtal-server config reload`.
+  Provider writes, provider secrets and agent writes keep the restart
+  sentence, the last of them because an agent fragment mixes the
+  reloadable `mcp` list with a prompt, providers and filler that are
+  not. The CLI's `--local` recovery path keeps it for every entity,
+  since it runs where there may be no server to ask.
 
 - **The MCP streamable_http transport left the SDK's deprecated
   client** (#98): the transport now builds its own `httpx.AsyncClient`

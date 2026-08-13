@@ -622,6 +622,68 @@ deployment's credentials could reflect it in either. Published names
 are the exception because the model has to be given them and an
 operator has to be able to write one down.
 
+### Applying an MCP change without a restart
+
+Configuration is a boot-time snapshot, so writing an entry and granting
+it to an agent used to cost a restart and every conversation on the
+server. `samtal-server config reload` applies them instead:
+
+```console
+$ samtal-server config set mcp-server weather -f weather.yaml
+wrote mcp-server weather
+This applies when the running server is asked to reload: run
+`samtal-server config reload`, which ...
+$ samtal-server config set agent house -f house.yaml
+$ samtal-server config reload
+started: weather
+restarted: (none)
+stopped: (none)
+unchanged: home
+
+home: connected since 2026-08-13T09:12:03.104213+00:00
+  tools: home__turn_on_light, home__turn_off_light
+  agents: kids, house
+weather: connected since 2026-08-13T11:02:44.118902+00:00
+  tools: weather__forecast
+  agents: house
+```
+
+**What it applies** is the `mcp_servers` entries, the secrets stored on
+them, and the agents' effective `mcp` grant lists (`agents.<name>.mcp`
+and `agent_defaults.mcp`), re-read from the configuration database. An
+entry that is new or newly referenced is started, one whose fragment or
+whose stored secrets changed is stopped and rebuilt (so rotating a
+credential applies here too), one that is gone or no longer referenced
+is stopped, and an unchanged one keeps the connection it had, untouched.
+The four outcomes come back with the status document, so one command
+both applies and verifies.
+
+**What still needs a restart** is everything else, and that includes
+most of an agent: its prompt, its providers, its memory and its filler
+are built at boot, so a new agent waits for the start that builds them,
+and a write to an agent says "restart" even when it changed only the
+`mcp` list. Providers, provider credentials and the whole `server`
+section (including the configuration file itself) are boot-time as they
+always were.
+
+**No session is dropped.** The tools an agent may reach are snapshotted
+per reply, so a conversation in progress meets the new world on its next
+utterance; a tool call in flight on a server the reload stopped fails
+into the same error result a server dropping mid-call produces, which
+the assistant explains in its own words.
+
+**Nothing is half applied.** Every manager the new configuration needs
+is built before anything running is touched, so an unset `$VAR`, a
+credential that will not decrypt, an entry `server.local_only` forbids,
+or a stored configuration that will not validate refuses the reload and
+leaves the servers exactly as they were. A server that merely will not
+connect is not that: it applies, shows `down` with its reason, and is
+reconnected in the background like any other. One reload runs at a time;
+a second is refused with the retryable 409 a contended write answers
+with, having changed nothing.
+
+Over the API it is `POST /api/runtime/mcp-servers/reload`.
+
 ## Stack
 
 Python 3.12 with [FastAPI](https://fastapi.tiangolo.com), managed with
@@ -806,13 +868,25 @@ is stored, with every secret masked.
 **A change applies at the next server start.** The configuration is read
 once at boot, so an edit made while the server runs is picked up when it
 is restarted, and every mutating command says so. The API says the same
-sentence in the answer to that write, because it does not hot apply
-either. Hot apply is a later change; until then, restart.
+sentence in the answer to that write. There are two exceptions, below,
+and each write says which of the three cases it is in.
 
-**Device bindings are the exception.** A running server reads the
-devices table and the default agent as a device asks for them, so
-binding a board, unbinding it, or changing the default agent applies at
-that device's next OTA check or connection, with no restart. Those
+**The MCP servers are one, applied on request.** Writing an entry,
+rotating a secret on it, or changing which agents may reach it takes
+effect when a running server is asked to reload, with no restart and no
+session dropped: that is [Applying an MCP change without a
+restart](#applying-an-mcp-change-without-a-restart). Those writes name
+`samtal-server config reload` instead of the restart. A write to an
+agent does not, even though its `mcp` list is part of what a reload
+applies: the rest of an agent (prompt, providers, memory, filler) is
+built at boot, and a notice right about one field and wrong about the
+others would be worse than the conservative one.
+
+**Device bindings are the other, applied by being noticed.** A running
+server reads the devices table and the default agent as a device asks
+for them, so
+binding a board, unbinding it, or changing the default agent applies
+at that device's next OTA check or connection, with no restart. Those
 writes say so instead. The exception ends where the agent does: a
 binding naming an agent created since the server started resolves to
 nothing until the restart that builds that agent's providers, and the
@@ -916,11 +990,17 @@ named after any word a route might want:
 
 ```
 GET                 /api/runtime/mcp-servers
+POST                /api/runtime/mcp-servers/reload
 ```
 
-It answers what each configured MCP server is doing right now, which
-[What the MCP servers are doing](#what-the-mcp-servers-are-doing)
-describes and `samtal-server config status` prints.
+The read answers what each configured MCP server is doing right now,
+which [What the MCP servers are doing](#what-the-mcp-servers-are-doing)
+describes and `samtal-server config status` prints. The reload applies
+the stored MCP entries and grant lists to the running server, which
+[Applying an MCP change without a
+restart](#applying-an-mcp-change-without-a-restart) describes and
+`samtal-server config reload` prints; it is the only route here that
+changes what the server is doing rather than what is stored.
 
 `GET /api/config` is the whole domain configuration, masked, with the
 location of every stored secret beside it, which is the JSON of what
@@ -940,22 +1020,27 @@ than a fragment: that one, a device binding (`{"agents": [...]}`), and
 the default agent (`{"name": "..."}`), whose DELETE clears it.
 
 **A successful write says when it takes effect.** It answers
-`{"wrote": "...", "notice": "..."}`, and the notice is one of two
+`{"wrote": "...", "notice": "..."}`, and the notice is one of three
 sentences. Most writes carry the boot-time snapshot one: the
 configuration is read once at boot, so the write applies at the next
-server start. A device binding and the default agent carry the other,
+server start. A device binding and the default agent carry the second,
 because a running server reads them: they apply at the device's next OTA
 check or connection, unless they name an agent this server has not
-loaded, which brings the first sentence back. Nothing about a running
-conversation changes when a write lands, in either case.
+loaded, which brings the first sentence back. An MCP server entry and
+the secret slots on it carry the third, which names the reload above,
+since that is what applies them to a running server. Nothing about a
+running conversation changes when a write lands, in any of the three
+cases; a reload is what makes the third one take effect.
 
 **A refusal carries the sentence the CLI prints**, in `detail`, with a
 status code: 404 for an entity that does not exist, 409 for the
-retryable busy database lock (nothing was changed, so retry), 422 for a
-fragment or an address the caller got wrong, 500 for stored state that
-cannot be read. A request body is never quoted back, on any path, and
-neither is a traceback: a fragment can carry a credential pasted where a
-variable name belongs, and a refusal that echoed it would be the leak.
+retryable busy database lock or a reload already running (nothing was
+changed, so retry), 422 for a fragment or an address the caller got
+wrong, 500 for stored state that cannot be read, and 503 for a runtime
+action asked of an application with no server around it. A request body
+is never quoted back, on any path, and neither is a traceback: a
+fragment can carry a credential pasted where a variable name belongs,
+and a refusal that echoed it would be the leak.
 
 **`samtal-server config` is the ergonomic client**, and the shape of a
 deployment's own use of the API. It finds the server in this order:
