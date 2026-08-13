@@ -48,7 +48,7 @@ import ipaddress
 import os
 import re
 import sys
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, NoReturn
@@ -154,6 +154,11 @@ PENDING_FIELDS = frozenset({"mac", "board", "firmware", "expires_at"})
 # rule the pending listing applies: a body that does not carry these did
 # not come from this API.
 STATUS_FIELDS = frozenset({"state", "reason", "since", "tools", "grants"})
+
+# And what `state` may say. The vocabulary is part of the shape: a
+# rendering that printed whatever arrived there would be printing a word
+# chosen by whatever answered.
+STATUS_STATES = frozenset({"connected", "down", "unused"})
 
 NOTHING_CONFIGURED = (
     "this server has no MCP servers configured. An entry is written with "
@@ -1267,44 +1272,77 @@ def _status_listing(answer: object) -> str:
         return f"{NOTHING_CONFIGURED}\n"
     lines: list[str] = []
     for name, entry in entries.items():
-        state = _printable(str(entry["state"]))
-        since = _printable(str(entry["since"]))
         reason = entry["reason"]
         lines.append(
-            f"{_printable(name)}: {state} since {since}"
-            + (f" ({_printable(reason)})" if isinstance(reason, str) else "")
+            f"{_printable(name)}: {entry['state']} since {_printable(str(entry['since']))}"
+            + (f" ({_printable(str(reason))})" if reason is not None else "")
         )
         lines.append("  tools: " + (_names(entry["tools"]) or "(none)"))
-        lines.append("  agents: " + (_names(sorted(_mapping(entry["grants"]))) or "(none)"))
+        lines.append("  agents: " + (_names(sorted(entry["grants"])) or "(none)"))
     return "\n".join(lines) + "\n"
 
 
-def _names(values: object) -> str:
-    """A list from a response, printed. Bounded and made printable one
-    by one, the rule everything that arrived from elsewhere is held to:
-    a published tool name is a safe-charset string this server derived,
-    and this is what keeps that true of what reaches a terminal even if
-    it one day is not."""
-    return ", ".join(_printable(str(value)) for value in _sequence(values))
+def _names(values: Iterable[str]) -> str:
+    """The names in one field of a validated entry, printed.
 
-
-def _sequence(value: object) -> Sequence[object]:
-    return value if isinstance(value, Sequence) and not isinstance(value, str) else ()
-
-
-def _mapping(value: object) -> Mapping[str, object]:
-    return value if isinstance(value, Mapping) else {}
+    Bounded and made printable one by one even though the shape check
+    below has established they are strings: what that check knows about
+    them is their type, not their length and not whether every
+    character in them can be written to a terminal.
+    """
+    return ", ".join(_printable(name) for name in values)
 
 
 def _status_entries(answer: object) -> Mapping[str, Mapping[str, object]]:
     """The status document, as the API returns it: entry name to what
-    that entry is doing."""
+    that entry is doing, checked all the way down.
+
+    Every field, its type and, for `state`, its vocabulary, because the
+    renderer prints what it is given and a body this client cannot
+    recognize is a body it did not write: what a proxy, a gateway or a
+    captive portal returns is text nobody vouched for, and a check that
+    only counted keys would have printed whatever was under them.
+
+    Written as plain predicates with no try/except, the rule this module
+    keeps for refusals: an exception raised while another is being
+    handled carries that one as its context, and the one being handled
+    here would hold the body.
+    """
     if isinstance(answer, Mapping) and all(
-        isinstance(name, str) and isinstance(entry, Mapping) and STATUS_FIELDS <= set(entry)
-        for name, entry in answer.items()
+        isinstance(name, str) and _is_status_entry(entry) for name, entry in answer.items()
     ):
         return answer
     raise ConfigError(f"the configuration API answered a read with {UNRECOGNIZED_ANSWER}")
+
+
+def _is_status_entry(entry: object) -> bool:
+    """One entry of the status document, in the shape the committed
+    OpenAPI document declares. Extra keys are tolerated and never
+    printed, so a newer server saying more than this client knows about
+    is readable rather than refused."""
+    if not isinstance(entry, Mapping) or not STATUS_FIELDS <= set(entry):
+        return False
+    reason = entry["reason"]
+    state = entry["state"]
+    return (
+        # The type before the vocabulary: a membership test on an
+        # unhashable value raises rather than answering False, and a
+        # body is free to put an object where a word belongs.
+        isinstance(state, str)
+        and state in STATUS_STATES
+        and isinstance(entry["since"], str)
+        and (reason is None or isinstance(reason, str))
+        and _is_name_list(entry["tools"])
+        and isinstance(entry["grants"], Mapping)
+        and all(
+            isinstance(agent, str) and (allowed is None or _is_name_list(allowed))
+            for agent, allowed in entry["grants"].items()
+        )
+    )
+
+
+def _is_name_list(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(name, str) for name in value)
 
 
 def _summary(document: Mapping[str, object]) -> str:
