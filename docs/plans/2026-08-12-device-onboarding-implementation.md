@@ -338,6 +338,43 @@ Three consequences worth carrying forward.
   records the current behavior as characterization, named as such, so
   the state is visible rather than implied.
 
+#### What milestone 3 carries of it
+
+Written while rebasing this milestone onto the fix above, which is
+where the rule met the routes this milestone adds.
+
+**`/activate` has the same two spellings, and now answers both.** The
+finding is the endpoint's, but the consequence is not only the
+endpoint's: the firmware builds the activation URL by appending
+`activate` to whatever it holds (`Ota::Activate` adds the separating
+slash when the stored URL lacks one), so a board whose portal dropped
+the trailing slash polls the slashless spelling of this route too. Both
+spellings are registered on both routers, behind the key guard on the
+short one, and the test that asserted a guarded 307 for the correct key
+here now asserts direct dispatch with redirects disabled. That test was
+written for the review round's finding 2, whose concern was the
+`Location` header carrying a secret; serving both spellings satisfies
+that concern and this one at once, since a route that never redirects
+has no `Location` to put anything in.
+
+**The third bullet above is superseded at this milestone's tip.** The
+legacy `ota_path` router is no longer untouched: this milestone's own
+review round (finding 2, commit 2d8412f) had already given it both
+spellings of both routes, for the narrower reason that the `Location`
+it would otherwise emit carries the deployment's secret path. The
+characterization test recording the legacy redirect is therefore
+dropped rather than carried, and the rule now has one implementation
+for both routers, `ota.spellings`, which is where the hardware finding
+is recorded in the code.
+
+**No device-facing route on this branch emits a redirect.** Short or
+legacy, base or activate, either spelling: every one dispatches, and
+every test of them asserts the reply with redirects disabled, which is
+what the device does. The one path that still redirects is the
+configuration API's bare `/api` prefix, which is a browser and a CLI
+surface and no device ever reaches.
+
+
 ## Milestone 2: live device bindings
 
 The one hole in the boot-time snapshot, opened exactly wide enough for
