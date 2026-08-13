@@ -41,7 +41,7 @@ Settled by issue #121 and not re-litigated here:
 
 ### Gap 1: the reload path is an explicit endpoint, not session-open pickup
 
-`POST /mcp-servers/reload` on the configuration API, with
+`POST /runtime/mcp-servers/reload` on the configuration API, with
 `samtal-server config reload` as its CLI client. The alternative the
 issue names, re-reading domain config when a session opens, loses on
 three counts:
@@ -113,12 +113,19 @@ exercises exactly that pair of writes plus one reload.
 
 ### Gap 2: the status surface is a gated read of runtime state
 
-`GET /mcp-servers/status` on the configuration API, with
+`GET /runtime/mcp-servers` on the configuration API, with
 `samtal-server config status` as its CLI client. Precedent:
 `/devices/pending` already serves the running server's own state from
 the same mounted application, shared object rather than database read.
-The route registers before `/mcp-servers/{name}`, the same
-registration-order rule the pending route documents.
+Unlike `pending`, whose path segment cannot collide with a MAC, a
+route inside `/mcp-servers/` would shadow a legal entry name (`status`
+passes `tools/names.py`, and an existing database may already hold
+it), so the runtime surfaces live in a namespace of their own:
+`/runtime/mcp-servers` for the status read, and the reload action
+beside it as `/runtime/mcp-servers/reload`. The entity namespace stays
+purely CRUD, so no future runtime route has to fight an entry name
+either, and an upgrade regression test proves an entry named `status`
+is still read, written and deleted as an entity.
 
 One entry per configured `mcp_servers` entry, keyed by name:
 
@@ -270,9 +277,9 @@ samtal_server/runtime/pipeline.py  _tool_snapshot and revive ask
                                    carrying config-resolved entry lists
 samtal_server/config/models.py     the grant value; mcp lists accept
                                    string-or-object entries; validation
-samtal_server/config/api.py        GET /mcp-servers/status,
-                                   POST /mcp-servers/reload, runtime
-                                   hooks on build_api
+samtal_server/config/api.py        GET /runtime/mcp-servers,
+                                   POST /runtime/mcp-servers/reload,
+                                   runtime hooks on build_api
 samtal_server/config/writes.py     the mcp reload notice
 samtal_server/config/cli.py        config status, config reload
 samtal_server/config/boot.py       the domain-slice re-read the reload
@@ -299,9 +306,10 @@ conversations.
 
 - Unit, milestone 1: manager state transitions (connected, down with
   reason token, dropped-after-failed-call, `unused` for unreferenced
-  entries); the status view's shape and instants; the API route (gated,
-  registration order, empty for a serverless application); CLI
-  rendering.
+  entries); the status view's shape and instants; the API route
+  (gated, empty for a serverless application); an entry named
+  `status` still read, written and deleted as an entity while the
+  runtime route answers beside it; CLI rendering.
 - Unit, milestone 2: the diff (new, changed fragment, changed stored
   ciphertext, removed, de-referenced, unchanged-untouched); refusal on
   an invalid snapshot applies nothing; concurrent reload answers 409;
@@ -364,6 +372,12 @@ its resolution once the amendment addressing it lands.
    runtime status outside the entity namespace (such as
    `GET /runtime/mcp-servers`) rather than reserving the name, and
    add an upgrade regression test with an entry named `status`.
+   *Resolution*: adopted. The status read is `GET /runtime/mcp-servers`
+   and the reload moves beside it as `POST /runtime/mcp-servers/reload`,
+   so the entity namespace stays purely CRUD and no future runtime
+   route fights an entry name; the gap 2 section says why, and
+   milestone 1's tests and acceptance carry the `status`-named-entry
+   regression.
 
 2. **P1: the status payload violates the no-secret-readback
    contract.** `listed_as` and `description` are server-provided
@@ -480,14 +494,15 @@ changes is additive; the grant schema is backward compatible; the docs
 milestone is docs.
 
 - [ ] **Status visibility**: manager state, reason and since;
-  `McpServers` keeps its slice; `GET /mcp-servers/status`;
+  `McpServers` keeps its slice; `GET /runtime/mcp-servers`;
   `config status`; OpenAPI regen; README section; CHANGELOG. Accept:
   lint and both lanes green; a dead server shows `down` with a
   reason and an unreferenced entry shows `unused`, both proven in
-  tests; the drift checks pass.
+  tests; an entry named `status` still behaves as an entity; the
+  drift checks pass.
 - [ ] **Reload without restart**: the domain-slice re-read shared with
   boot; diff-and-apply on `McpServers`; grants behind the swap;
-  pipeline asks by agent; `POST /mcp-servers/reload`;
+  pipeline asks by agent; `POST /runtime/mcp-servers/reload`;
   `config reload`; the mcp-server write notices; OpenAPI regen;
   README; CHANGELOG. Accept: lint and both lanes green; the
   integration proof that a written-and-granted entry is usable after
