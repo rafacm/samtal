@@ -7,6 +7,7 @@ deterministic.
 
 import asyncio
 import re
+import socket
 import sys
 import time
 from datetime import datetime, timedelta
@@ -193,6 +194,34 @@ async def test_a_server_stopped_on_purpose_is_down_with_nothing_wrong() -> None:
 
     assert manager.state == DOWN
     assert manager.reason is None
+
+
+async def test_a_new_reason_for_staying_down_is_a_new_instant() -> None:
+    """The state alone would not have moved it, and it has to move: a
+    server that goes on being down for a different reason has failed
+    again, and an instant that stayed put would date the new reason to
+    the old failure."""
+    manager = McpServerManager("tools", stdio_entry(command="/nonexistent/one", args=[]))
+    await manager.start()
+    first_reason, first_since = manager.reason, manager.since
+    assert manager.state == DOWN
+
+    # A second failure of another kind, still without ever connecting:
+    # a URL on a port that was free a moment ago and nothing of ours
+    # took.
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    manager._config = McpServerConfig.model_validate(
+        {"transport": "streamable_http", "url": f"http://127.0.0.1:{port}/mcp"}
+    )
+    await manager.start()
+    try:
+        assert manager.state == DOWN
+        assert manager.reason != first_reason
+        assert manager.since > first_since
+    finally:
+        await manager.stop()
 
 
 async def test_the_instant_moves_when_the_state_does() -> None:
