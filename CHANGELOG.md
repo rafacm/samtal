@@ -9,6 +9,20 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The MCP streamable_http transport left the SDK's deprecated
+  client** (#98): the transport now builds its own `httpx.AsyncClient`
+  with the configured headers and the HTTP policy the SDK's factory
+  used to supply for it (redirects followed, a 30 s timeout with a
+  300 s read for a stream a server holds open), and hands that client
+  to the SDK's replacement transport. Nothing changes for a running
+  deployment; what changes is that the transport is no longer one SDK
+  release away from breaking, and that the header-delivery test no
+  longer has to ignore a deprecation warning to make its point. The
+  `mcp` requirement moves from `>=1.2` to `>=1.24,<2`, since 1.24 is
+  the first release carrying the replacement and MCP 2 needs httpx 2
+  and yields a transport this client does not unpack, which makes
+  migrating to it separate work.
+
 - **The hardware checkpoint's findings are in the notes and the
   AMOLED guide** (#40): the captive portal's Custom OTA URL field is
   vendor-build-dependent rather than a firmware-version threshold
