@@ -264,11 +264,16 @@ agents:
   override semantics as today.
 - **Names that match nothing are visible, not silent.** An allow list
   cannot be validated at write time against a tool list only a live
-  connection knows. So when a server publishes its tools (connect or
-  reload), every grant naming it is checked and a warning names the
-  allowed tools the server did not publish; the status surface shows
-  the allow list under `grants`, beside the published tool list, so
-  the mismatch is answerable in one read.
+  connection knows. So when a server's tools come out of the
+  publishing rule (connect or reload), every grant naming that server
+  is checked against the final `PublishedTools` mapping, after
+  sanitization, collision drops and length drops, never against the
+  raw `tools/list` answer: a tool the server listed but publication
+  dropped is exactly as unreachable as one it never listed, and a
+  warning that consulted the raw listing would stay silent about it.
+  The warning names the allowed tools that did not publish; the
+  status surface shows the allow list under `grants`, beside the
+  published tool list, so the mismatch is answerable in one read.
 
 Internally the grant edge becomes a small value (`entry name` plus
 `allowed tool names or None`), `Config.mcp_for_agent` returns it, and
@@ -425,8 +430,9 @@ conversations.
   reference checks on the object form, `agent_defaults` parity);
   filtering by the unprefixed published name, including tools whose
   listed names needed sanitizing; the call-time grant refusal; the
-  unpublished-allowed-name warning; the status surface carrying
-  allow lists.
+  unpublished-allowed-name warning, including a grant naming a tool
+  the server listed but publication dropped; the status surface
+  carrying allow lists.
 - Integration: the issue's verification steps. A new entry written and
   granted through the API becomes usable in a live conversation after
   one reload, no restart, and status shows it connected with its
@@ -682,6 +688,11 @@ its resolution once the amendment addressing it lands.
     against the raw listing would stay silent about a listed but
     unusable tool. Compare grants against the final `PublishedTools`
     mapping, and test a grant naming a tool that publication dropped.
+    *Resolution*: adopted. The warning rule now names the final
+    `PublishedTools` mapping as its comparison base, with the reason
+    (a listed-but-dropped tool is exactly as unreachable as an
+    unlisted one), and milestone 3's unit tests carry the
+    dropped-tool grant case.
 
 ## Milestones
 
