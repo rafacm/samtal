@@ -16,7 +16,11 @@ dependencies = [
     # Direct because the cloud providers speak their APIs over it rather
     # than pulling in a vendor SDK; it arrives with the LLM SDKs anyway.
     "httpx>=0.28",
-    "mcp>=1.2",
+    # 1.24 is the first release carrying streamable_http_client, the
+    # replacement for the deprecated wrapper the transport used to call.
+    # Capped below 2 because MCP 2 needs httpx 2 and yields a transport
+    # this client does not unpack; migrating to it is its own change.
+    "mcp>=1.24,<2",
     "openai>=2.48.0",
     "pydantic>=2.9",
     "pydantic-settings>=2.6",

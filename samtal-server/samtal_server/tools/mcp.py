@@ -21,10 +21,11 @@ from collections.abc import Iterable
 from contextlib import AsyncExitStack
 from typing import Any
 
+import httpx
 import mcp.types
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import get_default_environment, stdio_client
-from mcp.client.streamable_http import streamablehttp_client
+from mcp.client.streamable_http import streamable_http_client
 
 from samtal_server.config import Config, McpServerConfig
 from samtal_server.config.secrets import SecretStore, resolve_mcp_values
@@ -179,8 +180,29 @@ class McpServerManager:
             read, write = await stack.enter_async_context(stdio_client(parameters))
         else:
             assert self._config.url is not None
+            # The transport takes a caller-managed httpx client rather
+            # than headers, a timeout and a redirect policy of its own,
+            # so the HTTP policy is stated here. The values come from
+            # the SDK's own create_mcp_http_client, which is what the
+            # deprecated wrapper this replaced built its client with, so
+            # this stays a client swap rather than a behavior change for
+            # deployments already running them: redirects followed for a
+            # proxy in front of the server, 30 s for everything but the
+            # read, and 300 s for the read, which was the wrapper's
+            # sse_read_timeout and is deliberately longer than
+            # CONNECT_TIMEOUT_S because a streamable_http server may
+            # hold a GET stream open with nothing to say on it. Entered
+            # on the stack before the transport, so unwinding closes the
+            # transport first and the client after it, in this one task.
+            client = await stack.enter_async_context(
+                httpx.AsyncClient(
+                    headers=self._resolve("headers") or None,
+                    follow_redirects=True,
+                    timeout=httpx.Timeout(30.0, read=300.0),
+                )
+            )
             read, write, _ = await stack.enter_async_context(
-                streamablehttp_client(self._config.url, headers=self._resolve("headers") or None)
+                streamable_http_client(self._config.url, http_client=client)
             )
         session = await stack.enter_async_context(ClientSession(read, write))
         await session.initialize()
