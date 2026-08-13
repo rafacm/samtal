@@ -599,7 +599,11 @@ def test_reload_gives_the_server_longer_to_answer_than_a_write(
     another copy of httpx entirely and would report whatever that made
     of one.
     """
-    envelope = mcp_module.CONNECT_TIMEOUT_S + mcp_module.STOP_TIMEOUT_S
+    envelope = (
+        mcp_module.CONNECT_TIMEOUT_S
+        + mcp_module.STOP_TIMEOUT_S
+        + mcp_module.CANCEL_TIMEOUT_S
+    )
     assert cli.RELOAD_READ_TIMEOUT_S > cli.READ_TIMEOUT_S
     assert cli.RELOAD_READ_TIMEOUT_S >= 2 * envelope
 
