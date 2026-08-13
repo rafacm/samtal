@@ -587,7 +587,7 @@ status` says what is:
 $ samtal-server config status
 home: connected since 2026-08-13T09:12:03.104213+00:00
   tools: home__turn_on_light, home__turn_off_light
-  agents: kids, house
+  agents: house, kids
 weather: down since 2026-08-13T10:41:57.882014+00:00 (ConnectionRefusedError)
   tools: (none)
   agents: house
