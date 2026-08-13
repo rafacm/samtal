@@ -63,6 +63,23 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **Three tool decisions are documented where they are met** (#121):
+  that the builtins are outside the grant model, each appearing under a
+  structural condition (`switch_agent` when the device is bound to more
+  than one agent, `remember` when memory is configured) because
+  withholding either per agent would strand a handoff or leave an agent
+  recalling and never learning; that an SSE-only server is configured as
+  a stdio server behind an `mcp-proxy` bridge, there being no native SSE
+  arm now that the specification has deprecated the transport in favour
+  of streamable HTTP; and that a tool result is speakable text, with
+  content of any other kind rendered as a named placeholder rather than
+  dropped, so the model can say what it received, until a display path
+  that renders more than speech makes structured results worth carrying
+  to the board. The server README's tools section carries all three, the
+  two MCP server examples carry the bridge, and the generated reference
+  carries a sentence of each on the `mcp`, `transport` and `mcp_servers`
+  descriptions.
+
 - **MCP writes name the reload instead of a restart** (#121): the entry
   writes and deletes, and the writes and clears of the secret slots on
   them, answer with a notice naming `samtal-server config reload`.
