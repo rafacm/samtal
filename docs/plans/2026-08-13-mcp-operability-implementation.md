@@ -72,10 +72,11 @@ client of the new endpoint. It renders a block per entry (a header line
 with the state, the instant and the reason in parentheses, then `tools:`
 and `agents:` lines) rather than the pending listing's columns, because
 two of the fields are lists. Everything printed goes through the
-existing `_printable` bound, and `_status_entries` refuses a body that
-does not carry the five fields with the same `UNRECOGNIZED_ANSWER`
-sentence the other readers use. No `--local`: a database has no runtime
-state to report.
+existing `_printable` bound, and `_status_entries` refuses a body it
+cannot recognize with the same `UNRECOGNIZED_ANSWER` sentence the other
+readers use (checking the five fields when this landed, and every
+field's type and `state`'s vocabulary after the review round below). No
+`--local`: a database has no runtime state to report.
 
 **`docs/reference/api-openapi.json`.** Regenerated with
 `uv run samtal-server config openapi`, never hand-edited. One new path,
@@ -262,3 +263,105 @@ deployment. `config status` was exercised through its real entry point
 against the real application over Starlette's TestClient, which is how
 every other command in that suite is covered, but not over a socket
 against a running server.
+
+### PR #125 review round
+
+One external review of the milestone's diff (main...ef4ac79): codex CLI
+0.147.0, model gpt-5.6-sol, read-only, 2026-08-13. Verdict: mergeable
+after the listed fixes. Findings as received, condensed; each carries
+the commit that addressed it.
+
+1. **P1: reflected credentials still escape through tool names.**
+   `tools/publish.py` logs the raw name a server listed when it drops a
+   tool, and `tools/mcp.py` logs and returns published names, so a
+   credential made of tool-name characters reaches the log, the API and
+   the CLI. The sentinel test avoids names, which the plan's test bullet
+   asked for and the implementation doc admits. Suggested: never log
+   rejected names, and stop a delivered credential from becoming an
+   observable identifier at all, through application-owned aliases or
+   credential-aware rejection during publication.
+   *Resolution*: adopted in part, in 635cdd5. The half about rejected
+   names is taken whole: all three drop warnings stop quoting what the
+   server listed and identify the tool by its position in the listing,
+   the length case says how long the name would have been, the
+   empty-name case has nothing to print (every character but none at
+   all survives sanitizing), and the collision case names the published
+   name it clashes with, which is the one name a drop may print because
+   an earlier tool already published under it and it is on the connect
+   line already. The reflecting test servers now list a tool whose name
+   is the credential and is too long to publish, so both sentinel tests
+   cover a rejected name across logs, response and CLI, and the
+   publishing suite pins the rule directly.
+   The other half is refused, and this is the finding's real subject.
+   Published names crossing is not an oversight: it is what the plan
+   settled in gap 2 and in its resolution to plan finding 2, which the
+   review did not have in front of it. The connect log has always
+   printed them under the publishing rule, the model must be given them
+   to call anything, and an operator must be able to read one in
+   `config status` and write the same word into a grant, which is the
+   whole design of milestone 3's allow lists. An application-owned alias
+   would put a name the far side never chose in front of the model and
+   in the operator's grant, breaking the correspondence the grant model
+   rests on; credential-aware rejection would have this server pattern
+   matching its own secrets against every string a third party sends,
+   which fails open on any credential it does not recognize and turns a
+   publishing rule into a scanner. The plan states the remainder and its
+   limit out loud: a deployment that distrusts a server's choice of
+   names has no business granting that server. Reopening it is a plan
+   decision rather than a review fix.
+2. **P1: `config status` prints arbitrary values from a malformed
+   response.** The client checked that five keys existed and then
+   stringified what was under them, so a body answering with an object
+   where `state`, `since` or a tool name belongs would have printed that
+   object. Suggested: validate the whole shape and vocabulary before
+   rendering, raise the fixed refusal outside any exception context, and
+   test every malformed field type.
+   *Resolution*: adopted in 7d8e087. Every field is checked for its type
+   and `state` for its vocabulary before anything renders; extra keys
+   stay tolerated so a newer server is readable; the refusal is the
+   existing sentence raised from plain predicates with no `try`, so
+   nothing walking a chain finds the body. Ten parametrized bodies each
+   carry a credential-shaped value where a printed one belongs, with a
+   control asserting the shape they were built from is accepted and a
+   test asserting the raised error's whole chain holds none of it. The
+   first run found the bug the finding implies: a membership test on an
+   unhashable value raises rather than answering False, so the type is
+   checked before the vocabulary.
+3. **P2: the boot-order change is broader than recorded.** The API token
+   was resolved after the MCP managers, so a deployment missing
+   `SAMTAL_API_SECRET` and also holding a bad MCP entry now reads about
+   the entry.
+   *Resolution*: adopted in 6b8e1f5. The token is resolved into a local
+   ahead of the registry and passed to `build_api` from there. A test
+   drives `create_app` with both faults and asserts the refusal names
+   the variable; it fails under the old order. Deviation 5 above is
+   corrected in the same commit.
+4. **P3: the documented output and vocabulary cannot match the
+   command.** The README sample listed agents unsorted where the command
+   sorts them, and the help named two of the three states.
+   *Resolution*: adopted in a6182be, with a test for each so neither can
+   drift again.
+5. **P3: the "a new reason moves the instant" contract is untested.**
+   Every assertion in the suite would have passed with the instant tied
+   to the state alone.
+   *Resolution*: adopted in df94714. A manager that fails to spawn a
+   command and then fails to reach a socket is down throughout for two
+   different reasons, and the test asserts both the reason and the
+   instant moved. Checked for teeth against an instant tied to the
+   state.
+
+### Verification after the review round
+
+Same commands, from `samtal-server/`, on the tree at df94714.
+
+- `uv run ruff check .`: "All checks passed!".
+- `uv run pytest tests/unit -q`: 1476 passed, 15 skipped in 129.78s.
+  Eighteen more than before the round, which is exactly what was added:
+  two publishing rules, ten malformed bodies with their control and the
+  refusal-chain check, the boot precedence, the agent order, the help
+  vocabulary and the new-reason instant.
+- `uv run pytest tests/integration -q`: 44 passed in 78.71s.
+- Teeth, both restored from a copy and touched rather than with `git
+  checkout`: the boot precedence test fails with the token resolved
+  inside the `build_api` call, and the new-reason test fails with the
+  instant tied to the state alone.
