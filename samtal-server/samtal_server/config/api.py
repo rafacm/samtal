@@ -32,7 +32,7 @@ import os
 from collections.abc import Callable, Collection, Iterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import Body, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -92,6 +92,12 @@ if TYPE_CHECKING:
     from samtal_server.onboarding import PendingDevice as PendingRecord
     from samtal_server.onboarding import PendingDevices
 
+    # Named here for the same reason and with more force: the MCP
+    # registry imports the SDK's clients and this project's provider
+    # layer, none of which rendering a document has any business
+    # loading. It arrives as an argument and is read through one method.
+    from samtal_server.tools.mcp import McpServers
+
 logger = logging.getLogger(__name__)
 
 # Where the sub-application is mounted on the server's own port. A
@@ -129,6 +135,12 @@ API_DESCRIPTION = (
     "That listing is the running server's own state rather than stored "
     "configuration: a restart forgets it, and the devices come back with fresh "
     "codes.\n\n"
+    "The `/runtime` namespace is the running server's own state as well, and is "
+    "kept apart from the entity namespaces because an entity may legally be named "
+    "after any word a route might want. `/runtime/mcp-servers` says what each "
+    "configured MCP server is doing right now: connected or down, since when, what "
+    "it published, and which agents may reach it. Nothing there is read from the "
+    "database, so it cannot disagree with what is running.\n\n"
     f"{API_OPTIONS_NOTE}"
 )
 
@@ -471,6 +483,58 @@ class PendingDevice(BaseModel):
     )
 
 
+class McpServerStatus(BaseModel):
+    """One configured MCP server, as the running server sees it.
+
+    The listing is keyed by the entry's name, because that is what the
+    operator wrote and what every tool the server publishes is prefixed
+    with.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: Literal["connected", "down", "unused"] = Field(
+        description=(
+            "What this entry is doing: `connected` and offering the tools below, "
+            "`down` and offering none, or `unused` because no agent references it, so "
+            "this server never built a connection for it at all."
+        )
+    )
+    reason: str | None = Field(
+        description=(
+            "Why a `down` server is down, as a fixed token this server owns: the class "
+            "of the failure, or `DroppedAfterFailedCall` for a connection dropped after "
+            "a tool call failed on it. Null when it is not down. Never a message the "
+            "far side wrote, since an MCP server is a third party and its bytes are not "
+            "this API's to publish."
+        )
+    )
+    since: str = Field(
+        description=(
+            "When this state was last entered, as an ISO-8601 instant in UTC. A new "
+            "reason for staying down counts as entering it again, since it is a fresh "
+            "failure. For an entry no agent references it is when the running "
+            "configuration took effect."
+        )
+    )
+    tools: list[str] = Field(
+        description=(
+            "What this server published, under the names the model is given "
+            "(`<entry>__<tool>`, sanitized). Empty while it is down. Only names cross "
+            "this surface: a description, or the name a server listed before the "
+            "publishing rule got to it, is bytes that server chose, and a server "
+            "holding a credential of this deployment's could reflect it in either."
+        )
+    )
+    grants: dict[str, list[str] | None] = Field(
+        description=(
+            "Which agents may reach this server, by agent name. The value is how much "
+            "of the server the agent gets: null is all of it, which is every grant "
+            "today."
+        )
+    )
+
+
 class DefaultAgent(BaseModel):
     """The agent an unbound device reaches."""
 
@@ -528,6 +592,7 @@ def build_api(
     database_dir: Path,
     loaded_agents: Collection[str] = (),
     pending: "PendingDevices | None" = None,
+    mcp_servers: "McpServers | None" = None,
 ) -> FastAPI:
     """The sub-application the server mounts: the routes, gated.
 
@@ -548,6 +613,12 @@ def build_api(
     claim route reads it, and they are the same object or the ceremony
     does not work. An application built without a server gets a table of
     its own, which is empty and stays empty, so every code is unknown.
+
+    `mcp_servers` are that server's live MCP managers, shared for the
+    same reason: the status read reports what is running, and a copy
+    would report what was running once. None is the honest answer for an
+    application built without a server, and the read answers with an
+    empty object.
     """
     api = _application()
     # Attached rather than closed over: the read and write routes take
@@ -555,6 +626,7 @@ def build_api(
     api.state.store = store_dependency(database_dir)
     api.state.loaded_agents = frozenset(loaded_agents)
     api.state.pending = pending if pending is not None else _empty_pending()
+    api.state.mcp_servers = mcp_servers
     # Added last is outermost, so a failure inside the gate itself
     # answers as sanitized as one inside a handler.
     api.add_middleware(_BearerGate, token=token)
@@ -669,6 +741,17 @@ def _pending(request: Request) -> "PendingDevices":
 # this module deliberately does not import at runtime would fail to
 # resolve. The dependency function above carries the honest type.
 PendingDep = Annotated[Any, Depends(_pending)]
+
+
+def _mcp_servers(request: Request) -> "McpServers | None":
+    """The running server's MCP managers, or None for an application
+    built without a server around it. Taken from the application for the
+    reason the store is."""
+    return request.app.state.mcp_servers
+
+
+# Annotated `Any` for the reason PendingDep is.
+McpServersDep = Annotated[Any, Depends(_mcp_servers)]
 
 
 def _pending_view(device: "PendingRecord") -> dict[str, Any]:
@@ -820,6 +903,44 @@ def _reads(api: FastAPI) -> None:
         configuration rather than a missing entity, so this is never a
         404."""
         return views.default_agent(store.read_default_agent())
+
+
+def _runtime(api: FastAPI) -> None:
+    """What the server around this application is doing, as against what
+    is stored.
+
+    A namespace of its own, outside the entity namespaces, because an
+    entity name is the operator's to choose: `status` passes the
+    `mcp_servers` entry-name rule, an existing database may already hold
+    it, and a runtime route under `/mcp-servers/` would shadow it. Kept
+    apart, the entity namespaces stay purely CRUD and no runtime route
+    added later has to fight a name either.
+    """
+
+    @api.get(
+        "/runtime/mcp-servers",
+        response_model=dict[str, McpServerStatus],
+        responses=_problems(401),
+    )
+    async def read_mcp_server_status(servers: McpServersDep) -> dict[str, Any]:
+        """What each configured MCP server is doing right now.
+
+        Runtime state of the server this application is mounted on, like
+        the pending listing: it touches no database, so it can answer
+        none of the refusals a read of the configuration can, and what
+        it reports is the slice its managers were built with rather than
+        anything read back out of storage.
+
+        `async def`, unlike the repository's plain-`def` handlers, on
+        purpose: the read then happens on the event loop that owns the
+        managers, so it cannot interleave with a change to them and
+        report half of one world.
+
+        An application built without a server around it has no runtime
+        to report and answers with an empty object, which is the honesty
+        `loaded_agents = ()` already has.
+        """
+        return {} if servers is None else servers.status()
 
 
 # A body, exactly as it was sent, handed to the repository unread.
@@ -1394,6 +1515,7 @@ def _application() -> FastAPI:
     api.add_exception_handler(RequestValidationError, _malformed_request)
     _reads(api)
     _writes(api)
+    _runtime(api)
     return api
 
 

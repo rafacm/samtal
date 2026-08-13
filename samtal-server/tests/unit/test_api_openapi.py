@@ -143,6 +143,9 @@ def test_the_document_describes_every_route_the_api_serves() -> None:
         "/devices/pending/{code}": ["post"],
         "/devices/{mac}": ["delete", "get", "put"],
         "/default-agent": ["delete", "get", "put"],
+        # The runtime namespace, which is deliberately not a route
+        # inside an entity namespace: an entry may be named `status`.
+        "/runtime/mcp-servers": ["get"],
     }
 
 
@@ -248,6 +251,13 @@ def test_every_field_a_read_always_answers_with_is_required() -> None:
         "first_seen",
         "last_seen",
         "expires_at",
+    }
+    assert set(schemas["McpServerStatus"]["required"]) == {
+        "state",
+        "reason",
+        "since",
+        "tools",
+        "grants",
     }
 
 
