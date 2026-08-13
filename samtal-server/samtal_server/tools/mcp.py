@@ -17,6 +17,7 @@ task connects, publishes its tools, and then waits until asked to stop.
 import asyncio
 import contextlib
 import logging
+import time
 from collections.abc import Iterable
 from contextlib import AsyncExitStack
 from typing import Any
@@ -38,6 +39,21 @@ logger = logging.getLogger(__name__)
 # How long connecting and listing a server's tools may take. The boot
 # waits for this once per server, concurrently.
 CONNECT_TIMEOUT_S = 10.0
+
+# What a configured entry is doing, in the vocabulary the status surface
+# answers with. `unused` is not a manager state: no manager exists for
+# an entry no agent references, which is a likely answer to "why does
+# the agent not have that tool" and is otherwise invisible.
+CONNECTED = "connected"
+DOWN = "down"
+UNUSED = "unused"
+
+# Why a connection is gone when nothing raised on the way in: a tool
+# call failed on it and the manager dropped it so the next session
+# revives it. A fixed token this application owns, like the type names
+# `_reason` answers with and for the same reason, since here there is no
+# exception left to name.
+DROPPED_AFTER_FAILED_CALL = "DroppedAfterFailedCall"
 
 
 def _emit_nothing(_record: logging.LogRecord) -> bool:
@@ -97,6 +113,13 @@ class McpServerManager:
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self._settled = asyncio.Event()
+        # What the status surface reports, written where `_run` and
+        # `_mark_down` already decide these things. A manager that has
+        # not connected yet is down with no reason: the first attempt is
+        # what supplies one.
+        self._state = DOWN
+        self._reason: str | None = None
+        self._since = time.time()
 
     @property
     def name(self) -> str:
@@ -105,6 +128,22 @@ class McpServerManager:
     @property
     def up(self) -> bool:
         return self._session is not None
+
+    @property
+    def state(self) -> str:
+        """`connected` or `down`, as the status surface says it."""
+        return self._state
+
+    @property
+    def reason(self) -> str | None:
+        """Why this server is down, as a token this application owns, or
+        None when nothing has failed. Never a far side's own words."""
+        return self._reason
+
+    @property
+    def since(self) -> float:
+        """When the current state and reason were recorded."""
+        return self._since
 
     @property
     def tool_timeout_s(self) -> float:
@@ -141,6 +180,21 @@ class McpServerManager:
         self._settled = asyncio.Event()
         self._task = asyncio.create_task(self._run(), name=f"mcp-{self._name}")
 
+    def _became(self, state: str, reason: str | None) -> None:
+        """Record what this server is doing and when it started doing
+        it.
+
+        The reason counts as part of the condition rather than as a note
+        beside it: a server that goes on being down for a new reason has
+        failed again, and an instant that stayed put would date that
+        failure to the previous one.
+        """
+        if (state, reason) == (self._state, self._reason):
+            return
+        self._state = state
+        self._reason = reason
+        self._since = time.time()
+
     async def _run(self) -> None:
         self._stop.clear()
         try:
@@ -160,6 +214,7 @@ class McpServerManager:
                     label=f"mcp server {self._name}",
                 )
                 self._session = session
+                self._became(CONNECTED, None)
                 logger.info(
                     "mcp server %s connected with %d tool(s): %s",
                     self._name,
@@ -171,14 +226,21 @@ class McpServerManager:
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            self._became(DOWN, _reason(exc))
             logger.warning(
                 "mcp server %s is unavailable, its tools are absent: %s",
                 self._name,
-                _reason(exc),
+                self._reason,
             )
         finally:
             self._session = None
             self._published = PublishedTools(tools=[], originals={})
+            # A stop with nothing wrong carries no reason. A failure
+            # recorded its own just above, and a connection dropped
+            # after a failed call recorded the fixed token before it
+            # asked this task to end, so neither is overwritten here.
+            if self._state == CONNECTED:
+                self._became(DOWN, None)
             self._settled.set()
 
     def _resolve(self, group: str) -> dict[str, str]:
@@ -254,6 +316,7 @@ class McpServerManager:
     def _mark_down(self) -> None:
         """Unwind the connection so the next session reconnects it."""
         logger.warning("mcp server %s: dropping the connection after a failed call", self._name)
+        self._became(DOWN, DROPPED_AFTER_FAILED_CALL)
         self._session = None
         self._published = PublishedTools(tools=[], originals={})
         self._stop.set()

@@ -6,7 +6,9 @@ deterministic.
 """
 
 import asyncio
+import re
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -14,6 +16,9 @@ import pytest
 from samtal_server.config import Config, McpServerConfig
 from samtal_server.tools import names
 from samtal_server.tools.mcp import (
+    CONNECTED,
+    DOWN,
+    DROPPED_AFTER_FAILED_CALL,
     McpConfigError,
     McpServerDown,
     McpServerManager,
@@ -21,6 +26,11 @@ from samtal_server.tools.mcp import (
 )
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
+
+# What a reason may look like: type names, and a group's several joined
+# with commas. Anything a far side wrote has spaces, punctuation or
+# quotes in it and does not match.
+REASON_TOKEN = re.compile(r"^[A-Za-z][A-Za-z0-9]*(, [A-Za-z][A-Za-z0-9]*)*$")
 
 
 def stdio_entry(**overrides: object) -> McpServerConfig:
@@ -106,6 +116,100 @@ async def test_a_stopped_server_leaves_no_child_behind() -> None:
     assert not manager.up
     with pytest.raises(McpServerDown):
         await manager.call("tools__secret_word", {})
+
+
+# What a manager knows about itself
+#
+# The three fields the status surface reports, at each of the four
+# moments that decide them: before the first attempt, after a
+# connection, after a failure, and after a call failed on a connection
+# that was working.
+
+
+async def test_a_manager_that_has_not_connected_yet_is_down_with_no_reason() -> None:
+    before = time.time()
+    manager = McpServerManager("tools", stdio_entry())
+
+    assert manager.state == DOWN
+    assert manager.reason is None
+    assert manager.since >= before
+
+
+async def test_a_connected_server_records_when_it_connected() -> None:
+    before = time.time()
+    manager = await running(stdio_entry())
+    try:
+        assert manager.state == CONNECTED
+        assert manager.reason is None
+        assert before <= manager.since <= time.time()
+    finally:
+        await manager.stop()
+
+
+async def test_a_dead_server_records_a_reason_token_and_never_a_message() -> None:
+    # The token is the whole diagnosis the surface carries, and it is
+    # this application's word rather than the far side's: an exception's
+    # message quotes whatever the other end wrote.
+    manager = await running(stdio_entry(command="/nonexistent/mcp-server", args=[]))
+    try:
+        assert manager.state == DOWN
+        assert manager.reason is not None
+        assert REASON_TOKEN.match(manager.reason), manager.reason
+        assert "nonexistent" not in manager.reason
+    finally:
+        await manager.stop()
+
+
+async def test_a_connection_dropped_after_a_failed_call_carries_a_fixed_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one way down that has no exception left to name by the time
+    the state is recorded: the call raised, the manager unwound the
+    connection so the next session revives it, and nothing about that is
+    the far side's to describe."""
+    manager = await running(stdio_entry())
+    try:
+
+        async def refuse(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("a message from nowhere near this token")
+
+        monkeypatch.setattr(manager._session, "call_tool", refuse)
+        with pytest.raises(RuntimeError):
+            await manager.call("tools__secret_word", {})
+
+        assert manager.state == DOWN
+        assert manager.reason == DROPPED_AFTER_FAILED_CALL
+    finally:
+        await manager.stop()
+
+
+async def test_a_server_stopped_on_purpose_is_down_with_nothing_wrong() -> None:
+    # Shutting a server down is not a failure, so there is no reason to
+    # report for it.
+    manager = await running(stdio_entry())
+    await manager.stop()
+
+    assert manager.state == DOWN
+    assert manager.reason is None
+
+
+async def test_the_instant_moves_when_the_state_does() -> None:
+    manager = McpServerManager("tools", stdio_entry())
+    manager._config = stdio_entry(command="/nonexistent/mcp-server", args=[])
+    await manager.start()
+    went_down = manager.since
+    assert manager.state == DOWN
+
+    manager._config = stdio_entry()
+    manager.ensure_reconnecting()
+    try:
+        async with asyncio.timeout(20):
+            while not manager.up:
+                await asyncio.sleep(0.05)
+        assert manager.state == CONNECTED
+        assert manager.since > went_down
+    finally:
+        await manager.stop()
 
 
 def config_with(
