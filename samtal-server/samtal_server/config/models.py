@@ -801,7 +801,10 @@ class McpServerConfig(BaseModel):
         description=(
             "Which field group applies: stdio spawns `command` as a subprocess, "
             "streamable_http connects to `url`. Naming a field of the other "
-            "transport is an error rather than a silently ignored key."
+            "transport is an error rather than a silently ignored key. An "
+            "SSE-only endpoint is configured as a stdio server behind an "
+            "mcp-proxy bridge, since the specification deprecated SSE in favour "
+            "of streamable_http and there is no native arm for it here."
         )
     )
 

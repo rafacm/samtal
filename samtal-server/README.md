@@ -540,6 +540,25 @@ tool_timeout_s: 15
 YAML
 ```
 
+**SSE-only servers** are reached through a bridge rather than a
+transport of their own. Point `mcp-proxy` at the endpoint and configure
+the result as the stdio server it now is, which is what the `home` entry
+above does:
+
+```yaml
+transport: stdio
+command: mcp-proxy
+args: ["https://example.invalid/mcp_server/sse"]
+```
+
+There is no native SSE arm and there will not be one. The specification
+moved its HTTP story to streamable HTTP and left SSE deprecated, so a
+third transport here would be permanent maintenance for a shrinking
+population, bought straight after this server paid to leave one
+deprecated client behind. The bridge is one line of configuration and
+everything else about the entry, secrets, egress, grants, the timeout,
+is the same as any other stdio server's.
+
 **Per-tool grants.** An `mcp` entry is either the entry name on its own,
 which is the whole server, or an object naming the server and the tools
 of it that layer may reach:

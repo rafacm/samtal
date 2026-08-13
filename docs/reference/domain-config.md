@@ -138,7 +138,7 @@ samtal-server config set mcp-server <name> -f fragment.yaml
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `transport` | `"stdio" \| "streamable_http"` | `required` | Which field group applies: stdio spawns `command` as a subprocess, streamable_http connects to `url`. Naming a field of the other transport is an error rather than a silently ignored key. |
+| `transport` | `"stdio" \| "streamable_http"` | `required` | Which field group applies: stdio spawns `command` as a subprocess, streamable_http connects to `url`. Naming a field of the other transport is an error rather than a silently ignored key. An SSE-only endpoint is configured as a stdio server behind an mcp-proxy bridge, since the specification deprecated SSE in favour of streamable_http and there is no native arm for it here. |
 | `command` | `str \| null` | `null` | The executable a stdio server is spawned as. Required for that transport, and rejected for streamable_http. |
 | `args` | `list[str]` | `[]` | The arguments the stdio command is spawned with, one per entry. |
 | `env` | `dict[str, str]` | `{}` | Environment variables for the spawned stdio command. A value of $NAME is read from the server's own environment at startup, and any secret-bearing key (token, api_key, authorization, ...) must use that form. |
