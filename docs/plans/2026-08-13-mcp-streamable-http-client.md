@@ -317,7 +317,7 @@ resolution once the amendment addressing it lands.
 
 - [x] **[Switch the streamable_http transport to the replacement
   client and cover it](2026-08-13-mcp-streamable-http-client-implementation.md#milestone-1-switch-the-streamable_http-transport-to-the-replacement-client-and-cover-it)**
-  (PR TBD): `_connect` builds the
+  (PR #123): `_connect` builds the
   caller-managed `httpx.AsyncClient` (headers, the wrapper's
   timeout and redirect defaults, with the comment naming their
   origin) on the manager's exit stack and hands it to
