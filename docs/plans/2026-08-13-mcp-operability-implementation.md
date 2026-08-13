@@ -365,3 +365,191 @@ Same commands, from `samtal-server/`, on the tree at df94714.
   checkout`: the boot precedence test fails with the token resolved
   inside the `build_api` call, and the new-reason test fails with the
   instant tied to the state alone.
+
+## Milestone 2: Reload without restart
+
+An MCP entry written, a grant given and a credential rotated now reach a
+running server on request, without a restart and without dropping a
+conversation. Everything else about the configuration is still a
+boot-time snapshot.
+
+### What landed
+
+**`samtal_server/config/secrets.py`.** `SecretStore.fingerprint(kind,
+identity)`: a SHA-256 over the entity's slot names and the ciphertext in
+them, each length-prefixed so that no two different sets of slots can
+digest alike. It answers one question, whether two loads hold the same
+stored secrets for one entity, and carries neither plaintext nor
+envelope to whoever asks; it needs no key, which is what lets the diff
+compare rotations on a store it cannot open. Setting a slot again to the
+same plaintext changes the mark, since a Fernet token carries a
+timestamp and a fresh IV, and rebuilding then is the safe direction to
+be wrong in.
+
+**`samtal_server/config/boot.py`.** The boot's steps 2 to 5 (open the
+database, load, verify the stored secrets, compose and validate the
+whole snapshot) become `_with_domain_half`, shared by `load_boot_config`
+and the new `reload_domain_config(running)`. The reload composes the
+stored domain half onto the running process's `server` and `memory`
+sections rather than reading the file again, so entry names, references
+and `server.local_only` are judged by the code that judged them at
+startup while a changed file still means a restart.
+
+**`samtal_server/config/loader.py`.** `ReloadInProgressError`, beside
+`DatabaseBusyError` and for its reason: the raiser is the MCP registry,
+on the conversation side of the process, and the answerer is the
+configuration API, which loads none of that.
+
+**`samtal_server/tools/mcp.py`.** The milestone's centre.
+
+`McpServerManager` gains the secrets mark it was built with, `same_as`
+(the same entry fragment and the same mark, which is the whole of the
+diff's question), and a bounded `stop(timeout)` whose backstop is
+cancelling the manager's own task, never touching a transport from
+outside it.
+
+`McpServers.reload(read)` is the two-phase apply. `read` is the
+synchronous re-read, handed in rather than done here, and run in
+`asyncio.to_thread` because it takes the database's write lock while
+this coroutine is on the loop every conversation is on. `_prepared`
+builds every manager the new world needs through `_managers_for`, the
+function `build` now shares, which is where the egress check, `$VAR`
+resolution and decryption already live; any failure there is recorded
+and re-raised outside the handler as a `ConfigError` led by "the reload
+was refused and nothing was changed". `_apply` diffs candidates against
+what is running, stops the departing managers concurrently under
+`STOP_TIMEOUT_S` (5 s, new), starts the arriving ones concurrently under
+the existing `CONNECT_TIMEOUT_S`, and then swaps the manager dict and
+the slice with no await between them. One reload at a time, on a plain
+flag rather than a lock, because a second is refused rather than queued.
+
+`tools_for_agent(agent)` and `revive_for_agents(agents)` ask the slice
+that is running rather than a configuration a session is holding;
+`McpSlice.entries_for` answers nothing for an agent it does not know.
+`McpReload` is the frozen four-tuple of outcomes.
+
+**`samtal_server/runtime/pipeline.py`.** The revive at connect and
+`_tool_snapshot` call those two methods, so the grants swap with the
+managers they name.
+
+**`samtal_server/config/api.py`.** `POST /runtime/mcp-servers/reload`,
+`async def` for the reason the status read is; the `McpReloadResult`
+response model (the four outcome lists plus `servers`, the whole status
+document, taken with no await after the reload returns); `NoRuntimeError`
+mapped to 503 with its own problem description, `ReloadInProgressError`
+mapped to 409 beside the busy database; `build_api` grows the
+`mcp_reload` hook beside `mcp_servers`, and the API description gains a
+paragraph on the second exception to the boot-time snapshot.
+
+**`samtal_server/app.py`.** `_mcp_reloader(config, servers)` closes over
+the booted configuration and the running registry and hands the registry
+a plain `read` function, which is what keeps the tools layer clear of the
+database.
+
+**`samtal_server/config/writes.py` and the routes.** `MCP_RELOAD_NOTICE`,
+answered by the four MCP mutations: the entry PUT and DELETE and the
+secret slot PUT and DELETE. Providers, provider secrets, agents and the
+whole `--local` path keep the restart sentence.
+
+**`samtal_server/config/cli.py`.** `samtal-server config reload`, which
+prints the four outcomes and then the status block underneath, since an
+entry that started is not thereby connected. `RELOAD_READ_TIMEOUT_S` is
+60 s against a server envelope of one connect timeout plus a stop bound,
+and `_call` takes the endpoint's read timeout as an argument.
+
+**Documents.** `config/docgen.py`'s preamble and `config.example.yaml`'s
+note now name two exceptions and say what separates them (a binding is
+noticed, a reload is asked for); `docs/reference/domain-config.md` and
+`docs/reference/api-openapi.json` were regenerated with the commands,
+never hand-edited. The server README gains "Applying an MCP change
+without a restart" beside the status section, and its configuration and
+API sections learn the third notice and the 503. One `CHANGELOG.md`
+entry under the existing `## 2026-08-13`.
+
+### Deviations from the plan
+
+Four, none changing what the milestone does.
+
+1. **The re-read is handed to `McpServers` as a callable rather than
+   called by it.** The plan says the synchronous half runs in
+   `asyncio.to_thread` and touches no manager state, which is exactly
+   what happens; what differs is who imports whom. `tools/mcp.py`
+   calling `config/boot.py` would put the database, SQLAlchemy and
+   Alembic on the tools layer's import path, so the composition root
+   passes a `read` function and the registry decides where it runs. The
+   unit suite gets the same seam for free: the diff tests supply a
+   configuration without a database.
+2. **A candidate is constructed for every referenced entry, including
+   the unchanged ones**, and the ones that turn out unchanged are
+   thrown away. The plan asks for "every candidate manager the new world
+   needs", and this is the literal reading; it also makes preparation
+   total, so an entry whose stored secret stopped decrypting refuses the
+   reload rather than being quietly kept. The cost is one env and header
+   resolution per entry per reload.
+3. **The CLI's endpoint-specific timeout is set on the client rather
+   than passed with the request.** httpx would take it per request, and
+   that is what was written first; Starlette's `TestClient` raises
+   `StarletteDeprecationWarning` on a request-level timeout, and the
+   whole CLI acceptance suite runs through that seam. Each `_call`
+   builds a client, makes one request and closes it, so the two are the
+   same thing here, and the comment says why.
+4. **The reload response's status field is named `servers`.** The plan
+   says "the full status document exactly as `GET /runtime/mcp-servers`
+   would answer it" without naming the key; `status` would have read as
+   `status.status` for every entry inside it.
+
+### Discoveries
+
+**`TestClient` carries a different httpx.** Starlette's test client is
+built on a vendored `httpx2`, so assigning an `httpx.Timeout` to it
+produces a `Timeout` whose `.read` is that object rather than a number.
+Nothing in production touches it (the real client is `httpx.Client`),
+but a test that asserted the reload's timeout through the fixture's
+TestClient would have been asserting nonsense. The test that pins it
+drives a real `httpx.Client` over `httpx.MockTransport` instead, and
+says so.
+
+**A reload cannot be driven across event loops.** Milestone 1 recorded
+that a `TestClient` call inside an async test reads managers from
+another loop, and that `status()` is safe because it is a synchronous
+read. The reload is not: it stops and starts tasks. So the API-level
+tests hand the route a stub reload and an unstarted registry, and the
+real two-phase apply is exercised against real servers in
+`test_tools_mcp_reload.py` and over a real socket in the integration
+lane. This is the same one-task rule the module's own docstring warns
+about, met from the test side.
+
+**An unchanged entry needs an identity assertion, not a state one.** A
+manager that was stopped and started again reports the same state, the
+same tools and (within a second) a similar instant, so "unchanged" is
+proven by the manager object being the same one and by its published
+`ToolDef` objects being the very same objects, which a re-listing would
+have replaced.
+
+**The device sdk re-arms its own listening.** `XiaoZhiWebsocket` sends
+`listen start` when a reply's `tts stop` arrives in auto mode, which is
+what lets the integration test speak twice on one connection without
+reimplementing the device's half of the protocol.
+
+### Verification
+
+All from `samtal-server/`, on the tree at the documentation commit.
+
+- `uv run ruff check .`: "All checks passed!".
+- `uv run pytest tests/unit -q`: 1504 passed, 15 skipped in 136.60s.
+  Forty-six more than milestone 1, which is what the files above added;
+  the drift checks for the OpenAPI document and the generated reference
+  run in this lane and pass.
+- `uv run pytest tests/integration -q`: 46 passed in 108.54s. Two more:
+  the single-socket reload proof, and the reload's answer and its 422
+  refusal over a real socket.
+- Teeth: the integration proof fails at its second utterance if the
+  reload is not made (the reply keeps carrying the tool loop's "no tool
+  called" refusal), and every refusal test asserts the running managers
+  and grants are the same objects afterwards.
+
+Not verified, and not claimed: nothing was run against hardware or a
+deployment, and no reload was made against a server holding a real MCP
+server over the network. The 60 s client timeout and the 5 s stop bound
+are asserted against the constants they have to outlast rather than
+measured under a slow server.
