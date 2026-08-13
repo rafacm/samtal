@@ -13,7 +13,10 @@ nothing new is configured, stored or persisted; stable across restarts;
 and rotating only when the secret rotates. Base32 because A-Z2-7 holds
 no 0/O and no 1/I/l, the pairs a person misreads off a 240x240 display,
 and matched case-insensitively because a phone keyboard offers lower
-case first.
+case first. It is also served with and without its trailing slash, by
+the same handlers rather than by a redirect between them: a captive
+portal saves what it likes, and the firmware treats a redirect on this
+request as an error rather than following it.
 
 A wrong key answers the stock 404, byte for byte what a path that was
 never served answers, and logs the attempted key next to the correct
@@ -43,7 +46,6 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.responses import RedirectResponse
 
 from samtal_server import ota
 from samtal_server.config import Config
@@ -264,33 +266,31 @@ def build_router(key: str | None) -> APIRouter:
     """
     router = APIRouter()
     if key is None:
-        router.post(onboarding_path(None))(ota.check_version)
-        router.get(onboarding_path(None))(ota.describe)
+        for path in _spellings(onboarding_path(None)):
+            router.post(path)(ota.check_version)
+            router.get(path)(ota.describe)
         return router
-    path = f"{ONBOARDING_MOUNT_PATH}/{{key}}/"
-    router.post(path)(_guarded(key, ota.check_version))
-    router.get(path)(_guarded(key, ota.describe))
-    # A captive portal may drop the trailing slash, and Starlette answers
-    # that with a 307 of its own. Left to it, the redirect happens before
-    # any handler runs and its Location header echoes the attempted key,
-    # so a wrong key would be answered differently from a path that was
-    # never served, which is the one thing the miss branch must not do.
-    # These routes put the key check in front of the redirect: the
-    # correct key gets the same 307, a wrong one gets the same 404 as
-    # everywhere else.
-    slashless = path.rstrip("/")
-    router.post(slashless)(_guarded(key, _redirect_to_slash))
-    router.get(slashless)(_guarded(key, _redirect_to_slash))
+    for path in _spellings(f"{ONBOARDING_MOUNT_PATH}/{{key}}/"):
+        router.post(path)(_guarded(key, ota.check_version))
+        router.get(path)(_guarded(key, ota.describe))
     return router
 
 
-async def _redirect_to_slash(request: Request) -> Response:
-    """The redirect Starlette would have issued, once the key is known
-    to be right. 307 rather than 302 or 303: it preserves the method and
-    the body, and what arrives here is a device's POST."""
-    return RedirectResponse(
-        str(request.url.replace(path=f"{request.url.path}/")), status_code=307
-    )
+def _spellings(path: str) -> tuple[str, str]:
+    """The path as written and the path without its trailing slash, both
+    of which are served by the same handler.
+
+    Not a redirect between the two, which is what this was until a
+    factory board met it (2026-08-13): the captive portal saved the
+    typed URL without its trailing slash, the device POSTed to the
+    slashless spelling, and the firmware does not follow a redirect on
+    this request. It rendered "code=307" on its screen and restarted in
+    a loop, and nothing reached a handler, so the server had nothing to
+    say about it either. A device-facing endpoint cannot spend a
+    round trip on a redirect it has no evidence the device will follow,
+    so both spellings answer.
+    """
+    return path, path.rstrip("/")
 
 
 def _guarded(expected: str, handler: Handler) -> Handler:

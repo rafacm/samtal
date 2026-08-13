@@ -241,10 +241,12 @@ def test_the_correct_key_is_not_broadcast_at_unshaped_probes(
 
 @pytest.mark.parametrize("method", ["get", "post"])
 def test_a_wrong_key_without_the_slash_is_answered_the_same_way(method: str) -> None:
-    """Starlette's own trailing-slash redirect runs before any handler
-    and echoes the attempted key in its Location header, which would
-    make a wrong key distinguishable from a path that was never served.
-    The slashless routes therefore check the key first."""
+    """Left to Starlette, the slashless spelling is a trailing-slash
+    redirect that runs before any handler and echoes the attempted key
+    in its Location header, which would make a wrong key distinguishable
+    from a path that was never served. The router registers that
+    spelling itself, behind the same guard, so a miss is a miss on
+    either one."""
     client = client_for()
     # The device's POST carries a body; a person checking the URL by
     # hand sends a GET with none. Both must miss the same way.
@@ -264,34 +266,65 @@ def test_a_wrong_key_without_the_slash_is_answered_the_same_way(method: str) -> 
     assert "AAAAAAAA" not in str(missed.headers)
 
 
-def test_the_right_key_without_the_slash_still_redirects() -> None:
+def test_the_short_path_serves_both_spellings_itself() -> None:
+    """A captive portal saves the typed URL without its trailing slash,
+    and a factory board proved on 2026-08-13 that the firmware does not
+    follow a redirect on this request: it rendered "code=307" and
+    restarted in a loop. So the slashless spelling is served rather than
+    redirected, and this asserts it with redirects disabled, which is
+    what the device does.
+    """
     client = client_for()
-    for method in ("get", "post"):
-        body = {"json": SYSTEM_INFO} if method == "post" else {}
-        redirected = getattr(client, method)(
-            f"/x/{KEY}", headers=HEADERS, follow_redirects=False, **body
-        )
-        assert redirected.status_code == 307, method
-        assert redirected.headers["location"].endswith(f"/x/{KEY}/")
+
+    answered = client.post(
+        f"/x/{KEY}", json=SYSTEM_INFO, headers=HEADERS, follow_redirects=False
+    )
+    assert answered.status_code == 200
+    assert "location" not in answered.headers
+    # The version the system info carried, so the body reached the
+    # handler rather than being lost on the way to another URL.
+    assert answered.json()["firmware"]["version"] == "2.4.0"
+
+    slashed = client.post(
+        f"/x/{KEY}/", json=SYSTEM_INFO, headers=HEADERS, follow_redirects=False
+    )
+    assert _stable(answered) == _stable(slashed)
+
+    described = client.get(f"/x/{KEY}", headers=HEADERS, follow_redirects=False)
+    assert described.status_code == 200
+    assert "location" not in described.headers
 
 
-def test_the_slashless_redirect_keeps_the_query_it_was_given() -> None:
-    """The redirect Starlette would have issued preserves the query, and
-    so does this one: a portal that appends anything must not lose it."""
-    redirected = client_for().get(
+def test_a_query_on_the_slashless_spelling_still_reaches_the_handler() -> None:
+    """A portal that appends something of its own must not turn the URL
+    into a miss."""
+    answered = client_for().get(
         f"/x/{KEY}?probe=1", headers=HEADERS, follow_redirects=False
     )
-    assert redirected.status_code == 307
-    assert redirected.headers["location"].endswith(f"/x/{KEY}/?probe=1")
+    assert answered.status_code == 200
 
 
-@pytest.mark.parametrize("path", [f"/x/{KEY}", OTA_PATH.rstrip("/")])
-def test_a_missing_trailing_slash_still_reaches_the_handler(path: str) -> None:
-    """A captive portal may strip the trailing slash. Starlette answers
-    307, which preserves the method and the body, but that is asserted
-    here rather than assumed: a 302 or a 303 would turn the device's
-    POST into a GET and lose its system info."""
+def test_the_keyless_route_serves_both_spellings_too() -> None:
+    """Auth off is the trial network, where the portal behaves exactly
+    as it does everywhere else."""
+    client = client_for(Config(server={"auth": {"enabled": False}}))
+    for path in ("/x/", "/x"):
+        answered = client.post(
+            path, json=SYSTEM_INFO, headers=HEADERS, follow_redirects=False
+        )
+        assert answered.status_code == 200, path
+
+
+def test_the_legacy_path_still_answers_the_slashless_spelling_by_redirect() -> None:
+    """Characterization, not endorsement. `ota.build_router` registers
+    only the slashed spelling, so Starlette answers the other with its
+    own 307, which preserves the method and the body but which the
+    hardware finding above says a device will not follow. The legacy
+    router is deliberately not changed here: it is not what this
+    milestone added, and it is being changed where it is being changed.
+    """
     client = client_for()
+    path = OTA_PATH.rstrip("/")
 
     redirected = client.post(
         path, json=SYSTEM_INFO, headers=HEADERS, follow_redirects=False
@@ -301,6 +334,4 @@ def test_a_missing_trailing_slash_still_reaches_the_handler(path: str) -> None:
 
     followed = client.post(path, json=SYSTEM_INFO, headers=HEADERS)
     assert followed.status_code == 200
-    # The body survived the redirect: this is the version the system info
-    # carried, and a lost body would answer with the unknown one.
     assert followed.json()["firmware"]["version"] == "2.4.0"
