@@ -27,9 +27,21 @@ tts: eleven
 # Naming a list replaces the inherited one rather than extending it,
 # like the stage fields above. An empty list (`mcp: []`) is how an agent
 # opts out of tools its siblings have.
+#
+# An entry is either the server's name on its own, which is all of its
+# tools, or the object form below: the server, and which of its tools
+# this agent may reach. The tools are named the way the model is given
+# them minus the entry prefix, which is the name `samtal-server config
+# status` prints under `tools:` (`turn_on_light` for
+# `home__turn_on_light`); leaving `tools` out of the object means the
+# whole server, and there is no deny list, because a denied set would
+# silently grant whatever the server adds next.
 mcp:
-  - home
   - weather
+  - server: home
+    tools:
+      - turn_on_light
+      - turn_off_light
 
 # An agent may name its own filler section, which replaces the inherited
 # one wholly rather than merging with it. See examples/agent-defaults.yaml

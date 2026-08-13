@@ -44,6 +44,23 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   time, and a concurrent one is refused with the same retryable 409 a
   contended write answers with.
 
+- **An agent can be granted single tools of an MCP server** (#121): an
+  `mcp` list entry is either the entry name on its own, which is the
+  whole server as before, or an object naming the server and the tools
+  of it that layer may reach (`{server: home, tools: [turn_on_light]}`),
+  on agents and on `agent_defaults` alike. Tools are named the way the
+  model is given them minus the entry prefix, which is the name
+  `samtal-server config status` prints, so what the server called a tool
+  before the publishing rule got to it never has to appear. It is an
+  allow list and there is no deny list, since a denied set would
+  silently grant whatever the server adds next. The grant filters what
+  the agent is offered and is checked again when a call arrives, so a
+  tool an agent was not offered is refused rather than run. A name the
+  server does not publish is logged when its tools come out of the
+  publishing rule, compared against what published rather than what was
+  listed, and the status surface shows each agent's allowed tools beside
+  the published ones.
+
 ### Changed
 
 - **MCP writes name the reload instead of a restart** (#121): the entry
