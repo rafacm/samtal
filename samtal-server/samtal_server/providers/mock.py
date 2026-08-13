@@ -138,8 +138,12 @@ class MockLlm(LlmProvider):
     streamed word by word so sentence assembly is exercised. The template
     takes `{text}` (the last user turn), `{system}` (the prompt the
     session handed over, so a test can prove a reply came from one
-    agent's own prompt and not another's), and `{tool_result}` (whatever
-    the tools answered this reply).
+    agent's own prompt and not another's), `{tools}` (the names this
+    reply was offered, the same trick `{system}` plays for the prompt:
+    what a session gave the model is otherwise invisible from outside,
+    so a test about which tools an agent may reach could only watch
+    which calls happened, and a forbidden tool nobody called would pass)
+    and `{tool_result}` (whatever the tools answered this reply).
 
     Tool calling is scripted rather than decided: when `tool_when` is a
     substring of the last user turn, the first round asks for
@@ -189,6 +193,7 @@ class MockLlm(LlmProvider):
         reply = self._reply.format(
             text=last_user,
             system=system,
+            tools=", ".join(tool.name for tool in tools),
             tool_result=" ".join(result.content for result in results),
         )
         for index, word in enumerate(reply.split(" ")):

@@ -9,6 +9,7 @@ from samtal_server.providers import (
     StreamStarted,
     TextDelta,
     ToolCall,
+    ToolDef,
     ToolResult,
     Turn,
     build_provider,
@@ -86,3 +87,32 @@ def test_a_tool_arguments_option_that_is_not_a_mapping_is_refused() -> None:
         assert "must be a mapping" in str(exc)
     else:
         raise AssertionError("a scalar tool_arguments should not build")
+
+
+async def test_the_reply_can_say_which_tools_it_was_offered() -> None:
+    """What a session hands the model is otherwise invisible from
+    outside it: `MockLlm.stream` ignored its `tools` argument, so a
+    scripted conversation about which tools an agent may reach could
+    only watch which calls happened, and a forbidden tool nobody called
+    would have passed. The placeholder puts the offer in the reply, the
+    trick `{system}` already plays for the prompt."""
+    llm = scripted(reply="I have {tools}.")
+
+    said = spoken(
+        await events(
+            llm,
+            [Turn("user", "hello")],
+            tools=[
+                ToolDef(name="home__turn_on_light", description="", input_schema={}),
+                ToolDef(name="home__turn_off_light", description="", input_schema={}),
+            ],
+        )
+    )
+
+    assert said == "I have home__turn_on_light, home__turn_off_light."
+
+
+async def test_a_reply_that_names_no_tools_is_unaffected() -> None:
+    # Backward compatible: every existing template is one of these.
+    llm = scripted(reply="You said {text}.")
+    assert spoken(await events(llm, [Turn("user", "hello")])) == "You said hello."
