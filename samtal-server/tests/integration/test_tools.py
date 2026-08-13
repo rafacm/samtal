@@ -256,3 +256,54 @@ async def test_a_server_tool_the_apis_would_refuse_is_still_reachable(
         events, _ = await simulate(port, DEVICE_MAC)
 
     assert spoken(events) == "The tool says dotted answer."
+
+
+# Per-tool grants, proven from what the model was offered
+
+
+RESTRICTED_MAC = "aa:bb:cc:dd:ee:23"
+
+
+def granting_config(kids_grant: object) -> Config:
+    """Two agents on one MCP server, one of them restricted, each on a
+    device of its own so neither is offered `switch_agent`. The reply is
+    the list of tools the model was handed, which is the only place the
+    offer is visible from outside the session."""
+    return Config(
+        providers={
+            "llm": {"mock": {"type": "mock", "reply": "I have {tools}."}},
+            "asr": {"mock": {"type": "mock", "text": "what can you do"}},
+            "tts": {"mock": {"type": "mock"}},
+            "vad": {"mock": {"type": "mock"}},
+        },
+        mcp_servers={"tools": stdio_server()},
+        agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
+        agents={
+            "house": {"prompt": "HOUSE", "mcp": ["tools"]},
+            "kids": {"prompt": "KIDS", "mcp": [kids_grant]},
+        },
+        devices={DEVICE_MAC: ["house"], RESTRICTED_MAC: ["kids"]},
+        default_agent="house",
+    )
+
+
+def offered(events: list[dict]) -> set[str]:
+    """The tool names the reply said it was given."""
+    return set(spoken(events).removeprefix("I have ").rstrip(".").split(", "))
+
+
+async def test_a_restricted_agent_is_offered_exactly_its_subset(serve, simulate) -> None:
+    """The issue's third verification step. Proven from the offer rather
+    than from which calls happened: the model is free to call nothing,
+    and a conversation that watched calls would pass with a forbidden
+    tool sitting on the list."""
+    config = granting_config({"server": "tools", "tools": ["secret_word", "add"]})
+    async with serve(config) as port:
+        restricted, _ = await simulate(port, RESTRICTED_MAC)
+        whole, _ = await simulate(port, DEVICE_MAC)
+
+    assert offered(restricted) == {"tools__secret_word", "tools__add"}
+    # The sibling agent on the same server, so the subset is a
+    # restriction rather than everything the server published.
+    assert offered(whole) > offered(restricted)
+    assert "tools__always_fails" in offered(whole)
