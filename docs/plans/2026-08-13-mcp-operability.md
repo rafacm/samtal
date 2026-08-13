@@ -74,9 +74,25 @@ contract stays "boot-time snapshot" everywhere else.
 restart), verifies the stored secrets open, composes it with the
 running server section and validates the whole snapshot exactly as
 boot does, so entry-name rules, reference checks and `server.local_only`
-egress declarations are enforced by the same code. A snapshot that
-fails validation refuses the reload with the model's own sentence and
-applies nothing. A valid one is diffed against what is running:
+egress declarations are enforced by the same code.
+
+**The apply is two-phase, and only the second phase touches anything
+running.** Model validation is not the last thing that can fail:
+building a manager resolves `$VAR` references from the environment,
+decrypts stored credentials and enforces the egress declarations, any
+of which can refuse after the snapshot itself validated. So the
+prepare phase does all of it: validate the composed snapshot, verify
+the stored secrets open, construct every candidate manager the new
+world needs (which is where `$VAR` resolution, decryption and the
+`local_only` check already live, at construction), and only when
+every candidate stands does the apply phase stop, start and swap. A
+failure anywhere in preparation refuses the reload with the same
+sanitized sentence shape the write routes use and leaves managers and
+grants exactly as they were. Being unreachable is not a preparation
+failure: a candidate that connects to nothing still applies as a
+`down` manager with its reason on the status surface, eligible for
+the existing revival, which is the boot behaviour (config errors fail,
+liveness does not) carried over. The diff against what is running:
 
 - an entry that is new, or newly referenced, is built and started;
 - an entry whose fragment or whose stored secret ciphertexts changed
@@ -337,9 +353,14 @@ conversations.
   absent from the status response, the CLI output and every log
   record, the way the malformed-handshake test already asserts.
 - Unit, milestone 2: the diff (new, changed fragment, changed stored
-  ciphertext, removed, de-referenced, unchanged-untouched); refusal on
-  an invalid snapshot applies nothing; concurrent reload answers 409;
-  grants swap visible to the next tool snapshot; write notices.
+  ciphertext, removed, de-referenced, unchanged-untouched); refusal
+  applies nothing, proven for each way preparation can fail (a
+  snapshot that will not validate, an unset `$VAR`, a stored secret
+  that will not decrypt, a `local_only` egress refusal), with the
+  running managers and grants asserted untouched after each; a
+  candidate that merely cannot connect applies as `down` and is
+  revivable; concurrent reload answers 409; grants swap visible to
+  the next tool snapshot; write notices.
 - Unit, milestone 3: config shapes (string form, object form, both in
   one list, `tools: []` refused, duplicate and blank names refused,
   reference checks on the object form, `agent_defaults` parity);
@@ -456,6 +477,15 @@ its resolution once the amendment addressing it lands.
    connection failure distinctly defined as an applied-but-down
    manager eligible for revival. Test unset variables, undecryptable
    secrets and `local_only` rejection, not only validation errors.
+   *Resolution*: adopted. The mechanics section now specifies the
+   two-phase apply in exactly this shape: preparation (validate,
+   verify, construct every candidate, which is where `$VAR`
+   resolution, decryption and the egress check already live) touches
+   nothing running and any failure there refuses with the sanitized
+   sentence shape and changes nothing; unreachability is applied as a
+   `down`, revivable manager, the boot rule carried over. Milestone
+   2's tests enumerate each preparation failure and assert the
+   running state untouched after each.
 
 5. **P1: object-form grants cannot round-trip through the current
    database and view paths.** `config/store.py` serializes
