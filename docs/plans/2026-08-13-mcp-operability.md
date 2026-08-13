@@ -347,6 +347,131 @@ conversations.
   ride in the same commit as the change that moves them; CI's drift
   checks are the net.
 
+## Plan review round
+
+One external review of the plan as first committed (9c773d2): codex
+CLI 0.147.0, model gpt-5.6-sol, read-only against this repository
+with the issue #121 body supplied, 2026-08-13. Verdict: ready after
+the P1/P2 amendments. Findings as received, condensed; each carries
+its resolution once the amendment addressing it lands.
+
+1. **P1: the status route shadows a valid MCP server named
+   `status`.** `GET /mcp-servers/status` registered before
+   `/mcp-servers/{name}` would answer runtime status where
+   `config show mcp-server status` used to answer that entry's
+   configuration: `status` is a legal entry name under
+   `tools/names.py`, and existing databases may already hold it. Put
+   runtime status outside the entity namespace (such as
+   `GET /runtime/mcp-servers`) rather than reserving the name, and
+   add an upgrade regression test with an entry named `status`.
+
+2. **P1: the status payload violates the no-secret-readback
+   contract.** `listed_as` and `description` are server-provided
+   bytes; a server that received a credential through its env or
+   headers can reflect it in either field, making the API and CLI a
+   secret-readback path, and sanitizing only `reason` does not cover
+   it. Expose only names that have been through the publishing rule,
+   omit raw descriptions and original names, define allow lists
+   against a non-reflective identifier, and add sentinel tests
+   asserting a credential reflected in tool metadata reaches neither
+   responses nor CLI output nor logs.
+
+3. **P1: reload would perform blocking SQLite work on the
+   conversation event loop.** `ConfigStore.load()` is synchronous and
+   takes `BEGIN IMMEDIATE`, and the existing database-backed handlers
+   are plain `def` precisely so FastAPI runs them on a worker thread;
+   an `async def` reload doing the same load would stall every live
+   conversation for up to the busy timeout. Run the load, secret
+   verification and composition in a worker thread with no manager
+   state touched there, keep manager construction and swapping on the
+   owning event loop, and define the status route's synchronization.
+
+4. **P1: "invalid reload applies nothing" does not cover failures
+   after model validation.** Manager construction resolves `$VAR`
+   values, decrypts credentials and enforces `local_only` after the
+   snapshot validates, with no stated ordering or rollback. Specify a
+   two-phase apply: prepare everything (validation, secret
+   verification, reference resolution, egress checks, candidate
+   construction) before stopping or replacing anything, any
+   preparation failure leaving managers and grants unchanged, and
+   connection failure distinctly defined as an applied-but-down
+   manager eligible for revival. Test unset variables, undecryptable
+   secrets and `local_only` rejection, not only validation errors.
+
+5. **P1: object-form grants cannot round-trip through the current
+   database and view paths.** `config/store.py` serializes
+   `list(entry.mcp)` into row JSON and `config/views.py` echoes the
+   same shape, and neither file is in the plan's layout; pydantic
+   grant objects are not valid values there. Add both files to the
+   milestone, define canonical serialization for both entry forms and
+   the exact read representation, and require write, restart or
+   reload, read-back tests covering pre-upgrade string rows.
+
+6. **P2: secret-rotation diffing has no safe implementation
+   primitive.** The diff compares stored ciphertexts, but
+   `SecretStore` exposes locations, slots and decryption only, and
+   `config/secrets.py` is absent from the layout. Add a store
+   operation returning an opaque comparison fingerprint (or comparing
+   envelopes internally) that never exposes envelopes or plaintext,
+   and test that unchanged secrets preserve managers while rotated
+   ciphertext rebuilds only the affected ones.
+
+7. **P2: MCP secret writes would still falsely instruct operators to
+   restart.** The plan changes notices for entry writes and deletes
+   only; MCP secret PUT and DELETE use the generic secret
+   acknowledgements, whose default notice requires restart. Apply the
+   reload notice to API and CLI writes and clears of MCP secret
+   slots, keep restart notices for provider secrets and the `--local`
+   recovery path, and test the notice on every MCP mutation path.
+
+8. **P2: the documentation work targets the wrong source and would
+   leave contradictory upgrade guidance.** `config.example.yaml`
+   holds the file half only and says domain entities in it prevent
+   boot, so the object grant form cannot be demonstrated there; its
+   general wording and `config/docgen.py`'s generated preamble both
+   claim every configuration command takes effect at restart, which
+   the reload makes false; `examples/agent-defaults.yaml` uses the
+   grant form and is omitted. Put object examples in
+   `examples/agent.yaml` and `examples/agent-defaults.yaml`, update
+   `config/docgen.py`, the acknowledgement descriptions and
+   `config.example.yaml`'s wording for the reload exception, and
+   regenerate rather than hand-edit the committed references.
+
+9. **P2: reload has neither a bounded completion contract nor a
+   defined response schema.** No concurrency bound, total deadline,
+   timeout outcome, JSON model or HTTP error set is defined, and the
+   CLI's fixed 30 s read timeout could expire while the server later
+   applies the reload, recreating the ambiguity the feature removes.
+   Define bounded, concurrent lifecycle work, an endpoint-specific
+   CLI timeout longer than the server bound, a typed response
+   (started, restarted, stopped, unchanged, plus final status), and
+   specified responses for validation refusal, preparation failure
+   and timeout, pinned in OpenAPI and real-socket tests.
+
+10. **P2: the proposed conversation test cannot prove which tools the
+    model received.** `MockLlm.stream()` ignores its `tools`
+    argument, so a scripted conversation passes even when a forbidden
+    tool was offered. Capture the exact `tools` argument with a
+    recording test LLM (or make the mock refuse calls absent from
+    it), assert the offered names exactly, and test call-time
+    authorization separately.
+
+11. **P2: the "live conversation" test does not require reload during
+    the same session.** The integration helper opens a socket, sends
+    one utterance and closes, so reopening after reload would pass
+    without testing the per-reply pickup promise. Require one
+    WebSocket and session across two utterances: one before the write
+    and reload, the reload through the API while the socket stays
+    open, and a second utterance that observes the new tool without
+    disconnecting.
+
+12. **P3: allow-list warnings must be based on successfully published
+    tools, not raw `list_tools` output.** Publication can drop a tool
+    for a sanitized-name collision or length, and a warning compared
+    against the raw listing would stay silent about a listed but
+    unusable tool. Compare grants against the final `PublishedTools`
+    mapping, and test a grant naming a tool that publication dropped.
+
 ## Milestones
 
 Stacked branches, one PR each, every merge leaving `main` releasable:
