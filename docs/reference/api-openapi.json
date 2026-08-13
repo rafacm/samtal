@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "samtal-server configuration API",
-    "description": "The domain half of one samtal-server deployment's configuration: providers, MCP servers, agents, devices, and the credentials they use. Every request carries a bearer token, whose value is the environment variable `server.api.secret_env` names.\n\nConfiguration is a boot-time snapshot, so a successful write applies at the next server start rather than immediately. Device bindings are the one exception: a running server reads them, and the default agent, as a device asks for them, so binding or unbinding a device applies at that device's next OTA check or connection. The exception ends where the agent does, since a server builds an agent's providers at boot: a binding naming an agent this server has not loaded waits for the restart that loads it. Every write says which of the two happened, in its `notice`.\n\nA device with no binding and no default agent to cover it is answered at its configuration check with a six-digit activation code, which it shows on its screen and speaks. `/devices/pending` lists the devices showing one, keyed by the code, and posting to `/devices/pending/{code}` binds the device showing it. That listing is the running server's own state rather than stored configuration: a restart forgets it, and the devices come back with fresh codes.\n\nThe `/runtime` namespace is the running server's own state as well, and is kept apart from the entity namespaces because an entity may legally be named after any word a route might want. `/runtime/mcp-servers` says what each configured MCP server is doing right now: connected or down, since when, what it published, and which agents may reach it. Nothing there is read from the database, so it cannot disagree with what is running.\n\nA provider entry carries whatever options its `type` takes, and those are passed through rather than declared, so no schema can list them. Until typed option models land (#88) they are documented in the example fragments under `samtal-server/examples/`, which is also where the measured numbers behind each default are kept.",
+    "description": "The domain half of one samtal-server deployment's configuration: providers, MCP servers, agents, devices, and the credentials they use. Every request carries a bearer token, whose value is the environment variable `server.api.secret_env` names.\n\nConfiguration is a boot-time snapshot, so a successful write applies at the next server start rather than immediately. Device bindings are the one exception: a running server reads them, and the default agent, as a device asks for them, so binding or unbinding a device applies at that device's next OTA check or connection. The exception ends where the agent does, since a server builds an agent's providers at boot: a binding naming an agent this server has not loaded waits for the restart that loads it. Every write says which of the two happened, in its `notice`.\n\nA device with no binding and no default agent to cover it is answered at its configuration check with a six-digit activation code, which it shows on its screen and speaks. `/devices/pending` lists the devices showing one, keyed by the code, and posting to `/devices/pending/{code}` binds the device showing it. That listing is the running server's own state rather than stored configuration: a restart forgets it, and the devices come back with fresh codes.\n\nThe `/runtime` namespace is the running server's own state as well, and is kept apart from the entity namespaces because an entity may legally be named after any word a route might want. `/runtime/mcp-servers` says what each configured MCP server is doing right now: connected or down, since when, what it published, and which agents may reach it. Nothing there is read from the database, so it cannot disagree with what is running.\n\n`POST /runtime/mcp-servers/reload` is the second exception to the boot-time snapshot, and unlike device bindings it is asked for rather than noticed. It re-reads the `mcp_servers` entries, the secrets stored on them and the agents' `mcp` grant lists, and applies them to the running server: entries are started, restarted, stopped or left alone, and live conversations pick the result up on their next utterance without being dropped. Everything else about an agent still waits for a restart, which is why writes to those keep saying so.\n\nA provider entry carries whatever options its `type` takes, and those are passed through rather than declared, so no schema can list them. Until typed option models land (#88) they are documented in the example fragments under `samtal-server/examples/`, which is also where the measured numbers behind each default are kept.",
     "version": "1"
   },
   "servers": [
@@ -38,7 +38,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -94,7 +94,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -173,7 +173,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -260,7 +260,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -347,7 +347,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -410,7 +410,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -480,7 +480,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -558,7 +558,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -636,7 +636,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -699,7 +699,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -769,7 +769,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -847,7 +847,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -925,7 +925,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -984,7 +984,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1041,7 +1041,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1104,7 +1104,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1207,7 +1207,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1285,7 +1285,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1363,7 +1363,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1422,7 +1422,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1479,7 +1479,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1536,7 +1536,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1634,7 +1634,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1730,7 +1730,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1829,7 +1829,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1916,7 +1916,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2006,7 +2006,7 @@
             }
           },
           "409": {
-            "description": "Something this request needs is held by another one: the configuration database's write lock, or the activation code a concurrent claim is already binding. Nothing was changed and the request can be retried.",
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2060,6 +2060,75 @@
           },
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runtime/mcp-servers/reload": {
+      "post": {
+        "summary": "Reload Mcp Servers",
+        "description": "Re-read the MCP servers and the agents' grants, and apply\nthem to this running server.\n\nThe one action in this namespace, and the one exception to\n\"configuration applies at the next start\" that a request rather\nthan a device asks for. What it re-reads is the `mcp_servers`\nentries, the secrets stored on them and the effective `mcp`\nlists, and nothing else: an agent's prompt, its providers, its\nmemory and the whole server section stay as this process booted\nthem, so a new agent still waits for the restart that builds it.\n\nNothing is stopped or started until every manager the new\nconfiguration needs has been built, so a refusal (422) has\nchanged nothing at all. A server that merely will not connect is\nnot a refusal: it applies, and says `down` with its reason\nbelow, and is reconnected in the background when a session that\nwould use it opens.\n\nLive conversations are not dropped. The tools an agent may reach\nare snapshotted per reply, so a session picks the new world up on\nits next utterance; a call in flight on a server this stopped\nfails into the same error result a server dropping mid-call\nproduces.\n\nOne reload runs at a time: a concurrent one is refused with 409\nand has changed nothing, like a write that could not take the\ndatabase's lock.",
+        "operationId": "reload_mcp_servers_runtime_mcp_servers_reload_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpReloadResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "This application has no running server around it, so there is nothing for a runtime action to act on. A deployment reaches the API on its server's own port; an application built without one serves the reads in the /runtime namespace emptily and refuses the actions.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2170,6 +2239,61 @@
         ],
         "title": "Envelope",
         "description": "One entity as a read returns it: the entity, and its stored-secret\nslots beside it."
+      },
+      "McpReloadResult": {
+        "properties": {
+          "started": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Started",
+            "description": "The entries that had no connection before this reload and have one now: newly written, or newly named by some agent's `mcp` list. Started is not connected: an entry here whose server was unreachable is `down` below, with its reason."
+          },
+          "restarted": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Restarted",
+            "description": "The entries whose fragment or whose stored secrets changed. Their connections were closed and made again, so a rotated credential applies here rather than at the next server start."
+          },
+          "stopped": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Stopped",
+            "description": "The entries this server no longer connects: deleted, or no longer named by any agent. A deleted one is gone from the status below; a de-referenced one is still there, as `unused`."
+          },
+          "unchanged": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Unchanged",
+            "description": "The entries nothing changed about, which kept the connections they had. A reload does not disturb them, so the conversations using them do not notice one."
+          },
+          "servers": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/McpServerStatus"
+            },
+            "type": "object",
+            "title": "Servers",
+            "description": "What every configured entry is doing now that the reload has been applied, keyed by entry name: exactly what `GET /runtime/mcp-servers` answers, taken in the same breath so that applying and verifying are one round trip."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "started",
+          "restarted",
+          "stopped",
+          "unchanged",
+          "servers"
+        ],
+        "title": "McpReloadResult",
+        "description": "What one reload did, and what is running once it had done it.\n\nBoth halves in one answer on purpose: the request that applies a\nchange is the request that says what the change was and how it came\nout, so believing a write took effect when it did not takes a\ndeliberate act of not reading the reply."
       },
       "McpServerStatus": {
         "properties": {

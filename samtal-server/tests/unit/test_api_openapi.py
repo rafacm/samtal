@@ -146,6 +146,7 @@ def test_the_document_describes_every_route_the_api_serves() -> None:
         # The runtime namespace, which is deliberately not a route
         # inside an entity namespace: an entry may be named `status`.
         "/runtime/mcp-servers": ["get"],
+        "/runtime/mcp-servers/reload": ["post"],
     }
 
 

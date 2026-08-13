@@ -155,3 +155,46 @@ def test_a_contended_write_answers_over_a_real_socket(
         finally:
             client.close()
         assert answered.status_code == 200
+
+
+def test_the_reload_answers_over_a_real_socket_and_refuses_over_one(
+    served_api, tmp_path: Path
+) -> None:
+    """The reload's contract on a real connection: a typed answer when
+    it applies, and the sanitized refusal when the stored configuration
+    it re-read will not compose.
+
+    The refusal is the half only a real server can show honestly. It is
+    provoked the way an operator would provoke it by accident, by
+    writing half a configuration: an agent exists, nothing provides its
+    pipeline, and the composition that every boot runs says so. Nothing
+    was applied, which the reload that follows the repair demonstrates.
+    """
+    with served_api(tmp_path / "db") as api_url:
+        client = cli.build_client(api_url, _token())
+        try:
+            applied = client.post("/runtime/mcp-servers/reload")
+            assert applied.status_code == 200, applied.text
+            assert applied.json() == {
+                "started": [],
+                "restarted": [],
+                "stopped": [],
+                "unchanged": [],
+                "servers": {},
+            }
+
+            assert client.put("/agents/sam", json={"prompt": "You are Sam."}).status_code == 200
+            refused = client.post("/runtime/mcp-servers/reload")
+            assert refused.status_code == 422
+            assert set(refused.json()) == {"detail"}
+            assert "sam" in refused.json()["detail"]
+
+            # Repaired, and the same request applies: the refusal left
+            # nothing half done behind it.
+            for method, path, body in PIPELINE[:5]:
+                assert client.request(method, path, json=body).status_code == 200
+            bound = client.put("/devices/aa:bb:cc:dd:ee:ff", json={"agents": ["sam"]})
+            assert bound.status_code == 200
+            assert client.post("/runtime/mcp-servers/reload").status_code == 200
+        finally:
+            client.close()
