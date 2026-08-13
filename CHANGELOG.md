@@ -53,6 +53,23 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   Typing the URL with its trailing slash is still what the banner and
   the docs print, but it is no longer load-bearing.
 
+### Security
+
+- **An MCP server can no longer write to the logs** (#98): the SDK's
+  HTTP client narrated what the far end said, including the session id
+  it chose, the raw body of an initialization result that would not
+  parse, and a traceback quoting the bytes that failed, all of which
+  reached the collected JSON log of any deployment with an HTTP MCP
+  server configured. Those records now stop at the SDK's own logger,
+  and this server's unavailability warning prints a reason built from
+  exception types instead of the exception's message, which a broken or
+  hostile server writes half of. The line an operator greps for is
+  unchanged and still names the server and the kind of failure, for
+  example "mcp server weather is unavailable, its tools are absent:
+  ValidationError". Debug logging is unaffected and still prints
+  response headers from every HTTP client in the process, MCP servers
+  included.
+
 ## 2026-08-12
 
 ### Changed
