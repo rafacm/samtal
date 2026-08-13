@@ -61,6 +61,17 @@ def qualified(entry: str, tool: str) -> str:
     return f"{entry}{SERVER_SEPARATOR}{tool}"
 
 
+def unqualified(entry: str, published: str) -> str:
+    """The tool's own half of a published name, which is the half a
+    per-tool grant names it by (`turn_on_light` for
+    `home__turn_on_light`).
+
+    Taken by stripping the entry it was qualified with rather than by
+    splitting on the separator: an entry name may legally contain one
+    itself, and splitting would then answer with part of the entry."""
+    return published.removeprefix(f"{entry}{SERVER_SEPARATOR}")
+
+
 def split_qualified(name: str) -> tuple[str, str] | None:
     """The entry and tool behind a qualified name, or None when the name
     is not one."""

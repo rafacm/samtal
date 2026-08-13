@@ -940,7 +940,11 @@ class PipelineRuntime:
             return await self._output.call_device_tool(call.name, call.arguments)
         split = names.split_qualified(call.name)
         if split is not None and split[0] in self._mcp_servers:
-            return await self._mcp_servers.call(call.name, call.arguments)
+            assert self._agent is not None
+            # The agent goes with the call: the registry checks its
+            # grant again there, so a tool the snapshot withheld is
+            # refused rather than run when a model asks for it anyway.
+            return await self._mcp_servers.call(call.name, call.arguments, self._agent)
         return f'there is no tool called "{call.name}"', True
 
     def _timeout_for(self, name: str) -> float:

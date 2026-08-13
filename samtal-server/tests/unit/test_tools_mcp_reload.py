@@ -45,6 +45,7 @@ from samtal_server.tools.mcp import (
     McpServerManager,
     McpServers,
     McpSlice,
+    McpToolNotGranted,
 )
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
@@ -68,7 +69,7 @@ def stdio_entry(**overrides: object) -> McpServerConfig:
 
 def config_with(
     servers: dict[str, object],
-    grants: dict[str, list[str]],
+    grants: dict[str, list],
     local_only: bool = False,
 ) -> Config:
     """One agent per grant list, so a test can move an entry between
@@ -156,7 +157,10 @@ async def test_a_changed_fragment_is_stopped_rebuilt_and_started() -> None:
         assert manager_of(servers, "tools") is not was
         assert servers.timeout_for("tools") == 3.5
         assert servers.status()["tools"]["state"] == CONNECTED
-        assert await servers.call("tools__secret_word", {}) == ("rhubarb", False)
+        assert await servers.call("tools__secret_word", {}, "assistant") == (
+            "rhubarb",
+            False,
+        )
     finally:
         await servers.stop_all()
 
@@ -488,6 +492,33 @@ async def test_the_grants_swap_with_the_managers() -> None:
         assert {tool.name for tool in servers.tools_for_agent("assistant")} >= {
             "tools__secret_word"
         }
+    finally:
+        await servers.stop_all()
+
+
+async def test_a_narrowed_allow_list_applies_without_touching_the_connection() -> None:
+    """Narrowing a grant is a configuration change about the agent, not
+    about the server, so the entry is unchanged in the diff and keeps
+    the connection it had while what the agent may reach moves."""
+    before = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    after = config_with(
+        {"tools": entry_data()},
+        {"assistant": [{"server": "tools", "tools": ["secret_word"]}]},
+    )
+    servers = await started(before)
+    try:
+        kept = manager_of(servers, "tools")
+        assert len(servers.tools_for_agent("assistant")) > 1
+
+        applied = await servers.reload(reading(after))
+
+        assert applied.unchanged == ("tools",)
+        assert manager_of(servers, "tools") is kept
+        assert [tool.name for tool in servers.tools_for_agent("assistant")] == [
+            "tools__secret_word"
+        ]
+        with pytest.raises(McpToolNotGranted):
+            await servers.call("tools__add", {"first": 1, "second": 2}, "assistant")
     finally:
         await servers.stop_all()
 
