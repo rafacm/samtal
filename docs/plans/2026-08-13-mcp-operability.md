@@ -721,7 +721,7 @@ milestone is docs.
   one reload with no restart, and that an invalid snapshot refuses
   and applies nothing.
 - [x] **[Per-tool grants](2026-08-13-mcp-operability-implementation.md#milestone-3-per-tool-grants)**
-  (PR TBD): the grant value and object entry form;
+  (PR #127): the grant value and object entry form;
   snapshot filtering and the call-time check; the
   unpublished-allowed-name warning; status carries allow lists;
   `examples/agent.yaml` and `examples/agent-defaults.yaml`, reference
