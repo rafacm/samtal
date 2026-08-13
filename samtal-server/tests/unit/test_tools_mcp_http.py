@@ -1,0 +1,318 @@
+"""The MCP server manager, against a real streamable_http server.
+
+The stdio suite spawns a subprocess because that transport is a child
+process by nature. This one's nature is a TCP socket, so the server it
+talks to is a FastMCP app hosted in-process by uvicorn on a port the OS
+picks. Everything from the manager's `_connect` down to the wire is the
+code that ships.
+
+What is covered here is what the transport owns. Since `_connect` passes
+its own `httpx.AsyncClient`, the transport does not manage it, so the
+redirect policy, the timeouts and the client's closure are this module's
+subjects too. Logic that does not depend on the transport (name
+sanitization, call timeouts, registry routing, mark-down on a failed
+call) stays covered once, over stdio, where it already lives.
+"""
+
+import asyncio
+import gc
+import socket
+import threading
+from collections.abc import AsyncIterator
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import httpx
+import pytest
+import uvicorn
+from mcp.server.fastmcp import FastMCP
+from sse_starlette.sse import AppStatus
+
+from samtal_server.config import McpServerConfig
+from samtal_server.tools.mcp import McpServerDown, McpServerManager
+
+# The SDK's *server* transport hands the reading end of a per-request SSE
+# memory stream to its response and never closes it
+# (`_handle_post_request` and `_handle_get_request` in
+# `mcp/server/streamable_http.py`), so anyio's finalizer warns about an
+# unclosed stream and this lane turns warnings into errors. It is the
+# scaffolding warning, not the subject: the client under test closes what
+# it opens, which the closure tests below assert directly. Scoped to this
+# module and to that one message, and the fixture collects the garbage
+# before a finalizer can surface it inside somebody else's test.
+pytestmark = pytest.mark.filterwarnings("ignore:Unclosed <MemoryObject:ResourceWarning")
+
+# How long a server may take to come up or go down before the test gives
+# up on it. Generous: it is a deadlock guard, not a measurement.
+LIFECYCLE_TIMEOUT_S = 20.0
+
+
+def secret_word() -> str:
+    """The secret word, which only this tool knows."""
+    return "rhubarb"
+
+
+def add(first: int, second: int) -> int:
+    """Add two whole numbers."""
+    return first + second
+
+
+@pytest.fixture
+async def server_url() -> AsyncIterator[str]:
+    """A running streamable_http MCP server, as its URL.
+
+    Fresh `FastMCP`, app and uvicorn server per test, which is forced
+    rather than tidy: `streamable_http_app()` memoizes one session
+    manager on the instance, and that manager may be entered exactly
+    once, so a shared instance would break the second test to start it.
+    """
+    server = FastMCP("samtal-test-http-tools")
+    server.add_tool(secret_word)
+    server.add_tool(add)
+
+    config = uvicorn.Config(
+        server.streamable_http_app(),
+        host="127.0.0.1",
+        # The OS picks a free port, so there is no probe-then-bind race
+        # with anything else on the machine.
+        port=0,
+        log_level="warning",
+    )
+    uvicorn_server = uvicorn.Server(config)
+    serving = asyncio.create_task(uvicorn_server.serve())
+    async with asyncio.timeout(LIFECYCLE_TIMEOUT_S):
+        while not uvicorn_server.started:
+            if serving.done():
+                # Surfaces a startup failure as itself rather than as a
+                # timeout twenty seconds later.
+                serving.result()
+                raise RuntimeError("the test server stopped before it started")
+            await asyncio.sleep(0.01)
+    port = uvicorn_server.servers[0].sockets[0].getsockname()[1]
+
+    # sse_starlette keeps one process-wide "the server is shutting down"
+    # flag. It monkeypatches `uvicorn.Server.handle_exit` to set it, and
+    # nothing ever clears it, so `tests/unit/test_drain.py` calling
+    # `handle_exit` on its own server (which chains to the patched base)
+    # leaves it set for the rest of the session. While it is set, every
+    # SSE response in the process returns without sending anything, and
+    # an SSE response is how this server answers a POST, so it would
+    # accept connections and complete no request. Cleared for the length
+    # of the fixture and put back, so this module neither depends on the
+    # order the suite runs in nor changes it for anybody else.
+    shutting_down = AppStatus.should_exit
+    AppStatus.should_exit = False
+    try:
+        yield f"http://127.0.0.1:{port}/mcp"
+    finally:
+        AppStatus.should_exit = shutting_down
+        uvicorn_server.should_exit = True
+        async with asyncio.timeout(LIFECYCLE_TIMEOUT_S):
+            await serving
+        # Still inside this test's warning filters, which is the point:
+        # what the server left behind is finalized here rather than
+        # halfway through whatever runs next.
+        gc.collect()
+
+
+def http_entry(url: str, **overrides: object) -> McpServerConfig:
+    return McpServerConfig.model_validate(
+        {"transport": "streamable_http", "url": url} | overrides
+    )
+
+
+async def running(config: McpServerConfig, name: str = "tools") -> McpServerManager:
+    manager = McpServerManager(name, config)
+    await manager.start()
+    return manager
+
+
+def unused_url() -> str:
+    """A URL on a port nothing is listening on. Bound and released, so
+    the number was free a moment ago and nothing of ours took it."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    return f"http://127.0.0.1:{port}/mcp"
+
+
+async def test_a_started_server_offers_its_tools_under_its_entry_name(
+    server_url: str,
+) -> None:
+    manager = await running(http_entry(server_url))
+    try:
+        assert manager.up
+        offered = {tool.name for tool in manager.tools()}
+        assert offered == {"tools__secret_word", "tools__add"}
+        (listed,) = [tool for tool in manager.tools() if tool.name == "tools__add"]
+        assert "Add two whole numbers" in listed.description
+        assert listed.input_schema["properties"].keys() == {"first", "second"}
+    finally:
+        await manager.stop()
+
+
+async def test_a_tool_call_answers_with_its_text(server_url: str) -> None:
+    manager = await running(http_entry(server_url))
+    try:
+        assert await manager.call("tools__secret_word", {}) == ("rhubarb", False)
+        assert await manager.call("tools__add", {"first": 2, "second": 3}) == ("5", False)
+    finally:
+        await manager.stop()
+
+
+async def test_a_url_nobody_answers_does_not_fail_the_start() -> None:
+    # The stdio suite's dead-command case, over HTTP: liveness is
+    # forgiven, so the manager logs, publishes nothing, and stays down.
+    manager = await running(http_entry(unused_url()))
+    try:
+        assert not manager.up
+        assert manager.tools() == []
+        with pytest.raises(McpServerDown):
+            await manager.call("tools__secret_word", {})
+    finally:
+        await manager.stop()
+
+
+async def test_a_redirecting_server_is_followed_to_its_tools(server_url: str) -> None:
+    """`follow_redirects=True` is `_connect`'s to set now that it builds
+    the client, and every existing deployment had it from the SDK's
+    factory. A proxy in front of the server answers each request with a
+    307 to the real one, and the manager still lists tools."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def _redirect(self) -> None:
+            length = int(self.headers.get("Content-Length") or 0)
+            if length:
+                # Read what was sent, so the connection is not torn down
+                # under the client mid-body.
+                self.rfile.read(length)
+            self.send_response(307)
+            self.send_header("Location", server_url)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def do_GET(self) -> None:  # noqa: N802 - the stdlib's spelling
+            self._redirect()
+
+        def do_POST(self) -> None:  # noqa: N802
+            self._redirect()
+
+        def do_DELETE(self) -> None:  # noqa: N802
+            self._redirect()
+
+        def log_message(self, *_args: object) -> None:
+            """Silence: the proxy is not the subject of the test."""
+
+    proxy = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+    thread.start()
+    try:
+        manager = await running(http_entry(f"http://127.0.0.1:{proxy.server_port}/mcp"))
+        try:
+            assert manager.up
+            assert {tool.name for tool in manager.tools()} == {
+                "tools__secret_word",
+                "tools__add",
+            }
+        finally:
+            await manager.stop()
+    finally:
+        proxy.shutdown()
+        thread.join(timeout=LIFECYCLE_TIMEOUT_S)
+        proxy.server_close()
+
+
+class CapturedClients:
+    """Every `httpx.AsyncClient` the manager built, and how."""
+
+    def __init__(self) -> None:
+        self.kwargs: list[dict[str, object]] = []
+        self.clients: list[httpx.AsyncClient] = []
+
+
+def capture_clients(monkeypatch: pytest.MonkeyPatch) -> CapturedClients:
+    """Watch client construction without replacing it: the subclass
+    records its arguments and itself, then builds the real thing, so the
+    connection under test is a real connection."""
+    captured = CapturedClients()
+    real = httpx.AsyncClient
+
+    class Capturing(real):  # type: ignore[valid-type, misc]
+        def __init__(self, **kwargs: object) -> None:
+            captured.kwargs.append(kwargs)
+            captured.clients.append(self)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", Capturing)
+    return captured
+
+
+async def test_the_client_carries_the_wrappers_redirect_and_timeout_policy(
+    server_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The deprecated wrapper built the client from the SDK's factory
+    with these exact values. Passing our own client means httpx's
+    defaults would apply instead if `_connect` forgot them, silently and
+    only for deployments with a slow stream or a redirect."""
+    captured = capture_clients(monkeypatch)
+    manager = await running(http_entry(server_url))
+    try:
+        assert manager.up
+    finally:
+        await manager.stop()
+
+    assert len(captured.kwargs) == 1
+    (kwargs,) = captured.kwargs
+    assert kwargs["follow_redirects"] is True
+    assert kwargs["timeout"] == httpx.Timeout(30.0, read=300.0)
+
+
+async def test_the_client_is_closed_when_the_connection_ends(
+    server_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A caller-managed client is not the transport's to close, so a
+    manager that leaked one would grow a connection pool per reconnect
+    cycle."""
+    captured = capture_clients(monkeypatch)
+    manager = await running(http_entry(server_url))
+    assert manager.up
+    await manager.stop()
+
+    (client,) = captured.clients
+    assert client.is_closed
+
+
+async def test_a_refused_handshake_still_closes_the_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The other half of the lifecycle: the connect fails past client
+    construction, which is the path a flapping server takes on every
+    reconnect attempt."""
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - the stdlib's spelling
+            length = int(self.headers.get("Content-Length") or 0)
+            if length:
+                self.rfile.read(length)
+            self.send_response(404)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *_args: object) -> None:
+            """Silence: the stub is not the subject of the test."""
+
+    stub = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=stub.serve_forever, daemon=True)
+    thread.start()
+    captured = capture_clients(monkeypatch)
+    try:
+        manager = await running(http_entry(f"http://127.0.0.1:{stub.server_port}/mcp"))
+        await manager.stop()
+    finally:
+        stub.shutdown()
+        thread.join(timeout=LIFECYCLE_TIMEOUT_S)
+        stub.server_close()
+
+    assert not manager.up
+    # Construction happened, so this asserts closure rather than absence.
+    (client,) = captured.clients
+    assert client.is_closed
