@@ -187,6 +187,51 @@ shape or meaning.
   documented setup path, and the floor now states the true
   requirement instead of understating it.
 
+## Plan review round
+
+One external review of the plan as first committed (30fed2d): codex
+CLI 0.147.0, model gpt-5.6-sol, read-only against this repository
+with the pinned SDK synced into the worktree venv and the issue #98
+body supplied, 2026-08-13. Verdict: ready after the P1/P2
+amendments. Findings as received, condensed; each carries its
+resolution once the amendment addressing it lands.
+
+1. **P1: the proposed dependency range admits incompatible MCP
+   2.x.** `mcp>=1.24` has no upper bound, and MCP 2.0 is already
+   published as stable: it recommends `<2` for unmigrated v1
+   clients, requires httpx 2, and its transport yields two streams
+   where `_connect` unpacks three, so a fresh resolve of the
+   published requirements could pick 2.x and fail at startup while
+   CI stays green on the lock. Require `mcp>=1.24,<2` and record
+   that MCP 2 migration is separate work.
+2. **P2: `uv.lock` must change with the dependency constraint.**
+   The plan says the lockfile does not change, but the lock's
+   project metadata records the requirement string (`mcp>=1.2`
+   today), and frozen image builds treat the lock as authoritative.
+   Regenerate and commit `uv.lock` (still resolving mcp 1.28.1)
+   and add `uv lock --check` or equivalent to verification.
+3. **P2: the tests do not verify the new caller-owned client
+   responsibilities.** A supplied client is not managed by the
+   replacement transport; the plan takes over closure, redirects,
+   and the timeout values, yet its three tests would all pass with
+   `follow_redirects=False`, default httpx timeouts, or a client
+   never closed, contradicting the claimed mitigation. Add a
+   redirecting handshake test, assertions on the constructed
+   client's timeout values, and lifecycle assertions that the
+   client closes after both a normal stop and a failed connect.
+4. **P2: the FastMCP fixture must account for its one-shot session
+   manager.** `streamable_http_app()` memoizes one session manager
+   on the `FastMCP` instance, and that manager's `run()` may be
+   entered only once, so a shared server instance breaks the
+   second live-server test. Create a fresh `FastMCP` instance and
+   app inside each function-scoped fixture invocation, or scope
+   one server with an explicitly compatible event-loop scope.
+5. **P2: the deprecated-name acceptance command cannot succeed.**
+   `grep -rn streamablehttp_client samtal-server` traverses
+   `.venv`, where the pinned SDK necessarily defines the deprecated
+   wrapper. Scope the check to first-party code
+   (`samtal_server` and `tests`), expecting no matches.
+
 ## Milestones
 
 - [ ] **Switch the streamable_http transport to the replacement
