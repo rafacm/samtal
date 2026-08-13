@@ -1070,3 +1070,119 @@ deployment. The colliding namespace was exercised against two entries
 pointed at the same stdio test server rather than against two real
 third-party servers, and no schema validator outside this repository was
 run against the regenerated document.
+
+## Milestone 4: Documented decisions
+
+The three gaps that resolve as documentation are written down, where an
+operator meets each of them rather than only in the plan. No behaviour
+changed and no code path moved; what moved is four field descriptions
+and the prose around them.
+
+### What landed
+
+**Gap 4, the builtins stay structural.** The server README's tools
+section gains a paragraph where `switch_agent` and `remember` are
+described, saying that neither is granted the way an MCP server is and
+why the conditions are not agent-shaped: `switch_agent`'s belongs to the
+device and withholding it per agent would strand a conversation on
+whichever agent has no way back, `remember`'s belongs to the deployment
+and the prompt injection is unconditional wherever memory exists, so a
+withheld tool would leave an agent recalling for ever and never
+learning. It ends where a future policy-shaped builtin would land: the
+grant edge the `mcp` list already carries. The `mcp` field's description
+in `config/models.py` gains one sentence saying the builtins are outside
+the grant model, since the schema is where the other reader is.
+
+**Gap 5, SSE rides the stdio bridge.** An "SSE-only servers" paragraph
+in the same section, directly under the two transports, with the
+configuration that answers it (`mcp-proxy` in front of the endpoint,
+configured as the stdio server it then is), why there is no native arm
+(the specification moved its HTTP story to streamable HTTP and left SSE
+deprecated, so a third arm would be permanent maintenance for a
+shrinking population, bought straight after this server paid to leave a
+deprecated client behind), and that nothing else about the entry
+changes. `examples/mcp-server-streamable-http.yaml` says it is the only
+HTTP transport there is and points at the stdio example for an SSE
+endpoint; `examples/mcp-server-stdio.yaml` labels its `mcp-proxy` line
+as that bridge, which is what it silently was. The `transport` field's
+description carries the same sentence.
+
+**Gap 6, non-text results stay named placeholders.** A paragraph beside
+the README's error-result one: the tool loop's contract is speakable
+text because the pipeline's output is a voice and its history is text
+throughout, other content is rendered as a named placeholder
+(`[unsupported image content]`) rather than dropped so the model can say
+what it was given instead of reading as though it ignored the tool, and
+the revisit condition is the display path, at which point structured
+content to the board belongs beside the display protocol rather than
+inside the tool loop. The `mcp_servers` entry in `DOMAIN_DESCRIPTIONS`
+carries the short form.
+
+**Generated documents.** `docs/reference/domain-config.md` and
+`docs/reference/api-openapi.json` were regenerated with their commands
+in the commits that moved the descriptions, never hand-edited. One
+`CHANGELOG.md` entry under the existing `## 2026-08-13`, under Changed:
+nothing was added to the server, and a documentation-shaped entry is
+what that section already holds this date. No test changed, and none
+needed to: the two drift checks are the automated half of this
+milestone.
+
+### Deviations from the plan
+
+Two, neither changing what the milestone documents.
+
+1. **The stdio example is annotated as well as the streamable-http
+   one.** The plan asks the streamable-http example to point at the
+   bridge. The example it points at demonstrated the bridge without
+   naming it, so an operator following the pointer arrived at a Home
+   Assistant proxy and had to infer that this was the SSE answer. Three
+   comment lines on the `command` say so.
+2. **The README's SSE paragraph shows the three lines rather than
+   describing them.** The plan asks for a paragraph naming the bridge.
+   The claim being made is that the answer is one line of configuration,
+   and printing it is what makes the claim checkable.
+
+`config.example.yaml` needed no change: it holds the file half and no
+domain entities, and nothing in the server section moved.
+
+### Discoveries
+
+**A description change can move one committed contract, both, or
+neither.** `transport` and `mcp` are fields of models the configuration
+API serves, so their descriptions are in `docs/reference/api-openapi.json`
+as well as in the generated reference; `DOMAIN_DESCRIPTIONS["mcp_servers"]`
+describes a whole section of the composed configuration, which the API's
+per-entity schemas do not carry, so gap 6's sentence moved the reference
+alone. Regenerating both after every description change is the only rule
+that does not require knowing which case you are in, and the first two
+commits of this milestone were written the other way (reference only)
+and caught by the OpenAPI drift test in the unit lane before they were
+final.
+
+**The tools section had no natural home for a transport paragraph.** Its
+order is servers, grants, secrets, device tools, builtins, error
+results. The SSE paragraph went directly under the two-transport example
+because that is the sentence it contradicts ("both transports the
+specification defines are supported"), and the non-text paragraph went
+under the error-result one because both are about what comes back from a
+call rather than about what is configured.
+
+### Verification
+
+All from `samtal-server/`, on the tree at the documentation commit.
+
+- `uv run ruff check .`: "All checks passed!".
+- `uv run pytest tests/unit -q`: 1538 passed, 15 skipped in 139.66s.
+  The same count as milestone 3, this milestone adding no test; the
+  drift checks for the OpenAPI document and the generated reference run
+  in this lane and pass, which is what proves the two committed
+  documents match the descriptions as edited.
+- `uv run pytest tests/integration -q`: 47 passed in 92.41s. Unchanged,
+  as a documentation milestone should leave it.
+
+Not verified, and not claimed: no SSE-only server was put behind
+`mcp-proxy` and reached from this server, so the bridge is documented
+from the specification's deprecation and from the example that already
+shipped, not from a run. Nothing was run against hardware or a
+deployment, and the placeholder rendering was not re-exercised, no code
+having changed.

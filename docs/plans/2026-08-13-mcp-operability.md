@@ -728,7 +728,8 @@ milestone is docs.
   and OpenAPI regen; README; CHANGELOG. Accept: lint and both lanes green; the
   integration proof that a restricted agent sees exactly its subset;
   string-form fragments still validate byte-identically.
-- [ ] **Documented decisions**: builtins structural rule, the SSE
+- [x] **[Documented decisions](2026-08-13-mcp-operability-implementation.md#milestone-4-documented-decisions)**
+  (PR TBD): builtins structural rule, the SSE
   bridge paragraph and example pointer, the non-text results
   contract, in README, examples and generated reference; CHANGELOG.
   Accept: lint green; drift checks pass; the docs say what gaps 4, 5
