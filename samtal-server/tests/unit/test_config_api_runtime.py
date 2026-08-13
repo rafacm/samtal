@@ -19,14 +19,24 @@ from fastapi.testclient import TestClient
 from samtal_server.app import create_app
 from samtal_server.config import Config
 from samtal_server.config.api import MOUNT_PATH, build_api
+from samtal_server.config.loader import (
+    ConfigError,
+    DatabaseBusyError,
+    ReloadInProgressError,
+    StorageError,
+)
 from samtal_server.config.secrets import MASTER_KEY_ENV, generate_key
-from samtal_server.tools.mcp import CONNECTED, DOWN, UNUSED, McpServers
+from samtal_server.config.store import ConfigStore
+from samtal_server.db import open_database
+from samtal_server.tools.mcp import CONNECTED, DOWN, UNUSED, McpReload, McpServers
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 
 API_SECRET_ENV = "SAMTAL_API_SECRET"
 
 STATUS_PATH = "/runtime/mcp-servers"
+
+RELOAD_PATH = "/runtime/mcp-servers/reload"
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
 
@@ -54,6 +64,26 @@ def config_with(
     )
 
 
+def seed(directory: Path, config: Config) -> None:
+    """The configuration this test's server booted on, written into the
+    database it would read again, so a reload that changes nothing has
+    nothing to change."""
+    engine = open_database(directory)
+    try:
+        store = ConfigStore(engine)
+        for stage in ("llm", "asr", "tts", "vad"):
+            for name, entry in getattr(config.providers, stage).items():
+                store.set_provider(stage, name, entry.model_dump(exclude_unset=True))
+        for name, entry in config.mcp_servers.items():
+            store.set_mcp_server(name, entry.model_dump(exclude_unset=True))
+        store.set_agent_defaults(config.agent_defaults.model_dump(exclude_unset=True))
+        for name, agent in config.agents.items():
+            store.set_agent(name, agent.model_dump(exclude_unset=True))
+        store.set_default_agent(config.default_agent)
+    finally:
+        engine.dispose()
+
+
 @pytest.fixture
 def directory(tmp_path: Path) -> Path:
     return tmp_path / "db"
@@ -65,8 +95,10 @@ def keys(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @contextmanager
-def serving(directory: Path, servers: McpServers | None) -> Iterator[TestClient]:
-    api = build_api(TOKEN, directory, mcp_servers=servers)
+def serving(
+    directory: Path, servers: McpServers | None, reload: object = None
+) -> Iterator[TestClient]:
+    api = build_api(TOKEN, directory, mcp_servers=servers, mcp_reload=reload)
     with TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"}) as client:
         yield client
 
@@ -182,3 +214,118 @@ def test_an_entry_named_status_is_still_an_entity(client: TestClient) -> None:
     assert client.get(STATUS_PATH).json() == {}
     assert client.delete("/mcp-servers/status").status_code == 200
     assert client.get("/mcp-servers/status").status_code == 404
+
+
+# The reload action
+#
+# The registry's own two phases are exercised against real servers in
+# `test_tools_mcp_reload.py`; what is left here is what this module owns
+# and nothing else: the gate, the shape of the answer, the status code
+# each refusal maps to, and the honest refusal when there is no server.
+#
+# The reload callable is a stub for a reason beyond brevity. A TestClient
+# drives the application on a portal loop of its own, so a registry whose
+# managers were started on the test's loop would be stopped and started
+# from another one, which is exactly what the managers' one-task rule
+# forbids. The registry handed in here has never been started, so its
+# status is a read of plain attributes.
+
+
+def outcome(**fields: object) -> McpReload:
+    return McpReload(**fields)
+
+
+def answering(applied: McpReload):
+    async def reload() -> McpReload:
+        return applied
+
+    return reload
+
+
+def refusing(exc: Exception):
+    async def reload() -> McpReload:
+        raise exc
+
+    return reload
+
+
+def test_the_reload_needs_the_bearer_token(directory: Path) -> None:
+    with TestClient(build_api(TOKEN, directory)) as anonymous:
+        assert anonymous.post(RELOAD_PATH).status_code == 401
+        wrong = anonymous.post(RELOAD_PATH, headers={"Authorization": "Bearer wrong"})
+        assert wrong.status_code == 401
+
+
+def test_an_application_without_a_server_refuses_to_reload(client: TestClient) -> None:
+    """Unlike the read beside it, there is no honest empty answer: an
+    application with no runtime cannot apply anything, and answering 200
+    would say it had."""
+    response = client.post(RELOAD_PATH)
+
+    assert response.status_code == 503
+    assert set(response.json()) == {"detail"}
+    assert "no running server" in response.json()["detail"]
+
+
+def test_a_reload_answers_with_what_it_did_and_what_is_running(directory: Path) -> None:
+    servers = McpServers.build(
+        config_with({"tools": entry_data(), "shelved": entry_data()}, ["tools"])
+    )
+    applied = outcome(started=("tools",), stopped=("gone",), unchanged=("shelved",))
+
+    with serving(directory, servers, answering(applied)) as client:
+        response = client.post(RELOAD_PATH)
+
+    assert response.status_code == 200
+    answer = response.json()
+    assert set(answer) == {"started", "restarted", "stopped", "unchanged", "servers"}
+    assert answer["started"] == ["tools"]
+    assert answer["restarted"] == []
+    assert answer["stopped"] == ["gone"]
+    assert answer["unchanged"] == ["shelved"]
+    # And the whole status document, exactly as the read beside it
+    # answers: one round trip applies and verifies.
+    with serving(directory, servers) as client:
+        assert answer["servers"] == client.get(STATUS_PATH).json()
+
+
+@pytest.mark.parametrize(
+    ("refusal", "status"),
+    [
+        (ReloadInProgressError("already running"), 409),
+        (DatabaseBusyError("the configuration database is busy"), 409),
+        (ConfigError("the reload was refused and nothing was changed: mcp_servers.x"), 422),
+        (StorageError("the stored configuration cannot be read"), 500),
+    ],
+)
+def test_a_refusal_maps_to_its_status_and_carries_its_own_sentence(
+    directory: Path, refusal: Exception, status: int
+) -> None:
+    servers = McpServers.build(config_with({"tools": entry_data()}, ["tools"]))
+
+    with serving(directory, servers, refusing(refusal)) as client:
+        response = client.post(RELOAD_PATH)
+
+    assert response.status_code == status
+    assert response.json() == {"detail": str(refusal)}
+
+
+def test_a_running_server_hands_its_own_reload_to_the_api(
+    monkeypatch: pytest.MonkeyPatch, directory: Path
+) -> None:
+    """The wiring, through the mount a deployment gets: the route is
+    served, and it is not the 503 an application without a server
+    answers. No lifespan, so nothing is connected and the reload applies
+    an unchanged configuration to a registry of down managers."""
+    monkeypatch.setenv(API_SECRET_ENV, TOKEN)
+    config = config_with({"tools": entry_data()}, ["tools"], directory)
+    seed(directory, config)
+    served = TestClient(create_app(config))
+
+    answered = served.post(
+        f"{MOUNT_PATH}{RELOAD_PATH}", headers={"Authorization": f"Bearer {TOKEN}"}
+    )
+
+    assert answered.status_code == 200, answered.text
+    assert answered.json()["unchanged"] == ["tools"]
+    assert answered.json()["servers"]["tools"]["state"] == DOWN

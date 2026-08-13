@@ -1,6 +1,6 @@
 import contextlib
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 
 from fastapi import FastAPI
 
@@ -10,14 +10,14 @@ from samtal_server.build_info import revision
 from samtal_server.capture import CaptureStore, DeviceFacts
 from samtal_server.config import Config
 from samtal_server.config.api import api_token, build_api, mount_api
-from samtal_server.config.boot import load_boot_config
+from samtal_server.config.boot import load_boot_config, reload_domain_config
 from samtal_server.config.secrets import SecretStore
 from samtal_server.device.bindings import DeviceBindings
 from samtal_server.filler import build_agent_fillers
 from samtal_server.providers import build_agent_providers
 from samtal_server.registry import SessionRegistry
 from samtal_server.runtime.pipeline import bespoke_runtime_factory
-from samtal_server.tools.mcp import McpServers
+from samtal_server.tools.mcp import McpReload, McpServers
 from samtal_server.tools.memory import MemoryStore
 
 logger = logging.getLogger(__name__)
@@ -50,6 +50,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # go here so a process on its way out leaves no handle on the
         # data volume.
         app.state.bindings.dispose()
+
+
+def _mcp_reloader(
+    config: Config, servers: McpServers
+) -> Callable[[], Awaitable[McpReload]]:
+    """What the configuration API's reload route calls.
+
+    Closed over here because this is where both halves are known: the
+    configuration this process booted on, whose `server` section the
+    stored domain half is composed onto, and the managers that are
+    running. The re-read goes to the registry as a plain function rather
+    than being done here, which keeps the tools layer clear of the
+    database and leaves the registry deciding where a blocking read runs
+    (a worker thread) and when it is allowed to run at all.
+    """
+
+    def read() -> tuple[Config, SecretStore]:
+        reloaded = reload_domain_config(config)
+        return reloaded.config, reloaded.secrets
+
+    async def reload() -> McpReload:
+        return await servers.reload(read)
+
+    return reload
 
 
 def create_app(config: Config | None = None, secrets: SecretStore | None = None) -> FastAPI:
@@ -117,13 +141,16 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     # bound; and the MCP managers go with it because the status read
     # reports what they are doing, and passing the same object is what
     # makes that a report rather than a snapshot of what was true when
-    # the API was built.
+    # the API was built. The reload goes with them, because applying a
+    # fresh read to those managers is the one action that namespace
+    # serves.
     api = build_api(
         token,
         app.state.config.server.database.dir,
         app.state.config.agents,
         app.state.pending,
         app.state.mcp_servers,
+        _mcp_reloader(app.state.config, app.state.mcp_servers),
     )
     # One registry per app: what decides whether there is room for the
     # next conversation, and what the drain reaches the live ones through.

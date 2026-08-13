@@ -29,7 +29,7 @@ Nothing logs the token, a request body, or an Authorization header.
 import hmac
 import logging
 import os
-from collections.abc import Callable, Collection, Iterator, Sequence
+from collections.abc import Awaitable, Callable, Collection, Iterator, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
@@ -48,6 +48,7 @@ from samtal_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
     DeviceAlreadyBoundError,
+    ReloadInProgressError,
     StorageError,
     UnknownEntityError,
 )
@@ -141,12 +142,32 @@ API_DESCRIPTION = (
     "configured MCP server is doing right now: connected or down, since when, what "
     "it published, and which agents may reach it. Nothing there is read from the "
     "database, so it cannot disagree with what is running.\n\n"
+    "`POST /runtime/mcp-servers/reload` is the second exception to the boot-time "
+    "snapshot, and unlike device bindings it is asked for rather than noticed. It "
+    "re-reads the `mcp_servers` entries, the secrets stored on them and the agents' "
+    "`mcp` grant lists, and applies them to the running server: entries are started, "
+    "restarted, stopped or left alone, and live conversations pick the result up on "
+    "their next utterance without being dropped. Everything else about an agent "
+    "still waits for a restart, which is why writes to those keep saying so.\n\n"
     f"{API_OPTIONS_NOTE}"
 )
 
 # The name the security scheme is registered under. Referenced by the
 # document-level requirement, so both come from one string.
 BEARER_SCHEME = "bearerToken"
+
+
+class NoRuntimeError(ConfigError):
+    """A runtime action was asked of an application with no server
+    around it, which has nothing to act on.
+
+    A transport concern like the one below, and here for the same
+    reason: what is missing is not stored configuration but the running
+    thing this application would have been mounted on. The reads in the
+    `/runtime` namespace answer emptily instead, because an empty
+    listing is a true description of no runtime; an action has no
+    equivalent honest answer.
+    """
 
 
 class ClaimInFlightError(ConfigError):
@@ -170,7 +191,12 @@ REFUSAL_STATUS: dict[type[ConfigError], int] = {
     DeviceAlreadyBoundError: 404,
     DatabaseBusyError: 409,
     ClaimInFlightError: 409,
+    # The third thing that is held rather than wrong: one reload of the
+    # MCP servers runs at a time, and the second is retryable exactly as
+    # a contended write is.
+    ReloadInProgressError: 409,
     StorageError: 500,
+    NoRuntimeError: 503,
     ConfigError: 422,
 }
 
@@ -330,8 +356,9 @@ PROBLEM_DESCRIPTIONS: dict[int, str] = {
     404: "Nothing of that identity exists.",
     409: (
         "Something this request needs is held by another one: the configuration "
-        "database's write lock, or the activation code a concurrent claim is already "
-        "binding. Nothing was changed and the request can be retried."
+        "database's write lock, the activation code a concurrent claim is already "
+        "binding, or a reload of the MCP servers that is already running. Nothing was "
+        "changed and the request can be retried."
     ),
     422: (
         "The request names something that cannot be addressed, such as a stage that is "
@@ -340,6 +367,12 @@ PROBLEM_DESCRIPTIONS: dict[int, str] = {
     500: (
         "The stored configuration cannot be read, or the request failed for a reason "
         "that is not the caller's. The details are in the server's log."
+    ),
+    503: (
+        "This application has no running server around it, so there is nothing for a "
+        "runtime action to act on. A deployment reaches the API on its server's own "
+        "port; an application built without one serves the reads in the /runtime "
+        "namespace emptily and refuses the actions."
     ),
 }
 
@@ -535,6 +568,56 @@ class McpServerStatus(BaseModel):
     )
 
 
+class McpReloadResult(BaseModel):
+    """What one reload did, and what is running once it had done it.
+
+    Both halves in one answer on purpose: the request that applies a
+    change is the request that says what the change was and how it came
+    out, so believing a write took effect when it did not takes a
+    deliberate act of not reading the reply.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    started: list[str] = Field(
+        description=(
+            "The entries that had no connection before this reload and have one now: "
+            "newly written, or newly named by some agent's `mcp` list. Started is not "
+            "connected: an entry here whose server was unreachable is `down` below, "
+            "with its reason."
+        )
+    )
+    restarted: list[str] = Field(
+        description=(
+            "The entries whose fragment or whose stored secrets changed. Their "
+            "connections were closed and made again, so a rotated credential applies "
+            "here rather than at the next server start."
+        )
+    )
+    stopped: list[str] = Field(
+        description=(
+            "The entries this server no longer connects: deleted, or no longer named "
+            "by any agent. A deleted one is gone from the status below; a "
+            "de-referenced one is still there, as `unused`."
+        )
+    )
+    unchanged: list[str] = Field(
+        description=(
+            "The entries nothing changed about, which kept the connections they had. A "
+            "reload does not disturb them, so the conversations using them do not "
+            "notice one."
+        )
+    )
+    servers: dict[str, McpServerStatus] = Field(
+        description=(
+            "What every configured entry is doing now that the reload has been applied, "
+            "keyed by entry name: exactly what `GET /runtime/mcp-servers` answers, "
+            "taken in the same breath so that applying and verifying are one round "
+            "trip."
+        )
+    )
+
+
 class DefaultAgent(BaseModel):
     """The agent an unbound device reaches."""
 
@@ -593,6 +676,7 @@ def build_api(
     loaded_agents: Collection[str] = (),
     pending: "PendingDevices | None" = None,
     mcp_servers: "McpServers | None" = None,
+    mcp_reload: Callable[[], Awaitable[Any]] | None = None,
 ) -> FastAPI:
     """The sub-application the server mounts: the routes, gated.
 
@@ -619,6 +703,15 @@ def build_api(
     would report what was running once. None is the honest answer for an
     application built without a server, and the read answers with an
     empty object.
+
+    `mcp_reload` applies a re-read of the stored configuration to those
+    managers. A callable rather than the pieces it needs, because what
+    it closes over is the composition root's business: the configuration
+    this process booted on, whose server section the re-read composes
+    onto, and the registry that owns where the blocking half of it runs.
+    None is the honest answer for an application without a server, and
+    the route refuses with 503 rather than pretending to have applied
+    something.
     """
     api = _application()
     # Attached rather than closed over: the read and write routes take
@@ -627,6 +720,7 @@ def build_api(
     api.state.loaded_agents = frozenset(loaded_agents)
     api.state.pending = pending if pending is not None else _empty_pending()
     api.state.mcp_servers = mcp_servers
+    api.state.mcp_reload = mcp_reload
     # Added last is outermost, so a failure inside the gate itself
     # answers as sanitized as one inside a handler.
     api.add_middleware(_BearerGate, token=token)
@@ -752,6 +846,16 @@ def _mcp_servers(request: Request) -> "McpServers | None":
 
 # Annotated `Any` for the reason PendingDep is.
 McpServersDep = Annotated[Any, Depends(_mcp_servers)]
+
+
+def _mcp_reload(request: Request) -> Callable[[], Awaitable[Any]] | None:
+    """What applies a re-read of the stored configuration to the running
+    MCP managers, or None for an application built without a server.
+    Taken from the application for the reason the store is."""
+    return request.app.state.mcp_reload
+
+
+McpReloadDep = Annotated[Any, Depends(_mcp_reload)]
 
 
 def _pending_view(device: "PendingRecord") -> dict[str, Any]:
@@ -941,6 +1045,56 @@ def _runtime(api: FastAPI) -> None:
         `loaded_agents = ()` already has.
         """
         return {} if servers is None else servers.status()
+
+    @api.post(
+        "/runtime/mcp-servers/reload",
+        response_model=McpReloadResult,
+        responses=_problems(401, 409, 422, 500, 503),
+    )
+    async def reload_mcp_servers(
+        servers: McpServersDep, reload: McpReloadDep
+    ) -> dict[str, Any]:
+        """Re-read the MCP servers and the agents' grants, and apply
+        them to this running server.
+
+        The one action in this namespace, and the one exception to
+        "configuration applies at the next start" that a request rather
+        than a device asks for. What it re-reads is the `mcp_servers`
+        entries, the secrets stored on them and the effective `mcp`
+        lists, and nothing else: an agent's prompt, its providers, its
+        memory and the whole server section stay as this process booted
+        them, so a new agent still waits for the restart that builds it.
+
+        Nothing is stopped or started until every manager the new
+        configuration needs has been built, so a refusal (422) has
+        changed nothing at all. A server that merely will not connect is
+        not a refusal: it applies, and says `down` with its reason
+        below, and is reconnected in the background when a session that
+        would use it opens.
+
+        Live conversations are not dropped. The tools an agent may reach
+        are snapshotted per reply, so a session picks the new world up on
+        its next utterance; a call in flight on a server this stopped
+        fails into the same error result a server dropping mid-call
+        produces.
+
+        One reload runs at a time: a concurrent one is refused with 409
+        and has changed nothing, like a write that could not take the
+        database's lock.
+        """
+        if reload is None or servers is None:
+            raise NoRuntimeError(PROBLEM_DESCRIPTIONS[503])
+        applied = await reload()
+        # Taken here rather than answered by the registry, and with no
+        # await between the two, so the outcomes and the status describe
+        # one world.
+        return {
+            "started": list(applied.started),
+            "restarted": list(applied.restarted),
+            "stopped": list(applied.stopped),
+            "unchanged": list(applied.unchanged),
+            "servers": servers.status(),
+        }
 
 
 # A body, exactly as it was sent, handed to the repository unread.
