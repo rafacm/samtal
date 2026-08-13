@@ -97,6 +97,15 @@ separate work with its own issue when the project chooses to take
 it; this change is about leaving the deprecated 1.x client, not the
 1.x line.
 
+`uv.lock` moves with the requirement: the lock records the
+project's requirement strings in its metadata, and the frozen image
+build treats the lock as authoritative, so a pyproject edit the
+lock does not reflect would leave the two disagreeing about what
+the project requires. `uv lock` is rerun
+and the lock committed in the same change; the resolved `mcp`
+version stays 1.28.1, so the delta is metadata, not a version jump.
+Verification includes `uv lock --check`.
+
 ### New coverage runs the shipping transport in-process
 
 The stdio tests spawn `tests/support/mcp_stdio_server.py` as a
@@ -152,6 +161,7 @@ publish on push requires.
 ```
 samtal-server/samtal_server/tools/mcp.py        _connect, imports
 samtal-server/pyproject.toml                    mcp 1.2 -> >=1.24,<2
+samtal-server/uv.lock                           relocked, same versions
 samtal-server/tests/unit/test_tools_mcp_http.py new
 samtal-server/tests/unit/test_secret_resolution.py  filter and comment removed
 CHANGELOG.md                                    2026-08-13 entry
@@ -166,6 +176,8 @@ shape or meaning.
 
 - `uv run ruff check .`, `uv run pytest tests/unit -q`,
   `uv run pytest tests/integration -q`, all from `samtal-server/`.
+- `uv lock --check` passes: the committed lock agrees with the
+  edited requirement, so the frozen image build resolves.
 - `grep -rn streamablehttp_client samtal-server` finds nothing: no
   call site and no lingering import of the deprecated name.
 - The unit lane's `filterwarnings = ["error", ...]` is itself the
@@ -224,6 +236,11 @@ resolution once the amendment addressing it lands.
    today), and frozen image builds treat the lock as authoritative.
    Regenerate and commit `uv.lock` (still resolving mcp 1.28.1)
    and add `uv lock --check` or equivalent to verification.
+   *Resolution*: adopted. The dependency decision now says the
+   lock is relocked and committed in the same change (same
+   resolved versions, metadata delta only), the files-touched
+   list carries `uv.lock`, and verification gains
+   `uv lock --check`.
 3. **P2: the tests do not verify the new caller-owned client
    responsibilities.** A supplied client is not managed by the
    replacement transport; the plan takes over closure, redirects,
