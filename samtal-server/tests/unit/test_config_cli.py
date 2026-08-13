@@ -34,13 +34,14 @@ from fastapi.testclient import TestClient
 from sqlalchemy import update
 
 from samtal_server import db as db_module
-from samtal_server.config import cli
+from samtal_server.config import Config, cli
 from samtal_server.config.api import MOUNT_PATH, build_api, mount_api
 from samtal_server.config.loader import ConfigError, load_file_config
 from samtal_server.config.secrets import MASK, MASTER_KEY_ENV, generate_key
 from samtal_server.config.writes import BINDING_NOTICE
 from samtal_server.db import DATABASE_FILENAME, open_database, schema
 from samtal_server.onboarding import PendingDevices
+from samtal_server.tools.mcp import McpServers
 
 # Not real credentials, and shaped so a substring check for one cannot
 # match by accident.
@@ -79,6 +80,11 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # server, and a command that could not see what a previous one left
     # in it would be testing a table nobody has.
     pending = PendingDevices()
+    # The running server's MCP managers, for the same reason and put
+    # there by the tests that need one. None is what an application
+    # built without a server around it gets, which is what every other
+    # test here is.
+    runtime: dict[str, object] = {"mcp_servers": None}
 
     def factory(base_url: str, token: str) -> TestClient:
         reached.append(base_url)
@@ -88,7 +94,9 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         # to send would make every token the right one, and the
         # token-resolution tests would be asserting nothing: the wrong
         # variable, a stale value and a typo would all authenticate.
-        api = build_api(TOKEN, directory, pending=pending)
+        api = build_api(
+            TOKEN, directory, pending=pending, mcp_servers=runtime["mcp_servers"]
+        )
         # A base URL with a path prefix is the deployed shape, where the
         # sub-application is mounted on the server's own port, so the
         # fixture mounts it exactly where the server does rather than
@@ -113,6 +121,7 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     _run.reached = reached
     _run.pending = pending
+    _run.runtime = runtime
     return _run
 
 
@@ -291,6 +300,72 @@ def test_pending_lists_the_code_each_device_is_showing(
     assert "aa:bb:cc:dd:ee:ff" in printed
     assert "waveshare-esp32-s3-touch-lcd-1.54" in printed
     assert "2.4.0" in printed
+
+
+# What the MCP servers are doing
+#
+# The other read of the running server rather than of the database.
+# Nothing is connected here: a live connection is a subprocess or a
+# socket, and what these are about is the rendering of the three states
+# and the shape the client insists on.
+
+
+def _configured(servers: dict[str, object], granted: list[str]) -> McpServers:
+    """A registry built from a configuration, the way a server builds
+    one, and never started, so everything referenced is down."""
+    config = Config(
+        server={},
+        providers={
+            stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")
+        },
+        mcp_servers=servers,
+        agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
+        agents={"sam": {"prompt": "A", "mcp": granted}},
+        default_agent="sam",
+    )
+    return McpServers.build(config)
+
+
+def test_status_says_so_when_nothing_is_configured(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run("status") == 0
+
+    assert capsys.readouterr().out.startswith("this server has no MCP servers configured")
+
+
+def test_status_shows_each_entry_its_state_and_who_may_reach_it(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entry = {"transport": "streamable_http", "url": "http://127.0.0.1:9/mcp"}
+    run.runtime["mcp_servers"] = _configured(
+        {"weather": entry, "shelved": entry}, ["weather"]
+    )
+
+    assert run("status") == 0
+
+    printed = capsys.readouterr().out
+    assert "weather: down since " in printed
+    assert "  agents: sam" in printed
+    # The state that exists only on this surface: configured, referenced
+    # by nobody, so no connection was ever built for it.
+    assert "shelved: unused since " in printed
+    # A server with nothing published and nobody granted says so rather
+    # than printing an empty line.
+    assert "  tools: (none)" in printed
+
+
+def test_status_refuses_an_answer_it_cannot_read(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A body without the fields a status entry carries did not come
+    from this API, and a proxy's page is not rendered as though it
+    had."""
+    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: {"weather": {"up": True}})
+
+    assert run("status") == 1
+
+    assert cli.UNRECOGNIZED_ANSWER in capsys.readouterr().err
 
 
 def test_add_device_binds_the_board_showing_the_code(
