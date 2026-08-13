@@ -180,3 +180,103 @@ All commands from `samtal-server/`, on the milestone's final tree.
   before the edit, not with `git checkout`.
 - CI was not run from here. It runs the same lint, unit and integration
   steps on the PR.
+
+The numbers above are the state at the PR's first push. The review round
+below adds two tests, strengthens a third, and changes what the
+manager's warning prints; its own verification is recorded with it.
+
+### PR #123 review round
+
+One external review of the pull request's diff (`main...41e7b78`):
+codex CLI 0.147.0, model gpt-5.6-sol, read-only, 2026-08-13. Two
+findings, one P1 and one P2, each fixed in its own commit. Findings as
+received, condensed, each with its resolution.
+
+1. **P1: the MCP SDK can put server-controlled values and tracebacks
+   into the logs.** The call at `mcp.py:205` delegates to the pinned
+   transport, whose module logs the session id a server chose
+   (`streamable_http.py:181`), the raw result of an initialization
+   response that will not parse (`:195-198`), and a parsing failure
+   through `logger.exception` (`:393-395`). `logs.py:54` serializes a
+   traceback into the structured log, and a malformed response makes
+   Pydantic quote the rejected bytes inside the exception, so a
+   malicious or broken MCP server can write to the observability
+   surface. The manager's own `_run` interpolates the exception object
+   as well (`mcp.py:153`). Suggested: suppress or sanitize the SDK
+   client's records, replace the interpolation with application-owned
+   reason codes, and add malicious-handshake tests asserting the
+   sentinel bytes, the session id, the traceback, `exc_info` and the
+   exception chain are all absent.
+   *Resolution*: adopted, in the narrow form, in 8482178. The mechanism
+   is older than this PR, and the finding says so: the deprecated
+   wrapper delegated to the same module and the same logger, and the
+   interpolation predates the swap. It is fixed here because this is
+   the transport's review moment and JSON log events are a public
+   surface by ADR. The SDK client's logger takes a filter that passes
+   nothing, installed in `tools/mcp.py` where the transport is used, so
+   its records stop before any handler of ours is reached; this is the
+   reasoning that already keeps uvicorn's access log off in `main.py`.
+   The unavailability warning keeps its sentence and prints a reason
+   token built from exception types, unwrapping the group the transport
+   raises through, so a malformed handshake now reads "mcp server
+   weather is unavailable, its tools are absent: ValidationError". The
+   test drives a real connect against a stub that answers the handshake
+   with a well-formed envelope around a result that is not an
+   `InitializeResult`, echoing the request id so the client accepts it,
+   and asserts the sentinel appears in neither `caplog.text` nor the
+   `JsonFormatter` rendering of every record (which is where a
+   traceback would land), that no record from the SDK client's logger
+   survives, that no record carries `exc_info`, and that our own
+   warning still names the server. A unit test pins the reason token.
+   Three parts of the prescription were not taken, each for a reason
+   worth recording. Sanitizing the SDK's records was rejected in favour
+   of dropping them: the messages are already interpolated f-strings,
+   so sanitizing means pattern-matching another library's prose, and
+   what an operator needs from those lines this module already writes.
+   The guard names `mcp.client.streamable_http` only, rather than the
+   `mcp` namespace or every third-party logger, because a guard that
+   silences loggers nobody has read is a guess. And no new structured
+   field or event was added, since event names and fields are a
+   compatibility surface by the same ADR and the finding needs none.
+2. **P2: the dead-server test asserted only manager state.** The plan
+   promised a URL nobody answers would leave the manager logging and
+   staying down, and the test checked `up`, the empty tool list and the
+   refusal to call, none of which can tell a warning from silence.
+   Suggested: capture logs and assert one stable application warning,
+   pinned to our logger and level rather than to the wording, with no
+   exception object and no `exc_info`.
+   *Resolution*: adopted in 8ab0a18. The test captures across the start
+   and requires exactly one record from `samtal_server.tools.mcp` at
+   `WARNING`, naming the entry that went down, with `exc_info` unset.
+   The sentence itself is not asserted, so wording stays free.
+
+**What the round turned up and this PR did not fix.** At `DEBUG`,
+`httpcore` logs the headers of every response any `httpx` client in the
+process receives, MCP servers and the cloud LLM providers alike, which
+puts a session id (and whatever else a response header carries) in the
+log of a deployment that turns debug logging on. That is a property of
+the debug level across the whole server rather than anything this
+transport decides, it predates this PR, and narrowing it would take a
+decision about how much of a debugging tool to keep. It is recorded
+here rather than fixed, and the leak test scopes its capture to the SDK
+client's logger for exactly this reason, so that it asserts what this
+change guarantees and not more.
+
+### Verification after the review round
+
+Same commands, from `samtal-server/`, on the tree at 8ab0a18.
+
+- `uv run ruff check .`: "All checks passed!".
+- `uv run pytest tests/unit -q`: 1434 passed, 15 skipped in 127.70s.
+  Two more than before the round: the malformed-handshake test and the
+  reason-token test. The dead-server test was strengthened rather than
+  added.
+- `uv run pytest tests/integration -q`: 44 passed in 103.01s.
+- `uv lock --check`: "Resolved 104 packages", no error. No dependency
+  moved in this round.
+- `grep -rn streamablehttp_client samtal_server tests`: still no
+  matches (exit 1).
+- The leak guard was checked for teeth: with the filter line removed
+  and the exception interpolated again, the malformed-handshake test
+  fails and the other eight pass. The source was restored from a copy,
+  not with `git checkout`.
