@@ -205,10 +205,15 @@ SUPPLIED_ENDPOINT = "the supplied OTA endpoint"
 # all, bounded or otherwise.
 GLIMPSE_LENGTH = 120
 
-# How many redirects `doctor` follows. One, because one is what a
-# deployment produces: a URL typed without its trailing slash. The
-# limit is explicit rather than left to the client's default of twenty,
-# since every hop past the first is a hop somebody else chose.
+# How many redirects `doctor` follows. One, and one is already more
+# than a current server produces: since the hardware checkpoint of
+# 2026-08-13 every device-facing route answers both spellings of its
+# path directly, because the firmware does not follow a redirect on
+# that request either. What is left for this to meet is a server older
+# than that change, or a proxy in front of one that canonicalizes a
+# missing trailing slash. The limit is explicit rather than left to the
+# client's default of twenty, since every hop past the first is a hop
+# somebody else chose.
 CANONICAL_REDIRECTS = 1
 
 # How much of a body is looked at at all. The description this reads is
@@ -931,13 +936,15 @@ def _probed(url: str, shown: str) -> httpx.Response:
     and spend the mint budget would be a diagnosis nobody could run
     twice, so this method is not a default but a rule.
 
-    One redirect is followed, and only one shape of it: the server's
-    own, from a URL typed without its trailing slash to the canonical
-    path on the same origin. Reporting that one as "not samtal-server"
-    would be this command's worst answer, and following any other would
-    let whatever answers at an address choose where this request goes
-    next, which inside the network a deployment sits in is worth
-    refusing rather than reasoning about.
+    One redirect is followed, and only one shape of it: from a URL
+    typed without its trailing slash to the canonical path on the same
+    origin. A current server never sends it, since every device-facing
+    route answers both spellings directly, but a server older than that
+    change does, and reporting it as "not samtal-server" would be this
+    command's worst answer. Following any other would let whatever
+    answers at an address choose where this request goes next, which
+    inside the network a deployment sits in is worth refusing rather
+    than reasoning about.
 
     Building the client is inside the boundary with the request and the
     close. httpx validates a URL when it is given one, so construction
@@ -986,10 +993,12 @@ def _canonical_slash(response: httpx.Response) -> str | None:
 
     Same scheme, same host, same port, the same query, and a path that
     is the one just asked for with a slash after it. That is what
-    Starlette answers a missing trailing slash with, and it is the only
-    redirect an operator meets on the way to an OTA endpoint. A
-    `Location` this cannot read is refused the same way one pointing
-    elsewhere is, and neither is repeated back.
+    Starlette answers a missing trailing slash with, which is the only
+    redirect an operator can meet on the way to an OTA endpoint served
+    by this project, and only from a deployment older than the change
+    that made every spelling answer for itself. A `Location` this
+    cannot read is refused the same way one pointing elsewhere is, and
+    neither is repeated back.
     """
     current = response.request.url
     try:

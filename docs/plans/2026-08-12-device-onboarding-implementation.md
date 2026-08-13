@@ -374,6 +374,36 @@ what the device does. The one path that still redirects is the
 configuration API's bare `/api` prefix, which is a browser and a CLI
 surface and no device ever reaches.
 
+#### What milestone 4 carries of it
+
+Written while rebasing that milestone onto the fix above. It changes
+nothing it does and one thing it says.
+
+**`config doctor` still follows one redirect, and now for somebody
+else's server.** Its review round (finding 6) had narrowed the probe
+from "follow anything, twenty deep" to "follow the canonical
+trailing-slash redirect on the same origin, once", on the reasoning
+that this was the one redirect a deployment produces. After the
+checkpoint no current deployment produces it at all: every
+device-facing route answers both spellings itself. The behavior is
+kept, because what it now covers is a server older than this change,
+or a proxy in front of one that canonicalizes a missing slash, and
+reporting either as "not samtal-server" would be this command's worst
+answer. What changed is the wording that justified it, in
+`CANONICAL_REDIRECTS`, in `_probed` and in `_canonical_slash`: a
+comment claiming a current server sends this would send a later reader
+looking for a route that no longer exists.
+
+**The tests that stood on that claim now say whose server they mean.**
+Two of them build a canned application registering only the slashed
+route, which is exactly what a pre-checkpoint server was, and their
+names and docstrings say so rather than saying "the server's own
+redirect". Beside them is a new one asserting the other half against
+the real routers: a current server answers both `/x/<key>` and
+`/x/<key>/` with 200 and no redirect (checked with redirects
+disabled), and `doctor` probing the slashless spelling reports it
+healthy without a second request existing to make.
+
 
 ## Milestone 2: live device bindings
 
