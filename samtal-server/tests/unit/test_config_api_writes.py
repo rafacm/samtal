@@ -33,7 +33,11 @@ from samtal_server.config.secrets import (
     load_keys,
 )
 from samtal_server.config.store import ConfigStore
-from samtal_server.config.writes import BINDING_NOTICE, RESTART_NOTICE
+from samtal_server.config.writes import (
+    BINDING_NOTICE,
+    MCP_RELOAD_NOTICE,
+    RESTART_NOTICE,
+)
 from samtal_server.db import DATABASE_FILENAME, open_database
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
@@ -138,10 +142,22 @@ def test_a_write_says_what_it_did_and_when_it_applies(
     assert response.status_code == 200
     answer = response.json()
     assert set(answer) == {"wrote", "notice"}
-    assert answer["notice"] == (
-        BINDING_NOTICE if (method, path) == ("delete", "/default-agent") else RESTART_NOTICE
-    )
+    assert answer["notice"] == _expected_notice(method, path)
     assert answer["wrote"]
+
+
+def _expected_notice(method: str, path: str) -> str:
+    """Which of the three sentences a write carries, by what it wrote.
+
+    The default is the boot-time snapshot one; the exceptions are the
+    default agent, which the running server re-reads, and the MCP
+    entries, which a reload applies.
+    """
+    if (method, path) == ("delete", "/default-agent"):
+        return BINDING_NOTICE
+    if path.startswith("/mcp-servers/"):
+        return MCP_RELOAD_NOTICE
+    return RESTART_NOTICE
 
 
 # Which of the two notices a write carries
@@ -247,6 +263,69 @@ def test_everything_else_still_waits_for_a_restart(serving_client: TestClient) -
 
     answer = serving_client.put("/agents/sam", json={"prompt": "You are Sam still."})
 
+    assert answer.json()["notice"] == RESTART_NOTICE
+
+
+# The third sentence: what a reload applies
+#
+# Every mutation of an MCP entry, its stored secrets included, since
+# rotation is exactly what the ciphertext half of the reload's diff
+# applies. And nothing else, since a reload re-reads the entries and the
+# grant lists and no other part of a configuration.
+
+
+MCP_MUTATIONS = [
+    ("put", "/mcp-servers/home", {"transport": "stdio", "command": "uvx"}),
+    ("put", "/mcp-servers/weather/secrets/headers.Authorization", {"secret": "a-token"}),
+    ("delete", "/mcp-servers/weather/secrets/headers.Authorization", None),
+    ("delete", "/mcp-servers/weather", None),
+]
+
+
+@pytest.mark.usefixtures("store")
+@pytest.mark.parametrize(("method", "path", "body"), MCP_MUTATIONS)
+def test_every_mcp_mutation_names_the_reload(
+    serving_client: TestClient, method: str, path: str, body: object
+) -> None:
+    _pipeline(serving_client)
+    # In order, so the clear and the delete have something to address.
+    if method == "delete":
+        serving_client.put(
+            "/mcp-servers/weather/secrets/headers.Authorization", json={"secret": "a-token"}
+        )
+
+    answer = serving_client.request(method.upper(), path, json=body)
+
+    assert answer.status_code == 200, answer.text
+    assert answer.json()["notice"] == MCP_RELOAD_NOTICE
+
+
+PROVIDER_MUTATIONS = [
+    ("put", "/providers/llm/claude", {"type": "anthropic", "model": "m"}),
+    ("put", "/providers/llm/claude/secrets/api_key", {"secret": "a-key"}),
+    ("delete", "/providers/llm/claude/secrets/api_key", None),
+    ("put", "/agents/sam", {"prompt": "You are Sam."}),
+    ("put", "/agent-defaults", {"llm": "claude", "asr": "whisper"}),
+]
+
+
+@pytest.mark.usefixtures("store")
+@pytest.mark.parametrize(("method", "path", "body"), PROVIDER_MUTATIONS)
+def test_the_writes_a_reload_does_not_apply_still_name_the_restart(
+    serving_client: TestClient, method: str, path: str, body: object
+) -> None:
+    """A provider is built at boot and a credential of one is read then,
+    so neither is reloadable. An agent fragment mixes the two: its `mcp`
+    list is what a reload applies and its prompt, providers and filler
+    are not, and a notice right about one field and wrong about the rest
+    is worse than the conservative one."""
+    _pipeline(serving_client)
+    if method == "delete":
+        serving_client.put("/providers/llm/claude/secrets/api_key", json={"secret": "a-key"})
+
+    answer = serving_client.request(method.upper(), path, json=body)
+
+    assert answer.status_code == 200, answer.text
     assert answer.json()["notice"] == RESTART_NOTICE
 
 
