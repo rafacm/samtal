@@ -61,7 +61,9 @@ layer, and `config openapi` must load none of it.
 
 **`samtal_server/app.py`.** `McpServers.build(...)` moves from below the
 providers to just above `build_api`, which is then handed the same
-object. The boot contract is unchanged (a bad entry still fails the
+object. The API token is resolved into a local first, so a deployment
+that forgot the variable still reads that refusal before any other, and
+the boot contract is otherwise unchanged (a bad entry still fails the
 boot there, unreachability still does not); what changed is only that
 an MCP configuration error is now raised before a provider one.
 
@@ -191,9 +193,14 @@ Six, none changing what the milestone does.
    layer must not import the configuration API, and the alternative was
    a new shared module for one line.
 5. **`McpServers.build` moved up in `app.py`.** The API is handed the
-   registry, so the registry has to exist first. The only observable
-   change is which of two boot failures is raised first when a
-   configuration has both.
+   registry, so the registry has to exist first. The API token is
+   resolved into a local ahead of it, so the one precedence that is a
+   promise to an operator (the admin surface's own credential is
+   reported before anything the configuration references) is kept; the
+   only observable change left is which of two boot failures is raised
+   first when both a provider and an MCP entry are wrong. Corrected
+   after the review round found this paragraph claimed less than the
+   change did; see the round section below.
 6. **The status view returns plain dictionaries from `tools/mcp.py`**,
    with the transport shapes declared as pydantic models in
    `config/api.py`. That is the arrangement `views.py` and the response

@@ -94,26 +94,32 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     # even with onboarding off, so no handler needs a branch for its
     # absence; with onboarding off nothing ever puts anything in it.
     app.state.pending = onboarding.PendingDevices()
+    # The configuration API's token, resolved here rather than at the
+    # call below and for the reason it always was: the API is always
+    # mounted, so a deployment that forgot the variable must be refused
+    # before anything else is built rather than serve an admin surface
+    # its own operator cannot reach. Resolving it inside the call would
+    # have put the MCP servers' own refusals in front of it and changed
+    # which failure such a deployment reads. Held in a local, passed
+    # straight into the gate, and kept nowhere else, least of all on
+    # app.state, and never logged.
+    token = api_token(app.state.config)
     # Built before the API rather than beside the providers below,
     # because the API's status read reports these managers and they have
     # to exist to be handed over. An unknown reference or an unset
     # secret is still a boot failure here, exactly as it was; being
     # unreachable is still not one.
     app.state.mcp_servers = McpServers.build(app.state.config, secrets)
-    # The configuration API's token is resolved beside it and for the
-    # same reason: it is always mounted, so a deployment that forgot the
-    # variable must be refused here rather than serve an admin surface
-    # its own operator cannot reach. Passed straight into the gate and
-    # kept nowhere else, least of all on app.state, and never logged.
-    # The agents go with it because a device write's acknowledgement
-    # says whether the device can reach what it was just bound to, and
-    # only this server knows what it loaded, and the pending table goes
-    # with it because claiming a code is how a device is bound. The MCP
-    # managers go with it because the status read reports what they are
-    # doing, and the same object is what makes that a report rather than
-    # a snapshot of what was true when the API was built.
+    # The agents go with the token because a device write's
+    # acknowledgement says whether the device can reach what it was just
+    # bound to, and only this server knows what it loaded; the pending
+    # table goes with it because claiming a code is how a device is
+    # bound; and the MCP managers go with it because the status read
+    # reports what they are doing, and passing the same object is what
+    # makes that a report rather than a snapshot of what was true when
+    # the API was built.
     api = build_api(
-        api_token(app.state.config),
+        token,
         app.state.config.server.database.dir,
         app.state.config.agents,
         app.state.pending,
