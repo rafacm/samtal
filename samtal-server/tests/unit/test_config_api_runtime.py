@@ -18,7 +18,13 @@ from fastapi.testclient import TestClient
 
 from samtal_server.app import create_app
 from samtal_server.config import Config
-from samtal_server.config.api import MOUNT_PATH, build_api
+from samtal_server.config.api import (
+    MOUNT_PATH,
+    PROBLEM_DESCRIPTIONS,
+    RELOAD_REFUSED_DESCRIPTION,
+    build_api,
+    document,
+)
 from samtal_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
@@ -329,3 +335,22 @@ def test_a_running_server_hands_its_own_reload_to_the_api(
     assert answered.status_code == 200, answered.text
     assert answered.json()["unchanged"] == ["tools"]
     assert answered.json()["servers"]["tools"]["state"] == DOWN
+
+
+def test_the_reload_describes_a_422_of_its_own() -> None:
+    """The shared sentence for 422 is about addressing: a stage that is
+    not a stage, a MAC that is not one. This endpoint addresses nothing
+    and carries no body, so the only thing its 422 can mean is that the
+    stored configuration was refused, which is also where the endpoint's
+    guarantee belongs."""
+    rendered = document()["paths"]
+
+    described = rendered[RELOAD_PATH]["post"]["responses"]["422"]["description"]
+    assert described == RELOAD_REFUSED_DESCRIPTION
+    assert described != PROBLEM_DESCRIPTIONS[422]
+    assert "exactly as they were" in described
+    # Per route rather than a global edit: the writes still describe
+    # what a 422 means to them.
+    assert rendered["/mcp-servers/{name}"]["put"]["responses"]["422"]["description"] == (
+        PROBLEM_DESCRIPTIONS[422]
+    )
