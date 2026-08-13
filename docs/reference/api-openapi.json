@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "samtal-server configuration API",
-    "description": "The domain half of one samtal-server deployment's configuration: providers, MCP servers, agents, devices, and the credentials they use. Every request carries a bearer token, whose value is the environment variable `server.api.secret_env` names.\n\nConfiguration is a boot-time snapshot, so a successful write applies at the next server start rather than immediately. Device bindings are the one exception: a running server reads them, and the default agent, as a device asks for them, so binding or unbinding a device applies at that device's next OTA check or connection. The exception ends where the agent does, since a server builds an agent's providers at boot: a binding naming an agent this server has not loaded waits for the restart that loads it. Every write says which of the two happened, in its `notice`.\n\nA device with no binding and no default agent to cover it is answered at its configuration check with a six-digit activation code, which it shows on its screen and speaks. `/devices/pending` lists the devices showing one, keyed by the code, and posting to `/devices/pending/{code}` binds the device showing it. That listing is the running server's own state rather than stored configuration: a restart forgets it, and the devices come back with fresh codes.\n\nA provider entry carries whatever options its `type` takes, and those are passed through rather than declared, so no schema can list them. Until typed option models land (#88) they are documented in the example fragments under `samtal-server/examples/`, which is also where the measured numbers behind each default are kept.",
+    "description": "The domain half of one samtal-server deployment's configuration: providers, MCP servers, agents, devices, and the credentials they use. Every request carries a bearer token, whose value is the environment variable `server.api.secret_env` names.\n\nConfiguration is a boot-time snapshot, so a successful write applies at the next server start rather than immediately. Device bindings are the one exception: a running server reads them, and the default agent, as a device asks for them, so binding or unbinding a device applies at that device's next OTA check or connection. The exception ends where the agent does, since a server builds an agent's providers at boot: a binding naming an agent this server has not loaded waits for the restart that loads it. Every write says which of the two happened, in its `notice`.\n\nA device with no binding and no default agent to cover it is answered at its configuration check with a six-digit activation code, which it shows on its screen and speaks. `/devices/pending` lists the devices showing one, keyed by the code, and posting to `/devices/pending/{code}` binds the device showing it. That listing is the running server's own state rather than stored configuration: a restart forgets it, and the devices come back with fresh codes.\n\nThe `/runtime` namespace is the running server's own state as well, and is kept apart from the entity namespaces because an entity may legally be named after any word a route might want. `/runtime/mcp-servers` says what each configured MCP server is doing right now: connected or down, since when, what it published, and which agents may reach it. Nothing there is read from the database, so it cannot disagree with what is running.\n\nA provider entry carries whatever options its `type` takes, and those are passed through rather than declared, so no schema can list them. Until typed option models land (#88) they are documented in the example fragments under `samtal-server/examples/`, which is also where the measured numbers behind each default are kept.",
     "version": "1"
   },
   "servers": [
@@ -2037,6 +2037,39 @@
           }
         }
       }
+    },
+    "/runtime/mcp-servers": {
+      "get": {
+        "summary": "Read Mcp Server Status",
+        "description": "What each configured MCP server is doing right now.\n\nRuntime state of the server this application is mounted on, like\nthe pending listing: it touches no database, so it can answer\nnone of the refusals a read of the configuration can, and what\nit reports is the slice its managers were built with rather than\nanything read back out of storage.\n\n`async def`, unlike the repository's plain-`def` handlers, on\npurpose: the read then happens on the event loop that owns the\nmanagers, so it cannot interleave with a change to them and\nreport half of one world.\n\nAn application built without a server around it has no runtime\nto report and answers with an empty object, which is the honesty\n`loaded_agents = ()` already has.",
+        "operationId": "read_mcp_server_status_runtime_mcp_servers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/McpServerStatus"
+                  },
+                  "type": "object",
+                  "title": "Response Read Mcp Server Status Runtime Mcp Servers Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2137,6 +2170,74 @@
         ],
         "title": "Envelope",
         "description": "One entity as a read returns it: the entity, and its stored-secret\nslots beside it."
+      },
+      "McpServerStatus": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": [
+              "connected",
+              "down",
+              "unused"
+            ],
+            "title": "State",
+            "description": "What this entry is doing: `connected` and offering the tools below, `down` and offering none, or `unused` because no agent references it, so this server never built a connection for it at all."
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason",
+            "description": "Why a `down` server is down, as a fixed token this server owns: the class of the failure, or `DroppedAfterFailedCall` for a connection dropped after a tool call failed on it. Null when it is not down. Never a message the far side wrote, since an MCP server is a third party and its bytes are not this API's to publish."
+          },
+          "since": {
+            "type": "string",
+            "title": "Since",
+            "description": "When this state was last entered, as an ISO-8601 instant in UTC. A new reason for staying down counts as entering it again, since it is a fresh failure. For an entry no agent references it is when the running configuration took effect."
+          },
+          "tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tools",
+            "description": "What this server published, under the names the model is given (`<entry>__<tool>`, sanitized). Empty while it is down. Only names cross this surface: a description, or the name a server listed before the publishing rule got to it, is bytes that server chose, and a server holding a credential of this deployment's could reflect it in either."
+          },
+          "grants": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Grants",
+            "description": "Which agents may reach this server, by agent name. The value is how much of the server the agent gets: null is all of it, which is every grant today."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "state",
+          "reason",
+          "since",
+          "tools",
+          "grants"
+        ],
+        "title": "McpServerStatus",
+        "description": "One configured MCP server, as the running server sees it.\n\nThe listing is keyed by the entry's name, because that is what the\noperator wrote and what every tool the server publishes is prefixed\nwith."
       },
       "PendingDevice": {
         "properties": {
