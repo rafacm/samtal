@@ -16,7 +16,7 @@ which no model here ever carries.
 
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, Literal, Protocol
@@ -1026,7 +1026,14 @@ class McpGrant(BaseModel):
     @classmethod
     def _check_tools(cls, value: list[str] | None) -> list[str] | None:
         """An allow list that allows nothing, and one that says a name
-        twice, are both spellings of something else said plainly."""
+        twice, are both spellings of something else said plainly.
+
+        Both refusals point at positions rather than at what is in them.
+        A rejected fragment may be a pasted credential, and these
+        sentences travel out through the store as a CLI line and an HTTP
+        422 body; the position says which entry to look at without this
+        server repeating a word of it.
+        """
         if value is None:
             return value
         if not value:
@@ -1035,10 +1042,31 @@ class McpGrant(BaseModel):
                 'grant the whole server, or write "mcp: []" on the layer to give it '
                 "no servers"
             )
-        repeated = sorted({name for name in value if value.count(name) > 1})
+        repeated = _repeated_positions(value)
         if repeated:
-            raise ValueError(f"tools names {', '.join(repeated)} more than once")
+            raise ValueError(
+                f"tools names one tool at more than one position ({repeated}); list "
+                f"each tool once"
+            )
         return value
+
+
+def _repeated_positions(values: Sequence[str]) -> str:
+    """Where a list says the same thing twice, as positions counted from
+    one and never as the thing itself."""
+    return ", ".join(
+        str(position)
+        for position, value in enumerate(values, start=1)
+        if values.count(value) > 1
+    )
+
+
+# What a grant's own refusal may name. A location inside a declared
+# model is a field this repository chose, so it is safe to print; a
+# location for a key the model does not declare is that key, which came
+# out of the request and may be anything at all.
+_GRANT_FIELDS = ("server", "tools")
+_UNRECOGNIZED_KEY = "an unrecognized key"
 
 
 def read_mcp_entry(index: int, item: object) -> object:
@@ -1051,6 +1079,13 @@ def read_mcp_entry(index: int, item: object) -> object:
     Parsing the mapping here makes the refusal the grant's own. Anything
     that is neither form is passed through for the union to report, so
     a number in the list still reads as one.
+
+    What the refusal may say is bounded the way the rest of this
+    boundary is bounded: the position in the list, the declared field
+    that failed, and the rule it failed. Never a value, and never a key
+    the caller invented, because this sentence is what the CLI prints
+    and what the API answers 422 with, and the fragment it is about may
+    be a pasted credential.
     """
     if isinstance(item, str | McpGrant) or not isinstance(item, Mapping):
         return item
@@ -1059,11 +1094,22 @@ def read_mcp_entry(index: int, item: object) -> object:
         return McpGrant.model_validate(dict(item))
     except ValidationError as exc:
         problem = "; ".join(
-            f"{'.'.join(str(part) for part in error['loc'])}: "
-            f"{error['msg'].removeprefix('Value error, ')}"
+            f"{where}: {rule}" if (where := _grant_location(error["loc"])) else rule
             for error in exc.errors()
+            if (rule := error["msg"].removeprefix("Value error, "))
         )
-    raise ValueError(f"entry {index} ({item.get('server', 'unnamed')}): {problem}")
+    raise ValueError(f"entry {index + 1}: {problem}")
+
+
+def _grant_location(location: Sequence[object]) -> str:
+    """Where inside a grant something failed, made of declared field
+    names and positions only."""
+    return ".".join(
+        str(part)
+        if isinstance(part, int) or part in _GRANT_FIELDS
+        else _UNRECOGNIZED_KEY
+        for part in location
+    )
 
 
 def as_mcp_grant(entry: "str | McpGrant") -> McpGrant:
@@ -1160,15 +1206,18 @@ class AgentDefaults(BaseModel):
     ) -> list[str | McpGrant] | None:
         """One entry per server, whichever form each is written in. Two
         entries for one server are two answers to a question with one:
-        which of its tools this layer reaches."""
+        which of its tools this layer reaches.
+
+        The refusal names the positions and not the server, for the
+        reason the grant's own refusals do: it leaves this boundary as a
+        printed line and an HTTP body."""
         if value is None:
             return value
-        servers = [as_mcp_grant(entry).server for entry in value]
-        repeated = sorted({name for name in servers if servers.count(name) > 1})
+        repeated = _repeated_positions([as_mcp_grant(entry).server for entry in value])
         if repeated:
             raise ValueError(
-                f"mcp names {', '.join(repeated)} more than once; one entry per "
-                f"server, listing every tool it grants"
+                f"mcp names one server at more than one position ({repeated}); one "
+                f"entry per server, listing every tool it grants"
             )
         return value
 

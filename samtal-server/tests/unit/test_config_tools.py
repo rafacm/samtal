@@ -182,7 +182,11 @@ def test_an_empty_tools_list_is_refused_and_says_how_to_opt_out() -> None:
 
 
 def test_a_tool_named_twice_in_one_grant_is_refused() -> None:
-    with pytest.raises(ValidationError, match="tools names turn_on_light more than once"):
+    # By position, never by name: the sentence leaves this boundary as a
+    # printed line and an HTTP body, and the name is the caller's bytes.
+    with pytest.raises(
+        ValidationError, match=r"tools names one tool at more than one position \(1, 2\)"
+    ):
         config_with(
             mcp_servers={"ha": STDIO},
             agents={
@@ -213,7 +217,9 @@ def test_a_blank_tool_name_is_refused() -> None:
 def test_a_server_named_twice_in_one_list_is_refused(entries: list) -> None:
     # Two entries for one server are two answers to a question that has
     # one: which of its tools this layer reaches.
-    with pytest.raises(ValidationError, match="mcp names ha more than once"):
+    with pytest.raises(
+        ValidationError, match=r"mcp names one server at more than one position \(1, 2\)"
+    ):
         config_with(
             mcp_servers={"ha": STDIO},
             agents={"assistant": {"prompt": "A", "mcp": entries}},

@@ -368,6 +368,64 @@ def test_an_mcp_list_reads_back_in_the_form_it_was_written(
     assert client.get(path).json()["entity"]["mcp"] == written
 
 
+# Every way an object-form grant can be malformed, each carrying the
+# sentinel where the mistake is. A grant is a fragment like any other,
+# so the body that was refused is a body a pasted credential can be in.
+MALFORMED_GRANTS = [
+    {"server": "weather", "tools": []},
+    # The server itself, on a grant that is refused before any reference
+    # check reads it: the name of the entry a fragment asks for is still
+    # the caller's bytes until the repository has resolved it.
+    {"server": SECRET, "tools": []},
+    {"server": "weather", "tools": [SECRET, SECRET]},
+    {"server": "weather", "tools": ["  "], "note": SECRET},
+    {"server": "weather", SECRET: "yes"},
+    {"server": "weather", "tools": [{"pasted": SECRET}]},
+    {"tools": [SECRET]},
+]
+
+
+@pytest.mark.parametrize("grant", MALFORMED_GRANTS)
+def test_a_malformed_grant_is_refused_without_quoting_it(
+    client: TestClient, caplog: pytest.LogCaptureFixture, grant: dict
+) -> None:
+    """The grant refusals are location-and-rule only. They travel out of
+    the repository as this 422 body and as a printed CLI line, so a
+    credential pasted into a grant must reach neither, and neither must
+    a key the caller invented."""
+    _pipeline(client)
+
+    with caplog.at_level(logging.DEBUG):
+        response = client.put("/agents/sam", json={"prompt": "S", "mcp": [grant]})
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    # Still actionable: which entry of the list, and which rule.
+    assert "entry 1" in detail
+    assert SECRET not in response.text
+    assert SECRET not in str(response.headers)
+    assert SECRET not in caplog.text
+
+
+def test_a_server_repeated_in_a_grant_list_is_refused_without_quoting_it(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    # The other list-level refusal, whose subject is a name rather than
+    # a shape, so what it must not say is that name.
+    _pipeline(client)
+
+    with caplog.at_level(logging.DEBUG):
+        response = client.put(
+            "/agents/sam",
+            json={"prompt": "S", "mcp": [SECRET, {"server": SECRET, "tools": ["a"]}]},
+        )
+
+    assert response.status_code == 422
+    assert "more than one position (1, 2)" in response.json()["detail"]
+    assert SECRET not in response.text
+    assert SECRET not in caplog.text
+
+
 def test_a_grant_naming_an_unknown_server_is_refused_over_http(client: TestClient) -> None:
     _pipeline(client)
 

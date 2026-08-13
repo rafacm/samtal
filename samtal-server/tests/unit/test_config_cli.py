@@ -788,6 +788,27 @@ def test_a_secret_nested_in_an_option_is_refused_and_never_read_back(
     assert pasted not in shown
 
 
+def test_a_malformed_grant_is_refused_without_echoing_it(
+    run, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """The other end of the same rule, on the surface an operator
+    actually reads: a grant whose allow list repeats a name is refused
+    by position, and the name is the one thing the line does not
+    carry."""
+    fragment = f"prompt: A\nmcp:\n  - server: weather\n    tools: [{SECRET}, {SECRET}]\n"
+
+    with caplog.at_level(logging.DEBUG):
+        assert run("set", "agent", "sam", "-f", "-", stdin=fragment) == 1
+
+    captured = capsys.readouterr()
+    assert "entry 1" in captured.err
+    assert "more than one position (1, 2)" in captured.err
+    assert SECRET not in captured.err
+    assert SECRET not in captured.out
+    assert SECRET not in caplog.text
+    assert "Traceback" not in captured.err
+
+
 def test_malformed_yaml_is_refused_without_echoing_the_line(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
