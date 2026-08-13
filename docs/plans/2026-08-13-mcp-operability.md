@@ -91,7 +91,17 @@ tool snapshot any session takes sees the new world. One reload runs at
 a time; a concurrent one is refused with 409, like the database's busy
 write lock. The handler is `async def`, unlike the plain-`def` CRUD
 routes, because it awaits manager lifecycles on the event loop that
-owns them.
+owns them, and that puts a duty on it the plain routes discharge by
+being plain: `ConfigStore.load()` is synchronous and takes
+`BEGIN IMMEDIATE`, so run on the loop it would stall every live
+conversation for up to SQLite's busy timeout. The whole synchronous
+half (open the database, load, verify secrets, compose, validate)
+therefore runs in `asyncio.to_thread`, touching no manager state; the
+diff, candidate construction, manager stop/start and the atomic swap
+happen on the event loop, which is the task that owns them. The
+status handler is `async def` for the matching reason: it reads the
+managers and the slice on the loop that mutates them, so a read
+cannot interleave with a swap and report half of one world.
 
 **Live sessions.** The pipeline already snapshots tools per reply, so
 a running conversation picks up the new grant list and the new tool
@@ -428,6 +438,12 @@ its resolution once the amendment addressing it lands.
    verification and composition in a worker thread with no manager
    state touched there, keep manager construction and swapping on the
    owning event loop, and define the status route's synchronization.
+   *Resolution*: adopted. The reload mechanics now state that the
+   synchronous half (open, load, verify, compose, validate) runs in
+   `asyncio.to_thread` touching no manager state, while the diff,
+   candidate construction, lifecycle work and the swap stay on the
+   event loop; the status handler is `async def` so its read runs on
+   the loop that mutates the managers and cannot see half a swap.
 
 4. **P1: "invalid reload applies nothing" does not cover failures
    after model validation.** Manager construction resolves `$VAR`
