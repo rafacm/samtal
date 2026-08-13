@@ -448,10 +448,19 @@ device can discover is a misconfiguration, not a choice. The
 as reserved (a configured `ota_path` of `/x/...` would collide with
 the onboarding router).
 
-A missing trailing slash on POST must still reach the handler:
-Starlette's `redirect_slashes` answers 307, which preserves method
-and body, but a captive portal may strip the slash and this is
-asserted, not assumed, for both the short and the legacy path.
+A missing trailing slash on POST must still reach the handler, and
+not by redirect. This paragraph originally relied on Starlette's
+`redirect_slashes` 307 preserving method and body; the hardware
+checkpoint (2026-08-13, recorded in the implementation doc and
+`docs/xiaozhi-notes.md`) superseded that: a factory board whose
+portal saved the URL slashless surfaced the 307 as `code=307` on
+screen and restart-looped, because the firmware's OTA client does
+not follow redirects at all. The rule the finding leaves behind: a
+device-facing endpoint serves every reachable spelling directly and
+emits no redirect, because the firmware is not a browser. Both
+spellings are served and asserted on the short path; the legacy
+router's slashless dispatch lands with the milestone that reworked
+its routes.
 
 ### The banner
 
