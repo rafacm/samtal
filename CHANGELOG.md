@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-13
+
+### Changed
+
+- **The hardware checkpoint's findings are in the notes and the
+  AMOLED guide** (#40): the captive portal's Custom OTA URL field is
+  vendor-build-dependent rather than a firmware-version threshold
+  (present on the Waveshare factory AMOLED-2.16 image at 2.2.4,
+  absent from stock 2.4.0 on the Touch-LCD-1.54); the firmware's OTA
+  client does not follow redirects, so a slashless OTA URL against a
+  redirecting server shows `code=307` and restart-loops, which is why
+  a device-facing endpoint must serve the slashless spelling
+  directly; no portal re-entry was found on a provisioned factory
+  AMOLED, so repointing a provisioned board is the NVS-over-USB
+  route, not a portal retype; and the activation ceremony is
+  validated end to end on both boards against samtal-server, code to
+  connected with no power cycle. The AMOLED guide gains the factory
+  launcher's behavior (the assistant is the AIChats app), the three
+  labeled buttons, the white-screen quirk, and a portal-first
+  onboarding section.
+
 ## 2026-08-12
 
 ### Changed

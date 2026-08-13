@@ -24,12 +24,40 @@ git clone --depth 1 https://github.com/xinnan-tech/xiaozhi-esp32-server.git vend
   (WebSocket URL, token, protocol version, firmware updates) is delivered by
   the OTA response and persisted to NVS.
 - The captive portal (WiFi provisioning AP `Xiaozhi-XXXX`,
-  `http://192.168.4.1`) grew a **Custom OTA URL field** on its Advanced
-  tab at some point after v2.4.0, which had none: the factory firmware on
-  the AMOLED-2.16 board shows it (observed 2026-08-12), so a current
-  build can be pointed at a backend with no USB cable at all. Where the
-  field is absent, the URL can still be written directly to NVS over USB
-  (partition at `0x9000`, size `0x4000`):
+  `http://192.168.4.1`) may or may not have a **Custom OTA URL field**
+  on its Advanced tab, and the presence is vendor-build-dependent, not
+  a firmware-version threshold: the Waveshare factory image on the
+  AMOLED-2.16 has the field at firmware 2.2.4, while stock 2.4.0 on
+  the Touch-LCD-1.54 has none (both observed on hardware,
+  2026-08-12/13; an earlier revision of this bullet inferred "added
+  after v2.4.0" from those same boards, wrongly). Where the field
+  exists, a board can be pointed at a backend with no USB cable at
+  all. Three field-observed cautions:
+  - **The portal may save the URL without its trailing slash** (or the
+    operator may type it that way). The device then POSTs to the
+    slashless path; a server that answers with a redirect, even a
+    method-preserving 307, bricks the check-in loop, because the
+    firmware's OTA HttpClient does not follow redirects: the board
+    shows `code=307` and restarts over and over. samtal-server
+    therefore serves the slashless spelling directly on every
+    device-facing route. A device-facing endpoint can never rely on a
+    redirect.
+  - **A portal save can fail silently** (observed once on the
+    AMOLED's factory portal: WiFi fields submitted, nothing
+    persisted); re-dumping NVS over USB is the way to know what was
+    actually written.
+  - **No way back into the portal was found on a provisioned factory
+    AMOLED-2.16**: the launcher build ignores the BOOT-at-startup
+    provisioning gesture that the board-support sources describe, so
+    once a board is provisioned, repointing it at a new backend means
+    the NVS route below, not the portal. Retyping the OTA URL in the
+    portal is consequently not a recovery path an operator can count
+    on across the field's builds; the NVS route is.
+
+  Where the field is absent or unreachable, the URL is written
+  directly to NVS over USB (partition at `0x9000`, size `0x4000` on
+  the Touch-LCD-1.54 and `0x6000` on the AMOLED-2.16 factory image;
+  read the partition table at `0x8000` rather than assuming):
 
   ```csv
   # nvs_input.csv
@@ -202,6 +230,18 @@ this ceremony.
   be short-lived on the server, since the device fetches and displays a
   fresh one within a couple of minutes, and losing server-side pending
   state costs nothing but a changed number on the screen.
+- **The whole ceremony is validated on hardware against samtal-server**
+  (2026-08-13, the issue #40 checkpoint), on both available boards. The
+  Waveshare factory AMOLED-2.16 (firmware 2.2.4), given the short
+  onboarding URL through its portal, showed the server host over a
+  6-digit code, polled in the documented 3-second bursts, and went from
+  code-on-screen to activated in 36 seconds after a live
+  `config add-device`, with no server restart, no power cycle, and no
+  button press. The stock-firmware Touch-LCD-1.54 (2.4.0), pointed at
+  the same server over USB-written NVS, ran the identical ceremony
+  through the restart flow (its agent was created after boot). The one
+  firmware behavior the simulator could not have shown is the redirect
+  intolerance recorded in the captive-portal bullet above.
 - **The OTA response cannot set the device language.** The parser reads
   exactly `activation`, `mqtt`, `websocket`, `server_time` and
   `firmware`; screen chrome, jingle and digit voices are all compiled

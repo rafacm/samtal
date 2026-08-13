@@ -6,9 +6,11 @@
 > further; this guide grows as the board does.
 
 A 480x480 AMOLED with a capacitive touch layer, two microphones with
-hardware echo cancellation, a speaker, a battery, one side button
-marked BOOT, and a PWR button wired to the board's power-management
-chip rather than to the processor.
+hardware echo cancellation, a speaker, a battery, and three physical
+buttons whose labels are on the back of the case: BOOT (the one the
+firmware sees), PWR (wired to the board's power-management chip
+rather than to the processor), and a third whose function has not
+been identified in hands-on use.
 
 Every section below says where its facts come from, in one of three
 ways: **verified in hands-on use** with this board, **read from the
@@ -31,7 +33,22 @@ Verified in hands-on use:
 | Hold PWR for about 4 s | Cuts the power. This is the power-management chip acting on its own; the firmware never sees the button, so nothing on screen acknowledges it. |
 | Touch the screen | Nothing. Touch does not start a conversation on this board. |
 
-Read from the board support code, not verified on hardware:
+Verified in hands-on use, on the Waveshare-shipped factory image
+(2026-08-13): that image is not the bare assistant but an app
+launcher (DrawPanel, Squareline, Calculator, AIChats); the assistant
+is the AIChats app, and everything below about the firmware applies
+inside it. On that image, clicking BOOT at the launcher, during
+AIChats startup, and on the activation screen produced no visible
+effect, and holding BOOT turned the screen off; the
+click-at-startup provisioning gesture in the next list could not be
+made to work there. Once the board is provisioned, no way back into
+the captive portal was found on that image; repointing it at another
+backend means the NVS route in
+[`../xiaozhi-notes.md`](../xiaozhi-notes.md).
+
+Read from the board support code, not verified on hardware (and on
+the factory launcher image, contradicted where the previous
+paragraph says so):
 
 - Clicking BOOT while the board is still starting up, before it has
   connected, enters WiFi provisioning without a reboot.
@@ -106,14 +123,31 @@ showed.
 
 ## Getting this board onto your server
 
-Write your server's OTA/config address into the device's NVS `wifi`
-namespace under the key `ota_url` over USB, then provision WiFi from
-the board's captive portal. The procedure is in
-[`../xiaozhi-notes.md`](../xiaozhi-notes.md), with the size caveat in
-the next section.
+Verified in hands-on use (2026-08-13): a factory-fresh board
+completes samtal's onboarding ceremony entirely from its captive
+portal, no USB needed. The factory image's portal (firmware 2.2.4)
+has the Custom OTA URL field on its Advanced tab: enter your WiFi
+and the server's onboarding URL in one pass, and the board then
+shows a 6-digit code and connects within seconds of
+`samtal-server config add-device <code> <agent>`. Two cautions from
+that same session: type the URL exactly as the server printed it,
+and if the board shows `code=307` and keeps restarting, or a save
+does not seem to take, the portal wrote something other than what
+you typed; the NVS route below is the way to see and fix what is
+actually stored.
+
+For an already-provisioned board (the portal is not reachable again
+on the factory image), write the server's OTA/config address into
+the device's NVS `wifi` namespace under the key `ota_url` over USB.
+The procedure is in [`../xiaozhi-notes.md`](../xiaozhi-notes.md),
+with the size caveat in the next section.
 
 ## Known quirks
 
+- **AIChats can open to a plain white screen.** Verified in hands-on
+  use on the factory image: tapping the app sometimes renders
+  nothing, and it stayed white for minutes. A reset cleared it and
+  the next entry rendered normally. Cause unknown.
 - **The board can wedge during power-management initialization.**
   Verified in hands-on use: USB still enumerates and the port appears,
   but nothing responds and no software reset recovers it. The recovery
