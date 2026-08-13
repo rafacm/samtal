@@ -40,6 +40,26 @@ logger = logging.getLogger(__name__)
 CONNECT_TIMEOUT_S = 10.0
 
 
+def _emit_nothing(_record: logging.LogRecord) -> bool:
+    """A filter that passes no record. See where it is installed."""
+    return False
+
+
+# The SDK's HTTP client logs what the far end chose: the session id a
+# server picked, the raw body of an initialization result that would not
+# parse, and, through logger.exception, a traceback whose validation
+# message quotes the bytes that failed. JSON log events are this
+# server's observability surface and its transcript store
+# (docs/adr/2026-08-04-json-logs-are-the-observability-surface.md), and
+# nothing a third-party server writes was ever part of it, which is the
+# reason uvicorn's access log stays off in main.py as well. So those
+# records stop at their own logger, before any handler of ours is
+# reached. What an operator reads about an MCP server is what this
+# module writes: the entry name, the outcome, and tool names that have
+# been through the publishing rule.
+logging.getLogger("mcp.client.streamable_http").addFilter(_emit_nothing)
+
+
 class McpConfigError(ValueError):
     """An MCP server that cannot be built as configured. Raised at boot,
     like a bad provider, because at call time it would fail every
@@ -152,7 +172,9 @@ class McpServerManager:
             raise
         except Exception as exc:
             logger.warning(
-                "mcp server %s is unavailable, its tools are absent: %s", self._name, exc
+                "mcp server %s is unavailable, its tools are absent: %s",
+                self._name,
+                _reason(exc),
             )
         finally:
             self._session = None
@@ -235,6 +257,20 @@ class McpServerManager:
         self._session = None
         self._published = PublishedTools(tools=[], originals={})
         self._stop.set()
+
+
+def _reason(exc: BaseException) -> str:
+    """Why a connection did not happen, in words this server owns.
+
+    An exception's message is not one of them: a server that answers the
+    handshake with nonsense puts its own bytes in the validation error
+    that follows, and the log line an operator reads is no place for
+    them. The type names say what kind of failure it was, which is what
+    the line was ever used for, and a group is unwrapped because
+    "ExceptionGroup" says nothing at all."""
+    if isinstance(exc, BaseExceptionGroup):
+        return ", ".join(sorted({_reason(sub) for sub in exc.exceptions})) or "ExceptionGroup"
+    return type(exc).__name__
 
 
 def _result_text(result: mcp.types.CallToolResult) -> str:
