@@ -173,6 +173,33 @@ def test_a_pre_upgrade_string_row_loads_and_is_written_back_unchanged(
     assert stored == ["home"]
 
 
+@pytest.mark.parametrize(
+    "grant",
+    [
+        {"server": "home", "tools": [SECRET, SECRET]},
+        {"server": SECRET, "tools": []},
+        {"server": "home", SECRET: "yes"},
+        {"server": "home", "tools": [{"pasted": SECRET}]},
+    ],
+)
+def test_a_malformed_grant_is_refused_with_nothing_of_it_in_the_chain(
+    store: ConfigStore, grant: dict
+) -> None:
+    """Where the sanitized sentence is built, and the one place the
+    whole rejected fragment is still in reach: a ValidationError's
+    errors() hold it, so the refusal is raised outside the handler and
+    nothing walking the chain finds it."""
+    _populate(store)
+
+    with pytest.raises(ConfigError) as caught:
+        store.set_agent("poet", {"prompt": "P", "mcp": [grant]})
+
+    assert "entry 1" in str(caught.value)
+    assert SECRET not in _chain(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
 def test_a_grant_on_an_unknown_server_is_refused_at_the_write(store: ConfigStore) -> None:
     # The object form goes through the reference check the string form
     # does, which is what forces the natural creation order.
