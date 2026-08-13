@@ -702,7 +702,7 @@ changes is additive; the grant schema is backward compatible; the docs
 milestone is docs.
 
 - [x] **[Status visibility](2026-08-13-mcp-operability-implementation.md#milestone-1-status-visibility)**
-  (PR TBD): manager state, reason and since;
+  (PR #125): manager state, reason and since;
   `McpServers` keeps its slice; `GET /runtime/mcp-servers`;
   `config status`; OpenAPI regen; README section; CHANGELOG. Accept:
   lint and both lanes green; a dead server shows `down` with a
