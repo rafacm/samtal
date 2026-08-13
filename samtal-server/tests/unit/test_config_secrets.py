@@ -292,3 +292,93 @@ def test_an_unusable_key_names_its_position_and_not_its_material() -> None:
     assert "entry 2 of 2" in message
     assert rubbish not in message
     assert good not in _chain(caught.value)
+
+
+# The per-entity fingerprint
+#
+# What the MCP reload's diff compares to decide whether an entry's
+# stored secrets are still the ones its running manager was built with.
+# The properties that matter are that it changes when they change, that
+# it does not change when they do not, and that it carries neither the
+# plaintext nor the ciphertext to whoever compares it.
+
+
+def test_the_fingerprint_of_one_entity_is_stable_across_loads() -> None:
+    """Two loads of the same rows are the same world, and a diff that
+    said otherwise would restart every server on every reload."""
+    keys = MultiFernet([Fernet(generate_key())])
+    envelopes = {WEATHER: encrypt(WEATHER, SECRET, keys), CLAUDE: encrypt(CLAUDE, SECRET, keys)}
+
+    first = SecretStore(envelopes, keys)
+    second = SecretStore(dict(reversed(list(envelopes.items()))), keys)
+
+    assert first.fingerprint("mcp_server", "weather") == second.fingerprint(
+        "mcp_server", "weather"
+    )
+    # And an entity with nothing stored has one too, equal to every
+    # other empty one, so "no secrets" is not a third state a caller has
+    # to handle.
+    assert first.fingerprint("mcp_server", "nothing") == SecretStore().fingerprint(
+        "mcp_server", "nothing"
+    )
+
+
+def test_the_fingerprint_changes_when_the_ciphertext_is_rotated() -> None:
+    keys = MultiFernet([Fernet(generate_key())])
+    before = SecretStore({WEATHER: encrypt(WEATHER, SECRET, keys)}, keys)
+    after = SecretStore({WEATHER: encrypt(WEATHER, "another-value", keys)}, keys)
+
+    assert before.fingerprint("mcp_server", "weather") != after.fingerprint(
+        "mcp_server", "weather"
+    )
+
+
+def test_the_fingerprint_changes_when_a_slot_is_added_or_removed() -> None:
+    keys = MultiFernet([Fernet(generate_key())])
+    env_slot = SecretLocation.mcp_server("weather", "env.API_TOKEN")
+    one = SecretStore({WEATHER: encrypt(WEATHER, SECRET, keys)}, keys)
+    two = SecretStore(
+        {WEATHER: encrypt(WEATHER, SECRET, keys), env_slot: encrypt(env_slot, SECRET, keys)},
+        keys,
+    )
+
+    assert one.fingerprint("mcp_server", "weather") != two.fingerprint("mcp_server", "weather")
+    assert SecretStore().fingerprint("mcp_server", "weather") != one.fingerprint(
+        "mcp_server", "weather"
+    )
+
+
+def test_one_entity_s_fingerprint_says_nothing_about_another_s() -> None:
+    """A rotation on one entry must rebuild that entry and no other."""
+    keys = MultiFernet([Fernet(generate_key())])
+    other = SecretLocation.mcp_server("home", "headers.Authorization")
+    untouched = encrypt(WEATHER, SECRET, keys)
+    before = SecretStore({WEATHER: untouched, other: encrypt(other, SECRET, keys)}, keys)
+    after = SecretStore(
+        {WEATHER: untouched, other: encrypt(other, "another-value", keys)}, keys
+    )
+
+    assert before.fingerprint("mcp_server", "weather") == after.fingerprint(
+        "mcp_server", "weather"
+    )
+    assert before.fingerprint("mcp_server", "home") != after.fingerprint("mcp_server", "home")
+    # And a provider of the same name is a different entity.
+    assert before.fingerprint("provider", "weather") != before.fingerprint(
+        "mcp_server", "weather"
+    )
+
+
+def test_the_fingerprint_carries_neither_the_plaintext_nor_the_envelope() -> None:
+    """It is compared by code that has no business holding either, and
+    it needs no key to take, so what it must not be is a channel."""
+    keys = MultiFernet([Fernet(generate_key())])
+    envelope = encrypt(WEATHER, SECRET, keys)
+    store = SecretStore({WEATHER: envelope}, keys)
+
+    mark = store.fingerprint("mcp_server", "weather")
+
+    assert SECRET not in mark
+    assert envelope["enc"] not in mark
+    # Taken without the keys at all, and the same either way: comparing
+    # is not opening.
+    assert SecretStore({WEATHER: envelope}).fingerprint("mcp_server", "weather") == mark
