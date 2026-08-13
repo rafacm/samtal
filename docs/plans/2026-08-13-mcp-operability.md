@@ -130,10 +130,16 @@ set on its next utterance, with no session drop. A call in flight on a
 manager the reload stopped fails into the existing error-tool-result
 path, which is the same behaviour as a server dropping mid-call today.
 
-**Write notices.** `wrote_mcp_server` and `deleted_mcp_server`
-acknowledgements (API `notice`, CLI print) stop claiming a restart is
-needed and instead name the reload: an MCP server entry affects
-nothing but the MCP layer, so `config reload` applies all of it. Agent
+**Write notices.** Every MCP mutation the API serves stops claiming a
+restart is needed and instead names the reload: the entry writes and
+deletes (`wrote_mcp_server`, `deleted_mcp_server`) and equally the
+MCP secret slot writes and clears, which today answer with the
+generic restart sentence even though rotation is exactly what the
+ciphertext half of the reload diff applies. Provider writes and
+provider secrets keep the restart sentence, and so does the CLI's
+`--local` recovery path even for MCP entities: it runs where there
+may be no server to reload, and the sentence it prints must not
+promise a request it cannot make. Agent
 writes keep the restart sentence: an agent fragment mixes reloadable
 (`mcp`) and non-reloadable fields (prompt, providers, filler), and a
 notice that is right about one field and wrong about the rest is worse
@@ -548,6 +554,12 @@ its resolution once the amendment addressing it lands.
    reload notice to API and CLI writes and clears of MCP secret
    slots, keep restart notices for provider secrets and the `--local`
    recovery path, and test the notice on every MCP mutation path.
+   *Resolution*: adopted. The write-notices paragraph now covers MCP
+   secret slot writes and clears alongside entry writes and deletes,
+   keeps the restart sentence for providers, provider secrets and the
+   whole `--local` path (which runs where there may be no server to
+   ask), and milestone 2's tests pin the notice on every MCP mutation
+   path.
 
 8. **P2: the documentation work targets the wrong source and would
    leave contradictory upgrade guidance.** `config.example.yaml`
