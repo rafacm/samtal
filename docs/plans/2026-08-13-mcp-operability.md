@@ -430,7 +430,14 @@ conversations.
 - Integration: the issue's verification steps. A new entry written and
   granted through the API becomes usable in a live conversation after
   one reload, no restart, and status shows it connected with its
-  tools; a deliberately dead server shows `down` with a reason; an
+  tools. That test holds one WebSocket and one session across the
+  whole proof, because the promise under test is per-reply pickup in
+  a running session and the existing `converse` helper opens, speaks
+  once and closes, which would pass by reconnecting: first utterance
+  before the write and reload (the tool absent), the write and the
+  reload through the API while the socket stays open, then a second
+  utterance on the same session that reaches the new tool; a
+  deliberately dead server shows `down` with a reason; an
   agent restricted to a subset sees exactly that subset in its merged
   tool list. The subset claim is proven from what the model was
   actually offered, not from which calls happened: `MockLlm.stream()`
@@ -664,6 +671,10 @@ its resolution once the amendment addressing it lands.
     and reload, the reload through the API while the socket stays
     open, and a second utterance that observes the new tool without
     disconnecting.
+    *Resolution*: adopted. The integration test now specifies exactly
+    that sequence on one held WebSocket and session: tool absent in
+    the first reply, write and reload mid-session, tool reached in
+    the second reply, no reconnect anywhere.
 
 12. **P3: allow-list warnings must be based on successfully published
     tools, not raw `list_tools` output.** Publication can drop a tool
