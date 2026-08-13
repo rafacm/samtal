@@ -89,9 +89,10 @@ def test_the_re_read_keeps_the_running_server_section(
 
 
 def test_the_re_read_validates_the_whole_snapshot(tmp_path: Path) -> None:
-    """An agent with no pipeline behind it is refused by the same
-    completeness check the boot runs, because it is the same
-    composition."""
+    """The rules about a runnable deployment, which no write enforces
+    and every composition does, are enforced here too because it is the
+    same composition: an agent nothing can reach is the one the store
+    lets a caller arrive at."""
     directory = tmp_path / "db"
     running = running_config(directory)
     seeded(directory, lambda store: store.set_agent("sam", {"prompt": "You are Sam."}))
@@ -99,6 +100,7 @@ def test_the_re_read_validates_the_whole_snapshot(tmp_path: Path) -> None:
     with pytest.raises(ConfigError) as caught:
         reload_domain_config(running)
 
+    assert "default_agent is required" in str(caught.value)
     assert "sam" in str(caught.value)
 
 
