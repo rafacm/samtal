@@ -1361,9 +1361,21 @@ def _reload_listing(answer: object) -> str:
 
 def _reload_outcome(answer: object) -> Mapping[str, object]:
     """The reload's answer, as the API returns it: the four outcomes and
-    the status document."""
-    if isinstance(answer, Mapping) and all(
-        isinstance(answer.get(outcome), list) for outcome in RELOAD_OUTCOMES
+    the status document.
+
+    Checked to the same depth as the status document underneath it, and
+    for the same reason: `_names` prints every element of the outcome
+    lists, and the status half is rendered by the listing that expects
+    to have been handed a document, so a stray shape anywhere in here
+    would otherwise become output or a traceback."""
+    if (
+        isinstance(answer, Mapping)
+        and "servers" in answer
+        and all(
+            isinstance(answer.get(outcome), list)
+            and all(isinstance(name, str) for name in answer[outcome])
+            for outcome in RELOAD_OUTCOMES
+        )
     ):
         return answer
     raise ConfigError(f"the configuration API answered the reload with {UNRECOGNIZED_ANSWER}")

@@ -508,7 +508,7 @@ def test_reload_prints_what_it_did_and_what_is_running(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
     entry = {"transport": "streamable_http", "url": "http://127.0.0.1:9/mcp"}
-    run.runtime["mcp_servers"] = _configured({"weather": entry}, ["weather"])
+    run.runtime["mcp_servers"] = _configured({"weather": entry}, {"sam": ["weather"]})
     run.runtime["mcp_reload"] = _applied(started=("weather",), stopped=("gone",))
 
     assert run("reload") == 0
@@ -541,6 +541,48 @@ def test_reload_refuses_an_answer_it_cannot_read(
     assert run("reload") == 1
 
     assert cli.UNRECOGNIZED_ANSWER in capsys.readouterr().err
+
+
+def _reload_answer(**overrides: object) -> dict[str, object]:
+    """One reload answer as the API returns it, with one field replaced
+    by whatever a test wants to see refused."""
+    return (
+        dict.fromkeys(cli.RELOAD_OUTCOMES, [])
+        | {"servers": {"weather": _status_entry()}}
+        | overrides
+    )
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(_reload_answer(started=[{"leak": ANSWERED}]), id="outcome-object"),
+        pytest.param(_reload_answer(unchanged=ANSWERED), id="outcome-not-a-list"),
+        pytest.param(
+            {outcome: [] for outcome in cli.RELOAD_OUTCOMES}, id="servers-missing"
+        ),
+        pytest.param(
+            _reload_answer(servers={"weather": _status_entry(state=ANSWERED)}),
+            id="servers-invalid",
+        ),
+    ],
+)
+def test_reload_prints_nothing_from_an_answer_of_the_wrong_shape(
+    body: object, run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The status rules apply to the reload's answer too: `_names`
+    prints every element of the outcome lists, and the status half is
+    the same document the status command refuses when it cannot read
+    it, so a stray shape anywhere must end in the fixed sentence rather
+    than in output or a traceback."""
+    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
+
+    assert run("reload") == 1
+
+    captured = capsys.readouterr()
+    assert cli.UNRECOGNIZED_ANSWER in captured.err
+    assert ANSWERED not in captured.err + captured.out
+    assert "Traceback" not in captured.err
 
 
 def test_reload_gives_the_server_longer_to_answer_than_a_write(
