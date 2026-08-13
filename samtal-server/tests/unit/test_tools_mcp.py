@@ -9,6 +9,7 @@ import asyncio
 import re
 import sys
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ from samtal_server.tools.mcp import (
     CONNECTED,
     DOWN,
     DROPPED_AFTER_FAILED_CALL,
+    UNUSED,
     McpConfigError,
     McpServerDown,
     McpServerManager,
@@ -368,6 +370,126 @@ async def test_a_tool_the_server_never_published_is_refused() -> None:
             await manager.call("tools__nonexistent", {})
     finally:
         await manager.stop()
+
+
+# The status view
+#
+# What a gated read of the running server answers with. Built from the
+# slice the registry was constructed with and its managers, and from
+# nothing else, so it cannot disagree with what is running.
+
+
+def config_granting(servers: dict[str, object], grants: dict[str, list[str]]) -> Config:
+    """A configuration whose agents reach the entries named, which is
+    what the grants half of the status view is read from."""
+    return Config(
+        server={},
+        providers={
+            "llm": {"mock": {"type": "mock"}},
+            "asr": {"mock": {"type": "mock"}},
+            "tts": {"mock": {"type": "mock"}},
+            "vad": {"mock": {"type": "mock"}},
+        },
+        mcp_servers=servers,
+        agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
+        agents={name: {"prompt": "A", "mcp": entries} for name, entries in grants.items()},
+        default_agent=next(iter(grants)),
+    )
+
+
+async def test_a_connected_server_reports_its_published_tool_names() -> None:
+    config = config_with({"tools": entry_data()}, ["tools"])
+    servers = McpServers.build(config)
+    await servers.start_all()
+    try:
+        entry = servers.status()["tools"]
+
+        assert entry["state"] == CONNECTED
+        assert entry["reason"] is None
+        assert "tools__secret_word" in entry["tools"]
+        # Names the model was given, and nothing else a server chose:
+        # what it called the tool before the publishing rule and what it
+        # said about it are both bytes it wrote.
+        assert "weather.today/v2" not in entry["tools"]
+        assert all(names.TOOL_NAME_PATTERN.match(tool) for tool in entry["tools"])
+    finally:
+        await servers.stop_all()
+
+
+async def test_a_dead_server_is_down_with_its_reason_and_no_tools() -> None:
+    dead = entry_data(command="/nonexistent/mcp-server", args=[])
+    config = config_with({"tools": dead}, ["tools"])
+    servers = McpServers.build(config)
+    await servers.start_all()
+    try:
+        entry = servers.status()["tools"]
+
+        assert entry["state"] == DOWN
+        assert entry["reason"] is not None
+        assert REASON_TOKEN.match(entry["reason"]), entry["reason"]
+        assert entry["tools"] == []
+    finally:
+        await servers.stop_all()
+
+
+async def test_an_entry_no_agent_references_is_unused() -> None:
+    # No manager exists for it, so it has neither state nor tools of its
+    # own; what it has is a name in the configuration and nobody using
+    # it, which is a likely answer to "why does the agent not have that
+    # tool" and is invisible everywhere else.
+    config = config_with({"tools": entry_data(), "shelved": entry_data()}, ["tools"])
+    servers = McpServers.build(config)
+
+    entry = servers.status()["shelved"]
+
+    assert entry["state"] == UNUSED
+    assert entry["reason"] is None
+    assert entry["tools"] == []
+    assert entry["grants"] == {}
+
+
+async def test_every_configured_entry_is_reported_once_by_name() -> None:
+    config = config_with({"tools": entry_data(), "shelved": entry_data()}, ["tools"])
+    servers = McpServers.build(config)
+
+    assert set(servers.status()) == {"tools", "shelved"}
+
+
+async def test_the_grants_name_every_agent_that_may_reach_the_server() -> None:
+    config = config_granting(
+        {"tools": entry_data(), "other": entry_data()},
+        {"kids": ["tools"], "house": ["tools", "other"]},
+    )
+    servers = McpServers.build(config)
+
+    status = servers.status()
+
+    # A mapping rather than a list, and the value says how much of the
+    # server the agent gets: None is all of it.
+    assert status["tools"]["grants"] == {"house": None, "kids": None}
+    assert status["other"]["grants"] == {"house": None}
+
+
+async def test_the_instants_are_iso_8601_in_utc() -> None:
+    config = config_with({"tools": entry_data(), "shelved": entry_data()}, ["tools"])
+    servers = McpServers.build(config)
+
+    for entry in servers.status().values():
+        when = datetime.fromisoformat(entry["since"])
+        assert when.tzinfo is not None
+        assert when.utcoffset() == timedelta(0)
+
+
+async def test_the_status_view_reads_the_slice_it_was_built_with() -> None:
+    """Not the database and not the live configuration: an entry written
+    since this object was built is not part of the world it manages, and
+    a view that went and looked would say it was."""
+    config = config_with({"tools": entry_data()}, ["tools"])
+    servers = McpServers.build(config)
+
+    config.mcp_servers["written-since"] = McpServerConfig.model_validate(entry_data())
+
+    assert set(servers.status()) == {"tools"}
 
 
 async def test_the_registry_routes_by_the_qualified_name() -> None:

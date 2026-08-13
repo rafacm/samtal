@@ -18,8 +18,10 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from contextlib import AsyncExitStack
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -336,6 +338,14 @@ def _reason(exc: BaseException) -> str:
     return type(exc).__name__
 
 
+def _instant(when: float) -> str:
+    """One of the instants the status view carries, as a person reads
+    it. UTC and ISO-8601, the shape the pending listing answers with,
+    because a status read compared against a server's log is compared
+    against that server's clock."""
+    return datetime.fromtimestamp(when, UTC).isoformat()
+
+
 def _result_text(result: mcp.types.CallToolResult) -> str:
     """A tool result as speakable text. Content a voice assistant cannot
     use is named rather than dropped, so the model can say what it got
@@ -370,11 +380,48 @@ def _check_egress(name: str, entry: McpServerConfig) -> None:
     )
 
 
+@dataclass(frozen=True)
+class McpSlice:
+    """The configuration an `McpServers` was built from: every entry
+    under `mcp_servers`, referenced or not, and what each agent may
+    reach.
+
+    Kept rather than consulted again, so the status surface has one
+    source and cannot disagree with what is running: an entry an
+    operator has written since boot is not part of this world yet, and a
+    view that read the database would say it was.
+    """
+
+    entries: tuple[str, ...] = ()
+    grants: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+
+    @classmethod
+    def of(cls, config: Config) -> "McpSlice":
+        return cls(
+            entries=tuple(sorted(config.mcp_servers)),
+            grants={
+                agent: tuple(config.mcp_for_agent(agent)) for agent in sorted(config.agents)
+            },
+        )
+
+    def agents_for(self, entry: str) -> list[str]:
+        """Which agents may reach one entry, in the order the grants
+        were taken, which is agent-name order."""
+        return [agent for agent, entries in self.grants.items() if entry in entries]
+
+
 class McpServers:
     """Every MCP server some agent references, built at startup."""
 
-    def __init__(self, managers: dict[str, McpServerManager]) -> None:
+    def __init__(
+        self, managers: dict[str, McpServerManager], configured: McpSlice | None = None
+    ) -> None:
         self._managers = managers
+        self._configured = configured if configured is not None else McpSlice()
+        # An entry no agent references has no manager and never
+        # transitions, so the instant its status carries is when this
+        # configuration took effect, which is what this is.
+        self._since = time.time()
 
     @classmethod
     def build(cls, config: Config, secrets: SecretStore | None = None) -> "McpServers":
@@ -394,7 +441,7 @@ class McpServers:
                 managers[name] = McpServerManager(name, entry, secrets)
             except ValueError as exc:
                 raise McpConfigError(f"mcp_servers.{name}: {exc}") from exc
-        return cls(managers)
+        return cls(managers, McpSlice.of(config))
 
     def __len__(self) -> int:
         return len(self._managers)
@@ -431,6 +478,45 @@ class McpServers:
             manager = self._managers.get(entry)
             if manager is not None:
                 manager.ensure_reconnecting()
+
+    def status(self) -> dict[str, dict[str, Any]]:
+        """What every configured entry is doing right now, by name.
+
+        One entry per configured `mcp_servers` entry rather than one per
+        manager, because an entry no agent references has no manager at
+        all and its absence from a list of tools is exactly the thing an
+        operator cannot see from anywhere else.
+
+        The tool lists are published names and nothing else. A
+        description, or the name a server listed before the publishing
+        rule got to it, is bytes that server chose, and a server holding
+        a credential of ours can reflect one in either; a gated read that
+        carried them would be the secret-readback path the rest of the
+        API refuses to be.
+        """
+        return {entry: self._status_of(entry) for entry in self._configured.entries}
+
+    def _status_of(self, entry: str) -> dict[str, Any]:
+        # `grants` is a mapping to None rather than a list of agent
+        # names: None means the whole server, and that is where a
+        # per-tool allow list goes when there is one.
+        grants: dict[str, None] = dict.fromkeys(self._configured.agents_for(entry))
+        manager = self._managers.get(entry)
+        if manager is None:
+            return {
+                "state": UNUSED,
+                "reason": None,
+                "since": _instant(self._since),
+                "tools": [],
+                "grants": grants,
+            }
+        return {
+            "state": manager.state,
+            "reason": manager.reason,
+            "since": _instant(manager.since),
+            "tools": [tool.name for tool in manager.tools()],
+            "grants": grants,
+        }
 
     def timeout_for(self, entry: str) -> float | None:
         manager = self._managers.get(entry)
