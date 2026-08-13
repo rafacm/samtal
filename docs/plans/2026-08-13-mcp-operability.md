@@ -432,7 +432,15 @@ conversations.
   one reload, no restart, and status shows it connected with its
   tools; a deliberately dead server shows `down` with a reason; an
   agent restricted to a subset sees exactly that subset in its merged
-  tool list (scripted LLM, asserted through the conversation).
+  tool list. The subset claim is proven from what the model was
+  actually offered, not from which calls happened: `MockLlm.stream()`
+  ignores its `tools` argument today, so a scripted conversation
+  would pass even with a forbidden tool on offer. The mock gains a
+  `{tools}` reply placeholder rendering the offered tool names, the
+  same trick the `{system}` placeholder already plays for prompt
+  injection, and the test asserts the spoken list is exactly the
+  granted subset; the call-time refusal of a granted-away tool is a
+  unit test on `McpServers.call`, separate from the offer proof.
 - Doc drift: the committed OpenAPI document and generated reference
   are regenerated in the same change as each schema or route change,
   which the existing byte-for-byte drift tests enforce.
@@ -641,6 +649,12 @@ its resolution once the amendment addressing it lands.
     recording test LLM (or make the mock refuse calls absent from
     it), assert the offered names exactly, and test call-time
     authorization separately.
+    *Resolution*: adopted. The mock LLM gains a `{tools}` reply
+    placeholder rendering the offered tool names, the trick the
+    `{system}` placeholder already plays, so the conversation itself
+    carries the offer; the integration test asserts the spoken list
+    is exactly the granted subset, and the call-time refusal is its
+    own unit test on `McpServers.call`.
 
 11. **P2: the "live conversation" test does not require reload during
     the same session.** The integration helper opens a socket, sends
