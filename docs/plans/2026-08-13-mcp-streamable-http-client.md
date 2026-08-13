@@ -139,6 +139,28 @@ cases:
 - A URL nobody listens on does not fail the start: the manager logs
   and stays down, the way a dead stdio command does.
 
+The swap makes closure, redirects, and timeouts `_connect`'s
+responsibility, and the three cases above would all pass with
+`follow_redirects=False`, httpx's defaults, or a client never
+closed. So the module also proves the taken-over policy:
+
+- A redirecting handshake connects: a thin stub in front of the
+  real server answers `/mcp` with a 307 to the server's URL, and
+  the manager still lists tools. This is the end-to-end proof of
+  `follow_redirects=True`, the behavior every deployment had under
+  the SDK's factory.
+- The constructed client carries the wrapper's policy: a
+  monkeypatched `httpx.AsyncClient` captures its constructor
+  arguments and delegates, and the test asserts
+  `follow_redirects=True` and the timeout literals (30.0 with
+  read=300.0) exactly, so a silent fallback to httpx defaults
+  fails.
+- The client closes when the connection ends: the same capture
+  asserts `is_closed` after a normal `stop()`, and after a connect
+  that failed past client construction (the server refuses the
+  handshake), so a leaked connection pool cannot ride the
+  manager's reconnect cycle.
+
 Logic that is transport-independent (name sanitization, timeouts,
 registry routing, mark-down on a failed call) stays covered once,
 over stdio, where it already lives. The header-delivery test in
@@ -192,8 +214,10 @@ shape or meaning.
   the long read timeout would change behavior for deployments with
   redirecting proxies or long-lived streams. Mitigation: the values
   are stated as literals copied from the deprecated wrapper, with
-  the comment naming the source, and the header test plus the new
-  connect tests exercise the built client end to end.
+  the comment naming the source, and the policy is asserted, not
+  hoped for: the redirect test proves following end to end, the
+  capture test pins the constructor arguments, and the closure
+  test pins the lifecycle (the review round's finding 3).
 - **In-process uvicorn flakiness.** A test HTTP server brings
   lifecycle and port questions into the unit lane. Mitigation: port
   0 delegates the free-port choice to the OS with no probe-then-bind
@@ -250,6 +274,13 @@ resolution once the amendment addressing it lands.
    redirecting handshake test, assertions on the constructed
    client's timeout values, and lifecycle assertions that the
    client closes after both a normal stop and a failed connect.
+   *Resolution*: adopted. The coverage section gains three cases:
+   a 307-redirecting stub in front of the real server proving
+   redirects are followed end to end, a capturing
+   `httpx.AsyncClient` monkeypatch pinning `follow_redirects` and
+   the exact timeout literals, and closure assertions after a
+   normal stop and after a handshake-refused connect; the risk
+   mitigation now points at those assertions.
 4. **P2: the FastMCP fixture must account for its one-shot session
    manager.** `streamable_http_app()` memoizes one session manager
    on the `FastMCP` instance, and that manager's `run()` may be
