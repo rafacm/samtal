@@ -16,6 +16,8 @@ call) stays covered once, over stdio, where it already lives.
 
 import asyncio
 import gc
+import json
+import logging
 import socket
 import threading
 from collections.abc import AsyncIterator
@@ -27,8 +29,14 @@ import uvicorn
 from mcp.server.fastmcp import FastMCP
 from sse_starlette.sse import AppStatus
 
+from samtal_server import logs
 from samtal_server.config import McpServerConfig
-from samtal_server.tools.mcp import McpServerDown, McpServerManager
+from samtal_server.tools.mcp import McpServerDown, McpServerManager, _reason
+
+# The logger an operator watches for these servers, and the SDK one that
+# talks to them, named rather than spelled out at each assertion.
+MANAGER_LOGGER = "samtal_server.tools.mcp"
+SDK_CLIENT_LOGGER = "mcp.client.streamable_http"
 
 # The SDK's *server* transport hands the reading end of a per-request SSE
 # memory stream to its response and never closes it
@@ -316,3 +324,91 @@ async def test_a_refused_handshake_still_closes_the_client(
     # Construction happened, so this asserts closure rather than absence.
     (client,) = captured.clients
     assert client.is_closed
+
+
+async def test_a_malformed_handshake_keeps_the_servers_bytes_out_of_the_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An MCP server is a third party, and a hostile or broken one writes
+    the handshake. The SDK's client logs the session id it is handed, the
+    raw result it could not parse, and a traceback whose validation
+    message quotes the bytes that failed, all of which would land in the
+    JSON log the operator collects. None of it is this server's to
+    publish, so none of it may arrive there."""
+    sentinel = "not-a-real-value-8c1d4f7b-poison"
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - the stdlib's spelling
+            length = int(self.headers.get("Content-Length") or 0)
+            asked = json.loads(self.rfile.read(length)) if length else {}
+            # A well-formed JSON-RPC envelope, answering the id that was
+            # asked so the client accepts it as its reply, around a
+            # result that is not an InitializeResult. That is what makes
+            # the SDK log the parse failure and the raw result beside it,
+            # and what puts this server's bytes in the validation error
+            # the manager then catches.
+            body = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": asked.get("id", 0),
+                    "result": {"protocolVersion": sentinel, "capabilities": sentinel},
+                }
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Mcp-Session-Id", f"{sentinel}-session")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args: object) -> None:
+            """Silence: the stub is not the subject of the test."""
+
+    stub = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=stub.serve_forever, daemon=True)
+    thread.start()
+    try:
+        # Everything the SDK's client has to say, down to the session id
+        # it announces at info. The lane's own loggers keep their levels:
+        # at DEBUG, httpcore prints the headers of every response any
+        # httpx client in the process receives, which is a property of
+        # turning debug logging on rather than anything this transport
+        # decides.
+        with caplog.at_level(logging.DEBUG, logger=SDK_CLIENT_LOGGER):
+            manager = await running(
+                http_entry(f"http://127.0.0.1:{stub.server_port}/mcp"), name="weather"
+            )
+            await manager.stop()
+    finally:
+        stub.shutdown()
+        thread.join(timeout=LIFECYCLE_TIMEOUT_S)
+        stub.server_close()
+
+    assert not manager.up
+    # Rendered as the container renders it, since the JSON formatter is
+    # what would serialize a traceback into a field of its own.
+    rendered = caplog.text + "".join(
+        logs.JsonFormatter().format(record) for record in caplog.records
+    )
+    assert sentinel not in rendered
+    assert not [record for record in caplog.records if record.name == SDK_CLIENT_LOGGER]
+    assert all(record.exc_info is None for record in caplog.records)
+    # The operator still learns that this server is down, and what kind
+    # of failure it was, from the line that is ours to write.
+    (announced,) = [
+        record
+        for record in caplog.records
+        if record.name == MANAGER_LOGGER and record.levelno == logging.WARNING
+    ]
+    assert "weather" in announced.getMessage()
+
+
+def test_a_failure_reason_names_types_and_not_messages() -> None:
+    """The reason token is the whole diagnosis in that line, so it has to
+    survive a group: the transport raises its failures inside one, and
+    "ExceptionGroup" on its own tells an operator nothing."""
+    quoted = "not-a-real-value-in-a-message"
+    assert _reason(RuntimeError(quoted)) == "RuntimeError"
+    grouped = ExceptionGroup(quoted, [ValueError(quoted), TimeoutError()])
+    assert _reason(grouped) == "TimeoutError, ValueError"
+    assert quoted not in _reason(grouped)
