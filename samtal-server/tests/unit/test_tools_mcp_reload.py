@@ -24,7 +24,12 @@ from cryptography.fernet import Fernet, MultiFernet
 
 import samtal_server.tools.mcp as mcp_module
 from samtal_server.config import Config
-from samtal_server.config.loader import ConfigError, ReloadInProgressError
+from samtal_server.config.loader import (
+    ConfigError,
+    DatabaseBusyError,
+    ReloadInProgressError,
+    StorageError,
+)
 from samtal_server.config.models import McpServerConfig
 from samtal_server.config.secrets import (
     SecretLocation,
@@ -35,6 +40,7 @@ from samtal_server.config.secrets import (
 from samtal_server.tools.mcp import (
     CONNECTED,
     DOWN,
+    RELOAD_REFUSED,
     UNUSED,
     McpServerManager,
     McpServers,
@@ -275,7 +281,53 @@ async def unchanged_by(servers: McpServers, read) -> str:
 
 async def test_a_snapshot_that_will_not_validate_changes_nothing() -> None:
     """The re-read raises before a candidate is built at all, which is
-    what a stored configuration that no longer composes does."""
+    what a stored configuration that no longer composes does.
+
+    It refuses in the same words the other half of the preparation
+    refuses in, guarantee included: which half of a two-phase apply a
+    refusal came out of is this module's business, and what the operator
+    needs to know is that the servers are as they were."""
+    config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    servers = await started(config)
+    stored = "invalid config in the database: agents.sam has no llm"
+
+    def refuse() -> tuple[Config, SecretStore | None]:
+        raise ConfigError(stored)
+
+    try:
+        assert await unchanged_by(servers, refuse) == f"{RELOAD_REFUSED} {stored}"
+    finally:
+        await servers.stop_all()
+
+
+@pytest.mark.parametrize("refusal", [DatabaseBusyError, StorageError])
+async def test_the_two_read_refusals_that_are_not_about_the_snapshot_keep_their_type(
+    refusal: type[ConfigError],
+) -> None:
+    """Their type is the answer: a busy database is retryable and the
+    API answers 409, unreadable stored state is not the caller's fault
+    and it answers 500. Wrapping either in the refused sentence would
+    turn both into 422."""
+    config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    servers = await started(config)
+    said = "the configuration database could not be read"
+
+    def refuse() -> tuple[Config, SecretStore | None]:
+        raise refusal(said)
+
+    try:
+        with pytest.raises(refusal) as caught:
+            await servers.reload(refuse)
+        assert str(caught.value) == said
+        assert "tools" in servers
+    finally:
+        await servers.stop_all()
+
+
+async def test_a_read_refusal_carries_nothing_of_what_the_read_was_holding() -> None:
+    """Raised outside the handler, the rule this codebase settled on: a
+    refusal raised inside one keeps the exception being handled as its
+    context, and a load that failed is holding a snapshot."""
     config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
     servers = await started(config)
 
@@ -283,7 +335,10 @@ async def test_a_snapshot_that_will_not_validate_changes_nothing() -> None:
         raise ConfigError("invalid config in the database: agents.sam has no llm")
 
     try:
-        assert "agents.sam has no llm" in await unchanged_by(servers, refuse)
+        with pytest.raises(ConfigError) as caught:
+            await servers.reload(refuse)
+        assert caught.value.__cause__ is None
+        assert caught.value.__context__ is None
     finally:
         await servers.stop_all()
 
