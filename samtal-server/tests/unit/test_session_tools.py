@@ -9,6 +9,7 @@ provider entirely.
 
 import asyncio
 import json
+import sys
 from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,7 @@ from samtal_server.providers import (
     build_agent_providers,
 )
 from samtal_server.tools.builtin import switch_agent_tool
+from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
 from tests.unit.test_session import (
     DEVICE_HELLO,
@@ -47,6 +49,8 @@ from tests.unit.test_session import (
 
 POET_MAC = "aa:bb:cc:dd:ee:01"
 BOTH_MAC = "aa:bb:cc:dd:ee:03"
+
+STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
 
 
 Step = str | list[str | ToolCall | Usage]
@@ -113,6 +117,7 @@ def session_for(
     memory: MemoryStore | None = None,
     fillers: dict[str, Any] | None = None,
     websocket: Any = None,
+    mcp_servers: McpServers | None = None,
 ) -> DeviceSession:
     """A device session with a real bespoke runtime behind it, built the
     way `run` builds one, with the named agents' LLMs replaced by
@@ -130,7 +135,7 @@ def session_for(
             tts=providers[agent].tts,
             vad=providers[agent].vad,
         )
-    return device_session(config, mac, providers, memory, fillers, websocket)
+    return device_session(config, mac, providers, memory, fillers, websocket, mcp_servers)
 
 
 async def run_reply(session: DeviceSession, said: str) -> list[str]:
@@ -436,6 +441,51 @@ async def test_a_device_bound_to_two_agents_is_answered_in_the_new_voice() -> No
 
     assert sentences(texts) == ["TUTOR says hello."]
     assert tone_strength(audio, TUTOR_TONE) > 10 * tone_strength(audio, POET_TONE)
+
+
+# What a reload changes for a conversation that is already running
+
+
+def registry_config(granted: bool) -> Config:
+    """The configuration the MCP registry is built from, which is not
+    the one the session was built from: the session's carries no MCP
+    entries at all, so a tool that turns up in its snapshot can only
+    have come from the registry."""
+    return base_config(
+        mcp_servers={
+            "tools": {
+                "transport": "stdio",
+                "command": sys.executable,
+                "args": [str(STDIO_SERVER)],
+            }
+        },
+        agents={
+            "poet": {"prompt": "POET", "tts": "tenor", "mcp": ["tools"] if granted else []},
+            "tutor": {"prompt": "TUTOR", "tts": "alto"},
+        },
+    )
+
+
+async def test_a_reload_between_replies_changes_what_the_next_one_may_reach() -> None:
+    """The promise the whole reload path exists for, at the seam where a
+    session meets it: the snapshot is taken per reply and asks the
+    registry by agent, so a grant written and reloaded mid-conversation
+    is on offer in the next reply and no session was dropped."""
+    servers = McpServers.build(registry_config(granted=False))
+    await servers.start_all()
+    script = ScriptedLlm(["First.", "Second."])
+    session = session_for(base_config(), POET_MAC, {"poet": script}, mcp_servers=servers)
+    try:
+        await run_reply(session, "hello")
+        offered_before = {tool.name for tool in script.seen[0][1]}
+
+        await servers.reload(lambda: (registry_config(granted=True), None))
+        await run_reply(session, "hello again")
+    finally:
+        await servers.stop_all()
+
+    assert not any(name.startswith("tools__") for name in offered_before)
+    assert "tools__secret_word" in {tool.name for tool in script.seen[-1][1]}
 
 
 async def test_a_hello_without_mcp_gets_no_device_tool_client() -> None:
