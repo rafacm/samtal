@@ -655,7 +655,7 @@ def build_router(key: str | None) -> APIRouter:
     router = APIRouter()
     if key is None:
         base = onboarding_path(None)
-        for path in _spellings(base):
+        for path in ota.spellings(base):
             router.post(path)(ota.check_version)
             router.get(path)(ota.describe)
         # Where a waiting device polls, which is its OTA URL with
@@ -663,34 +663,17 @@ def build_router(key: str | None) -> APIRouter:
         # every other device-facing route: the firmware is not a
         # browser, and a portal that dropped the trailing slash from the
         # endpoint dropped it from this too.
-        for path in _spellings(f"{base}{ota.ACTIVATE_SEGMENT}/"):
+        for path in ota.spellings(f"{base}{ota.ACTIVATE_SEGMENT}/"):
             router.post(path)(ota.activate)
         return router
-    for path in _spellings(f"{ONBOARDING_MOUNT_PATH}/{{key}}/"):
+    for path in ota.spellings(f"{ONBOARDING_MOUNT_PATH}/{{key}}/"):
         router.post(path)(_guarded(key, ota.check_version))
         router.get(path)(_guarded(key, ota.describe))
     # Guarded like everything else on this path: a wrong key must meet
     # the same 404 here as at the endpoint itself, on either spelling.
-    for path in _spellings(f"{ONBOARDING_MOUNT_PATH}/{{key}}/{ota.ACTIVATE_SEGMENT}/"):
+    for path in ota.spellings(f"{ONBOARDING_MOUNT_PATH}/{{key}}/{ota.ACTIVATE_SEGMENT}/"):
         router.post(path)(_guarded(key, ota.activate))
     return router
-
-
-def _spellings(path: str) -> tuple[str, str]:
-    """The path as written and the path without its trailing slash, both
-    of which are served by the same handler.
-
-    Not a redirect between the two, which is what this was until a
-    factory board met it (2026-08-13): the captive portal saved the
-    typed URL without its trailing slash, the device POSTed to the
-    slashless spelling, and the firmware does not follow a redirect on
-    this request. It rendered "code=307" on its screen and restarted in
-    a loop, and nothing reached a handler, so the server had nothing to
-    say about it either. A device-facing endpoint cannot spend a
-    round trip on a redirect it has no evidence the device will follow,
-    so both spellings answer.
-    """
-    return path, path.rstrip("/")
 
 
 def _guarded(expected: str, handler: Handler) -> Handler:
