@@ -248,6 +248,19 @@ what it was shown. This is the edge #122 will hang guidance on, and
 the object form is where a future per-grant field lands without
 another schema change.
 
+**Both entry forms round-trip as themselves.** The store serializes
+agent rows into JSON and the views echo the row shape back, so the
+grant needs a canonical serialization on both paths: a string entry
+is stored and read back as its string, an object entry as
+`{server, tools}` with no invented keys, which keeps a read exactly
+the fragment a write of it accepts (the envelope contract) and keeps
+pre-upgrade rows, which are all plain string lists, valid without a
+migration. `config/store.py` (row serialization on write and load)
+and `config/views.py` (what a read shows) are part of the milestone,
+and the suite proves the loop: write both forms through the API,
+read them back byte-shaped, reload and see them applied, and load a
+pre-upgrade string row unchanged.
+
 ### Gap 4: builtins stay structural, and the rule is documented
 
 `switch_agent` and `remember` do not join the grant model. The
@@ -315,6 +328,9 @@ samtal_server/runtime/pipeline.py  _tool_snapshot and revive ask
                                    carrying config-resolved entry lists
 samtal_server/config/models.py     the grant value; mcp lists accept
                                    string-or-object entries; validation
+samtal_server/config/store.py      grant serialization in agent rows,
+                                   both forms canonical
+samtal_server/config/views.py      reads echo the written form
 samtal_server/config/api.py        GET /runtime/mcp-servers,
                                    POST /runtime/mcp-servers/reload,
                                    runtime hooks on build_api
@@ -495,6 +511,13 @@ its resolution once the amendment addressing it lands.
    milestone, define canonical serialization for both entry forms and
    the exact read representation, and require write, restart or
    reload, read-back tests covering pre-upgrade string rows.
+   *Resolution*: adopted. Gap 3 gains a round-trip decision: each
+   entry form serializes as itself (string as string, object as
+   `{server, tools}`), which keeps reads write-shaped per the
+   envelope contract and pre-upgrade string rows valid without
+   migration; `config/store.py` and `config/views.py` join the module
+   layout, and the milestone's tests close the write, read-back,
+   reload, pre-upgrade loop.
 
 6. **P2: secret-rotation diffing has no safe implementation
    primitive.** The diff compares stored ciphertexts, but
