@@ -124,6 +124,30 @@ status handler is `async def` for the matching reason: it reads the
 managers and the slice on the loop that mutates them, so a read
 cannot interleave with a swap and report half of one world.
 
+**The reload answers within a stated bound, in a typed shape.** The
+apply phase does its lifecycle work concurrently, the way
+`start_all` already connects at boot: stops together, then starts
+together, each start under the existing `CONNECT_TIMEOUT_S` and each
+stop under a short fixed bound of its own with task cancellation as
+the backstop, so the endpoint's whole envelope is one connect timeout
+plus small change rather than a sum over managers. A manager that
+cannot finish connecting inside its bound is not a hung request: it
+is reported `down` with its reason, revivable as ever. The response
+is a declared model, not an ad-hoc dictionary: the four diff outcomes
+by entry name (`started`, `restarted`, `stopped`, `unchanged`) plus
+the full status document as `GET /runtime/mcp-servers` would answer
+it, so one round trip both applies and verifies. Refusals map like
+the rest of the API: 409 for a reload already running or a busy
+database, 422 for a preparation refusal in the sanitized sentence
+shape, 500 for unreadable stored state, 503 for an application built
+without a server. All of it is pinned in the committed OpenAPI
+document and exercised over a real socket. The CLI's `reload`
+command sends with an endpoint-specific read timeout comfortably
+above the server-side envelope (60 s against a bound well under
+half that), so the client cannot time out on a reload the server
+then applies, which would recreate the exact ambiguity this feature
+exists to remove.
+
 **Live sessions.** The pipeline already snapshots tools per reply, so
 a running conversation picks up the new grant list and the new tool
 set on its next utterance, with no session drop. A call in flight on a
@@ -599,6 +623,16 @@ its resolution once the amendment addressing it lands.
    (started, restarted, stopped, unchanged, plus final status), and
    specified responses for validation refusal, preparation failure
    and timeout, pinned in OpenAPI and real-socket tests.
+   *Resolution*: adopted. A new mechanics paragraph fixes the
+   contract: concurrent stops then concurrent starts, each start
+   under `CONNECT_TIMEOUT_S` and each stop under a short bound with
+   cancellation as backstop, an envelope of one connect timeout plus
+   small change, a slow manager reported `down` rather than awaited;
+   a declared response model carrying the four diff outcomes plus
+   the full status document; refusal statuses 409, 422, 500 and 503
+   mapped like the rest of the API; and a 60 s endpoint-specific CLI
+   read timeout above the server bound. Pinned in OpenAPI and tested
+   over a real socket.
 
 10. **P2: the proposed conversation test cannot prove which tools the
     model received.** `MockLlm.stream()` ignores its `tools`
