@@ -27,12 +27,14 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import httpx
 import pytest
 import yaml
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import update
 
+import samtal_server.tools.mcp as mcp_module
 from samtal_server import db as db_module
 from samtal_server.config import Config, cli
 from samtal_server.config.api import MOUNT_PATH, build_api, mount_api
@@ -41,7 +43,7 @@ from samtal_server.config.secrets import MASK, MASTER_KEY_ENV, generate_key
 from samtal_server.config.writes import BINDING_NOTICE
 from samtal_server.db import DATABASE_FILENAME, open_database, schema
 from samtal_server.onboarding import PendingDevices
-from samtal_server.tools.mcp import McpServers
+from samtal_server.tools.mcp import McpReload, McpServers
 
 # Not real credentials, and shaped so a substring check for one cannot
 # match by accident.
@@ -84,7 +86,10 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # there by the tests that need one. None is what an application
     # built without a server around it gets, which is what every other
     # test here is.
-    runtime: dict[str, object] = {"mcp_servers": None}
+    runtime: dict[str, object] = {"mcp_servers": None, "mcp_reload": None}
+    # Every client the entry point built, kept so a test can read the
+    # timeouts a command chose after it has run.
+    clients: list[TestClient] = []
 
     def factory(base_url: str, token: str) -> TestClient:
         reached.append(base_url)
@@ -95,7 +100,11 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         # token-resolution tests would be asserting nothing: the wrong
         # variable, a stale value and a typo would all authenticate.
         api = build_api(
-            TOKEN, directory, pending=pending, mcp_servers=runtime["mcp_servers"]
+            TOKEN,
+            directory,
+            pending=pending,
+            mcp_servers=runtime["mcp_servers"],
+            mcp_reload=runtime["mcp_reload"],
         )
         # A base URL with a path prefix is the deployed shape, where the
         # sub-application is mounted on the server's own port, so the
@@ -106,11 +115,13 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             assert urlsplit(base_url).path.rstrip("/") == MOUNT_PATH
             served = FastAPI()
             mount_api(served, api)
-        return TestClient(
+        client = TestClient(
             served,
             base_url=base_url,
             headers={"Authorization": f"Bearer {token}"},
         )
+        clients.append(client)
+        return client
 
     monkeypatch.setattr(cli, "build_client", factory)
 
@@ -122,6 +133,7 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _run.reached = reached
     _run.pending = pending
     _run.runtime = runtime
+    _run.clients = clients
     return _run
 
 
@@ -472,6 +484,109 @@ def test_a_status_refusal_carries_nothing_of_the_body() -> None:
         cli._status_listing(body)
 
     assert ANSWERED not in _chain(caught.value)
+
+
+# Applying them, which is the other half of the same surface
+#
+# The registry's own diff is exercised against real servers elsewhere;
+# what these are about is the command: that it reaches the right route,
+# renders both halves of the answer, waits long enough for one, and
+# refuses a body that is not one.
+
+
+def _applied(**outcome: object):
+    """A server that answers a reload with what it did, standing in for
+    a registry these tests deliberately do not start."""
+
+    async def reload() -> McpReload:
+        return McpReload(**outcome)
+
+    return reload
+
+
+def test_reload_prints_what_it_did_and_what_is_running(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    entry = {"transport": "streamable_http", "url": "http://127.0.0.1:9/mcp"}
+    run.runtime["mcp_servers"] = _configured({"weather": entry}, ["weather"])
+    run.runtime["mcp_reload"] = _applied(started=("weather",), stopped=("gone",))
+
+    assert run("reload") == 0
+
+    printed = capsys.readouterr().out
+    assert "started: weather" in printed
+    assert "restarted: (none)" in printed
+    assert "stopped: gone" in printed
+    assert "unchanged: (none)" in printed
+    # And the status underneath, which is what says whether an entry
+    # that started actually connected.
+    assert "weather: down since " in printed
+
+
+def test_reload_prints_the_refusal_the_api_answered(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No server to reload is a 503 with a sentence, and the sentence is
+    what an operator reads: this client adds nothing to it."""
+    assert run("reload") == 1
+
+    assert "no running server" in capsys.readouterr().err
+
+
+def test_reload_refuses_an_answer_it_cannot_read(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: {"started": "weather"})
+
+    assert run("reload") == 1
+
+    assert cli.UNRECOGNIZED_ANSWER in capsys.readouterr().err
+
+
+def test_reload_gives_the_server_longer_to_answer_than_a_write(
+    run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The client must not give up on a reload the server then applies:
+    that would leave nobody knowing what is running, which is the exact
+    ambiguity this whole feature exists to remove. So the bound is the
+    server's own envelope with room to spare, and the command really
+    does use it.
+
+    Driven through a real `httpx.Client` over a mock transport rather
+    than through the fixture's TestClient, which carries a timeout from
+    another copy of httpx entirely and would report whatever that made
+    of one.
+    """
+    envelope = mcp_module.CONNECT_TIMEOUT_S + mcp_module.STOP_TIMEOUT_S
+    assert cli.RELOAD_READ_TIMEOUT_S > cli.READ_TIMEOUT_S
+    assert cli.RELOAD_READ_TIMEOUT_S >= 2 * envelope
+
+    made: list[httpx.Client] = []
+    empty = dict.fromkeys(cli.RELOAD_OUTCOMES, []) | {"servers": {}}
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=empty if "reload" in request.url.path else {})
+
+    def factory(base_url: str, token: str | None = None) -> httpx.Client:
+        client = httpx.Client(
+            base_url=base_url,
+            transport=httpx.MockTransport(answer),
+            timeout=httpx.Timeout(cli.READ_TIMEOUT_S, connect=cli.CONNECT_TIMEOUT_S),
+        )
+        made.append(client)
+        return client
+
+    monkeypatch.setattr(cli, "build_client", factory)
+
+    assert run("status") == 0
+    assert run("reload") == 0
+
+    status_client, reload_client = made
+    assert status_client.timeout.read == cli.READ_TIMEOUT_S
+    assert reload_client.timeout.read == cli.RELOAD_READ_TIMEOUT_S
+    # And the connect bound is untouched: a server that is not there
+    # must not take a minute to say so.
+    assert reload_client.timeout.connect == cli.CONNECT_TIMEOUT_S
 
 
 def test_add_device_binds_the_board_showing_the_code(
