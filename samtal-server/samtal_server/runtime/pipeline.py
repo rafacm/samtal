@@ -238,9 +238,11 @@ class PipelineRuntime:
         # A server that was down at boot, or that dropped since, gets a
         # background reconnect now, so it is picked up by the time this
         # conversation needs it rather than at the next server restart.
-        self._mcp_servers.revive(
-            entry for agent in self._agents for entry in config.mcp_for_agent(agent)
-        )
+        # Which entries those are is asked of the registry rather than
+        # resolved from this session's configuration: a reload replaces
+        # the grants along with the managers they name, and the
+        # configuration here is the one that was loaded at boot.
+        self._mcp_servers.revive_for_agents(self._agents)
 
     @property
     def _agent(self) -> str | None:
@@ -812,11 +814,14 @@ class PipelineRuntime:
     def _tool_snapshot(self) -> list[ToolDef]:
         """What the active agent may reach this reply: the builtins that
         apply, the device's tools once discovery has finished, and the
-        tools of the MCP servers its configuration names that are up.
+        tools of the MCP servers it is granted that are up.
 
         Taken per reply rather than per session, so a server that came
-        back and a device that finished discovering are both picked up
-        on the next utterance."""
+        back, a device that finished discovering and a reload that
+        landed mid-conversation are all picked up on the next utterance.
+        Which servers the agent is granted is the registry's answer
+        rather than this session's configuration, for the same reason:
+        the grants are what a reload swaps."""
         assert self._agent is not None
         tools: list[ToolDef] = []
         # A device bound to one agent has nowhere to switch, so it gets
@@ -826,7 +831,7 @@ class PipelineRuntime:
         if self._memory is not None:
             tools.append(builtin.remember_tool())
         tools.extend(self._output.device_tools())
-        tools.extend(self._mcp_servers.tools_for(self._config.mcp_for_agent(self._agent)))
+        tools.extend(self._mcp_servers.tools_for_agent(self._agent))
         return tools
 
     async def _run_tools(

@@ -560,16 +560,21 @@ def device_session(
     memory: Any = None,
     fillers: dict[str, Any] | None = None,
     websocket: Any = None,
+    mcp_servers: McpServers | None = None,
 ) -> session_module.DeviceSession:
     """A device session with a real bespoke runtime behind it, built the
     way `run` builds one: the agents resolved from the binding, then the
     factory called with them. Every test that drives a session below the
     websocket goes through here, so the composition root has one shape
-    in the tests as well as in the server."""
+    in the tests as well as in the server.
+
+    `mcp_servers` is the running registry, which a test that is about
+    tools supplies; an empty one is what every other test here needs,
+    and is what a deployment with no MCP entries has."""
     factory = bespoke_runtime_factory(
         config,
         providers if providers is not None else build_agent_providers(config),
-        McpServers({}),
+        mcp_servers if mcp_servers is not None else McpServers({}),
         memory,
         fillers if fillers is not None else {},
     )
