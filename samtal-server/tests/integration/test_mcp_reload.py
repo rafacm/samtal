@@ -37,28 +37,41 @@ ENTRY = "weather"
 TOOL = f"{ENTRY}__secret_word"
 
 
-def one_agent() -> Config:
-    """A working deployment with no MCP servers at all: the agent is
-    complete, and the tool the model is scripted to call does not
-    exist."""
+def stdio_entry() -> dict[str, object]:
+    return {
+        "transport": "stdio",
+        "command": sys.executable,
+        "args": [str(STDIO_SERVER)],
+    }
+
+
+def one_agent(**extra: object) -> Config:
+    """A working deployment, by default with no MCP servers at all: the
+    agent is complete, and the tool the model is scripted to call does
+    not exist."""
     return Config(
-        providers={
-            "llm": {
-                "mock": {
-                    "type": "mock",
-                    "reply": "The tool says {tool_result}.",
-                    "tool_when": "secret",
-                    "tool_name": TOOL,
-                }
-            },
-            "asr": {"mock": {"type": "mock", "text": "tell me the secret"}},
-            "tts": {"mock": {"type": "mock"}},
-            "vad": {"mock": {"type": "mock"}},
-        },
-        agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
-        agents={"assistant": {"prompt": "ASSISTANT"}},
-        devices={DEVICE_MAC: ["assistant"]},
-        default_agent="assistant",
+        **(
+            {
+                "providers": {
+                    "llm": {
+                        "mock": {
+                            "type": "mock",
+                            "reply": "The tool says {tool_result}.",
+                            "tool_when": "secret",
+                            "tool_name": TOOL,
+                        }
+                    },
+                    "asr": {"mock": {"type": "mock", "text": "tell me the secret"}},
+                    "tts": {"mock": {"type": "mock"}},
+                    "vad": {"mock": {"type": "mock"}},
+                },
+                "agent_defaults": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
+                "agents": {"assistant": {"prompt": "ASSISTANT"}},
+                "devices": {DEVICE_MAC: ["assistant"]},
+                "default_agent": "assistant",
+            }
+            | extra
+        )
     )
 
 
@@ -138,14 +151,7 @@ async def test_a_written_and_granted_server_is_usable_without_a_restart(
 
             # The operator's two writes and the reload, with the device
             # connected and the session alive throughout.
-            written = await control.put(
-                f"/mcp-servers/{ENTRY}",
-                json={
-                    "transport": "stdio",
-                    "command": sys.executable,
-                    "args": [str(STDIO_SERVER)],
-                },
-            )
+            written = await control.put(f"/mcp-servers/{ENTRY}", json=stdio_entry())
             assert written.status_code == 200, written.text
             # And the write said how to apply it, which is what this
             # test then does.
@@ -180,5 +186,69 @@ async def test_a_written_and_granted_server_is_usable_without_a_restart(
             assert not [
                 event for event in device.events if event.get("type") == "websocket"
             ]
+        finally:
+            await device.close()
+
+
+async def test_a_refused_reload_leaves_the_running_servers_alone(
+    serve_app_in, tmp_path: Path
+) -> None:
+    """The other half of the promise, on a server with something to
+    lose: a reload the stored configuration refuses changes nothing, and
+    the conversation that was using an MCP server goes on using it.
+
+    Provoked the way an operator would provoke it by accident, and by
+    the one way this API leaves open. Every write route refuses a
+    fragment that would leave a reference dangling, and every delete
+    refuses while something still names its subject, so what is left is
+    the rule that is checked when a configuration is composed and by no
+    write: a deployment with agents has to be reachable. Unbinding the
+    board and then clearing the default agent is two live, legal writes
+    that between them leave a snapshot no boot would accept.
+    """
+    granted = one_agent(
+        mcp_servers={ENTRY: stdio_entry()},
+        agents={"assistant": {"prompt": "ASSISTANT", "mcp": [ENTRY]}},
+    )
+    async with serve_app_in(tmp_path / "db", granted) as (port, app), control_client(
+        port
+    ) as control:
+        device = Device(port)
+        await device.connect()
+        try:
+            assert await device.say_something() == "The tool says rhubarb."
+            before = (await control.get("/runtime/mcp-servers")).json()
+            assert before[ENTRY]["state"] == "connected"
+            assert TOOL in before[ENTRY]["tools"]
+
+            assert (await control.delete(f"/devices/{DEVICE_MAC}")).status_code == 200
+            assert (await control.delete("/default-agent")).status_code == 200
+
+            refused = await control.post("/runtime/mcp-servers/reload")
+
+            assert refused.status_code == 422
+            assert set(refused.json()) == {"detail"}
+            assert refused.json()["detail"].startswith(
+                "the reload was refused and nothing was changed:"
+            )
+            assert "default_agent is required" in refused.json()["detail"]
+            # Nothing was applied, and the instants say so rather than
+            # the states: a manager stopped and started again would
+            # report `connected` too, and would have moved.
+            assert (await control.get("/runtime/mcp-servers")).json() == before
+            # And the conversation that was using the server still is.
+            assert await device.say_something() == "The tool says rhubarb."
+
+            # Repaired, and the same request applies. The entry comes
+            # back `unchanged` rather than `restarted`, which is the
+            # other way of saying the refusal never touched it.
+            repaired = await control.put("/default-agent", json={"name": "assistant"})
+            assert repaired.status_code == 200, repaired.text
+            applied = await control.post("/runtime/mcp-servers/reload")
+            assert applied.status_code == 200, applied.text
+            assert applied.json()["unchanged"] == [ENTRY]
+            assert applied.json()["servers"] == before
+
+            assert await device.say_something() == "The tool says rhubarb."
         finally:
             await device.close()
