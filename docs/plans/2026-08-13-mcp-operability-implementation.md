@@ -707,3 +707,220 @@ deployment. The bounds are asserted against the constants they have to
 outlast rather than measured against a slow server, and the abandonment
 path is exercised against a manager written to be stubborn rather than
 against a real transport that would not close.
+
+## Milestone 3: Per-tool grants
+
+An agent can now be granted part of an MCP server rather than all of it.
+The list that says which servers an agent talks to says which of their
+tools as well, in an entry form the string form's readers still read.
+
+### What landed
+
+**`samtal_server/config/models.py`.** `McpGrant` is one `mcp` list entry
+in its object form: a `server`, and a `tools` list or nothing. The field
+is `list[NonBlankStr | McpGrant] | None`, so the string form is
+untouched and the object form is additive. Validation refuses an empty
+`tools` with the plain way to say it (`mcp: []`), a tool named twice, a
+blank name (`NonBlankStr`), and a server named twice in one list
+whichever forms the two entries take. `Config.mcp_for_agent` answers
+grants rather than names, `referenced_mcp_servers` reads `server` off
+them (an allow list narrows the tool list, never whether the connection
+is made), and `check_references` checks both forms in the one place it
+checked one. `mcp_entry_fragment` is the canonical serialization both
+the row writer and the view use.
+
+**`samtal_server/config/store.py` and `config/views.py`.** Both went
+through `list(entry.mcp)`, which a pydantic model is not a valid value
+for and which would have normalized the two forms into one. Both now map
+each entry through `mcp_entry_fragment`: a string is stored and shown as
+its string, so every row written before the object form existed loads
+and is written back byte-identically and no migration is owed, and an
+object is stored and shown as `{server, tools}` with `tools` absent when
+it was never written.
+
+**`samtal_server/tools/names.py`.** `unqualified(entry, published)`, the
+half of a published name a grant names it by. It strips the entry it was
+qualified with rather than splitting on the separator, because an entry
+name may legally contain `__` itself.
+
+**`samtal_server/tools/mcp.py`.** The milestone's centre.
+
+`McpSlice.grants` holds grants rather than entry names. `grants_for`
+answers an agent's, `entries_for` is the server names off them (what a
+revive needs), `allows(agent, entry, published)` is the call-time
+question, `allowed_by_agent(entry)` is the status surface's mapping from
+agent to allow list or `None`, and `allowed_names(entry)` is every tool
+name some grant allows of one entry, which is what a publication is
+checked against.
+
+`tools_for_agent` filters each granted server's published tools through
+that grant's allow list, matched by the unprefixed published name.
+`McpServers.call` takes the speaking agent and refuses a tool the grants
+do not name with `McpToolNotGranted`, which reaches the session as the
+error result an unknown tool produces.
+
+Each `McpServerManager` carries the names some grant allows of its
+entry, and `_warn_about_unpublished` says which of them the server did
+not publish. It runs where the manager publishes (so a boot, a reload
+and a background reconnect all check) and again when `expect` hands a
+connected manager a new allow list. The comparison is against the
+published mapping, never the raw listing, and only names the operator
+wrote are printed.
+
+The reload composes its `McpSlice` once and hands it to both phases, so
+the world the candidates were built for is the world that is installed,
+and a kept manager is told its new allow list on the way through.
+
+**`samtal_server/runtime/pipeline.py`.** `_dispatch` passes the active
+agent to `McpServers.call`.
+
+**`samtal_server/config/api.py` and `config/cli.py`.** The `grants`
+field's description says what the value now means; `config status`
+prints an agent on its own when it may reach the whole server and with
+its allowed tools in parentheses when it may not.
+
+**`samtal_server/providers/mock.py`.** A `{tools}` reply-template
+placeholder rendering the offered tool names, the trick `{system}`
+already plays for the prompt. Templates without it are unaffected.
+
+**`samtal_server/config/docgen.py`.** An "MCP grant" entity section
+beside the filler's, since the `mcp` field's type now names a shape a
+reader has to be able to look up.
+
+**Documents.** `examples/agent.yaml` carries the object form live and
+`examples/agent-defaults.yaml` carries its shape and the prose for the
+defaults layer; the server README's tools section gains the per-tool
+grants passage and its status subsection explains the parentheses;
+`docs/reference/domain-config.md` and `docs/reference/api-openapi.json`
+were regenerated with the commands, never hand-edited. One
+`CHANGELOG.md` entry under the existing `## 2026-08-13`.
+`config.example.yaml` holds no domain entities, so it did not change.
+
+**Tests.** Thirty-four new ones in the unit lane and one in the
+integration lane.
+
+- `tests/unit/test_config_tools.py`: the shapes (object form, object
+  form without tools, both forms in one list, empty `tools` refused
+  naming `mcp: []`, a tool named twice, a blank name, a server named
+  twice in each of the three ways two entries can say it,
+  `agent_defaults` parity with replace-not-merge), the reference check
+  on both forms in both layers, and each form serializing as itself.
+- `tests/unit/test_config_store.py`: both forms through a row with the
+  raw column asserted, a pre-upgrade string row loading and being
+  written back unchanged, and a grant on an unknown server refused at
+  the write.
+- `tests/unit/test_config_api_writes.py`: an `mcp` list reading back in
+  the form it was written, on an agent and on the defaults, and a grant
+  naming an unknown server refused with 422.
+- `tests/unit/test_tools_mcp.py`: a whole-server grant offering
+  everything, an allow list offering only what it names, a grant written
+  against the sanitized published name reaching the tool while the raw
+  listed name reaches nothing, two agents getting their own subsets, the
+  call-time refusal (and the same call from an agent granted the whole
+  server running), a call from an agent with no grant at all, the three
+  warning cases (a tool the server never listed, a tool publication
+  dropped for length, and a whole-server grant warned about nothing),
+  and the status surface carrying allow lists beside published tools.
+- `tests/unit/test_tools_mcp_reload.py`: a narrowed allow list applying
+  without touching the connection, and a grant added to a connected
+  server checked on the reload rather than at the next connect.
+- `tests/unit/test_config_cli.py`: `config status` printing how much of
+  a server each agent gets.
+- `tests/unit/test_providers_mock_tools.py`: the `{tools}` placeholder,
+  and a template without it unaffected.
+- `tests/integration/test_tools.py`: the issue's third verification
+  step, proven from the offer rather than from which calls happened.
+
+### Deviations from the plan
+
+Five, none changing what the milestone does.
+
+1. **The object form is parsed by a `mode="before"` validator rather
+   than left to the field's union.** Pydantic reports every branch of a
+   union, so the first thing an operator read about a grant with an
+   empty `tools` was that a mapping is not a valid string, and the
+   sentence about the actual mistake came second. The entry is parsed as
+   an `McpGrant` before the union sees it and the failure is re-raised as
+   that grant's own sentence, naming the entry's index and its server.
+   The annotation is unchanged, so the schema and the reference still
+   describe both forms.
+2. **`config/docgen.py` gains an "MCP grant" entity section.** The plan
+   asks only that the `mcp` field's description describe both forms,
+   which it does; but the field's rendered type is now
+   `list[str | McpGrant] | null`, and a reader who meets that name has
+   nowhere to look it up. It is a nested shape with no command of its
+   own, the arrangement `FillerConfig` already has.
+3. **`config status` renders the allow lists too.** The plan puts them
+   on the status surface; the CLI is that surface's other client, and an
+   operator reading `agents: kids` there would have had to ask the API
+   directly to see that `kids` gets two tools of the server rather than
+   all of them.
+4. **The agent reaches the call router as an argument of
+   `McpServers.call`.** The plan left the seam to the implementation and
+   asked for the choice to be recorded. The alternatives were a grant
+   value carried from the tool snapshot to the call (which would have
+   made the check use a world one reply old, since a reload can land
+   between them) and a per-session view object (a second object to keep
+   in step with the swap). One registry serves every session and the
+   grants swap inside it, so the session passes the one thing it owns,
+   its agent's name, and the registry answers from the world running
+   now. It is a required argument rather than an optional one, so a call
+   site cannot forget it.
+5. **A kept manager is told its new allow list on a reload.** The plan
+   checks grants "when a server's tools come out of the publishing rule
+   (connect or reload)", and an entry the reload leaves alone publishes
+   nothing. Deferring its check to the next connect would leave an
+   operator who adds a grant and reloads with no answer until something
+   restarts, which may be days. `expect` therefore re-checks a connected
+   manager against the tools it already published.
+
+### Discoveries
+
+**The test server's awkward names were already the two cases that
+mattered.** `tests/support/mcp_stdio_server.py` lists
+`weather.today/v2`, which publishes as `tools__weather_today_v2`, and a
+sixty-character name that publication drops because the entry prefix
+pushes it over the limit. The first is the sanitizing case (a grant
+naming the published half reaches it, one naming the raw listed name
+reaches nothing) and the second is the plan's dropped-tool warning case,
+neither needing a new fixture.
+
+**The offer proof needs an agent with no builtins.** `_tool_snapshot`
+merges `switch_agent` when the device is bound to more than one agent
+and `remember` when memory is configured, so the reply's rendered list
+is exactly the granted subset only when the test binds each agent to a
+device of its own, configures no memory, and registers no device tools.
+The two agents in that test therefore sit on two MACs rather than on one
+bound to both.
+
+**A pre-upgrade row is proven by writing it back, not by loading it.**
+Loading a plain string list would pass whatever the serializer did with
+it; the assertion that matters is on the column after a write through
+the same path the API writes with, which is where a normalization into
+objects would have shown up.
+
+**Teeth.** The integration proof fails when the restricted agent's grant
+is widened to the whole server (the spoken list then carries the
+sibling's tools); the file was restored from a copy and touched, not
+with `git checkout`. Each warning test asserts the tool's absence from
+the published list first, so the warning is about something genuinely
+unreachable rather than about a name that arrived anyway.
+
+### Verification
+
+All from `samtal-server/`, on the tree at the documentation commit.
+
+- `uv run ruff check .`: "All checks passed!".
+- `uv run pytest tests/unit -q`: 1538 passed, 15 skipped in 138.93s.
+  Thirty-four more than milestone 2, which is the count listed above;
+  the drift checks for the OpenAPI document and the generated reference
+  run in this lane and pass.
+- `uv run pytest tests/integration -q`: 47 passed in 91.77s. One more:
+  the offer proof.
+
+Not verified, and not claimed: nothing was run against hardware or a
+deployment, and no grant was written against a real third-party MCP
+server. The unpublished-name warning was exercised against the stdio
+test server only, and the reflection sentinels milestone 1 added were
+not re-run against the new warning line, which prints operator-written
+names rather than anything a server chose.
