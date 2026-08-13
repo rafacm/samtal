@@ -586,8 +586,8 @@ status` says what is:
 ```console
 $ samtal-server config status
 home: connected since 2026-08-13T09:12:03.104213+00:00
-  tools: home__turn_on_light, home__turn_off_light
-  agents: house, kids
+  tools: home__turn_on_light, home__turn_off_light, home__unlock_door
+  agents: house, kids (turn_on_light, turn_off_light)
 weather: down since 2026-08-13T10:41:57.882014+00:00 (ConnectionRefusedError)
   tools: (none)
   agents: house
@@ -606,6 +606,12 @@ than a chore. **unused** is configured and referenced by no agent, so no
 connection was ever built for it: the answer to "why does the agent not
 have that tool" when the entry looks right, and invisible everywhere
 else.
+
+Each agent under `agents:` is named on its own when it may reach the
+whole server, and with its allowed tools in parentheses when it was
+granted only some of them. That list sits beside the published one, so
+an allowed name the server does not actually offer is answerable in one
+read.
 
 It is a read of the running server rather than of the database, which is
 why there is no `--local` for it and why what it says cannot disagree

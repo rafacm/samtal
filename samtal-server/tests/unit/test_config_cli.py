@@ -322,7 +322,7 @@ def test_pending_lists_the_code_each_device_is_showing(
 # and the shape the client insists on.
 
 
-def _configured(servers: dict[str, object], grants: dict[str, list[str]]) -> McpServers:
+def _configured(servers: dict[str, object], grants: dict[str, list]) -> McpServers:
     """A registry built from a configuration, the way a server builds
     one, and never started, so everything referenced is down."""
     config = Config(
@@ -382,6 +382,22 @@ def test_status_lists_the_agents_of_an_entry_in_name_order(
     assert run("status") == 0
 
     assert "  agents: house, kids" in capsys.readouterr().out
+
+
+def test_status_shows_how_much_of_a_server_each_agent_gets(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The allow list beside the published list, which is what makes a
+    grant naming a tool the server does not offer answerable without a
+    second read."""
+    entry = {"transport": "streamable_http", "url": "http://127.0.0.1:9/mcp"}
+    run.runtime["mcp_servers"] = _configured(
+        {"weather": entry}, {"sam": [{"server": "weather", "tools": ["forecast", "wind"]}]}
+    )
+
+    assert run("status") == 0
+
+    assert "  agents: sam (forecast, wind)" in capsys.readouterr().out
 
 
 def test_the_status_help_names_every_state_it_can_print() -> None:

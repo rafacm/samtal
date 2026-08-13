@@ -575,8 +575,10 @@ class McpServerStatus(BaseModel):
     grants: dict[str, list[str] | None] = Field(
         description=(
             "Which agents may reach this server, by agent name. The value is how much "
-            "of the server the agent gets: null is all of it, which is every grant "
-            "today."
+            "of the server the agent gets: null is the whole server, and a list is the "
+            "tools that agent was allowed, by the published name without the entry "
+            "prefix. Beside the published list above it, so an allowed name this "
+            "server does not offer is answerable in one read."
         )
     )
 

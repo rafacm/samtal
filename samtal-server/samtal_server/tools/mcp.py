@@ -638,14 +638,18 @@ class McpSlice:
             },
         )
 
-    def agents_for(self, entry: str) -> list[str]:
-        """Which agents may reach one entry, in the order the grants
-        were taken, which is agent-name order."""
-        return [
-            agent
+    def allowed_by_agent(self, entry: str) -> dict[str, list[str] | None]:
+        """Which agents may reach one entry and how much of it: the
+        allow list they were given, or None for the whole server. In the
+        order the grants were taken, which is agent-name order.
+
+        One value per agent, since a list may name a server once."""
+        return {
+            agent: (None if grant.tools is None else list(grant.tools))
             for agent, grants in self.grants.items()
-            if any(grant.server == entry for grant in grants)
-        ]
+            for grant in grants
+            if grant.server == entry
+        }
 
     def grants_for(self, agent: str) -> tuple[McpGrant, ...]:
         """What one agent may reach, entry by entry and with each
@@ -1024,10 +1028,13 @@ class McpServers:
         return {entry: self._status_of(entry) for entry in self._configured.entries}
 
     def _status_of(self, entry: str) -> dict[str, Any]:
-        # `grants` is a mapping to None rather than a list of agent
-        # names: None means the whole server, and that is where a
-        # per-tool allow list goes when there is one.
-        grants: dict[str, None] = dict.fromkeys(self._configured.agents_for(entry))
+        # `grants` is a mapping rather than a list of agent names, and
+        # the value is how much of the server that agent gets: None is
+        # all of it, a list is the tools it was allowed. Beside the
+        # published list above it, which is what makes an allow list
+        # naming something this server does not offer answerable in one
+        # read.
+        grants = self._configured.allowed_by_agent(entry)
         manager = self._managers.get(entry)
         if manager is None:
             return {

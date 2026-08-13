@@ -744,3 +744,31 @@ async def test_a_whole_server_grant_is_warned_about_nothing(
         assert unpublished_warnings(caplog) == []
     finally:
         await servers.stop_all()
+
+
+async def test_the_grants_carry_the_allow_list_beside_the_published_tools() -> None:
+    """Where milestone 1 put a null: the value is how much of the server
+    that agent gets, so the mismatch between what a grant allows and
+    what the server published is one read rather than two."""
+    config = config_granting(
+        {"tools": entry_data()},
+        {
+            "house": ["tools"],
+            "kids": [{"server": "tools", "tools": ["secret_word", "no_such_tool"]}],
+        },
+    )
+    servers = McpServers.build(config)
+    await servers.start_all()
+    try:
+        entry = servers.status()["tools"]
+
+        assert entry["grants"] == {
+            "house": None,
+            "kids": ["secret_word", "no_such_tool"],
+        }
+        # And the published list beside it, which is what the allow list
+        # is read against.
+        assert "tools__secret_word" in entry["tools"]
+        assert "tools__no_such_tool" not in entry["tools"]
+    finally:
+        await servers.stop_all()
