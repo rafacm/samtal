@@ -33,6 +33,7 @@ raise cuts the exception chain: a JSON decode error carries the
 document it failed on, which in this module is the decrypted plaintext.
 """
 
+import hashlib
 import json
 import os
 import re
@@ -333,6 +334,47 @@ class SecretStore:
         if envelope is None:
             return None
         return decrypt(location, envelope, self._keys)
+
+    def fingerprint(self, kind: EntityKind, identity: str) -> str:
+        """An opaque mark of what is stored for one entity: which slots
+        it has, and the ciphertext sitting in them.
+
+        It answers one question, whether two loads hold the same stored
+        secrets for the same entity, which is what decides whether
+        something built from them has to be built again. A digest rather
+        than the envelopes themselves so that nothing leaves this class
+        that could end up in a response, a log line or an exception
+        message: agreement is the whole of what a caller may learn, and
+        no key is needed to ask.
+
+        Setting a slot again to the same plaintext still changes the
+        mark, since a Fernet token carries a timestamp and a fresh IV.
+        Rebuilding then is the safe direction to be wrong in: the other
+        one would mean deciding that two ciphertexts hold the same
+        secret, which is a question this class has no business
+        answering.
+        """
+        digest = hashlib.sha256()
+        for where in self.locations():
+            if where.kind != kind or where.identity != identity:
+                continue
+            # Length-prefixed, so that no two different sets of slots can
+            # produce the same stream of bytes: a slot named "a" holding
+            # "bc" would otherwise digest as a slot named "ab" holding
+            # "c".
+            for part in (where.slot, _canonical(self._envelopes[where])):
+                digest.update(f"{len(part)}:".encode())
+                digest.update(part.encode("utf-8"))
+        return digest.hexdigest()
+
+
+def _canonical(envelope: object) -> str:
+    """One stored value as bytes to digest, in a form that does not
+    depend on how the row was read: keys sorted, and anything JSON
+    cannot carry rendered as text rather than refused, because a
+    malformed value in a secret slot still has to be compared with the
+    next load's."""
+    return json.dumps(envelope, sort_keys=True, default=str)
 
 
 @dataclass(frozen=True)
