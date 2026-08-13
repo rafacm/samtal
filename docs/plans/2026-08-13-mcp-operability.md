@@ -139,10 +139,16 @@ One entry per configured `mcp_servers` entry, keyed by name:
   round.
 - `since`: when the state last changed, ISO-8601 UTC, the `_instant`
   shape the pending listing uses.
-- `tools`: what a connected server published, as
-  `{name, listed_as, description}`, where `name` is what the model
-  sees (prefixed, sanitized) and `listed_as` what the server listed;
-  one shape for every entry, empty while down.
+- `tools`: what a connected server published, as the list of names
+  the model sees (prefixed, sanitized), empty while down. Nothing
+  else a server chose crosses this surface: descriptions and the
+  original listed names are server-provided bytes, and a server that
+  received a credential through its env or headers could reflect it
+  in either, which would make a gated read into the secret-readback
+  path the whole API refuses to be. Published names are the one
+  server-derived thing already accepted on the observability surface
+  (the connect log prints them, through the publishing rule), and
+  they are what an operator needs to write a grant.
 - `grants`: which agents may reach this server, as a mapping from
   agent name to `null`, meaning the whole server. Shaped as a mapping
   now so milestone 3 can put the allow list where the `null` is
@@ -176,13 +182,18 @@ agents:
 ```
 
 - `server` names the `mcp_servers` entry, checked by the same
-  reference validation as the string form. `tools` lists the tools the
-  agent may reach, by the name the server lists them under
-  (`listed_as` in the status surface), matched exactly. Omitting
-  `tools` means the whole server, same as the string form; an explicit
-  empty list is refused at validation, because "granted, nothing
-  allowed" is a confusing spelling of not granting (`mcp: []` is how
-  an agent opts out).
+  reference validation as the string form. `tools` lists the tools
+  the agent may reach, by the published name without its entry prefix
+  (`turn_on_light` grants `home__turn_on_light`), matched exactly.
+  That identifier is application-owned: it has been through the
+  sanitize rule, it is what the status surface shows and what the
+  model calls, so the operator reads a name in `config status` and
+  writes the same name in the grant, and the raw server-listed
+  original never has to appear on any samtal surface. Omitting
+  `tools` means the whole server, same as the string form; an
+  explicit empty list is refused at validation, because "granted,
+  nothing allowed" is a confusing spelling of not granting
+  (`mcp: []` is how an agent opts out).
 - **Allow list only, no deny list.** A deny list fails open: a
   kitchen-sink server adding a tool silently grants it to every agent
   that denied the old ones, and the shared-family-device story (gap
@@ -201,7 +212,8 @@ agents:
 Internally the grant edge becomes a small value (`entry name` plus
 `allowed tool names or None`), `Config.mcp_for_agent` returns it, and
 `McpServers` filters a server's published tools through the allow list
-by original name before handing them to the tool snapshot. Execution
+by the published name's unprefixed half before handing them to the
+tool snapshot. Execution
 needs no second gate beyond the snapshot filter for the model's sake,
 but gets one anyway: a call to a granted-away tool is refused in
 `McpServers.call`'s routing by the same grant value, so the property
@@ -309,7 +321,11 @@ conversations.
   entries); the status view's shape and instants; the API route
   (gated, empty for a serverless application); an entry named
   `status` still read, written and deleted as an entity while the
-  runtime route answers beside it; CLI rendering.
+  runtime route answers beside it; CLI rendering; the reflection
+  sentinels: a stdio and an HTTP test server whose tool metadata
+  (names, descriptions) carries a credential sentinel, asserted
+  absent from the status response, the CLI output and every log
+  record, the way the malformed-handshake test already asserts.
 - Unit, milestone 2: the diff (new, changed fragment, changed stored
   ciphertext, removed, de-referenced, unchanged-untouched); refusal on
   an invalid snapshot applies nothing; concurrent reload answers 409;
@@ -317,9 +333,10 @@ conversations.
 - Unit, milestone 3: config shapes (string form, object form, both in
   one list, `tools: []` refused, duplicate and blank names refused,
   reference checks on the object form, `agent_defaults` parity);
-  filtering by original name including sanitized-name servers; the
-  call-time grant refusal; the unpublished-allowed-name warning; the
-  status surface carrying allow lists.
+  filtering by the unprefixed published name, including tools whose
+  listed names needed sanitizing; the call-time grant refusal; the
+  unpublished-allowed-name warning; the status surface carrying
+  allow lists.
 - Integration: the issue's verification steps. A new entry written and
   granted through the API becomes usable in a live conversation after
   one reload, no restart, and status shows it connected with its
@@ -389,6 +406,18 @@ its resolution once the amendment addressing it lands.
    against a non-reflective identifier, and add sentinel tests
    asserting a credential reflected in tool metadata reaches neither
    responses nor CLI output nor logs.
+   *Resolution*: adopted. The status `tools` field is now a list of
+   published names only, with the gap 2 section stating why nothing
+   else a server chose crosses the surface; allow lists are defined
+   against the unprefixed published name, so the operator reads a
+   name in `config status` and writes the same name in the grant and
+   the raw original never appears anywhere; milestone 1's tests gain
+   the two reflection sentinels over responses, CLI output and logs.
+   One deliberate remainder: published names are still server-chosen
+   strings inside a safe charset, accepted here because the connect
+   log already prints them under the publishing rule and the model
+   must see them anyway; a deployment that distrusts even that has no
+   business granting the server at all.
 
 3. **P1: reload would perform blocking SQLite work on the
    conversation event loop.** `ConfigStore.load()` is synchronous and
