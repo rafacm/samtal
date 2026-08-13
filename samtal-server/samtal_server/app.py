@@ -94,6 +94,12 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     # even with onboarding off, so no handler needs a branch for its
     # absence; with onboarding off nothing ever puts anything in it.
     app.state.pending = onboarding.PendingDevices()
+    # Built before the API rather than beside the providers below,
+    # because the API's status read reports these managers and they have
+    # to exist to be handed over. An unknown reference or an unset
+    # secret is still a boot failure here, exactly as it was; being
+    # unreachable is still not one.
+    app.state.mcp_servers = McpServers.build(app.state.config, secrets)
     # The configuration API's token is resolved beside it and for the
     # same reason: it is always mounted, so a deployment that forgot the
     # variable must be refused here rather than serve an admin surface
@@ -102,26 +108,28 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     # The agents go with it because a device write's acknowledgement
     # says whether the device can reach what it was just bound to, and
     # only this server knows what it loaded, and the pending table goes
-    # with it because claiming a code is how a device is bound.
+    # with it because claiming a code is how a device is bound. The MCP
+    # managers go with it because the status read reports what they are
+    # doing, and the same object is what makes that a report rather than
+    # a snapshot of what was true when the API was built.
     api = build_api(
         api_token(app.state.config),
         app.state.config.server.database.dir,
         app.state.config.agents,
         app.state.pending,
+        app.state.mcp_servers,
     )
     # One registry per app: what decides whether there is room for the
     # next conversation, and what the drain reaches the live ones through.
     app.state.sessions = SessionRegistry(app.state.config.server.limits.max_sessions)
     # Built here so a bad provider configuration (unknown type, bad option,
     # missing extra, agent without a full pipeline) fails the boot rather
-    # than the first conversation. The same for MCP servers: an unknown
-    # reference or an unset secret is a boot failure, being unreachable
-    # is not.
+    # than the first conversation. The MCP servers are built above, for
+    # the same reason and one of their own.
     app.state.agent_providers = build_agent_providers(app.state.config, secrets)
     # Filled at startup by the lifespan above, since synthesis is async;
     # empty means no agent masks its latency, which is the default.
     app.state.agent_fillers = {}
-    app.state.mcp_servers = McpServers.build(app.state.config, secrets)
     # Absent memory configuration means no remember tool and no
     # injection; the directory itself is created on the first write.
     memory = app.state.config.memory

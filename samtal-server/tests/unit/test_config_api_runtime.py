@@ -16,12 +16,15 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from samtal_server.app import create_app
 from samtal_server.config import Config
-from samtal_server.config.api import build_api
+from samtal_server.config.api import MOUNT_PATH, build_api
 from samtal_server.config.secrets import MASTER_KEY_ENV, generate_key
 from samtal_server.tools.mcp import CONNECTED, DOWN, UNUSED, McpServers
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
+
+API_SECRET_ENV = "SAMTAL_API_SECRET"
 
 STATUS_PATH = "/runtime/mcp-servers"
 
@@ -36,9 +39,11 @@ def entry_data(**overrides: object) -> dict[str, object]:
     } | overrides
 
 
-def config_with(servers: dict[str, object], granted: list[str]) -> Config:
+def config_with(
+    servers: dict[str, object], granted: list[str], database: Path | None = None
+) -> Config:
     return Config(
-        server={},
+        server={} if database is None else {"database": {"dir": str(database)}},
         providers={
             stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")
         },
@@ -129,6 +134,31 @@ async def test_a_dead_server_is_reported_down_with_its_reason(directory: Path) -
     assert answered["tools"]["state"] == DOWN
     assert answered["tools"]["reason"]
     assert answered["tools"]["tools"] == []
+
+
+def test_a_running_server_hands_its_own_managers_to_the_api(
+    monkeypatch: pytest.MonkeyPatch, directory: Path
+) -> None:
+    """The wiring, through the mount a deployment gets.
+
+    No lifespan, so nothing is connected and everything referenced is
+    down: what this shows is that the mounted API reports this server's
+    own entries rather than the empty answer an application built
+    without one gives.
+    """
+    monkeypatch.setenv(API_SECRET_ENV, TOKEN)
+    config = config_with(
+        {"tools": entry_data(), "shelved": entry_data()}, ["tools"], directory
+    )
+    served = TestClient(create_app(config))
+
+    answered = served.get(
+        f"{MOUNT_PATH}{STATUS_PATH}", headers={"Authorization": f"Bearer {TOKEN}"}
+    )
+
+    assert answered.status_code == 200
+    assert answered.json()["tools"]["state"] == DOWN
+    assert answered.json()["shelved"]["state"] == UNUSED
 
 
 @pytest.mark.usefixtures("keys")
