@@ -1093,3 +1093,151 @@ Not verified locally, and stated rather than claimed: the
 installed-wheel migration check, which builds a wheel and migrates a
 fresh database from it, runs in CI only. It learned the two new columns
 in the same change as the migration.
+
+### PR #133 review round
+
+One external review of the milestone's diff: codex CLI, model
+gpt-5.6-sol, read-only, 2026-08-14, with CI green on all three lanes.
+Verdict: mergeable after the listed fixes. Findings as received,
+condensed; each carries the commit that addressed it.
+
+1. **P1: opted-in MCP servers can reflect credentials into HTTP and CLI
+   output.** The manager keeps server guidance verbatim, the prompt
+   route returns it and `config prompt` prints it, and the reflection
+   test even proves a configured environment credential reaches
+   guidance while never exercising either surface. Suggested: redact or
+   reject materialized MCP credential values before storing server
+   instructions and prompts, names included, then add sentinel
+   assertions over the runtime prompt response, `config prompt`, logs,
+   stderr and exception chains.
+   *Resolution*: adopted in ee77ace, redacting rather than rejecting and
+   scoped to this deployment's own values. What an opted-in entry asks
+   for is a third party's words in the prompt, and that decision stands;
+   what it does not ask for is that server handing back the credential
+   this deployment gave it, through surfaces the rest of the API refuses
+   to read a stored secret from. So the entry's env and headers are
+   materialized once at capture, every occurrence of one is replaced
+   with `[redacted]` before anything is stored, and only the redacted
+   text is kept; the resolved values live for the length of that call
+   and are never held on the manager, which is the rule the constructor
+   already follows. The floor is eight characters: an entry's env holds
+   ports and locales as well as tokens, and replacing every occurrence
+   of a three-character value would mangle the guidance without
+   protecting anything. The configured prompt name is redacted where it
+   is echoed. The reflection tests now drive the prompt read and
+   `config prompt` beside the status surfaces, in both trust states, and
+   assert the entry's own guidance survives intact so that an absent
+   sentinel is redaction rather than emptiness.
+   Two things fell out of it. Resolving the values can fail if the
+   environment moved under a running server, and a capture that cannot
+   redact must not keep the text nor take the tools down, so it fails
+   closed with a warning and the connection stands. And the held-session
+   integration test had been proving the reconnect by shipping the
+   entry's own materialized value straight back, which is now redacted
+   and rightly so; its two markers are short enough to sit under the
+   floor, which is the same mechanism seen from the other side.
+
+2. **P1: stdio server output bypasses the no-leak boundary.**
+   `stdio_client` is called without an `errlog`, and the SDK's default
+   forwards a child's stderr to this process's; only
+   `mcp.client.streamable_http` was filtered, while the stdio client
+   logs malformed JSON through `logger.exception` with the bytes in the
+   traceback. Suggested: send child stderr to a discard sink, suppress
+   or sanitize SDK diagnostics before handlers see them, and test a
+   child that writes its credential to stderr and emits malformed
+   protocol data.
+   *Resolution*: adopted in e24c719. The child's stderr goes to
+   `os.devnull`, opened on the connection's own stack so the sink closes
+   with it. The filter list gains the stdio client and the two session
+   loggers, and propagation is turned off at the root of the SDK's
+   namespace behind them, because a filter stops the records logged
+   through the logger it sits on and nothing else, so a list of module
+   names goes stale in a way that a propagation flag does not. The test
+   drives a child that prints its credential to stderr and a
+   non-JSON-RPC line to stdout and then connects anyway, since a server
+   that never came up would prove nothing. The stderr half is asserted
+   on the sink the transport is handed rather than on captured output,
+   and the reason is recorded in the test: `stdio_client` binds
+   `sys.stderr` as a default argument when the SDK module is imported,
+   which under pytest is a capture object belonging to whatever was in
+   force at collection time, so the leak is invisible to `capfd` and a
+   test written that way passes either way. Both halves were checked
+   against a deliberate revert before being believed.
+
+3. **P2: configured prompt names are silently rewritten before
+   lookup.** `inject_prompts` used `NonBlankStr`, which strips, so
+   `"  spaced  "` fetched `"spaced"`. Suggested: a nonblank validator
+   that returns the original unchanged, with round-trip and discovery
+   tests.
+   *Resolution*: adopted in f55f8d0, reusing the verbatim non-blank type
+   milestone 1 built for the text that is promised as written. A
+   published prompt's name is an identifier the server chose rather than
+   a word this server may tidy, and the generated description now says
+   the name is looked up exactly as it was given. The discovery test
+   lists both the padded name and the tidy one and asserts which was
+   fetched.
+
+4. **P2: discovery fetches before the advertised paginated listing
+   ends.** The walk returned as soon as every wanted name had appeared,
+   even with `nextCursor` still set, and the pagination test could not
+   catch it because it put the wanted name on the last page. Suggested:
+   return only when the cursor is null, and test a name on page one with
+   later pages remaining.
+   *Resolution*: adopted in 8f64151. The walk ends when the server says
+   the listing has ended, and the new test puts the wanted name on the
+   first page of three, so stopping early fails it. What the early
+   return cost was not only the stated order: a name published twice
+   would have answered differently depending on which page the first
+   copy sat on.
+
+5. **P2: the discovery deadline and the size cap do not bound response
+   processing.** `_bounded` covers the awaited call only; a page is
+   iterated afterwards, `_rendered` joins every message before the cap
+   is checked, and `_injectable` scans whitespace before checking
+   length. Suggested: transport response-size limits, deadlines enforced
+   while processing, incremental rendering with early rejection, length
+   before stripping, and oversized-page and many-message tests.
+   *Resolution*: adopted in aedb966, and what is bounded is worth
+   stating exactly rather than claiming the whole of the suggestion. A
+   listed-prompt cap (2000 across the walk) ends a walk whose pages are
+   individually enormous, which the page cap cannot see. The phase
+   deadline is checked between pages, so processing counts against it
+   and not only waiting. A prompt result is refused past a fixed message
+   count (200), and its size is then arithmetic over lengths the parsed
+   messages already carry, so an oversized block is refused by a sum
+   rather than by an allocation, with the sum exact enough to name in
+   the warning. `_injectable` checks the length before `strip()`, which
+   would otherwise copy a block already decided against. What is **not**
+   enforced, and is not claimed: there is no transport-level byte limit
+   on a response. What a server sends is read and parsed by the SDK
+   before this code sees it, and these bounds are on what this code then
+   does with it.
+
+### Verification after the review round
+
+Same commands, from `samtal-server/`, on the tree at ee77ace.
+
+```
+uv run ruff check .
+All checks passed!
+
+uv run pytest tests/unit -q
+1841 passed, 15 skipped in 172.82s
+
+uv run pytest tests/integration -q
+53 passed in 153.47s
+
+uv run samtal-server config reference | diff against the committed copy
+reference current
+
+uv run samtal-server config openapi | diff against the committed copy
+openapi current
+```
+
+Eight more unit tests than the milestone left, which is what the
+round added: the two name cases, the finished listing, the listing and
+message caps, the oversized rendering measured rather than built, and
+the child that writes where it likes. Three of the five fixes were
+checked against a deliberate revert before being believed, since two
+of the findings are about tests that passed either way. The
+installed-wheel migration check still runs in CI only.
