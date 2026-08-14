@@ -1009,7 +1009,19 @@ class McpGrant(BaseModel):
             "mcp_servers."
         )
     )
-    tools: list[NonBlankStr] | None = Field(
+    # The two rules the validator below enforces are declared on the
+    # type as well, where a client generator and a schema validator read
+    # them: a contract looser than the code is one a client builds the
+    # wrong request from. They are not pydantic constraints, because a
+    # constraint would answer the empty list with its own sentence and
+    # the one below is the one that says how to grant nothing.
+    tools: (
+        Annotated[
+            list[NonBlankStr],
+            Field(json_schema_extra={"minItems": 1, "uniqueItems": True}),
+        ]
+        | None
+    ) = Field(
         default=None,
         description=(
             "Which of that server's tools this layer may reach, by the published name "
