@@ -305,9 +305,16 @@ def _check_egress(
 
 @dataclass(frozen=True)
 class AgentProviders:
-    """Everything a session needs to hold a conversation as one agent."""
+    """The four engines a session holds a conversation as one agent
+    with.
 
-    prompt: str
+    Exactly the providers, and deliberately not the agent's prompt as
+    well: that used to ride here as a boot-time copy of
+    `agents.<name>.prompt`, and two sources for one string is how the
+    pipeline and an inspection surface come to disagree about what the
+    model was sent. `Config.prompt_for_agent` is the one source.
+    """
+
     llm: LlmProvider
     asr: AsrProvider
     tts: TtsProvider
@@ -344,11 +351,10 @@ def build_agent_providers(
 
     return {
         name: AgentProviders(
-            prompt=agent.prompt,
             llm=cast(LlmProvider, get("llm", name)),
             asr=cast(AsrProvider, get("asr", name)),
             tts=cast(TtsProvider, get("tts", name)),
             vad=cast(VadProvider, get("vad", name)),
         )
-        for name, agent in config.agents.items()
+        for name in config.agents
     }

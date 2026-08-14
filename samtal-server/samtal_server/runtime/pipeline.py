@@ -964,9 +964,10 @@ class PipelineRuntime:
 
     def _system_prompt(self) -> str:
         """The active agent's prompt, plus whatever it remembers."""
-        assert self._providers is not None and self._agent is not None
+        assert self._agent is not None
         facts = "" if self._memory is None else self._memory.read(self._agent)
-        return prompt.with_memory(prompt.know_how(self._providers.prompt), facts).text
+        persona = self._config.prompt_for_agent(self._agent)
+        return prompt.with_memory(prompt.know_how(persona), facts).text
 
     async def _speak_after(
         self,
