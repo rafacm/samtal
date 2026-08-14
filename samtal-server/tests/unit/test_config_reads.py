@@ -207,6 +207,58 @@ def test_an_entry_with_no_guidance_shows_no_key(store: ConfigStore) -> None:
     assert "instructions" not in views.mcp_server(store.read_mcp_server("weather"))["entity"]
 
 
+def test_a_fragment_is_shown_as_the_mapping_a_write_takes_back(
+    store: ConfigStore,
+) -> None:
+    """The exact read representation, pinned: an envelope whose entity is
+    the one-key mapping a PUT of it carries, with the text byte for
+    byte."""
+    written = "  The bins go out on Tuesday.\n\n    The radio is called Bosse.\n"
+    store.set_prompt_fragment("household", {"text": written})
+
+    envelope = views.prompt_fragment(store.read_prompt_fragment("household"))
+
+    assert envelope == {"entity": {"text": written}, "secrets": {}}
+    store.set_prompt_fragment("household", envelope["entity"])
+    assert store.read_prompt_fragment("household").entry.text == written
+
+
+def test_every_fragment_is_listed_and_shown_in_the_whole_configuration(
+    store: ConfigStore,
+) -> None:
+    _populate(store)
+    store.set_prompt_fragment("household", {"text": "The bins go out on Tuesday."})
+
+    snapshot = store.load()
+
+    assert views.prompt_fragments(snapshot) == {
+        "household": {"entity": {"text": "The bins go out on Tuesday."}, "secrets": {}}
+    }
+    document = views.config(snapshot)["config"]
+    assert document["prompt_fragments"] == {
+        "household": {"text": "The bins go out on Tuesday."}
+    }
+
+
+def test_an_include_list_is_echoed_write_shaped_on_both_layers(
+    store: ConfigStore,
+) -> None:
+    """An unset list is absent rather than null, since unset is inherit
+    and an empty list is the opposite."""
+    _populate(store)
+    store.set_prompt_fragment("household", {"text": "The bins go out on Tuesday."})
+    store.set_agent_defaults({"prompt_includes": ["household"]})
+    store.set_agent("poet", {"prompt": "P", "prompt_includes": []})
+
+    defaults = views.agent_defaults(store.read_agent_defaults())["entity"]
+    poet = views.agent(store.read_agent("poet"))["entity"]
+    sam = views.agent(store.read_agent("sam"))["entity"]
+
+    assert defaults["prompt_includes"] == ["household"]
+    assert poet["prompt_includes"] == []
+    assert "prompt_includes" not in sam
+
+
 def test_a_reference_that_is_not_one_comes_back_masked(store: ConfigStore) -> None:
     """Fail-closed masking, on the path an operator reaches for when
     something is wrong. The models keep an obvious paste out, but a
