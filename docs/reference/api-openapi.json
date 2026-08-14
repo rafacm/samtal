@@ -2243,12 +2243,12 @@
             },
             "type": "array",
             "title": "Blocks",
-            "description": "The blocks in the order they are sent: the persona, then the guidance of each MCP entry the agent is granted in grant order, then the remembered facts. The order is fixed and not configurable."
+            "description": "The blocks in the order they are sent, joined by one blank line each: the persona, then the guidance of each MCP entry the agent is granted in grant order, then the remembered facts. The order is fixed and not configurable. A block that would hold nothing is not sent and is not listed, which is what an agent with no prompt of its own produces."
           },
           "characters": {
             "type": "integer",
             "title": "Characters",
-            "description": "The whole prompt's length in characters. Not the sum of the blocks: the blank lines between them count, and whitespace at the two ends is stripped."
+            "description": "The whole prompt's length in characters, which is the sum of the blocks plus the blank line between each pair of them. The prompt is the blocks joined and nothing else, so a character counted here is a character the model receives."
           }
         },
         "additionalProperties": false,
@@ -2807,7 +2807,7 @@
               }
             ],
             "default": null,
-            "description": "Guidance for the model about using this server's tools, injected into the system prompt of every agent this entry is granted to, under a heading naming the prefix its tools carry. It is written for the whole entry rather than per tool, so guidance about a tool an agent's allow list withholds is noise the operator avoids by writing about the granted surface. The grant is the whole condition: it is injected whether or not the server is connected and whatever its tools turn out to be, and an agent with `mcp: []` never sees it. It is stored and injected exactly as written, indentation and blank lines included. Editing it does not restart the connection, so a reload reports the entry as `unchanged`, and the new text reaches a conversation at its next activation: a new session or an agent switch, never a reply of a session already running.",
+            "description": "Guidance for the model about using this server's tools, injected into the system prompt of every agent this entry is granted to, under a heading naming the prefix its tools carry. It is written for the whole entry rather than per tool, so guidance about a tool an agent's allow list withholds is noise the operator avoids by writing about the granted surface. The grant is the whole condition: it is injected whether or not the server is connected and whatever its tools turn out to be, and an agent with `mcp: []` never sees it. It is stored and injected as written, its indentation and its own blank lines included; the only bytes trimmed are whitespace at the two ends of the whole assembled prompt, which is also what the inspection surface reports. Editing it does not restart the connection, so a reload reports the entry as `unchanged`, and the new text reaches a conversation at its next activation: a new session or an agent switch, never a reply of a session already running.",
             "title": "Instructions"
           }
         },

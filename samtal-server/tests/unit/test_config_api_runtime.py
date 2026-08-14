@@ -444,9 +444,12 @@ def test_the_blocks_and_the_total_are_the_assemblers_own(directory: Path) -> Non
     assert [block["text"] for block in body["blocks"]] == [
         block.text for block in assembled.blocks
     ]
-    # The total is the whole prompt rather than the sum of the blocks:
-    # the blank lines between them count.
+    # The total is the whole prompt, and the whole prompt is the blocks
+    # joined: a byte counted here is a byte the model receives.
     assert body["characters"] == assembled.characters
+    assert body["characters"] == len(
+        "\n\n".join(block["text"] for block in body["blocks"])
+    )
     assert body["characters"] > sum(block["characters"] for block in body["blocks"])
 
 
@@ -473,6 +476,9 @@ def test_a_running_server_hands_its_own_assembly_to_the_api(
     ]
     assert body["blocks"][0]["text"] == "A"
     assert "Ask first." in body["blocks"][1]["text"]
+    assert body["characters"] == len(
+        "\n\n".join(block["text"] for block in body["blocks"])
+    )
     # And an agent nothing loaded is the 404, through the same mount.
     missing = served.get(
         f"{MOUNT_PATH}/runtime/agents/stranger/prompt",

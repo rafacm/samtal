@@ -693,16 +693,19 @@ class AssembledPrompt(BaseModel):
 
     blocks: list[PromptBlock] = Field(
         description=(
-            "The blocks in the order they are sent: the persona, then the guidance of "
-            "each MCP entry the agent is granted in grant order, then the remembered "
-            "facts. The order is fixed and not configurable."
+            "The blocks in the order they are sent, joined by one blank line each: the "
+            "persona, then the guidance of each MCP entry the agent is granted in grant "
+            "order, then the remembered facts. The order is fixed and not configurable. "
+            "A block that would hold nothing is not sent and is not listed, which is "
+            "what an agent with no prompt of its own produces."
         )
     )
     characters: int = Field(
         description=(
-            "The whole prompt's length in characters. Not the sum of the blocks: the "
-            "blank lines between them count, and whitespace at the two ends is "
-            "stripped."
+            "The whole prompt's length in characters, which is the sum of the blocks "
+            "plus the blank line between each pair of them. The prompt is the blocks "
+            "joined and nothing else, so a character counted here is a character the "
+            "model receives."
         )
     )
 
