@@ -207,6 +207,39 @@ def test_an_entry_with_no_guidance_shows_no_key(store: ConfigStore) -> None:
     assert "instructions" not in views.mcp_server(store.read_mcp_server("weather"))["entity"]
 
 
+def test_the_server_guidance_opt_ins_are_shown_write_shaped(store: ConfigStore) -> None:
+    """The trust decision is what a read answers about, so the flag is
+    shown in either state; the prompt names are the operator's own
+    configuration, echoed here as they were written, which is one of the
+    two places they may appear at all."""
+    store.set_mcp_server(
+        "home",
+        {
+            "transport": "stdio",
+            "command": "uvx",
+            "use_server_instructions": True,
+            "inject_prompts": ["house_style"],
+        },
+    )
+
+    body = views.mcp_server(store.read_mcp_server("home"))["entity"]
+
+    assert body["use_server_instructions"] is True
+    assert body["inject_prompts"] == ["house_style"]
+    store.set_mcp_server("home", body)
+    entry = store.read_mcp_server("home").entry
+    assert (entry.use_server_instructions, entry.inject_prompts) == (True, ["house_style"])
+
+
+def test_an_entry_naming_no_prompts_shows_no_list(store: ConfigStore) -> None:
+    _populate(store)
+
+    body = views.mcp_server(store.read_mcp_server("weather"))["entity"]
+
+    assert body["use_server_instructions"] is False
+    assert "inject_prompts" not in body
+
+
 def test_a_fragment_is_shown_as_the_mapping_a_write_takes_back(
     store: ConfigStore,
 ) -> None:

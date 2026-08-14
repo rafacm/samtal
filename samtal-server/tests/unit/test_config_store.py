@@ -188,6 +188,49 @@ def test_a_row_written_before_the_guidance_column_loads_unchanged(
     assert entry.command == "uvx"
 
 
+def test_the_server_guidance_opt_ins_round_trip(store: ConfigStore) -> None:
+    """Both channels' opt-ins are stored in columns of their own, so what
+    a write says about trusting a third party is what a load reads."""
+    _populate(store)
+    store.set_mcp_server(
+        "weather",
+        {
+            "transport": "stdio",
+            "command": "uvx",
+            "use_server_instructions": True,
+            "inject_prompts": ["house_style", "safety"],
+        },
+    )
+
+    with store._engine.connect() as connection:
+        stored = connection.execute(
+            select(
+                schema.mcp_servers.c.use_server_instructions,
+                schema.mcp_servers.c.inject_prompts,
+            ).where(schema.mcp_servers.c.name == "weather")
+        ).one()
+    assert stored.use_server_instructions
+    assert stored.inject_prompts == ["house_style", "safety"]
+
+    entry = store.load().domain.mcp_servers["weather"]
+    assert entry.use_server_instructions is True
+    assert entry.inject_prompts == ["house_style", "safety"]
+
+
+def test_a_row_written_before_the_opt_in_columns_loads_as_opted_out(
+    store: ConfigStore,
+) -> None:
+    """The boolean's column is NOT NULL with a database-level default,
+    so a row that predates the migration says false itself; the list
+    beside it is nullable, where NULL is the none the model means."""
+    _populate(store)
+
+    entry = store.load().domain.mcp_servers["home"]
+
+    assert entry.use_server_instructions is False
+    assert entry.inject_prompts is None
+
+
 def test_a_fragment_round_trips_byte_for_byte(store: ConfigStore) -> None:
     """A fragment is injected into a prompt as it stands, so what the
     column holds and what a read gives back are the bytes that were

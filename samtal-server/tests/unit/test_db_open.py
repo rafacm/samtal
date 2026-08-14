@@ -31,7 +31,7 @@ EXPECTED_TABLES = {
 # stopped early fails here rather than at the first write on a
 # deployment. The same set the installed-wheel check in CI holds.
 EXPECTED_COLUMNS = {
-    "mcp_servers": {"instructions"},
+    "mcp_servers": {"instructions", "use_server_instructions", "inject_prompts"},
     "agent_defaults": {"prompt_includes"},
     "agents": {"prompt_includes"},
 }
@@ -376,6 +376,12 @@ def test_a_seeded_baseline_database_upgrades_to_head_with_every_value_kept(
     assert domain.prompt_fragments == {}
     assert domain.agent_defaults.prompt_includes is None
     assert domain.agents["sam"].prompt_includes is None
+    # And what 0004 added: the opt-in reads false from the database
+    # rather than from a Python-side rescue of NULL, which is what a
+    # NOT NULL column with a database-level default is for, and the
+    # nullable list beside it is unset.
+    assert entry.use_server_instructions is False
+    assert entry.inject_prompts is None
     # 0003 is additive in the other two shapes as well: a new table,
     # empty because nothing wrote a fragment, and a nullable column on
     # each layer table.
@@ -384,6 +390,15 @@ def test_a_seeded_baseline_database_upgrades_to_head_with_every_value_kept(
         assert EXPECTED_TABLES <= _tables(engine)
         for table, added in EXPECTED_COLUMNS.items():
             assert added <= _columns(engine, table)
+        # The opt-in is false in the row rather than NULL in it, which
+        # is the difference between a database that says the decision
+        # and one whose readers each decide what NULL meant.
+        with engine.connect() as connection:
+            stored = connection.execute(
+                text("select use_server_instructions from mcp_servers where name = 'home'")
+            ).scalar()
+        assert stored is not None
+        assert not stored
     finally:
         engine.dispose()
 

@@ -922,6 +922,12 @@ def _mcp_from_row(row: Row) -> McpServerConfig:
     # before the column existed holds and what "no guidance" means.
     if row.instructions is not None:
         data["instructions"] = row.instructions
+    # Read rather than defaulted, and read from the column rather than
+    # rescued from NULL: the column is NOT NULL with a database-level
+    # default, so a row written before it existed says false itself.
+    data["use_server_instructions"] = bool(row.use_server_instructions)
+    if row.inject_prompts is not None:
+        data["inject_prompts"] = _list(location, "inject_prompts", row.inject_prompts)
     return _stored(McpServerConfig, location, data)
 
 
@@ -1019,6 +1025,13 @@ def _mcp_values(entry: McpServerConfig) -> dict[str, object]:
         # Written as it was given: this is prompt text an operator wrote,
         # and its indentation and its blank lines are part of it.
         "instructions": entry.instructions,
+        "use_server_instructions": entry.use_server_instructions,
+        # None and an empty list are different configurations here as
+        # everywhere else: one is "no prompts named", the other is a
+        # list an operator emptied.
+        "inject_prompts": (
+            list(entry.inject_prompts) if entry.inject_prompts is not None else None
+        ),
     }
 
 
