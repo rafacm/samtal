@@ -43,6 +43,19 @@ mcp:
       - turn_on_light
       - turn_off_light
 
+# The shared prompt fragments this agent's system prompt carries, named
+# the way agent_defaults names them and following the same rule as the
+# lists above: naming a list replaces the inherited one rather than
+# extending it, and `prompt_includes: []` opts this agent out of the
+# fragments its siblings share. Leaving the key out inherits the
+# agent_defaults list, which is what most agents want.
+#
+# The blocks are injected after this agent's prompt, in the order listed
+# here, exactly as they were written. `samtal-server config prompt
+# <name>` prints what they add up to.
+prompt_includes:
+  - household
+
 # An agent may name its own filler section, which replaces the inherited
 # one wholly rather than merging with it. See examples/agent-defaults.yaml
 # for what the section holds.
