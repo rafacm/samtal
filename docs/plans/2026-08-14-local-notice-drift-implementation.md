@@ -56,10 +56,14 @@ deletes, and `set-secret` and `clear-secret` on a provider slot and on
 an MCP slot. Each case carries what the act needs seeded, the act's
 argv, and whether it is one a reload applies. The body seeds, runs the
 act over HTTP, keeps that invocation's stderr as the expected value,
-seeds again, runs the same act with `--local`, and asserts the local
-stderr's lines are exactly `[LOCAL_NOTICE, <what the ordinary path
-answered>]`. The three reloadable cases additionally assert
-`RESTART_NOTICE` appears nowhere in that stderr. The section header
+puts the state back (deleting the entity and seeding it again, for the
+acts that are not themselves deletes; see the third review finding
+below, which is where that step came from), runs the same act with
+`--local`, and asserts the local stderr's lines are exactly
+`[LOCAL_PREAMBLE, <what the ordinary path answered>]`. The three
+reloadable cases additionally assert `RESTART_NOTICE`, and the
+phrasings a restart claim is made in, appear nowhere in that stderr.
+The section header
 above the test states that the nine cases are manual coverage of the
 current subset, kept complete by review rather than by machinery, which
 is the plan's honest wording for the P3 finding.
@@ -67,7 +71,9 @@ is the plan's honest wording for the P3 finding.
 No existing test was weakened, loosened or deleted. Nothing in the
 suite pinned `LOCAL_NOTICE`'s exact text (the preamble test checks for
 the phrase "bypassing the configuration API", which the revision
-keeps), so no existing assertion needed rewording.
+keeps), so no existing assertion needed rewording. The review round
+added the pin that was missing, `LOCAL_PREAMBLE` and
+`test_the_local_preamble_makes_no_timing_claim_of_its_own`.
 
 **`samtal-server/README.md`.** The four passages the plan names, plus a
 fifth sentence found beside the fourth:
@@ -78,7 +84,9 @@ fifth sentence found beside the fourth:
   names the three applicability cases explicitly;
 - the deployment section's "an edit applies at the next server start"
   trap paragraph, which becomes "most of an edit applies at the next
-  server start" with both exceptions named;
+  server start" with both exceptions named (its body kept the universal
+  claim through this pass and was corrected in the review round, the
+  second finding below);
 - the deployment section's description of the `--local` stderr line;
 - and the two-sentence closer under it, "Restart the server when the
   repair is done. Nothing written this way is observed until then." The
@@ -167,3 +175,80 @@ Full lanes, from `samtal-server/`:
 - `uv run ruff check .`: **All checks passed!**
 - `uv run pytest tests/unit -q`: **1850 passed, 15 skipped** in 178 s.
 - `uv run pytest tests/integration -q`: **53 passed** in 154 s.
+
+The numbers above are the state at the PR's first push. The review
+round below strengthens the test's two weakest assumptions and corrects
+one more README paragraph; its own verification is recorded with it.
+
+### PR #147 review round
+
+One external review of the pull request's diff: codex CLI, model
+gpt-5.6-sol, read-only, 2026-08-14. Verdict: mergeable after fixes.
+Three findings, one P1 and two P2, each fixed in its own commit.
+Findings as received, condensed, each with its resolution.
+
+1. **P1: the regression test follows `LOCAL_NOTICE` instead of pinning
+   its neutral wording.** The stderr-shape assertion expects the same
+   `cli.LOCAL_NOTICE` production prints, so restoring the old
+   contradictory "until its next start" preamble would update both
+   sides and still pass; the reloadable check rejects only the exact
+   `RESTART_NOTICE`, which the old wording does not contain. Suggested:
+   assert `cli.LOCAL_NOTICE` equals the approved neutral sentence as a
+   literal, use that literal in the shape assertion, and reject
+   restart-timing language independently in the reloadable cases rather
+   than only the constant.
+   *Resolution*: adopted in 7c7c2d9. `LOCAL_PREAMBLE` is the neutral
+   sentence as a literal in the test file, tied to production by
+   `test_the_local_preamble_makes_no_timing_claim_of_its_own`, and the
+   shape assertion uses the literal. A `RESTART_TIMING` tuple holds the
+   phrasings a restart claim has been written in here (the two halves
+   of `RESTART_NOTICE`, and the retired clause), which the preamble test
+   and the reloadable cases both reject; the bare word "restart" is
+   deliberately not among them, since `MCP_RELOAD_NOTICE` uses it to say
+   that none is needed. Checked by putting the old wording back into
+   `cli.py`: all ten cases fail, where before the commit all ten passed.
+2. **P2: the deployment notes keep the universal restart claim.** The
+   "an edit applies at the next server start" paragraph still says a
+   `config set` changes nothing until restart and that both transports
+   always answer accordingly, which `config set mcp-server` does not.
+   Suggested: qualify the sentence to boot-time entity writes and
+   distinguish MCP entry writes, preserving the nuance that agent writes
+   still report the restart even though a reload re-reads their grant
+   lists.
+   *Resolution*: adopted in 955960d. The sentence now names the writes
+   it is true of (a provider, an agent, a prompt fragment, the agent
+   defaults), gives the two kinds that answer otherwise, and keeps the
+   agent nuance explicitly with its reason. This is a fifth README
+   passage beyond the four the plan named and the one the milestone
+   found; the earlier pass had qualified the paragraph's heading
+   sentence and left its body making the claim.
+3. **P2: the two set-secret comparisons do not run against equivalent
+   state.** After the API path sets the secret, the re-seed only
+   rewrites the entity, and `_upsert` (store.py:1111) preserves omitted
+   columns including `secrets`, so the API run creates a secret while
+   the `--local` run rotates an existing one, contrary to the test's and
+   this document's equivalent-state claim. Suggested: delete and
+   recreate the entity between the runs, or run each path against fresh
+   state, asserting the setup calls succeed; correct the implementation
+   doc if its claim was inaccurate.
+   *Resolution*: adopted in 210b356. The finding is correct, and
+   `_upsert`'s own docstring says so ("leaving every column the caller
+   did not name (the `secrets` column, above all) as it was"). The test
+   now deletes the entity between the runs and seeds it again, which
+   takes the row and its stored secrets together, and asserts the
+   delete's exit code; the acts that are themselves deletes skip it,
+   having left nothing to address. The comment and the docstring say how
+   equivalence is established rather than claiming it. Confirmed with a
+   throwaway probe before removing it: after re-seeding alone, `show`
+   still rendered the stored `api_key`; after the delete and re-seed, it
+   did not. The claim in this document's "What landed" section was
+   inaccurate in the same way and is corrected above.
+
+### Verification after the review round
+
+From `samtal-server/`, on the branch with all three fixes:
+
+- `uv run ruff check .`: **All checks passed!**
+- `uv run pytest tests/unit -q`: **1851 passed, 15 skipped** in 174 s.
+  One more test than before the round, the preamble pin.
+- `uv run pytest tests/integration -q`: **53 passed** in 152 s.
