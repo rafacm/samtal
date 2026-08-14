@@ -352,6 +352,35 @@ def test_a_running_server_hands_its_own_reload_to_the_api(
     assert answered.json()["servers"]["tools"]["state"] == DOWN
 
 
+def test_the_reload_says_that_unchanged_is_about_the_connection() -> None:
+    """An instructions-only edit is reported `unchanged` on purpose, so
+    the word has to mean the connection and not the entry. A contract
+    that read it as "nothing about this entry moved" would have a
+    client, or an operator, believe a rewrite had not been applied.
+
+    And the two halves of an entry reach a conversation at different
+    moments, which is the other thing this document has to say: tools
+    and grants on the next utterance, because they are snapshotted per
+    reply, and guidance at the next activation, because prompt text is
+    assembled there and cached.
+    """
+    rendered = document()
+    described = rendered["components"]["schemas"]["McpReloadResult"]["properties"]
+    unchanged = described["unchanged"]["description"]
+
+    assert "kept the connection" in unchanged
+    assert "instructions" in unchanged
+    assert "next activation" in unchanged
+    assert "nothing changed about" not in unchanged
+
+    for prose in (
+        rendered["info"]["description"],
+        rendered["paths"][RELOAD_PATH]["post"]["description"],
+    ):
+        assert "next utterance" in prose
+        assert "next activation" in prose
+
+
 def test_the_reload_describes_a_422_of_its_own() -> None:
     """The shared sentence for 422 is about addressing: a stage that is
     not a stage, a MAC that is not one. This endpoint addresses nothing
