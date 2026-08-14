@@ -399,6 +399,11 @@ examples/mcp-server-streamable-http.yaml  the same, plus the opt-in with
 examples/prompt-fragment.yaml         a fragment example
 examples/agent.yaml                   prompt_includes beside mcp
 examples/agent-defaults.yaml          the same, on the defaults layer
+examples/README.md                    the new example listed, which the
+                                      example suite enforces
+tests/unit/test_config_examples.py    prompt-fragment joins the creation
+                                      order before the layers that
+                                      include it; the listing assertions
 docs/reference/domain-config.md       regenerated
 docs/reference/api-openapi.json       regenerated
 samtal-server/README.md               assembly order, guidance, fragments,
@@ -595,6 +600,11 @@ its resolution once the amendment addressing it lands.
    requires every example listed in `examples/README.md`; adding
    `examples/prompt-fragment.yaml` fails `ORDER.index(...)`, and
    neither the test nor the README is named by the plan.
+   *Resolution*: adopted. The module layout now carries
+   `examples/README.md` and `tests/unit/test_config_examples.py`,
+   with `prompt-fragment` joining the creation order before the
+   layers that include it, and the listing assertions updated in the
+   same milestone 2 change that adds the example.
 
 5. **P2: the upgrade verification does not prove real 0001
    databases survive.** The database tests migrate a fresh database
