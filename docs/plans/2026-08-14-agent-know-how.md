@@ -199,9 +199,9 @@ on:
   places, both deliberate: the model's system prompt, which is what
   the opt-in means, and the assembled-prompt surface, which exists to
   show what the model receives and marks the block's provenance so an
-  operator can see whose words they are reading. The CLI strips
-  control characters when rendering any block, so a hostile server
-  cannot drive a terminal through an inspection command.
+  operator can see whose words they are reading. The CLI renders
+  blocks through a sanitizer of their own (below), so a hostile
+  server cannot drive a terminal through an inspection command.
 
 ### Guidance and per-tool grants: whole-entry, and injected next to tools
 
@@ -382,6 +382,19 @@ status surface, which is about surfaces that did not ask for those
 bytes; here the operator explicitly opted the bytes into the model's
 prompt, and this surface is the audit of exactly that.
 
+`config prompt` does not render through the CLI's existing response
+renderer: `_printable` strips every value and truncates it to
+`GLIMPSE_LENGTH`, which is right for acknowledgements and fatally
+wrong for an inspection command, where a concealed tail is exactly
+what the operator came to see. The command gets a full-block terminal
+sanitizer of its own: newlines and tabs pass, every other
+non-printable character is replaced rather than stripped, and nothing
+is truncated, ever, silently or otherwise; the block's reported
+character count is the count of what was stored, so a replacement
+never falsifies the accounting. The test renders a block longer than
+`GLIMPSE_LENGTH` and asserts the tail survives, beside the
+control-character case.
+
 ## Module layout
 
 ```
@@ -494,8 +507,10 @@ doc drift checks.
   stops injecting while the connection stands.
 - Unit, milestone 4: the route (bearer-gated, 404 for an unloaded
   agent with the restart sentence, 503 serverless); the block shapes
-  and totals agree with the assembler; CLI rendering strips control
-  characters; OpenAPI drift.
+  and totals agree with the assembler; the CLI's full-block
+  sanitizer replaces non-printables without stripping and truncates
+  nothing, proven with a block longer than `GLIMPSE_LENGTH` whose
+  tail survives; OpenAPI drift.
 - Integration: the issue's verification steps. Two agents granted the
   same entry both speak its guidance through `{system}`, and an
   `mcp: []` agent does not; a fragment written through the API changes
@@ -536,7 +551,7 @@ doc drift checks.
   the documented two-tier fallback owned by #83.
 - **Third-party bytes steering the agent.** Opt-in per entry, the
   size cap, the publishing rule for logs, provenance on the surface,
-  control characters stripped at the CLI.
+  the CLI's full-block sanitizer.
 - **Schema widening breaks existing rows.** Every column is nullable
   or defaulted, the table is new, and the unit suites pin pre-upgrade
   rows loading unchanged; migrations are additive and per-milestone,
@@ -709,6 +724,13 @@ its resolution once the amendment addressing it lands.
    Use a dedicated full-block sanitizer that replaces nonprintables
    without stripping or truncating, and test a block longer than
    `GLIMPSE_LENGTH`.
+   *Resolution*: adopted. The inspection section now states that
+   `config prompt` bypasses `_printable` and renders through a
+   full-block sanitizer that passes newlines and tabs, replaces
+   rather than strips other non-printables, and never truncates,
+   with the reported counts always counting what was stored; the
+   milestone 4 tests carry the longer-than-`GLIMPSE_LENGTH` block
+   whose tail must survive.
 
 9. **P3: two persona sources are left standing.** The plan has
    `Config.prompt_for_agent` resolving the persona while
@@ -755,5 +777,6 @@ default-off flag, milestone 4 is a new read surface.
   `prompt_assembled` event, the assembly-order documentation, OpenAPI
   regen, CHANGELOG. Accept: lint and both lanes green; the surface
   answers all four provenances with sizes and totals over a real
-  socket; 404 and 503 honest; control characters stripped at the CLI;
+  socket; 404 and 503 honest; the CLI sanitizer replaces without
+  stripping or truncating, the long-block tail surviving;
   drift checks pass.
