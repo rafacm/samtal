@@ -427,7 +427,8 @@ samtal_server/providers/registry.py   AgentProviders loses its prompt copy;
                                       the four providers remain
 samtal_server/db/schema.py            the new columns and table
 samtal_server/db/migrations/versions/ 0002 (instructions), 0003 (fragments,
-                                      includes), 0004 (use_server_instructions)
+                                      includes), 0004 (the two
+                                      server-shipped opt-in fields)
 samtal_server/config/store.py         fragment rows; the new columns in
                                       entry and layer rows
 samtal_server/config/views.py         fragment reads; the new fields echoed
