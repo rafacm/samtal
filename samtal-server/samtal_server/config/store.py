@@ -53,9 +53,11 @@ from samtal_server.config.models import (
     AgentDefaults,
     McpServerConfig,
     NonBlankStr,
+    PromptFragmentConfig,
     ProviderConfig,
     ProvidersConfig,
     check_mcp_entry_names,
+    check_prompt_fragment_names,
     check_references,
     is_env_name,
     is_secret_option,
@@ -133,6 +135,9 @@ class DomainConfig(BaseModel):
     mcp_servers: dict[NonBlankStr, McpServerConfig] = Field(
         default_factory=dict, description=DOMAIN_DESCRIPTIONS["mcp_servers"]
     )
+    prompt_fragments: dict[NonBlankStr, PromptFragmentConfig] = Field(
+        default_factory=dict, description=DOMAIN_DESCRIPTIONS["prompt_fragments"]
+    )
     agent_defaults: AgentDefaults = Field(
         default_factory=AgentDefaults, description=DOMAIN_DESCRIPTIONS["agent_defaults"]
     )
@@ -152,6 +157,13 @@ class DomainConfig(BaseModel):
         cls, value: dict[str, McpServerConfig]
     ) -> dict[str, McpServerConfig]:
         return check_mcp_entry_names(value)
+
+    @field_validator("prompt_fragments")
+    @classmethod
+    def _check_fragment_names(
+        cls, value: dict[str, PromptFragmentConfig]
+    ) -> dict[str, PromptFragmentConfig]:
+        return check_prompt_fragment_names(value)
 
     @field_validator("devices", mode="before")
     @classmethod

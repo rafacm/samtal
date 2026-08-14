@@ -13,6 +13,7 @@ from samtal_server.config.models import (
     AgentConfig,
     AgentDefaults,
     McpServerConfig,
+    PromptFragmentConfig,
     ProviderConfig,
     ProvidersConfig,
     check_completeness,
@@ -27,6 +28,7 @@ class Snapshot:
 
     providers: ProvidersConfig = field(default_factory=ProvidersConfig)
     mcp_servers: dict[str, McpServerConfig] = field(default_factory=dict)
+    prompt_fragments: dict[str, PromptFragmentConfig] = field(default_factory=dict)
     agent_defaults: AgentDefaults = field(default_factory=AgentDefaults)
     agents: dict[str, AgentConfig] = field(default_factory=dict)
     devices: dict[str, list[str]] = field(default_factory=dict)

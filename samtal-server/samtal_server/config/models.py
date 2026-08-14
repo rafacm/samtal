@@ -968,6 +968,34 @@ class McpServerConfig(BaseModel):
         return problems
 
 
+class PromptFragmentConfig(BaseModel):
+    """One named block of prompt text, shared by the agents that include
+    it.
+
+    A mapping with one field rather than a bare string. Every entity in
+    this configuration travels the same path (a stored row, a read
+    envelope, a written fragment), and all three of those want a mapping;
+    a one-field mapping also leaves room for a second field later without
+    changing the shape a client writes, which is why a grant took its
+    object form too.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    text: VerbatimStr = Field(
+        description=(
+            "The text injected into the system prompt of every agent whose "
+            "prompt_includes names this fragment, exactly as written: indentation and "
+            "blank lines are part of it, and nothing is added around it, not even a "
+            "heading, since this is prompt text the operator wrote and a heading would "
+            "editorialize. It sits after the agent's own prompt and before any MCP "
+            "guidance, in the order the including layer lists it. There is no length "
+            "cap: what each block costs is reported by `samtal-server config prompt "
+            "<agent>`, and the operator is the one who knows what their model tolerates."
+        )
+    )
+
+
 class MemoryConfig(BaseModel):
     """Where the agents' remembered facts are kept.
 
@@ -1303,6 +1331,46 @@ class AgentDefaults(BaseModel):
         ),
     )
 
+    # The shared fragments this layer's prompt carries. None means
+    # inherit; a list replaces rather than extends, exactly like `mcp`,
+    # so a layer naming an empty list opts out of the fragments its
+    # siblings share.
+    prompt_includes: list[NonBlankStr] | None = Field(
+        default=None,
+        description=(
+            "The shared prompt fragments this layer's system prompt carries, each by "
+            "the name it is defined under in prompt_fragments, injected in the order "
+            "listed and directly after the agent's own prompt. Unset inherits the "
+            "agent_defaults list; naming a list replaces the inherited one rather than "
+            "extending it, so an empty list opts an agent out of the fragments its "
+            "siblings share. Every name has to be a fragment that exists, since the "
+            "fragment is in this same database, and a name listed twice is refused. "
+            "Fragments are part of the boot-time snapshot, so a change here reaches a "
+            "conversation at the next server start rather than at a reload."
+        ),
+    )
+
+    @field_validator("prompt_includes")
+    @classmethod
+    def _check_prompt_includes(cls, value: list[str] | None) -> list[str] | None:
+        """One entry per fragment. Naming a fragment twice would inject
+        it twice, which is a thing to say once if it is meant at all.
+
+        The refusal points at positions and never at what is in them, the
+        rule the grant's own refusals follow: a rejected name may be a
+        pasted credential, and this sentence leaves the boundary as a
+        printed CLI line, an HTTP 422 body and a boot log.
+        """
+        if value is None:
+            return value
+        repeated = _repeated_positions(value)
+        if repeated:
+            raise ValueError(
+                f"prompt_includes names one fragment at more than one position "
+                f"({repeated}); list each fragment once"
+            )
+        return value
+
 
 class AgentConfig(AgentDefaults):
     """One agent: a prompt, plus whichever stages it overrides."""
@@ -1345,6 +1413,33 @@ def check_mcp_entry_names(value: dict[str, McpServerConfig]) -> dict[str, McpSer
     return value
 
 
+def check_prompt_fragment_names(
+    value: dict[str, PromptFragmentConfig],
+) -> dict[str, PromptFragmentConfig]:
+    """A fragment name is printed wherever the assembled prompt is
+    accounted for, so it has to be written in the safe charset.
+
+    The same rule an `mcp_servers` entry name follows, for the same
+    reason and not for its reason: an entry name has to be a legal tool
+    prefix, and a fragment name has to be safe on a terminal, in a log
+    line and in a provenance token (`fragment:<name>`). The reserved
+    names do not apply, since a fragment is in no tool list.
+
+    The refusal is deliberately not `check_mcp_entry_names`', which
+    interpolates the name it rejected: a name that fails the charset is
+    exactly the string that must not be echoed, because what was written
+    there may be a pasted credential. So it names the section and the
+    rule, and a valid name is the only kind any surface here prints.
+    """
+    if any(not names.TOOL_NAME_PATTERN.match(name) for name in value):
+        raise ValueError(
+            "prompt_fragments: a fragment name has to match [A-Za-z0-9_-]+, and one "
+            "of these does not. The name is not quoted back: what fails this rule is "
+            "the kind of string that must not be echoed"
+        )
+    return value
+
+
 def normalize_device_bindings(value: object) -> object:
     """The devices mapping with every MAC in its canonical form and
     every binding a list. Anything that is not a mapping is left for
@@ -1380,6 +1475,15 @@ DOMAIN_DESCRIPTIONS: dict[str, str] = {
         "structured content to a device is work for the display protocol, once the "
         "display path can render more than speech, rather than for the tool loop."
     ),
+    "prompt_fragments": (
+        "The shared blocks of prompt text agents include by name, keyed by fragment "
+        "name. A fragment is written once and injected verbatim into the system "
+        "prompt of every agent whose prompt_includes names it, which is how household "
+        "facts or a house style stay in one place instead of being copied into every "
+        "persona prompt and drifting apart. The name appears in the provenance the "
+        "assembled prompt is reported under (fragment:<name>), so it must match "
+        "[A-Za-z0-9_-]+."
+    ),
     "agent_defaults": (
         "What every agent uses unless it names something else. One entry for the "
         "whole deployment, and deliberately without a prompt: a prompt is what "
@@ -1402,10 +1506,12 @@ DOMAIN_DESCRIPTIONS: dict[str, str] = {
     ),
 }
 
-# The six sections that live in the database rather than in the file, in
-# the order they are written and read. Derived from the descriptions
-# above rather than restated, so a section cannot be documented and then
-# forgotten by the composition (or the other way round).
+# The sections that live in the database rather than in the file, in the
+# order they are written and read, which is also the order they have to
+# be created in: nothing may reference what does not exist yet. Derived
+# from the descriptions above rather than restated, so a section cannot
+# be documented and then forgotten by the composition (or the other way
+# round).
 DOMAIN_KEYS: tuple[str, ...] = tuple(DOMAIN_DESCRIPTIONS)
 
 
@@ -1421,6 +1527,7 @@ class DomainSnapshot(Protocol):
 
     providers: ProvidersConfig
     mcp_servers: dict[str, McpServerConfig]
+    prompt_fragments: dict[str, PromptFragmentConfig]
     agent_defaults: AgentDefaults
     agents: dict[str, AgentConfig]
     devices: dict[str, list[str]]
@@ -1481,6 +1588,30 @@ def check_references(snapshot: DomainSnapshot) -> list[str]:
                     else "; no mcp_servers entries are defined"
                 )
                 problems.append(f'{source}.mcp: unknown MCP server "{server}"{hint}')
+        # An include is checked here rather than deferred the way a
+        # grant's tool allow list is: the referent is a row in this same
+        # database, so nothing about it waits for a live connection.
+        #
+        # The one below is the only reference refusal in this function
+        # that does not quote what it could not resolve, and the
+        # difference is deliberate. A fragment name is written beside
+        # prompt text, an operator pastes things there, and this sentence
+        # travels out as a CLI line, an HTTP 422 body and a boot log. The
+        # charset rule does not close that on its own, since a credential
+        # can be written in [A-Za-z0-9_-]. So the position says which
+        # entry to look at, and the fragments that do exist say what
+        # could have been meant, both of them written by this deployment.
+        for position, include in enumerate(layer.prompt_includes or [], start=1):
+            if include not in snapshot.prompt_fragments:
+                hint = (
+                    f" (defined: {', '.join(sorted(snapshot.prompt_fragments))})"
+                    if snapshot.prompt_fragments
+                    else "; no prompt_fragments entries are defined"
+                )
+                problems.append(
+                    f"{source}.prompt_includes: entry {position} names no prompt "
+                    f"fragment that exists, and the name is not quoted back{hint}"
+                )
 
     return problems
 
@@ -1586,6 +1717,11 @@ class Config(BaseModel):
     mcp_servers: dict[NonBlankStr, McpServerConfig] = Field(
         default_factory=dict, description=DOMAIN_DESCRIPTIONS["mcp_servers"]
     )
+    # The shared prompt text agents compose their own with, keyed by the
+    # name a layer's prompt_includes references.
+    prompt_fragments: dict[NonBlankStr, PromptFragmentConfig] = Field(
+        default_factory=dict, description=DOMAIN_DESCRIPTIONS["prompt_fragments"]
+    )
     memory: MemoryConfig | None = None
     agent_defaults: AgentDefaults = Field(
         default_factory=AgentDefaults, description=DOMAIN_DESCRIPTIONS["agent_defaults"]
@@ -1608,6 +1744,13 @@ class Config(BaseModel):
         cls, value: dict[str, McpServerConfig]
     ) -> dict[str, McpServerConfig]:
         return check_mcp_entry_names(value)
+
+    @field_validator("prompt_fragments")
+    @classmethod
+    def _check_fragment_names(
+        cls, value: dict[str, PromptFragmentConfig]
+    ) -> dict[str, PromptFragmentConfig]:
+        return check_prompt_fragment_names(value)
 
     @field_validator("devices", mode="before")
     @classmethod
