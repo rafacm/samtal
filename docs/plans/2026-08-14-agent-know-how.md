@@ -1147,7 +1147,7 @@ prompts) and carries the inspection surface from the start, milestone
 injection milestone merges without the surface that counts it.
 
 - [x] **[Per-server guidance, with the inspection surface](2026-08-14-agent-know-how-implementation.md#milestone-1-per-server-guidance-with-the-inspection-surface)**
-  (PR TBD): the
+  (PR #130): the
   `instructions` field, migration 0002, the assembler in
   `runtime/prompt.py` subsuming `with_memory`, the know-how half
   cached in `_activate_agent`, the per-round memory read off the
