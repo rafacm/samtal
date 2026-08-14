@@ -1169,16 +1169,20 @@ call rather than about what is configured.
 
 ### Verification
 
-All from `samtal-server/`, on the tree at the documentation commit.
+All from `samtal-server/`. The figures first recorded here were the
+branch's before it was rebased onto the merged milestone 3 with its
+review round; both lanes were rerun on the rebased tree, and these are
+that tree's.
 
 - `uv run ruff check .`: "All checks passed!".
-- `uv run pytest tests/unit -q`: 1538 passed, 15 skipped in 139.66s.
-  The same count as milestone 3, this milestone adding no test; the
-  drift checks for the OpenAPI document and the generated reference run
-  in this lane and pass, which is what proves the two committed
-  documents match the descriptions as edited.
-- `uv run pytest tests/integration -q`: 47 passed in 92.41s. Unchanged,
-  as a documentation milestone should leave it.
+- `uv run pytest tests/unit -q`: 1585 passed, 15 skipped in 145.81s.
+  Exactly what milestone 3's round left on `main`, this milestone adding
+  no test; the drift checks for the OpenAPI document and the generated
+  reference run in this lane and pass, which is what proves the two
+  committed documents match the descriptions as edited.
+- `uv run pytest tests/integration -q`: 48 passed in 96.62s. Unchanged
+  from what milestone 3's round left, as a documentation milestone
+  should leave it.
 
 Not verified, and not claimed: no SSE-only server was put behind
 `mcp-proxy` and reached from this server, so the bridge is documented
