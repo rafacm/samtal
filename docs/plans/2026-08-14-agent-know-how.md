@@ -169,8 +169,12 @@ guidance in, each behind its own explicit opt-in on the entry:
   names anything, the manager walks the full paginated
   `prompts/list`, cursor by cursor, and validates every configured
   name against the listing before any fetch. Each way a name can be
-  unusable is a distinct, sanitized skip warning naming the
-  operator-written name and the rule: the server does not advertise
+  unusable is a distinct, sanitized skip warning naming the entry,
+  the name's position in `inject_prompts` counted from one, and the
+  rule, never the configured value: an MCP prompt name is a
+  server-chosen identifier the operator copies, so nothing bounds
+  what it holds, and a warning that printed it could carry a pasted
+  credential or a terminal escape. The rules: the server does not advertise
   the prompts capability at all (one warning for the entry, every
   name skipped), the name is absent from the listing, or the listed
   prompt declares required arguments (a template cannot be rendered
@@ -202,9 +206,13 @@ on:
   instruction block is half an instruction nobody reviewed, and an
   unbounded one is a third party filling the prompt budget.
 - **The publishing rule for logs.** The shipped bytes never appear in
-  a log record; the connect log and the skip warnings carry the entry
-  name, the operator-written prompt name where one exists, and the
-  size only.
+  a log record, and neither does a configured prompt name; the
+  connect log and the skip warnings carry the entry name, the
+  `inject_prompts` position where one applies, and the size only.
+  The configured name itself appears only where operator-written
+  configuration is already echoed write-shaped: entity reads and the
+  inspection response body, both JSON-encoded, with the CLI's
+  full-block sanitizer covering provenance strings as well as text.
 
 **How a prompt renders, exactly.** A `prompts/get` result is an
 ordered list of messages with roles and typed content blocks, and
@@ -217,10 +225,13 @@ as a dialog is a template this feature is not for. A prompt any of
 whose messages carries a non-text content block is skipped as
 unusable, the same visible rule as required arguments; the size cap
 applies to the final rendered block. Each injected prompt carries
-the stable provenance `server_prompt:<entry>:<name>`, built from the
-entry name and the operator-written prompt name, both safe to print
-by construction, and the rendering itself is pinned exactly in
-milestone 3's tests, including a multi-message prompt.
+the stable provenance `server_prompt:<entry>:<position>`, built from
+the entry name and the name's position in `inject_prompts`, both
+safe to print by construction where the configured name is not; the
+inspection response body sets the configured name beside the token
+as data, where reads already echo what the operator wrote. The
+rendering itself is pinned exactly in milestone 3's tests, including
+a multi-message prompt.
 
 **Prompt retrieval cannot take the tools down.** The tool connection
 is the entry's load-bearing half, and optional guidance must not be
@@ -231,8 +242,8 @@ tools are published, in the same task, before the manager settles
 into its wait. Each listing page and each `prompts/get` runs under
 its own short per-call bound; a failure or timeout there skips that
 prompt (or, when the listing itself fails, all configured names)
-with a warning carrying the entry, the operator-written name and the
-reason token, and the connection, the published tools and the
+with a warning carrying the entry, the `inject_prompts` position and
+the reason token, and the connection, the published tools and the
 already-captured blocks stay up throughout. Milestone 3 tests a
 stalled prompt and a sequence of fetches whose summed duration
 exceeds `CONNECT_TIMEOUT_S`, asserting the tools survive both. The bytes reach exactly two
@@ -423,8 +434,10 @@ operator audits is what the configuration produces now. The response
 carries:
 the ordered blocks, each with its provenance (`persona`,
 `fragment:<name>`, `instructions:<entry>`,
-`server_instructions:<entry>`, `server_prompt:<entry>:<name>`,
-`memory`), its character count, and its text, plus the total count.
+`server_instructions:<entry>`, `server_prompt:<entry>:<position>`,
+`memory`), its character count, and its text, plus the total count;
+a `server_prompt` block also carries the configured name as data,
+where reads already echo what the operator wrote.
 It is a runtime read, not a database read: it reflects the loaded
 agents, the running slice and managers, and the memory store, so it
 cannot disagree with what a session would get, which is the point. An
@@ -581,15 +594,18 @@ doc drift checks.
   listing walked across more than one page, a server without the
   prompts capability skipping every configured name with one
   entry-level warning, and an unlisted name, a required-arguments
-  prompt and a non-text-content prompt each skipped with their own
-  rule named, never the server's bytes; the rendering pinned
-  exactly, a multi-message prompt joining its messages' text with
-  blank lines and roles dropped, under the
-  `server_prompt:<entry>:<name>` provenance; the cap skips wholesale
-  per block with a warning naming entry, channel and size; the reflection sentinel: a mock
+  prompt and a non-text-content prompt each skipped with its
+  `inject_prompts` position and rule named, never the configured
+  value or the server's bytes; the rendering pinned exactly, a
+  multi-message prompt joining its messages' text with blank lines
+  and roles dropped, under the `server_prompt:<entry>:<position>`
+  provenance; the cap skips wholesale per block with a warning
+  naming entry, channel and size; the reflection sentinels: a mock
   server shipping a credential sentinel in its instructions and in a
-  prompt's rendered text, asserted absent from every log record and
-  from the status surface, with or without the opt-ins; cleared when
+  prompt's rendered text, and a configured prompt name holding a
+  credential sentinel and a terminal escape, each asserted absent
+  from every log record, every CLI stream, every refusal sentence
+  and the status surface, with or without the opt-ins; cleared when
   the connection drops, on the normal unwind and on `_mark_down`
   both; an `inject_prompts` edit restarts the connection on reload,
   and the two injection-only fields do not, proven in both toggle
