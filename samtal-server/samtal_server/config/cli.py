@@ -112,8 +112,10 @@ READ_TIMEOUT_S = 30.0
 
 # What `reload` waits instead, because it is the one request whose
 # server-side work is not a database call. The server's envelope is one
-# MCP connect timeout plus small change: stops run concurrently under a
-# short bound and starts run concurrently under the connect timeout, so
+# MCP connect timeout plus one prompt-discovery deadline plus small
+# change: stops run concurrently under a short bound, starts run
+# concurrently under the connect timeout, and an entry that names
+# published prompts spends one further bounded phase fetching them, so
 # a slow server is reported down rather than waited for. This is
 # comfortably above that, because a client that gave up on a reload the
 # server then applied would recreate the exact ambiguity the whole

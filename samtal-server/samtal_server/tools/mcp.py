@@ -18,7 +18,11 @@ An entry also carries what its operator wrote about using its tools,
 which this layer answers by agent and by grant and knows nothing else
 about: the block shape comes from `runtime.prompt`, which is what turns
 it into prompt text, so headings and block order are decided there and
-never here.
+never here. Beside it sits what the server itself shipped, through the
+two channels the specification gives it: the `instructions` of its
+initialize result, and the prompts it publishes. Those are a third
+party's words, so each is captured only under a bound and injected only
+where the entry opted in, and neither ever reaches a log.
 
 Each manager's whole lifecycle lives in one task: the SDK's clients are
 async context managers over anyio task groups, and entering them in one
@@ -28,9 +32,10 @@ task connects, publishes its tools, and then waits until asked to stop.
 
 import asyncio
 import contextlib
+import functools
 import logging
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -51,7 +56,12 @@ from samtal_server.config.loader import (
 )
 from samtal_server.config.secrets import SecretStore, resolve_mcp_values
 from samtal_server.providers import ToolDef
-from samtal_server.runtime.prompt import Guidance
+from samtal_server.runtime.prompt import (
+    Guidance,
+    GuidanceBlock,
+    ServerInstructions,
+    ServerPrompt,
+)
 from samtal_server.tools import names
 from samtal_server.tools.publish import PublishedTools, publish
 
@@ -60,6 +70,49 @@ logger = logging.getLogger(__name__)
 # How long connecting and listing a server's tools may take. The boot
 # waits for this once per server, concurrently.
 CONNECT_TIMEOUT_S = 10.0
+
+# How long one prompt call may take: one page of `prompts/list`, or one
+# `prompts/get`. Short, because this is optional guidance and every
+# second of it is a second of the boot or of a reload.
+PROMPT_CALL_TIMEOUT_S = 5.0
+
+# And how long the whole discovery phase may take, listing and fetches
+# together. Per-call bounds do not bound the phase: a server answering
+# every page inside its bound, for ever, would hold a start open for as
+# long as it cared to. Equal to the connect timeout, so a manager start
+# is one connect timeout plus one of these plus small change, about 20 s,
+# and a reload's envelope grows by the same one deadline and stays well
+# inside the CLI's 60 s read timeout.
+PROMPT_DISCOVERY_TIMEOUT_S = CONNECT_TIMEOUT_S
+
+# How many pages of a prompt listing are walked. The backstop against a
+# cursor that repeats itself, which no per-call bound and no aggregate
+# deadline notices as anything other than a slow server.
+PROMPT_PAGE_CAP = 20
+
+# The size of a server-shipped block this server will inject, whichever
+# channel it arrived on. A longer one is skipped whole rather than
+# truncated: a truncated instruction block is half an instruction nobody
+# reviewed, and an unbounded one is a third party filling the prompt
+# budget an operator tunes.
+SHIPPED_BLOCK_LIMIT = 4000
+
+# The two channels a server ships guidance in, as the warnings name
+# them.
+INSTRUCTIONS_CHANNEL = "instructions"
+PROMPT_CHANNEL = "prompt"
+
+# Why a configured prompt is not injected, as fixed tokens this
+# application owns. They stand where an exception type name stands in a
+# connection's reason: the whole diagnosis in a line that must carry
+# neither the server's bytes nor the operator's copy of its name.
+NO_PROMPTS_CAPABILITY = "NoPromptsCapability"
+NOT_LISTED = "NotListed"
+REQUIRES_ARGUMENTS = "RequiresArguments"
+NON_TEXT_CONTENT = "NonTextContent"
+NOTHING_TO_INJECT = "NothingToInject"
+DISCOVERY_DEADLINE = "DiscoveryDeadline"
+PAGE_CAP = "PageCap"
 
 # How long a manager gets to close its connection when a reload is
 # taking it away, before its task is cancelled instead. Short, because
@@ -134,6 +187,20 @@ class McpToolNotGranted(LookupError):
     unknown tool produces, which the agent phrases in its own words."""
 
 
+class _PromptsUnreadable(Exception):
+    """Why a prompt call did not answer, as a token this application
+    owns.
+
+    Private, and it never leaves this module: it carries a reason the
+    way `_reason` does, so that a discovery failure is logged as what
+    kind of failure it was rather than as whatever the far side wrote.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 class McpServerManager:
     """One configured MCP server: its connection, its tools, and its
     reconnection."""
@@ -177,6 +244,17 @@ class McpServerManager:
         )
         self._session: ClientSession | None = None
         self._published = PublishedTools(tools=[], originals={})
+        # What this server shipped about itself on the connection that
+        # is up, held beside the published tools because it has their
+        # lifetime exactly: it arrived with this connection and it goes
+        # when this connection does. The instructions are captured
+        # whatever the entry's opt-in says, since the opt-in is excluded
+        # from connection identity and a false-to-true reload has to be
+        # able to expose what a connection nobody restarted already
+        # holds; the prompts are fetched only when the entry names some,
+        # since that field does restart the connection.
+        self._instructions: str | None = None
+        self._prompts: tuple[ServerPrompt, ...] = ()
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
         self._settled = asyncio.Event()
@@ -221,6 +299,23 @@ class McpServerManager:
         while the server is down, which is how an agent configured with
         an unreachable server still holds a conversation."""
         return list(self._published.tools)
+
+    @property
+    def shipped_instructions(self) -> str | None:
+        """What this server said about itself when it connected, or None
+        when it said nothing, said too much, or is not connected.
+
+        Captured whatever the entry's opt-in says, and what the opt-in
+        decides is whether a prompt and an inspection read carry it.
+        """
+        return self._instructions
+
+    @property
+    def shipped_prompts(self) -> tuple[ServerPrompt, ...]:
+        """The prompts this entry named that this server published and
+        this connection could render, in the order the entry named
+        them."""
+        return self._prompts
 
     async def start(self) -> None:
         """Connect and list the tools, or log why not. Never raises: a
@@ -368,7 +463,7 @@ class McpServerManager:
         try:
             async with AsyncExitStack() as stack:
                 async with asyncio.timeout(CONNECT_TIMEOUT_S):
-                    session = await self._connect(stack)
+                    session, initialized = await self._connect(stack)
                     listed = await session.list_tools()
                 # A third-party server's names are no more trustworthy
                 # than a device's: they publish through the same rule,
@@ -381,6 +476,9 @@ class McpServerManager:
                     prefix=self._name,
                     label=f"mcp server {self._name}",
                 )
+                self._instructions = self._injectable(
+                    initialized.instructions, INSTRUCTIONS_CHANNEL
+                )
                 self._session = session
                 self._became(CONNECTED, None)
                 logger.info(
@@ -390,6 +488,17 @@ class McpServerManager:
                     ", ".join(tool.name for tool in self._published.tools) or "none",
                 )
                 self._warn_about_unpublished()
+                # The optional half, and it runs here for a reason. The
+                # tools are the entry's load-bearing part, and inside the
+                # envelope above a raised exception marks this manager
+                # down and takes every one of them away; out here the
+                # connection is published and nothing below can cost it.
+                # It runs before the settle rather than behind it, so
+                # `start()` still returns to a manager whose whole answer
+                # is in place, at the price of one discovery deadline on
+                # the boot and on a reload.
+                self._prompts = await self._discovered(session, initialized.capabilities)
+                self._announce_shipped()
                 self._settled.set()
                 await self._stop.wait()
         except asyncio.CancelledError:
@@ -404,6 +513,7 @@ class McpServerManager:
         finally:
             self._session = None
             self._published = PublishedTools(tools=[], originals={})
+            self._forget_shipped()
             # A stop with nothing wrong carries no reason. A failure
             # recorded its own just above, and a connection dropped
             # after a failed call recorded the fixed token before it
@@ -420,7 +530,17 @@ class McpServerManager:
         values = self._config.env if group == "env" else self._config.headers
         return resolve_mcp_values(self._name, group, values, self._secrets)
 
-    async def _connect(self, stack: AsyncExitStack) -> ClientSession:
+    async def _connect(
+        self, stack: AsyncExitStack
+    ) -> tuple[ClientSession, mcp.types.InitializeResult]:
+        """The connected session, and what the handshake answered with.
+
+        The initialization result is returned rather than discarded
+        because it is where a server describes itself: its `instructions`
+        is one of the two channels this entry may opt into, and its
+        capabilities are what says whether asking for prompts is a
+        question this server answers at all.
+        """
         if self._config.transport == "stdio":
             assert self._config.command is not None
             parameters = StdioServerParameters(
@@ -458,8 +578,228 @@ class McpServerManager:
                 streamable_http_client(self._config.url, http_client=client)
             )
         session = await stack.enter_async_context(ClientSession(read, write))
-        await session.initialize()
-        return session
+        return session, await session.initialize()
+
+    # Prompt discovery
+    #
+    # Everything below runs after the connect envelope has closed and
+    # the tools are published, so nothing in it can take a working
+    # server away. What it may do is take time, which is why it is
+    # bounded twice: once per call, and once over the phase.
+
+    async def _discovered(
+        self, session: ClientSession, capabilities: mcp.types.ServerCapabilities
+    ) -> tuple[ServerPrompt, ...]:
+        """The prompts this entry named, fetched and rendered. Never
+        raises, whatever the far side does or this code gets wrong: the
+        caller is holding a published tool list, and optional guidance
+        does not get to cost it."""
+        try:
+            return await self._discover(session, capabilities)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._skipped(self._positions(), _reason(exc))
+            return ()
+
+    def _positions(self, first: int = 1) -> range:
+        """The `inject_prompts` positions from one to the end, counted
+        from one, which is how every line about them names them."""
+        return range(first, len(self._config.inject_prompts or ()) + 1)
+
+    async def _discover(
+        self, session: ClientSession, capabilities: mcp.types.ServerCapabilities
+    ) -> tuple[ServerPrompt, ...]:
+        """Listing first, then the fetches, under one deadline.
+
+        The order is the whole design. Calling `prompts/get` and reading
+        the failure would make every skip decision rest on interpreting
+        an untrusted server's error, so the full listing is walked
+        first and each configured name is judged against it: a name the
+        listing does not carry, and a listed prompt that declares
+        required arguments, are refused before anything is fetched. Only
+        what the listing proves eligible is asked for, with no arguments.
+        """
+        wanted = list(self._config.inject_prompts or ())
+        if not wanted:
+            return ()
+        if capabilities.prompts is None:
+            # One line for the entry rather than one per name: the
+            # server answered the handshake saying it publishes no
+            # prompts at all, which is one fact about the entry.
+            self._skipped(self._positions(), NO_PROMPTS_CAPABILITY)
+            return ()
+
+        deadline = time.monotonic() + PROMPT_DISCOVERY_TIMEOUT_S
+        try:
+            listing = await self._listing(session, deadline, frozenset(wanted))
+        except _PromptsUnreadable as unreadable:
+            # The listing is what every name is judged against, so a
+            # listing this server could not read is every name skipped.
+            self._skipped(self._positions(), unreadable.reason)
+            return ()
+
+        captured: list[ServerPrompt] = []
+        for position, name in enumerate(wanted, start=1):
+            listed = listing.get(name)
+            if listed is None:
+                self._skipped([position], NOT_LISTED)
+                continue
+            if any(argument.required for argument in listed.arguments or ()):
+                # A template cannot be rendered without the arguments it
+                # declares, and this feature injects standing guidance
+                # rather than filling templates in.
+                self._skipped([position], REQUIRES_ARGUMENTS)
+                continue
+            try:
+                fetched = await self._bounded(
+                    functools.partial(session.get_prompt, name), deadline
+                )
+            except _PromptsUnreadable as unreadable:
+                if unreadable.reason == DISCOVERY_DEADLINE:
+                    self._skipped(self._positions(position), DISCOVERY_DEADLINE)
+                    break
+                self._skipped([position], unreadable.reason)
+                continue
+            rendered = _rendered(fetched)
+            if rendered is None:
+                self._skipped([position], NON_TEXT_CONTENT)
+                continue
+            text = self._injectable(rendered, PROMPT_CHANNEL, position)
+            if text is None:
+                continue
+            captured.append(ServerPrompt(self._name, position, name, text))
+        return tuple(captured)
+
+    async def _listing(
+        self, session: ClientSession, deadline: float, wanted: frozenset[str]
+    ) -> dict[str, mcp.types.Prompt]:
+        """Everything this server publishes under a name this entry
+        named, walked cursor by cursor.
+
+        Only the configured names are kept, since they are all that is
+        judged and the listing itself is a third party's list of any
+        length. The walk stops early once every configured name has been
+        seen, and a listing that has not ended by the page cap is a
+        listing this server will not finish reading: a cursor that
+        repeats itself looks like nothing else from here.
+        """
+        listing: dict[str, mcp.types.Prompt] = {}
+        cursor: str | None = None
+        for _page in range(PROMPT_PAGE_CAP):
+            answered = await self._bounded(
+                functools.partial(session.list_prompts, cursor), deadline
+            )
+            for listed in answered.prompts:
+                if listed.name in wanted:
+                    listing.setdefault(listed.name, listed)
+            cursor = answered.nextCursor
+            if cursor is None or len(listing) == len(wanted):
+                return listing
+        raise _PromptsUnreadable(PAGE_CAP)
+
+    async def _bounded[T](self, call: Callable[[], Awaitable[T]], deadline: float) -> T:
+        """One prompt call, inside both of the bounds that apply to it.
+
+        The call is handed over unmade rather than as an awaitable, so
+        that a phase which is already over creates no coroutine nobody
+        awaits. Which bound expired decides what the caller does about
+        it, so they are told apart: a call cut short by the phase's own
+        deadline means everything remaining is over too, while one that
+        used its whole per-call bound is this prompt's failure and
+        nobody else's.
+        """
+        budget = min(PROMPT_CALL_TIMEOUT_S, deadline - time.monotonic())
+        if budget <= 0:
+            raise _PromptsUnreadable(DISCOVERY_DEADLINE)
+        phase_bound = budget < PROMPT_CALL_TIMEOUT_S
+        try:
+            async with asyncio.timeout(budget):
+                return await call()
+        except asyncio.CancelledError:
+            raise
+        except TimeoutError:
+            raise _PromptsUnreadable(
+                DISCOVERY_DEADLINE if phase_bound else _reason(TimeoutError())
+            ) from None
+        except Exception as exc:
+            # Chained from nothing, deliberately: the reason token is
+            # what travels, and a far side's own words are not part of
+            # what this server publishes about it.
+            raise _PromptsUnreadable(_reason(exc)) from None
+
+    def _injectable(
+        self, text: str | None, channel: str, position: int | None = None
+    ) -> str | None:
+        """One server-shipped block, or None when there is nothing to
+        inject.
+
+        Nothing at all and nothing but whitespace are the same answer: a
+        heading with no words under it is not guidance. Over the cap is
+        the visible case, and it is skipped whole rather than truncated,
+        because half an instruction is an instruction nobody reviewed.
+        """
+        if text is None or not text.strip():
+            if position is not None:
+                self._skipped([position], NOTHING_TO_INJECT)
+            return None
+        if len(text) > SHIPPED_BLOCK_LIMIT:
+            # The entry, the channel and the size. Never the block: it is
+            # a third party's bytes, and this line is read by an operator
+            # from a log store that holds the transcripts.
+            logger.warning(
+                "mcp server %s: the %s block it shipped%s is %d characters, past the "
+                "%d-character cap, so it is skipped whole rather than truncated",
+                self._name,
+                channel,
+                "" if position is None else f" at inject_prompts position {position}",
+                len(text),
+                SHIPPED_BLOCK_LIMIT,
+            )
+            return None
+        return text
+
+    def _skipped(self, positions: Iterable[int], rule: str) -> None:
+        """Say what is not injected and why.
+
+        The entry, the positions in `inject_prompts` counted from one,
+        and the rule. Never the configured name: an MCP prompt name is a
+        server-chosen identifier the operator copied, so nothing bounds
+        what it holds, and this sentence lands in the JSON log this
+        deployment collects.
+        """
+        listed = ", ".join(str(position) for position in positions)
+        if not listed:
+            return
+        logger.warning(
+            "mcp server %s: nothing is injected for inject_prompts position %s (%s)",
+            self._name,
+            listed,
+            rule,
+        )
+
+    def _announce_shipped(self) -> None:
+        """What this connection captured, in sizes and positions.
+
+        Said at all because an operator tuning a small model's context
+        budget should not have to open an inspection surface to learn
+        that a server started shipping a thousand characters overnight,
+        and said this way because the bytes themselves reach exactly two
+        places, neither of which is a log.
+        """
+        if self._instructions is None and not self._prompts:
+            return
+        logger.info(
+            "mcp server %s shipped guidance: %d characters of instructions, and "
+            "prompts at inject_prompts position(s) %s",
+            self._name,
+            0 if self._instructions is None else len(self._instructions),
+            ", ".join(
+                f"{prompt.position} ({len(prompt.text)} characters)"
+                for prompt in self._prompts
+            )
+            or "none",
+        )
 
     async def call(self, published: str, arguments: dict[str, Any]) -> tuple[str, bool]:
         """Run one of this server's tools, named as the model was given
@@ -488,13 +828,29 @@ class McpServerManager:
         self._became(DOWN, DROPPED_AFTER_FAILED_CALL)
         self._session = None
         self._published = PublishedTools(tools=[], originals={})
+        self._forget_shipped()
         self._stop.set()
+
+    def _forget_shipped(self) -> None:
+        """Drop what the connection that is going shipped about itself.
+
+        Beside the published tools wherever they are dropped, and for
+        the same reason: this text arrived on that connection, and a
+        server that is down has not told this one anything. What the next
+        connect captures replaces it.
+        """
+        self._instructions = None
+        self._prompts = ()
 
 
 # The entry fields that configure prompt text rather than the
 # connection. Excluded from the comparison below, and the exclusion is
 # the whole of what makes an instructions edit apply without a restart.
-_PROMPT_ONLY_FIELDS = ("instructions",)
+#
+# `inject_prompts` is deliberately not one of them: editing it changes
+# what a connect fetches from the server, so applying it means fetching
+# again, and the honest way to say that is a restarted connection.
+_PROMPT_ONLY_FIELDS = ("instructions", "use_server_instructions")
 
 
 def _connection_identity(config: McpServerConfig) -> McpServerConfig:
@@ -544,6 +900,31 @@ def _result_text(result: mcp.types.CallToolResult) -> str:
         else:
             parts.append(f"[unsupported {item.type} content]")
     return "\n".join(parts)
+
+
+def _rendered(fetched: mcp.types.GetPromptResult) -> str | None:
+    """One published prompt as the block it is injected as, or None when
+    it is not one.
+
+    A prompt result is an ordered list of messages with roles and typed
+    content, and what this feature injects is one block of standing
+    guidance, so the rendering is defined rather than left to whatever
+    the code happened to do: the text of each message in message order,
+    joined by blank lines, roles dropped. A prompt that only makes sense
+    as a dialogue to replay is a template this feature is not for.
+
+    A message carrying anything but text makes the whole prompt
+    unusable, the same visible rule as required arguments, rather than
+    being rendered as the named placeholder a tool result gets: a tool
+    result is spoken by an assistant that can say it got something it
+    cannot use, and a system-prompt block has nobody to say that.
+    """
+    parts: list[str] = []
+    for message in fetched.messages:
+        if not isinstance(message.content, mcp.types.TextContent):
+            return None
+        parts.append(message.content.text)
+    return "\n\n".join(parts)
 
 
 def _managers_for(
@@ -665,6 +1046,14 @@ def _check_egress(name: str, entry: McpServerConfig) -> None:
     )
 
 
+def _nothing_shipped(_entry: str) -> tuple[GuidanceBlock, ...]:
+    """What an entry contributes beyond its operator's own guidance when
+    nobody is holding its connection: nothing. What a slice asked on its
+    own answers, since a slice is configuration and the shipped blocks
+    are a property of a live connection."""
+    return ()
+
+
 @dataclass(frozen=True)
 class McpSlice:
     """The configuration an `McpServers` was built from: every entry
@@ -684,6 +1073,12 @@ class McpSlice:
     # them: a reload that keeps a connection still changes what an
     # agent's next activation is told about it.
     instructions: Mapping[str, str] = field(default_factory=dict)
+    # The entries whose operator opted into the guidance the server
+    # ships about itself. Swapped with the grants for the same reason,
+    # and held here rather than read off a manager because it is a
+    # configuration decision: what the manager holds is what the server
+    # said, and what this holds is whether anyone asked to hear it.
+    use_server_instructions: frozenset[str] = frozenset()
 
     @classmethod
     def of(cls, config: Config) -> "McpSlice":
@@ -697,6 +1092,11 @@ class McpSlice:
                 for name, entry in sorted(config.mcp_servers.items())
                 if entry.instructions is not None
             },
+            use_server_instructions=frozenset(
+                name
+                for name, entry in config.mcp_servers.items()
+                if entry.use_server_instructions
+            ),
         )
 
     def allowed_by_agent(self, entry: str) -> dict[str, list[str] | None]:
@@ -724,7 +1124,11 @@ class McpSlice:
         the rest of a deleted agent's session does too."""
         return tuple(self.grants.get(agent, ()))
 
-    def guidance_for(self, agent: str) -> tuple[Guidance, ...]:
+    def guidance_for(
+        self,
+        agent: str,
+        shipped: Callable[[str], Sequence[GuidanceBlock]] = _nothing_shipped,
+    ) -> tuple[GuidanceBlock, ...]:
         """The guidance blocks one agent's grants name, in grant order.
 
         The effective grant is the whole condition, which is the
@@ -737,12 +1141,21 @@ class McpSlice:
         write about the granted surface, and both surfaces make the
         mismatch visible. An agent granted nothing is answered with
         nothing.
+
+        `shipped` answers what a live connection to one entry captured,
+        which is the registry's to know and not a slice's. Passed in
+        rather than looked up so that the order stays in one loop: an
+        entry's blocks are the operator's, then the server's own, then
+        the prompts it publishes, and an entry with no connection
+        contributes only the first.
         """
-        return tuple(
-            Guidance(grant.server, text)
-            for grant in self.grants_for(agent)
-            if (text := self.instructions.get(grant.server)) is not None
-        )
+        blocks: list[GuidanceBlock] = []
+        for grant in self.grants_for(agent):
+            text = self.instructions.get(grant.server)
+            if text is not None:
+                blocks.append(Guidance(grant.server, text))
+            blocks.extend(shipped(grant.server))
+        return tuple(blocks)
 
     def entries_for(self, agent: str) -> tuple[str, ...]:
         """Which entries one agent may reach, whole or in part. What a
@@ -946,9 +1359,10 @@ class McpServers:
             for tool in _allowed(grant, self.tools_for([grant.server]))
         ]
 
-    def guidance_for_agent(self, agent: str) -> tuple[Guidance, ...]:
-        """The operator's guidance for the entries one agent is granted,
-        in grant order.
+    def guidance_for_agent(self, agent: str) -> tuple[GuidanceBlock, ...]:
+        """The guidance for the entries one agent is granted, in grant
+        order: what the operator wrote about each, and what each server
+        shipped about itself where the entry opted into it.
 
         Asked by agent for the reason `tools_for_agent` is: the grants
         are part of what a reload swaps, so this answers the world that
@@ -957,7 +1371,30 @@ class McpServers:
         cached, so a reload's guidance reaches new sessions and
         switched-in agents.
         """
-        return self._configured.guidance_for(agent)
+        return self._configured.guidance_for(agent, self._shipped_by)
+
+    def _shipped_by(self, entry: str) -> tuple[GuidanceBlock, ...]:
+        """What one entry's live connection captured, where the entry
+        opted into it.
+
+        The instructions are captured whatever the flag says, so this is
+        where the flag is finally read: a reload that turns it on
+        exposes what a connection nobody restarted is already holding,
+        and one that turns it off stops the injection while that same
+        connection stands. The prompts need no such gate, since editing
+        the list that names them restarts the connection that fetched
+        them.
+        """
+        manager = self._managers.get(entry)
+        if manager is None:
+            return ()
+        blocks: list[GuidanceBlock] = []
+        if entry in self._configured.use_server_instructions:
+            shipped = manager.shipped_instructions
+            if shipped is not None:
+                blocks.append(ServerInstructions(entry, shipped))
+        blocks.extend(manager.shipped_prompts)
+        return tuple(blocks)
 
     def revive(self, entries: Iterable[str]) -> None:
         """Kick off a background reconnect for any of these that is

@@ -26,7 +26,15 @@ from samtal_server.providers import (
     ToolDef,
     Turn,
 )
-from samtal_server.runtime.prompt import Guidance, guidance_heading
+from samtal_server.runtime.prompt import (
+    Guidance,
+    GuidanceBlock,
+    ServerInstructions,
+    ServerPrompt,
+    guidance_heading,
+    server_instructions_heading,
+    server_prompt_heading,
+)
 from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
 from tests.unit.test_session_tools import (
@@ -50,12 +58,12 @@ class CountingServers(McpServers):
     assembled half looks the same whether it was assembled once or ten
     times, so the question has to be asked of the source."""
 
-    def __init__(self, guidance: tuple[Guidance, ...] = ()) -> None:
+    def __init__(self, guidance: tuple[GuidanceBlock, ...] = ()) -> None:
         super().__init__({})
         self._guidance = guidance
         self.asked: list[str] = []
 
-    def guidance_for_agent(self, agent: str) -> tuple[Guidance, ...]:
+    def guidance_for_agent(self, agent: str) -> tuple[GuidanceBlock, ...]:
         self.asked.append(agent)
         return self._guidance
 
@@ -342,6 +350,62 @@ async def test_activation_logs_what_the_know_how_half_holds(
     # nor a word of what it holds.
     assert "memory" not in assembled.sources
     assert "vegetarian" not in str(assembled.__dict__)
+
+
+async def test_the_event_counts_the_server_shipped_blocks_without_quoting_them(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The two provenances a server's own guidance arrives under, sized
+    in the event the way every other block is, and the bytes nowhere
+    near it: this record lands in the JSON log a deployment collects."""
+    shipped = "Call list_devices before anything else."
+    published = "Answer in short sentences."
+    with caplog.at_level("INFO"):
+        session = session_with(
+            CountingServers(
+                (
+                    ServerInstructions("home", shipped),
+                    ServerPrompt("home", 1, "house_style", published),
+                )
+            ),
+            {"poet": ScriptedLlm(["Said."])},
+        )
+        await run_reply(session, "hello")
+
+    (assembled,) = prompt_events(caplog)
+    assert set(assembled.sources) == {
+        "persona",
+        "server_instructions:home",
+        "server_prompt:home:1",
+    }
+    assert assembled.sources["server_prompt:home:1"] == len(
+        server_prompt_heading("home")
+    ) + len(f"\n{published}")
+    written = "".join(record.getMessage() for record in caplog.records) + str(
+        assembled.__dict__
+    )
+    assert shipped not in written and published not in written
+    assert "house_style" not in written
+
+
+async def test_the_shipped_guidance_reaches_the_model(
+    tmp_path: Path,
+) -> None:
+    """Under a heading that says the server is the one talking, which is
+    the trust boundary made legible to the one reader that cannot see a
+    provenance."""
+    llm = RecordingLlm()
+    session = session_with(
+        CountingServers((ServerInstructions("home", "Call list_devices first."),)),
+        {"poet": llm},
+        memory=None,
+    )
+
+    await run_reply(session, "hello")
+
+    (system,) = llm.systems
+    assert server_instructions_heading("home") in system
+    assert "Call list_devices first." in system
 
 
 async def test_a_switch_logs_the_half_it_assembled(

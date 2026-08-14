@@ -38,7 +38,7 @@ from samtal_server.config.secrets import (
     encrypt,
     generate_key,
 )
-from samtal_server.runtime.prompt import Guidance
+from samtal_server.runtime.prompt import Guidance, ServerInstructions
 from samtal_server.tools.mcp import (
     CONNECTED,
     DOWN,
@@ -49,6 +49,7 @@ from samtal_server.tools.mcp import (
     McpSlice,
     McpToolNotGranted,
 )
+from tests.support.mcp_stdio_server import SHIPPED_INSTRUCTIONS
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
 
@@ -212,6 +213,62 @@ async def test_adding_guidance_to_an_entry_that_had_none_keeps_the_connection() 
         assert applied.unchanged == ("tools",)
         assert manager_of(servers, "tools") is kept
         assert servers.guidance_for_agent("assistant") == (Guidance("tools", "New guidance."),)
+    finally:
+        await servers.stop_all()
+
+
+async def test_the_server_instructions_opt_in_toggles_without_a_reconnect() -> None:
+    """Both directions, on the same manager object, which is what makes
+    the capture rule worth having: what a server ships is captured on
+    every connect whatever the flag says, so turning the flag on exposes
+    text a connection nobody restarted is already holding, and turning
+    it off stops the injection while that connection stands."""
+    off = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    on = config_with(
+        {"tools": entry_data(use_server_instructions=True)}, {"assistant": ["tools"]}
+    )
+    servers = await started(off)
+    try:
+        kept = manager_of(servers, "tools")
+        assert servers.guidance_for_agent("assistant") == ()
+
+        applied = await servers.reload(reading(on))
+
+        assert applied.unchanged == ("tools",)
+        assert manager_of(servers, "tools") is kept
+        assert servers.guidance_for_agent("assistant") == (
+            ServerInstructions("tools", SHIPPED_INSTRUCTIONS),
+        )
+
+        applied = await servers.reload(reading(off))
+
+        assert applied.unchanged == ("tools",)
+        assert manager_of(servers, "tools") is kept
+        assert servers.guidance_for_agent("assistant") == ()
+    finally:
+        await servers.stop_all()
+
+
+async def test_an_inject_prompts_edit_restarts_the_connection() -> None:
+    """The one prompt field that is not excluded from connection
+    identity, and the reason is the honest one: editing it changes what
+    a connect fetches from the server, so applying it means fetching
+    again."""
+    before = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    after = config_with(
+        {"tools": entry_data(inject_prompts=["house_style"])}, {"assistant": ["tools"]}
+    )
+    servers = await started(before)
+    try:
+        was = manager_of(servers, "tools")
+
+        applied = await servers.reload(reading(after))
+
+        assert applied.restarted == ("tools",)
+        assert manager_of(servers, "tools") is not was
+        assert [
+            block.name for block in servers.guidance_for_agent("assistant")
+        ] == ["house_style"]
     finally:
         await servers.stop_all()
 

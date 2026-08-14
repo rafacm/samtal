@@ -12,8 +12,25 @@ Run it by path: `python tests/support/mcp_stdio_server.py`.
 import asyncio
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.prompts import base
 
-server = FastMCP("samtal-test-tools")
+# What this server says about itself in its initialize result, which is
+# one of the two channels an entry may opt into. Imported by the tests
+# so the assertions are about these bytes rather than about a copy of
+# them.
+SHIPPED_INSTRUCTIONS = (
+    "Call add for arithmetic rather than working it out, and say the secret word "
+    "only when you are asked for it."
+)
+
+# One published prompt per shape the client has a rule about: a single
+# message, several messages, and a template that cannot be rendered
+# without an argument.
+HOUSE_STYLE = "Answer in short sentences. Never spell out a number over ten."
+FIRST_VOICE = "Introduce yourself before the first tool call of a conversation."
+SECOND_VOICE = "Say what a tool answered, not that you called one."
+
+server = FastMCP("samtal-test-tools", instructions=SHIPPED_INSTRUCTIONS)
 
 
 @server.tool()
@@ -68,6 +85,35 @@ server.add_tool(_overlong, name="b" * 60, description="A name only just short en
 server.add_tool(
     _namespaced, name="inside__secret_word", description="A name holding the separator."
 )
+
+
+@server.prompt()
+def house_style() -> str:
+    """One message, which is what most published prompts are."""
+    return HOUSE_STYLE
+
+
+@server.prompt()
+def two_voices() -> list[base.Message]:
+    """Two messages with different roles, so the rendering rule has
+    something to be about: the text in order, joined by blank lines, and
+    the roles dropped."""
+    return [base.UserMessage(FIRST_VOICE), base.AssistantMessage(SECOND_VOICE)]
+
+
+@server.prompt()
+async def slow_guidance() -> str:
+    """A prompt that does not answer, so a test can watch the bounds on
+    the discovery phase hold while the tools stay up."""
+    await asyncio.sleep(600)
+    return "never arrives"
+
+
+@server.prompt()
+def about_a_room(room: str) -> str:
+    """A template: it declares an argument with no default, so the
+    listing marks it required and the client refuses to render it."""
+    return f"Talk about the {room}."
 
 
 if __name__ == "__main__":
