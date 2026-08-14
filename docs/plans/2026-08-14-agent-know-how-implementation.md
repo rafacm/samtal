@@ -117,9 +117,10 @@ milestone.
   headings and blank lines included; the byte-equality pin, which
   transcribes the old `with_memory` and compares the two over an empty
   persona, a whitespace-only one and an indented one crossed with three
-  memory states; the per-block accounting; the empty persona still
-  being a block; an empty memory read returning the cached half
-  unchanged, by identity.
+  memory states; the per-block accounting; an empty memory read
+  returning the cached half unchanged, by identity. The review round
+  below added the equality that makes the accounting worth reading:
+  the prompt is the blocks joined and nothing else.
 - `tests/unit/test_config_tools.py`, `test_config_store.py`,
   `test_config_reads.py`: the field parses, a blank one is refused by
   the rule and not by its value, and the text round trips byte for byte
@@ -211,12 +212,22 @@ was stored either way. Recorded rather than repaired: the pin is worth
 more than a trailing newline nothing reads, and repairing it would have
 made the byte-equality claim conditional.
 
+*Superseded by review finding 1 below.* The paragraph above is half
+right and the half it got wrong is the one that mattered: the strip was
+applied to the joined text only, so the blocks kept bytes the model
+never received and the surface reported them. The trim now applies to
+the blocks as well.
+
 **The strip is also why the persona is always a block.** The assembler
 joins the blocks and strips only when something was appended to the
 persona, which is what reproduces the old behavior exactly for a
 whitespace-only prompt with no memory. Dropping an empty persona from
 the block list instead would have been simpler and would have failed
 that case.
+
+*Superseded by review finding 1 below.* A blank persona is now dropped
+when there is anything else to say, and the one-block prompt is what
+carries the compatibility case instead.
 
 **`tools/mcp.py` imports the block shape from `runtime/prompt.py`.**
 The MCP layer knows which entries an agent may reach and what their
@@ -261,3 +272,135 @@ config openapi` in the commits that moved them.
 Not verified locally, and stated rather than claimed: the
 installed-wheel migration check, which builds a wheel and migrates a
 fresh database from it, runs in CI only.
+
+### PR #130 review round
+
+One external review of the milestone's diff: codex CLI, model
+gpt-5.6-sol, read-only, 2026-08-14, with CI green on all three lanes.
+Verdict: mergeable after the listed fixes. Findings as received,
+condensed; each carries the commit that addressed it.
+
+1. **P1: prompt inspection reports bytes the model never receives.**
+   `runtime/prompt.py` strips the assembled prompt but retains
+   unstripped `Block.text` and counts, so leading persona whitespace and
+   trailing instruction blank lines appear in inspection and are absent
+   from the model prompt, against the plan's byte-exact and
+   no-disagreement requirements. The tests evade it by adding memory
+   after guidance and by collapsing whitespace. Suggested: preserve
+   boundary whitespace for the new guidance assemblies and keep the
+   legacy stripping only for the no-guidance compatibility path, then
+   assert model against inspection exactly, with leading persona
+   whitespace and a final guidance block ending in blank lines.
+   *Resolution*: adopted in 3f9be29, by the other of the two ways it can
+   be closed. The trim now applies to the blocks as well, so the prompt
+   is the blocks joined by blank lines and nothing else: a blank block
+   contributes nothing and is not reported, the first block loses its
+   leading whitespace and the last its trailing, and every byte inside a
+   block is left as written. A prompt of one block, a persona standing
+   alone, is still handed over untouched, which is what keeps the
+   no-guidance byte-equality pin exact for every input including a
+   whitespace-only prompt.
+   The suggested split was weighed and not taken. It makes the same
+   persona value produce different bytes depending on whether an
+   unrelated entry happens to carry guidance, which is a rule an
+   operator cannot hold in their head; and it leaves the legacy path's
+   blocks disagreeing with its own text unless they are trimmed there
+   too, which is the whole of this fix anyway. What the taken route
+   costs is whitespace at the two outer ends of a guidance block when it
+   sits first or last, and the block reports exactly what it sent, so
+   nothing disagrees. The field description, the README and the response
+   model say what is trimmed instead of promising bytes nothing sends.
+   The tests are the ones the finding asked for: six awkward inputs
+   (leading persona whitespace, guidance ending in blank lines, a blank
+   persona, facts with a trailing newline) crossed with both halves,
+   asserting the blocks joined equal the text and the total equals the
+   sum plus the separators; a session-level test comparing the exact
+   string the provider was handed against the blocks the surface would
+   report; and the API and integration reads asserting the same equality
+   on the answer itself, which is what the whitespace-collapsing spoken
+   reply cannot check.
+2. **P1: a malformed memory file leaks a library traceback through the
+   new prompt-read path.** `tools/memory.py` catches `OSError` but not
+   `UnicodeDecodeError`, and the threaded read now reaches the reply's
+   own handler, which logs with `exc_info` and records the traceback.
+   Suggested: contain decode and prompt-preparation failures with a
+   fixed sanitized record and an empty-memory fallback, never `exc_info`
+   or the exception message, with a corrupt-memory sentinel test over
+   every log record.
+   *Resolution*: adopted in b5f773e. Decode failures are caught beside
+   the filesystem ones at the source, which is where the containment
+   belongs (everything above it is pure string joining), and the record
+   carries the class of the failure and nothing else, the rule the MCP
+   layer's reason tokens already follow: a `UnicodeDecodeError` quotes
+   the byte it tripped on and an `OSError` carries the path, and neither
+   belongs in a record about a prompt. An unreadable file means the
+   agent remembers nothing this round and the reply happens. Appending
+   reads through the same containment, so the next remembered fact
+   leaves a readable file behind, which loses nothing a model could have
+   been given and keeps `remember` working rather than failing for as
+   long as those bytes sit there. Four tests: the read, the sentinel
+   over every record's message, args and attributes with `exc_info`
+   asserted absent, the append, and a whole reply held over a corrupt
+   file.
+3. **P2: the generated prompt-route contract advertises the wrong,
+   input-reflecting error shape.** The route omits an explicit 422, so
+   the document carries `HTTPValidationError` with its `input` field
+   while runtime validation is globally replaced by the sanitized
+   `Problem`; and its 503 description says the reads in this namespace
+   answer emptily, although this one returns 503. Suggested: document
+   the sanitized 422 or remove the unreachable one, add a
+   prompt-specific 503 description, regenerate and pin both.
+   *Resolution*: adopted in 4448188. The 422 is declared like every
+   other refusal, with a sentence saying it is the request that could
+   not be read and that nothing sent is quoted back; `HTTPValidationError`
+   is now referenced by no path in the document. The 503 gets a sentence
+   of its own saying why this read refuses where the status read answers
+   emptily: an empty block list would say a session opening now is sent
+   nothing. The reload keeps the shared sentence, since that one is
+   about actions, and the test pins all four schemas as `Problem` and
+   both descriptions against the shared ones.
+4. **P2: reload documentation still contradicts instructions-only reload
+   semantics.** The API description claims live conversations pick the
+   entire result up on their next utterance, and `unchanged` is defined
+   as the entries nothing changed about, while an instructions-only edit
+   returns `unchanged`, changes the entry's text, and reaches
+   conversations at their next activation. Suggested: state that
+   `unchanged` describes connection identity, distinguish per-reply tool
+   and grant pickup from activation-cached guidance, regenerate and pin
+   the wording.
+   *Resolution*: adopted in b48d681. The description, the route's own
+   prose and the `unchanged` field now say which half of an entry a
+   conversation meets when: tools and grants on the next utterance,
+   because they are snapshotted per reply, and guidance at the next
+   activation, because prompt text is assembled there and cached, with
+   the inspection surface named as what previews it meanwhile.
+   `unchanged` says it is a statement about the connection and names the
+   instructions case explicitly. The test pins the field's wording and
+   the presence of both clocks in the two pieces of prose.
+
+### Verification after the review round
+
+Same commands, from `samtal-server/`, on the tree at b48d681.
+
+```
+uv run ruff check .
+All checks passed!
+
+uv run pytest tests/unit -q
+1674 passed, 15 skipped in 150.10s
+
+uv run pytest tests/integration -q
+51 passed in 147.91s
+
+uv run samtal-server config reference | diff against the committed copy
+reference current
+
+uv run samtal-server config openapi | diff against the committed copy
+openapi current
+```
+
+Nineteen more unit tests than before the round, which is what was
+added: twelve parametrized assembler equalities, one session-level
+model-against-inspection comparison, four corrupt-memory tests and the
+two contract pins. The installed-wheel migration check still runs in CI
+only.
