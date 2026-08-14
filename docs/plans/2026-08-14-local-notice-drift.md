@@ -84,6 +84,36 @@ the dispatch unification the issue defers to #139. The anti-drift
 mechanism for the pair of paths is the new CLI test, not a shared
 call site.
 
+### LOCAL_NOTICE stops making the timing claim the write answers
+
+Fixing the three final notices is not enough on its own: every
+`--local` invocation first prints `LOCAL_NOTICE` (cli.py:130), which
+itself promises that a running server will not observe the change
+until its next start, device bindings excepted. A fixed MCP write
+would then print that sentence followed by the reload notice, two
+mutually exclusive instructions in one invocation.
+
+So `LOCAL_NOTICE` drops its universal timing claim and keeps its
+identity claim. It still says what the path is and that it bypasses
+the configuration API (the phrase the existing preamble test checks
+for), and it now defers timing to the write itself:
+
+```python
+LOCAL_NOTICE = (
+    "--local is the break-glass path: it reads and writes the database directly, "
+    "bypassing the configuration API. Each write says separately when it takes "
+    "effect, the same answer the API gives for the same act."
+)
+```
+
+The module docstring's `--local` paragraph (cli.py:21-28) is revised
+to match: the boot-time snapshot stays the default story, and the
+sentence naming device bindings as the one exception becomes the
+statement that each write answers with its own applicability notice,
+the same one the API answers. The comment above `LOCAL_NOTICE`
+(why it is printed rather than enforced) is unchanged; that
+reasoning does not move.
+
 ### The pin compares the two paths' answers, not two copies of a constant
 
 The new test runs each local-mutating act twice against the same
@@ -139,7 +169,7 @@ on push requires.
 
 ```
 samtal-server/samtal_server/config/writes.py    secret_notice helper
-samtal-server/samtal_server/config/cli.py       three --local branches
+samtal-server/samtal_server/config/cli.py       three --local branches; LOCAL_NOTICE and the module docstring paragraph
 samtal-server/tests/unit/test_config_cli.py     the two-path pin
 CHANGELOG.md                                    2026-08-14 entry under Fixed
 docs/plans/2026-08-14-local-notice-drift.md
@@ -203,6 +233,12 @@ resolution once the amendment addressing it lands.
    write reports separately when it takes effect), update the
    module docstring at cli.py:21-28, and name both changes in the
    milestone and file list.
+   *Resolution*: adopted. A new decision section ("LOCAL_NOTICE
+   stops making the timing claim the write answers") revises
+   `LOCAL_NOTICE` to keep its identity claim and defer timing to
+   the write's own notice, revises the module docstring paragraph
+   to match, and the files-touched list and milestone name both
+   changes.
 2. **P2: the proposed final-line assertion deliberately misses that
    contradiction.** The test design discards all but the final
    stderr line, and existing local-preamble coverage only checks
@@ -237,7 +273,9 @@ resolution once the amendment addressing it lands.
 - [ ] **Align the three --local notices with the API and pin every
   local write's notice**: `secret_notice` lands in `writes.py`;
   `_delete_mcp_server` passes `MCP_RELOAD_NOTICE`, `_set_secret`
-  and `_clear_secret` pass `secret_notice(location.kind)`; the
+  and `_clear_secret` pass `secret_notice(location.kind)`;
+  `LOCAL_NOTICE` and the module docstring paragraph drop the
+  universal timing claim and defer to the write's own notice; the
   parametrized two-path test covers the complete `--local` mutating
   subset; CHANGELOG entry under Fixed, 2026-08-14; the
   implementation doc section written in the change that ticks this
