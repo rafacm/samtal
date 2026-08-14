@@ -202,6 +202,20 @@ def test_the_document_permits_no_body_the_api_refuses() -> None:
     assert schemas["SecretValue"]["required"] == ["secret"]
     assert schemas["SecretValue"]["additionalProperties"] is False
 
+    # A grant's allow list is the other case: the model refuses an empty
+    # one and one that repeats a name, so the array says both. The
+    # refusals themselves are exercised over HTTP in
+    # tests/unit/test_config_api_writes.py.
+    grant = schemas["McpGrant"]
+    array = next(
+        branch for branch in grant["properties"]["tools"]["anyOf"] if "items" in branch
+    )
+    assert array["minItems"] == 1
+    assert array["uniqueItems"] is True
+    assert array["items"]["minLength"] == 1
+    assert grant["required"] == ["server"]
+    assert grant["additionalProperties"] is False
+
 
 def test_a_write_answers_with_what_it_did_and_when_it_applies() -> None:
     """Decision 5's contract, in the document: a write is acknowledged
