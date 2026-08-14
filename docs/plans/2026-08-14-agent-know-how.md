@@ -239,14 +239,25 @@ able to cost it: inside the `CONNECT_TIMEOUT_S` envelope a raised
 exception marks the manager down and removes every tool, so prompt
 discovery and fetching run after the envelope has closed and the
 tools are published, in the same task, before the manager settles
-into its wait. Each listing page and each `prompts/get` runs under
-its own short per-call bound; a failure or timeout there skips that
-prompt (or, when the listing itself fails, all configured names)
-with a warning carrying the entry, the `inject_prompts` position and
-the reason token, and the connection, the published tools and the
-already-captured blocks stay up throughout. Milestone 3 tests a
-stalled prompt and a sequence of fetches whose summed duration
-exceeds `CONNECT_TIMEOUT_S`, asserting the tools survive both. The bytes reach exactly two
+into its wait. Two layers of bound apply, because per-call bounds
+alone do not bound the phase: each listing page and each
+`prompts/get` runs under its own short per-call bound, and the whole
+discovery phase runs under one aggregate deadline equal to
+`CONNECT_TIMEOUT_S`, with a fixed page cap on the listing walk as
+the backstop against a repeating cursor. A per-call failure or
+timeout skips that prompt (or, when the listing itself fails, all
+configured names); reaching the aggregate deadline or the page cap
+skips everything remaining, with one warning carrying the entry, the
+`inject_prompts` positions concerned and the reason token. The
+connection, the published tools and the already-captured blocks stay
+up throughout. The envelope arithmetic is stated because #121 pinned
+it: a manager start is now bounded by one connect timeout plus one
+discovery deadline plus small change (about 20 s), and the reload's
+whole envelope grows by the same one deadline, staying comfortably
+inside the CLI's 60 s reload read timeout. Milestone 3 tests a
+stalled prompt, a repeating pagination cursor, a listing whose pages
+exceed the cap, and elapsed boot and reload completion against the
+stated envelope, asserting the tools survive every case. The bytes reach exactly two
   places, both deliberate: the model's system prompt, which is what
   the opt-in means, and the assembled-prompt surface, which exists to
   show what the model receives and marks the block's provenance so an
@@ -612,8 +623,10 @@ doc drift checks.
   directions on the same manager object: false-to-true exposes the
   already captured instructions without a reconnect, true-to-false
   stops injecting while the connection stands; containment proven
-  with a stalled prompt fetch and a fetch sequence summing past
-  `CONNECT_TIMEOUT_S`, the connection and tools surviving both.
+  with a stalled prompt fetch, a repeating pagination cursor, a
+  listing past the page cap, and elapsed boot and reload completion
+  measured against the stated envelope, the connection and tools
+  surviving every case.
 - Unit, milestone 1, the inspection surface: the route
   (bearer-gated, 404 for an unloaded agent with the restart
   sentence, 503 serverless); the block shapes and totals agree with
