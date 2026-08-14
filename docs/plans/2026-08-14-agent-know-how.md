@@ -1163,7 +1163,8 @@ injection milestone merges without the surface that counts it.
   memory provenance with sizes and totals over a real socket, 404
   and 503 honest, the sanitizer's long-block tail surviving; drift
   checks pass.
-- [ ] **Shared prompt fragments**: the `prompt_fragments` section and
+- [x] **[Shared prompt fragments](2026-08-14-agent-know-how-implementation.md#milestone-2-shared-prompt-fragments)**
+  (PR TBD): the `prompt_fragments` section and
   `prompt_includes` on both layers, migration 0003, store, views, API
   routes, CLI verbs, write sentences, reference checks, the
   moved-key command, assembly slot, `fragment:<name>` provenance on
