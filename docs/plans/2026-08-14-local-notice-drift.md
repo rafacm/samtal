@@ -236,11 +236,16 @@ shape or meaning. `api.py` is untouched by decision, above.
   together closes both directions without a third copy of the
   sentences.
 - **A future local command could be added without joining the
-  parametrization.** Mitigation: the test's docstring states it
-  covers the complete `--local` mutating subset, and the
-  parametrization is written from the same grammar table a new
-  command would be added to; #139's dispatch unification removes
-  the class of drift entirely.
+  parametrization.** The parametrization is a hand-maintained list;
+  the grammar is imperative parser construction, so nothing fails
+  mechanically when a new `local_ok=True` command skips the test.
+  Stated honestly: the nine cases are manual coverage of the
+  current `--local` mutating subset, kept complete by review, not
+  by machinery. The drift class itself is removed when #139
+  unifies local and HTTP dispatch, which is where a mechanical
+  guarantee belongs; building an inventory walker over argparse
+  internals for a subset that refactor dissolves would be scaffolding
+  with a shorter life than its cost.
 
 ## Plan review round
 
@@ -306,6 +311,11 @@ resolution once the amendment addressing it lands.
    describe the nine cases honestly as manual coverage of the
    current subset, or add a mechanically enforced inventory check.
    A docstring alone is not a regression guard.
+   *Resolution*: adopted, first option. The risk section now states
+   the nine cases are manual coverage of the current subset, kept
+   complete by review; the mechanical guarantee belongs to #139's
+   dispatch unification, and an argparse-internals inventory walker
+   for a subset that refactor dissolves is declined with reasons.
 
 ## Milestones
 
