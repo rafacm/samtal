@@ -622,10 +622,12 @@ instructions: |
 YAML
 ```
 
-It is stored and injected exactly as written, indentation and blank
+It is stored and injected as written, its indentation and its own blank
 lines included, and it goes into the prompt under a heading naming the
 prefix its tools carry (`home__`), so the model can tie the paragraph to
-the names it can call.
+the names it can call. The only bytes trimmed are whitespace at the two
+ends of the whole assembled prompt, and what the surface below reports
+is trimmed with them: what it counts is what the model receives.
 
 The grant is the whole condition. Every agent granted the entry is told
 about it, whether or not the server is connected and whatever an allow
@@ -737,7 +739,9 @@ lets a later feature compose against a known base.
 others for the context budget of a small local model, and there is no
 automatic trimming: a server that silently dropped an instruction block
 would be worse than one that says what it injected. The number to tune
-against is the total. Agent activation also logs a `prompt_assembled`
+against is the total, which is the sum of the blocks plus the blank line
+between each pair of them: the prompt is the blocks joined and nothing
+else, so a character counted here is a character the model receives. Agent activation also logs a `prompt_assembled`
 event with the same per-source counts, so a model that degrades in the
 field can be diagnosed from the retained logs without reproducing the
 session.

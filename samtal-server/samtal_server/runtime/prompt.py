@@ -25,7 +25,9 @@ where, and how many characters each of them costs, which is what the
 inspection surface reports, what the `prompt_assembled` event carries,
 and what an operator tunes a small local model against. Producing both
 in one place is what keeps the pipeline, the event and the surface from
-disagreeing about what was assembled.
+disagreeing about what was assembled, and the accounting is exact: the
+prompt is the blocks joined by blank lines and nothing else, so a
+character reported against a block is a character the model receives.
 
 The order is fixed and documented, and deliberately not configurable:
 the persona first, because it says who is speaking and everything after
@@ -113,9 +115,10 @@ class Assembled:
     @property
     def characters(self) -> int:
         """The size of the whole prompt, which is the number an operator
-        tunes a context budget against. Not the sum of the blocks: the
-        separators between them count, and a leading blank block is
-        stripped away."""
+        tunes a context budget against. The sum of the blocks plus the
+        blank line between each pair of them, exactly: the text is the
+        blocks joined, so there is nothing in it that is counted
+        nowhere."""
         return len(self.text)
 
     def sizes(self) -> dict[str, int]:
@@ -129,10 +132,10 @@ def know_how(persona: str, guidance: Sequence[Guidance] = ()) -> Assembled:
     persona, and the guidance of each entry the agent is granted, in
     grant order.
 
-    Assembled once per activation and cached by the caller. The persona
-    is always a block of its own, empty or not, so that an agent with no
-    prompt of its own is visible as one on the inspection surface rather
-    than being silently absent from it.
+    Assembled once per activation and cached by the caller. An agent
+    with no prompt of its own contributes no persona block, because a
+    block is what the model receives and this one would be nothing: the
+    surface reports the prompt rather than the fields it was made from.
     """
     return _assembled(
         [
@@ -164,24 +167,45 @@ def with_memory(half: Assembled, facts: str) -> Assembled:
 
 
 def _assembled(blocks: Sequence[Block]) -> Assembled:
-    """The blocks joined by blank lines.
+    """The blocks joined by blank lines, and the blocks as they were
+    joined.
 
-    The join is stripped when anything was appended to the persona,
-    which is what keeps an agent with no prompt of its own from being
-    sent a prompt that starts with a blank line. A persona standing
-    alone is handed over exactly as it was written instead, which is
-    what the byte-equality pin holds: for a configuration with no
-    guidance, this function produces character for character what the
-    memory append has always produced.
+    Both halves of that sentence matter, and the second one is the
+    contract this surface exists for: the text is exactly the blocks
+    joined, so a character counted against a block is a character the
+    model receives and a byte the model never sees is reported nowhere.
+    Whatever this function adjusts, it adjusts in the blocks as well.
 
-    The one thing a verbatim block does not keep is whitespace at the
-    two ends of the whole prompt, since that is what the strip takes.
-    Deliberately unchanged rather than repaired: it is the behavior the
-    memory block has had all along, and the pin is worth more than a
-    trailing newline nothing reads.
+    What it adjusts is the two ends of the prompt and nothing between
+    them. A block that holds only whitespace contributes nothing and is
+    dropped, the first block loses its leading whitespace and the last
+    its trailing, which is what keeps an agent with no prompt of its own
+    from being sent one that begins with a blank line. Every byte inside
+    a block, its indentation and its own blank lines included, is left
+    exactly as it was written.
+
+    A prompt of one block is handed over untouched instead, because a
+    persona standing alone is what an agent's prompt field holds and
+    trimming it would be this module editing a value it was handed. That
+    is also the byte-equality pin: for a configuration with no guidance,
+    every path through here produces character for character what the
+    memory append produced before this module existed, including the
+    strip it has always ended with.
     """
-    text = "\n\n".join(block.text for block in blocks)
-    return Assembled(tuple(blocks), text if len(blocks) == 1 else text.strip())
+    if len(blocks) == 1:
+        return Assembled(tuple(blocks), blocks[0].text)
+    # A prompt made of nothing but a blank persona cannot happen (the
+    # blocks that join it are non-blank by construction), but falling
+    # back to the persona rather than to no blocks at all keeps this
+    # total rather than resting on that.
+    kept = [block for block in blocks if block.text.strip()] or [blocks[0]]
+    texts = [block.text for block in kept]
+    texts[0] = texts[0].lstrip()
+    texts[-1] = texts[-1].rstrip()
+    trimmed = tuple(
+        Block(block.provenance, text) for block, text in zip(kept, texts, strict=True)
+    )
+    return Assembled(trimmed, "\n\n".join(block.text for block in trimmed))
 
 
 __all__ = [

@@ -39,8 +39,8 @@ egress: false
 
 # What the model should know about using this server's tools, injected
 # into the system prompt of every agent this entry is granted to. It is
-# stored and injected exactly as written, so its indentation and its
-# blank lines are part of it.
+# stored and injected as written, so its indentation and its own blank
+# lines are part of it.
 instructions: |
   Forecasts from this server are for the user's own town unless they
   name another one. Give temperatures in Celsius and round them to whole

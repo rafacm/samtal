@@ -143,6 +143,36 @@ async def test_the_granted_guidance_reaches_the_model() -> None:
     assert GUIDANCE in system
 
 
+async def test_the_model_receives_exactly_the_blocks_that_are_reported() -> None:
+    """The session's side of the surface's one promise, over the inputs
+    that make a lazy assembler lie: a persona written with leading
+    whitespace, and guidance whose author left blank lines at the end of
+    it. What the provider was handed is the blocks joined, character for
+    character, so what the surface reports is what the model read."""
+    config = base_config(
+        agents={
+            "poet": {"prompt": "  POET  \n", "tts": "tenor"},
+            "tutor": {"prompt": "TUTOR", "tts": "alto"},
+        }
+    )
+    llm = RecordingLlm()
+    session = session_with(
+        CountingServers((Guidance("home", "  Ask first.\n\n"),)), {"poet": llm}, config=config
+    )
+
+    await run_reply(session, "hello")
+
+    half = session.runtime._know_how
+    assert half is not None
+    (system,) = llm.systems
+    assert system == "\n\n".join(block.text for block in half.blocks)
+    assert system == half.text
+    assert len(system) == half.characters
+    # The interior of the guidance is what its author wrote; only the
+    # end of the whole prompt was trimmed, and the block says so.
+    assert "Ask first." in half.blocks[1].text
+
+
 async def test_an_agent_granted_nothing_is_sent_its_persona_alone() -> None:
     """The byte-equality case, seen from the session: with no guidance
     and no memory, the prompt is the agent's prompt field and nothing

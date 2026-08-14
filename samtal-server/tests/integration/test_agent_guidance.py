@@ -211,12 +211,15 @@ async def test_the_api_reads_back_the_prompt_the_model_was_given(
         f"instructions:{ENTRY}",
     ]
     # Every block the surface reports is in what the model was given,
-    # with the whitespace collapsed by the trip through the speaker.
+    # with the whitespace collapsed by the trip through the speaker,
+    # which is the most a spoken reply can carry.
     for block in body["blocks"]:
         assert collapsed(block["text"]) in collapsed(said)
-    assert body["characters"] == sum(
-        block["characters"] for block in body["blocks"]
-    ) + len("\n\n")
+    # What the trip through the speaker cannot check, checked on the
+    # answer itself: the prompt is the blocks joined and nothing else.
+    assert body["characters"] == len(
+        "\n\n".join(block["text"] for block in body["blocks"])
+    )
 
 
 # The two clocks, in one held session

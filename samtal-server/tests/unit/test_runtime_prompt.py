@@ -82,17 +82,76 @@ def test_guidance_keeps_grant_order() -> None:
 
 def test_guidance_is_injected_verbatim_under_its_heading() -> None:
     """Indentation and inner blank lines are what somebody wrote, so
-    they reach the model as written. The one thing that does not survive
-    is whitespace at the two ends of the whole prompt, which the join
-    strips exactly as the memory append has always stripped it, so the
-    text is asserted inside a prompt that carries a block after it."""
+    they reach the model as written. The two ends of the whole prompt
+    are the exception, and the block reports what it sent: what is
+    asserted here is that the interior survives and that the block and
+    the prompt agree about the rest."""
     written = "  Ask before unlocking the door.\n\n    The lights are safe.\n"
-    assembled = prompt.with_memory(
-        prompt.know_how("P", [prompt.Guidance("home", written)]), "- a fact"
-    )
+    assembled = prompt.know_how("P", [prompt.Guidance("home", written)])
 
-    assert assembled.blocks[1].text.endswith(written)
-    assert written in assembled.text
+    guidance = assembled.blocks[1]
+    assert "  Ask before unlocking the door.\n\n    The lights are safe." in guidance.text
+    assert guidance.text in assembled.text
+    assert assembled.text.endswith(guidance.text)
+
+
+# The blocks are the prompt
+#
+# The surface exists to say what the model receives, so the blocks it
+# reports have to be the prompt and not a description of it. These pin
+# that as an equality over the inputs that used to break it: a persona
+# with leading whitespace, and a last block whose text ends in blank
+# lines.
+
+AWKWARD = [
+    ("  POET  \n", (), ""),
+    ("  POET  \n", (prompt.Guidance("home", "Ask first.\n\n"),), ""),
+    ("\n  POET", (prompt.Guidance("home", "  Ask first.\n\n"),), "- a fact"),
+    ("", (prompt.Guidance("home", "Ask first."),), ""),
+    ("   ", (), "- a fact"),
+    ("POET", (prompt.Guidance("home", "Ask first."),), "- a fact\n"),
+]
+
+
+@pytest.mark.parametrize(("persona", "guidance", "facts"), AWKWARD)
+def test_the_prompt_is_the_blocks_and_nothing_else(
+    persona: str, guidance: tuple[prompt.Guidance, ...], facts: str
+) -> None:
+    """The equality the inspection surface is worth nothing without: a
+    byte the model is sent is a byte some block reports, and a byte a
+    block reports is a byte the model is sent."""
+    for assembled in (
+        prompt.know_how(persona, guidance),
+        prompt.with_memory(prompt.know_how(persona, guidance), facts),
+    ):
+        assert "\n\n".join(block.text for block in assembled.blocks) == assembled.text
+        assert assembled.characters == sum(assembled.sizes().values()) + 2 * (
+            len(assembled.blocks) - 1
+        )
+
+
+@pytest.mark.parametrize(("persona", "guidance", "facts"), AWKWARD)
+def test_no_block_holds_whitespace_the_prompt_does_not(
+    persona: str, guidance: tuple[prompt.Guidance, ...], facts: str
+) -> None:
+    """The other side of it, stated as the rule that produces it: the
+    ends of the prompt are trimmed, so the ends of the first and last
+    blocks are trimmed with them rather than being reported as bytes
+    that went nowhere.
+
+    A prompt of one block is exempt and stays exactly as it was
+    written, which is the persona standing alone: trimming it would be
+    this module editing the value it was handed, and it is what the
+    byte-equality pin holds."""
+    assembled = prompt.with_memory(prompt.know_how(persona, guidance), facts)
+    if len(assembled.blocks) == 1:
+        assert assembled.text == assembled.blocks[0].text
+        return
+
+    assert assembled.text == assembled.text.strip()
+    assert assembled.blocks[0].text == assembled.blocks[0].text.lstrip()
+    assert assembled.blocks[-1].text == assembled.blocks[-1].text.rstrip()
+    assert all(block.text.strip() for block in assembled.blocks)
 
 
 def test_every_block_carries_its_provenance_and_its_size() -> None:
@@ -110,15 +169,15 @@ def test_every_block_carries_its_provenance_and_its_size() -> None:
         assert block.text in assembled.text
 
 
-def test_an_agent_with_no_prompt_of_its_own_still_has_a_persona_block() -> None:
-    """Reported as the empty block it is rather than being absent, so
-    the surface says an agent has no persona instead of saying nothing.
-    The prompt itself does not start with a blank line."""
+def test_an_agent_with_no_prompt_of_its_own_contributes_no_block() -> None:
+    """The prompt does not begin with a blank line, and the blocks do
+    not claim one: a block is what the model receives, and this one
+    would be nothing."""
     assembled = prompt.with_memory(prompt.know_how(""), "- a fact")
 
-    assert [block.provenance for block in assembled.blocks] == ["persona", "memory"]
-    assert assembled.blocks[0].characters == 0
+    assert [block.provenance for block in assembled.blocks] == ["memory"]
     assert assembled.text.startswith(prompt.MEMORY_HEADING)
+    assert assembled.text == assembled.blocks[0].text
 
 
 def test_the_know_how_half_is_the_persona_alone_without_guidance() -> None:
