@@ -96,7 +96,7 @@ def test_an_empty_start_is_configured_over_http_and_serves_after_a_restart(
     # conversation configuration" means: every stage built at boot, which
     # is also the check the first application could not have passed.
     providers = restarted.state.agent_providers["assistant"]
-    assert providers.prompt == "You are an assistant."
+    assert restarted.state.config.prompt_for_agent("assistant") == "You are an assistant."
     assert providers.llm is not None
     assert providers.asr is not None
     assert providers.tts is not None
