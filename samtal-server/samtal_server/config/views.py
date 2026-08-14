@@ -201,6 +201,10 @@ def mcp_server_body(entry: McpServerConfig) -> dict[str, object]:
     if entry.egress is not None:
         data["egress"] = entry.egress
     data["tool_timeout_s"] = entry.tool_timeout_s
+    # Shown as written, and unmasked: it is guidance the operator wrote
+    # for the model to read, not a credential slot.
+    if entry.instructions is not None:
+        data["instructions"] = entry.instructions
     return data
 
 

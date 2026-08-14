@@ -2620,6 +2620,19 @@
             "exclusiveMinimum": 0,
             "title": "Tool Timeout S",
             "type": "number"
+          },
+          "instructions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Guidance for the model about using this server's tools, injected into the system prompt of every agent this entry is granted to, under a heading naming the prefix its tools carry. It is written for the whole entry rather than per tool, so guidance about a tool an agent's allow list withholds is noise the operator avoids by writing about the granted surface. The grant is the whole condition: it is injected whether or not the server is connected and whatever its tools turn out to be, and an agent with `mcp: []` never sees it. It is stored and injected exactly as written, indentation and blank lines included. Editing it does not restart the connection, so a reload reports the entry as `unchanged`, and the new text reaches a conversation at its next activation: a new session or an agent switch, never a reply of a session already running.",
+            "title": "Instructions"
           }
         },
         "required": [

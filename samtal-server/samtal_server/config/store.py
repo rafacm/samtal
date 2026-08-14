@@ -834,6 +834,10 @@ def _mcp_from_row(row: Row) -> McpServerConfig:
         mapping = _mapping(location, key, value)
         if mapping:
             data[key] = mapping
+    # Left unset when the column is NULL, which is what a row written
+    # before the column existed holds and what "no guidance" means.
+    if row.instructions is not None:
+        data["instructions"] = row.instructions
     return _stored(McpServerConfig, location, data)
 
 
@@ -916,6 +920,9 @@ def _mcp_values(entry: McpServerConfig) -> dict[str, object]:
         "headers": dict(entry.headers),
         "egress": entry.egress,
         "tool_timeout_s": entry.tool_timeout_s,
+        # Written as it was given: this is prompt text an operator wrote,
+        # and its indentation and its blank lines are part of it.
+        "instructions": entry.instructions,
     }
 
 

@@ -86,6 +86,11 @@ mcp_servers = Table(
     Column("headers", JSON, nullable=False, default=dict),
     Column("egress", Boolean, nullable=True),
     Column("tool_timeout_s", Float, nullable=False),
+    # The operator's guidance about using this server's tools, injected
+    # into the prompt of every agent granted the entry. Nullable, since
+    # NULL is the unset the model already means, and a row written
+    # before the column existed reads as having none.
+    Column("instructions", Text, nullable=True),
     # Dotted path (env.API_TOKEN, headers.Authorization) to envelope.
     Column("secrets", JSON, nullable=False, default=dict),
 )

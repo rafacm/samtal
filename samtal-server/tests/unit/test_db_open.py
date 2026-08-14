@@ -207,6 +207,158 @@ def test_provider_rows_hold_every_declared_model_field(tmp_path: Path) -> None:
         engine.dispose()
 
 
+# Upgrading a database somebody is already running
+#
+# Every other test here migrates an empty directory, which proves the
+# scripts run and nothing about what happens to rows that were already
+# there. This one builds the baseline schema, fills it the way a
+# deployment fills it, and takes it to head through every migration that
+# has landed since, loading the result through the repository a server
+# boots on. It grows a case per migration rather than being replaced, so
+# the whole chain is proven at every merge.
+
+SEEDED_MAC = "aa:bb:cc:dd:ee:ff"
+
+
+def _at_baseline(directory: Path):
+    """A database at revision 0001 and no further: the schema a
+    deployment that installed before this feature is running."""
+    from alembic import command
+    from alembic.config import Config as AlembicConfig
+    from sqlalchemy import create_engine
+
+    from samtal_server.db import _MIGRATIONS_DIR, DATABASE_FILENAME
+
+    directory.mkdir(parents=True, exist_ok=True)
+    engine = create_engine(f"sqlite+pysqlite:///{directory / DATABASE_FILENAME}")
+    with engine.connect() as connection:
+        config = AlembicConfig()
+        config.set_main_option("script_location", str(_MIGRATIONS_DIR))
+        config.attributes["connection"] = connection
+        command.upgrade(config, "0001")
+        connection.commit()
+    return engine
+
+
+def _seed_baseline_rows(engine) -> None:
+    """One nonempty row per table, written as SQL against the baseline
+    columns rather than through the repository: the repository writes
+    today's columns, and what this test is about is rows that predate
+    them."""
+    import json
+
+    statements = [
+        (
+            "insert into providers (stage, name, type, api_key_env, egress, options, "
+            "secrets) values (:stage, :name, :type, :api_key_env, :egress, :options, "
+            ":secrets)",
+            {
+                "stage": "llm",
+                "name": "claude",
+                "type": "anthropic",
+                "api_key_env": "ANTHROPIC_API_KEY",
+                "egress": None,
+                "options": json.dumps({"model": "claude-sonnet-5"}),
+                "secrets": json.dumps({}),
+            },
+        ),
+        (
+            "insert into mcp_servers (name, transport, command, args, env, url, headers, "
+            "egress, tool_timeout_s, secrets) values (:name, :transport, :command, :args, "
+            ":env, :url, :headers, :egress, :tool_timeout_s, :secrets)",
+            {
+                "name": "home",
+                "transport": "stdio",
+                "command": "uvx",
+                "args": json.dumps(["home-mcp"]),
+                "env": json.dumps({"API_ACCESS_TOKEN": "$HOME_TOKEN"}),
+                "url": None,
+                "headers": json.dumps({}),
+                "egress": False,
+                "tool_timeout_s": 7.5,
+                "secrets": json.dumps({}),
+            },
+        ),
+        (
+            "insert into agent_defaults (id, llm, asr, tts, vad, mcp, filler) values "
+            "('singleton', :llm, :asr, :tts, :vad, :mcp, :filler)",
+            {
+                "llm": "claude",
+                "asr": None,
+                "tts": None,
+                "vad": None,
+                "mcp": json.dumps(["home"]),
+                "filler": None,
+            },
+        ),
+        (
+            "insert into agents (name, prompt, llm, asr, tts, vad, mcp, filler) values "
+            "(:name, :prompt, :llm, :asr, :tts, :vad, :mcp, :filler)",
+            {
+                "name": "sam",
+                "prompt": "You are Sam.",
+                "llm": None,
+                "asr": None,
+                "tts": None,
+                "vad": None,
+                "mcp": None,
+                "filler": json.dumps({"enabled": True, "phrases": ["Hmm..."], "delay_ms": 1800.0}),
+            },
+        ),
+        (
+            "insert into devices (mac, agents) values (:mac, :agents)",
+            {"mac": SEEDED_MAC, "agents": json.dumps(["sam"])},
+        ),
+        (
+            "insert into domain_settings (key, value) values ('default_agent', :value)",
+            {"value": json.dumps("sam")},
+        ),
+    ]
+    with engine.begin() as connection:
+        for statement, parameters in statements:
+            connection.execute(text(statement), parameters)
+
+
+def test_a_seeded_baseline_database_upgrades_to_head_with_every_value_kept(
+    tmp_path: Path,
+) -> None:
+    from samtal_server.config.store import ConfigStore
+
+    directory = tmp_path / "db"
+    baseline = _at_baseline(directory)
+    try:
+        _seed_baseline_rows(baseline)
+        assert _version(baseline) == ["0001"]
+    finally:
+        baseline.dispose()
+
+    # What a server does on the first start after the upgrade.
+    engine = open_database(directory)
+    try:
+        assert _version(engine) != ["0001"]
+        domain = ConfigStore(engine).load().domain
+    finally:
+        engine.dispose()
+
+    assert domain.providers.llm["claude"].type == "anthropic"
+    assert domain.providers.llm["claude"].api_key_env == "ANTHROPIC_API_KEY"
+    assert domain.providers.llm["claude"].options == {"model": "claude-sonnet-5"}
+    entry = domain.mcp_servers["home"]
+    assert (entry.command, entry.args) == ("uvx", ["home-mcp"])
+    assert entry.env == {"API_ACCESS_TOKEN": "$HOME_TOKEN"}
+    assert (entry.egress, entry.tool_timeout_s) == (False, 7.5)
+    assert domain.agent_defaults.llm == "claude"
+    assert domain.agent_defaults.mcp == ["home"]
+    assert domain.agents["sam"].prompt == "You are Sam."
+    assert domain.agents["sam"].filler is not None
+    assert domain.agents["sam"].filler.phrases == ["Hmm..."]
+    assert domain.devices == {SEEDED_MAC: ["sam"]}
+    assert domain.default_agent == "sam"
+    # And what 0002 added is unset on a row that predates it, which is
+    # the whole of what a nullable additive column promises.
+    assert entry.instructions is None
+
+
 def test_the_migrations_ship_inside_the_package() -> None:
     """Discovery from an installed wheel is proved in CI, which installs
     one and migrates from it. This is the cheap half: the scripts are

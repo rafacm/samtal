@@ -59,6 +59,33 @@ def test_a_field_belonging_to_the_other_transport_is_an_error(
         config_with(mcp_servers={"x": entry})
 
 
+# Guidance whose shape is the assertion: leading indentation, an inner
+# blank line and a trailing newline, all of which a stripping type would
+# quietly take away.
+VERBATIM = "  Ask before unlocking the door.\n\n    The lights are safe.\n"
+
+
+def test_an_entry_carries_the_operators_guidance_verbatim() -> None:
+    config = config_with(mcp_servers={"ha": STDIO | {"instructions": VERBATIM}})
+
+    assert config.mcp_servers["ha"].instructions == VERBATIM
+
+
+def test_an_entry_without_guidance_has_none() -> None:
+    assert config_with(mcp_servers={"ha": STDIO}).mcp_servers["ha"].instructions is None
+
+
+@pytest.mark.parametrize("written", ["", "   ", "\n\n"])
+def test_blank_guidance_is_refused_by_the_rule_and_not_by_its_value(written: str) -> None:
+    """Non-blank is checked on a stripped copy; what is stored is the
+    original. The refusal names the rule, since a rejected fragment is
+    one nobody has validated yet."""
+    with pytest.raises(ValidationError, match="only whitespace") as caught:
+        config_with(mcp_servers={"ha": STDIO | {"instructions": written}})
+
+    assert "leave the key out" in str(caught.value)
+
+
 @pytest.mark.parametrize("name", ["self", "switch_agent", "remember", "home.assistant"])
 def test_a_reserved_or_unusable_entry_name_fails_the_boot(name: str) -> None:
     with pytest.raises(ValidationError, match="not a usable entry name"):

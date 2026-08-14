@@ -93,6 +93,34 @@ _LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 NonBlankStr = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 
+def _check_written_text(value: str) -> str:
+    """Text an operator wrote for the model to read, checked without
+    being changed.
+
+    Deliberately not `NonBlankStr`, which strips: that is right for an
+    identifier and wrong for prompt text. Leading indentation and a
+    trailing blank line are things somebody wrote on purpose, and what
+    this field promises is that the model is given exactly what was
+    written. So the emptiness check runs on a stripped copy and the
+    original is returned untouched.
+
+    The refusal names the rule and not the value, the boundary's rule
+    everywhere else: a fragment refused here has been validated by
+    nobody yet.
+    """
+    if not value.strip():
+        raise ValueError(
+            "this field holds only whitespace, which the model would read as nothing; "
+            "write the guidance, or leave the key out"
+        )
+    return value
+
+
+# Text stored and injected byte for byte: non-blank, and otherwise
+# exactly as it was written.
+VerbatimStr = Annotated[str, AfterValidator(_check_written_text)]
+
+
 def _check_env_name(value: str) -> str:
     """A key that names an environment variable holds a name and nothing
     else.
@@ -871,6 +899,28 @@ class McpServerConfig(BaseModel):
             "How long one tool call on this server may take, in seconds, before the "
             "model is told it timed out. The device hears silence meanwhile, so "
             "keep it short."
+        ),
+    )
+
+    # What the operator wants the model to know about using this
+    # server's tools, injected into the system prompt of every agent
+    # granted the entry. Verbatim, and whole-entry rather than per-tool
+    # (#122).
+    instructions: VerbatimStr | None = Field(
+        default=None,
+        description=(
+            "Guidance for the model about using this server's tools, injected into the "
+            "system prompt of every agent this entry is granted to, under a heading "
+            "naming the prefix its tools carry. It is written for the whole entry "
+            "rather than per tool, so guidance about a tool an agent's allow list "
+            "withholds is noise the operator avoids by writing about the granted "
+            "surface. The grant is the whole condition: it is injected whether or not "
+            "the server is connected and whatever its tools turn out to be, and an "
+            "agent with `mcp: []` never sees it. It is stored and injected exactly as "
+            "written, indentation and blank lines included. Editing it does not "
+            "restart the connection, so a reload reports the entry as `unchanged`, and "
+            "the new text reaches a conversation at its next activation: a new session "
+            "or an agent switch, never a reply of a session already running."
         ),
     )
 
