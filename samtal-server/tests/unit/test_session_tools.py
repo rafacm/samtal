@@ -129,7 +129,6 @@ def session_for(
         # emits about its LLM carry what a real one's would.
         script.identity = providers[agent].llm.identity
         providers[agent] = type(providers[agent])(
-            prompt=providers[agent].prompt,
             llm=script,
             asr=providers[agent].asr,
             tts=providers[agent].tts,
@@ -268,7 +267,7 @@ async def test_a_successful_switch_hands_over_to_the_other_agent() -> None:
     assert await run_reply(session, "get me the tutor") == ["Tutor here, hello."]
     assert session._agent == "tutor"
     assert session.runtime._providers is not None
-    assert session.runtime._providers.prompt == "TUTOR"
+    assert session.runtime._system_prompt() == "TUTOR"
 
     # The new agent saw the conversation so far plus an ephemeral turn
     # telling it to greet, and that turn is not in the history.

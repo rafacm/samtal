@@ -1633,6 +1633,20 @@ class Config(BaseModel):
             return own, f"agents.{agent}.{stage}"
         return getattr(self.agent_defaults, stage), f"agent_defaults.{stage}"
 
+    def prompt_for_agent(self, agent: str) -> str:
+        """The persona an agent replies under, and the only source of
+        it.
+
+        A method rather than a field read at each call site because the
+        persona is one of the pieces the assembled prompt is made of,
+        and two places holding it is how a pipeline and an inspection
+        surface come to disagree about what the model was sent. There is
+        deliberately no inheritance here, unlike the provider stages: a
+        prompt is what makes an agent that agent, which is why
+        `agent_defaults` refuses to carry one.
+        """
+        return self.agents[agent].prompt
+
     def mcp_for_agent(self, agent: str) -> list[McpGrant]:
         """The MCP servers an agent talks to and how much of each: its
         own list when it names one, agent_defaults otherwise. A list

@@ -350,7 +350,7 @@ def runtime_for(config: Config, device: FakeDevice, llm: Any = None) -> Any:
     if llm is not None:
         agent = providers["assistant"]
         providers["assistant"] = type(agent)(
-            prompt=agent.prompt, llm=llm, asr=agent.asr, tts=agent.tts, vad=agent.vad
+            llm=llm, asr=agent.asr, tts=agent.tts, vad=agent.vad
         )
     factory = bespoke_runtime_factory(config, providers, McpServers({}), None, {})
     return factory(cast(DeviceOutput, device), SessionEvents("contract"), ["assistant"])

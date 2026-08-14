@@ -257,8 +257,12 @@ def test_agent_defaults_complete_a_pipeline_an_agent_only_half_names() -> None:
     assert providers["poet"].llm is providers["tutor"].llm
     assert providers["poet"].vad is providers["tutor"].vad
     assert providers["poet"].tts is not providers["tutor"].tts
-    assert providers["poet"].prompt == "POET"
-    assert providers["tutor"].prompt == "TUTOR"
+    # And the personas are not here at all: what this builds is the four
+    # engines, and the prompt has one source, which is the
+    # configuration.
+    assert not hasattr(providers["poet"], "prompt")
+    assert config.prompt_for_agent("poet") == "POET"
+    assert config.prompt_for_agent("tutor") == "TUTOR"
 
 
 def test_an_agent_default_naming_a_broken_provider_fails_the_boot() -> None:
