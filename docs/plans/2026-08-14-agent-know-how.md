@@ -48,8 +48,10 @@ Settled by issue #122 and not re-litigated here:
 
 The assembled system prompt is, in order: the persona prompt, the
 fragments in `prompt_includes` order, the per-server guidance in grant
-order (for each entry, the operator's `instructions` and then the
-server-shipped guidance when opted in), and the remembered facts last
+order (for each entry, the operator's `instructions`, then the
+server's shipped instructions, then its named prompts in
+`inject_prompts` order, each where opted in), and the remembered
+facts last
 under the existing memory heading. Blocks are separated by blank
 lines. Fragments are injected verbatim with no added heading: they are
 prompt text the operator wrote, and a heading would editorialize.
@@ -109,40 +111,60 @@ and a server that silently drops instruction blocks is worse than one
 that visibly reports what it injected. That is the two-tier fallback's
 job if it is ever needed, per the issue's settled decision.
 
-### Trust boundary: the opt-in consumes the spec's own guidance channel
+### Trust boundary: two server channels, both behind per-entry opt-ins
 
-Deliverable 3 is resolved through `InitializeResult.instructions`, the
-MCP specification's field "describing how to use the server and its
-features". It is captured during the `initialize` call every manager
-already makes, so consuming it costs no extra round trip, and it is
-exactly the deliverable's motivating shape: the standards-based twin
-of the operator-written `instructions` field, for servers that ship
-their own usage guidance.
+Deliverable 3 is resolved through both channels a server can ship
+guidance in, each behind its own explicit opt-in on the entry:
 
-The prompts primitive is deliberately not the guidance channel. The
-specification defines prompts as user-controlled templates: they take
-arguments and are designed to be explicitly selected by the user, the
-way a slash command is. Injecting them wholesale at session open would
-repurpose them against their own interaction model, and a voice device
-has no surface to select one from. The revisit conditions are
-documented where the decision is: prompts become worth consuming when
-samtal grows a user-invocable surface for them, and resources when
-non-text tool results land (#121 gap 6 names that condition already).
+- **`use_server_instructions`** (default false) injects
+  `InitializeResult.instructions`, the specification's field
+  "describing how to use the server and its features". It is captured
+  during the `initialize` call every manager already makes, so
+  consuming it costs no extra round trip.
+- **`inject_prompts`** (default unset, meaning none) names the
+  server-published prompts to inject, by prompt name. At connect,
+  inside the existing `CONNECT_TIMEOUT_S` envelope and never during a
+  turn, the manager fetches each named prompt with `prompts/get` and
+  no arguments, extracts its text content, and holds it beside the
+  published tools; the blocks are injected in the order the operator
+  listed them, after the entry's other guidance. Selection is
+  operator-explicit rather than wholesale, because the specification
+  defines prompts as user-controlled templates and a server may
+  publish dozens: the operator, who read the server's documentation,
+  names the ones that are standing guidance rather than invocable
+  templates. A named prompt the server does not publish, one that
+  requires arguments (a template cannot be rendered without them),
+  or one whose rendered content is not text, is skipped with a
+  warning naming the operator-written name and the rule it failed,
+  never the server's bytes: the same visible-mismatch shape as a
+  grant allow list naming an unpublished tool. Prompts are refetched
+  on every reconnect, like the tool list, and `inject_prompts`
+  participates in connection identity (below): editing it changes
+  what the connect fetches, so it restarts the connection, unlike
+  the two fields that configure only injection.
 
-Injection is opt-in per entry: `use_server_instructions`, default
-false. Operator-written guidance is trusted; a third party's published
-instructions are that server steering the agent, so the operator says
-so explicitly, per entry, and the generated reference says exactly
-that on the field. Two bounds apply when the opt-in is on:
+What stays out, with its revisit conditions documented where the
+decision is: prompt templates with arguments become worth consuming
+when samtal grows a user-invocable surface for them, and resources
+wait until non-text tool results land (#121 gap 6 names that
+condition already).
 
-- **A size cap.** Server-shipped instructions longer than a fixed cap
-  (4000 characters) are skipped wholesale with a warning naming the
-  entry and the size, never truncated: a truncated instruction block
-  is half an instruction nobody reviewed, and an unbounded one is a
-  third party filling the prompt budget.
-- **The publishing rule for logs.** The instruction bytes never
-  appear in a log record; the connect log and the skip warning carry
-  the entry name and the size only. The bytes reach exactly two
+Operator-written guidance is trusted; a third party's published
+instructions and prompts are that server steering the agent, so the
+operator opts in explicitly, per entry and per channel, and the
+generated reference says exactly that on both fields. Two bounds
+apply to every server-shipped block, whichever channel it came in
+on:
+
+- **A size cap.** A server-shipped block longer than a fixed cap
+  (4000 characters) is skipped wholesale with a warning naming the
+  entry, the channel and the size, never truncated: a truncated
+  instruction block is half an instruction nobody reviewed, and an
+  unbounded one is a third party filling the prompt budget.
+- **The publishing rule for logs.** The shipped bytes never appear in
+  a log record; the connect log and the skip warnings carry the entry
+  name, the operator-written prompt name where one exists, and the
+  size only. The bytes reach exactly two
   places, both deliberate: the model's system prompt, which is what
   the opt-in means, and the assembled-prompt surface, which exists to
   show what the model receives and marks the block's provenance so an
@@ -176,7 +198,9 @@ secrets are unchanged. `instructions` and `use_server_instructions`
 are excluded from that comparison: they configure prompt text the
 connection never sees, so restarting a live connection (dropping
 mid-call tools, respawning a stdio child) to apply a guidance typo fix
-is churn without cause. An instructions-only edit therefore applies on
+is churn without cause. `inject_prompts` is deliberately not excluded:
+editing it changes what the connect fetches from the server, so it
+restarts the connection, which is the honest cost of a new fetch. An instructions-only edit therefore applies on
 reload as `unchanged` in the reload report, which is honest about the
 connection, and the new guidance is visible on the assembled-prompt
 surface and in the next reply. The README and the reload response
@@ -231,12 +255,15 @@ in the same database, so there is no reason to defer the check to a
 live connection). A nullable `prompt_includes` JSON column on both
 layer tables, in the same migration.
 
-**`mcp_servers.<name>.use_server_instructions`** (milestone 3): a
-boolean, default false, stored in its own column, with the trust
-sentence in its generated description. The manager captures
-`InitializeResult.instructions` in `_run` where it already awaits
-`initialize()`, holds it beside the published tools (cleared when the
-connection drops, like them), and applies the cap at capture.
+**`mcp_servers.<name>.use_server_instructions`** and
+**`mcp_servers.<name>.inject_prompts`** (milestone 3): a boolean,
+default false, and an optional list of prompt names (non-blank,
+duplicates refused by position), each stored in its own column, with
+the trust sentence in both generated descriptions. The manager
+captures `InitializeResult.instructions` and fetches the named
+prompts at connect, holds them beside the published tools (cleared
+when the connection drops, like them), and applies the cap at
+capture.
 
 ### Where the pieces live at runtime
 
@@ -365,12 +392,18 @@ doc drift checks.
   include order; migration loads pre-upgrade agent rows; docgen and
   examples drift checks.
 - Unit, milestone 3: default-off ignores shipped instructions
-  entirely; opted-in captures and injects after the operator's block;
-  the cap skips wholesale with a warning naming entry and size; the
-  reflection sentinel: a mock server shipping a credential sentinel in
-  its instructions, asserted absent from every log record, and from
-  the status surface, with or without the opt-in; cleared when the
-  connection drops.
+  entirely and fetches no prompts; opted-in captures and injects
+  after the operator's block, prompts in `inject_prompts` order after
+  the shipped instructions; a named prompt that is unpublished,
+  requires arguments, or renders non-text content is skipped with the
+  warning naming the operator-written name and the rule, never the
+  server's bytes; the cap skips wholesale per block with a warning
+  naming entry, channel and size; the reflection sentinel: a mock
+  server shipping a credential sentinel in its instructions and in a
+  prompt's rendered text, asserted absent from every log record and
+  from the status surface, with or without the opt-ins; cleared when
+  the connection drops; an `inject_prompts` edit restarts the
+  connection on reload, and the two injection-only fields do not.
 - Unit, milestone 4: the route (bearer-gated, 404 for an unloaded
   agent with the restart sentence, 503 serverless); the block shapes
   and totals agree with the assembler; CLI rendering strips control
@@ -430,6 +463,22 @@ its resolution once the amendment addressing it lands.
    reconnects and opt-in; `InitializeResult.instructions` may be
    supported additionally, but cannot replace the deliverable.
    Resources may stay deferred as the issue permits.
+   *Resolution*: adopted. The trust-boundary section now consumes
+   both channels behind per-entry opt-ins: `use_server_instructions`
+   for `InitializeResult.instructions`, and `inject_prompts`, a list
+   of operator-named prompts fetched with `prompts/get` and no
+   arguments at connect inside the existing `CONNECT_TIMEOUT_S`
+   envelope, never during a turn, refetched on every reconnect.
+   Selection is operator-explicit because the specification defines
+   prompts as user-controlled templates and a server may publish
+   dozens; a named prompt that is unpublished, requires arguments or
+   renders non-text is skipped with a warning naming the
+   operator-written name only, the grant-allow-list mismatch shape.
+   `inject_prompts` participates in connection identity, since
+   editing it changes what the connect fetches. Templates with
+   arguments keep a documented revisit condition (a user-invocable
+   surface); resources stay deferred. Milestone 3 and its tests
+   carry both fields.
 
 2. **P1: per-reply assembly contradicts the settled session-open
    boundary, and the byte-equality claim is false.** The plan
@@ -533,13 +582,16 @@ default-off flag, milestone 4 is a new read surface.
   the write, read-back, boot, assembled loop proven; unknown and
   duplicate includes refused; pre-upgrade rows load; drift checks
   pass.
-- [ ] **Server-shipped guidance opt-in**: `use_server_instructions`,
-  migration 0004, capture at `initialize` under the cap, injection
-  after the operator's block, the reflection sentinel, the trust
-  paragraph in README and the generated reference, examples, regen,
-  CHANGELOG. Accept: lint and both lanes green; default-off proven
-  silent; opted-in proven injected and capped; no server bytes in any
-  log record; drift checks pass.
+- [ ] **Server-shipped guidance opt-ins**: `use_server_instructions`
+  and `inject_prompts`, migration 0004, capture at `initialize` and
+  the prompt fetches at connect under the cap, injection after the
+  operator's block, the skip rules for unusable named prompts, the
+  reflection sentinel, the trust paragraph in README and the
+  generated reference, examples, regen, CHANGELOG. Accept: lint and
+  both lanes green; default-off proven silent and fetch-free;
+  opted-in proven injected, ordered and capped; unusable named
+  prompts skipped visibly; no server bytes in any log record; drift
+  checks pass.
 - [ ] **The assembled-prompt surface**: `GET
   /runtime/agents/{name}/prompt`, `config prompt <agent>`, the
   `prompt_assembled` event, the assembly-order documentation, OpenAPI
