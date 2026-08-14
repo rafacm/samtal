@@ -338,7 +338,15 @@ granted agent. Ordinary domain field: stored in a nullable
 reads (it is not a secret), covered by the generated reference.
 
 **`prompt_fragments`** (milestone 2): a new domain section mapping
-fragment names to instruction blocks. Names match the MCP entry-name
+fragment names to a `PromptFragmentConfig` entity with a single
+verbatim `text` field, not to bare strings: the store's entity
+parsing, the API's `Envelope.entity` and the CLI's fragment handling
+all require mapping-shaped entities, so the fragment travels the
+ordinary path as `{text: ...}`, in the PUT body, the read envelope
+and the CLI fragment alike, and milestone 2 pins the exact CLI input
+and API read representation in tests. The one-field mapping also
+leaves room for a later per-fragment field without a shape change,
+the same reason grants took their object form. Names match the MCP entry-name
 pattern (`[A-Za-z0-9_-]+`): they appear in refusals, logs and the
 inspection surface, so the same safe-charset rule applies, enforced
 at parse time. The refusal sentence is not borrowed with the rule:
