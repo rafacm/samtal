@@ -90,6 +90,17 @@ PROMPT_DISCOVERY_TIMEOUT_S = CONNECT_TIMEOUT_S
 # deadline notices as anything other than a slow server.
 PROMPT_PAGE_CAP = 20
 
+# And how many listed prompts are looked at across the whole walk. The
+# page cap bounds how many arrays arrive; nothing bounds how long one of
+# them is, and a server that answers instantly with a million entries
+# costs the loop that reads them rather than any of the timers.
+PROMPT_LISTING_CAP = 2000
+
+# How many messages one published prompt may render from. A prompt
+# result is a third party's list too, and the size cap below cannot be
+# reached without walking it.
+PROMPT_MESSAGE_CAP = 200
+
 # The size of a server-shipped block this server will inject, whichever
 # channel it arrived on. A longer one is skipped whole rather than
 # truncated: a truncated instruction block is half an instruction nobody
@@ -113,6 +124,9 @@ NON_TEXT_CONTENT = "NonTextContent"
 NOTHING_TO_INJECT = "NothingToInject"
 DISCOVERY_DEADLINE = "DiscoveryDeadline"
 PAGE_CAP = "PageCap"
+LISTING_CAP = "ListingCap"
+TOO_MANY_MESSAGES = "TooManyMessages"
+TOO_LONG = "TooLong"
 
 # How long a manager gets to close its connection when a reload is
 # taking it away, before its task is cancelled instead. Short, because
@@ -662,10 +676,13 @@ class McpServerManager:
                 self._skipped([position], unreadable.reason)
                 continue
             rendered = _rendered(fetched)
-            if rendered is None:
-                self._skipped([position], NON_TEXT_CONTENT)
+            if rendered.problem == TOO_LONG:
+                self._too_long(PROMPT_CHANNEL, rendered.size, position)
                 continue
-            text = self._injectable(rendered, PROMPT_CHANNEL, position)
+            if rendered.problem is not None:
+                self._skipped([position], rendered.problem)
+                continue
+            text = self._injectable(rendered.text, PROMPT_CHANNEL, position)
             if text is None:
                 continue
             captured.append(ServerPrompt(self._name, position, name, text))
@@ -681,26 +698,40 @@ class McpServerManager:
         judged and the listing itself is a third party's list of any
         length. The walk ends when the server says the listing has ended
         and not a page earlier: stopping as soon as every configured name
-        had been seen would have been a fetch while the server was still
-        advertising, which is the one ordering listing-first exists to
-        prevent, and it would have made a name published twice answer
-        differently depending on which page the first copy sat on. A
-        listing that has not ended by the page cap is a listing this
-        server will not finish reading: a cursor that repeats itself
-        looks like nothing else from here.
+        had been seen would have been a fetch before the advertised
+        listing was over, which is the one thing this order exists to
+        prevent, and it would have made a name published twice under
+        different arguments answer differently depending on where the
+        first copy sat. A listing that has not ended by the page cap is a
+        listing this server will not finish reading: a cursor that
+        repeats itself looks like nothing else from here.
+
+        The deadline is checked between pages as well as before each
+        call, so a server that answers every page instantly and hands
+        back a great many of them is bounded by the phase and not only
+        by the cap.
         """
         listing: dict[str, mcp.types.Prompt] = {}
+        seen = 0
         cursor: str | None = None
         for _page in range(PROMPT_PAGE_CAP):
             answered = await self._bounded(
                 functools.partial(session.list_prompts, cursor), deadline
             )
             for listed in answered.prompts:
+                seen += 1
+                if seen > PROMPT_LISTING_CAP:
+                    # A page is a third party's array and nothing bounds
+                    # its length, so the walk stops counting rather than
+                    # reading out an arbitrary one.
+                    raise _PromptsUnreadable(LISTING_CAP)
                 if listed.name in wanted:
                     listing.setdefault(listed.name, listed)
             cursor = answered.nextCursor
             if cursor is None:
                 return listing
+            if time.monotonic() >= deadline:
+                raise _PromptsUnreadable(DISCOVERY_DEADLINE)
         raise _PromptsUnreadable(PAGE_CAP)
 
     async def _bounded[T](self, call: Callable[[], Awaitable[T]], deadline: float) -> T:
@@ -739,30 +770,44 @@ class McpServerManager:
         """One server-shipped block, or None when there is nothing to
         inject.
 
-        Nothing at all and nothing but whitespace are the same answer: a
-        heading with no words under it is not guidance. Over the cap is
-        the visible case, and it is skipped whole rather than truncated,
-        because half an instruction is an instruction nobody reviewed.
+        The length is checked before anything walks the text, and the
+        order is deliberate: `strip()` copies whatever it was given, so
+        asking whether an oversized block is blank costs a second copy
+        of a block this server has already decided not to keep. Over the
+        cap is skipped whole rather than truncated, because half an
+        instruction is an instruction nobody reviewed. Nothing at all
+        and nothing but whitespace are then the same answer, since a
+        heading with no words under it is not guidance.
         """
-        if text is None or not text.strip():
+        if text is None:
             if position is not None:
                 self._skipped([position], NOTHING_TO_INJECT)
             return None
         if len(text) > SHIPPED_BLOCK_LIMIT:
-            # The entry, the channel and the size. Never the block: it is
-            # a third party's bytes, and this line is read by an operator
-            # from a log store that holds the transcripts.
-            logger.warning(
-                "mcp server %s: the %s block it shipped%s is %d characters, past the "
-                "%d-character cap, so it is skipped whole rather than truncated",
-                self._name,
-                channel,
-                "" if position is None else f" at inject_prompts position {position}",
-                len(text),
-                SHIPPED_BLOCK_LIMIT,
-            )
+            self._too_long(channel, len(text), position)
+            return None
+        if not text.strip():
+            if position is not None:
+                self._skipped([position], NOTHING_TO_INJECT)
             return None
         return text
+
+    def _too_long(self, channel: str, size: int, position: int | None) -> None:
+        """Say that a block was past the cap, in sizes and positions.
+
+        The entry, the channel and the size. Never the block: it is a
+        third party's bytes, and this line is read by an operator from a
+        log store that holds the transcripts.
+        """
+        logger.warning(
+            "mcp server %s: the %s block it shipped%s is %d characters, past the "
+            "%d-character cap, so it is skipped whole rather than truncated",
+            self._name,
+            channel,
+            "" if position is None else f" at inject_prompts position {position}",
+            size,
+            SHIPPED_BLOCK_LIMIT,
+        )
 
     def _skipped(self, positions: Iterable[int], rule: str) -> None:
         """Say what is not injected and why.
@@ -907,7 +952,22 @@ def _result_text(result: mcp.types.CallToolResult) -> str:
     return "\n".join(parts)
 
 
-def _rendered(fetched: mcp.types.GetPromptResult) -> str | None:
+@dataclass(frozen=True)
+class _Rendering:
+    """What one published prompt rendered to, or why it did not.
+
+    `text` when there is a block to inject, and otherwise a `problem`
+    token and the size the messages added up to, so the caller can say
+    which rule refused it and how big it was without this function
+    knowing anything about warnings.
+    """
+
+    text: str | None = None
+    problem: str | None = None
+    size: int = 0
+
+
+def _rendered(fetched: mcp.types.GetPromptResult) -> _Rendering:
     """One published prompt as the block it is injected as, or None when
     it is not one.
 
@@ -923,13 +983,29 @@ def _rendered(fetched: mcp.types.GetPromptResult) -> str | None:
     being rendered as the named placeholder a tool result gets: a tool
     result is spoken by an assistant that can say it got something it
     cannot use, and a system-prompt block has nobody to say that.
+
+    Both bounds are applied before the join rather than after it. The
+    message list is a third party's array, so it is refused past a fixed
+    count; and the block's size is the sum of what the messages hold
+    plus the separators between them, which is arithmetic over lengths
+    the objects already carry, so a prompt that would be skipped for
+    being oversized is skipped without a string of that size ever being
+    built. Rendering first and measuring afterwards was the whole of the
+    difference between a cap and an allocation a far side chooses.
     """
-    parts: list[str] = []
-    for message in fetched.messages:
+    messages = fetched.messages
+    if len(messages) > PROMPT_MESSAGE_CAP:
+        return _Rendering(problem=TOO_MANY_MESSAGES)
+    size = 0
+    for count, message in enumerate(messages, start=1):
         if not isinstance(message.content, mcp.types.TextContent):
-            return None
-        parts.append(message.content.text)
-    return "\n\n".join(parts)
+            return _Rendering(problem=NON_TEXT_CONTENT)
+        size += len(message.content.text) + (2 if count > 1 else 0)
+    if size > SHIPPED_BLOCK_LIMIT:
+        return _Rendering(problem=TOO_LONG, size=size)
+    return _Rendering(
+        text="\n\n".join(message.content.text for message in messages), size=size
+    )
 
 
 def _managers_for(
