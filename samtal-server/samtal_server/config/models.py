@@ -1324,7 +1324,9 @@ DOMAIN_DESCRIPTIONS: dict[str, str] = {
         "(home__turn_on_light), so it must match [A-Za-z0-9_-]+ and must not be one "
         "of the names the merged tool list already uses. What a tool answers with "
         "reaches the model as speakable text, since the reply is spoken; content of "
-        "any other kind is named as a placeholder rather than dropped."
+        "any other kind is named as a placeholder rather than dropped. Carrying "
+        "structured content to a device is work for the display protocol, once the "
+        "display path can render more than speech, rather than for the tool loop."
     ),
     "agent_defaults": (
         "What every agent uses unless it names something else. One entry for the "
