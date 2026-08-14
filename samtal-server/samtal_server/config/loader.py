@@ -43,6 +43,9 @@ ENV_PREFIX = "SAMTAL_"
 MOVED_KEY_COMMANDS: dict[str, str] = {
     "providers": "samtal-server config set provider <stage> <name> -f fragment.yaml",
     "mcp_servers": "samtal-server config set mcp-server <name> -f fragment.yaml",
+    "prompt_fragments": (
+        "samtal-server config set prompt-fragment <name> -f fragment.yaml"
+    ),
     "agent_defaults": "samtal-server config set agent-defaults -f fragment.yaml",
     "agents": "samtal-server config set agent <name> -f fragment.yaml",
     "devices": "samtal-server config bind-device <mac> <agent> [<agent> ...]",

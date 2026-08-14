@@ -302,11 +302,26 @@ def test_unknown_top_level_key_is_rejected(tmp_path: Path) -> None:
 MOVED_SECTIONS: list[tuple[str, str, str]] = [
     ("providers", "providers:\n  llm:\n    claude:\n      type: anthropic\n", "set provider"),
     ("mcp_servers", "mcp_servers:\n  home:\n    transport: stdio\n", "set mcp-server"),
+    (
+        "prompt_fragments",
+        "prompt_fragments:\n  household:\n    text: The bins go out on Tuesday.\n",
+        "set prompt-fragment",
+    ),
     ("agent_defaults", "agent_defaults:\n  llm: claude\n", "set agent-defaults"),
     ("agents", "agents:\n  assistant:\n    prompt: hi\n", "set agent"),
     ("devices", 'devices:\n  "aa:bb:cc:dd:ee:ff": assistant\n', "bind-device"),
     ("default_agent", "default_agent: assistant\n", "set-default-agent"),
 ]
+
+
+def test_every_domain_section_names_the_command_that_writes_it() -> None:
+    """The refusals index this table by domain key, so a section added
+    without one would answer with a KeyError out of the boot path rather
+    than with the sentence that sends an operator to the command."""
+    from samtal_server.config.loader import MOVED_KEY_COMMANDS
+
+    assert set(MOVED_KEY_COMMANDS) == set(DOMAIN_KEYS)
+    assert {key for key, _, _ in MOVED_SECTIONS} == set(DOMAIN_KEYS)
 
 
 @pytest.mark.parametrize(("key", "section", "command"), MOVED_SECTIONS)
