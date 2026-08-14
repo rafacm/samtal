@@ -148,6 +148,46 @@ def test_both_mcp_entry_forms_round_trip_through_the_row(store: ConfigStore) -> 
     assert [mcp_entry_fragment(item) for item in entry.mcp] == written
 
 
+def test_an_entrys_guidance_round_trips_byte_for_byte(store: ConfigStore) -> None:
+    """The field is promised verbatim, so what the column holds and what
+    a read gives back are the bytes that were written: the indentation
+    and the trailing newline are somebody's own formatting of a prompt."""
+    _populate(store)
+    written = "  Ask before unlocking the door.\n\n    The lights are safe.\n"
+    store.set_mcp_server(
+        "weather", {"transport": "stdio", "command": "uvx", "instructions": written}
+    )
+
+    with store._engine.connect() as connection:
+        stored = connection.execute(
+            select(schema.mcp_servers.c.instructions).where(
+                schema.mcp_servers.c.name == "weather"
+            )
+        ).scalar_one()
+    assert stored == written
+    assert store.load().domain.mcp_servers["weather"].instructions == written
+    assert store.read_mcp_server("weather").entry.instructions == written
+
+
+def test_a_row_written_before_the_guidance_column_loads_unchanged(
+    store: ConfigStore,
+) -> None:
+    """The column is nullable because NULL is the unset the model
+    already means, so a row from a database written before the migration
+    is an entry with no guidance rather than an unreadable row."""
+    _populate(store)
+    with store._engine.begin() as connection:
+        connection.execute(
+            update(schema.mcp_servers)
+            .where(schema.mcp_servers.c.name == "home")
+            .values(instructions=None)
+        )
+
+    entry = store.load().domain.mcp_servers["home"]
+    assert entry.instructions is None
+    assert entry.command == "uvx"
+
+
 def test_a_pre_upgrade_string_row_loads_and_is_written_back_unchanged(
     store: ConfigStore,
 ) -> None:

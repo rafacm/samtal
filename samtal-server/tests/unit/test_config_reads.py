@@ -186,6 +186,27 @@ def test_a_kind_that_holds_no_secret_is_shown_with_an_empty_mapping(
     assert views.device(store.read_device("aa:bb:cc:dd:ee:ff"))["entity"] == {"agents": ["sam"]}
 
 
+def test_an_entrys_guidance_is_shown_write_shaped_and_unmasked(store: ConfigStore) -> None:
+    """It is prompt text the operator wrote, not a credential slot, so a
+    read shows it as written and a write of the body takes it back."""
+    written = "  Ask before unlocking the door.\n\n    The lights are safe.\n"
+    store.set_mcp_server(
+        "home", {"transport": "stdio", "command": "uvx", "instructions": written}
+    )
+
+    body = views.mcp_server(store.read_mcp_server("home"))["entity"]
+
+    assert body["instructions"] == written
+    store.set_mcp_server("home", body)
+    assert store.read_mcp_server("home").entry.instructions == written
+
+
+def test_an_entry_with_no_guidance_shows_no_key(store: ConfigStore) -> None:
+    _populate(store)
+
+    assert "instructions" not in views.mcp_server(store.read_mcp_server("weather"))["entity"]
+
+
 def test_a_reference_that_is_not_one_comes_back_masked(store: ConfigStore) -> None:
     """Fail-closed masking, on the path an operator reaches for when
     something is wrong. The models keep an obvious paste out, but a

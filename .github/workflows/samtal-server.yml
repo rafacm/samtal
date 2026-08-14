@@ -110,7 +110,12 @@ jobs:
               sys.exit(f"the source tree was imported, not the wheel: {installed}")
 
           engine = open_database(pathlib.Path(tempfile.mkdtemp()) / "db")
-          tables = set(inspect(engine).get_table_names())
+          inspector = inspect(engine)
+          tables = set(inspector.get_table_names())
+          columns = {
+              table: {column["name"] for column in inspector.get_columns(table)}
+              for table in tables
+          }
           engine.dispose()
 
           expected = {
@@ -124,6 +129,14 @@ jobs:
           missing = expected - tables
           if missing:
               sys.exit("the wheel's migrations did not create: " + ", ".join(sorted(missing)))
+          # The columns later migrations add, so a wheel that carries
+          # only the baseline script fails here rather than at the first
+          # write on a deployment.
+          added = {"mcp_servers": {"instructions"}}
+          for table, names in added.items():
+              absent = names - columns[table]
+              if absent:
+                  sys.exit(f"the wheel's migrations did not add {table}: " + ", ".join(sorted(absent)))
           print(f"migrated a fresh database from {installed.parent}")
           PY
 
