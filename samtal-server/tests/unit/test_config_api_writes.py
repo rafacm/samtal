@@ -32,7 +32,7 @@ from samtal_server.config.secrets import (
     generate_key,
     load_keys,
 )
-from samtal_server.config.store import ConfigStore
+from samtal_server.config.store import NO_SUCH_FRAGMENT, ConfigStore
 from samtal_server.config.writes import (
     BINDING_NOTICE,
     MCP_RELOAD_NOTICE,
@@ -564,6 +564,30 @@ def test_deleting_something_that_is_not_there_is_404(client: TestClient) -> None
         response = client.delete(path)
         assert response.status_code == 404, path
         assert response.json() == {"detail": detail}
+
+
+@pytest.mark.parametrize("name", [SECRET, f"{SECRET}.pasted"])
+def test_a_fragment_that_is_not_there_is_404_without_the_name(
+    client: TestClient, caplog: pytest.LogCaptureFixture, name: str
+) -> None:
+    """The read and the delete of a name nothing wrote. It arrived in the
+    path and was never validated by anything here, so the 404 names the
+    section and the fact and not what was typed."""
+    path = f"/prompt-fragments/{quote(name, safe='')}"
+
+    with caplog.at_level(logging.DEBUG):
+        read = client.get(path)
+        removed = client.delete(path)
+
+    for response in (read, removed):
+        assert response.status_code == 404
+        assert response.json() == {"detail": NO_SUCH_FRAGMENT}
+        assert SECRET not in response.text
+        assert SECRET not in str(response.headers)
+    served = [
+        record for record in caplog.records if record.name.startswith("samtal_server")
+    ]
+    assert all(SECRET not in str(record.__dict__) for record in served)
 
 
 def test_a_secret_for_a_slot_holding_none_is_404(client: TestClient) -> None:

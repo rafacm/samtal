@@ -18,7 +18,7 @@ from samtal_server.config import ConfigError
 from samtal_server.config.loader import StorageError, UnknownEntityError
 from samtal_server.config.models import mcp_entry_fragment
 from samtal_server.config.secrets import SecretLocation, generate_key
-from samtal_server.config.store import ConfigStore, verify_secrets
+from samtal_server.config.store import NO_SUCH_FRAGMENT, ConfigStore, verify_secrets
 from samtal_server.db import open_database, schema
 
 # Not a real credential, and shaped so a substring check for it cannot
@@ -207,11 +207,24 @@ def test_a_fragment_round_trips_byte_for_byte(store: ConfigStore) -> None:
     assert store.read_prompt_fragment("household").entry.text == written
 
 
-def test_a_fragment_that_is_not_there_names_itself(store: ConfigStore) -> None:
-    with pytest.raises(UnknownEntityError) as caught:
-        store.read_prompt_fragment("household")
+@pytest.mark.parametrize("name", ["household", SECRET, f"{SECRET}.pasted"])
+def test_a_fragment_that_is_not_there_is_named_by_its_section_only(
+    store: ConfigStore, name: str
+) -> None:
+    """The one refusal in this section that could carry a value nothing
+    validated. A name that addresses no fragment arrived in a URL path
+    or on a command line and was never written here, so what comes back
+    names the section and the fact, and the operator can see what they
+    typed without this server repeating it."""
+    for call in (
+        lambda: store.read_prompt_fragment(name),
+        lambda: store.delete_prompt_fragment(name),
+    ):
+        with pytest.raises(UnknownEntityError) as caught:
+            call()
 
-    assert str(caught.value) == "prompt_fragments.household: no such prompt fragment"
+        assert str(caught.value) == NO_SUCH_FRAGMENT
+        assert SECRET not in _chain(caught.value)
 
 
 # Every body a write of an unusable name can carry, because the name is

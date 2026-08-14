@@ -119,6 +119,15 @@ _NON_STRING_KEY = (
     "given a key nobody wrote"
 )
 
+# What a read or a delete of a fragment that is not there says. Fixed,
+# and deliberately not the `<section>.<name>: no such ...` shape its
+# neighbours use: a name that addresses no fragment is a name nothing in
+# this deployment has validated, it arrived in a URL path or on a
+# command line, and this sentence travels out as a 404 body and a
+# printed line. The section is what an operator needs to be told; the
+# name is the thing they typed and can see.
+NO_SUCH_FRAGMENT = "prompt_fragments: no prompt fragment of that name exists"
+
 
 class DomainConfig(BaseModel):
     """The domain half of a configuration, as the database holds it.
@@ -313,9 +322,7 @@ class ConfigStore:
         with self._transaction() as connection:
             entry = _read_domain(connection).prompt_fragments.get(name)
             if entry is None:
-                raise UnknownEntityError(
-                    f"prompt_fragments.{name}: no such prompt fragment"
-                )
+                raise UnknownEntityError(NO_SUCH_FRAGMENT)
             # A fragment is prompt text and holds no credential slot, so
             # there is nothing stored beside it.
             return Entity(entry=entry, secrets=())
@@ -468,7 +475,7 @@ class ConfigStore:
                 connection,
                 schema.prompt_fragments,
                 (schema.prompt_fragments.c.name == name,),
-                f"prompt_fragments.{name}: no such prompt fragment",
+                NO_SUCH_FRAGMENT,
             )
 
     def set_agent(self, name: str, fragment: object) -> None:
@@ -1455,6 +1462,7 @@ def _refuse_unresolved(domain: DomainConfig) -> None:
 
 
 __all__ = [
+    "NO_SUCH_FRAGMENT",
     "BoundDevice",
     "ConfigStore",
     "check_transportable",
