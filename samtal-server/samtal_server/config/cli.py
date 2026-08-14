@@ -1419,7 +1419,15 @@ def _prompt_listing(answer: object) -> str:
     body = _assembled_prompt(answer)
     lines: list[str] = []
     for block in body["blocks"]:
-        lines.append(f"{_block(str(block['provenance']))} ({block['characters']} characters)")
+        named = block.get("name")
+        lines.append(
+            f"{_block(str(block['provenance']))} ({block['characters']} characters)"
+            + (
+                ""
+                if named is None
+                else f", the server prompt named {_block(str(named))}"
+            )
+        )
         lines.append(_block(str(block["text"])))
         lines.append("")
     lines.append(f"total: {body['characters']} characters")
@@ -1437,9 +1445,11 @@ def _block(value: str) -> str:
     inspection command, and a renderer that quietly cut the text would
     make it lie about the one thing it exists to show.
 
-    Applied to the provenance as well as to the text, since a
-    provenance names an entry an operator wrote and later milestones
-    put more of the world in it.
+    Applied to the provenance and to a block's name as well as to its
+    text. The provenance names an entry an operator wrote; the name is a
+    prompt name a server chose and an operator copied, so nothing bounds
+    what it holds, and it is exactly the string a hostile server would
+    put an escape sequence in.
     """
     return "".join(
         character if character.isprintable() or character in "\n\t" else "?"
@@ -1463,11 +1473,15 @@ def _assembled_prompt(answer: object) -> Mapping[str, object]:
 
 
 def _is_prompt_block(block: object) -> bool:
+    # `name` is optional and null for every block but a published
+    # prompt's, so what is checked is its type when it is there rather
+    # than its presence.
     return (
         isinstance(block, Mapping)
         and PROMPT_BLOCK_FIELDS <= set(block)
         and isinstance(block["provenance"], str)
         and isinstance(block["text"], str)
+        and isinstance(block.get("name"), str | None)
         and _is_count(block["characters"])
     )
 
