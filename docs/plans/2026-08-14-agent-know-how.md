@@ -478,8 +478,14 @@ samtal_server/db/schema.py            the new columns and table
 samtal_server/db/migrations/versions/ 0002 (instructions), 0003 (fragments,
                                       includes), 0004 (the two
                                       server-shipped opt-in fields)
+samtal_server/config/loader.py        prompt_fragments joins the moved-key
+                                      commands, so a stale YAML section or
+                                      environment variable is refused with
+                                      the command that writes it
 samtal_server/config/store.py         fragment rows; the new columns in
                                       entry and layer rows
+config.example.yaml                   the domain-section wording learns
+                                      prompt_fragments and its command
 samtal_server/config/views.py         fragment reads; the new fields echoed
                                       write-shaped
 samtal_server/config/api.py           prompt-fragment CRUD routes;
@@ -552,7 +558,11 @@ doc drift checks.
   stderr, every log record and the full exception chain, for agent
   and defaults writes and for boot validation; assembly order with
   fragments in include order; migration loads pre-upgrade agent
-  rows; docgen and examples drift checks.
+  rows; the moved-key path: a YAML file holding a `prompt_fragments`
+  section and a `SAMTAL_PROMPT_FRAGMENTS` environment variable are
+  each refused naming the command that writes the section, which is
+  the loader's rule for every domain key; docgen and examples drift
+  checks.
 - Unit, milestone 3: default-off ignores shipped instructions
   entirely and fetches no prompts; opted-in captures and injects
   after the operator's block, prompts in `inject_prompts` order after
