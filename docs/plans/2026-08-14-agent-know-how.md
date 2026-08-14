@@ -75,18 +75,49 @@ deterministic ordering beats a configurable one, and when #83's
 precedence question lands it composes against a fixed base rather than
 against a per-deployment permutation.
 
-Assembly is a pure function over memory-resident state. Every network
-fetch (connect, `initialize`, reload) happened before assembly runs;
-what the issue's session-open decision forbids is fetching, not string
-concatenation, and the pieces are all in memory. The pipeline
-assembles once per reply leg, beside the tool snapshot it already
-takes, so the guidance and the tool list a reply is built on describe
-the same world; a reload landing mid-conversation is picked up by the
-next utterance, exactly as the tool snapshot already is. The assembler
-lives in `samtal_server/runtime/prompt.py`: prompt assembly fails the
-"would this exist if the backend were a telephone call" test, so it is
-runtime code, and `builtin.with_memory` folds into it rather than
-surviving as a second place where prompt text is glued.
+**When assembly runs, stated exactly.** Assembly is a pure function
+over memory-resident state, evaluated at the start of each reply leg,
+beside the tool snapshot the leg already takes: once when a reply
+begins answering an utterance, and once more when an agent switch
+starts the new agent's leg, which is the "at agent switch" case the
+issue names. Nothing is assembled, and nothing is ever fetched, while
+the model is streaming or between tool rounds; every network fetch
+(connect, `initialize`, the prompt fetches, reload) happened before
+assembly runs. That is this plan's reading of the issue's settled
+boundary, and it is a reading rather than a repeal: what the decision
+exists to forbid is fetch-on-demand through the speaker's dead air,
+and a string concatenation of resident pieces costs none. The
+alternative, caching one prompt at session open, was considered and
+rejected because it cannot coexist with the rest of the system: #121
+deliberately made the tool snapshot per-reply so that reloads and
+reconnects reach running sessions on the next utterance, so a prompt
+frozen at activation would describe tools that have since moved,
+which is the inert-config trap rebuilt inside one session. Per-leg
+assembly is what keeps the guidance and the tool list a reply is
+built on describing the same world.
+
+This changes one visible timing, and the plan says so rather than
+hiding it behind an equality claim: today `_system_prompt()` is
+evaluated on every LLM round, so a fact remembered in round one of a
+multi-round reply appears in round two's prompt; assembled per leg,
+it appears at the next leg instead. The change is deliberate (a
+prompt that shifts between the rounds of one reply is a prompt the
+tool loop cannot reason about) and small (one reply's tail, only when
+the model called `remember` mid-reply). Cross-session freshness is
+unchanged: memory is still read at every assembly, so a fact
+remembered in a concurrent session is known to this one on its next
+reply, exactly as today. The assembler's output for a configuration
+with no guidance and no fragments is pinned byte-equal to today's
+`with_memory` output per invocation, and the timing itself is pinned
+by an integration test that holds one session across a memory write,
+a reload, a reconnect and an agent switch and asserts when each
+becomes visible.
+
+The assembler lives in `samtal_server/runtime/prompt.py`: prompt
+assembly fails the "would this exist if the backend were a telephone
+call" test, so it is runtime code, and `builtin.with_memory` folds
+into it rather than surviving as a second place where prompt text is
+glued.
 
 ### Budget pressure: counted on the inspection surface, not the MCP one
 
@@ -289,7 +320,11 @@ about what was assembled.
 `GET /runtime/agents/{name}/prompt`, with `samtal-server config
 prompt <agent>` as its CLI client. It lives in the `/runtime`
 namespace #121 established (the entity namespace stays purely CRUD),
-and it answers what a session opening now as that agent would receive:
+and it answers what a session opening now as that agent would
+receive. It is explicitly a new-session preview: sessions hold no
+cached prompt to read back (each leg assembles afresh), so there is
+no "what did session X get" answer to give, and the surface says so
+in its description rather than implying one. The response carries:
 the ordered blocks, each with its provenance (`persona`,
 `fragment:<name>`, `instructions:<entry>`, `server_instructions:<entry>`,
 `memory`), its character count, and its text, plus the total count.
@@ -375,8 +410,9 @@ doc drift checks.
 
 - Unit, milestone 1: the field parses, round-trips through store and
   views write-shaped, and appears in the generated reference; the
-  assembler's order pinned (persona, guidance, memory) and byte-equal
-  to today's output when no guidance exists; guidance injected for a
+  assembler's order pinned (persona, guidance, memory) and, per
+  invocation, byte-equal to today's `with_memory` output when no
+  guidance exists; guidance injected for a
   granted agent whose entry contributes tools, absent for `mcp: []`,
   absent while the entry is down, absent when the allow list filtered
   the offer to nothing; an instructions-only reload keeps the
@@ -413,7 +449,10 @@ doc drift checks.
   `mcp: []` agent does not; a fragment written through the API changes
   the assembled prompt of every including agent after a restart (a
   second app instance on the same database); a server shipping
-  instructions has them surfaced only when the entry opts in; the
+  instructions has them surfaced only when the entry opts in; one
+  session held open across a memory write, an MCP reload, a server
+  reconnect and an agent switch, asserting through `{system}` when
+  each becomes visible (the next leg, never mid-reply); the
   assembled prompt of a live deployment is read back through
   `GET /runtime/agents/{name}/prompt` over a real socket and matches
   what `{system}` shows the model receiving.
@@ -424,9 +463,12 @@ doc drift checks.
 ## Risks and mitigations
 
 - **The with_memory refactor touches every reply.** The assembler
-  lands with a pinned test that its output is byte-equal to today's
-  for a configuration with no guidance and no fragments, so milestone
-  1 is provably additive for every existing deployment.
+  lands with a pinned test that its output is, per invocation,
+  byte-equal to today's for a configuration with no guidance and no
+  fragments, and the one timing change (per-leg rather than
+  per-round evaluation) is stated in the assembly section and pinned
+  by the held-session integration test, so milestone 1's effect on
+  existing deployments is exactly the documented one.
 - **Prompt budget on small local models.** No automatic trimming, by
   decision; the mitigation is visibility (the surface, the event) and
   the documented two-tier fallback owned by #83.
@@ -495,6 +537,23 @@ its resolution once the amendment addressing it lands.
    a persistent session across memory writes, reloads, reconnects
    and an agent switch; make the inspection endpoint's
    new-session-preview nature explicit.
+   *Resolution*: adopted in substance, with the per-leg design kept
+   and the contradiction resolved by argument rather than by a
+   cache. The assembly section now states exactly when assembly runs
+   (the start of each reply leg, which is the utterance boundary and
+   the issue's own agent-switch case), why a session-open cache was
+   rejected (it cannot coexist with #121's per-reply tool snapshot:
+   a frozen prompt would describe tools that have since moved, the
+   inert-config trap rebuilt inside one session), and that what the
+   settled decision forbids is fetch-on-demand, which per-leg
+   assembly never does. The false compatibility claim is replaced by
+   a stated timing change (a mid-reply `remember` becomes visible at
+   the next leg rather than the next round, cross-session freshness
+   unchanged), pinned per invocation by the byte-equality test and
+   in time by a new held-session integration test spanning a memory
+   write, a reload, a reconnect and an agent switch. The inspection
+   surface now says it is a new-session preview and why no cached
+   per-session answer exists.
 
 3. **P1: unknown `prompt_includes` can become a secret-reflection
    path.** The plan delegates unknown includes to
