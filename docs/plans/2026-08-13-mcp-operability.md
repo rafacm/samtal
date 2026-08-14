@@ -729,7 +729,7 @@ milestone is docs.
   integration proof that a restricted agent sees exactly its subset;
   string-form fragments still validate byte-identically.
 - [x] **[Documented decisions](2026-08-13-mcp-operability-implementation.md#milestone-4-documented-decisions)**
-  (PR TBD): builtins structural rule, the SSE
+  (PR #128): builtins structural rule, the SSE
   bridge paragraph and example pointer, the non-text results
   contract, in README, examples and generated reference; CHANGELOG.
   Accept: lint green; drift checks pass; the docs say what gaps 4, 5
