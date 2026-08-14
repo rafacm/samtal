@@ -3068,7 +3068,6 @@
             "anyOf": [
               {
                 "items": {
-                  "minLength": 1,
                   "type": "string"
                 },
                 "type": "array"
@@ -3078,7 +3077,7 @@
               }
             ],
             "default": null,
-            "description": "The prompts this server publishes that are injected into the system prompt of every agent this entry is granted to, each by the name the server lists it under and in the order listed here. Unset means none, which is the default: a third party's text steering the agent is an opt-in per entry and per channel, and the specification defines prompts as user-controlled templates, so the operator who read the server's documentation names the ones that are standing guidance rather than invocable templates. Every name is validated against the server's own paginated prompt listing before anything is fetched, and a name the listing does not carry, one whose prompt declares required arguments, one that renders anything but text, and a rendered block longer than 4000 characters are each skipped with a warning naming this entry and the position in this list, never the name itself, since a server-chosen name is not this server's to print. Editing this list changes what a connect fetches, so unlike the other two prompt fields it restarts the connection when a reload applies it. A name listed twice is refused.",
+            "description": "The prompts this server publishes that are injected into the system prompt of every agent this entry is granted to, each by the name the server lists it under and in the order listed here. Unset means none, which is the default: a third party's text steering the agent is an opt-in per entry and per channel, and the specification defines prompts as user-controlled templates, so the operator who read the server's documentation names the ones that are standing guidance rather than invocable templates. Every name is validated against the server's own paginated prompt listing before anything is fetched, and a name the listing does not carry, one whose prompt declares required arguments, one that renders anything but text, and a rendered block longer than 4000 characters are each skipped with a warning naming this entry and the position in this list, never the name itself, since a server-chosen name is not this server's to print. Editing this list changes what a connect fetches, so unlike the other two prompt fields it restarts the connection when a reload applies it. A name listed twice is refused. Each name is stored and looked up exactly as written, surrounding whitespace included, because it is an identifier the server chose rather than a word this server may tidy: a stripped copy of it addresses a different prompt or none at all.",
             "title": "Inject Prompts"
           }
         },

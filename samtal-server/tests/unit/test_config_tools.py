@@ -123,10 +123,21 @@ def test_a_prompt_named_twice_is_refused_by_position_and_not_by_value() -> None:
     assert secret not in problem
 
 
-@pytest.mark.parametrize("written", ["", "   "])
+@pytest.mark.parametrize("written", ["", "   ", "\n"])
 def test_a_blank_prompt_name_is_refused(written: str) -> None:
     with pytest.raises(ValidationError):
         config_with(mcp_servers={"ha": STDIO | {"inject_prompts": [written]}})
+
+
+def test_a_prompt_name_keeps_the_whitespace_it_was_written_with() -> None:
+    """The name is an identifier the server chose, not a word this
+    server may tidy: a stripped copy of `  spaced  ` addresses a
+    different prompt, or none at all, and the fetch would silently ask
+    for the wrong thing."""
+    written = "  spaced out  "
+    config = config_with(mcp_servers={"ha": STDIO | {"inject_prompts": [written]}})
+
+    assert config.mcp_servers["ha"].inject_prompts == [written]
 
 
 @pytest.mark.parametrize("name", ["self", "switch_agent", "remember", "home.assistant"])

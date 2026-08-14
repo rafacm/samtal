@@ -958,7 +958,11 @@ class McpServerConfig(BaseModel):
     # The second channel: the prompts the server publishes, named one
     # by one because the specification defines them as user-controlled
     # templates and a server may publish dozens.
-    inject_prompts: list[NonBlankStr] | None = Field(
+    # Typed with the verbatim string rather than NonBlankStr, which
+    # strips: a published prompt's name is an exact identifier the
+    # server chose, and a stripped copy of it addresses a different
+    # prompt or none at all.
+    inject_prompts: list[VerbatimStr] | None = Field(
         default=None,
         description=(
             "The prompts this server publishes that are injected into the system prompt "
@@ -976,7 +980,10 @@ class McpServerConfig(BaseModel):
             "itself, since a server-chosen name is not this server's to print. Editing "
             "this list changes what a connect fetches, so unlike the other two prompt "
             "fields it restarts the connection when a reload applies it. A name listed "
-            "twice is refused."
+            "twice is refused. Each name is stored and looked up exactly as written, "
+            "surrounding whitespace included, because it is an identifier the server "
+            "chose rather than a word this server may tidy: a stripped copy of it "
+            "addresses a different prompt or none at all."
         ),
     )
 
