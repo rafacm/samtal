@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from samtal_server.config import Config, McpServerConfig
+from samtal_server.runtime.prompt import Guidance
 from samtal_server.tools import names
 from samtal_server.tools.mcp import (
     CONNECTED,
@@ -879,3 +880,90 @@ async def test_a_shadowed_name_is_reported_once_per_manager_set(
         assert len([r for r in caplog.records if "namespace" in r.getMessage()]) == 1
     finally:
         await servers.stop_all()
+
+
+# The operator's guidance, answered by the effective grant
+#
+# The injection condition is the grant and nothing else, which is the
+# deliverable read literally: a granted agent is told about the entry
+# whether or not it is connected and whatever its allow list narrows its
+# tools to. So these tests never start a server: liveness is not part of
+# the question.
+
+GUIDANCE = "Ask before unlocking the door."
+
+
+async def test_every_granted_agent_gets_the_entrys_guidance() -> None:
+    config = config_granting(
+        {"home": entry_data(instructions=GUIDANCE)},
+        {"house": ["home"], "kids": ["home"]},
+    )
+    servers = McpServers.build(config)
+
+    for agent in ("house", "kids"):
+        assert servers.guidance_for_agent(agent) == (Guidance("home", GUIDANCE),)
+
+
+async def test_guidance_is_there_while_the_server_is_down() -> None:
+    """A server that is unreachable still has an operator's guidance
+    about it, and the agent was still granted it. The mismatch is the
+    accepted noise the issue names, and the status surface is where it
+    is answered."""
+    dead = entry_data(command="/nonexistent/mcp-server", args=[], instructions=GUIDANCE)
+    config = config_granting({"home": dead}, {"house": ["home"]})
+    servers = McpServers.build(config)
+    await servers.start_all()
+    try:
+        assert servers.status()["home"]["state"] == DOWN
+        assert servers.guidance_for_agent("house") == (Guidance("home", GUIDANCE),)
+    finally:
+        await servers.stop_all()
+
+
+async def test_guidance_survives_an_allow_list_that_offers_nothing() -> None:
+    """The grant edge rather than the filtered tool list: an allow list
+    naming nothing the server publishes leaves the agent with no tools
+    of that entry and with the guidance, because it is still granted."""
+    config = config_granting(
+        {"home": entry_data(instructions=GUIDANCE)},
+        {"house": [{"server": "home", "tools": ["no_such_tool"]}]},
+    )
+    servers = McpServers.build(config)
+    await servers.start_all()
+    try:
+        assert servers.tools_for_agent("house") == []
+        assert servers.guidance_for_agent("house") == (Guidance("home", GUIDANCE),)
+    finally:
+        await servers.stop_all()
+
+
+async def test_an_agent_granted_nothing_gets_no_guidance() -> None:
+    """`mcp: []` opts an agent out of the tools its siblings have, and
+    out of what is said about them."""
+    config = config_granting(
+        {"home": entry_data(instructions=GUIDANCE)}, {"house": ["home"], "quiet": []}
+    )
+    servers = McpServers.build(config)
+
+    assert servers.guidance_for_agent("quiet") == ()
+    assert servers.guidance_for_agent("stranger") == ()
+
+
+async def test_an_entry_with_no_guidance_contributes_no_block() -> None:
+    config = config_granting(
+        {"home": entry_data(instructions=GUIDANCE), "weather": entry_data()},
+        {"house": ["weather", "home"]},
+    )
+    servers = McpServers.build(config)
+
+    # And in grant order, which is what the operator wrote.
+    assert servers.guidance_for_agent("house") == (Guidance("home", GUIDANCE),)
+
+
+async def test_guidance_is_carried_verbatim_through_the_slice() -> None:
+    written = "  Ask before unlocking the door.\n\n    The lights are safe.\n"
+    config = config_granting({"home": entry_data(instructions=written)}, {"house": ["home"]})
+
+    servers = McpServers.build(config)
+
+    assert servers.guidance_for_agent("house")[0].text == written

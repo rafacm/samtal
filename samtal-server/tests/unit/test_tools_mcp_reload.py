@@ -38,6 +38,7 @@ from samtal_server.config.secrets import (
     encrypt,
     generate_key,
 )
+from samtal_server.runtime.prompt import Guidance
 from samtal_server.tools.mcp import (
     CONNECTED,
     DOWN,
@@ -162,6 +163,78 @@ async def test_a_changed_fragment_is_stopped_rebuilt_and_started() -> None:
             "rhubarb",
             False,
         )
+    finally:
+        await servers.stop_all()
+
+
+async def test_an_instructions_only_edit_keeps_the_connection() -> None:
+    """The guidance is prompt text the connection never sees, so
+    applying a rewrite of it must not drop a live connection, with the
+    mid-call tools and the respawned child process that would cost. The
+    reload therefore reports `unchanged`, which is honest about the
+    connection, and the new text is in the slice for the next
+    activation to read."""
+    before = config_with(
+        {"tools": entry_data(instructions="Old guidance.")}, {"assistant": ["tools"]}
+    )
+    after = config_with(
+        {"tools": entry_data(instructions="New guidance.")}, {"assistant": ["tools"]}
+    )
+    servers = await started(before)
+    try:
+        kept = manager_of(servers, "tools")
+
+        applied = await servers.reload(reading(after))
+
+        assert applied.unchanged == ("tools",)
+        assert (applied.started, applied.restarted, applied.stopped) == ((), (), ())
+        assert manager_of(servers, "tools") is kept
+        assert servers.status()["tools"]["state"] == CONNECTED
+        # And what an agent activating now is told about the entry is
+        # the text that was just written.
+        assert servers.guidance_for_agent("assistant") == (Guidance("tools", "New guidance."),)
+    finally:
+        await servers.stop_all()
+
+
+async def test_adding_guidance_to_an_entry_that_had_none_keeps_the_connection() -> None:
+    before = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    after = config_with(
+        {"tools": entry_data(instructions="New guidance.")}, {"assistant": ["tools"]}
+    )
+    servers = await started(before)
+    try:
+        kept = manager_of(servers, "tools")
+        assert servers.guidance_for_agent("assistant") == ()
+
+        applied = await servers.reload(reading(after))
+
+        assert applied.unchanged == ("tools",)
+        assert manager_of(servers, "tools") is kept
+        assert servers.guidance_for_agent("assistant") == (Guidance("tools", "New guidance."),)
+    finally:
+        await servers.stop_all()
+
+
+async def test_an_edit_beside_the_guidance_still_restarts_the_entry() -> None:
+    """The exclusion is one field and not a general softening: an entry
+    whose command or timeout moved is still stopped and rebuilt, even
+    when the guidance moved with it."""
+    before = config_with(
+        {"tools": entry_data(instructions="Old guidance.")}, {"assistant": ["tools"]}
+    )
+    after = config_with(
+        {"tools": entry_data(instructions="New guidance.", tool_timeout_s=3.5)},
+        {"assistant": ["tools"]},
+    )
+    servers = await started(before)
+    try:
+        was = manager_of(servers, "tools")
+
+        applied = await servers.reload(reading(after))
+
+        assert applied.restarted == ("tools",)
+        assert manager_of(servers, "tools") is not was
     finally:
         await servers.stop_all()
 
