@@ -308,8 +308,13 @@ reads (it is not a secret), covered by the generated reference.
 **`prompt_fragments`** (milestone 2): a new domain section mapping
 fragment names to instruction blocks. Names match the MCP entry-name
 pattern (`[A-Za-z0-9_-]+`): they appear in refusals, logs and the
-inspection surface, so the same safe-charset rule applies, enforced at
-parse time like `check_mcp_entry_names`. Bodies have no
+inspection surface, so the same safe-charset rule applies, enforced
+at parse time. The refusal sentence is not borrowed with the rule:
+`check_mcp_entry_names` interpolates the rejected name, and a string
+that fails the charset is exactly the string that must not be
+echoed, so an invalid fragment name is refused naming the section
+and the rule only, and a valid name is the only kind any samtal
+surface ever prints. Bodies have no
 server-imposed length cap; the counting surface is the guard, and the
 operator is trusted with their own prompt budget.
 
@@ -548,8 +553,11 @@ doc drift checks.
   unchanged; the inspection surface and `prompt_assembled` event
   over persona, guidance and memory provenance.
 - Unit, milestone 2: fragment name and body validation (bad charset,
-  blank body, both refused with the position-not-value rule where a
-  value would be echoed); store, views, API and CLI round-trips;
+  blank body, both refused naming section and rule only), with a
+  credential-sentinel fragment name asserted absent from the HTTP
+  response, CLI stdout and stderr, every log record and the full
+  exception chain, beside the unknown-include sentinel; store,
+  views, API and CLI round-trips;
   `prompt_includes` semantics (inherit, replace, `[]` opt-out,
   duplicates refused, unknown fragment refused at write time and at
   boot, `agent_defaults` parity); the unresolved-include refusal
