@@ -121,6 +121,7 @@ jobs:
           expected = {
               "providers",
               "mcp_servers",
+              "prompt_fragments",
               "agent_defaults",
               "agents",
               "devices",
@@ -132,7 +133,11 @@ jobs:
           # The columns later migrations add, so a wheel that carries
           # only the baseline script fails here rather than at the first
           # write on a deployment.
-          added = {"mcp_servers": {"instructions"}}
+          added = {
+              "mcp_servers": {"instructions"},
+              "agent_defaults": {"prompt_includes"},
+              "agents": {"prompt_includes"},
+          }
           for table, names in added.items():
               absent = names - columns[table]
               if absent:
