@@ -38,9 +38,10 @@ TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 #   samtal-server config set provider llm claude -f examples/llm-anthropic.yaml
 COMMAND = re.compile(r"^#\s+samtal-server config (set .+?) -f ")
 
-# Providers and MCP servers have to exist before anything references
-# them: a write leaving a reference unresolved is refused, by design.
-ORDER = ("provider", "mcp-server", "agent-defaults", "agent")
+# Providers, MCP servers and prompt fragments have to exist before
+# anything references them: a write leaving a reference unresolved is
+# refused, by design.
+ORDER = ("provider", "mcp-server", "prompt-fragment", "agent-defaults", "agent")
 
 
 def _fragments() -> list[Path]:
@@ -109,6 +110,7 @@ def test_every_fragment_installs_through_the_command_it_names(
     listed = capsys.readouterr().out
     assert "claude (anthropic)" in listed
     assert "home (stdio)" in listed
+    assert "household (" in listed
     assert "assistant" in listed
 
 

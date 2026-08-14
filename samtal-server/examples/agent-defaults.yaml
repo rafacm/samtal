@@ -35,6 +35,16 @@ vad: silero
 mcp:
   - weather
 
+# The shared prompt fragments every agent's system prompt carries, by
+# the name each is defined under in prompt_fragments (see
+# examples/prompt-fragment.yaml). They are injected after the agent's
+# own prompt, in the order listed here, and this is the deployment-wide
+# default: an agent that names its own list replaces this one rather
+# than extending it, and an agent's `prompt_includes: []` opts it out of
+# what its siblings share.
+prompt_includes:
+  - household
+
 # Latency masking with a pre-synthesized filled pause, off by default.
 # When a reply's first audio has not started within delay_ms of the
 # utterance being transcribed, the server plays one of the phrases
