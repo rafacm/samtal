@@ -267,7 +267,7 @@ async def test_a_successful_switch_hands_over_to_the_other_agent() -> None:
     assert await run_reply(session, "get me the tutor") == ["Tutor here, hello."]
     assert session._agent == "tutor"
     assert session.runtime._providers is not None
-    assert session.runtime._system_prompt() == "TUTOR"
+    assert await session.runtime._system_prompt() == "TUTOR"
 
     # The new agent saw the conversation so far plus an ephemeral turn
     # telling it to greet, and that turn is not in the history.
@@ -382,8 +382,8 @@ async def test_a_remembered_fact_is_in_the_next_replys_prompt(tmp_path: Path) ->
     store = MemoryStore(tmp_path)
     await store.remember("poet", "the user is vegetarian")
     session = session_for(base_config(), POET_MAC, memory=store)
-    assert "the user is vegetarian" in session.runtime._system_prompt()
-    assert session.runtime._system_prompt().startswith("POET")
+    assert "the user is vegetarian" in await session.runtime._system_prompt()
+    assert (await session.runtime._system_prompt()).startswith("POET")
 
 
 async def test_malformed_arguments_come_back_as_an_error_result() -> None:

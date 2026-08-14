@@ -190,6 +190,12 @@ class PipelineRuntime:
         # boundary attribute events to it.
         self._agents: list[str] = []
         self._providers: AgentProviders | None = None
+        # The half of the system prompt that belongs to the agent rather
+        # than to the moment: its persona and the guidance of the MCP
+        # entries it is granted, assembled once per activation and held
+        # here for the life of it. Nothing about it is recomputed per
+        # reply; what is, is the memory block appended to it.
+        self._know_how: prompt.Assembled | None = None
         self._turns: list[Turn] = []
         # Generation calls in the reply being spoken, counted across its
         # agents rather than per leg, so the one after a handover is a
@@ -560,6 +566,15 @@ class PipelineRuntime:
         new agent seeing what was said is what makes "switch to the
         tutor and explain what we just discussed" work.
 
+        This is also where the know-how half of the system prompt is
+        assembled, which is the whole of when it happens: at session
+        open and again at an agent switch, and never per reply. Nothing
+        is fetched here, because nothing needs to be: the persona is the
+        configuration this process booted on, and the guidance is what
+        the registry's slice holds, so a reload that landed since is
+        picked up by the next session or the next switch rather than by
+        a conversation in flight.
+
         The device's bound list is enforced here rather than left to
         callers, because the next caller is a tool whose argument a model
         chose: an agent that merely exists is not one this device may
@@ -569,8 +584,44 @@ class PipelineRuntime:
             raise _not_allowed(name, self._agents)
         self._agent = name
         self._providers = self._agent_providers[name]
+        self._know_how = prompt.know_how(
+            self._config.prompt_for_agent(name),
+            self._mcp_servers.guidance_for_agent(name),
+        )
+        self._prompt_assembled(name, self._know_how)
         self._endpointer = self._providers.vad.new_endpointer()
         self._reset_utterance()
+
+    def _prompt_assembled(self, agent: str, half: prompt.Assembled) -> None:
+        """One `prompt_assembled` event: what this agent's know-how half
+        was made of, and how big each piece of it is.
+
+        The decision-site rule applied to prompt size. Every injected
+        block competes with the rest for the budget of a small local
+        model, and when one degrades in the field the retained logs
+        should say what its prompt held without anybody reproducing the
+        session.
+
+        Memory is deliberately outside it. This fires where the
+        know-how half is actually assembled, once per activation, while
+        memory is read per round; emitting per round would double a
+        round's log volume for a number that moves slowly, and
+        `llm_round` already carries that round's token counts. The
+        inspection surface reads memory fresh and answers its size on
+        demand.
+        """
+        logger.info(
+            "session %s: assembled %d characters of prompt for %s",
+            self.session_id,
+            half.characters,
+            agent,
+            extra=self._events.event(
+                "prompt_assembled",
+                agent=agent,
+                characters=half.characters,
+                sources=half.sizes(),
+            ),
+        )
 
     async def _reply(self, pcm: bytes, result: AsrResult | None = None) -> None:
         """Run one utterance through ASR, the LLM, and TTS. Cancelled by
@@ -745,12 +796,13 @@ class PipelineRuntime:
             first_token_at: float | None = None
             usage: Usage | None = None
             self._llm_round += 1
+            # Resolved before the request is built, and per round rather
+            # than per reply, because that is the memory block's clock.
+            system = await self._system_prompt()
             try:
                 async for event in self._watchdog_stream(
                     providers.llm,
-                    functools.partial(
-                        providers.llm.stream, self._system_prompt(), working, tools, choice
-                    ),
+                    functools.partial(providers.llm.stream, system, working, tools, choice),
                 ):
                     if isinstance(event, StreamStarted):
                         # Liveness, not content. The watchdog consumes
@@ -962,12 +1014,26 @@ class PipelineRuntime:
                 return configured
         return DEFAULT_TOOL_TIMEOUT_S
 
-    def _system_prompt(self) -> str:
-        """The active agent's prompt, plus whatever it remembers."""
-        assert self._agent is not None
-        facts = "" if self._memory is None else self._memory.read(self._agent)
-        persona = self._config.prompt_for_agent(self._agent)
-        return prompt.with_memory(prompt.know_how(persona), facts).text
+    async def _system_prompt(self) -> str:
+        """The prompt this round is sent: the half cached at activation,
+        plus whatever the agent remembers right now.
+
+        The half is not rebuilt here. What this adds is the memory
+        block, which keeps the clock it has always had: read on every
+        round, so a fact remembered in one session is known to a
+        concurrent one on its next reply, which is a contract that
+        predates this split.
+
+        The read itself is filesystem I/O and runs in a worker thread
+        rather than on the loop every live conversation shares. It is
+        resolved before the request is built, which is what lets the
+        assembler stay a pure function of the text it is handed.
+        """
+        assert self._know_how is not None and self._agent is not None
+        if self._memory is None:
+            return self._know_how.text
+        facts = await asyncio.to_thread(self._memory.read, self._agent)
+        return prompt.with_memory(self._know_how, facts).text
 
     async def _speak_after(
         self,
