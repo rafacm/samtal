@@ -699,10 +699,11 @@ class PromptBlock(BaseModel):
     provenance: str = Field(
         description=(
             "Where this block came from, as a fixed token this server owns: `persona` "
-            "for the agent's own prompt, `instructions:<entry>` for the guidance "
+            "for the agent's own prompt, `fragment:<name>` for a shared prompt "
+            "fragment the agent includes, `instructions:<entry>` for the guidance "
             "written on an MCP server entry the agent is granted, `memory` for what "
-            "the agent remembers. The entry name is the operator's, and it has been "
-            "through the rule that makes it a tool-name prefix."
+            "the agent remembers. The fragment and entry names are the operator's, and "
+            "both have been through the rule that keeps them to `[A-Za-z0-9_-]+`."
         )
     )
     characters: int = Field(
@@ -730,10 +731,11 @@ class AssembledPrompt(BaseModel):
     blocks: list[PromptBlock] = Field(
         description=(
             "The blocks in the order they are sent, joined by one blank line each: the "
-            "persona, then the guidance of each MCP entry the agent is granted in grant "
-            "order, then the remembered facts. The order is fixed and not configurable. "
-            "A block that would hold nothing is not sent and is not listed, which is "
-            "what an agent with no prompt of its own produces."
+            "persona, then the shared fragments the agent includes in the order its "
+            "layer lists them, then the guidance of each MCP entry the agent is granted "
+            "in grant order, then the remembered facts. The order is fixed and not "
+            "configurable. A block that would hold nothing is not sent and is not "
+            "listed, which is what an agent with no prompt of its own produces."
         )
     )
     characters: int = Field(

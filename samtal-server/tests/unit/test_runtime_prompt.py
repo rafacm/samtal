@@ -44,7 +44,7 @@ def test_the_order_is_persona_then_guidance_then_memory() -> None:
     assembled = prompt.with_memory(
         prompt.know_how(
             "You are the house assistant.",
-            [
+            guidance=[
                 prompt.Guidance("home", "Ask before unlocking the door."),
                 prompt.Guidance("weather", "Give temperatures in Celsius."),
             ],
@@ -66,11 +66,108 @@ def test_the_order_is_persona_then_guidance_then_memory() -> None:
     )
 
 
+def test_the_fragments_sit_between_the_persona_and_the_guidance() -> None:
+    """The whole order in one assembly, with nothing put over a
+    fragment: a heading would editorialize text the operator
+    composed."""
+    assembled = prompt.with_memory(
+        prompt.know_how(
+            "You are the house assistant.",
+            [
+                prompt.Fragment("household", "The bins go out on Tuesday."),
+                prompt.Fragment("style", "Answer in one sentence."),
+            ],
+            [prompt.Guidance("home", "Ask before unlocking the door.")],
+        ),
+        "- the user is vegetarian",
+    )
+
+    assert assembled.text == (
+        "You are the house assistant.\n"
+        "\n"
+        "The bins go out on Tuesday.\n"
+        "\n"
+        "Answer in one sentence.\n"
+        "\n"
+        "Guidance for using the tools whose names begin with home__:\n"
+        "Ask before unlocking the door.\n"
+        "\n"
+        f"{prompt.MEMORY_HEADING}\n"
+        "- the user is vegetarian"
+    )
+    assert [block.provenance for block in assembled.blocks] == [
+        "persona",
+        "fragment:household",
+        "fragment:style",
+        "instructions:home",
+        "memory",
+    ]
+
+
+def test_a_fragment_is_injected_byte_for_byte() -> None:
+    """A fragment's interior is what somebody wrote: its indentation and
+    its own blank lines reach the model as written, and its size is the
+    size of what was sent.
+
+    The two ends of the whole prompt are the exception every block
+    shares, so this is asserted where a fragment is neither of them.
+    The parametrized test below is what covers a fragment that is."""
+    written = "  The bins go out on Tuesday.\n\n    The radio is called Bosse.\n"
+    assembled = prompt.with_memory(
+        prompt.know_how(
+            "P",
+            [prompt.Fragment("household", written)],
+            [prompt.Guidance("home", "Ask first.")],
+        ),
+        "- a fact",
+    )
+
+    assert assembled.blocks[1].text == written
+    assert written in assembled.text
+    assert assembled.sizes()["fragment:household"] == len(written)
+
+
+# A fragment is a block like the others, which is the whole of what it
+# has to be for the surface's equality to hold: the same awkward inputs
+# M1's rules were fixed against, written into fragments this time.
+
+AWKWARD_FRAGMENTS = [
+    ("  POET  \n", (prompt.Fragment("household", "Bins on Tuesday.\n\n"),), ""),
+    ("", (prompt.Fragment("household", "  Bins on Tuesday.\n"),), ""),
+    ("   ", (prompt.Fragment("household", "  Bins.  "),), "- a fact"),
+    (
+        "POET",
+        (prompt.Fragment("household", "Bins.\n"), prompt.Fragment("style", "  One line.  ")),
+        "- a fact\n",
+    ),
+]
+
+
+@pytest.mark.parametrize(("persona", "fragments", "facts"), AWKWARD_FRAGMENTS)
+def test_a_fragment_obeys_the_rules_every_block_obeys(
+    persona: str, fragments: tuple[prompt.Fragment, ...], facts: str
+) -> None:
+    """The prompt is the blocks joined, the ends are trimmed with the
+    blocks that hold them, and a fragment that would hold nothing is
+    reported nowhere. Milestone 1 pinned this over personas and
+    guidance; a new block type has to be inside it rather than beside
+    it."""
+    assembled = prompt.with_memory(prompt.know_how(persona, fragments), facts)
+
+    assert "\n\n".join(block.text for block in assembled.blocks) == assembled.text
+    assert assembled.characters == sum(assembled.sizes().values()) + 2 * (
+        len(assembled.blocks) - 1
+    )
+    if len(assembled.blocks) > 1:
+        assert assembled.text == assembled.text.strip()
+        assert all(block.text.strip() for block in assembled.blocks)
+
+
 def test_guidance_keeps_grant_order() -> None:
     """Grant order rather than alphabetical: what the operator listed is
     what the model reads, and it is the order the registry answers in."""
     assembled = prompt.know_how(
-        "P", [prompt.Guidance("weather", "W"), prompt.Guidance("home", "H")]
+        "P", guidance=[prompt.Guidance("weather", "W"), prompt.Guidance("home", "H")]
     )
 
     assert [block.provenance for block in assembled.blocks] == [
@@ -87,7 +184,7 @@ def test_guidance_is_injected_verbatim_under_its_heading() -> None:
     asserted here is that the interior survives and that the block and
     the prompt agree about the rest."""
     written = "  Ask before unlocking the door.\n\n    The lights are safe.\n"
-    assembled = prompt.know_how("P", [prompt.Guidance("home", written)])
+    assembled = prompt.know_how("P", guidance=[prompt.Guidance("home", written)])
 
     guidance = assembled.blocks[1]
     assert "  Ask before unlocking the door.\n\n    The lights are safe." in guidance.text
@@ -121,8 +218,8 @@ def test_the_prompt_is_the_blocks_and_nothing_else(
     byte the model is sent is a byte some block reports, and a byte a
     block reports is a byte the model is sent."""
     for assembled in (
-        prompt.know_how(persona, guidance),
-        prompt.with_memory(prompt.know_how(persona, guidance), facts),
+        prompt.know_how(persona, guidance=guidance),
+        prompt.with_memory(prompt.know_how(persona, guidance=guidance), facts),
     ):
         assert "\n\n".join(block.text for block in assembled.blocks) == assembled.text
         assert assembled.characters == sum(assembled.sizes().values()) + 2 * (
@@ -143,7 +240,7 @@ def test_no_block_holds_whitespace_the_prompt_does_not(
     written, which is the persona standing alone: trimming it would be
     this module editing the value it was handed, and it is what the
     byte-equality pin holds."""
-    assembled = prompt.with_memory(prompt.know_how(persona, guidance), facts)
+    assembled = prompt.with_memory(prompt.know_how(persona, guidance=guidance), facts)
     if len(assembled.blocks) == 1:
         assert assembled.text == assembled.blocks[0].text
         return
@@ -156,7 +253,7 @@ def test_no_block_holds_whitespace_the_prompt_does_not(
 
 def test_every_block_carries_its_provenance_and_its_size() -> None:
     assembled = prompt.with_memory(
-        prompt.know_how("POET", [prompt.Guidance("home", "H")]), "- a fact"
+        prompt.know_how("POET", guidance=[prompt.Guidance("home", "H")]), "- a fact"
     )
 
     assert assembled.sizes() == {
@@ -190,7 +287,7 @@ def test_the_know_how_half_is_the_persona_alone_without_guidance() -> None:
 def test_memory_that_is_empty_leaves_the_cached_half_alone() -> None:
     """Identity, not equality: the half is cached per activation and a
     round that remembers nothing must not rebuild it."""
-    half = prompt.know_how("POET", [prompt.Guidance("home", "H")])
+    half = prompt.know_how("POET", guidance=[prompt.Guidance("home", "H")])
 
     assert prompt.with_memory(half, "") is half
 

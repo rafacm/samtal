@@ -101,7 +101,9 @@ def _prompt_preview(
         if agent not in config.agents:
             return None
         half = prompt.know_how(
-            config.prompt_for_agent(agent), servers.guidance_for_agent(agent)
+            config.prompt_for_agent(agent),
+            config.fragments_for_agent(agent),
+            servers.guidance_for_agent(agent),
         )
         if memory is None:
             return half

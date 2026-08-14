@@ -9,8 +9,9 @@ it, so there is one place where prompt text is joined and one answer to
 
 The prompt has two halves with two clocks, and the split is what lets
 assembly happen where the decision that owns it says it does. The
-**know-how half** (the persona, and the guidance of each MCP entry the
-agent is granted) is assembled once per activation, at session open and
+**know-how half** (the persona, the shared fragments it includes, and
+the guidance of each MCP entry it is granted) is assembled once per
+activation, at session open and
 again at an agent switch, and cached for the life of that activation:
 nothing about it is recomputed per reply and nothing is fetched while
 it is assembled. The **memory block** keeps the clock it already had,
@@ -31,10 +32,12 @@ character reported against a block is a character the model receives.
 
 The order is fixed and documented, and deliberately not configurable:
 the persona first, because it says who is speaking and everything after
-it is read in that voice; the guidance blocks next in grant order, each
-under a one-line heading naming the prefix its tools carry, because
-they are about the tools rather than about the speaker; the remembered
-facts last, which is where they already were.
+it is read in that voice; the shared fragments next, in the order the
+including layer lists them, because they are standing context the
+persona speaks within; the guidance blocks after those in grant order,
+each under a one-line heading naming the prefix its tools carry,
+because they are about the tools rather than about the speaker; the
+remembered facts last, which is where they already were.
 """
 
 from collections.abc import Sequence
@@ -58,9 +61,18 @@ MEMORY = "memory"
 # been through the `[A-Za-z0-9_-]+` rule that makes it a tool prefix.
 INSTRUCTIONS = "instructions"
 
+# One shared fragment, qualified by its name, which is safe to print for
+# the same reason and by the same rule: a fragment name is refused at
+# parse time unless it is written in that charset.
+FRAGMENT = "fragment"
+
 
 def instructions_provenance(entry: str) -> str:
     return f"{INSTRUCTIONS}:{entry}"
+
+
+def fragment_provenance(name: str) -> str:
+    return f"{FRAGMENT}:{name}"
 
 
 def guidance_heading(entry: str) -> str:
@@ -73,6 +85,22 @@ def guidance_heading(entry: str) -> str:
     is about.
     """
     return f"Guidance for using the tools whose names begin with {entry}{names.SERVER_SEPARATOR}:"
+
+
+@dataclass(frozen=True)
+class Fragment:
+    """One shared fragment an agent includes, as the configuration
+    resolves it: the name it is stored under, and the text as it was
+    written.
+
+    The block shape lives here rather than beside the rows it is read
+    from, for the reason `Guidance` does: what a fragment is made of is
+    the configuration's business, and where it sits in a prompt and what
+    is written around it is this module's.
+    """
+
+    name: str
+    text: str
 
 
 @dataclass(frozen=True)
@@ -127,19 +155,35 @@ class Assembled:
         return {block.provenance: block.characters for block in self.blocks}
 
 
-def know_how(persona: str, guidance: Sequence[Guidance] = ()) -> Assembled:
+def know_how(
+    persona: str,
+    fragments: Sequence[Fragment] = (),
+    guidance: Sequence[Guidance] = (),
+) -> Assembled:
     """The half of the prompt that changes only when the agent does: the
-    persona, and the guidance of each entry the agent is granted, in
-    grant order.
+    persona, the shared fragments it includes in the order it lists
+    them, and the guidance of each entry it is granted, in grant order.
 
     Assembled once per activation and cached by the caller. An agent
     with no prompt of its own contributes no persona block, because a
     block is what the model receives and this one would be nothing: the
     surface reports the prompt rather than the fields it was made from.
+
+    A fragment is injected with no heading over it, which is the one way
+    it differs from a guidance block: a fragment is prompt text the
+    operator composed, and a heading would editorialize, while guidance
+    is about a set of tools and has to say which. It is otherwise a
+    block like any other, so what `_assembled` trims at the two ends of
+    the prompt it trims here too, and everything inside a fragment is
+    left as it was written.
     """
     return _assembled(
         [
             Block(PERSONA, persona),
+            *(
+                Block(fragment_provenance(block.name), block.text)
+                for block in fragments
+            ),
             *(
                 Block(
                     instructions_provenance(block.entry),
@@ -209,13 +253,16 @@ def _assembled(blocks: Sequence[Block]) -> Assembled:
 
 
 __all__ = [
+    "FRAGMENT",
     "INSTRUCTIONS",
     "MEMORY",
     "MEMORY_HEADING",
     "PERSONA",
     "Assembled",
     "Block",
+    "Fragment",
     "Guidance",
+    "fragment_provenance",
     "guidance_heading",
     "instructions_provenance",
     "know_how",
