@@ -1164,7 +1164,7 @@ injection milestone merges without the surface that counts it.
   and 503 honest, the sanitizer's long-block tail surviving; drift
   checks pass.
 - [x] **[Shared prompt fragments](2026-08-14-agent-know-how-implementation.md#milestone-2-shared-prompt-fragments)**
-  (PR TBD): the `prompt_fragments` section and
+  (PR #131): the `prompt_fragments` section and
   `prompt_includes` on both layers, migration 0003, store, views, API
   routes, CLI verbs, write sentences, reference checks, the
   moved-key command, assembly slot, `fragment:<name>` provenance on
