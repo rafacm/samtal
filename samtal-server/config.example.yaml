@@ -9,11 +9,12 @@
 # This file holds the server half of the configuration: how the process
 # runs (server:) and where remembered facts are kept (memory:). The
 # domain half, everything about what the server says and to whom
-# (providers, mcp_servers, agent_defaults, agents, devices,
-# default_agent), lives in the database under server.database.dir and is
-# written with the config commands:
+# (providers, mcp_servers, prompt_fragments, agent_defaults, agents,
+# devices, default_agent), lives in the database under
+# server.database.dir and is written with the config commands:
 #
 #   samtal-server config set provider llm claude -f examples/llm-anthropic.yaml
+#   samtal-server config set prompt-fragment household -f examples/prompt-fragment.yaml
 #   samtal-server config set agent sam -f examples/agent.yaml
 #   samtal-server config bind-device aa:bb:cc:dd:ee:ff sam
 #   samtal-server config list
