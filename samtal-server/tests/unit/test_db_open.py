@@ -371,6 +371,11 @@ def test_a_seeded_baseline_database_upgrades_to_head_with_every_value_kept(
     # And what 0002 added is unset on a row that predates it, which is
     # the whole of what a nullable additive column promises.
     assert entry.instructions is None
+    # And what 0003 added is unset in the same way: the seeded rows
+    # include no fragment, and no fragment exists to include.
+    assert domain.prompt_fragments == {}
+    assert domain.agent_defaults.prompt_includes is None
+    assert domain.agents["sam"].prompt_includes is None
     # 0003 is additive in the other two shapes as well: a new table,
     # empty because nothing wrote a fragment, and a nullable column on
     # each layer table.

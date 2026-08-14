@@ -307,6 +307,17 @@ class ConfigStore:
                 raise UnknownEntityError(f"mcp_servers.{name}: no such MCP server")
             return self._with_secrets(connection, entry, "mcp_server", name)
 
+    def read_prompt_fragment(self, name: str) -> Entity[PromptFragmentConfig]:
+        with self._transaction() as connection:
+            entry = _read_domain(connection).prompt_fragments.get(name)
+            if entry is None:
+                raise UnknownEntityError(
+                    f"prompt_fragments.{name}: no such prompt fragment"
+                )
+            # A fragment is prompt text and holds no credential slot, so
+            # there is nothing stored beside it.
+            return Entity(entry=entry, secrets=())
+
     def read_agent(self, name: str) -> Entity[AgentConfig]:
         with self._transaction() as connection:
             entry = _read_domain(connection).agents.get(name)
@@ -408,6 +419,51 @@ class ConfigStore:
                 schema.mcp_servers,
                 (schema.mcp_servers.c.name == name,),
                 f"mcp_servers.{name}: no such MCP server",
+            )
+
+    def set_prompt_fragment(self, name: str, fragment: object) -> None:
+        """Create or replace `prompt_fragments.<name>` from a fragment in
+        the same shape the section has: `{text: ...}`.
+
+        The name is checked here as well as on the loaded snapshot, for
+        the reason an MCP entry name is: a write is where a name is
+        chosen, and refusing it at the write is what keeps the stored
+        state loadable. The refusal names the section and the rule and
+        never the name, which is the whole difference from the entry-name
+        check beside it.
+        """
+        name = _identifier("prompt_fragments", name)
+        entry = _parse(PromptFragmentConfig, f"prompt_fragments.{name}", fragment)
+        problem: str | None = None
+        try:
+            check_prompt_fragment_names({name: entry})
+        except ValueError as exc:
+            problem = str(exc)
+        if problem is not None:
+            raise ConfigError(problem)
+        with self._transaction() as connection:
+            domain = _read_domain(connection)
+            domain.prompt_fragments[name] = entry
+            _refuse_unresolved(domain)
+            _upsert(
+                connection,
+                schema.prompt_fragments,
+                {"name": name},
+                # Written as it was given: the text is what the model is
+                # handed, and its indentation and blank lines are part
+                # of it.
+                {"text": entry.text},
+            )
+
+    def delete_prompt_fragment(self, name: str) -> None:
+        """Refused while any layer still includes it, by the same
+        reference pass every other write runs."""
+        with self._transaction() as connection:
+            _delete_row(
+                connection,
+                schema.prompt_fragments,
+                (schema.prompt_fragments.c.name == name,),
+                f"prompt_fragments.{name}: no such prompt fragment",
             )
 
     def set_agent(self, name: str, fragment: object) -> None:
@@ -766,6 +822,10 @@ def _read_domain(connection: Connection) -> DomainConfig:
                 row.name: _mcp_from_row(row)
                 for row in connection.execute(select(schema.mcp_servers))
             },
+            prompt_fragments={
+                row.name: _fragment_from_row(row)
+                for row in connection.execute(select(schema.prompt_fragments))
+            },
             agents={
                 row.name: _agent_from_row(row) for row in connection.execute(select(schema.agents))
             },
@@ -853,6 +913,12 @@ def _mcp_from_row(row: Row) -> McpServerConfig:
     return _stored(McpServerConfig, location, data)
 
 
+def _fragment_from_row(row: Row) -> PromptFragmentConfig:
+    return _stored(
+        PromptFragmentConfig, f"prompt_fragments.{row.name}", {"text": row.text}
+    )
+
+
 def _agent_from_row(row: Row) -> AgentConfig:
     location = f"agents.{row.name}"
     data = {"prompt": row.prompt or "", **_layer_data(location, row)}
@@ -871,6 +937,12 @@ def _layer_data(location: str, row: Row) -> dict[str, object]:
         data["mcp"] = _list(location, "mcp", row.mcp)
     if row.filler is not None:
         data["filler"] = _mapping(location, "filler", row.filler)
+    # The same rule as mcp, and the same reason for reading the column
+    # rather than defaulting it: a row written before this column
+    # existed holds NULL, which is inherit, and an empty list is an
+    # agent that opted out.
+    if row.prompt_includes is not None:
+        data["prompt_includes"] = _list(location, "prompt_includes", row.prompt_includes)
     return data
 
 
@@ -950,6 +1022,9 @@ def _layer_values(entry: AgentDefaults) -> dict[str, object]:
         [mcp_entry_fragment(item) for item in entry.mcp] if entry.mcp is not None else None
     )
     values["filler"] = entry.filler.model_dump() if entry.filler is not None else None
+    values["prompt_includes"] = (
+        list(entry.prompt_includes) if entry.prompt_includes is not None else None
+    )
     return values
 
 
