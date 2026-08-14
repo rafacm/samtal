@@ -490,8 +490,8 @@ class Envelope(BaseModel):
         description=(
             "The slots holding a secret stored in the database, by slot name, and "
             "never their values: reads are masked. Empty for the kinds that can hold "
-            "no stored secret (agents, agent defaults, devices), so that every read "
-            "has one shape."
+            "no stored secret (prompt fragments, agents, agent defaults, devices), so "
+            "that every read has one shape."
         )
     )
 
