@@ -37,9 +37,11 @@ from mcp.server.fastmcp import FastMCP
 
 import samtal_server.tools.mcp as mcp_module
 from samtal_server import logs
+from samtal_server.app import _prompt_preview
 from samtal_server.config import Config, cli
 from samtal_server.config.api import build_api, mount_api
-from samtal_server.tools.mcp import CONNECTED, McpServers
+from samtal_server.config.models import API_MOUNT_PATH
+from samtal_server.tools.mcp import CONNECTED, REDACTED, McpServers
 from tests.support.mcp_reflecting_server import REFLECTED_ENV
 from tests.unit.test_tools_mcp_http import serving
 
@@ -123,6 +125,64 @@ def cli_status(
 
     monkeypatch.setattr(cli, "build_client", factory)
     assert cli.main(["status"]) == 0
+    captured = capsys.readouterr()
+    return captured.out + captured.err
+
+
+def prompt_api(directory: Path, servers: McpServers, entry: dict[str, object]) -> FastAPI:
+    """An application serving the assembled-prompt read over these
+    managers, wired the way the composition root wires it, so what the
+    read answers is what a session would be sent."""
+    served = FastAPI()
+    mount_api(
+        served,
+        build_api(
+            TOKEN,
+            directory,
+            mcp_servers=servers,
+            agent_prompt=_prompt_preview(config_with(entry), servers, None),
+        ),
+    )
+    return served
+
+
+def api_prompt(
+    directory: Path, servers: McpServers, entry: dict[str, object]
+) -> dict[str, object]:
+    """`GET /runtime/agents/assistant/prompt`, as a client sees it."""
+    with TestClient(
+        prompt_api(directory, servers, entry),
+        headers={"Authorization": f"Bearer {TOKEN}"},
+    ) as client:
+        answered = client.get(f"{API_MOUNT_PATH}/runtime/agents/assistant/prompt")
+    assert answered.status_code == 200, answered.text
+    return answered.json()
+
+
+def cli_prompt(
+    directory: Path,
+    servers: McpServers,
+    entry: dict[str, object],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> str:
+    """`samtal-server config prompt assistant`, and everything it
+    printed on either stream. The one command that prints whole blocks
+    rather than a glimpse of them, which is what makes it the surface
+    worth checking here."""
+    monkeypatch.delenv("SAMTAL_CONFIG", raising=False)
+    monkeypatch.delenv(cli.API_URL_ENV, raising=False)
+    monkeypatch.setenv(API_SECRET_ENV, TOKEN)
+
+    def factory(base_url: str, token: str) -> TestClient:
+        return TestClient(
+            prompt_api(directory, servers, entry),
+            base_url=base_url,
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    monkeypatch.setattr(cli, "build_client", factory)
+    assert cli.main(["prompt", "assistant"]) == 0
     captured = capsys.readouterr()
     return captured.out + captured.err
 
@@ -271,20 +331,24 @@ async def test_what_a_server_ships_reaches_no_operator_surface(
     """The two guidance channels, held to the same rule as the tool
     metadata above, in both trust states.
 
-    Opting in moves those bytes into the model's prompt and onto the
-    inspection surface, which is what the opt-in means. It moves them
-    nowhere else: not into the status response, not into the command
-    that prints one, and not into a log record. And the prompt name,
-    which this server chose to be the credential with a terminal escape
-    after it, is never printed at all, because every line about a
-    configured prompt names its position instead.
+    Opting in is a decision about a third party's words: they reach the
+    model's prompt and the surface that shows what the model was given,
+    which is what the opt-in means. It is not a decision to let that
+    server hand this deployment's own credential back through either of
+    them, so the values materialized for the connection are replaced in
+    what is captured, and the entry's own guidance is proof that
+    everything else survives. The prompt name, which this server chose
+    to be the credential with a terminal escape after it, is redacted
+    where it is echoed and named by position everywhere else.
     """
     monkeypatch.setenv("SAMTAL_TEST_REFLECTED_SECRET", SENTINEL)
+    ours = "Ask before unlocking the door."
     entry = {
         "transport": "stdio",
         "command": sys.executable,
         "args": [str(REFLECTING_SERVER)],
         "env": {REFLECTED_ENV: "$SAMTAL_TEST_REFLECTED_SECRET"},
+        "instructions": ours,
         "use_server_instructions": opted_in,
         "inject_prompts": [f"{SENTINEL}\x1b[2J"] if opted_in else None,
     }
@@ -294,21 +358,33 @@ async def test_what_a_server_ships_reaches_no_operator_surface(
         status = servers.status()
         guidance = servers.guidance_for_agent("assistant")
         printed = cli_status(tmp_path / "db", servers, monkeypatch, capsys)
+        answered = api_prompt(tmp_path / "db", servers, entry)
+        shown = cli_prompt(tmp_path / "db", servers, entry, monkeypatch, capsys)
     finally:
         await servers.stop_all()
 
     # The opt-in did what it says, or the assertions below would hold
-    # for the wrong reason.
+    # for the wrong reason: the shipped blocks are there, they carry the
+    # server's own words, and what they no longer carry is ours.
+    blocks = {block["provenance"]: block for block in answered["blocks"]}
+    assert ours in blocks["instructions:weather"]["text"]
     if opted_in:
-        assert [block.entry for block in guidance] == ["weather", "weather"]
-        assert SENTINEL in "".join(block.text for block in guidance)
+        assert [block.entry for block in guidance] == ["weather"] * 3
+        assert "Call the forecast tool with" in blocks["server_instructions:weather"]["text"]
+        assert "Answer briefly" in blocks["server_prompt:weather:1"]["text"]
+        assert blocks["server_prompt:weather:1"]["name"].startswith(REDACTED)
     else:
-        assert guidance == ()
+        assert [block.entry for block in guidance] == ["weather"]
+        assert set(blocks) == {"persona", "instructions:weather"}
 
-    assert SENTINEL not in json.dumps(status)
-    assert SENTINEL not in printed
+    for surface in (json.dumps(status), printed, json.dumps(answered), shown):
+        assert SENTINEL not in surface
     assert SENTINEL not in rendered(watched)
-    assert "\x1b" not in printed
+    assert "\x1b" not in printed + shown
+    # And nothing was reported by a traceback, which is the other way a
+    # value travels: an exception's chain is rendered by the formatter
+    # above, and none of these records has one to render.
+    assert all(record.exc_info is None for record in watched.records)
 
 
 async def test_an_http_server_cannot_reflect_its_credential_onto_the_surfaces(

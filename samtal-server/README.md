@@ -678,6 +678,15 @@ and the same is true of every byte of what it publishes. None of it is
 ever written to a log. Editing the list changes what a connect fetches,
 so applying it does restart the connection.
 
+**One thing is taken back out.** Whatever this deployment gave the
+entry in its `env` or `headers` is replaced with `[redacted]` in what
+the server ships back, before any of it is stored. Opting in is a
+decision about a third party's words, not a decision to let that server
+hand your own credential back through a prompt or a gated read, and a
+careless server that echoes what it was configured with is the ordinary
+case rather than the hostile one. Values shorter than eight characters
+are left alone, since an `env` holds ports and locales too.
+
 Both channels are capped at 4000 characters per block, and a longer one
 is skipped whole rather than truncated: half an instruction is an
 instruction nobody reviewed. What is injected appears under
