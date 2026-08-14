@@ -2003,13 +2003,18 @@ access-controlled backups, not in a repository.
 
 And the operational one, said again because it is the trap of a
 boot-time snapshot: **most of an edit applies at the next server
-start.** A `config set` against a running deployment is accepted by that
+start.** A `config set` of a provider, an agent, a prompt fragment or
+the agent defaults against a running deployment is accepted by that
 server and changes nothing it is doing until the process restarts, which
-both the command and the API's answer say every time they write. There
-are two exceptions, and each write says which of the three cases it is
-in: an MCP entry, a secret stored on one, and the agents' grant lists
-reach a running server when it is asked to reload, and a device binding
-reaches the running server at that device's next check-in.
+both the command and the API's answer say every time they write. Two
+kinds of write answer otherwise, and each write says which of the three
+cases it is in: `config set mcp-server`, and a secret stored on an MCP
+entry, reach a running server when it is asked to reload; a device
+binding reaches it at that device's next check-in. Writing an agent
+stays with the first group even though a reload does re-read that
+agent's `mcp` grant list, because the rest of it (prompt, providers,
+memory, filler) is built at boot, and a notice right about one field and
+wrong about the others would be worse than the conservative one.
 
 ### The configuration API in a deployment
 
