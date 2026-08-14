@@ -109,6 +109,19 @@ PROMPT_MESSAGE_CAP = 200
 # budget an operator tunes.
 SHIPPED_BLOCK_LIMIT = 4000
 
+# What one of this deployment's own credentials becomes if a server
+# writes it back into the guidance it ships.
+REDACTED = "[redacted]"
+
+# And how long a materialized value has to be before it is treated as
+# one. Below this, an entry's env and headers hold things like a port, a
+# locale or `true`, and replacing every occurrence of a three-character
+# value would mangle the guidance without protecting anything: a secret
+# that short is not one. Everything at or above it is replaced, secret
+# or not, because whether a value is a credential is not knowable from
+# here and a redacted setting costs an operator nothing.
+REDACTION_FLOOR = 8
+
 # The two channels a server ships guidance in, as the warnings name
 # them.
 INSTRUCTIONS_CHANNEL = "instructions"
@@ -510,9 +523,6 @@ class McpServerManager:
                     prefix=self._name,
                     label=f"mcp server {self._name}",
                 )
-                self._instructions = self._injectable(
-                    initialized.instructions, INSTRUCTIONS_CHANNEL
-                )
                 self._session = session
                 self._became(CONNECTED, None)
                 logger.info(
@@ -531,7 +541,7 @@ class McpServerManager:
                 # `start()` still returns to a manager whose whole answer
                 # is in place, at the price of one discovery deadline on
                 # the boot and on a reload.
-                self._prompts = await self._discovered(session, initialized.capabilities)
+                await self._capture(session, initialized)
                 self._announce_shipped()
                 self._settled.set()
                 await self._stop.wait()
@@ -633,15 +643,61 @@ class McpServerManager:
     # server away. What it may do is take time, which is why it is
     # bounded twice: once per call, and once over the phase.
 
+    async def _capture(
+        self, session: ClientSession, initialized: mcp.types.InitializeResult
+    ) -> None:
+        """Take what this server ships, with this deployment's own
+        credentials taken back out of it.
+
+        A server holds whatever the entry's `env` and `headers` gave it,
+        and an opted-in entry asks for its words to be put in a system
+        prompt and on a gated read. That is the operator's decision about
+        a third party's text and it stands; it is not a decision to let
+        the server hand this deployment's own secrets back through a
+        surface the rest of the API refuses to read them from. So the
+        materialized values are resolved once here, every occurrence of
+        one is replaced before anything is stored, and only the redacted
+        text is kept.
+
+        The resolved values live for the length of this call and are
+        never held on the manager, which is the rule `__init__` already
+        follows and for the same reason: a manager lives as long as the
+        process.
+        """
+        try:
+            redact = _redactor(self._resolve("env"), self._resolve("headers"))
+        except Exception as exc:
+            # Fail closed, and do not take the tools with it. Resolving
+            # succeeded a moment ago inside the connect or there would be
+            # no session here, so this is the environment moving under a
+            # running server; what it costs is the optional half, and the
+            # alternative is keeping text nothing was redacted from.
+            logger.warning(
+                "mcp server %s: its own configured values could not be resolved (%s), "
+                "so nothing this server ships is kept this time",
+                self._name,
+                _reason(exc),
+            )
+            return
+        self._instructions = self._injectable(
+            redact(initialized.instructions), INSTRUCTIONS_CHANNEL
+        )
+        self._prompts = await self._discovered(
+            session, initialized.capabilities, redact
+        )
+
     async def _discovered(
-        self, session: ClientSession, capabilities: mcp.types.ServerCapabilities
+        self,
+        session: ClientSession,
+        capabilities: mcp.types.ServerCapabilities,
+        redact: "_Redactor",
     ) -> tuple[ServerPrompt, ...]:
         """The prompts this entry named, fetched and rendered. Never
         raises, whatever the far side does or this code gets wrong: the
         caller is holding a published tool list, and optional guidance
         does not get to cost it."""
         try:
-            return await self._discover(session, capabilities)
+            return await self._discover(session, capabilities, redact)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -654,7 +710,10 @@ class McpServerManager:
         return range(first, len(self._config.inject_prompts or ()) + 1)
 
     async def _discover(
-        self, session: ClientSession, capabilities: mcp.types.ServerCapabilities
+        self,
+        session: ClientSession,
+        capabilities: mcp.types.ServerCapabilities,
+        redact: "_Redactor",
     ) -> tuple[ServerPrompt, ...]:
         """Listing first, then the fetches, under one deadline.
 
@@ -714,10 +773,18 @@ class McpServerManager:
             if rendered.problem is not None:
                 self._skipped([position], rendered.problem)
                 continue
-            text = self._injectable(rendered.text, PROMPT_CHANNEL, position)
+            text = self._injectable(
+                redact(rendered.text), PROMPT_CHANNEL, position
+            )
             if text is None:
                 continue
-            captured.append(ServerPrompt(self._name, position, name, text))
+            # The configured name is redacted too. It is the operator's
+            # own copy of a server-chosen string, echoed write-shaped by
+            # the two surfaces that echo configuration, and a credential
+            # pasted into it would ride out on both.
+            captured.append(
+                ServerPrompt(self._name, position, redact(name) or name, text)
+            )
         return tuple(captured)
 
     async def _listing(
@@ -982,6 +1049,47 @@ def _result_text(result: mcp.types.CallToolResult) -> str:
         else:
             parts.append(f"[unsupported {item.type} content]")
     return "\n".join(parts)
+
+
+# What `_redactor` answers with: text in, text out, and None passes
+# through, because "the server shipped nothing" is a thing to say.
+_Redactor = Callable[[str | None], str | None]
+
+
+def _redactor(*groups: Mapping[str, str]) -> _Redactor:
+    """A function that takes this deployment's own values back out of
+    whatever a server hands it.
+
+    The problem it answers is narrow and worth stating narrowly. An
+    opted-in entry asks for a third party's words to reach a system
+    prompt and a gated read, and that is the operator's decision; it is
+    not a decision to let that server hand back the credential this
+    deployment gave it, through a surface the rest of the API refuses to
+    read a stored secret from. So the values that were materialized for
+    this connection, and only those, are replaced.
+
+    Longest first, so that a value which contains another is replaced
+    whole rather than left holding a placeholder in the middle of it.
+    """
+    values = sorted(
+        {
+            value
+            for group in groups
+            for value in group.values()
+            if len(value) >= REDACTION_FLOOR
+        },
+        key=len,
+        reverse=True,
+    )
+
+    def redact(text: str | None) -> str | None:
+        if text is None:
+            return None
+        for value in values:
+            text = text.replace(value, REDACTED)
+        return text
+
+    return redact
 
 
 @dataclass(frozen=True)

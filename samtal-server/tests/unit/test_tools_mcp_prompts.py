@@ -321,9 +321,16 @@ async def discovered(
     **overrides: object,
 ) -> tuple[ServerPrompt, ...]:
     """One discovery phase, run the way `_run` runs it: after the
-    connect envelope, on a manager that is otherwise ordinary."""
+    connect envelope, on a manager that is otherwise ordinary.
+
+    The redaction of this deployment's own materialized values is
+    passed as the identity here and tested where it belongs, over a
+    real entry holding a real credential, in
+    `test_mcp_status_reflection.py`."""
     manager = McpServerManager("tools", stdio_entry(**overrides))
-    return await manager._discovered(session, capabilities)  # type: ignore[arg-type]
+    return await manager._discovered(  # type: ignore[arg-type]
+        session, capabilities, lambda text: text
+    )
 
 
 def skips(caplog: pytest.LogCaptureFixture) -> list[tuple[str, str, str]]:

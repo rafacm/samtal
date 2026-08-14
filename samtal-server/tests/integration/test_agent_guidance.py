@@ -41,6 +41,14 @@ ENTRY = "home"
 # reconnect captures something the running session must not be given.
 SHIPPED_TEXT_ENV = "SAMTAL_TEST_SHIPPED_TEXT"
 
+# And the two values it takes, which are short on purpose. A value this
+# entry materializes is replaced in what the server ships back, since a
+# server that echoes its own configuration is how a credential would
+# come home; anything under the floor is left alone, and these are
+# markers rather than credentials.
+FIRST_SHIPPED = "Zog"
+SECOND_SHIPPED = "Vex"
+
 # Short on purpose: the mock voice speaks at 40 ms a character, and the
 # reply here is the whole system prompt.
 GUIDANCE = "Ask first."
@@ -478,7 +486,7 @@ async def test_one_session_across_a_reload_a_switch_and_a_memory_write(
     that same reply.
     """
     fact = "the user is vegetarian"
-    monkeypatch.setenv(SHIPPED_TEXT_ENV, "Shipped first.")
+    monkeypatch.setenv(SHIPPED_TEXT_ENV, FIRST_SHIPPED)
     async with serve_app_in(tmp_path / "db", held_config(tmp_path / "memory")) as (
         port,
         app,
@@ -505,7 +513,7 @@ async def test_one_session_across_a_reload_a_switch_and_a_memory_write(
             # And what the server shipped about itself, which this entry
             # opted into, as the connection gamma was activated over
             # captured it.
-            assert "Shipped first." in second
+            assert FIRST_SHIPPED in second
 
             # A memory write from outside this conversation, which is
             # what a concurrent session would do, a second reload gamma
@@ -513,7 +521,7 @@ async def test_one_session_across_a_reload_a_switch_and_a_memory_write(
             # which gamma must not see either.
             await app.state.memory.remember("gamma", fact)
             await rewrite_guidance(control, "Ask three times.")
-            await reconnect(app, "Shipped second.")
+            await reconnect(app, SECOND_SHIPPED)
 
             third = await device.say_something()
 
@@ -523,8 +531,8 @@ async def test_one_session_across_a_reload_a_switch_and_a_memory_write(
             assert third.startswith("GAMMA")
             assert "Ask twice." in third
             assert "Ask three times." not in third
-            assert "Shipped first." in third
-            assert "Shipped second." not in third
+            assert FIRST_SHIPPED in third
+            assert SECOND_SHIPPED not in third
             # And the memory block is not cached with it: the fact
             # written between the two replies is in this one, which is
             # the contract this feature deliberately did not move.
@@ -544,5 +552,5 @@ async def test_one_session_across_a_reload_a_switch_and_a_memory_write(
         assert preview.status_code == 200, preview.text
         blocks = {block["provenance"]: block["text"] for block in preview.json()["blocks"]}
         assert "Ask three times." in blocks[f"instructions:{ENTRY}"]
-        assert "Shipped second." in blocks[f"server_instructions:{ENTRY}"]
+        assert SECOND_SHIPPED in blocks[f"server_instructions:{ENTRY}"]
         assert fact in blocks["memory"]
