@@ -679,10 +679,15 @@ class McpServerManager:
 
         Only the configured names are kept, since they are all that is
         judged and the listing itself is a third party's list of any
-        length. The walk stops early once every configured name has been
-        seen, and a listing that has not ended by the page cap is a
-        listing this server will not finish reading: a cursor that
-        repeats itself looks like nothing else from here.
+        length. The walk ends when the server says the listing has ended
+        and not a page earlier: stopping as soon as every configured name
+        had been seen would have been a fetch while the server was still
+        advertising, which is the one ordering listing-first exists to
+        prevent, and it would have made a name published twice answer
+        differently depending on which page the first copy sat on. A
+        listing that has not ended by the page cap is a listing this
+        server will not finish reading: a cursor that repeats itself
+        looks like nothing else from here.
         """
         listing: dict[str, mcp.types.Prompt] = {}
         cursor: str | None = None
@@ -694,7 +699,7 @@ class McpServerManager:
                 if listed.name in wanted:
                     listing.setdefault(listed.name, listed)
             cursor = answered.nextCursor
-            if cursor is None or len(listing) == len(wanted):
+            if cursor is None:
                 return listing
         raise _PromptsUnreadable(PAGE_CAP)
 
