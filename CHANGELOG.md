@@ -24,6 +24,23 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   and the tools do not blink; the new text reaches a conversation at
   its next activation, a new session or an agent switch, and never a
   reply of one already running.
+- **Agents share blocks of prompt text** (#122): a `prompt_fragments`
+  section maps a name to one block of text, and `prompt_includes` on an
+  agent or on `agent_defaults` names the fragments that agent's system
+  prompt carries. Household facts or a house style are then written once
+  instead of being copied into every persona prompt and drifting apart.
+  The list follows the `mcp` field's rules exactly: unset inherits the
+  `agent_defaults` list, naming a list replaces the inherited one rather
+  than extending it, and `prompt_includes: []` opts one agent out of
+  what its siblings share. A fragment is injected verbatim, in the order
+  the layer lists it, between the agent's own prompt and any MCP
+  guidance, with nothing added around it, and it is counted under
+  `fragment:<name>` by `samtal-server config prompt` and by the
+  `prompt_assembled` event. A name that matches no fragment is refused
+  when it is written and reported by layer and list position rather than
+  by value, since a name written beside prompt text is where a
+  credential gets pasted. Fragments are part of the boot-time snapshot,
+  so a write applies at the next server start.
 - **An operator can read an agent's assembled prompt** (#122):
   `GET /api/runtime/agents/{name}/prompt`, and `samtal-server config
   prompt <agent>` as its client, answer the system prompt a session
@@ -42,9 +59,10 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 ### Changed
 
 - **The system prompt is assembled in one documented order** (#122):
-  the agent's own prompt, then the guidance of each granted MCP entry
-  in grant order, then the remembered facts last under the heading they
-  have always had, separated by blank lines. For a deployment with no
+  the agent's own prompt, then the shared fragments it includes in the
+  order its layer lists them, then the guidance of each granted MCP
+  entry in grant order, then the remembered facts last under the
+  heading they have always had, separated by blank lines. For a deployment with no
   guidance configured, the prompt is character for character what it
   was. The persona and the guidance are assembled when a conversation
   starts and again when it switches agents, and held for the life of
