@@ -300,7 +300,12 @@ migration.
 **`mcp_servers.<name>.inject_prompts`** (milestone 3): a boolean,
 default false, and an optional list of prompt names (non-blank,
 duplicates refused by position), each stored in its own column, with
-the trust sentence in both generated descriptions. The manager
+the trust sentence in both generated descriptions. The boolean's
+column is NOT NULL with a database-level default of false, so a row
+written before the migration reads false from the database itself
+rather than through a Python-side rescue of NULL; `inject_prompts`
+and milestone 1's `instructions` are nullable, where NULL is the
+unset the models already mean. The manager
 captures `InitializeResult.instructions` and fetches the named
 prompts at connect, holds them beside the published tools (cleared
 when the connection drops, like them), and applies the cap at
@@ -404,6 +409,11 @@ examples/README.md                    the new example listed, which the
 tests/unit/test_config_examples.py    prompt-fragment joins the creation
                                       order before the layers that
                                       include it; the listing assertions
+tests/unit/test_db_open.py            the expected-table set gains
+                                      prompt_fragments; the seeded
+                                      0001-to-head upgrade proof
+.github/workflows/samtal-server.yml   the installed-wheel database check
+                                      learns the new table and columns
 docs/reference/domain-config.md       regenerated
 docs/reference/api-openapi.json       regenerated
 samtal-server/README.md               assembly order, guidance, fragments,
@@ -475,6 +485,16 @@ doc drift checks.
   assembled prompt of a live deployment is read back through
   `GET /runtime/agents/{name}/prompt` over a real socket and matches
   what `{system}` shows the model receiving.
+- Upgrade, all three migration milestones: a test that stamps and
+  builds the 0001 schema, seeds nonempty provider, MCP entry,
+  defaults, agent and device rows, upgrades to head through 0002,
+  0003 and 0004, and loads the result through `ConfigStore`,
+  asserting every seeded value preserved, `use_server_instructions`
+  false and the nullable additions unset. Grown in each milestone as
+  its migration lands, so the chain is proven at every merge, not
+  only at the end. The expected-table set in `test_db_open.py` and
+  the installed-wheel check in the CI workflow move in the same
+  change as each migration.
 - Doc drift: reference and OpenAPI regenerated in the same change as
   each schema or route move, enforced by the existing byte-for-byte
   checks.
@@ -616,6 +636,14 @@ its resolution once the amendment addressing it lands.
    migrations, load through `ConfigStore` and assert preservation
    plus `use_server_instructions == false`; specify the boolean's
    database-level default; update both expected-table sets.
+   *Resolution*: adopted. The boolean's column is NOT NULL with a
+   database-level default of false, stated where the shapes are; a
+   new upgrade test stamps and seeds a real 0001 schema with
+   nonempty rows, upgrades through all three migrations and loads
+   through `ConfigStore`, grown in each milestone as its migration
+   lands so the chain is proven at every merge; `test_db_open.py`'s
+   expected-table set and the installed-wheel CI check join the
+   module layout and move with each migration.
 
 6. **P2: server-instruction capture is attached to the wrong code
    path, and flag toggles are unproven.** `initialize()` is awaited
