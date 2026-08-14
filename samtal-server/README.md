@@ -708,32 +708,60 @@ there is a command that says what it adds up to:
 
 ```console
 $ samtal-server config prompt house
-persona (112 characters)
+persona (133 characters)
 You are the assistant in the living room. Answer in the language you
 were spoken to, and keep answers short: this is spoken out loud.
 
-instructions:home (168 characters)
+fragment:household (100 characters)
+The bins go out on Tuesday evening, the kitchen speaker is called
+Bosse, and the cat is called Ines.
+
+instructions:home (210 characters)
 Guidance for using the tools whose names begin with home__:
 The lights, the blinds and the front door are on this server. Turn
 lights on and off freely. Always ask the user to confirm before
 unlocking the door.
 
-memory (94 characters)
+memory (108 characters)
 You remember these facts about past conversations:
 - the user is vegetarian
 - the user's dog is called Bosse
 
-total: 378 characters
+total: 557 characters
 ```
 
 **The order is fixed and documented**, and deliberately not
 configurable: the agent's own prompt first, because it says who is
-speaking and everything after it is read in that voice; then the
-guidance of each MCP entry the agent is granted, in the order the grants
-name them, each under its heading; then the remembered facts last, under
-the heading they have always had. Blocks are separated by blank lines.
-One documented order beats a per-deployment permutation, and it is what
-lets a later feature compose against a known base.
+speaking and everything after it is read in that voice; then the shared
+fragments it includes, in the order its layer lists them, because they
+are standing context the persona speaks within; then the guidance of
+each MCP entry the agent is granted, in the order the grants name them,
+each under its heading; then the remembered facts last, under the
+heading they have always had. Blocks are separated by blank lines. One
+documented order beats a per-deployment permutation, and it is what lets
+a later feature compose against a known base.
+
+**A shared fragment is written once and included by name.** Household
+facts, a house style, anything every agent in the deployment should
+know: it goes into `prompt_fragments` under a name, and each agent that
+should carry it names that fragment in its `prompt_includes`.
+
+```bash
+samtal-server config set prompt-fragment household -f examples/prompt-fragment.yaml
+samtal-server config set agent house -f agent.yaml   # prompt_includes: [household]
+```
+
+The alternative is copying the same paragraph into every persona prompt
+and watching the copies drift, which is what this exists to stop.
+`prompt_includes` follows the `mcp` list's rules exactly: leaving it out
+inherits the `agent_defaults` list, naming a list replaces the inherited
+one rather than extending it, and `prompt_includes: []` opts one agent
+out of what its siblings share. A name that matches no fragment is
+refused when it is written, since the fragment is a row in the same
+database. The text is injected exactly as written, with no heading over
+it: it is prompt text the operator composed, and a heading would
+editorialize. Fragments are part of the boot-time snapshot, so writing
+or editing one applies at the next server start, and the write says so.
 
 **Each block is counted** because every one of them competes with the
 others for the context budget of a small local model, and there is no
@@ -747,7 +775,8 @@ field can be diagnosed from the retained logs without reproducing the
 session.
 
 **It is a preview of a new session**, not a readback of a running one.
-The persona and the guidance are assembled when a conversation starts
+The persona, the fragments and the guidance are assembled when a
+conversation starts
 and again when it switches agents, and held for the life of that
 activation; the remembered facts are read on every reply, so a fact
 stored by one conversation is known to a concurrent one on its next
@@ -1008,10 +1037,11 @@ rather than merely written down.
 **The domain half lives in a database**, one SQLite file under
 `server.database.dir`, written with `samtal-server config`: named
 `providers` per stage (`llm`, `asr`, `tts`, `vad`), named `mcp_servers`,
+named `prompt_fragments` holding the blocks of prompt text agents share,
 `agent_defaults` holding what every agent uses unless it says otherwise,
-`agents` combining a prompt with provider and MCP references, `devices`
-binding MAC addresses to agents, and `default_agent` for unknown
-devices.
+`agents` combining a prompt with provider, fragment and MCP references,
+`devices` binding MAC addresses to agents, and `default_agent` for
+unknown devices.
 
 The CLI writes it through the configuration API on the running server,
 so these commands need one to be up, and an empty database is a valid
@@ -1025,6 +1055,7 @@ samtal-server config set provider llm claude -f examples/llm-anthropic.yaml
 samtal-server config set provider asr ears -f examples/asr-openai.yaml
 samtal-server config set provider tts voice -f examples/tts-piper.yaml
 samtal-server config set provider vad silero -f examples/vad-silero.yaml
+samtal-server config set prompt-fragment household -f examples/prompt-fragment.yaml
 samtal-server config set agent-defaults -f examples/agent-defaults.yaml
 samtal-server config set agent assistant -f examples/agent.yaml
 samtal-server config bind-device aa:bb:cc:dd:ee:ff assistant
