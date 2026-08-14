@@ -25,7 +25,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from samtal_server import db as db_module
-from samtal_server.config.api import build_api
+from samtal_server.config.api import MALFORMED_REQUEST, build_api
 from samtal_server.config.secrets import (
     MASTER_KEY_ENV,
     SecretLocation,
@@ -785,11 +785,33 @@ def test_an_unknown_include_is_refused_without_quoting_it(
     assert SECRET not in caplog.text
 
 
+# The bodies an unusable name can arrive with. The invalid ones are the
+# point: a refusal about a body says where the body was written, and for
+# a fragment that location is the name.
+UNUSABLE_BODIES: list[object] = [
+    {"text": "a"},
+    {},
+    None,
+    {"text": ""},
+    {"text": 4},
+    {"text": "a", "extra": "b"},
+    [SECRET],
+    SECRET,
+]
+
+
+@pytest.mark.parametrize("body", UNUSABLE_BODIES)
 def test_an_unusable_fragment_name_is_refused_without_quoting_it(
-    client: TestClient, caplog: pytest.LogCaptureFixture
+    client: TestClient, caplog: pytest.LogCaptureFixture, body: object
 ) -> None:
     """The refusal names the section and the rule, and never the name it
-    rejected.
+    rejected, whatever else the request got wrong.
+
+    The bodies are the assertion. The name is checked before any of them
+    is parsed, so a request that pastes a credential into the path and
+    sends a body that will not parse still meets the sentence about the
+    name rather than one about the body, which would have named the
+    location the body was written at.
 
     What is asserted about the log is what this server writes. A name
     travels in the path, so the client that sent the request has it by
@@ -799,11 +821,15 @@ def test_an_unusable_fragment_name_is_refused_without_quoting_it(
     """
     with caplog.at_level(logging.DEBUG):
         response = client.put(
-            f"/prompt-fragments/{quote(SECRET + '.pasted', safe='')}", json={"text": "a"}
+            f"/prompt-fragments/{quote(SECRET + '.pasted', safe='')}", json=body
         )
 
     assert response.status_code == 422
-    assert "[A-Za-z0-9_-]+" in response.json()["detail"]
+    detail = response.json()["detail"]
+    # Either the name's own rule, or the framework's sanitized refusal
+    # for a body it could not read at all, which never reaches the
+    # repository and names nothing either.
+    assert "[A-Za-z0-9_-]+" in detail or detail == MALFORMED_REQUEST
     assert SECRET not in response.text
     assert SECRET not in str(response.headers)
     served = [

@@ -214,16 +214,55 @@ def test_a_fragment_that_is_not_there_names_itself(store: ConfigStore) -> None:
     assert str(caught.value) == "prompt_fragments.household: no such prompt fragment"
 
 
+# Every body a write of an unusable name can carry, because the name is
+# refused before any of them is looked at. The bad ones are the point: a
+# refusal about a body names the location it was written at, and that
+# location is the name.
+UNUSABLE_BODIES: list[object] = [
+    {"text": "a"},
+    {},
+    None,
+    {"text": ""},
+    {"text": 4},
+    {"text": "a", "extra": "b"},
+    "not a mapping at all",
+    {"text": SECRET},
+]
+
+
+@pytest.mark.parametrize("body", UNUSABLE_BODIES)
 def test_an_unusable_fragment_name_is_refused_without_being_quoted(
-    store: ConfigStore,
+    store: ConfigStore, body: object
 ) -> None:
+    """The name is checked first, whatever else is wrong with the write.
+
+    The order is the assertion. Every refusal about a body says where
+    the body was written, and for a fragment that is
+    `prompt_fragments.<name>`, so a request that gets both wrong at once
+    would otherwise be answered by a sentence about the body carrying
+    the name that must not be repeated.
+    """
     with pytest.raises(ConfigError) as caught:
-        store.set_prompt_fragment(f"{SECRET}.pasted", {"text": "a"})
+        store.set_prompt_fragment(f"{SECRET}.pasted", body)
 
     rendered = _chain(caught.value)
     assert "prompt_fragments" in rendered
     assert "[A-Za-z0-9_-]+" in rendered
     assert SECRET not in rendered
+    assert store.load().domain.prompt_fragments == {}
+
+
+def test_a_usable_name_with_an_unusable_body_names_the_location(
+    store: ConfigStore,
+) -> None:
+    """The other side of that order: a name that passed the rule is one
+    this deployment wrote, so a refusal about its body says which
+    fragment it is about."""
+    with pytest.raises(ConfigError) as caught:
+        store.set_prompt_fragment("household", {"text": ""})
+
+    assert "prompt_fragments.household" in str(caught.value)
+    assert "only whitespace" in str(caught.value)
 
 
 @pytest.mark.parametrize("layer", ["agent_defaults", "agents"])

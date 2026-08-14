@@ -1421,11 +1421,20 @@ def check_mcp_entry_names(value: dict[str, McpServerConfig]) -> dict[str, McpSer
     return value
 
 
-def check_prompt_fragment_names(
-    value: dict[str, PromptFragmentConfig],
-) -> dict[str, PromptFragmentConfig]:
-    """A fragment name is printed wherever the assembled prompt is
-    accounted for, so it has to be written in the safe charset.
+# What a rejected fragment name is told, wherever it is rejected. One
+# sentence, because there is one rule and because it must be possible to
+# say it before anything else has looked at the write: it names the
+# section and the rule and never the name, so a caller can refuse a name
+# without having parsed the body it arrived with.
+PROMPT_FRAGMENT_NAME_RULE = (
+    "prompt_fragments: a fragment name has to match [A-Za-z0-9_-]+, and this one does "
+    "not. The name is not quoted back: what fails this rule is the kind of string that "
+    "must not be echoed"
+)
+
+
+def is_valid_fragment_name(name: object) -> bool:
+    """Whether a fragment name is written in the safe charset.
 
     The same rule an `mcp_servers` entry name follows, for the same
     reason and not for its reason: an entry name has to be a legal tool
@@ -1433,18 +1442,27 @@ def check_prompt_fragment_names(
     line and in a provenance token (`fragment:<name>`). The reserved
     names do not apply, since a fragment is in no tool list.
 
+    A predicate rather than a check that raises, because the first thing
+    a write does with a name is decide whether it may be spoken about at
+    all: a caller that has to parse a body before it can ask this ends
+    up naming the rejected name in the refusal about the body.
+    """
+    return isinstance(name, str) and names.TOOL_NAME_PATTERN.match(name) is not None
+
+
+def check_prompt_fragment_names(
+    value: dict[str, PromptFragmentConfig],
+) -> dict[str, PromptFragmentConfig]:
+    """Every name in the section, checked as a snapshot is validated.
+
     The refusal is deliberately not `check_mcp_entry_names`', which
     interpolates the name it rejected: a name that fails the charset is
     exactly the string that must not be echoed, because what was written
     there may be a pasted credential. So it names the section and the
     rule, and a valid name is the only kind any surface here prints.
     """
-    if any(not names.TOOL_NAME_PATTERN.match(name) for name in value):
-        raise ValueError(
-            "prompt_fragments: a fragment name has to match [A-Za-z0-9_-]+, and one "
-            "of these does not. The name is not quoted back: what fails this rule is "
-            "the kind of string that must not be echoed"
-        )
+    if any(not is_valid_fragment_name(name) for name in value):
+        raise ValueError(PROMPT_FRAGMENT_NAME_RULE)
     return value
 
 

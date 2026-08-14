@@ -48,6 +48,7 @@ from samtal_server.config.loader import (
 )
 from samtal_server.config.models import (
     DOMAIN_DESCRIPTIONS,
+    PROMPT_FRAGMENT_NAME_RULE,
     PROVIDER_STAGES,
     AgentConfig,
     AgentDefaults,
@@ -61,6 +62,7 @@ from samtal_server.config.models import (
     check_references,
     is_env_name,
     is_secret_option,
+    is_valid_fragment_name,
     mcp_entry_fragment,
     normalize_device_bindings,
     normalize_mac,
@@ -431,16 +433,19 @@ class ConfigStore:
         state loadable. The refusal names the section and the rule and
         never the name, which is the whole difference from the entry-name
         check beside it.
+
+        It is checked before the body is parsed, and the order is the
+        whole of it. Every refusal about a body names the location it was
+        written at, which is `prompt_fragments.<name>`, so a request that
+        gets both wrong at once (a pasted credential in the path and a
+        body that will not parse) would have been answered by a sentence
+        about the body carrying the name it must not repeat. A name this
+        rejects is never spoken of again.
         """
         name = _identifier("prompt_fragments", name)
+        if not is_valid_fragment_name(name):
+            raise ConfigError(PROMPT_FRAGMENT_NAME_RULE)
         entry = _parse(PromptFragmentConfig, f"prompt_fragments.{name}", fragment)
-        problem: str | None = None
-        try:
-            check_prompt_fragment_names({name: entry})
-        except ValueError as exc:
-            problem = str(exc)
-        if problem is not None:
-            raise ConfigError(problem)
         with self._transaction() as connection:
             domain = _read_domain(connection)
             domain.prompt_fragments[name] = entry
