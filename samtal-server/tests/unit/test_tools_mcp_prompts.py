@@ -35,16 +35,20 @@ from samtal_server.tools.mcp import (
     CONNECT_TIMEOUT_S,
     CONNECTED,
     DISCOVERY_DEADLINE,
+    LISTING_CAP,
     NO_PROMPTS_CAPABILITY,
     NON_TEXT_CONTENT,
     NOT_LISTED,
     NOTHING_TO_INJECT,
     PAGE_CAP,
     PROMPT_DISCOVERY_TIMEOUT_S,
+    PROMPT_LISTING_CAP,
+    PROMPT_MESSAGE_CAP,
     PROMPT_PAGE_CAP,
     REQUIRES_ARGUMENTS,
     SHIPPED_BLOCK_LIMIT,
     STOP_TIMEOUT_S,
+    TOO_MANY_MESSAGES,
     McpServerManager,
     McpServers,
 )
@@ -364,8 +368,8 @@ async def test_the_listing_is_finished_before_anything_is_fetched(
 ) -> None:
     """Listing first means the whole listing. Stopping as soon as every
     configured name had been seen would fetch while the server was still
-    advertising, which is the one ordering this design exists to prevent,
-    so the name it wants sits on the first page of three."""
+    advertising more, which is the one ordering this design exists to
+    prevent."""
     session = StubSession(
         pages=[
             ([listed("wanted")], "1"),
@@ -381,6 +385,59 @@ async def test_the_listing_is_finished_before_anything_is_fetched(
     assert session.listed == [None, "1", "2"]
     assert [prompt.text for prompt in captured] == ["guidance"]
     assert skips(caplog) == []
+
+
+async def test_a_page_longer_than_the_listing_cap_ends_the_walk(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The page cap bounds how many arrays arrive and nothing bounds how
+    long one of them is, so a server that answers one instant page with
+    an enormous list would cost the loop that reads it rather than any
+    of the timers."""
+    session = StubSession(
+        pages=[([listed(f"p{index}") for index in range(PROMPT_LISTING_CAP + 1)], None)],
+        results={},
+    )
+
+    with caplog.at_level(logging.WARNING, logger=MANAGER_LOGGER):
+        captured = await discovered(session, with_prompts(), inject_prompts=["p0"])
+
+    assert captured == ()
+    assert session.fetched == []
+    assert skips(caplog) == [("tools", "1", LISTING_CAP)]
+
+
+async def test_a_prompt_of_many_messages_is_refused_before_it_is_joined(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A prompt result is a third party's array too, and the size cap
+    cannot be reached without walking it."""
+    session = StubSession(
+        pages=[([listed("many")], None)],
+        results={"many": text_result(*["x"] * (PROMPT_MESSAGE_CAP + 1))},
+    )
+
+    with caplog.at_level(logging.WARNING, logger=MANAGER_LOGGER):
+        captured = await discovered(session, with_prompts(), inject_prompts=["many"])
+
+    assert captured == ()
+    assert skips(caplog) == [("tools", "1", TOO_MANY_MESSAGES)]
+
+
+def test_an_oversized_prompt_is_measured_without_being_built() -> None:
+    """The unit under the cap, asked directly, because what matters is
+    what it did not do: the block is refused by arithmetic over lengths
+    the parsed messages already carry, so the string it would have been
+    is never allocated."""
+    halves = ["y" * SHIPPED_BLOCK_LIMIT, "z" * SHIPPED_BLOCK_LIMIT]
+
+    rendering = mcp_module._rendered(text_result(*halves))
+
+    assert rendering.text is None
+    assert rendering.problem == mcp_module.TOO_LONG
+    # Exact, including the blank line between the two messages, which is
+    # part of what the model would have been sent.
+    assert rendering.size == 2 * SHIPPED_BLOCK_LIMIT + 2
 
 
 async def test_a_name_is_looked_up_exactly_as_it_was_written() -> None:
