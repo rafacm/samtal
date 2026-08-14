@@ -134,7 +134,7 @@ jobs:
           # only the baseline script fails here rather than at the first
           # write on a deployment.
           added = {
-              "mcp_servers": {"instructions"},
+              "mcp_servers": {"instructions", "use_server_instructions", "inject_prompts"},
               "agent_defaults": {"prompt_includes"},
               "agents": {"prompt_includes"},
           }

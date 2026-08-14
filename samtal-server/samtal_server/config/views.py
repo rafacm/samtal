@@ -221,6 +221,16 @@ def mcp_server_body(entry: McpServerConfig) -> dict[str, object]:
     # for the model to read, not a credential slot.
     if entry.instructions is not None:
         data["instructions"] = entry.instructions
+    # Always shown, like the timeout beside it: what a read of an entry
+    # answers about a trust decision should be the decision, and "off"
+    # is one of its two states rather than the absence of one.
+    data["use_server_instructions"] = entry.use_server_instructions
+    # Shown only when the operator named prompts, so an unset list reads
+    # as the "none" it is rather than as an emptied one. The names are
+    # the server's, and this is where operator-written configuration is
+    # echoed write-shaped, which is the one place they may appear.
+    if entry.inject_prompts is not None:
+        data["inject_prompts"] = list(entry.inject_prompts)
     return data
 
 

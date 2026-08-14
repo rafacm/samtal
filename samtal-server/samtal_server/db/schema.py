@@ -26,6 +26,7 @@ from sqlalchemy import (
     MetaData,
     Table,
     Text,
+    false,
 )
 
 # Named constraints and indexes, so a later migration can address them.
@@ -91,6 +92,21 @@ mcp_servers = Table(
     # NULL is the unset the model already means, and a row written
     # before the column existed reads as having none.
     Column("instructions", Text, nullable=True),
+    # Whether the guidance the server ships about itself is injected.
+    # NOT NULL with a database-level default rather than a Python-side
+    # rescue of NULL: a row written before the column existed then reads
+    # false from the database itself, which is what the opt-in means.
+    Column(
+        "use_server_instructions",
+        Boolean,
+        nullable=False,
+        server_default=false(),
+        default=False,
+    ),
+    # The published prompts this entry injects, by the names the server
+    # lists them under. Nullable, since NULL is the "none" the model
+    # already means.
+    Column("inject_prompts", JSON, nullable=True),
     # Dotted path (env.API_TOKEN, headers.Authorization) to envelope.
     Column("secrets", JSON, nullable=False, default=dict),
 )
