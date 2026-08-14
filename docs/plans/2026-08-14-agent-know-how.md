@@ -156,26 +156,29 @@ guidance in, each behind its own explicit opt-in on the entry:
   during the `initialize` call every manager already makes, so
   consuming it costs no extra round trip.
 - **`inject_prompts`** (default unset, meaning none) names the
-  server-published prompts to inject, by prompt name. At connect,
-  inside the existing `CONNECT_TIMEOUT_S` envelope and never during a
-  turn, the manager fetches each named prompt with `prompts/get` and
-  no arguments, extracts its text content, and holds it beside the
-  published tools; the blocks are injected in the order the operator
-  listed them, after the entry's other guidance. Selection is
+  server-published prompts to inject, by prompt name. Selection is
   operator-explicit rather than wholesale, because the specification
   defines prompts as user-controlled templates and a server may
   publish dozens: the operator, who read the server's documentation,
   names the ones that are standing guidance rather than invocable
-  templates. A named prompt the server does not publish, one that
-  requires arguments (a template cannot be rendered without them),
-  or one whose rendered content is not text, is skipped with a
-  warning naming the operator-written name and the rule it failed,
-  never the server's bytes: the same visible-mismatch shape as a
-  grant allow list naming an unpublished tool. Prompts are refetched
-  on every reconnect, like the tool list, and `inject_prompts`
+  templates. Discovery is listing-first, so no skip decision ever
+  rests on interpreting an untrusted server error: when the field
+  names anything, the manager walks the full paginated
+  `prompts/list`, cursor by cursor, and validates every configured
+  name against the listing before any fetch. Each way a name can be
+  unusable is a distinct, sanitized skip warning naming the
+  operator-written name and the rule: the server does not advertise
+  the prompts capability at all (one warning for the entry, every
+  name skipped), the name is absent from the listing, or the listed
+  prompt declares required arguments (a template cannot be rendered
+  without them). Only names the listing proves eligible are fetched
+  with `prompts/get` and no arguments. Prompts are refetched on
+  every reconnect, like the tool list, and `inject_prompts`
   participates in connection identity (below): editing it changes
   what the connect fetches, so it restarts the connection, unlike
-  the two fields that configure only injection.
+  the two fields that configure only injection. The blocks are
+  injected in the order the operator listed them, after the entry's
+  other guidance.
 
 What stays out, with its revisit conditions documented where the
 decision is: prompt templates with arguments become worth consuming
@@ -521,11 +524,13 @@ doc drift checks.
 - Unit, milestone 3: default-off ignores shipped instructions
   entirely and fetches no prompts; opted-in captures and injects
   after the operator's block, prompts in `inject_prompts` order after
-  the shipped instructions; a named prompt that is unpublished,
-  requires arguments, or renders non-text content is skipped with the
-  warning naming the operator-written name and the rule, never the
-  server's bytes; the cap skips wholesale per block with a warning
-  naming entry, channel and size; the reflection sentinel: a mock
+  the shipped instructions; discovery is listing-first and proven: a
+  listing walked across more than one page, a server without the
+  prompts capability skipping every configured name with one
+  entry-level warning, and an unlisted name, a required-arguments
+  prompt and a non-text-content prompt each skipped with their own
+  rule named, never the server's bytes; the cap skips wholesale per
+  block with a warning naming entry, channel and size; the reflection sentinel: a mock
   server shipping a credential sentinel in its instructions and in a
   prompt's rendered text, asserted absent from every log record and
   from the status surface, with or without the opt-ins; cleared when
