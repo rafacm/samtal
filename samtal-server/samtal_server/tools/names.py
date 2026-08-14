@@ -15,11 +15,17 @@ Configuration then forbids an `mcp_servers` entry from being called
 groups disjoint. Routing a call back to its source reads the same
 structure, so nothing has to be remembered about where a tool came from.
 
+The one place the structure is not enough on its own is between two MCP
+entries: an entry name may contain the separator, so `home` and
+`home__inside` can publish the same name, and `owner_of` below settles
+which of them a name belongs to.
+
 A leaf module on purpose: the configuration layer validates entry names
 against it, so it must not import anything that imports configuration.
 """
 
 import re
+from collections.abc import Iterable
 
 # The device's tools, as the firmware names them.
 DEVICE_PREFIX = "self"
@@ -72,10 +78,28 @@ def unqualified(entry: str, published: str) -> str:
     return published.removeprefix(f"{entry}{SERVER_SEPARATOR}")
 
 
-def split_qualified(name: str) -> tuple[str, str] | None:
-    """The entry and tool behind a qualified name, or None when the name
-    is not one."""
-    entry, separator, tool = name.partition(SERVER_SEPARATOR)
-    if not separator or not entry or not tool:
-        return None
-    return entry, tool
+def owner_of(published: str, entries: Iterable[str]) -> str | None:
+    """Which of these `mcp_servers` entries a published tool name
+    belongs to, or None when none of them does.
+
+    The longest entry that qualifies the name wins, and that is the
+    whole of the rule. An entry name may itself contain the separator
+    (`home__inside` is a legal one), so a published name can be
+    qualified by two configured entries at once, and the more specific
+    one is the one whose namespace it is in: `home__inside__turn_on` is
+    `home__inside`'s tool `turn_on` before it is `home`'s tool
+    `inside__turn_on`. Splitting at the first separator instead would
+    hand the name to `home`, which is a different server, and the caller
+    would run a tool nobody asked for.
+
+    The answer depends on the configured entries and on nothing else, so
+    two callers asking about one name get one answer however the servers
+    behind them happen to be doing.
+    """
+    owner: str | None = None
+    for entry in entries:
+        prefix = f"{entry}{SERVER_SEPARATOR}"
+        if published.startswith(prefix) and len(published) > len(prefix):
+            if owner is None or len(entry) > len(owner):
+                owner = entry
+    return owner

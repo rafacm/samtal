@@ -938,8 +938,7 @@ class PipelineRuntime:
             return await builtin.remember(self._memory, self._agent, call.arguments), False
         if any(tool.name == call.name for tool in self._output.device_tools()):
             return await self._output.call_device_tool(call.name, call.arguments)
-        split = names.split_qualified(call.name)
-        if split is not None and split[0] in self._mcp_servers:
+        if self._mcp_servers.owner_of(call.name) is not None:
             assert self._agent is not None
             # The agent goes with the call: the registry checks its
             # grant again there, so a tool the snapshot withheld is
@@ -949,10 +948,15 @@ class PipelineRuntime:
 
     def _timeout_for(self, name: str) -> float:
         """A server tool gets its entry's configured timeout; builtins
-        and device tools the module default."""
-        split = names.split_qualified(name)
-        if split is not None:
-            configured = self._mcp_servers.timeout_for(split[0])
+        and device tools the module default.
+
+        Which entry owns the name is the registry's answer rather than
+        this module's reading of the name, the same answer the dispatch
+        below routes by, so a tool cannot be run against one entry's
+        timeout and dispatched to another."""
+        entry = self._mcp_servers.owner_of(name)
+        if entry is not None:
+            configured = self._mcp_servers.timeout_for(entry)
             if configured is not None:
                 return configured
         return DEFAULT_TOOL_TIMEOUT_S

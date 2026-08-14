@@ -578,6 +578,23 @@ async def _stopped(manager: McpServerManager) -> None:
         await manager.stop(STOP_TIMEOUT_S)
 
 
+def _shadowed(managers: Mapping[str, McpServerManager]) -> frozenset[str]:
+    """Which of these entries have another entry inside their namespace.
+
+    A configuration property rather than a published-tool one: `home` is
+    shadowed the moment `home__inside` is also running, whatever either
+    of them publishes. Only these entries need their published names
+    resolved before they are offered, which keeps the common
+    deployment's snapshot free of the question.
+    """
+    return frozenset(
+        entry
+        for entry in managers
+        for other in managers
+        if other != entry and other.startswith(f"{entry}{names.SERVER_SEPARATOR}")
+    )
+
+
 def _allowed(grant: McpGrant, tools: list[ToolDef]) -> list[ToolDef]:
     """The tools of one server this grant reaches.
 
@@ -734,6 +751,12 @@ class McpServers:
     ) -> None:
         self._managers = managers
         self._configured = configured if configured is not None else McpSlice()
+        # Which running entries have a more specific entry inside their
+        # namespace, and which of their tools have already been reported
+        # unreachable because of it. Both are decided by the manager set,
+        # so both are replaced when it is.
+        self._shadowed = _shadowed(managers)
+        self._reported: set[tuple[str, str]] = set()
         # An entry no agent references has no manager and never
         # transitions, so the instant its status carries is when this
         # configuration took effect, which is what this is.
@@ -786,8 +809,62 @@ class McpServers:
             tool
             for entry in entries
             if entry in self._managers
-            for tool in self._managers[entry].tools()
+            for tool in self._reachable(entry)
         ]
+
+    def owner_of(self, published: str) -> str | None:
+        """Which running entry a published tool name belongs to, or None
+        when no entry claims it.
+
+        The one place a published name is resolved. Everything that has
+        to agree about which server a name belongs to (the offer, the
+        timeout, the grant check and the call itself) asks here, so the
+        list the model is given and the routing of what it calls cannot
+        answer differently.
+        """
+        return names.owner_of(published, self._managers)
+
+    def _reachable(self, entry: str) -> list[ToolDef]:
+        """One entry's tools under the names that actually route to it.
+
+        Two entries publish the same name when one entry name is inside
+        the other's namespace: `home` listing a tool called
+        `inside__turn_on` publishes `home__inside__turn_on`, and so does
+        `home__inside` listing `turn_on`. The name belongs to the more
+        specific entry, so the other one's tool is dropped rather than
+        offered: a name in front of the model that runs a different
+        server's tool is worse than a tool the model was never offered,
+        and this is the same first-wins drop `publish` already makes
+        inside one server.
+
+        Decided here rather than when the server published, because what
+        decides it is the manager set: a reload that adds
+        `home__inside` changes the answer for `home`, which reconnected
+        nothing and published nothing new.
+        """
+        manager = self._managers[entry]
+        if entry not in self._shadowed:
+            return manager.tools()
+        kept: list[ToolDef] = []
+        for position, tool in enumerate(manager.tools(), start=1):
+            owner = self.owner_of(tool.name)
+            if owner == entry:
+                kept.append(tool)
+            elif (entry, tool.name) not in self._reported:
+                # The position and the entry that owns the name, never
+                # the name: the half of it this server did not choose is
+                # the far side's bytes, and a tool that does not reach
+                # the model has no claim on the log. Once per tool per
+                # manager set, since this is read once a reply.
+                self._reported.add((entry, tool.name))
+                logger.warning(
+                    "mcp server %s: dropping published tool %d, its name is inside the "
+                    "namespace of the entry %s, which owns it",
+                    entry,
+                    position,
+                    owner,
+                )
+        return kept
 
     def tools_for_agent(self, agent: str) -> list[ToolDef]:
         """The tools one agent may reach right now, its grants applied.
@@ -995,6 +1072,8 @@ class McpServers:
         # the two, so no reply can be built on half of one world.
         self._managers = keep
         self._configured = configured
+        self._shadowed = _shadowed(keep)
+        self._reported = set()
         self._since = time.time()
         logger.info(
             "mcp servers reloaded: %d started, %d restarted, %d stopped, %d unchanged",
@@ -1048,7 +1127,7 @@ class McpServers:
             "state": manager.state,
             "reason": manager.reason,
             "since": _instant(manager.since),
-            "tools": [tool.name for tool in manager.tools()],
+            "tools": [tool.name for tool in self._reachable(entry)],
             "grants": grants,
         }
 
@@ -1070,12 +1149,11 @@ class McpServers:
         rather than remembered: one registry serves every session, and
         the grants are the ones running now.
         """
-        split = names.split_qualified(published)
-        manager = self._managers.get(split[0]) if split is not None else None
-        if manager is None:
+        entry = self.owner_of(published)
+        if entry is None:
             raise McpServerDown(f'no MCP server owns a tool called "{published}"')
-        if not self._configured.allows(agent, manager.name, published):
+        if not self._configured.allows(agent, entry, published):
             raise McpToolNotGranted(
                 f'this assistant is not allowed to use the tool "{published}"'
             )
-        return await manager.call(published, arguments)
+        return await self._managers[entry].call(published, arguments)

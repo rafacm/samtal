@@ -772,3 +772,110 @@ async def test_the_grants_carry_the_allow_list_beside_the_published_tools() -> N
         assert "tools__no_such_tool" not in entry["tools"]
     finally:
         await servers.stop_all()
+
+
+# Entry names that hold the separator, and the namespace between two
+
+
+async def test_an_entry_name_holding_the_separator_is_reachable_end_to_end() -> None:
+    """`home__inside` is a legal entry name, and its tools publish as
+    `home__inside__<tool>`. Reading that name by splitting at the first
+    separator would look for a server called `home`, so the tool was
+    offered and then unreachable."""
+    config = config_granting(
+        {"home__inside": entry_data()},
+        {"assistant": [{"server": "home__inside", "tools": ["secret_word"]}]},
+    )
+    servers = McpServers.build(config)
+    await servers.start_all()
+    try:
+        offered = [tool.name for tool in servers.tools_for_agent("assistant")]
+        assert offered == ["home__inside__secret_word"]
+
+        # The one resolution, which every other question asks.
+        entry = servers.owner_of("home__inside__secret_word")
+        assert entry == "home__inside"
+        assert servers.timeout_for(entry) == 15.0
+        assert await servers.call("home__inside__secret_word", {}, "assistant") == (
+            "rhubarb",
+            False,
+        )
+        # And the gate is the one the grant names, not a server called
+        # `home` that does not exist.
+        with pytest.raises(McpToolNotGranted):
+            await servers.call("home__inside__add", {"first": 1, "second": 2}, "assistant")
+    finally:
+        await servers.stop_all()
+
+
+async def test_the_more_specific_entry_owns_a_name_both_servers_publish(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Two entries can publish one name: this server lists a tool called
+    `inside__secret_word`, so under the entry `home` it publishes as
+    `home__inside__secret_word`, which is what the entry `home__inside`
+    publishes its own `secret_word` as. The name is the more specific
+    entry's, and the other one's tool is dropped rather than offered
+    under a name that would run somebody else's."""
+    config = config_granting(
+        {"home": entry_data(), "home__inside": entry_data()},
+        {"assistant": ["home", "home__inside"]},
+    )
+    servers = McpServers.build(config)
+    with caplog.at_level(logging.WARNING, logger=MANAGER_LOGGER):
+        await servers.start_all()
+        offered = [tool.name for tool in servers.tools_for_agent("assistant")]
+    try:
+        assert offered.count("home__inside__secret_word") == 1
+        assert servers.owner_of("home__inside__secret_word") == "home__inside"
+        # The outer entry keeps everything else it published.
+        assert "home__secret_word" in offered
+        assert "home__inside__secret_word" not in [
+            tool.name for tool in servers.tools_for(["home"])
+        ]
+        # The call reaches the owner's tool, and this server answers
+        # differently through each of the two, so the answer says which.
+        assert await servers.call("home__inside__secret_word", {}, "assistant") == (
+            "rhubarb",
+            False,
+        )
+        # What the surface shows is what the model was offered.
+        assert servers.status()["home"]["tools"] == [
+            tool.name for tool in servers.tools_for(["home"])
+        ]
+
+        (warned,) = [
+            record.getMessage()
+            for record in caplog.records
+            if record.name == MANAGER_LOGGER and "namespace" in record.getMessage()
+        ]
+        # The entry that owns the name and the position of the tool
+        # that lost it, never the name itself: the model will not be
+        # given it, and half of it is what the far side called its tool.
+        assert "mcp server home:" in warned
+        assert "home__inside" in warned
+        assert "secret_word" not in warned
+    finally:
+        await servers.stop_all()
+
+
+async def test_a_shadowed_name_is_reported_once_per_manager_set(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # The drop is decided per read, since a reload can change it without
+    # anything reconnecting, but the line about it is not a line per
+    # reply.
+    config = config_granting(
+        {"home": entry_data(), "home__inside": entry_data()},
+        {"assistant": ["home", "home__inside"]},
+    )
+    servers = McpServers.build(config)
+    await servers.start_all()
+    try:
+        with caplog.at_level(logging.WARNING, logger=MANAGER_LOGGER):
+            for _ in range(3):
+                servers.tools_for_agent("assistant")
+
+        assert len([r for r in caplog.records if "namespace" in r.getMessage()]) == 1
+    finally:
+        await servers.stop_all()
