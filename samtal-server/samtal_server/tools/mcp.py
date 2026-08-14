@@ -14,6 +14,12 @@ connections accordingly, so an operator who writes an entry does not pay
 for it with every live conversation. It is still the only thing that
 changes them, and it is asked for rather than noticed.
 
+An entry also carries what its operator wrote about using its tools,
+which this layer answers by agent and by grant and knows nothing else
+about: the block shape comes from `runtime.prompt`, which is what turns
+it into prompt text, so headings and block order are decided there and
+never here.
+
 Each manager's whole lifecycle lives in one task: the SDK's clients are
 async context managers over anyio task groups, and entering them in one
 task while exiting in another is what breaks their cancel scopes. The
@@ -45,6 +51,7 @@ from samtal_server.config.loader import (
 )
 from samtal_server.config.secrets import SecretStore, resolve_mcp_values
 from samtal_server.providers import ToolDef
+from samtal_server.runtime.prompt import Guidance
 from samtal_server.tools import names
 from samtal_server.tools.publish import PublishedTools, publish
 
@@ -269,8 +276,15 @@ class McpServerManager:
         connects to as surely as one who edits its URL, and comparing
         only the fragment would leave the old token in a process nobody
         restarted.
+
+        The fragment's prompt fields are left out of the comparison,
+        because they are not part of the world this connects to: see
+        `_connection_identity`.
         """
-        return self._config == other._config and self._secrets_mark == other._secrets_mark
+        return (
+            _connection_identity(self._config) == _connection_identity(other._config)
+            and self._secrets_mark == other._secrets_mark
+        )
 
     async def stop(self, timeout: float | None = None) -> None:
         """Ask this server's task to end, and see it out.
@@ -477,6 +491,26 @@ class McpServerManager:
         self._stop.set()
 
 
+# The entry fields that configure prompt text rather than the
+# connection. Excluded from the comparison below, and the exclusion is
+# the whole of what makes an instructions edit apply without a restart.
+_PROMPT_ONLY_FIELDS = ("instructions",)
+
+
+def _connection_identity(config: McpServerConfig) -> McpServerConfig:
+    """One entry with the fields the connection never sees removed.
+
+    An operator fixing a typo in the guidance has not changed the server
+    this talks to, and dropping a live connection to apply it (with a
+    mid-call tool list and, for stdio, a respawned child process) would
+    be churn without a cause. So the reload reports such an entry as
+    `unchanged`, which is honest about the connection, and the new text
+    reaches conversations at their next activation through the slice,
+    which a reload swaps whatever it did to the managers.
+    """
+    return config.model_copy(update=dict.fromkeys(_PROMPT_ONLY_FIELDS))
+
+
 def _reason(exc: BaseException) -> str:
     """Why a connection did not happen, in words this server owns.
 
@@ -645,6 +679,11 @@ class McpSlice:
 
     entries: tuple[str, ...] = ()
     grants: Mapping[str, tuple[McpGrant, ...]] = field(default_factory=dict)
+    # The guidance each entry's operator wrote about it, for the entries
+    # that carry any. Held beside the grants because it is swapped with
+    # them: a reload that keeps a connection still changes what an
+    # agent's next activation is told about it.
+    instructions: Mapping[str, str] = field(default_factory=dict)
 
     @classmethod
     def of(cls, config: Config) -> "McpSlice":
@@ -652,6 +691,11 @@ class McpSlice:
             entries=tuple(sorted(config.mcp_servers)),
             grants={
                 agent: tuple(config.mcp_for_agent(agent)) for agent in sorted(config.agents)
+            },
+            instructions={
+                name: entry.instructions
+                for name, entry in sorted(config.mcp_servers.items())
+                if entry.instructions is not None
             },
         )
 
@@ -679,6 +723,26 @@ class McpSlice:
         conversation talking without tools until it ends, which is what
         the rest of a deleted agent's session does too."""
         return tuple(self.grants.get(agent, ()))
+
+    def guidance_for(self, agent: str) -> tuple[Guidance, ...]:
+        """The guidance blocks one agent's grants name, in grant order.
+
+        The effective grant is the whole condition, which is the
+        deliverable read literally: guidance is injected for every agent
+        granted the entry, whether or not that entry is connected and
+        whatever its allow list narrows its tools to. Guidance for a
+        server that is down, or one whose granted tools were all
+        filtered away, is the same accepted noise as guidance naming a
+        tool an agent cannot reach; what an operator does about it is
+        write about the granted surface, and both surfaces make the
+        mismatch visible. An agent granted nothing is answered with
+        nothing.
+        """
+        return tuple(
+            Guidance(grant.server, text)
+            for grant in self.grants_for(agent)
+            if (text := self.instructions.get(grant.server)) is not None
+        )
 
     def entries_for(self, agent: str) -> tuple[str, ...]:
         """Which entries one agent may reach, whole or in part. What a
@@ -881,6 +945,19 @@ class McpServers:
             for grant in self._configured.grants_for(agent)
             for tool in _allowed(grant, self.tools_for([grant.server]))
         ]
+
+    def guidance_for_agent(self, agent: str) -> tuple[Guidance, ...]:
+        """The operator's guidance for the entries one agent is granted,
+        in grant order.
+
+        Asked by agent for the reason `tools_for_agent` is: the grants
+        are part of what a reload swaps, so this answers the world that
+        is running rather than the configuration a session was built on.
+        Read at activation, where the know-how half is assembled and
+        cached, so a reload's guidance reaches new sessions and
+        switched-in agents.
+        """
+        return self._configured.guidance_for(agent)
 
     def revive(self, entries: Iterable[str]) -> None:
         """Kick off a background reconnect for any of these that is
