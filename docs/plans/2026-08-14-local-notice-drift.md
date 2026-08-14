@@ -321,7 +321,7 @@ resolution once the amendment addressing it lands.
 
 - [x] **[Align the three --local notices with the API and pin every
   local write's notice](2026-08-14-local-notice-drift-implementation.md#milestone-1-align-the-three---local-notices-with-the-api-and-pin-every-local-writes-notice)**
-  (PR TBD): `secret_notice` lands in `writes.py`;
+  (PR #147): `secret_notice` lands in `writes.py`;
   `_delete_mcp_server` passes `MCP_RELOAD_NOTICE`, `_set_secret`
   and `_clear_secret` pass `secret_notice(location.kind)`;
   `LOCAL_NOTICE` and the module docstring paragraph drop the
