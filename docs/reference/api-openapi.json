@@ -3045,6 +3045,29 @@
             "default": null,
             "description": "Guidance for the model about using this server's tools, injected into the system prompt of every agent this entry is granted to, under a heading naming the prefix its tools carry. It is written for the whole entry rather than per tool, so guidance about a tool an agent's allow list withholds is noise the operator avoids by writing about the granted surface. The grant is the whole condition: it is injected whether or not the server is connected and whatever its tools turn out to be, and an agent with `mcp: []` never sees it. It is stored and injected as written, its indentation and its own blank lines included; the only bytes trimmed are whitespace at the two ends of the whole assembled prompt, which is also what the inspection surface reports. Editing it does not restart the connection, so a reload reports the entry as `unchanged`, and the new text reaches a conversation at its next activation: a new session or an agent switch, never a reply of a session already running.",
             "title": "Instructions"
+          },
+          "use_server_instructions": {
+            "default": false,
+            "description": "Whether to inject the guidance this server ships about itself, the `instructions` field of its initialize result, into the system prompt of every agent this entry is granted to. Off by default, and deliberately: the entry's own `instructions` is what your operator wrote, while this is a third party's text steering the agent, so consuming it is an explicit opt-in taken per entry and per channel. What a server ships is captured on every connect whatever this says, so turning it on applies at the next reload without restarting the connection, and turning it off stops the injection at the next activation. A block longer than 4000 characters is skipped whole rather than truncated. The block sits after this entry's own guidance, and `samtal-server config prompt <agent>` reports it under `server_instructions:<entry>`, so an operator can see whose words they are reading.",
+            "title": "Use Server Instructions",
+            "type": "boolean"
+          },
+          "inject_prompts": {
+            "anyOf": [
+              {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The prompts this server publishes that are injected into the system prompt of every agent this entry is granted to, each by the name the server lists it under and in the order listed here. Unset means none, which is the default: a third party's text steering the agent is an opt-in per entry and per channel, and the specification defines prompts as user-controlled templates, so the operator who read the server's documentation names the ones that are standing guidance rather than invocable templates. Every name is validated against the server's own paginated prompt listing before anything is fetched, and a name the listing does not carry, one whose prompt declares required arguments, one that renders anything but text, and a rendered block longer than 4000 characters are each skipped with a warning naming this entry and the position in this list, never the name itself, since a server-chosen name is not this server's to print. Editing this list changes what a connect fetches, so unlike the other two prompt fields it restarts the connection when a reload applies it. A name listed twice is refused.",
+            "title": "Inject Prompts"
           }
         },
         "required": [
