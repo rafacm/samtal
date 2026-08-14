@@ -201,7 +201,23 @@ on:
 - **The publishing rule for logs.** The shipped bytes never appear in
   a log record; the connect log and the skip warnings carry the entry
   name, the operator-written prompt name where one exists, and the
-  size only. The bytes reach exactly two
+  size only.
+
+**How a prompt renders, exactly.** A `prompts/get` result is an
+ordered list of messages with roles and typed content blocks, and
+what this feature injects is one system-guidance block, so the
+rendering is defined rather than left to an implementation: the text
+of each message, in message order, joined by blank lines, roles
+dropped. The block is standing guidance the operator chose to
+inject, not a dialog to replay, and a prompt that only makes sense
+as a dialog is a template this feature is not for. A prompt any of
+whose messages carries a non-text content block is skipped as
+unusable, the same visible rule as required arguments; the size cap
+applies to the final rendered block. Each injected prompt carries
+the stable provenance `server_prompt:<entry>:<name>`, built from the
+entry name and the operator-written prompt name, both safe to print
+by construction, and the rendering itself is pinned exactly in
+milestone 3's tests, including a multi-message prompt. The bytes reach exactly two
   places, both deliberate: the model's system prompt, which is what
   the opt-in means, and the assembled-prompt surface, which exists to
   show what the model receives and marks the block's provenance so an
@@ -383,7 +399,8 @@ and per-session readback is deliberately not offered; what an
 operator audits is what the configuration produces now. The response
 carries:
 the ordered blocks, each with its provenance (`persona`,
-`fragment:<name>`, `instructions:<entry>`, `server_instructions:<entry>`,
+`fragment:<name>`, `instructions:<entry>`,
+`server_instructions:<entry>`, `server_prompt:<entry>:<name>`,
 `memory`), its character count, and its text, plus the total count.
 It is a runtime read, not a database read: it reflects the loaded
 agents, the running slice and managers, and the memory store, so it
@@ -529,8 +546,11 @@ doc drift checks.
   prompts capability skipping every configured name with one
   entry-level warning, and an unlisted name, a required-arguments
   prompt and a non-text-content prompt each skipped with their own
-  rule named, never the server's bytes; the cap skips wholesale per
-  block with a warning naming entry, channel and size; the reflection sentinel: a mock
+  rule named, never the server's bytes; the rendering pinned
+  exactly, a multi-message prompt joining its messages' text with
+  blank lines and roles dropped, under the
+  `server_prompt:<entry>:<name>` provenance; the cap skips wholesale
+  per block with a warning naming entry, channel and size; the reflection sentinel: a mock
   server shipping a credential sentinel in its instructions and in a
   prompt's rendered text, asserted absent from every log record and
   from the status surface, with or without the opt-ins; cleared when
