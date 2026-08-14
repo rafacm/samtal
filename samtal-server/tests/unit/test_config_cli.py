@@ -376,7 +376,7 @@ def test_a_prompt_fragment_reads_and_deletes_through_the_recovery_path(
     assert capsys.readouterr().out == "wrote prompt-fragment household deleted\n"
 
     assert run("show", "prompt-fragment", "household") == 1
-    assert "no such prompt fragment" in capsys.readouterr().err
+    assert "no prompt fragment of that name exists" in capsys.readouterr().err
 
 
 def test_an_agent_includes_a_fragment_and_reads_it_back(
@@ -408,6 +408,29 @@ def test_a_fragment_an_agent_includes_is_not_deleted_from_under_it(
     assert run("delete", "prompt-fragment", "household") == 1
 
     assert "prompt_includes" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("name", [SECRET, f"{SECRET}.pasted"])
+@pytest.mark.parametrize("local", [False, True])
+def test_a_fragment_that_is_not_there_is_refused_without_printing_it(
+    run, capsys: pytest.CaptureFixture[str], name: str, local: bool
+) -> None:
+    """Both ways in, since the recovery path opens the database itself
+    and has to say the same sentence: a name that addresses no fragment
+    was typed rather than stored, so neither the read nor the delete
+    repeats it."""
+    flags = ("--local",) if local else ()
+    for argv in (
+        (*flags, "show", "prompt-fragment", name),
+        (*flags, "delete", "prompt-fragment", name),
+    ):
+        assert run(*argv) == 1
+
+        captured = capsys.readouterr()
+        assert "no prompt fragment of that name exists" in captured.err
+        assert SECRET not in captured.err
+        assert SECRET not in captured.out
+        assert "Traceback" not in captured.err
 
 
 @pytest.mark.parametrize("layer", ["agent", "agent-defaults"])
