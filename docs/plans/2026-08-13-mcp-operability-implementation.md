@@ -908,15 +908,21 @@ unreachable rather than about a name that arrived anyway.
 
 ### Verification
 
-All from `samtal-server/`, on the tree at the documentation commit.
+All from `samtal-server/`. The figures first recorded here were the
+branch's before it was rebased, twice: onto the merged milestone 1 with
+its review round, and onto the merged milestone 2 with its review round.
+Both lanes were rerun on the rebased tree, after the PR #127 round
+below, and these are that tree's.
 
 - `uv run ruff check .`: "All checks passed!".
-- `uv run pytest tests/unit -q`: 1538 passed, 15 skipped in 138.93s.
-  Thirty-four more than milestone 2, which is the count listed above;
-  the drift checks for the OpenAPI document and the generated reference
-  run in this lane and pass.
-- `uv run pytest tests/integration -q`: 47 passed in 91.77s. One more:
-  the offer proof.
+- `uv run pytest tests/unit -q`: 1585 passed, 15 skipped in 145.99s.
+  The arithmetic the rebase makes checkable: milestone 2's round left
+  1533 on `main`, this milestone adds the thirty-four listed above, and
+  the round below adds eighteen. The drift checks for the OpenAPI
+  document and the generated reference run in this lane and pass.
+- `uv run pytest tests/integration -q`: 48 passed in 96.39s. One more
+  than milestone 2's round left: the offer proof. The round below added
+  no integration test.
 
 Not verified, and not claimed: nothing was run against hardware or a
 deployment, and no grant was written against a real third-party MCP
@@ -924,3 +930,143 @@ server. The unpublished-name warning was exercised against the stdio
 test server only, and the reflection sentinels milestone 1 added were
 not re-run against the new warning line, which prints operator-written
 names rather than anything a server chose.
+
+### PR #127 review round
+
+One external review of the milestone's diff: codex CLI 0.147.0, model
+gpt-5.6-sol, read-only, 2026-08-14. Verdict: mergeable after the listed
+fixes. Findings as received, condensed; each carries the commit that
+addressed it, or the reason it did not.
+
+1. **P1: an object grant's refusals quote what they rejected.** The
+   duplicate tool name, the server value of a failing entry and the
+   locations pydantic reports (which for a key the model does not
+   declare is that key) were interpolated into sentences that travel
+   through the store into CLI errors and HTTP 422 bodies, so a
+   credential pasted into a malformed grant came back out. Suggested:
+   make them location-and-rule only, keeping them actionable, and add
+   credential sentinels over the response, the CLI, the logs and the
+   exception chain.
+   *Resolution*: adopted in 56cda3c. A repeated name is named by the
+   positions that repeat it, an entry by its position in the list, and a
+   location inside a grant only when it is a field this repository
+   declared; anything else prints as "an unrecognized key". The empty
+   allow list still points at `mcp: []`, which is what the plan asked
+   that sentence to do. Thirteen sentinel cases: seven malformed grants
+   over HTTP with the body, the headers and every log record checked,
+   the same shapes through the repository with the whole exception chain
+   checked, one over the CLI on both streams, and the repeated-server
+   refusal. All of them fail against the sentences they replace.
+   One thing the finding's subject touches that this did not change, and
+   deliberately: `check_references` still answers an unresolved
+   reference with `unknown MCP server "<name>"`, and its provider
+   neighbour with the same shape. That sentence predates this milestone,
+   is uniform across every reference kind, and names what the fragment
+   asked the repository to resolve rather than a value it rejected on
+   sight. It is still a body value reaching a 422, so it is worth
+   deciding on; the decision is repository-wide (both branches, several
+   suites pinning the wording) and does not belong in a milestone's
+   review round. The sentinel cases above are built so that none of them
+   depends on it.
+2. **P1: the call-time gate embeds the refused tool name in the
+   exception, the error result and the `tool_call` log event.**
+   Suggested: deny without the value.
+   *Resolution*: refused, and refused deliberately. The name in a
+   refused call is model-generated content, not a server's bytes and not
+   an operator's secret. The model's words are already this server's
+   structured transcript by design
+   ([`json logs are the observability surface`](../adr/2026-08-04-json-logs-are-the-observability-surface.md)):
+   the same reply is logged under `heard` and `said`, every `tool_call`
+   event has carried `call.name` since M6, and the pre-existing
+   unknown-tool path answers `there is no tool called "<name>"` with it.
+   A value-free denial would therefore remove the one datum an operator
+   debugging a grant needs, which tool was denied, while leaving the
+   same name in the transcript lines beside it, and it would make the
+   granted-away case say less than the unknown-tool case it is
+   deliberately shaped like. If model-generated content is to stop
+   crossing into logs, that is a decision about the transcript and every
+   line that carries it, not about this gate.
+3. **P2: an entry name may contain the separator, and the split at the
+   first one gets it wrong.** `home__inside` is a legal entry, and
+   `split_qualified` hands `home__inside__turn_on` to a server called
+   `home`: unreachable when there is none, and somebody else's tool when
+   there is. The grant gate made the wrong answer more visible, since it
+   asked the same split which server to check. Suggested: resolve
+   published names through a registry-owned mapping with the longest
+   matching entry-name prefix winning, drop cross-manager collisions
+   deterministically with a warning, and keep the pipeline on the same
+   resolution.
+   *Resolution*: adopted in db3015d. `names.owner_of(published,
+   entries)` is the one resolution: the longest entry that qualifies the
+   name owns it, which depends on the configuration and on nothing a
+   server published, so two callers asking about one name get one
+   answer. The registry's offer, status, timeout lookup, grant check and
+   routing ask it, and so do the session's dispatch and per-call
+   timeout. Where two entries do publish one name the more specific
+   keeps it and the other's tool is dropped rather than offered under a
+   name that would run somebody else's, which is `publish`'s own
+   first-wins drop between managers instead of within one. Two
+   departures from the finding's letter, both for determinism: the
+   winner is the more specific entry rather than the first listed,
+   because "first" across managers means whichever connected first and
+   would flip when one reconnects, while the entry names cannot; and the
+   drop is decided when the tools are read rather than when they are
+   published, because a reload that adds the inner entry changes the
+   answer for the outer one without reconnecting anything. The warning
+   is printed once per manager set, by position and by the entry that
+   owns the name, never by the name, per the rule PR #125's round
+   settled for dropped tools. `split_qualified` had no caller left and
+   is gone. Five tests, each failing against the first-split rule: the
+   resolution itself, an entry holding the separator end to end through
+   the registry (offer, timeout, gate, execution), the same through the
+   session's dispatch and timeout, the collision drop with its warning
+   and its status, and the once-per-world reporting. The stdio test
+   server grew a tool whose listed name holds the separator, so one
+   entry genuinely collides with another and each answers differently,
+   which is what lets a test say which one a call reached.
+4. **P2: the schema declares `tools` as an unconstrained array while
+   the model refuses an empty one and a repeated name.** Suggested:
+   express both in the JSON schema, regenerate, and assert them in the
+   contract test.
+   *Resolution*: adopted in 84881b4. The array carries `minItems: 1` and
+   `uniqueItems: true` on the type, where a generator and a schema
+   validator read them, declared rather than enforced by pydantic
+   because a constraint would answer the empty list with its own
+   sentence instead of the one that says how to grant nothing. Both
+   committed documents were regenerated with their commands; the
+   reference did not move, since its tables carry types and descriptions
+   rather than constraints. The contract test asserts both bounds beside
+   the empty-secret case it already pinned, and the write suite
+   exercises the refusals over HTTP.
+5. **P3: the milestone's verification figures are the pre-rebase
+   tree's and are arithmetically inconsistent with this one.**
+   Suggested: rerun and replace them.
+   *Resolution*: adopted in this commit. Both lanes were rerun on the
+   rebased tree and the milestone's Verification section carries those
+   figures, with the rebase said out loud and the arithmetic shown:
+   1533 on `main` after milestone 2's round, plus this milestone's
+   thirty-four, plus this round's eighteen.
+
+### Verification after the review round
+
+Same commands, from `samtal-server/`, on the tree at the documentation
+commit.
+
+- `uv run ruff check .`: "All checks passed!".
+- `uv run pytest tests/unit -q`: 1585 passed, 15 skipped in 145.99s.
+  Eighteen more than the tree this round started from, which is what the
+  round added: thirteen sentinel cases for the refusals and five for the
+  namespace resolution.
+- `uv run pytest tests/integration -q`: 48 passed in 96.39s. Unchanged:
+  the round is about what a refusal says and which server a name belongs
+  to, and both are proven where they are decided.
+- Teeth, all restored from a copy and touched rather than with `git
+  checkout`: every sentinel case fails against the sentences that quoted
+  the body, and all five namespace tests fail against the first-split
+  resolution.
+
+Not verified, and not claimed: nothing was run against hardware or a
+deployment. The colliding namespace was exercised against two entries
+pointed at the same stdio test server rather than against two real
+third-party servers, and no schema validator outside this repository was
+run against the regenerated document.
