@@ -120,19 +120,22 @@ def server_instructions_heading(entry: str) -> str:
     injected because an entry opted into them, and a model reading the
     prompt should be able to tell whose advice it is following as
     plainly as the operator reading the inspection surface can.
+
+    It is also deliberately shorter than the operator's, which can
+    afford to spell the prefix rule out because it is the first heading
+    a reader meets: this one sits under it, and every character of a
+    heading is a character of the budget the surface beside it exists to
+    count.
     """
     return (
-        f"The server behind the tools whose names begin with "
-        f"{entry}{names.SERVER_SEPARATOR} says this about using them:"
+        f"What the server behind the {entry}{names.SERVER_SEPARATOR} tools "
+        f"says about using them:"
     )
 
 
 def server_prompt_heading(entry: str) -> str:
     """The same, for one of the prompts that server publishes."""
-    return (
-        f"The server behind the tools whose names begin with "
-        f"{entry}{names.SERVER_SEPARATOR} publishes this guidance:"
-    )
+    return f"Guidance the server behind the {entry}{names.SERVER_SEPARATOR} tools publishes:"
 
 
 @dataclass(frozen=True)

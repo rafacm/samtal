@@ -213,12 +213,10 @@ def test_an_entrys_own_guidance_comes_before_what_its_server_shipped() -> None:
         "Guidance for using the tools whose names begin with home__:\n"
         "Ask before unlocking the door.\n"
         "\n"
-        "The server behind the tools whose names begin with home__ says this about "
-        "using them:\n"
+        "What the server behind the home__ tools says about using them:\n"
         "Call list_devices first.\n"
         "\n"
-        "The server behind the tools whose names begin with home__ publishes this "
-        "guidance:\n"
+        "Guidance the server behind the home__ tools publishes:\n"
         "Answer in short sentences."
     )
     assert [block.provenance for block in assembled.blocks] == [
@@ -374,3 +372,16 @@ def test_memory_that_is_empty_leaves_the_cached_half_alone() -> None:
 
 def test_the_heading_names_the_prefix_the_model_can_call() -> None:
     assert prompt.guidance_heading("home").endswith("home__:")
+
+
+def test_the_server_headings_name_the_prefix_and_say_who_is_talking() -> None:
+    for heading in (
+        prompt.server_instructions_heading("home"),
+        prompt.server_prompt_heading("home"),
+    ):
+        assert "home__" in heading
+        assert "server" in heading
+        # Shorter than the operator's, which spells the prefix rule out:
+        # these sit under it, and a heading costs the same budget the
+        # surface beside it counts.
+        assert len(heading) < len(prompt.guidance_heading("home")) + 10
