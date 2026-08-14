@@ -98,6 +98,26 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   worker thread rather than on the event loop every conversation
   shares.
 
+### Fixed
+
+- **A `--local` write says when it really applies** (#134): three
+  commands on the break-glass path told an operator to restart the
+  server for a change `samtal-server config reload` applies. `config
+  --local delete mcp-server`, and `set-secret` and `clear-secret` on an
+  MCP entry's slot, now name the reload, which is what the same act
+  through the configuration API has always answered. The line every
+  `--local` invocation prints first changed with them: it said that a
+  running server observes no local change until its next start, device
+  bindings excepted, which would have contradicted the corrected notice
+  one line later. It now says what the path is and leaves the timing to
+  the write, which answers it in the same three cases the API does. A
+  test runs each act of the `--local` mutating subset both ways and
+  compares what the two printed, so a future notice on one path that
+  the other does not follow fails rather than being noticed by
+  somebody. The deployment notes and the configuration section of the
+  server README carried the same absolute claim in four places and are
+  corrected with it.
+
 ## 2026-08-13
 
 ### Added
