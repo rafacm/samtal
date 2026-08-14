@@ -47,13 +47,39 @@ class MemoryStore:
     def read(self, agent: str) -> str:
         """This agent's facts, or an empty string when it has none. Read
         per reply rather than cached, so a fact remembered in one session
-        is known to a concurrent one on its next reply."""
+        is known to a concurrent one on its next reply.
+
+        Nothing about a file that cannot be read reaches the caller.
+        This is on the path that builds a system prompt, so a raised
+        exception would leave as a traceback under "reply failed", with
+        whatever the decoder was holding in it; an unreadable file means
+        this agent remembers nothing this round, and the reply happens.
+
+        Decode failures are caught beside the filesystem ones because a
+        memory file is bytes on a volume, and a volume half-written by a
+        crash, restored from a backup or edited by hand holds what it
+        holds. What is logged is the class of the failure and never the
+        message: `UnicodeDecodeError` quotes the byte it tripped on and
+        an `OSError` carries the path, and neither is something a record
+        about a prompt needs. It is the rule the MCP layer's reason
+        tokens already follow.
+        """
         try:
             return self.path_for(agent).read_text(encoding="utf-8").strip()
         except FileNotFoundError:
             return ""
-        except OSError as exc:
-            logger.warning("could not read memory for agent %s: %s", agent, exc)
+        except (OSError, ValueError) as exc:
+            logger.warning(
+                "could not read memory for agent %s (%s); it remembers nothing this "
+                "round",
+                agent,
+                type(exc).__name__,
+                extra={
+                    "event": "memory_unreadable",
+                    "agent": agent,
+                    "error": type(exc).__name__,
+                },
+            )
             return ""
 
     async def remember(self, agent: str, fact: str) -> None:
@@ -66,6 +92,12 @@ class MemoryStore:
             await asyncio.to_thread(self._append, agent, text)
 
     def _append(self, agent: str, fact: str) -> None:
+        # Reads through the same containment above, so a file that
+        # cannot be read is appended to as an empty one and the write
+        # below leaves a readable file behind. Nothing a model could
+        # have been given is lost by that: what those bytes held was
+        # already unreadable, and the alternative is a `remember` that
+        # fails for as long as the file sits there.
         path = self.path_for(agent)
         path.parent.mkdir(parents=True, exist_ok=True)
         existing = self.read(agent)

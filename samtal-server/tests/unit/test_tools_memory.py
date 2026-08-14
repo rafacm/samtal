@@ -116,3 +116,105 @@ async def test_remembered_facts_reach_the_model_through_the_prompt(tmp_path: Pat
     assert "- the user is vegetarian" in assembled
     # Another agent's prompt is untouched by it.
     assert prompt.with_memory(prompt.know_how("TUTOR"), store.read("tutor")).text == "TUTOR"
+
+
+# A file that cannot be read
+#
+# A memory file is bytes on a volume, so a crash, a restore or a hand
+# edit can leave one that will not decode. It is reached from the loop
+# that builds a system prompt, so what must never happen is an exception
+# travelling out of it: it would end the reply and put the decoder's own
+# message, and a traceback, in the log.
+
+# Not a real credential, and shaped so a substring check for it cannot
+# match by accident. Written into the corrupt file, where a handler that
+# logged the file or the exception's message would carry it out.
+STORED = "sk-test-3d7f10ba-never-a-real-credential"
+
+CORRUPT = f"- {STORED}\n- \xff\xfe not utf-8 at all\n".encode("latin-1")
+
+
+def _corrupt(store: MemoryStore, agent: str) -> None:
+    path = store.path_for(agent)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(CORRUPT)
+
+
+def test_a_file_that_will_not_decode_reads_as_no_memory(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    store = MemoryStore(tmp_path)
+    _corrupt(store, "poet")
+
+    with caplog.at_level("WARNING"):
+        assert store.read("poet") == ""
+
+    (record,) = [r for r in caplog.records if getattr(r, "event", None) == "memory_unreadable"]
+    assert record.agent == "poet"
+    # The class of the failure and nothing else: the decoder's own
+    # message quotes the byte it tripped on, and a traceback carries the
+    # values that produced it.
+    assert record.error == "UnicodeDecodeError"
+    assert record.exc_info is None
+    assert "0xff" not in record.getMessage()
+
+
+def test_nothing_of_an_unreadable_file_reaches_any_log_record(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The sentinel over every record, not only the one this writes: a
+    file nobody could decode may hold anything, including a credential
+    somebody pasted into it."""
+    store = MemoryStore(tmp_path)
+    _corrupt(store, "poet")
+
+    with caplog.at_level("DEBUG"):
+        store.read("poet")
+
+    for record in caplog.records:
+        rendered = record.getMessage() + repr(record.args) + repr(record.__dict__)
+        assert STORED not in rendered
+        assert record.exc_info is None
+        assert "Traceback" not in rendered
+
+
+async def test_remembering_over_an_unreadable_file_leaves_a_readable_one(
+    tmp_path: Path,
+) -> None:
+    """The file is appended to as an empty one, which is what the read
+    says it is. Nothing a model could have been given is lost, and the
+    `remember` tool keeps working rather than failing for as long as
+    those bytes sit there."""
+    store = MemoryStore(tmp_path)
+    _corrupt(store, "poet")
+
+    await store.remember("poet", "the user is vegetarian")
+
+    assert store.read("poet") == "- the user is vegetarian"
+
+
+async def test_a_reply_happens_over_an_unreadable_memory_file(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The whole point of containing it: the prompt is built without the
+    memory block and the conversation carries on, rather than the read
+    ending the reply from inside a worker thread."""
+    from tests.unit.test_session_prompt import (
+        CountingServers,
+        RecordingLlm,
+        session_with,
+    )
+    from tests.unit.test_session_tools import run_reply
+
+    store = MemoryStore(tmp_path)
+    _corrupt(store, "poet")
+    llm = RecordingLlm()
+    session = session_with(CountingServers(), {"poet": llm}, memory=store)
+
+    with caplog.at_level("DEBUG"):
+        assert await run_reply(session, "hello") == ["Said."]
+
+    assert llm.systems == ["POET"]
+    for record in caplog.records:
+        assert STORED not in record.getMessage() + repr(record.__dict__)
+        assert record.exc_info is None
