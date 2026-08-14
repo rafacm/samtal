@@ -217,7 +217,22 @@ applies to the final rendered block. Each injected prompt carries
 the stable provenance `server_prompt:<entry>:<name>`, built from the
 entry name and the operator-written prompt name, both safe to print
 by construction, and the rendering itself is pinned exactly in
-milestone 3's tests, including a multi-message prompt. The bytes reach exactly two
+milestone 3's tests, including a multi-message prompt.
+
+**Prompt retrieval cannot take the tools down.** The tool connection
+is the entry's load-bearing half, and optional guidance must not be
+able to cost it: inside the `CONNECT_TIMEOUT_S` envelope a raised
+exception marks the manager down and removes every tool, so prompt
+discovery and fetching run after the envelope has closed and the
+tools are published, in the same task, before the manager settles
+into its wait. Each listing page and each `prompts/get` runs under
+its own short per-call bound; a failure or timeout there skips that
+prompt (or, when the listing itself fails, all configured names)
+with a warning carrying the entry, the operator-written name and the
+reason token, and the connection, the published tools and the
+already-captured blocks stay up throughout. Milestone 3 tests a
+stalled prompt and a sequence of fetches whose summed duration
+exceeds `CONNECT_TIMEOUT_S`, asserting the tools survive both. The bytes reach exactly two
   places, both deliberate: the model's system prompt, which is what
   the opt-in means, and the assembled-prompt surface, which exists to
   show what the model receives and marks the block's provenance so an
@@ -559,7 +574,9 @@ doc drift checks.
   and the two injection-only fields do not, proven in both toggle
   directions on the same manager object: false-to-true exposes the
   already captured instructions without a reconnect, true-to-false
-  stops injecting while the connection stands.
+  stops injecting while the connection stands; containment proven
+  with a stalled prompt fetch and a fetch sequence summing past
+  `CONNECT_TIMEOUT_S`, the connection and tools surviving both.
 - Unit, milestone 4: the route (bearer-gated, 404 for an unloaded
   agent with the restart sentence, 503 serverless); the block shapes
   and totals agree with the assembler; the CLI's full-block
