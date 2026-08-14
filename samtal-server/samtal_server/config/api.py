@@ -154,8 +154,14 @@ API_DESCRIPTION = (
     "snapshot, and unlike device bindings it is asked for rather than noticed. It "
     "re-reads the `mcp_servers` entries, the secrets stored on them and the agents' "
     "`mcp` grant lists, and applies them to the running server: entries are started, "
-    "restarted, stopped or left alone, and live conversations pick the result up on "
-    "their next utterance without being dropped. Everything else about an agent "
+    "restarted, stopped or left alone, and no conversation is dropped. When a live "
+    "conversation meets the result depends on which half of an entry moved. The tools "
+    "it may reach are snapshotted per reply, so a started, restarted or stopped entry "
+    "is picked up on its next utterance. An entry's `instructions` is prompt text, and "
+    "prompt text is assembled at an activation and cached for it, so a rewrite reaches "
+    "a conversation at its next activation, a new session or an agent switch, and "
+    "never a reply of one already running; `GET /runtime/agents/{name}/prompt` "
+    "previews what a session opening now would be sent. Everything else about an agent "
     "still waits for a restart, which is why writes to those keep saying so.\n\n"
     f"{API_OPTIONS_NOTE}"
 )
@@ -661,9 +667,14 @@ class McpReloadResult(BaseModel):
     )
     unchanged: list[str] = Field(
         description=(
-            "The entries nothing changed about, which kept the connections they had. A "
-            "reload does not disturb them, so the conversations using them do not "
-            "notice one."
+            "The entries that kept the connection they had. It is a statement about "
+            "the connection and not about the entry's text: an entry whose "
+            "`instructions` was rewritten is here, because that field configures a "
+            "prompt rather than a connection, and restarting a live connection to "
+            "apply it would drop mid-call tools and respawn a stdio child for nothing. "
+            "The conversations using such an entry keep the tools they had and the "
+            "guidance they were activated with; the new guidance reaches them at their "
+            "next activation."
         )
     )
     servers: dict[str, McpServerStatus] = Field(
@@ -1274,11 +1285,17 @@ def _runtime(api: FastAPI) -> None:
         below, and is reconnected in the background when a session that
         would use it opens.
 
-        Live conversations are not dropped. The tools an agent may reach
-        are snapshotted per reply, so a session picks the new world up on
-        its next utterance; a call in flight on a server this stopped
-        fails into the same error result a server dropping mid-call
-        produces.
+        Live conversations are not dropped, and when one meets the
+        result depends on which half of an entry moved. The tools an
+        agent may reach are snapshotted per reply, so a session picks
+        those up on its next utterance; a call in flight on a server
+        this stopped fails into the same error result a server dropping
+        mid-call produces. An entry's `instructions` is prompt text,
+        which is assembled at an activation and cached for it, so a
+        rewrite reaches a conversation at its next activation, a new
+        session or an agent switch. Such an entry is reported
+        `unchanged` here, which is a statement about its connection: the
+        connection is what did not change.
 
         One reload runs at a time: a concurrent one is refused with 409
         and has changed nothing, like a write that could not take the
