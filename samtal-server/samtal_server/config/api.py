@@ -143,6 +143,13 @@ API_DESCRIPTION = (
     "configured MCP server is doing right now: connected or down, since when, what "
     "it published, and which agents may reach it. Nothing there is read from the "
     "database, so it cannot disagree with what is running.\n\n"
+    "`GET /runtime/agents/{name}/prompt` is the other read there: the system prompt "
+    "a session opening now as that agent would be sent, block by block, with the "
+    "provenance and the character count of each and the total. It is assembled from "
+    "the loaded agents, the running MCP slice and the memory store rather than from "
+    "the database, so it cannot disagree with what a session would get, and it is a "
+    "preview of a new session rather than a readback of a running one: a conversation "
+    "already in progress holds the half it assembled at its own activation.\n\n"
     "`POST /runtime/mcp-servers/reload` is the second exception to the boot-time "
     "snapshot, and unlike device bindings it is asked for rather than noticed. It "
     "re-reads the `mcp_servers` entries, the secrets stored on them and the agents' "
@@ -376,6 +383,21 @@ PROBLEM_DESCRIPTIONS: dict[int, str] = {
         "namespace emptily and refuses the actions."
     ),
 }
+
+# What a prompt read answers for an agent this server did not load. The
+# name is not quoted back: it arrived in the path, and what is worth
+# saying about it is where to look instead.
+UNLOADED_AGENT = (
+    "this server has not loaded an agent of that name. An agent's providers are built "
+    "at boot, so one written since this server started is served by the restart that "
+    "builds it, and one that never existed is a name nothing answers to. "
+    "`samtal-server config list` shows the agents that are stored."
+)
+
+UNLOADED_AGENT_DESCRIPTION = (
+    "No agent of that name was loaded when this server started. An agent written "
+    "since then waits for the restart that builds its providers."
+)
 
 # The reload takes no body and addresses nothing, so the shared sentence
 # for 422 (a stage that is not a stage, a MAC that is not one) cannot be
@@ -633,6 +655,58 @@ class McpReloadResult(BaseModel):
     )
 
 
+class PromptBlock(BaseModel):
+    """One block of an assembled system prompt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    provenance: str = Field(
+        description=(
+            "Where this block came from, as a fixed token this server owns: `persona` "
+            "for the agent's own prompt, `instructions:<entry>` for the guidance "
+            "written on an MCP server entry the agent is granted, `memory` for what "
+            "the agent remembers. The entry name is the operator's, and it has been "
+            "through the rule that makes it a tool-name prefix."
+        )
+    )
+    characters: int = Field(
+        description=(
+            "How long this block is, in characters, counted on what is stored and "
+            "sent. It is what an operator tunes a small model's context budget "
+            "against, block by block."
+        )
+    )
+    text: str = Field(
+        description=(
+            "The block as the model receives it, heading included. A surface that "
+            "hid part of the prompt would fail its own purpose, which is to say what "
+            "the model was given."
+        )
+    )
+
+
+class AssembledPrompt(BaseModel):
+    """The system prompt a session opening now as this agent would be
+    sent."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    blocks: list[PromptBlock] = Field(
+        description=(
+            "The blocks in the order they are sent: the persona, then the guidance of "
+            "each MCP entry the agent is granted in grant order, then the remembered "
+            "facts. The order is fixed and not configurable."
+        )
+    )
+    characters: int = Field(
+        description=(
+            "The whole prompt's length in characters. Not the sum of the blocks: the "
+            "blank lines between them count, and whitespace at the two ends is "
+            "stripped."
+        )
+    )
+
+
 class DefaultAgent(BaseModel):
     """The agent an unbound device reaches."""
 
@@ -694,6 +768,7 @@ def build_api(
     pending: "PendingDevices | None" = None,
     mcp_servers: "McpServers | None" = None,
     mcp_reload: Callable[[], Awaitable[Any]] | None = None,
+    agent_prompt: Callable[[str], Awaitable[Any]] | None = None,
 ) -> FastAPI:
     """The sub-application the server mounts: the routes, gated.
 
@@ -729,6 +804,14 @@ def build_api(
     None is the honest answer for an application without a server, and
     the route refuses with 503 rather than pretending to have applied
     something.
+
+    `agent_prompt` assembles the prompt a session opening now as one
+    agent would be sent, and answers None for an agent this server did
+    not load. A callable for the reason the reload is one: what it
+    closes over is the composition root's business again (the loaded
+    configuration, the MCP registry and the memory store), and this
+    application must not learn what a prompt is made of. None is the
+    honest answer without a server, and the route answers 503.
     """
     api = _application()
     # Attached rather than closed over: the read and write routes take
@@ -738,6 +821,7 @@ def build_api(
     api.state.pending = pending if pending is not None else _empty_pending()
     api.state.mcp_servers = mcp_servers
     api.state.mcp_reload = mcp_reload
+    api.state.agent_prompt = agent_prompt
     # Added last is outermost, so a failure inside the gate itself
     # answers as sanitized as one inside a handler.
     api.add_middleware(_BearerGate, token=token)
@@ -873,6 +957,16 @@ def _mcp_reload(request: Request) -> Callable[[], Awaitable[Any]] | None:
 
 
 McpReloadDep = Annotated[Any, Depends(_mcp_reload)]
+
+
+def _agent_prompt(request: Request) -> Callable[[str], Awaitable[Any]] | None:
+    """What assembles one agent's prompt from the running server, or
+    None for an application built without one. Taken from the
+    application for the reason the store is."""
+    return request.app.state.agent_prompt
+
+
+AgentPromptDep = Annotated[Any, Depends(_agent_prompt)]
 
 
 def _pending_view(device: "PendingRecord") -> dict[str, Any]:
@@ -1070,6 +1164,53 @@ def _runtime(api: FastAPI) -> None:
         `loaded_agents = ()` already has.
         """
         return {} if servers is None else servers.status()
+
+    @api.get(
+        "/runtime/agents/{name}/prompt",
+        response_model=AssembledPrompt,
+        responses=_problems(401, 404, 503, instead={404: UNLOADED_AGENT_DESCRIPTION}),
+    )
+    async def read_agent_prompt(name: str, assemble: AgentPromptDep) -> dict[str, Any]:
+        """The system prompt a session opening now as this agent would
+        be sent, block by block.
+
+        A runtime read rather than a database one: it is assembled from
+        the agents this server loaded, the MCP slice its registry is
+        running and the memory store it writes, so it cannot disagree
+        with what a session would be given, which is the whole point of
+        it.
+
+        It is a preview of a new session and says so, because there is
+        no honest per-session answer to offer instead: a conversation
+        already in progress holds the know-how half it assembled at its
+        own activation, which may predate a reload, and what an operator
+        audits is what the configuration produces now.
+
+        `async def`, like the status read beside it: the MCP slice is
+        read on the loop that mutates it, so the answer cannot be half
+        of one world and half of another. The memory read that follows
+        is a file read and happens in a worker thread.
+
+        An agent this server did not load is a 404 naming the restart,
+        since an agent is built at boot; an application with no server
+        around it answers 503, like the reload.
+        """
+        if assemble is None:
+            raise NoRuntimeError(PROBLEM_DESCRIPTIONS[503])
+        assembled = await assemble(name)
+        if assembled is None:
+            raise UnknownEntityError(UNLOADED_AGENT)
+        return {
+            "blocks": [
+                {
+                    "provenance": block.provenance,
+                    "characters": block.characters,
+                    "text": block.text,
+                }
+                for block in assembled.blocks
+            ],
+            "characters": assembled.characters,
+        }
 
     @api.post(
         "/runtime/mcp-servers/reload",

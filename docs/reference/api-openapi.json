@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "samtal-server configuration API",
-    "description": "The domain half of one samtal-server deployment's configuration: providers, MCP servers, agents, devices, and the credentials they use. Every request carries a bearer token, whose value is the environment variable `server.api.secret_env` names.\n\nConfiguration is a boot-time snapshot, so a successful write applies at the next server start rather than immediately. Device bindings are the one exception: a running server reads them, and the default agent, as a device asks for them, so binding or unbinding a device applies at that device's next OTA check or connection. The exception ends where the agent does, since a server builds an agent's providers at boot: a binding naming an agent this server has not loaded waits for the restart that loads it. Every write says which of the two happened, in its `notice`.\n\nA device with no binding and no default agent to cover it is answered at its configuration check with a six-digit activation code, which it shows on its screen and speaks. `/devices/pending` lists the devices showing one, keyed by the code, and posting to `/devices/pending/{code}` binds the device showing it. That listing is the running server's own state rather than stored configuration: a restart forgets it, and the devices come back with fresh codes.\n\nThe `/runtime` namespace is the running server's own state as well, and is kept apart from the entity namespaces because an entity may legally be named after any word a route might want. `/runtime/mcp-servers` says what each configured MCP server is doing right now: connected or down, since when, what it published, and which agents may reach it. Nothing there is read from the database, so it cannot disagree with what is running.\n\n`POST /runtime/mcp-servers/reload` is the second exception to the boot-time snapshot, and unlike device bindings it is asked for rather than noticed. It re-reads the `mcp_servers` entries, the secrets stored on them and the agents' `mcp` grant lists, and applies them to the running server: entries are started, restarted, stopped or left alone, and live conversations pick the result up on their next utterance without being dropped. Everything else about an agent still waits for a restart, which is why writes to those keep saying so.\n\nA provider entry carries whatever options its `type` takes, and those are passed through rather than declared, so no schema can list them. Until typed option models land (#88) they are documented in the example fragments under `samtal-server/examples/`, which is also where the measured numbers behind each default are kept.",
+    "description": "The domain half of one samtal-server deployment's configuration: providers, MCP servers, agents, devices, and the credentials they use. Every request carries a bearer token, whose value is the environment variable `server.api.secret_env` names.\n\nConfiguration is a boot-time snapshot, so a successful write applies at the next server start rather than immediately. Device bindings are the one exception: a running server reads them, and the default agent, as a device asks for them, so binding or unbinding a device applies at that device's next OTA check or connection. The exception ends where the agent does, since a server builds an agent's providers at boot: a binding naming an agent this server has not loaded waits for the restart that loads it. Every write says which of the two happened, in its `notice`.\n\nA device with no binding and no default agent to cover it is answered at its configuration check with a six-digit activation code, which it shows on its screen and speaks. `/devices/pending` lists the devices showing one, keyed by the code, and posting to `/devices/pending/{code}` binds the device showing it. That listing is the running server's own state rather than stored configuration: a restart forgets it, and the devices come back with fresh codes.\n\nThe `/runtime` namespace is the running server's own state as well, and is kept apart from the entity namespaces because an entity may legally be named after any word a route might want. `/runtime/mcp-servers` says what each configured MCP server is doing right now: connected or down, since when, what it published, and which agents may reach it. Nothing there is read from the database, so it cannot disagree with what is running.\n\n`GET /runtime/agents/{name}/prompt` is the other read there: the system prompt a session opening now as that agent would be sent, block by block, with the provenance and the character count of each and the total. It is assembled from the loaded agents, the running MCP slice and the memory store rather than from the database, so it cannot disagree with what a session would get, and it is a preview of a new session rather than a readback of a running one: a conversation already in progress holds the half it assembled at its own activation.\n\n`POST /runtime/mcp-servers/reload` is the second exception to the boot-time snapshot, and unlike device bindings it is asked for rather than noticed. It re-reads the `mcp_servers` entries, the secrets stored on them and the agents' `mcp` grant lists, and applies them to the running server: entries are started, restarted, stopped or left alone, and live conversations pick the result up on their next utterance without being dropped. Everything else about an agent still waits for a restart, which is why writes to those keep saying so.\n\nA provider entry carries whatever options its `type` takes, and those are passed through rather than declared, so no schema can list them. Until typed option models land (#88) they are documented in the example fragments under `samtal-server/examples/`, which is also where the measured numbers behind each default are kept.",
     "version": "1"
   },
   "servers": [
@@ -2071,6 +2071,76 @@
         }
       }
     },
+    "/runtime/agents/{name}/prompt": {
+      "get": {
+        "summary": "Read Agent Prompt",
+        "description": "The system prompt a session opening now as this agent would\nbe sent, block by block.\n\nA runtime read rather than a database one: it is assembled from\nthe agents this server loaded, the MCP slice its registry is\nrunning and the memory store it writes, so it cannot disagree\nwith what a session would be given, which is the whole point of\nit.\n\nIt is a preview of a new session and says so, because there is\nno honest per-session answer to offer instead: a conversation\nalready in progress holds the know-how half it assembled at its\nown activation, which may predate a reload, and what an operator\naudits is what the configuration produces now.\n\n`async def`, like the status read beside it: the MCP slice is\nread on the loop that mutates it, so the answer cannot be half\nof one world and half of another. The memory read that follows\nis a file read and happens in a worker thread.\n\nAn agent this server did not load is a 404 naming the restart,\nsince an agent is built at boot; an application with no server\naround it answers 503, like the reload.",
+        "operationId": "read_agent_prompt_runtime_agents__name__prompt_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssembledPrompt"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No agent of that name was loaded when this server started. An agent written since then waits for the restart that builds its providers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "This application has no running server around it, so there is nothing for a runtime action to act on. A deployment reaches the API on its server's own port; an application built without one serves the reads in the /runtime namespace emptily and refuses the actions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/runtime/mcp-servers/reload": {
       "post": {
         "summary": "Reload Mcp Servers",
@@ -2165,6 +2235,31 @@
         "title": "Acknowledgement",
         "description": "What a write answers with: what it did, and when it takes\neffect."
       },
+      "AssembledPrompt": {
+        "properties": {
+          "blocks": {
+            "items": {
+              "$ref": "#/components/schemas/PromptBlock"
+            },
+            "type": "array",
+            "title": "Blocks",
+            "description": "The blocks in the order they are sent: the persona, then the guidance of each MCP entry the agent is granted in grant order, then the remembered facts. The order is fixed and not configurable."
+          },
+          "characters": {
+            "type": "integer",
+            "title": "Characters",
+            "description": "The whole prompt's length in characters. Not the sum of the blocks: the blank lines between them count, and whitespace at the two ends is stripped."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "blocks",
+          "characters"
+        ],
+        "title": "AssembledPrompt",
+        "description": "The system prompt a session opening now as this agent would be\nsent."
+      },
       "ConfigDocument": {
         "properties": {
           "config": {
@@ -2239,6 +2334,19 @@
         ],
         "title": "Envelope",
         "description": "One entity as a read returns it: the entity, and its stored-secret\nslots beside it."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
       },
       "McpReloadResult": {
         "properties": {
@@ -2431,6 +2539,34 @@
         "title": "Problem",
         "description": "A refusal, in the repository's own words."
       },
+      "PromptBlock": {
+        "properties": {
+          "provenance": {
+            "type": "string",
+            "title": "Provenance",
+            "description": "Where this block came from, as a fixed token this server owns: `persona` for the agent's own prompt, `instructions:<entry>` for the guidance written on an MCP server entry the agent is granted, `memory` for what the agent remembers. The entry name is the operator's, and it has been through the rule that makes it a tool-name prefix."
+          },
+          "characters": {
+            "type": "integer",
+            "title": "Characters",
+            "description": "How long this block is, in characters, counted on what is stored and sent. It is what an operator tunes a small model's context budget against, block by block."
+          },
+          "text": {
+            "type": "string",
+            "title": "Text",
+            "description": "The block as the model receives it, heading included. A surface that hid part of the prompt would fail its own purpose, which is to say what the model was given."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "provenance",
+          "characters",
+          "text"
+        ],
+        "title": "PromptBlock",
+        "description": "One block of an assembled system prompt."
+      },
       "SecretSlot": {
         "properties": {
           "shadows": {
@@ -2494,6 +2630,46 @@
         ],
         "title": "StoredSecretLocation",
         "description": "Where one stored secret is, in the whole-configuration read."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
       },
       "ProviderConfig": {
         "additionalProperties": true,

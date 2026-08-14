@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -16,6 +17,7 @@ from samtal_server.device.bindings import DeviceBindings
 from samtal_server.filler import build_agent_fillers
 from samtal_server.providers import build_agent_providers
 from samtal_server.registry import SessionRegistry
+from samtal_server.runtime import prompt
 from samtal_server.runtime.pipeline import bespoke_runtime_factory
 from samtal_server.tools.mcp import McpReload, McpServers
 from samtal_server.tools.memory import MemoryStore
@@ -76,6 +78,38 @@ def _mcp_reloader(
     return reload
 
 
+def _prompt_preview(
+    config: Config, servers: McpServers, memory: MemoryStore | None
+) -> Callable[[str], Awaitable[prompt.Assembled | None]]:
+    """What the configuration API's prompt read calls.
+
+    Closed over here for the reason the reload is: the three things an
+    assembly needs (the configuration this process loaded, the MCP
+    registry that is running, and the memory store this server writes)
+    are known at the composition root and nowhere else, and the API
+    application must not learn what a prompt is made of.
+
+    An agent this server did not load answers None rather than raising,
+    so the route decides what a missing one means. The guidance is read
+    on the loop that owns the managers, before any await; the memory
+    read is filesystem I/O and goes to a worker thread, which is what
+    keeps an inspection request off the loop every live conversation is
+    on.
+    """
+
+    async def assemble(agent: str) -> prompt.Assembled | None:
+        if agent not in config.agents:
+            return None
+        half = prompt.know_how(
+            config.prompt_for_agent(agent), servers.guidance_for_agent(agent)
+        )
+        if memory is None:
+            return half
+        return prompt.with_memory(half, await asyncio.to_thread(memory.read, agent))
+
+    return assemble
+
+
 def create_app(config: Config | None = None, secrets: SecretStore | None = None) -> FastAPI:
     """Build the ASGI app. Without a config the whole boot configuration is
     read here (the file named by SAMTAL_CONFIG plus the domain half from the
@@ -134,6 +168,13 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     # secret is still a boot failure here, exactly as it was; being
     # unreachable is still not one.
     app.state.mcp_servers = McpServers.build(app.state.config, secrets)
+    # Absent memory configuration means no remember tool and no
+    # injection; the directory itself is created on the first write.
+    # Built before the API rather than beside the runtime below, because
+    # the API's prompt read reports what a session would be sent and
+    # memory is part of that.
+    memory = app.state.config.memory
+    app.state.memory = None if memory is None else MemoryStore(memory.dir)
     # The agents go with the token because a device write's
     # acknowledgement says whether the device can reach what it was just
     # bound to, and only this server knows what it loaded; the pending
@@ -143,7 +184,8 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     # makes that a report rather than a snapshot of what was true when
     # the API was built. The reload goes with them, because applying a
     # fresh read to those managers is the one action that namespace
-    # serves.
+    # serves, and the prompt assembly goes with them because what it
+    # answers is what a session opening now would be sent.
     api = build_api(
         token,
         app.state.config.server.database.dir,
@@ -151,6 +193,7 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
         app.state.pending,
         app.state.mcp_servers,
         _mcp_reloader(app.state.config, app.state.mcp_servers),
+        _prompt_preview(app.state.config, app.state.mcp_servers, app.state.memory),
     )
     # One registry per app: what decides whether there is room for the
     # next conversation, and what the drain reaches the live ones through.
@@ -163,10 +206,6 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     # Filled at startup by the lifespan above, since synthesis is async;
     # empty means no agent masks its latency, which is the default.
     app.state.agent_fillers = {}
-    # Absent memory configuration means no remember tool and no
-    # injection; the directory itself is created on the first write.
-    memory = app.state.config.memory
-    app.state.memory = None if memory is None else MemoryStore(memory.dir)
     # How one conversation is built for one connection, closed over
     # once here: the providers, the MCP servers, the memory store and
     # the filler clips all outlive any single websocket, and a device
