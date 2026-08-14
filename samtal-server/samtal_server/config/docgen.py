@@ -40,6 +40,7 @@ from samtal_server.config.models import (
     FillerConfig,
     McpGrant,
     McpServerConfig,
+    PromptFragmentConfig,
     ProviderConfig,
 )
 from samtal_server.config.store import DomainConfig
@@ -145,6 +146,35 @@ ENTITIES: tuple[Entity, ...] = (
         ),
         command="samtal-server config set mcp-server <name> -f fragment.yaml",
         examples=("mcp-server-stdio.yaml", "mcp-server-streamable-http.yaml"),
+    ),
+    Entity(
+        name="prompt-fragment",
+        title="Prompt fragment",
+        location="prompt_fragments.<name>",
+        model=PromptFragmentConfig,
+        purpose=(
+            "One named block of prompt text, shared by the agents that include it. A "
+            "fragment is written once and injected verbatim into the system prompt of "
+            "every agent whose `prompt_includes` names it, which is how household "
+            "facts or a house style stay in one place instead of being copied into "
+            "every persona prompt and drifting apart. The name appears in the "
+            "provenance the assembled prompt is reported under (`fragment:<name>`), so "
+            "it must match `[A-Za-z0-9_-]+`."
+        ),
+        command="samtal-server config set prompt-fragment <name> -f fragment.yaml",
+        examples=("prompt-fragment.yaml",),
+        notes=(
+            "Nothing is added around the text, not one heading: it is prompt text the "
+            "operator wrote, and a heading would editorialize. The blocks are injected "
+            "in the order the including layer lists them, after the agent's own prompt "
+            "and before any MCP server's guidance.",
+            "A fragment that some layer still includes cannot be deleted, which is the "
+            "same reference rule that keeps a referenced provider or MCP server from "
+            "being taken away underneath an agent.",
+            "There is no length cap. `samtal-server config prompt <agent>` reports what "
+            "each block costs and what the whole prompt costs, which is what an "
+            "operator tunes a small model's context budget against.",
+        ),
     ),
     Entity(
         name="agent",
