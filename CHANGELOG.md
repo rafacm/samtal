@@ -41,20 +41,45 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   rather than by value, since a name written beside prompt text is
   where a credential gets pasted. Fragments are part of the boot-time snapshot,
   so a write applies at the next server start.
+- **A server's own guidance is consumed behind two opt-ins** (#122):
+  an MCP server ships guidance about itself through two channels, the
+  `instructions` of its handshake and the prompts it publishes, and
+  each is injected only where an entry says so.
+  `use_server_instructions` (off by default) takes the first;
+  `inject_prompts` names published prompts one at a time, by the name
+  the server lists them under, and injects them in the order listed. A
+  published prompt renders as the text of its messages in order, joined
+  by blank lines and with the roles dropped. Names are validated
+  against the server's own paginated listing before anything is
+  fetched, and a name it does not publish, a prompt declaring required
+  arguments, and one that renders anything but text are each skipped
+  with a warning naming the entry and the position in the list, never
+  the name, since a prompt name is a string the server chose. Both
+  channels are capped at 4000 characters per block, skipped whole
+  rather than truncated, and nothing a server ships is ever written to
+  a log. What is injected is counted under
+  `server_instructions:<entry>` and `server_prompt:<entry>:<position>`
+  by `samtal-server config prompt`, under a heading in the prompt
+  saying the server is the one talking. What a server ships is captured
+  on every connect whatever the flag says, so turning
+  `use_server_instructions` on applies at the next reload with no
+  reconnection; editing `inject_prompts` changes what a connect
+  fetches, so that one restarts the connection.
 - **An operator can read an agent's assembled prompt** (#122):
   `GET /api/runtime/agents/{name}/prompt`, and `samtal-server config
   prompt <agent>` as its client, answer the system prompt a session
   opening now as that agent would be sent: the ordered blocks, each
   with its provenance (`persona`, `fragment:<name>`,
-  `instructions:<entry>`, `memory`), its size in characters and its
-  text, plus the total to tune a small model's context budget against.
-  It is assembled from the loaded agents, the running MCP slice and the
-  memory store rather than from the database, so it cannot disagree with
-  what a session would get, and it is a preview of a new session rather
-  than a readback of a running one. The CLI prints whole blocks and
-  truncates nothing, since a concealed tail is exactly what an operator
-  came to see. Agent activation also logs a `prompt_assembled` event
-  with the same per-source counts.
+  `instructions:<entry>`, `server_instructions:<entry>`,
+  `server_prompt:<entry>:<position>`, `memory`), its size in characters
+  and its text, plus the total to tune a small model's context budget
+  against. It is assembled from the loaded agents, the running MCP slice
+  and the memory store rather than from the database, so it cannot
+  disagree with what a session would get, and it is a preview of a new
+  session rather than a readback of a running one. The CLI prints whole
+  blocks and truncates nothing, since a concealed tail is exactly what
+  an operator came to see. Agent activation also logs a
+  `prompt_assembled` event with the same per-source counts.
 
 ### Changed
 
