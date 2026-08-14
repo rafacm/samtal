@@ -170,6 +170,9 @@ STATUS_FIELDS = frozenset({"state", "reason", "since", "tools", "grants"})
 # chosen by whatever answered.
 STATUS_STATES = frozenset({"connected", "down", "unused"})
 
+# What one block of an assembled prompt has to carry to be read as one.
+PROMPT_BLOCK_FIELDS = frozenset({"provenance", "characters", "text"})
+
 # What a reload did, in the order a person reads it: what arrived, what
 # was made again, what went, and what nothing happened to. Also what a
 # body has to carry to be read as a reload's answer at all.
@@ -414,6 +417,19 @@ def _status(args: argparse.Namespace) -> None:
     mcp-server` prints, and a stopped server has no state to report.
     """
     print(_status_listing(_call(args, "GET", _path("runtime", "mcp-servers"))), end="")
+
+
+def _prompt(args: argparse.Namespace) -> None:
+    """The system prompt a new session as this agent would be sent.
+
+    A read of the server rather than of the database, so there is no
+    --local: the persona is stored, the guidance is stored, and what
+    they add up to is a property of the process that loaded them.
+    """
+    print(
+        _prompt_listing(_call(args, "GET", _path("runtime", "agents", args.name, "prompt"))),
+        end="",
+    )
 
 
 def _reload(args: argparse.Namespace) -> None:
@@ -1361,6 +1377,81 @@ def _mapping(value: object) -> Mapping[str, object]:
     return value if isinstance(value, Mapping) else {}
 
 
+def _prompt_listing(answer: object) -> str:
+    """The assembled prompt, block by block, and its total size.
+
+    Every block is printed whole. This command exists to show what the
+    model is given, so a concealed tail is exactly what the operator
+    came to see, which is why nothing here goes through `_printable`:
+    that renderer strips a value and cuts it at `GLIMPSE_LENGTH`, which
+    is right for an acknowledgement and fatally wrong here.
+
+    The counts printed are the ones the server reported, which count
+    what is stored and sent, so a replaced character below never
+    falsifies the accounting.
+    """
+    body = _assembled_prompt(answer)
+    lines: list[str] = []
+    for block in body["blocks"]:
+        lines.append(f"{_block(str(block['provenance']))} ({block['characters']} characters)")
+        lines.append(_block(str(block["text"])))
+        lines.append("")
+    lines.append(f"total: {body['characters']} characters")
+    return "\n".join(lines) + "\n"
+
+
+def _block(value: str) -> str:
+    """A whole block of prompt text, made safe for a terminal and
+    nothing else.
+
+    Newlines and tabs pass, because a prompt is written in them.
+    Everything else unprintable is replaced rather than dropped, so an
+    escape sequence cannot drive the terminal and a block that arrived
+    mangled reads as mangled. Nothing is truncated, ever: this is an
+    inspection command, and a renderer that quietly cut the text would
+    make it lie about the one thing it exists to show.
+
+    Applied to the provenance as well as to the text, since a
+    provenance names an entry an operator wrote and later milestones
+    put more of the world in it.
+    """
+    return "".join(
+        character if character.isprintable() or character in "\n\t" else "?"
+        for character in value
+    )
+
+
+def _assembled_prompt(answer: object) -> Mapping[str, object]:
+    """The assembled prompt, as the API returns it, checked all the way
+    down for the reason the status document is: the renderer prints what
+    it is given, and a body this client does not recognize did not come
+    from this API."""
+    if (
+        isinstance(answer, Mapping)
+        and _is_count(answer.get("characters"))
+        and isinstance(answer.get("blocks"), list)
+        and all(_is_prompt_block(block) for block in answer["blocks"])
+    ):
+        return answer
+    raise ConfigError(f"the configuration API answered a read with {UNRECOGNIZED_ANSWER}")
+
+
+def _is_prompt_block(block: object) -> bool:
+    return (
+        isinstance(block, Mapping)
+        and PROMPT_BLOCK_FIELDS <= set(block)
+        and isinstance(block["provenance"], str)
+        and isinstance(block["text"], str)
+        and _is_count(block["characters"])
+    )
+
+
+def _is_count(value: object) -> bool:
+    # bool before int, since a body is free to put one where a number
+    # belongs and `True` would otherwise print as a size.
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
 def _reload_listing(answer: object) -> str:
     """What the reload did, and then what is running.
 
@@ -1824,6 +1915,21 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     running.set_defaults(run=_status)
+
+    # The other read of the running server, and the one that answers
+    # what the model is actually given: the configuration says what an
+    # agent is made of, and this says what that adds up to.
+    assembled = commands.add_parser(
+        "prompt",
+        parents=[common],
+        help=(
+            "the system prompt a new session as this agent would be sent, block by "
+            "block with the size of each and the total; a conversation already running "
+            "holds what it assembled when it started"
+        ),
+    )
+    assembled.add_argument("name", metavar="AGENT")
+    assembled.set_defaults(run=_prompt)
 
     # The one command that changes what the server is doing rather than
     # what is stored, which is why it is a verb of its own rather than a

@@ -86,7 +86,11 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # there by the tests that need one. None is what an application
     # built without a server around it gets, which is what every other
     # test here is.
-    runtime: dict[str, object] = {"mcp_servers": None, "mcp_reload": None}
+    runtime: dict[str, object] = {
+        "mcp_servers": None,
+        "mcp_reload": None,
+        "agent_prompt": None,
+    }
     # Every client the entry point built, kept so a test can read the
     # timeouts a command chose after it has run.
     clients: list[TestClient] = []
@@ -105,6 +109,7 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             pending=pending,
             mcp_servers=runtime["mcp_servers"],
             mcp_reload=runtime["mcp_reload"],
+            agent_prompt=runtime["agent_prompt"],
         )
         # A base URL with a path prefix is the deployed shape, where the
         # sub-application is mounted on the server's own port, so the
@@ -498,6 +503,144 @@ def test_a_status_refusal_carries_nothing_of_the_body() -> None:
 
     with pytest.raises(ConfigError) as caught:
         cli._status_listing(body)
+
+    assert ANSWERED not in _chain(caught.value)
+
+
+# The assembled prompt
+#
+# The renderer is the point of these: `config prompt` is an inspection
+# command, so it prints whole blocks, and everything else in this module
+# prints through a renderer that strips and truncates.
+
+
+def _prompt_block(**overrides: object) -> dict[str, object]:
+    return {"provenance": "persona", "characters": 4, "text": "POET"} | overrides
+
+
+def _assembled(*blocks: dict[str, object], characters: int = 4) -> dict[str, object]:
+    return {"blocks": list(blocks) or [_prompt_block()], "characters": characters}
+
+
+def _previewing(assembled: object):
+    async def assemble(agent: str) -> object:
+        return assembled if agent == "poet" else None
+
+    return assemble
+
+
+def test_prompt_prints_each_block_its_size_and_the_total(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    body = _assembled(
+        _prompt_block(),
+        _prompt_block(
+            provenance="instructions:home", characters=20, text="Heading:\nAsk first."
+        ),
+        characters=26,
+    )
+    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
+
+    assert run("prompt", "poet") == 0
+
+    printed = capsys.readouterr().out
+    assert "persona (4 characters)" in printed
+    assert "POET" in printed
+    assert "instructions:home (20 characters)" in printed
+    assert "Ask first." in printed
+    assert printed.endswith("total: 26 characters\n")
+
+
+def test_prompt_never_truncates_a_block(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The whole reason this command does not render through
+    `_printable`: a realistic prompt is far longer than GLIMPSE_LENGTH,
+    and a concealed tail is exactly what an operator came to see."""
+    tail = "END-OF-THE-PROMPT"
+    long_block = "x" * (cli.GLIMPSE_LENGTH * 3) + tail
+    body = _assembled(
+        _prompt_block(text=long_block, characters=len(long_block)),
+        characters=len(long_block),
+    )
+    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
+
+    assert run("prompt", "poet") == 0
+
+    printed = capsys.readouterr().out
+    assert tail in printed
+    assert long_block in printed
+    assert "..." not in printed
+
+
+def test_prompt_keeps_the_newlines_and_replaces_the_control_characters(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A prompt is written in newlines and tabs, so they pass; anything
+    else unprintable is replaced rather than dropped, so a block that
+    arrived mangled reads as mangled and an escape sequence cannot drive
+    the terminal."""
+    text = "first line\n\tindented\x1b[31mred\x07"
+    body = _assembled(_prompt_block(text=text, characters=len(text)))
+    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
+
+    assert run("prompt", "poet") == 0
+
+    printed = capsys.readouterr().out
+    assert "first line\n\tindented?[31mred?" in printed
+    assert "\x1b" not in printed
+    assert "\x07" not in printed
+    # The count is the server's, counting what is stored, so a
+    # replacement never falsifies it.
+    assert f"({len(text)} characters)" in printed
+
+
+def test_prompt_says_what_the_server_answered_for_an_unloaded_agent(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run.runtime["agent_prompt"] = _previewing(_assembled())
+
+    assert run("prompt", "stranger") == 1
+
+    assert "restart" in capsys.readouterr().err
+
+
+def test_prompt_without_a_server_says_so(run, capsys: pytest.CaptureFixture[str]) -> None:
+    assert run("prompt", "poet") == 1
+
+    assert "no running server" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(
+            {"blocks": [_prompt_block(provenance=None)], "characters": 4}, id="provenance"
+        ),
+        pytest.param({"blocks": [_prompt_block(text=None)], "characters": 4}, id="text"),
+        pytest.param({"blocks": [_prompt_block(characters=ANSWERED)], "characters": 4}, id="size"),
+        pytest.param({"blocks": [{"leak": ANSWERED}], "characters": 4}, id="block-fields"),
+        pytest.param({"blocks": ANSWERED, "characters": 4}, id="blocks-not-a-list"),
+        pytest.param({"blocks": [], "characters": ANSWERED}, id="total"),
+        pytest.param([_prompt_block()], id="document-not-an-object"),
+    ],
+)
+def test_prompt_prints_nothing_from_an_answer_of_the_wrong_shape(
+    body: object, run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
+
+    assert run("prompt", "poet") == 1
+
+    captured = capsys.readouterr()
+    assert cli.UNRECOGNIZED_ANSWER in captured.err
+    assert ANSWERED not in captured.err + captured.out
+    assert "Traceback" not in captured.err
+
+
+def test_a_prompt_refusal_carries_nothing_of_the_body() -> None:
+    with pytest.raises(ConfigError) as caught:
+        cli._prompt_listing({"blocks": [{"leak": ANSWERED}], "characters": 4})
 
     assert ANSWERED not in _chain(caught.value)
 
