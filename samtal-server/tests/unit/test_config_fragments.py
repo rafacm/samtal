@@ -10,18 +10,25 @@ is looked for in the whole exception chain, since a message built
 inside an exception handler drags the rejected input along behind it.
 """
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
 from samtal_server.config import Config
+from samtal_server.config.loader import ConfigError, StorageError, compose_config
 from samtal_server.config.models import (
     AgentConfig,
     AgentDefaults,
+    FileConfig,
     McpServerConfig,
     PromptFragmentConfig,
     ProvidersConfig,
+    check_prompt_fragment_names,
     check_references,
 )
+from samtal_server.config.store import ConfigStore
+from samtal_server.db import open_database, schema
 from samtal_server.runtime.prompt import Fragment
 from tests.unit.test_config_tools import config_with
 
@@ -33,6 +40,13 @@ SENTINEL = "sk-test-4f8b2c9e-never-a-real-credential"
 # The same value where the charset itself fails, which is the other
 # refusal that must not quote what it was handed.
 UNUSABLE_SENTINEL = f"{SENTINEL}.pasted"
+
+# A short credential sentinel, and a name-shaped unusable one built from
+# it. Short because a long value can be lost to something truncating a
+# representation, which would make an absence assertion pass for the
+# wrong reason.
+SHORT_SENTINEL = "hunter2"
+SHORT_UNUSABLE = f"{SHORT_SENTINEL}.pasted"
 
 # A body whose shape is the assertion: leading indentation, an inner
 # blank line and a trailing newline, all of which a stripping type would
@@ -105,20 +119,87 @@ def test_a_blank_fragment_body_is_refused_by_the_rule_and_not_by_its_value(
     assert "leave the key out" in str(caught.value)
 
 
-@pytest.mark.parametrize(
-    "name", ["house rules", "household.facts", "hushåll", UNUSABLE_SENTINEL]
-)
+UNUSABLE_NAMES = ["house rules", "household.facts", "hushåll", UNUSABLE_SENTINEL, SHORT_UNUSABLE]
+
+
+@pytest.mark.parametrize("name", UNUSABLE_NAMES)
 def test_an_unusable_fragment_name_names_the_section_and_the_rule_only(name: str) -> None:
     """Deliberately not the entry-name refusal, which interpolates what
     it rejected: a name that fails the charset is exactly the string
-    that must not be echoed."""
-    with pytest.raises(ValidationError) as caught:
-        config_with(prompt_fragments={name: {"text": "a"}})
+    that must not be echoed.
+
+    Asserted against the rule itself rather than against a model, and
+    every name is looked for rather than one sentinel: pydantic renders
+    the input it rejected into a raw `ValidationError`, keys included,
+    so a test that asked a model this question would be asking about
+    pydantic's rendering rather than about the sentence this repository
+    produces. Where that rendering could otherwise escape is the test
+    below."""
+    with pytest.raises(ValueError) as caught:
+        check_prompt_fragment_names({name: PromptFragmentConfig(text="a")})
 
     rendered = chain(caught.value)
     assert "prompt_fragments" in rendered
     assert "[A-Za-z0-9_-]+" in rendered
+    assert name not in rendered
     assert SENTINEL not in rendered
+    assert SHORT_SENTINEL not in rendered
+
+
+@pytest.mark.parametrize("name", UNUSABLE_NAMES)
+def test_no_boundary_hands_out_pydantics_rendering_of_the_name(
+    tmp_path: Path, name: str
+) -> None:
+    """The three ways an unusable name reaches a model, and what each of
+    them answers with.
+
+    Pydantic puts the input it rejected into a `ValidationError`, so the
+    raw exception carries the whole mapping and its keys. No operator
+    ever meets one: every boundary renders the error's locations and
+    messages only and raises its own refusal after the handler, leaving
+    neither a cause nor a context to walk back to. That is what makes the
+    charset rule's promise true rather than merely stated, and it is
+    what this pins, on the write, at boot, and on a row that got into the
+    table some other way.
+
+    The sentinels are short on purpose: a long one could be hidden by
+    something truncating a representation rather than by anything
+    keeping it out.
+    """
+    engine = open_database(tmp_path / "db")
+    caught: list[BaseException] = []
+    try:
+        store = ConfigStore(engine)
+        with pytest.raises(ConfigError) as written:
+            store.set_prompt_fragment(name, {"text": "a"})
+        caught.append(written.value)
+
+        with pytest.raises(ConfigError) as booted:
+            compose_config(
+                FileConfig(),
+                {"prompt_fragments": {name: {"text": "a"}}},
+                "the test's database",
+            )
+        caught.append(booted.value)
+
+        # A row nothing here wrote, which is how such a name gets stored
+        # at all: a hand edit, a restore, a database from somewhere else.
+        with engine.begin() as connection:
+            connection.execute(schema.prompt_fragments.insert().values(name=name, text="a"))
+        with pytest.raises(StorageError) as loaded:
+            store.load()
+        caught.append(loaded.value)
+    finally:
+        engine.dispose()
+
+    for problem in caught:
+        rendered = chain(problem)
+        assert "prompt_fragments" in rendered
+        assert name not in rendered
+        assert SENTINEL not in rendered
+        assert SHORT_SENTINEL not in rendered
+        # The tell of a raw pydantic error travelling out behind ours.
+        assert "input_value" not in rendered
 
 
 def test_a_reserved_tool_name_is_a_usable_fragment_name() -> None:
