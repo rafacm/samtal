@@ -78,6 +78,14 @@ def deleted_mcp_server(name: str) -> str:
     return f"mcp-server {name} deleted, with its stored secrets"
 
 
+def wrote_prompt_fragment(name: str) -> str:
+    return f"prompt-fragment {name}"
+
+
+def deleted_prompt_fragment(name: str) -> str:
+    return f"prompt-fragment {name} deleted"
+
+
 def wrote_agent(name: str) -> str:
     return f"agent {name}"
 
@@ -125,10 +133,12 @@ __all__ = [
     "deleted_agent",
     "deleted_device",
     "deleted_mcp_server",
+    "deleted_prompt_fragment",
     "deleted_provider",
     "wrote_agent",
     "wrote_default_agent",
     "wrote_mcp_server",
+    "wrote_prompt_fragment",
     "wrote_provider",
     "wrote_secret",
 ]

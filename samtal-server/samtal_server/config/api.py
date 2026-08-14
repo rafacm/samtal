@@ -58,6 +58,7 @@ from samtal_server.config.models import (
     AgentDefaults,
     Config,
     McpServerConfig,
+    PromptFragmentConfig,
     ProviderConfig,
 )
 from samtal_server.config.secrets import SecretLocation, load_keys
@@ -74,10 +75,12 @@ from samtal_server.config.writes import (
     deleted_agent,
     deleted_device,
     deleted_mcp_server,
+    deleted_prompt_fragment,
     deleted_provider,
     wrote_agent,
     wrote_default_agent,
     wrote_mcp_server,
+    wrote_prompt_fragment,
     wrote_provider,
     wrote_secret,
 )
@@ -246,6 +249,7 @@ UNEXPECTED = "the server failed to handle this request; the failure is recorded 
 ENTITY_MODELS: tuple[type[BaseModel], ...] = (
     ProviderConfig,
     McpServerConfig,
+    PromptFragmentConfig,
     AgentConfig,
     AgentDefaults,
 )
@@ -1101,6 +1105,26 @@ def _reads(api: FastAPI) -> None:
         """One MCP server."""
         return views.mcp_server(store.read_mcp_server(name))
 
+    @api.get(
+        "/prompt-fragments",
+        response_model=dict[str, Envelope],
+        responses=_problems(401, 409, 500),
+    )
+    def read_prompt_fragments(store: StoreDep) -> dict[str, Any]:
+        """Every shared prompt fragment, by name."""
+        return views.prompt_fragments(store.load())
+
+    @api.get(
+        "/prompt-fragments/{name}",
+        response_model=Envelope,
+        responses=_problems(401, 404, 409, 422, 500),
+    )
+    def read_prompt_fragment(name: str, store: StoreDep) -> dict[str, Any]:
+        """One shared prompt fragment, with its text as it was written:
+        it is what the model is given, and there is nothing in it to
+        mask."""
+        return views.prompt_fragment(store.read_prompt_fragment(name))
+
     @api.get("/agents", response_model=dict[str, Envelope], responses=_problems(401, 409, 500))
     def read_agents(store: StoreDep) -> dict[str, Any]:
         """Every agent, by name."""
@@ -1453,6 +1477,34 @@ def _writes(api: FastAPI) -> None:
         location = SecretLocation.mcp_server(name, slot)
         store.clear_secret(location)
         return _acknowledge(cleared_secret(location.describe()), MCP_RELOAD_NOTICE)
+
+    @api.put(
+        "/prompt-fragments/{name}",
+        response_model=Acknowledgement,
+        responses=_problems(401, 409, 422, 500),
+        openapi_extra=_request_body(PromptFragmentConfig),
+    )
+    def write_prompt_fragment(name: str, body: RawBody, store: StoreDep) -> dict[str, str]:
+        """Create or replace one shared prompt fragment.
+
+        It carries the restart sentence rather than the reload's: what
+        the reload re-reads is the MCP entries, their secrets and the
+        grant lists, and a fragment is prompt text the agents compose
+        with at their next activation on a server that read it at boot.
+        """
+        store.set_prompt_fragment(name, body)
+        return _acknowledge(wrote_prompt_fragment(name))
+
+    @api.delete(
+        "/prompt-fragments/{name}",
+        response_model=Acknowledgement,
+        responses=_problems(401, 404, 409, 422, 500),
+    )
+    def remove_prompt_fragment(name: str, store: StoreDep) -> dict[str, str]:
+        """Delete one shared prompt fragment. Refused while any layer
+        still includes it."""
+        store.delete_prompt_fragment(name)
+        return _acknowledge(deleted_prompt_fragment(name))
 
     @api.put(
         "/agents/{name}",

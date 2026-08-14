@@ -135,6 +135,8 @@ def test_the_document_describes_every_route_the_api_serves() -> None:
         "/mcp-servers": ["get"],
         "/mcp-servers/{name}": ["delete", "get", "put"],
         "/mcp-servers/{name}/secrets/{slot}": ["delete", "put"],
+        "/prompt-fragments": ["get"],
+        "/prompt-fragments/{name}": ["delete", "get", "put"],
         "/agents": ["get"],
         "/agents/{name}": ["delete", "get", "put"],
         "/agent-defaults": ["get", "put"],

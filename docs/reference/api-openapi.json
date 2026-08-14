@@ -668,6 +668,295 @@
         }
       }
     },
+    "/prompt-fragments": {
+      "get": {
+        "summary": "Read Prompt Fragments",
+        "description": "Every shared prompt fragment, by name.",
+        "operationId": "read_prompt_fragments_prompt_fragments_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "$ref": "#/components/schemas/Envelope"
+                  },
+                  "type": "object",
+                  "title": "Response Read Prompt Fragments Prompt Fragments Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/prompt-fragments/{name}": {
+      "get": {
+        "summary": "Read Prompt Fragment",
+        "description": "One shared prompt fragment, with its text as it was written:\nit is what the model is given, and there is nothing in it to\nmask.",
+        "operationId": "read_prompt_fragment_prompt_fragments__name__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Envelope"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing of that identity exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Write Prompt Fragment",
+        "description": "Create or replace one shared prompt fragment.\n\nIt carries the restart sentence rather than the reload's: what\nthe reload re-reads is the MCP entries, their secrets and the\ngrant lists, and a fragment is prompt text the agents compose\nwith at their next activation on a server that read it at boot.",
+        "operationId": "write_prompt_fragment_prompt_fragments__name__put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptFragmentConfig"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove Prompt Fragment",
+        "description": "Delete one shared prompt fragment. Refused while any layer\nstill includes it.",
+        "operationId": "remove_prompt_fragment_prompt_fragments__name__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Acknowledgement"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Nothing of that identity exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/agents": {
       "get": {
         "summary": "Read Agents",
@@ -2762,6 +3051,22 @@
           "transport"
         ],
         "title": "McpServerConfig",
+        "type": "object"
+      },
+      "PromptFragmentConfig": {
+        "additionalProperties": false,
+        "description": "One named block of prompt text, shared by the agents that include\nit.\n\nA mapping with one field rather than a bare string. Every entity in\nthis configuration travels the same path (a stored row, a read\nenvelope, a written fragment), and all three of those want a mapping;\na one-field mapping also leaves room for a second field later without\nchanging the shape a client writes, which is why a grant took its\nobject form too.",
+        "properties": {
+          "text": {
+            "description": "The text injected into the system prompt of every agent whose prompt_includes names this fragment, exactly as written: indentation and blank lines are part of it, and nothing is added around it, not even a heading, since this is prompt text the operator wrote and a heading would editorialize. It sits after the agent's own prompt and before any MCP guidance, in the order the including layer lists it. There is no length cap: what each block costs is reported by `samtal-server config prompt <agent>`, and the operator is the one who knows what their model tolerates.",
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "PromptFragmentConfig",
         "type": "object"
       },
       "FillerConfig": {

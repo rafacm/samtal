@@ -46,6 +46,11 @@ OTHER_SECRET = "tok-test-7a1d3f60-never-a-real-credential"
 # paste check and is what the display path's own rule has to catch.
 PASTED = "sk_test_4f8b2c9e_never_a_real_credential"
 
+# A fragment body whose shape is the assertion: leading indentation, an
+# inner blank line and a trailing newline, none of which may be tidied
+# up on the way through HTTP.
+FRAGMENT = "  The bins go out on Tuesday.\n\n    The radio is called Bosse.\n"
+
 # Short enough that a blocked reader gives up inside a test run, and
 # long enough that an unblocked one never sees it.
 SHORT_BUSY_MS = 200
@@ -98,8 +103,11 @@ def _populate(store: ConfigStore) -> None:
             "headers": {"Authorization": "$WEATHER_TOKEN", "X-Region": "eu"},
         },
     )
+    store.set_prompt_fragment("household", {"text": FRAGMENT})
     store.set_agent_defaults({"llm": "claude"})
-    store.set_agent("sam", {"prompt": "You are Sam.", "tts": "voice"})
+    store.set_agent(
+        "sam", {"prompt": "You are Sam.", "tts": "voice", "prompt_includes": ["household"]}
+    )
     store.bind_device("AA-BB-CC-DD-EE-FF", ["sam"])
     store.set_default_agent("sam")
 
@@ -112,12 +120,21 @@ def _with_secrets(store: ConfigStore) -> None:
 ENTITY_PATHS = [
     "/providers/llm/claude",
     "/mcp-servers/weather",
+    "/prompt-fragments/household",
     "/agents/sam",
     "/agent-defaults",
     "/devices/aa:bb:cc:dd:ee:ff",
 ]
 
-LIST_PATHS = ["/config", "/providers", "/mcp-servers", "/agents", "/devices", "/default-agent"]
+LIST_PATHS = [
+    "/config",
+    "/providers",
+    "/mcp-servers",
+    "/prompt-fragments",
+    "/agents",
+    "/devices",
+    "/default-agent",
+]
 
 
 # What a read answers
@@ -210,6 +227,28 @@ def test_the_listings_are_keyed_by_identity(client: TestClient, store: ConfigSto
     assert client.get("/devices").json() == {
         "aa:bb:cc:dd:ee:ff": {"entity": {"agents": ["sam"]}, "secrets": {}}
     }
+
+
+def test_a_fragment_reads_as_the_body_a_write_of_it_carries(
+    client: TestClient, store: ConfigStore
+) -> None:
+    """The read representation, pinned exactly: an envelope whose entity
+    is `{text: ...}`, with the text byte for byte through JSON."""
+    _populate(store)
+
+    body = client.get("/prompt-fragments/household").json()
+
+    assert body == {"entity": {"text": FRAGMENT}, "secrets": {}}
+    assert client.get("/prompt-fragments").json() == {
+        "household": {"entity": {"text": FRAGMENT}, "secrets": {}}
+    }
+
+
+def test_an_include_list_reads_write_shaped(client: TestClient, store: ConfigStore) -> None:
+    _populate(store)
+
+    assert client.get("/agents/sam").json()["entity"]["prompt_includes"] == ["household"]
+    assert "prompt_includes" not in client.get("/agent-defaults").json()["entity"]
 
 
 def test_the_default_agent_is_a_name_and_may_be_null(

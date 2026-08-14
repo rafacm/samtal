@@ -102,6 +102,7 @@ def _pipeline(client: TestClient) -> None:
 WRITES = [
     ("put", "/providers/llm/claude", {"type": "anthropic", "model": "m"}),
     ("put", "/mcp-servers/home", {"transport": "stdio", "command": "uvx"}),
+    ("put", "/prompt-fragments/household", {"text": "The bins go out on Tuesday."}),
     ("put", "/agents/sam", {"prompt": "You are Sam."}),
     ("put", "/agent-defaults", {}),
     ("put", "/devices/aa:bb:cc:dd:ee:ff", {"agents": ["sam"]}),
@@ -706,6 +707,110 @@ def test_a_body_that_is_not_json_at_all_is_refused_without_echoing_it(
         assert SECRET not in response.text
         assert "Traceback" not in response.text
     assert SECRET not in caplog.text
+
+
+# Shared prompt fragments
+#
+# The write body and the read back are pinned exactly here, because a
+# fragment is the one entity whose whole content is text promised
+# verbatim: anything the transport tidied up would be tidied up in the
+# model's prompt too.
+
+
+FRAGMENT = "  The bins go out on Tuesday.\n\n    The radio is called Bosse.\n"
+
+
+def test_a_fragment_is_written_and_read_back_byte_for_byte(
+    client: TestClient, store: ConfigStore
+) -> None:
+    written = client.put("/prompt-fragments/household", json={"text": FRAGMENT})
+
+    assert written.status_code == 200, written.text
+    assert written.json() == {
+        "wrote": "prompt-fragment household",
+        "notice": RESTART_NOTICE,
+    }
+    assert client.get("/prompt-fragments/household").json() == {
+        "entity": {"text": FRAGMENT},
+        "secrets": {},
+    }
+    assert store.read_prompt_fragment("household").entry.text == FRAGMENT
+
+
+def test_a_fragment_is_deleted_unless_something_includes_it(
+    client: TestClient, store: ConfigStore
+) -> None:
+    _pipeline(client)
+    client.put("/prompt-fragments/household", json={"text": "The bins go out on Tuesday."})
+    client.put(
+        "/agents/sam", json={"prompt": "You are Sam.", "prompt_includes": ["household"]}
+    )
+
+    held = client.delete("/prompt-fragments/household")
+    assert held.status_code == 422
+    assert "prompt_includes" in held.json()["detail"]
+
+    client.put("/agents/sam", json={"prompt": "You are Sam."})
+    gone = client.delete("/prompt-fragments/household")
+
+    assert gone.json() == {
+        "wrote": "prompt-fragment household deleted",
+        "notice": RESTART_NOTICE,
+    }
+    assert client.get("/prompt-fragments/household").status_code == 404
+
+
+@pytest.mark.parametrize("path", ["/agents/sam", "/agent-defaults"])
+def test_an_unknown_include_is_refused_without_quoting_it(
+    client: TestClient, caplog: pytest.LogCaptureFixture, path: str
+) -> None:
+    """The refusal names the layer, the position and the rule. It never
+    names the include, because a name written beside prompt text is a
+    place a credential gets pasted, and this sentence travels out as an
+    HTTP body and into whatever collects the log."""
+    _pipeline(client)
+    body = (
+        {"prompt": "You are Sam.", "prompt_includes": [SECRET]}
+        if path == "/agents/sam"
+        else {"llm": "claude", "prompt_includes": [SECRET]}
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        response = client.put(path, json=body)
+
+    assert response.status_code == 422
+    assert "prompt_includes: entry 1" in response.json()["detail"]
+    assert SECRET not in response.text
+    assert SECRET not in str(response.headers)
+    assert SECRET not in caplog.text
+
+
+def test_an_unusable_fragment_name_is_refused_without_quoting_it(
+    client: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The refusal names the section and the rule, and never the name it
+    rejected.
+
+    What is asserted about the log is what this server writes. A name
+    travels in the path, so the client that sent the request has it by
+    construction and records it in its own request line; that is the
+    operator's own transport, and what this pins is that nothing on this
+    side repeats it.
+    """
+    with caplog.at_level(logging.DEBUG):
+        response = client.put(
+            f"/prompt-fragments/{quote(SECRET + '.pasted', safe='')}", json={"text": "a"}
+        )
+
+    assert response.status_code == 422
+    assert "[A-Za-z0-9_-]+" in response.json()["detail"]
+    assert SECRET not in response.text
+    assert SECRET not in str(response.headers)
+    served = [
+        record for record in caplog.records if record.name.startswith("samtal_server")
+    ]
+    assert all(SECRET not in record.getMessage() for record in served)
+    assert all(SECRET not in str(record.__dict__) for record in served)
 
 
 def test_a_fragment_the_models_refuse_is_not_quoted_back(
