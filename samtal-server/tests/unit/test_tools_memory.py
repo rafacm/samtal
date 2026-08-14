@@ -5,8 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from samtal_server.runtime import prompt
 from samtal_server.tools import memory as memory_module
-from samtal_server.tools.builtin import MEMORY_HEADING, remember, remember_tool, with_memory
+from samtal_server.tools.builtin import remember, remember_tool
 from samtal_server.tools.memory import MemoryStore
 
 
@@ -101,17 +102,17 @@ def test_the_tool_asks_for_one_short_fact() -> None:
 
 
 async def test_remembered_facts_reach_the_model_through_the_prompt(tmp_path: Path) -> None:
+    """What the store holds, as the assembler injects it. The assembly
+    itself is `test_runtime_prompt.py`; what this pins is that the two
+    ends meet: one agent's file is one agent's facts."""
     store = MemoryStore(tmp_path)
-    assert with_memory("POET", store, "poet") == "POET"
+    half = prompt.know_how("POET")
+    assert prompt.with_memory(half, store.read("poet")).text == "POET"
 
     await store.remember("poet", "the user is vegetarian")
-    prompt = with_memory("POET", store, "poet")
-    assert prompt.startswith("POET")
-    assert MEMORY_HEADING in prompt
-    assert "- the user is vegetarian" in prompt
+    assembled = prompt.with_memory(half, store.read("poet")).text
+    assert assembled.startswith("POET")
+    assert prompt.MEMORY_HEADING in assembled
+    assert "- the user is vegetarian" in assembled
     # Another agent's prompt is untouched by it.
-    assert with_memory("TUTOR", store, "tutor") == "TUTOR"
-
-
-def test_without_a_store_the_prompt_is_the_prompt() -> None:
-    assert with_memory("POET", None, "poet") == "POET"
+    assert prompt.with_memory(prompt.know_how("TUTOR"), store.read("tutor")).text == "TUTOR"

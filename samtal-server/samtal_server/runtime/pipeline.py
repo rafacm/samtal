@@ -66,6 +66,7 @@ from samtal_server.providers import (
     Turn,
     Usage,
 )
+from samtal_server.runtime import prompt
 from samtal_server.runtime.speech import _Synthesis, speak_after
 from samtal_server.text import SentenceSplitter
 from samtal_server.tools import builtin, names
@@ -964,7 +965,8 @@ class PipelineRuntime:
     def _system_prompt(self) -> str:
         """The active agent's prompt, plus whatever it remembers."""
         assert self._providers is not None and self._agent is not None
-        return builtin.with_memory(self._providers.prompt, self._memory, self._agent)
+        facts = "" if self._memory is None else self._memory.read(self._agent)
+        return prompt.with_memory(prompt.know_how(self._providers.prompt), facts).text
 
     async def _speak_after(
         self,

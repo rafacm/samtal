@@ -5,6 +5,10 @@ reserve those names. `switch_agent` is defined here but executed by the
 session, since a successful switch ends the tool loop rather than
 producing a result; `remember` is executed here, against the memory
 store.
+
+What `remember` writes is injected by `runtime.prompt`, which is where
+the whole system prompt is assembled: this module defines and runs the
+tools, and how their output reaches the model is the runtime's.
 """
 
 from collections.abc import Sequence
@@ -12,10 +16,6 @@ from collections.abc import Sequence
 from samtal_server.providers import ToolDef
 from samtal_server.tools import names
 from samtal_server.tools.memory import MemoryStore
-
-# The heading the remembered facts are injected under, as the model
-# reads them.
-MEMORY_HEADING = "You remember these facts about past conversations:"
 
 
 def switch_agent_tool(agents: Sequence[str]) -> ToolDef:
@@ -81,16 +81,3 @@ async def remember(store: MemoryStore, agent: str, arguments: dict[str, object])
         raise ValueError('remember needs a "text" argument holding the fact to remember')
     await store.remember(agent, text)
     return f"Remembered: {' '.join(text.split())}"
-
-
-def with_memory(prompt: str, store: MemoryStore | None, agent: str) -> str:
-    """The agent's prompt with whatever it remembers appended.
-
-    Read on every reply rather than cached, so a fact remembered in one
-    session is known to a concurrent one on its next reply."""
-    if store is None:
-        return prompt
-    facts = store.read(agent)
-    if not facts:
-        return prompt
-    return f"{prompt}\n\n{MEMORY_HEADING}\n{facts}".strip()
