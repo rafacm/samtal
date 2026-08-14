@@ -784,7 +784,8 @@ def test_a_session_refuses_an_agent_its_device_is_not_bound_to() -> None:
     # Refused, and nothing swapped: the session still talks as the tutor.
     assert session._agent == "tutor"
     assert session.runtime._providers is not None
-    assert session.runtime._system_prompt() == "TUTOR"
+    assert session.runtime._know_how is not None
+    assert session.runtime._know_how.text == "TUTOR"
 
 
 def test_a_device_with_no_agent_is_turned_away() -> None:
