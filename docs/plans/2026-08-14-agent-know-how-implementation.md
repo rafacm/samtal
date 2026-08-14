@@ -1021,33 +1021,73 @@ value between two connections is enough. It is also the honest shape of
 the risk this rule exists for, a server whose shipped guidance changes
 under a running deployment.
 
+### Rebase onto the PR #131 review round
+
+This milestone was written on the milestone 2 branch as it stood before
+its review round, and rebased onto 37853fb afterwards. Nothing that
+round changed is anything this milestone touches: its fixes are all in
+the fragment half of the configuration (the name check moved in front
+of the body parse behind `is_valid_fragment_name` and
+`PROMPT_FRAGMENT_NAME_RULE`, and a missing fragment now answers the
+fixed `NO_SUCH_FRAGMENT` sentence), while milestone 3's store, views
+and models changes are in the MCP entry half, and its `api.py` change
+is on `PromptBlock` rather than on the `Envelope` description finding 4
+extended. Eight of the ten commits replayed untouched.
+
+Two conflicts, both in prose that both rounds appended to.
+
+- `CHANGELOG.md`: finding 4 added `fragment:<name>` to the assembled
+  prompt entry's provenance list, and this milestone added the two
+  server tokens to the same list. Merged so the list names all six in
+  assembly order, in the round's reflowed wording. That is the point of
+  the finding, and a list that gained one member and lost two would
+  have been worse than the omission it fixed.
+- The implementation doc: the round record and this section were both
+  written at the end of the file, and each carries a verification fence
+  of its own. The record precedes this section, and each fence keeps
+  its own numbers, since they were measured on different trees.
+
+`docs/reference/api-openapi.json` was regenerated after the rebase
+rather than trusted: the round's change to it (the envelope's `secrets`
+description) and this milestone's (the entry model's two fields) are
+far apart in the document, so git merged them without a conflict, and a
+generated file merged without anybody looking is exactly the one to
+regenerate. It came back byte-identical, as did the reference.
+
 ### Verification
 
 Run from `samtal-server/` with `PYTHONDONTWRITEBYTECODE=1` exported for
-everything that is not pytest.
+everything that is not pytest, on the rebased tree.
 
 ```
 uv run ruff check .
 All checks passed!
 
 uv run pytest tests/unit -q
-1798 passed, 15 skipped in 166.85s
+1833 passed, 15 skipped in 168.55s
 
 uv run pytest tests/integration -q
-53 passed in 152.14s
+53 passed in 150.35s
+
+uv run samtal-server config reference | diff against the committed copy
+reference current
+
+uv run samtal-server config openapi | diff against the committed copy
+openapi current
 ```
 
-Fifty-one more unit tests than milestone 2 left and one more integration
-test, which is what this milestone added. The unit lane is about twelve
-seconds slower, almost all of it the one test that watches a real
-server's prompt fail to answer inside the bounds that ship.
+Fifty-one more unit tests than the review round left and one more
+integration test, which is what this milestone added. The unit lane is
+about fifteen seconds slower, almost all of it the one test that
+watches a real server's prompt fail to answer inside the bounds that
+ship.
 
 The two doc drift checks pass inside the unit lane
 (`test_the_committed_reference_matches_the_models` and the OpenAPI pair
 in `test_api_openapi.py`), and both artifacts were regenerated with
 `uv run samtal-server config reference` and `uv run samtal-server config
-openapi`, the reference in the commit that moved it and the document in
-the commit immediately after.
+openapi`, the reference in the commit that moved it, the document in the
+commit immediately after, and both again after the rebase.
 
 Not verified locally, and stated rather than claimed: the
 installed-wheel migration check, which builds a wheel and migrates a
