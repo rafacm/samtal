@@ -701,10 +701,28 @@ class PromptBlock(BaseModel):
             "Where this block came from, as a fixed token this server owns: `persona` "
             "for the agent's own prompt, `fragment:<name>` for a shared prompt "
             "fragment the agent includes, `instructions:<entry>` for the guidance "
-            "written on an MCP server entry the agent is granted, `memory` for what "
-            "the agent remembers. The fragment and entry names are the operator's, and "
-            "both have been through the rule that keeps them to `[A-Za-z0-9_-]+`."
+            "written on an MCP server entry the agent is granted, "
+            "`server_instructions:<entry>` for the guidance that server ships about "
+            "itself where the entry opted into it, `server_prompt:<entry>:<position>` "
+            "for one of the prompts it publishes, at its position in that entry's "
+            "`inject_prompts` counted from one, `memory` for what the agent remembers. "
+            "The fragment and entry names are the operator's, and both have been "
+            "through the rule that keeps them to `[A-Za-z0-9_-]+`; a published prompt "
+            "is identified by its position rather than by its name, because the name "
+            "is a string the server chose and this token is printed in logs."
         )
+    )
+    name: str | None = Field(
+        default=None,
+        description=(
+            "The name the entry's `inject_prompts` gave the published prompt this "
+            "block came from, and null for every other kind of block. It is carried "
+            "here and not in the provenance because it is a server-chosen string the "
+            "operator copied into their configuration, so nothing bounds what it "
+            "holds; this body is JSON-encoded and is one of the two places "
+            "operator-written configuration is echoed back, which the tokens printed "
+            "in logs and structured events are not."
+        ),
     )
     characters: int = Field(
         description=(
@@ -715,9 +733,11 @@ class PromptBlock(BaseModel):
     )
     text: str = Field(
         description=(
-            "The block as the model receives it, heading included. A surface that "
-            "hid part of the prompt would fail its own purpose, which is to say what "
-            "the model was given."
+            "The block as the model receives it, heading included, whoever wrote it: a "
+            "surface that hid part of the prompt would fail its own purpose, which is "
+            "to say what the model was given, and an entry that opted into a server's "
+            "own guidance opted those bytes into this prompt. The provenance beside it "
+            "is what says whose words they are."
         )
     )
 
@@ -733,9 +753,11 @@ class AssembledPrompt(BaseModel):
             "The blocks in the order they are sent, joined by one blank line each: the "
             "persona, then the shared fragments the agent includes in the order its "
             "layer lists them, then the guidance of each MCP entry the agent is granted "
-            "in grant order, then the remembered facts. The order is fixed and not "
-            "configurable. A block that would hold nothing is not sent and is not "
-            "listed, which is what an agent with no prompt of its own produces."
+            "in grant order, and within one entry what its operator wrote, then what "
+            "the server ships about itself, then the prompts it publishes in the order "
+            "the entry names them, and then the remembered facts. The order is fixed "
+            "and not configurable. A block that would hold nothing is not sent and is "
+            "not listed, which is what an agent with no prompt of its own produces."
         )
     )
     characters: int = Field(
@@ -1275,6 +1297,7 @@ def _runtime(api: FastAPI) -> None:
             "blocks": [
                 {
                     "provenance": block.provenance,
+                    "name": block.name,
                     "characters": block.characters,
                     "text": block.text,
                 }

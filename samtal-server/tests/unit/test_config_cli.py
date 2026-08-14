@@ -777,6 +777,43 @@ def test_prompt_keeps_the_newlines_and_replaces_the_control_characters(
     assert f"({len(text)} characters)" in printed
 
 
+def test_prompt_sanitizes_a_published_prompts_name(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A published prompt's name is a string the server chose and the
+    operator copied, so it is the one value on this surface that may
+    hold an escape sequence. It goes through the block sanitizer with
+    the provenance and the text."""
+    body = _assembled(
+        _prompt_block(
+            provenance="server_prompt:home:1",
+            name="house\x1b[31m_style",
+            characters=8,
+            text="Be brief.",
+        ),
+        characters=8,
+    )
+    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: body)
+
+    assert run("prompt", "poet") == 0
+
+    printed = capsys.readouterr().out
+    assert "server_prompt:home:1 (8 characters), the server prompt named house?[31m_style" in (
+        printed
+    )
+    assert "\x1b" not in printed
+
+
+def test_prompt_names_nothing_beside_a_block_that_has_no_name(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(cli, "_call", lambda *_args, **_kwargs: _assembled())
+
+    assert run("prompt", "poet") == 0
+
+    assert "persona (4 characters)\n" in capsys.readouterr().out
+
+
 def test_prompt_says_what_the_server_answered_for_an_unloaded_agent(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -802,6 +839,7 @@ def test_prompt_without_a_server_says_so(run, capsys: pytest.CaptureFixture[str]
         pytest.param({"blocks": [_prompt_block(text=None)], "characters": 4}, id="text"),
         pytest.param({"blocks": [_prompt_block(characters=ANSWERED)], "characters": 4}, id="size"),
         pytest.param({"blocks": [{"leak": ANSWERED}], "characters": 4}, id="block-fields"),
+        pytest.param({"blocks": [_prompt_block(name=4)], "characters": 4}, id="name"),
         pytest.param({"blocks": ANSWERED, "characters": 4}, id="blocks-not-a-list"),
         pytest.param({"blocks": [], "characters": ANSWERED}, id="total"),
         pytest.param([_prompt_block()], id="document-not-an-object"),

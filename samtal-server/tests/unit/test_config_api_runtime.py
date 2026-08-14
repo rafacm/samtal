@@ -551,6 +551,47 @@ def test_a_fragment_is_counted_on_the_surface_under_its_own_provenance(
     )
 
 
+def test_the_server_shipped_blocks_are_counted_and_named_on_the_surface(
+    directory: Path,
+) -> None:
+    """The bytes an entry opted into reach exactly two places, and this
+    is the second: the surface exists to say what the model was given,
+    and the provenance is what tells an operator whose words they are
+    reading. The published prompt's configured name comes with it, since
+    a read body is where operator-written configuration is echoed back."""
+    shipped = "Call list_devices before anything else."
+    published = "Answer in short sentences."
+    assembled = prompt.know_how(
+        "POET",
+        guidance=[
+            Guidance("home", "Ask first."),
+            prompt.ServerInstructions("home", shipped),
+            prompt.ServerPrompt("home", 1, "house_style", published),
+        ],
+    )
+
+    with serving(directory, None, agent_prompt=previewing(assembled)) as client:
+        body = client.get(PROMPT_PATH).json()
+
+    assert [block["provenance"] for block in body["blocks"]] == [
+        "persona",
+        "instructions:home",
+        "server_instructions:home",
+        "server_prompt:home:1",
+    ]
+    assert [block["name"] for block in body["blocks"]] == [
+        None,
+        None,
+        None,
+        "house_style",
+    ]
+    assert shipped in body["blocks"][2]["text"]
+    assert published in body["blocks"][3]["text"]
+    assert body["characters"] == len(
+        "\n\n".join(block["text"] for block in body["blocks"])
+    )
+
+
 def test_a_running_server_hands_its_own_assembly_to_the_api(
     monkeypatch: pytest.MonkeyPatch, directory: Path, tmp_path: Path
 ) -> None:
