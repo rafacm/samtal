@@ -75,43 +75,46 @@ deterministic ordering beats a configurable one, and when #83's
 precedence question lands it composes against a fixed base rather than
 against a per-deployment permutation.
 
-**When assembly runs, stated exactly.** Assembly is a pure function
-over memory-resident state, evaluated at the start of each reply leg,
-beside the tool snapshot the leg already takes: once when a reply
-begins answering an utterance, and once more when an agent switch
-starts the new agent's leg, which is the "at agent switch" case the
-issue names. Nothing is assembled, and nothing is ever fetched, while
-the model is streaming or between tool rounds; every network fetch
-(connect, `initialize`, the prompt fetches, reload) happened before
-assembly runs. That is this plan's reading of the issue's settled
-boundary, and it is a reading rather than a repeal: what the decision
-exists to forbid is fetch-on-demand through the speaker's dead air,
-and a string concatenation of resident pieces costs none. The
-alternative, caching one prompt at session open, was considered and
-rejected because it cannot coexist with the rest of the system: #121
-deliberately made the tool snapshot per-reply so that reloads and
-reconnects reach running sessions on the next utterance, so a prompt
-frozen at activation would describe tools that have since moved,
-which is the inert-config trap rebuilt inside one session. Per-leg
-assembly is what keeps the guidance and the tool list a reply is
-built on describing the same world.
+**When assembly runs, stated exactly.** The prompt has two halves
+with two clocks, and the split is what lets the issue's decision hold
+without breaking a contract today's code documents. The know-how half
+(persona, fragments, per-server guidance) is assembled once in
+`_activate_agent`, at session open and again at agent switch, which
+is the decision's own timing verbatim, and cached on the runtime for
+the life of that activation; nothing about it is recomputed per
+reply, and nothing is ever fetched at assembly time (connect,
+`initialize`, the prompt fetches and reload all happened before).
+The memory block keeps the clock it already has: read on every LLM
+round and appended to the cached half, because that read predates
+this issue, its per-reply freshness is a documented contract in
+today's `with_memory` ("a fact remembered in one session is known to
+a concurrent one on its next reply"), and its restructuring belongs
+to #83, not here. The one change to that read is where it runs, not
+when (finding 16 below): it moves off the event loop through
+`asyncio.to_thread`, resolved before the round's stream request is
+built, and the assembler stays a pure function handed the text.
 
-This changes one visible timing, and the plan says so rather than
-hiding it behind an equality claim: today `_system_prompt()` is
-evaluated on every LLM round, so a fact remembered in round one of a
-multi-round reply appears in round two's prompt; assembled per leg,
-it appears at the next leg instead. The change is deliberate (a
-prompt that shifts between the rounds of one reply is a prompt the
-tool loop cannot reason about) and small (one reply's tail, only when
-the model called `remember` mid-reply). Cross-session freshness is
-unchanged: memory is still read at every assembly, so a fact
-remembered in a concurrent session is known to this one on its next
-reply, exactly as today. The assembler's output for a configuration
-with no guidance and no fragments is pinned byte-equal to today's
-`with_memory` output per invocation, and the timing itself is pinned
-by an integration test that holds one session across a memory write,
-a reload, a reconnect and an agent switch and asserts when each
-becomes visible.
+The consequence for a reload is stated rather than hidden: guidance
+applied by a reload reaches new sessions and switched-in agents, not
+the replies of a session already running, while the tool list keeps
+its #121 per-reply pickup. A live session can therefore briefly hold
+yesterday's guidance beside today's tools, and that mismatch is
+accepted the way the issue itself accepts guidance about withheld
+tools: initial noise, bounded by session length (minutes), gone at
+the next activation. The alternative, re-assembling guidance per
+reply, was round one's design and is retired: it re-reads the
+settled decision's explicit timing, and the second review round was
+right that nothing in the deliverables needs it.
+
+This design changes no existing timing at all. The cached half for a
+configuration with no guidance and no fragments is exactly the
+persona string `AgentProviders.prompt` holds today, and the memory
+append per round is unchanged, so the assembler's output is pinned
+byte-equal to today's `with_memory` output per invocation with no
+caveat. An integration test holds one session across a memory write,
+an MCP reload, a reconnect and an agent switch, asserting the memory
+write visible on the next reply (as today), the reload's guidance
+invisible until the switch, and the switch re-assembling.
 
 The assembler lives in `samtal_server/runtime/prompt.py`: prompt
 assembly fails the "would this exist if the backend were a telephone
@@ -203,22 +206,28 @@ on:
   blocks through a sanitizer of their own (below), so a hostile
   server cannot drive a terminal through an inspection command.
 
-### Guidance and per-tool grants: whole-entry, and injected next to tools
+### Guidance and per-tool grants: the effective grant is the condition
 
 Per-server guidance does not narrow with a grant's allow list; it is
-whole-entry, as the issue expects ("probably fine to ignore at first"),
-and the field's generated description says that guidance describing a
-withheld tool is noise the operator avoids by writing guidance about
-the granted surface. What the resolution adds is the injection
-condition: an entry's guidance (operator-written and server-shipped
-alike) is injected exactly when the entry contributes at least one
-tool to the reply's snapshot, after liveness and the allow-list
-filter. A down server contributes neither tools nor guidance, because
-"prefer the search tool" with no search tool present is an instruction
-to fail; an `mcp: []` agent never sees any of it; and an agent whose
-allow list filtered an entry's offer to nothing gets no orphaned
-guidance either. This is the issue's "next to that server's tools"
-made literal: the guidance appears when and only when the tools do.
+whole-entry, as the issue expects ("probably fine to ignore at
+first"), and the field's generated description says that guidance
+describing a withheld tool is noise the operator avoids by writing
+guidance about the granted surface. The injection condition is the
+effective grant and nothing else, which is deliverable 1 read
+literally ("injected into the system prompt of any agent granted
+that server"): operator instructions are injected for every granted
+agent, whether the server is connected and whatever its filtered
+tool count, and captured server-shipped blocks are injected for a
+granted server whenever a capture exists, tools or none, which is
+what keeps a prompt-only MCP server (deliverable 3's own case) from
+being silently excluded. An `mcp: []` agent never sees any of it.
+Guidance for a server that is down, or whose granted tools were all
+filtered away, is the same accepted noise as guidance naming a
+withheld tool: the issue tolerates it initially, the status and
+inspection surfaces make it visible, and tying injection to the
+mutable per-reply tool offer was rejected in review round two
+because it both violates the grant-edge deliverable and cannot
+coexist with activation-time assembly.
 
 ## The smaller decisions, decided
 
@@ -336,9 +345,10 @@ Per-server guidance follows the managers and the slice, because it is
 what a reload swaps: `McpSlice` carries each entry's operator
 `instructions` and its opt-in flag, the manager carries what the
 server shipped, and `McpServers` grows `guidance_for_agent(agent)`,
-answering the ordered guidance blocks for the entries that currently
-contribute tools to that agent, the same per-reply question
-`tools_for_agent` already answers and swapped by the same reload.
+answering the ordered guidance blocks the agent's effective grants
+name, whatever each server's liveness or filtered tool count. It is
+read at activation, when the know-how half is assembled and cached,
+so a reload's swap reaches new sessions and switched-in agents.
 
 Fragments follow the boot `Config`, which the pipeline already holds:
 `Config.prompt_for_agent(agent)` resolves the persona plus the
@@ -363,10 +373,12 @@ about what was assembled.
 prompt <agent>` as its CLI client. It lives in the `/runtime`
 namespace #121 established (the entity namespace stays purely CRUD),
 and it answers what a session opening now as that agent would
-receive. It is explicitly a new-session preview: sessions hold no
-cached prompt to read back (each leg assembles afresh), so there is
-no "what did session X get" answer to give, and the surface says so
-in its description rather than implying one. The response carries:
+receive. It is explicitly a new-session preview, and the surface
+says so in its description: a running session holds the know-how
+half it cached at its own activation, which may predate a reload,
+and per-session readback is deliberately not offered; what an
+operator audits is what the configuration produces now. The response
+carries:
 the ordered blocks, each with its provenance (`persona`,
 `fragment:<name>`, `instructions:<entry>`, `server_instructions:<entry>`,
 `memory`), its character count, and its text, plus the total count.
@@ -409,8 +421,10 @@ control-character case.
 samtal_server/runtime/prompt.py       the assembler: block order, headings,
                                       per-block accounting; subsumes
                                       builtin.with_memory
-samtal_server/runtime/pipeline.py     per-leg assembly beside the tool
-                                      snapshot; the prompt_assembled event
+samtal_server/runtime/pipeline.py     the cached know-how half assembled
+                                      in _activate_agent; the per-round
+                                      memory append moves to a worker
+                                      thread; the prompt_assembled event
 samtal_server/tools/builtin.py        with_memory retired into the assembler;
                                       MEMORY_HEADING moves with it
 samtal_server/tools/mcp.py            slice carries instructions and opt-ins;
@@ -481,13 +495,17 @@ doc drift checks.
   views write-shaped, and appears in the generated reference; the
   assembler's order pinned (persona, guidance, memory) and, per
   invocation, byte-equal to today's `with_memory` output when no
-  guidance exists; guidance injected for a
-  granted agent whose entry contributes tools, absent for `mcp: []`,
-  absent while the entry is down, absent when the allow list filtered
-  the offer to nothing; an instructions-only reload keeps the
-  connection (same manager object), reports `unchanged`, and the next
-  assembly carries the new text; pre-upgrade rows without the column
-  load unchanged.
+  guidance exists; guidance injected for every granted agent by the
+  effective grant, present while the entry is down and while the
+  allow list filters its offer to nothing, absent for `mcp: []`; an
+  instructions-only reload keeps the connection (same manager
+  object), reports `unchanged`, and the next activation carries the
+  new text while a running session's cached half does not; the
+  activation cache itself (assembled in `_activate_agent`, not per
+  reply, re-assembled on switch); the per-round memory read running
+  off the event loop; pre-upgrade rows without the column load
+  unchanged; the inspection surface and `prompt_assembled` event
+  over persona, guidance and memory provenance.
 - Unit, milestone 2: fragment name and body validation (bad charset,
   blank body, both refused with the position-not-value rule where a
   value would be echoed); store, views, API and CLI round-trips;
@@ -530,8 +548,10 @@ doc drift checks.
   second app instance on the same database); a server shipping
   instructions has them surfaced only when the entry opts in; one
   session held open across a memory write, an MCP reload, a server
-  reconnect and an agent switch, asserting through `{system}` when
-  each becomes visible (the next leg, never mid-reply); the
+  reconnect and an agent switch, asserting through `{system}` that
+  the memory write appears on the next reply as today, the reload's
+  guidance stays invisible until the switch, and the switch
+  re-assembles the know-how half; the
   assembled prompt of a live deployment is read back through
   `GET /runtime/agents/{name}/prompt` over a real socket and matches
   what `{system}` shows the model receiving.
@@ -554,9 +574,9 @@ doc drift checks.
 - **The with_memory refactor touches every reply.** The assembler
   lands with a pinned test that its output is, per invocation,
   byte-equal to today's for a configuration with no guidance and no
-  fragments, and the one timing change (per-leg rather than
-  per-round evaluation) is stated in the assembly section and pinned
-  by the held-session integration test, so milestone 1's effect on
+  fragments, the memory clock is deliberately unchanged (per-round,
+  now off the event loop), and the held-session integration test
+  pins the activation-cache semantics, so milestone 1's effect on
   existing deployments is exactly the documented one.
 - **Prompt budget on small local models.** No automatic trimming, by
   decision; the mitigation is visibility (the surface, the event) and
