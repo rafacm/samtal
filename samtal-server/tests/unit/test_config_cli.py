@@ -1976,6 +1976,43 @@ def test_every_local_invocation_says_what_it_is(
 # `local_ok=True` command that skips this list fails nothing.
 
 
+# The preamble, spelled out rather than read from the module under test.
+# Comparing production against itself would let the retired sentence
+# back in: restoring "a running server will not observe a change made
+# this way until its next start" would move both sides of that
+# comparison together and pass, while printing a timing claim the write
+# under it contradicts. The neutral sentence is therefore a literal
+# here, and the one place the two are tied together is the assertion
+# just below.
+LOCAL_PREAMBLE = (
+    "--local is the break-glass path: it reads and writes the database directly, "
+    "bypassing the configuration API. Each write says separately when it takes "
+    "effect, the same answer the API gives for the same act."
+)
+
+# How restart timing has been written on this path, in the words it has
+# been written in: the two halves of RESTART_NOTICE, and the clause the
+# retired preamble made the claim with. An act a reload applies may
+# carry none of them, whichever line they turn up on. Kept as phrases
+# rather than as the word "restart", which MCP_RELOAD_NOTICE uses
+# legitimately to say that none is needed.
+RESTART_TIMING = (
+    "until its next start",
+    "at the next server start",
+    "read once at boot",
+)
+
+
+def test_the_local_preamble_makes_no_timing_claim_of_its_own() -> None:
+    """Every --local invocation prints this before the command runs, so
+    a timing claim in it is a timing claim about every act, including
+    the ones a running server applies without a restart. It says what
+    the path is and leaves when to the write."""
+    assert cli.LOCAL_NOTICE == LOCAL_PREAMBLE
+    for phrasing in RESTART_TIMING:
+        assert phrasing not in cli.LOCAL_NOTICE, phrasing
+
+
 def _a_provider(run) -> None:
     run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
 
@@ -2051,12 +2088,15 @@ def test_a_local_write_says_what_the_api_says_for_the_same_act(
     assert run("--local", *argv, stdin=typed) == 0
 
     said = capsys.readouterr().err
-    assert said.splitlines() == [cli.LOCAL_NOTICE, answered]
+    assert said.splitlines() == [LOCAL_PREAMBLE, answered]
     if reloadable:
         # Said out loud for the acts the reload applies: the restart
         # sentence must not appear anywhere in this invocation, preamble
-        # included.
+        # included, and neither must the phrasings a differently worded
+        # restart claim would be made in.
         assert cli.RESTART_NOTICE not in said
+        for phrasing in RESTART_TIMING:
+            assert phrasing not in said, phrasing
 
 
 def test_the_recovery_subset_needs_no_server(
