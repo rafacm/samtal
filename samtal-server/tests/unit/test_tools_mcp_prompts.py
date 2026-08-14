@@ -359,6 +359,30 @@ async def test_a_listing_is_walked_page_by_page(
     assert skips(caplog) == []
 
 
+async def test_the_listing_is_finished_before_anything_is_fetched(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Listing first means the whole listing. Stopping as soon as every
+    configured name had been seen would fetch while the server was still
+    advertising, which is the one ordering this design exists to prevent,
+    so the name it wants sits on the first page of three."""
+    session = StubSession(
+        pages=[
+            ([listed("wanted")], "1"),
+            ([listed("other")], "2"),
+            ([listed("last")], None),
+        ],
+        results={"wanted": text_result("guidance")},
+    )
+
+    with caplog.at_level(logging.WARNING, logger=MANAGER_LOGGER):
+        captured = await discovered(session, with_prompts(), inject_prompts=["wanted"])
+
+    assert session.listed == [None, "1", "2"]
+    assert [prompt.text for prompt in captured] == ["guidance"]
+    assert skips(caplog) == []
+
+
 async def test_a_name_is_looked_up_exactly_as_it_was_written() -> None:
     """A published prompt's name is an identifier the server chose, so a
     configured `  spaced  ` is the prompt called `  spaced  ` and not
