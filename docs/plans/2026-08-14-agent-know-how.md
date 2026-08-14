@@ -756,6 +756,157 @@ its resolution once the amendment addressing it lands.
    the module layout. The pipeline and the inspection hook read the
    same helper, so they cannot disagree.
 
+## Plan review round, second pass
+
+A second review of the amended plan (6b81a68), same reviewer setup,
+2026-08-14, asked to verify the first round's resolutions and to
+find what the amendments introduced. Findings 3 to 9 of round one
+were confirmed resolved. Verdict: not ready, on findings 1, 2 and
+10. Findings as received, condensed, with resolutions appended as
+the amendments land.
+
+1. **P1: prompt discovery is underspecified and cannot enforce its
+   skip rules.** The plan calls only `prompts/get`, so the client
+   cannot tell an unpublished prompt from one requiring arguments
+   without interpreting an untrusted server error. Require paginated
+   `prompts/list`, validate configured names and required arguments
+   against the listing, call `prompts/get` only for eligible
+   prompts, define behavior when the server lacks the prompts
+   capability, and test pagination, capability absence, unpublished
+   names and required arguments.
+   *Resolution*: adopted. The trust-boundary section now specifies
+   discovery: the full paginated `prompts/list` is walked first,
+   each configured name is validated against the listing (absent
+   name, required arguments, no listing capability at all are each
+   a distinct skip with its own warning), and `prompts/get` is
+   called only for eligible names. A server without the prompts
+   capability skips every configured name with one warning naming
+   the entry. Milestone 3's tests cover pagination, capability
+   absence, unpublished names and required-argument prompts.
+
+2. **P1: the session-open decision is still contradicted, not
+   resolved.** Reinterpreting the decision as forbidding only
+   network fetches changes its explicit timing; cache the assembled
+   prompt at activation and rebuild only on agent switch, base
+   guidance on the grant edge rather than the mutable per-reply
+   offer, or change the issue decision before implementing.
+   *Resolution*: adopted, jointly with finding 10, and the design is
+   better for it. The know-how half of the prompt (persona,
+   fragments, guidance) is assembled once in `_activate_agent`, at
+   session open and again at agent switch, exactly as the decision
+   says, and cached on the runtime for the session's life; nothing
+   about it is recomputed per reply. Memory keeps its existing
+   per-round read appended to the cached half: that read predates
+   this issue, its freshness contract is documented in today's code
+   and owned by #83, and leaving it untouched means this plan
+   changes no existing timing at all, which retires round one's
+   finding 2 completely rather than arguing with it. A reload's
+   guidance changes reach new sessions and switched-in agents, not
+   replies in flight, the boot-snapshot contract's shape.
+
+10. **P1: conditioning guidance on at least one offered tool
+   violates the grant-edge deliverables and excludes prompt-only
+   servers.** Deliverable 1 requires guidance for any granted
+   agent, deliverable 3 concerns servers exposing prompts rather
+   than tools, and the issue already tolerates guidance about
+   withheld tools. Inject operator guidance by effective grant,
+   irrespective of liveness or the filtered tool count; make
+   shipped blocks eligible for a granted, connected server that
+   publishes no tools.
+   *Resolution*: adopted. The injection condition is now the
+   effective grant and nothing else: operator instructions are
+   injected for every granted agent, connected or not, tools or
+   none, and captured server-shipped blocks are injected for a
+   granted server whenever they have been captured, tools or none.
+   The contribute-a-tool condition is gone, and the section says
+   what replaced its rationale: the issue's own decision to
+   tolerate guidance-tool mismatch as initial noise.
+
+11. **P2: the new domain section omits the moved-key loader and the
+   canonical example.** `config/loader.py` indexes
+   `MOVED_KEY_COMMANDS` for every domain key, so a stale
+   `prompt_fragments` YAML section or environment variable would
+   raise `KeyError`, and AGENTS.md requires `config.example.yaml`
+   to move with every schema change. Name both files, add the
+   moved-key command and stale-file and environment tests, and
+   update the example's domain-section list.
+   *Resolution*: adopted. Both files join the module layout;
+   milestone 2 adds the `prompt_fragments` moved-key command, tests
+   a stale YAML section and a `SAMTAL_PROMPT_FRAGMENTS` environment
+   variable both refused with the command named, and updates
+   `config.example.yaml`'s domain-section wording.
+
+12. **P2: an MCP prompt has no defined, auditable rendering.**
+   Prompt results are ordered messages with roles and typed content
+   blocks, and the provenance list omits named prompts. Define the
+   rendering, assign stable provenance, apply the cap to the
+   rendered block, and prove the rendering in tests.
+   *Resolution*: adopted. A named prompt renders as the text of its
+   messages in order, joined by blank lines, roles dropped: the
+   block is standing guidance spoken by the operator's choice, not
+   a dialog replay, and the plan says so. A prompt whose messages
+   carry any non-text content block is skipped as unusable, the
+   same rule as required arguments. The cap applies to the rendered
+   block. Provenance is `server_prompt:<entry>:<name>`, the
+   operator-written name, safe to print by construction. Milestone
+   3 pins the exact rendering, including a multi-message prompt.
+
+13. **P2: optional prompt retrieval can take the tool server
+   down.** Every `prompts/get` inside the aggregate connect
+   envelope means one slow prompt can mark the manager down and
+   remove healthy tools. Specify bounded per-prompt failure
+   containment with sanitized diagnostics, keeping the initialized
+   connection usable; test a stalled prompt and aggregate duration
+   past the old envelope.
+   *Resolution*: adopted. Prompt discovery and fetching move after
+   the connect envelope closes and the tools are published: each
+   listing page and each `prompts/get` runs under its own short
+   per-call bound, a failure or timeout skips that prompt (or, for
+   the listing, all named prompts) with a warning carrying the
+   entry, the operator-written name and the reason token, and the
+   connection and tools stay up throughout. Milestone 3 tests a
+   stalled prompt and a sequence of fetches whose sum exceeds
+   `CONNECT_TIMEOUT_S`, asserting the tools survive both.
+
+14. **P2: the fragment-name validator can reflect a rejected
+   secret.** `check_mcp_entry_names` interpolates the rejected name
+   into its refusal, and the sentinel tests cover unknown includes
+   only. Refuse invalid fragment names by field and rule, never by
+   value, with sentinel tests on every surface.
+   *Resolution*: adopted. The name rule keeps the entry-name
+   charset but not its refusal sentence: an invalid fragment name
+   is refused naming the section and the rule only, and milestone
+   2's sentinel tests add the invalid-name case beside the
+   unknown-include one, over HTTP, CLI streams, logs and the
+   exception chain.
+
+15. **P2: inspection and budget visibility land after three
+   releasable injection milestones.** The counting surface is the
+   stated mitigation but ships last. Land the endpoint, the
+   accounting and the event with milestone 1 and extend their
+   provenance coverage per milestone.
+   *Resolution*: adopted. The plan is restructured from four
+   milestones to three: the inspection surface, the CLI command and
+   the `prompt_assembled` event land in milestone 1 covering
+   persona, guidance and memory, and milestones 2 and 3 extend the
+   provenance to fragments and server-shipped blocks in the same
+   change that adds each block type. No injection milestone merges
+   without the surface that counts it.
+
+16. **P2: the pipeline-side memory read remains blocking and
+   contradicts resident-only assembly.** `MemoryStore.read()` is
+   synchronous filesystem I/O reached from the event loop, and only
+   the inspection handler was assigned a worker thread. Read memory
+   through `asyncio.to_thread` in the runtime path too, passing the
+   text into the pure assembler.
+   *Resolution*: adopted. The plan now names the refactor: the
+   per-round memory read moves off the event loop through
+   `asyncio.to_thread`, resolved before the round's stream request
+   is built, and the assembler stays a pure function handed the
+   text. Today's code performs this read synchronously on the loop,
+   so this is a small repair shipped with milestone 1, tested by
+   the existing session suites.
+
 ## Milestones
 
 Stacked branches, one PR each, every merge leaving `main` releasable:
