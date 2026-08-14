@@ -137,10 +137,17 @@ candidate: that surface reports MCP runtime state, fragments are not
 MCP, and a prompt question ("what is the model receiving and how big
 is it") deserves one answer in one place rather than half an answer on
 a surface about connections. Beside the surface, agent activation
-logs a `prompt_assembled` event carrying per-source character counts,
-which is the decision-site rule applied to prompt size: when a small
-model degrades in the field, the retained logs say what the prompt
-held without anyone reproducing the session.
+logs a `prompt_assembled` event carrying the know-how half's
+per-source character counts, which is the decision-site rule applied
+to prompt size: when a small model degrades in the field, the
+retained logs say what the prompt held without anyone reproducing
+the session. Memory is deliberately outside the event: the event
+fires where the know-how half is assembled, `_activate_agent`, which
+is synchronous, while memory is read per round off the event loop,
+and emitting per round would double the round's log volume for a
+number that moves slowly when `llm_round` already carries per-round
+token counts. The inspection surface, which reads memory fresh,
+is where memory's size is answered.
 
 There is no automatic trimming and no budget enforcement: the
 deployment's operator is the one who knows what their model tolerates,
@@ -577,8 +584,9 @@ doc drift checks.
   activation cache itself (assembled in `_activate_agent`, not per
   reply, re-assembled on switch); the per-round memory read running
   off the event loop; pre-upgrade rows without the column load
-  unchanged; the inspection surface and `prompt_assembled` event
-  over persona, guidance and memory provenance.
+  unchanged; the inspection surface over persona, guidance and
+  memory provenance, and the `prompt_assembled` event over the
+  know-how half only, memory explicitly absent from it.
 - Unit, milestone 2: fragment name and body validation (bad charset,
   blank body, both refused naming section and rule only), with a
   credential-sentinel fragment name asserted absent from the HTTP
