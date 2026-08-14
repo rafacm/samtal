@@ -459,7 +459,7 @@ def test_an_agent_this_server_did_not_load_is_a_404_naming_the_restart(
 
 def test_the_blocks_and_the_total_are_the_assemblers_own(directory: Path) -> None:
     assembled = prompt.with_memory(
-        prompt.know_how("POET", [Guidance("home", "Ask first.")]), "- a fact"
+        prompt.know_how("POET", guidance=[Guidance("home", "Ask first.")]), "- a fact"
     )
 
     with serving(directory, None, agent_prompt=previewing(assembled)) as client:
@@ -514,6 +514,41 @@ def test_the_prompt_read_describes_the_refusals_it_can_actually_answer() -> None
     # action, keeps the shared sentence about actions.
     reload_503 = document()["paths"][RELOAD_PATH]["post"]["responses"]["503"]
     assert reload_503["description"] == PROBLEM_DESCRIPTIONS[503]
+
+
+def test_a_fragment_is_counted_on_the_surface_under_its_own_provenance(
+    directory: Path,
+) -> None:
+    """Every injected block is reported by the surface that counts it,
+    which is what makes the fragment section's cost visible rather than
+    only its existence."""
+    written = "The bins go out on Tuesday."
+    assembled = prompt.with_memory(
+        prompt.know_how(
+            "POET",
+            [prompt.Fragment("household", written)],
+            [Guidance("home", "Ask first.")],
+        ),
+        "- a fact",
+    )
+
+    with serving(directory, None, agent_prompt=previewing(assembled)) as client:
+        body = client.get(PROMPT_PATH).json()
+
+    assert [block["provenance"] for block in body["blocks"]] == [
+        "persona",
+        "fragment:household",
+        "instructions:home",
+        "memory",
+    ]
+    fragment = body["blocks"][1]
+    assert fragment["text"] == written
+    assert fragment["characters"] == len(written)
+    # And the fragment is a block like the others: the prompt is what
+    # they join to, so its bytes are counted once and reported once.
+    assert body["characters"] == len(
+        "\n\n".join(block["text"] for block in body["blocks"])
+    )
 
 
 def test_a_running_server_hands_its_own_assembly_to_the_api(

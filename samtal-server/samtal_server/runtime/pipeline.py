@@ -586,6 +586,7 @@ class PipelineRuntime:
         self._providers = self._agent_providers[name]
         self._know_how = prompt.know_how(
             self._config.prompt_for_agent(name),
+            self._config.fragments_for_agent(name),
             self._mcp_servers.guidance_for_agent(name),
         )
         self._prompt_assembled(name, self._know_how)

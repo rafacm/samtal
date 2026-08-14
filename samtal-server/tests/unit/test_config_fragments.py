@@ -22,6 +22,7 @@ from samtal_server.config.models import (
     ProvidersConfig,
     check_references,
 )
+from samtal_server.runtime.prompt import Fragment
 from tests.unit.test_config_tools import config_with
 
 # Not a real credential. Written in the safe charset on purpose: that is
@@ -237,6 +238,75 @@ def test_an_unresolved_include_fails_the_boot_without_quoting_it(layer: str) -> 
     rendered = chain(caught.value)
     assert "prompt_includes: entry 1" in rendered
     assert SENTINEL not in rendered
+
+
+# What an agent's prompt is made of
+
+
+def _resolving(**layers: object) -> Config:
+    return config_with(
+        prompt_fragments={
+            "household": {"text": "The bins go out on Tuesday."},
+            "style": {"text": "Answer in one sentence."},
+        },
+        **layers,
+    )
+
+
+def _defaults(**overrides: object) -> dict[str, object]:
+    return dict.fromkeys(("llm", "asr", "tts", "vad"), "mock") | overrides
+
+
+def test_an_agent_inherits_the_defaults_includes() -> None:
+    config = _resolving(agent_defaults=_defaults(prompt_includes=["household"]))
+
+    assert config.fragments_for_agent("assistant") == [
+        Fragment("household", "The bins go out on Tuesday.")
+    ]
+
+
+def test_an_agents_own_list_replaces_the_inherited_one() -> None:
+    """Replaces rather than extends, exactly like `mcp`: what an agent
+    lists is all of what it includes."""
+    config = _resolving(
+        agent_defaults=_defaults(prompt_includes=["household"]),
+        agents={"assistant": {"prompt": "A", "prompt_includes": ["style"]}},
+    )
+
+    assert config.fragments_for_agent("assistant") == [
+        Fragment("style", "Answer in one sentence.")
+    ]
+
+
+def test_an_empty_list_opts_an_agent_out_of_what_its_siblings_share() -> None:
+    config = _resolving(
+        agent_defaults=_defaults(prompt_includes=["household"]),
+        agents={
+            "assistant": {"prompt": "A", "prompt_includes": []},
+            "sibling": {"prompt": "S"},
+        },
+        devices={},
+    )
+
+    assert config.fragments_for_agent("assistant") == []
+    assert [block.name for block in config.fragments_for_agent("sibling")] == ["household"]
+
+
+def test_the_fragments_are_resolved_in_the_order_they_are_listed() -> None:
+    """Listed order rather than alphabetical: what the operator wrote is
+    what the model reads."""
+    config = _resolving(
+        agents={"assistant": {"prompt": "A", "prompt_includes": ["style", "household"]}}
+    )
+
+    assert [block.name for block in config.fragments_for_agent("assistant")] == [
+        "style",
+        "household",
+    ]
+
+
+def test_an_agent_that_includes_nothing_carries_no_fragments() -> None:
+    assert _resolving().fragments_for_agent("assistant") == []
 
 
 def test_a_composed_configuration_with_fragments_boots() -> None:

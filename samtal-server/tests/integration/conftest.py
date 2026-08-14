@@ -38,6 +38,7 @@ from samtal_server.config.models import (
     AgentDefaults,
     DatabaseConfig,
     McpServerConfig,
+    PromptFragmentConfig,
     ProviderConfig,
     domain_fields,
 )
@@ -105,6 +106,8 @@ def _seeded(store: ConfigStore, config: Config) -> Snapshot:
             store.set_provider(stage, name, _fragment(entry))
     for name, server in config.mcp_servers.items():
         store.set_mcp_server(name, _fragment(server))
+    for name, block in config.prompt_fragments.items():
+        store.set_prompt_fragment(name, _fragment(block))
     store.set_agent_defaults(_fragment(config.agent_defaults))
     for name, agent in config.agents.items():
         store.set_agent(name, _fragment(agent))
@@ -116,7 +119,11 @@ def _seeded(store: ConfigStore, config: Config) -> Snapshot:
 
 
 def _fragment(
-    entry: ProviderConfig | McpServerConfig | AgentConfig | AgentDefaults,
+    entry: ProviderConfig
+    | McpServerConfig
+    | PromptFragmentConfig
+    | AgentConfig
+    | AgentDefaults,
 ) -> dict[str, Any]:
     """One entity as the document that writes it: the fields it set and
     nothing else. Never a full dump, which would name the fields the
@@ -141,6 +148,31 @@ async def running_app_in(directory, config: Config):
     """The same, on a database that stays where it was seeded, for a
     test that writes to it while the server runs."""
     async with _serving(booted_in(directory, config)) as served:
+        yield served
+
+
+@contextlib.asynccontextmanager
+async def restarted_app_in(directory, config: Config):
+    """A second server start on a database somebody has already written.
+
+    Nothing is seeded: the domain half is read as it stands, which is
+    what a restart is, and the difference from `running_app_in` is the
+    whole point of the tests that use it. `config` is only there for its
+    file half, the port and the memory directory this process runs with.
+    """
+    directory = Path(directory)
+    engine = open_database(directory)
+    try:
+        snapshot = ConfigStore(engine).load()
+    finally:
+        engine.dispose()
+    server = config.server.model_copy(update={"database": DatabaseConfig(dir=directory)})
+    composed = compose_config(
+        FileConfig(server=server, memory=config.memory),
+        domain_fields(snapshot.domain),
+        str(directory),
+    )
+    async with _serving(create_app(composed, snapshot.secrets)) as served:
         yield served
 
 
@@ -301,6 +333,14 @@ def serve_app_in():
     writes to it while the server runs:
     `async with serve_app_in(directory, config) as (port, app):`."""
     return running_app_in
+
+
+@pytest.fixture
+def restart_in():
+    """The same database served again with nothing re-seeded, which is
+    what a restart reads: `async with restart_in(directory, config) as
+    (port, app):`."""
+    return restarted_app_in
 
 
 @pytest.fixture

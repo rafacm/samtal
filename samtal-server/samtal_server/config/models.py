@@ -39,6 +39,12 @@ from pydantic_settings import (
     YamlConfigSettingsSource,
 )
 
+# The block shape the assembler owns, imported rather than restated for
+# the reason `tools/mcp.py` imports `Guidance` from there: what an
+# agent's fragments are is this module's business, and what a prompt
+# does with them is that one's. It is a leaf import, over a module that
+# holds pure text functions and reads only `tools.names`.
+from samtal_server.runtime.prompt import Fragment
 from samtal_server.tools import names
 
 _MAC_RE = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5}$")
@@ -1791,6 +1797,22 @@ class Config(BaseModel):
         `agent_defaults` refuses to carry one.
         """
         return self.agents[agent].prompt
+
+    def fragments_for_agent(self, agent: str) -> list[Fragment]:
+        """The shared fragments an agent's prompt carries, resolved and
+        in the order they are injected: its own list when it names one,
+        `agent_defaults` otherwise. A list replaces rather than extends,
+        so `prompt_includes: []` is how an agent opts out of the
+        fragments its siblings share.
+
+        The lookup cannot miss. Every include is checked against
+        `prompt_fragments` at write time and again by this model's own
+        validator, so a `Config` that exists is one whose includes all
+        resolve.
+        """
+        own = self.agents[agent].prompt_includes
+        included = own if own is not None else self.agent_defaults.prompt_includes or []
+        return [Fragment(name, self.prompt_fragments[name].text) for name in included]
 
     def mcp_for_agent(self, agent: str) -> list[McpGrant]:
         """The MCP servers an agent talks to and how much of each: its

@@ -1,8 +1,9 @@
 """What the running session sends as the system prompt, and when.
 
 The assembler itself is `test_runtime_prompt.py`; what this file is
-about is the two clocks. The know-how half (the persona and the
-guidance of the entries the agent is granted) is assembled once per
+about is the two clocks. The know-how half (the persona, the fragments
+the agent includes and the guidance of the entries it is granted) is
+assembled once per
 activation and cached, so a reply never rebuilds it and an agent switch
 always does. The memory block keeps the clock it has always had, read
 per round, and moves off the event loop rather than moving in time.
@@ -25,7 +26,7 @@ from samtal_server.providers import (
     ToolDef,
     Turn,
 )
-from samtal_server.runtime.prompt import Guidance
+from samtal_server.runtime.prompt import Guidance, guidance_heading
 from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
 from tests.unit.test_session_tools import (
@@ -39,6 +40,8 @@ from tests.unit.test_session_tools import (
 )
 
 GUIDANCE = "Ask before unlocking the door."
+
+FRAGMENT = "The bins go out on Tuesday."
 
 
 class CountingServers(McpServers):
@@ -183,6 +186,70 @@ async def test_an_agent_granted_nothing_is_sent_its_persona_alone() -> None:
     await run_reply(session, "hello")
 
     assert llm.systems == ["POET"]
+
+
+# The fragments an agent includes
+
+
+def config_with_fragment(includes: list[str] | None = None) -> Config:
+    """The two agents, with a shared fragment the poet includes."""
+    return base_config(
+        prompt_fragments={"household": {"text": FRAGMENT}},
+        agents={
+            "poet": {
+                "prompt": "POET",
+                "tts": "tenor",
+                "prompt_includes": ["household"] if includes is None else includes,
+            },
+            "tutor": {"prompt": "TUTOR", "tts": "alto"},
+        },
+    )
+
+
+async def test_an_included_fragment_reaches_the_model() -> None:
+    llm = RecordingLlm()
+    session = session_with(
+        CountingServers(), {"poet": llm}, config=config_with_fragment()
+    )
+
+    await run_reply(session, "hello")
+
+    assert llm.systems == [f"POET\n\n{FRAGMENT}"]
+
+
+async def test_an_agent_that_includes_nothing_is_sent_its_persona_alone() -> None:
+    """The other half of the opt-out: the fragment exists and this agent
+    does not carry it."""
+    llm = RecordingLlm()
+    session = session_with(
+        CountingServers(), {"poet": llm}, config=config_with_fragment([])
+    )
+
+    await run_reply(session, "hello")
+
+    assert llm.systems == ["POET"]
+
+
+async def test_activation_logs_the_fragment_beside_the_persona(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The event grows a source per injected block, so what a prompt
+    held is answerable from the retained logs without the session."""
+    with caplog.at_level("INFO"):
+        session = session_with(
+            CountingServers((Guidance("home", GUIDANCE),)),
+            {"poet": ScriptedLlm(["Said."])},
+            config=config_with_fragment(),
+        )
+        await run_reply(session, "hello")
+
+    (assembled,) = prompt_events(caplog)
+    assert assembled.sources == {
+        "persona": len("POET"),
+        "fragment:household": len(FRAGMENT),
+        "instructions:home": len(guidance_heading("home")) + len(f"\n{GUIDANCE}"),
+    }
+    assert assembled.characters == session.runtime._know_how.characters
 
 
 # The memory clock, which did not move

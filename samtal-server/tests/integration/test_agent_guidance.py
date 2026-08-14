@@ -7,11 +7,14 @@ outside is the mock LLM's `{system}` placeholder: a session's prompt is
 otherwise invisible from the far end, so the reply is the prompt, spoken
 back.
 
-Two properties carry the file. Guidance follows the grant, so two agents
-granted one entry both speak it and an `mcp: []` agent speaks none of
-it. And the two halves of the prompt keep their two clocks, which the
-held session proves in the only place it can be proved: inside one
-conversation, across a reload and an agent switch.
+Three properties carry the file. Guidance follows the grant, so two
+agents granted one entry both speak it and an `mcp: []` agent speaks
+none of it. A shared fragment follows the include, so one block of text
+written in one place reaches every agent that names it, and an edit of
+it reaches them at the restart the write said it would. And the two
+halves of the prompt keep their two clocks, which the held session
+proves in the only place it can be proved: inside one conversation,
+across a reload and an agent switch.
 """
 
 import asyncio
@@ -220,6 +223,89 @@ async def test_the_api_reads_back_the_prompt_the_model_was_given(
     assert body["characters"] == len(
         "\n\n".join(block["text"] for block in body["blocks"])
     )
+
+
+# A shared fragment, written once and spoken by everyone who includes it
+
+
+FRAGMENT = "Bins on Tuesday."
+
+REWRITTEN = "Bins on Friday."
+
+
+def sharing_config(directory: Path) -> Config:
+    """Two agents that include one fragment, and one that does not, each
+    on a device of its own."""
+    return Config(
+        server={"database": {"dir": str(directory)}},
+        providers={
+            "llm": {"mock": speaks_its_prompt()},
+            "asr": {"mock": {"type": "mock", "text": "what can you do"}},
+            "tts": {"mock": {"type": "mock"}},
+            "vad": {"mock": {"type": "mock"}},
+        },
+        prompt_fragments={"household": {"text": FRAGMENT}},
+        agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
+        agents={
+            "house": {"prompt": "HOUSE", "prompt_includes": ["household"]},
+            "kids": {"prompt": "KIDS", "prompt_includes": ["household"]},
+            "quiet": {"prompt": "QUIET"},
+        },
+        devices={HOUSE_MAC: ["house"], KIDS_MAC: ["kids"], QUIET_MAC: ["quiet"]},
+        default_agent="house",
+    )
+
+
+async def test_a_fragment_written_once_is_spoken_by_every_agent_that_includes_it(
+    serve_app_in, restart_in, simulate, tmp_path: Path
+) -> None:
+    """The issue's verification for the shared half, end to end: one
+    block of text, written in one place, reaching two agents and not the
+    third, and an edit of it reaching both of them at the restart the
+    write said it would.
+    """
+    directory = tmp_path / "db"
+    config = sharing_config(directory)
+    async with serve_app_in(directory, config) as (port, _), control_client(port) as control:
+        house, _ = await simulate(port, HOUSE_MAC)
+        kids, _ = await simulate(port, KIDS_MAC)
+        quiet, _ = await simulate(port, QUIET_MAC)
+
+        assert spoken(house).startswith("HOUSE")
+        assert FRAGMENT in spoken(house)
+        assert spoken(kids).startswith("KIDS")
+        assert FRAGMENT in spoken(kids)
+        assert spoken(quiet).startswith("QUIET")
+        assert FRAGMENT not in spoken(quiet)
+
+        # The surface counts the block it injected, over the same socket
+        # the device is on.
+        preview = await control.get("/runtime/agents/house/prompt")
+        assert preview.status_code == 200, preview.text
+        blocks = {block["provenance"]: block for block in preview.json()["blocks"]}
+        assert blocks["fragment:household"]["text"] == FRAGMENT
+        assert blocks["fragment:household"]["characters"] == len(FRAGMENT)
+
+        written = await control.put(
+            "/prompt-fragments/household", json={"text": REWRITTEN}
+        )
+        assert written.status_code == 200, written.text
+        assert "next server start" in written.json()["notice"]
+
+        # This server read the fragment at boot and is still holding it,
+        # which is what the notice says.
+        during, _ = await simulate(port, HOUSE_MAC)
+        assert FRAGMENT in spoken(during)
+        assert REWRITTEN not in spoken(during)
+
+    # The restart the write named, on the database the write landed in.
+    async with restart_in(directory, config) as (port, _):
+        house, _ = await simulate(port, HOUSE_MAC)
+        kids, _ = await simulate(port, KIDS_MAC)
+
+    assert REWRITTEN in spoken(house)
+    assert REWRITTEN in spoken(kids)
+    assert FRAGMENT not in spoken(house)
 
 
 # The two clocks, in one held session
