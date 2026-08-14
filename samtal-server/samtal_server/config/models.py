@@ -932,6 +932,77 @@ class McpServerConfig(BaseModel):
         ),
     )
 
+    # The first of the two channels a server ships guidance in: the
+    # `instructions` of its initialize result. Off by default, because
+    # a third party's words steering the agent is a decision the
+    # operator takes per entry and per channel (#122).
+    use_server_instructions: bool = Field(
+        default=False,
+        description=(
+            "Whether to inject the guidance this server ships about itself, the "
+            "`instructions` field of its initialize result, into the system prompt of "
+            "every agent this entry is granted to. Off by default, and deliberately: "
+            "the entry's own `instructions` is what your operator wrote, while this is "
+            "a third party's text steering the agent, so consuming it is an explicit "
+            "opt-in taken per entry and per channel. What a server ships is captured on "
+            "every connect whatever this says, so turning it on applies at the next "
+            "reload without restarting the connection, and turning it off stops the "
+            "injection at the next activation. A block longer than 4000 characters is "
+            "skipped whole rather than truncated. The block sits after this entry's own "
+            "guidance, and `samtal-server config prompt <agent>` reports it under "
+            "`server_instructions:<entry>`, so an operator can see whose words they are "
+            "reading."
+        ),
+    )
+
+    # The second channel: the prompts the server publishes, named one
+    # by one because the specification defines them as user-controlled
+    # templates and a server may publish dozens.
+    inject_prompts: list[NonBlankStr] | None = Field(
+        default=None,
+        description=(
+            "The prompts this server publishes that are injected into the system prompt "
+            "of every agent this entry is granted to, each by the name the server lists "
+            "it under and in the order listed here. Unset means none, which is the "
+            "default: a third party's text steering the agent is an opt-in per entry "
+            "and per channel, and the specification defines prompts as user-controlled "
+            "templates, so the operator who read the server's documentation names the "
+            "ones that are standing guidance rather than invocable templates. Every "
+            "name is validated against the server's own paginated prompt listing before "
+            "anything is fetched, and a name the listing does not carry, one whose "
+            "prompt declares required arguments, one that renders anything but text, "
+            "and a rendered block longer than 4000 characters are each skipped with a "
+            "warning naming this entry and the position in this list, never the name "
+            "itself, since a server-chosen name is not this server's to print. Editing "
+            "this list changes what a connect fetches, so unlike the other two prompt "
+            "fields it restarts the connection when a reload applies it. A name listed "
+            "twice is refused."
+        ),
+    )
+
+    @field_validator("inject_prompts")
+    @classmethod
+    def _check_inject_prompts(cls, value: list[str] | None) -> list[str] | None:
+        """One entry per prompt. Naming a prompt twice would fetch it
+        twice and inject it twice, which is a thing to say once if it is
+        meant at all.
+
+        The refusal points at positions and never at what is in them, the
+        rule this list follows everywhere else: a prompt name is a
+        server-chosen string the operator copied, so nothing bounds what
+        it holds, and this sentence leaves the boundary as a printed CLI
+        line, an HTTP 422 body and a boot log.
+        """
+        if value is None:
+            return value
+        repeated = _repeated_positions(value)
+        if repeated:
+            raise ValueError(
+                f"inject_prompts names one prompt at more than one position "
+                f"({repeated}); list each prompt once"
+            )
+        return value
+
     @model_validator(mode="after")
     def _check_transport_fields(self) -> "McpServerConfig":
         stdio_only = ("command", "args", "env")

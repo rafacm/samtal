@@ -86,6 +86,49 @@ def test_blank_guidance_is_refused_by_the_rule_and_not_by_its_value(written: str
     assert "leave the key out" in str(caught.value)
 
 
+def test_the_server_guidance_opt_ins_are_off_by_default() -> None:
+    """Both channels a server can ship guidance in are closed until the
+    operator opens them, which is the whole of the trust decision."""
+    entry = config_with(mcp_servers={"ha": STDIO}).mcp_servers["ha"]
+
+    assert entry.use_server_instructions is False
+    assert entry.inject_prompts is None
+
+
+def test_the_server_guidance_opt_ins_parse_as_written() -> None:
+    config = config_with(
+        mcp_servers={
+            "ha": STDIO
+            | {"use_server_instructions": True, "inject_prompts": ["house_style", "safety"]}
+        }
+    )
+
+    entry = config.mcp_servers["ha"]
+    assert entry.use_server_instructions is True
+    assert entry.inject_prompts == ["house_style", "safety"]
+
+
+def test_a_prompt_named_twice_is_refused_by_position_and_not_by_value() -> None:
+    """A configured prompt name is a server-chosen string the operator
+    copied, so it may hold anything at all; the refusal says where the
+    repetition is and never what is repeated."""
+    secret = "sk-test-9f2b-never-a-real-credential"
+    with pytest.raises(ValidationError) as caught:
+        config_with(
+            mcp_servers={"ha": STDIO | {"inject_prompts": [secret, "other", secret]}}
+        )
+
+    problem = str(caught.value)
+    assert "inject_prompts names one prompt at more than one position (1, 3)" in problem
+    assert secret not in problem
+
+
+@pytest.mark.parametrize("written", ["", "   "])
+def test_a_blank_prompt_name_is_refused(written: str) -> None:
+    with pytest.raises(ValidationError):
+        config_with(mcp_servers={"ha": STDIO | {"inject_prompts": [written]}})
+
+
 @pytest.mark.parametrize("name", ["self", "switch_agent", "remember", "home.assistant"])
 def test_a_reserved_or_unusable_entry_name_fails_the_boot(name: str) -> None:
     with pytest.raises(ValidationError, match="not a usable entry name"):
