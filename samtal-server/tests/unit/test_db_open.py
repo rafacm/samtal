@@ -20,15 +20,29 @@ from samtal_server.db import DATABASE_FILENAME, open_database
 EXPECTED_TABLES = {
     "providers",
     "mcp_servers",
+    "prompt_fragments",
     "agent_defaults",
     "agents",
     "devices",
     "domain_settings",
 }
 
+# The columns a migration after the baseline adds, so a chain that
+# stopped early fails here rather than at the first write on a
+# deployment. The same set the installed-wheel check in CI holds.
+EXPECTED_COLUMNS = {
+    "mcp_servers": {"instructions"},
+    "agent_defaults": {"prompt_includes"},
+    "agents": {"prompt_includes"},
+}
+
 
 def _tables(engine) -> set[str]:
     return set(inspect(engine).get_table_names())
+
+
+def _columns(engine, table: str) -> set[str]:
+    return {column["name"] for column in inspect(engine).get_columns(table)}
 
 
 def _version(engine) -> list[str]:
@@ -357,6 +371,16 @@ def test_a_seeded_baseline_database_upgrades_to_head_with_every_value_kept(
     # And what 0002 added is unset on a row that predates it, which is
     # the whole of what a nullable additive column promises.
     assert entry.instructions is None
+    # 0003 is additive in the other two shapes as well: a new table,
+    # empty because nothing wrote a fragment, and a nullable column on
+    # each layer table.
+    engine = open_database(directory)
+    try:
+        assert EXPECTED_TABLES <= _tables(engine)
+        for table, added in EXPECTED_COLUMNS.items():
+            assert added <= _columns(engine, table)
+    finally:
+        engine.dispose()
 
 
 def test_the_migrations_ship_inside_the_package() -> None:

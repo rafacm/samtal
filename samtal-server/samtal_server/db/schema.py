@@ -95,6 +95,16 @@ mcp_servers = Table(
     Column("secrets", JSON, nullable=False, default=dict),
 )
 
+# The shared blocks of prompt text agents include by name. Two columns
+# and nothing else: the name a layer references, and the text, held as
+# it was written because that is what the model is given.
+prompt_fragments = Table(
+    "prompt_fragments",
+    metadata,
+    Column("name", Text, primary_key=True),
+    Column("text", Text, nullable=False),
+)
+
 agent_defaults = Table(
     "agent_defaults",
     metadata,
@@ -107,6 +117,9 @@ agent_defaults = Table(
     # so an empty list and a null are different configurations.
     Column("mcp", JSON, nullable=True),
     Column("filler", JSON, nullable=True),
+    # The fragment names this layer's prompt carries, under the same
+    # rule as mcp above: null is inherit and an empty list opts out.
+    Column("prompt_includes", JSON, nullable=True),
     CheckConstraint(f"id = '{AGENT_DEFAULTS_ID}'", name="singleton"),
 )
 
@@ -121,6 +134,7 @@ agents = Table(
     Column("vad", Text, nullable=True),
     Column("mcp", JSON, nullable=True),
     Column("filler", JSON, nullable=True),
+    Column("prompt_includes", JSON, nullable=True),
 )
 
 # An entity table rather than bare binding rows, so the per-device
