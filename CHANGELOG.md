@@ -5,6 +5,55 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-14
+
+### Added
+
+- **An MCP server entry carries its own guidance** (#122): an
+  `instructions` field on an `mcp_servers` entry holds what the model
+  should know about using that server's tools, and it is injected into
+  the system prompt of every agent the entry is granted to, under a
+  heading naming the prefix its tools carry (`home__`). Know-how about
+  a capability now lives beside the capability instead of being copied
+  into every persona that was granted it. The grant is the whole
+  condition: it is injected whether or not the server is connected and
+  whatever an allow list narrows its tools to, and an agent with
+  `mcp: []` sees none of it. The text is stored and injected exactly as
+  written, indentation and blank lines included. Editing it does not
+  restart the connection, so a reload reports the entry as `unchanged`
+  and the tools do not blink; the new text reaches a conversation at
+  its next activation, a new session or an agent switch, and never a
+  reply of one already running.
+- **An operator can read an agent's assembled prompt** (#122):
+  `GET /api/runtime/agents/{name}/prompt`, and `samtal-server config
+  prompt <agent>` as its client, answer the system prompt a session
+  opening now as that agent would be sent: the ordered blocks, each
+  with its provenance (`persona`, `instructions:<entry>`, `memory`),
+  its size in characters and its text, plus the total to tune a small
+  model's context budget against. It is assembled from the loaded
+  agents, the running MCP slice and the memory store rather than from
+  the database, so it cannot disagree with what a session would get,
+  and it is a preview of a new session rather than a readback of a
+  running one. The CLI prints whole blocks and truncates nothing, since
+  a concealed tail is exactly what an operator came to see. Agent
+  activation also logs a `prompt_assembled` event with the same
+  per-source counts.
+
+### Changed
+
+- **The system prompt is assembled in one documented order** (#122):
+  the agent's own prompt, then the guidance of each granted MCP entry
+  in grant order, then the remembered facts last under the heading they
+  have always had, separated by blank lines. For a deployment with no
+  guidance configured, the prompt is character for character what it
+  was. The persona and the guidance are assembled when a conversation
+  starts and again when it switches agents, and held for the life of
+  that activation; the remembered facts keep the clock they had, read
+  on every reply, so a fact stored by one conversation is still known
+  to a concurrent one on its next reply. That read now happens in a
+  worker thread rather than on the event loop every conversation
+  shares.
+
 ## 2026-08-13
 
 ### Added

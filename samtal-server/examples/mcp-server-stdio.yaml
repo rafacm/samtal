@@ -44,3 +44,18 @@ egress: false
 # How long one call may take before the model is told it timed out. The
 # device hears silence meanwhile, so keep it short.
 # tool_timeout_s: 15
+
+# What the model should know about using this server's tools, injected
+# into the system prompt of every agent this entry is granted to, under
+# a heading naming the prefix its tools carry. Written for the whole
+# entry rather than for one tool, so write about the surface the agents
+# are actually granted: guidance about a tool an allow list withholds is
+# noise in every prompt that carries it.
+#
+# It applies at the next activation of a conversation (a new session, or
+# an agent switch) once the running server has been asked to reload, and
+# editing it does not restart the connection.
+instructions: |
+  The lights, the blinds and the front door are on this server. Turn
+  lights on and off freely. Always ask the user to confirm before
+  unlocking the door, and say which door you are about to unlock.

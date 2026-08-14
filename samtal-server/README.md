@@ -604,6 +604,46 @@ reserved entry name. A server that is merely unreachable does not: it
 logs a warning, contributes no tools, and reconnects in the background
 when a session that would use it opens.
 
+**Guidance for a server's tools.** A tool's own description says what
+it does; how this deployment wants it used is the operator's, and it
+belongs beside the server rather than copied into every persona that
+was granted it. An entry's `instructions` is that text, injected into
+the system prompt of every agent the entry is granted to:
+
+```bash
+samtal-server config set mcp-server home -f - <<'YAML'
+transport: stdio
+command: mcp-proxy
+args: ["http://homeassistant.local:8123/mcp_server/sse"]
+instructions: |
+  The lights, the blinds and the front door are on this server. Turn
+  lights on and off freely. Always ask the user to confirm before
+  unlocking the door.
+YAML
+```
+
+It is stored and injected exactly as written, indentation and blank
+lines included, and it goes into the prompt under a heading naming the
+prefix its tools carry (`home__`), so the model can tie the paragraph to
+the names it can call.
+
+The grant is the whole condition. Every agent granted the entry is told
+about it, whether or not the server is connected and whatever an allow
+list narrows its tools to; an agent with `mcp: []` is told none of it.
+That means guidance about a tool a particular agent cannot reach is
+noise in that agent's prompt, and the answer is to write about the
+surface the agents are actually granted, not to expect the server to
+work it out. Guidance is whole-entry: an entry whose tools want two
+different paragraphs is two entries.
+
+Editing it does not restart the connection, since it is prompt text the
+connection never sees, so a reload reports the entry as `unchanged` and
+the tools do not blink. What that costs is stated rather than hidden:
+the new text reaches a conversation at its **next activation**, a new
+session or an agent switch, and a conversation already running keeps
+the text it was activated with until it ends. Sessions are minutes
+long, so what an edit buys is the next one.
+
 **The device's own tools** need no configuration. A board whose hello
 advertises `features.mcp` is asked for its tools over the same socket
 the audio runs on, and they arrive under their firmware names with the
@@ -658,6 +698,65 @@ The condition for revisiting this is the display: when the device path
 can render more than speech, a result can start carrying structured
 content to the board, and that work belongs beside the display protocol
 rather than inside the tool loop.
+
+### What the model is actually sent
+
+An agent's system prompt is assembled from more than one place now, so
+there is a command that says what it adds up to:
+
+```console
+$ samtal-server config prompt house
+persona (112 characters)
+You are the assistant in the living room. Answer in the language you
+were spoken to, and keep answers short: this is spoken out loud.
+
+instructions:home (168 characters)
+Guidance for using the tools whose names begin with home__:
+The lights, the blinds and the front door are on this server. Turn
+lights on and off freely. Always ask the user to confirm before
+unlocking the door.
+
+memory (94 characters)
+You remember these facts about past conversations:
+- the user is vegetarian
+- the user's dog is called Bosse
+
+total: 378 characters
+```
+
+**The order is fixed and documented**, and deliberately not
+configurable: the agent's own prompt first, because it says who is
+speaking and everything after it is read in that voice; then the
+guidance of each MCP entry the agent is granted, in the order the grants
+name them, each under its heading; then the remembered facts last, under
+the heading they have always had. Blocks are separated by blank lines.
+One documented order beats a per-deployment permutation, and it is what
+lets a later feature compose against a known base.
+
+**Each block is counted** because every one of them competes with the
+others for the context budget of a small local model, and there is no
+automatic trimming: a server that silently dropped an instruction block
+would be worse than one that says what it injected. The number to tune
+against is the total. Agent activation also logs a `prompt_assembled`
+event with the same per-source counts, so a model that degrades in the
+field can be diagnosed from the retained logs without reproducing the
+session.
+
+**It is a preview of a new session**, not a readback of a running one.
+The persona and the guidance are assembled when a conversation starts
+and again when it switches agents, and held for the life of that
+activation; the remembered facts are read on every reply, so a fact
+stored by one conversation is known to a concurrent one on its next
+reply. So this command answers what a session opening now would be
+given, which is what an operator auditing a configuration wants, and a
+conversation that started before the last reload is holding the older
+text until it ends.
+
+Over the API it is `GET /api/runtime/agents/{name}/prompt`, and it is a
+read of the running server rather than of the database: the agents this
+server loaded, the MCP slice it is running, and the memory it writes.
+An agent this server has not loaded answers 404 naming the restart,
+since an agent's providers are built at boot.
 
 ### What the MCP servers are doing
 
@@ -744,6 +843,13 @@ credential applies here too), one that is gone or no longer referenced
 is stopped, and an unchanged one keeps the connection it had, untouched.
 The four outcomes come back with the status document, so one command
 both applies and verifies.
+
+An entry whose `instructions` is all that changed is `unchanged`, and
+that word is about the connection: nothing was reconnected, and the new
+guidance is what the next activation reads. That is deliberate. The
+text configures a prompt and not a connection, so dropping a live one
+to apply it (mid-call tools, a respawned stdio child) would be churn
+without a cause.
 
 **What still needs a restart** is everything else, and that includes
 most of an agent: its prompt, its providers, its memory and its filler
@@ -1076,16 +1182,20 @@ kept apart from the entity namespaces because an entity may legally be
 named after any word a route might want:
 
 ```
+GET                 /api/runtime/agents/{name}/prompt
 GET                 /api/runtime/mcp-servers
 POST                /api/runtime/mcp-servers/reload
 ```
 
-The read answers what each configured MCP server is doing right now,
-which [What the MCP servers are doing](#what-the-mcp-servers-are-doing)
-describes and `samtal-server config status` prints. The reload applies
-the stored MCP entries and grant lists to the running server, which
-[Applying an MCP change without a
-restart](#applying-an-mcp-change-without-a-restart) describes and
+The first answers the system prompt a session opening now as that agent
+would be sent, block by block with the size of each, which [What the
+model is actually sent](#what-the-model-is-actually-sent) describes and
+`samtal-server config prompt` prints. The second answers what each
+configured MCP server is doing right now, which [What the MCP servers
+are doing](#what-the-mcp-servers-are-doing) describes and `samtal-server
+config status` prints. The reload applies the stored MCP entries and
+grant lists to the running server, which [Applying an MCP change without
+a restart](#applying-an-mcp-change-without-a-restart) describes and
 `samtal-server config reload` prints; it is the only route here that
 changes what the server is doing rather than what is stored.
 
