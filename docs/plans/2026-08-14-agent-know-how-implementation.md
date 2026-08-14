@@ -660,3 +660,113 @@ Not verified locally, and stated rather than claimed: the
 installed-wheel migration check, which builds a wheel and migrates a
 fresh database from it, runs in CI only. It learned the new table and
 the two new columns in the same change as the migration.
+
+### PR #131 review round
+
+One external review of the milestone's diff: codex CLI, model
+gpt-5.6-sol, read-only, 2026-08-14, with CI green on all three lanes.
+Verdict: mergeable after the listed fixes. Findings as received,
+condensed; each carries the commit that addressed it.
+
+1. **P1: invalid fragment names leak when the body is also invalid.**
+   `set_prompt_fragment` parses the body at the location
+   `prompt_fragments.<name>` before checking the name's charset, so a
+   `PUT /prompt-fragments/<credential>.pasted` with a body the models
+   refuse answers with a sentence carrying the rejected name. The tests
+   used only a valid body, which is why they missed the ordering.
+   Suggested: validate the name with a name-only helper before parsing,
+   and add invalid-name-plus-invalid-body sentinel tests across HTTP,
+   the CLI streams, logs, headers and the exception chain.
+   *Resolution*: adopted in efa668a. The charset check runs first,
+   through `is_valid_fragment_name`, a predicate that needs nothing of
+   the body, and the rule it refuses with is one sentence in one place
+   (`PROMPT_FRAGMENT_NAME_RULE`), which is what let the check move in
+   front of the parse at all. The store, HTTP and CLI cases are
+   parametrized over the bodies a mistake produces (blank, mistyped,
+   over-keyed, absent, not a mapping), with the sentinel looked for on
+   both streams, in the response headers, in this server's log records
+   and through the whole exception chain.
+
+2. **P1: missing-fragment reads and deletes reflect the rejected
+   identifier.** `read_prompt_fragment` and `delete_prompt_fragment`
+   interpolate an unknown path value into `UnknownEntityError`, which
+   reaches a 404 body and the CLI's stderr, and a test pinned that
+   behavior rather than catching it. Suggested: a fixed sentence, plus
+   credential-shaped missing-name tests for the remote and `--local`
+   reads and deletes.
+   *Resolution*: adopted in a3dd6b8. Both answer `NO_SUCH_FRAGMENT`,
+   one fixed sentence naming the section and the fact: a name that
+   addresses no fragment arrived in a URL path or on a command line and
+   was validated by nothing here, and the operator can see what they
+   typed without this server repeating it. The tests drive
+   credential-shaped names through the read and the delete on both
+   paths.
+
+   The boundary is worth stating, because the same interpolation is how
+   every other section answers a miss (`providers.<stage>.<name>: no
+   such provider`, `mcp_servers.<name>`, `agents.<name>`,
+   `devices.<mac>`, and the two secret-slot refusals). Those were not
+   rewritten here: each has its own validation story, several of those
+   names are checked before they are used in ways a fragment name is
+   not, and a milestone that widened the change would be changing
+   sentences its own tests are not about. The fragment case is the one
+   this milestone introduced, and it is the one fixed. Whether the rest
+   should follow is a question worth its own issue rather than a
+   silent decision here.
+
+3. **P2: the invalid-name exception-chain test does not test its stated
+   claim.** The parametrized names were all checked against one
+   unrelated long sentinel, so for a name like `household.facts`
+   pydantic's `ValidationError` renders the rejected mapping, keys
+   included, while the test passes. Suggested: assert each parametrized
+   name is absent, use a short sentinel that truncation cannot hide,
+   and make sure raw pydantic input cannot appear in the escaping
+   exception.
+   *Resolution*: adopted in b88ef4b. The test asks the rule itself
+   rather than a model, and looks for each name it was given rather
+   than for one it was not; a short sentinel joins the long one, since
+   a long value can be lost to something truncating a representation
+   instead of to anything keeping it out. Beside it, a new test pins
+   the claim where it has to hold: the write, the boot composition and
+   a row that reached the table some other way each answer with this
+   repository's own refusal, built from the error's locations and
+   messages and raised after the handler, so there is no cause and no
+   context to walk back to, and `input_value` appears in none of them.
+   No production change was needed for this one, which is the point of
+   pinning it.
+
+4. **P3: generated and operator documentation omit prompt fragments
+   from existing exhaustive lists.** The envelope's `secrets` field
+   names the kinds that hold no stored secret without naming fragments,
+   and the changelog's provenance list omits `fragment:<name>`.
+   *Resolution*: adopted in 7768304. Both lists gained the member, and
+   the OpenAPI document was regenerated from the description rather
+   than edited. A reader checks a list like that rather than reading
+   past it, so a missing member reads as a statement.
+
+### Verification after the review round
+
+Same commands, from `samtal-server/`, on the tree at 7768304.
+
+```
+uv run ruff check .
+All checks passed!
+
+uv run pytest tests/unit -q
+1782 passed, 15 skipped in 153.18s
+
+uv run pytest tests/integration -q
+52 passed in 156.42s
+
+uv run samtal-server config reference | diff against the committed copy
+reference current
+
+uv run samtal-server config openapi | diff against the committed copy
+openapi current
+```
+
+Thirty-five more unit tests than before the round, which is what the
+parametrization added: the bodies an unusable name can arrive with on
+three paths, the missing-name reads and deletes on two, and the two
+name tests the round rewrote. The installed-wheel migration check still
+runs in CI only.
