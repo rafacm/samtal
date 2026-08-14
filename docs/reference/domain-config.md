@@ -171,12 +171,13 @@ samtal-server config set prompt-fragment <name> -f fragment.yaml
 
 | Field | Type | Default | Description |
 | --- | --- | --- | --- |
-| `text` | `str` | `required` | The text injected into the system prompt of every agent whose prompt_includes names this fragment, exactly as written: indentation and blank lines are part of it, and nothing is added around it, not even a heading, since this is prompt text the operator wrote and a heading would editorialize. It sits after the agent's own prompt and before any MCP guidance, in the order the including layer lists it. There is no length cap: what each block costs is reported by `samtal-server config prompt <agent>`, and the operator is the one who knows what their model tolerates. |
+| `text` | `str` | `required` | The text injected into the system prompt of every agent whose prompt_includes names this fragment, as written: its indentation and its own blank lines are part of it, and nothing is added around it, not even a heading, since this is prompt text the operator wrote and a heading would editorialize. The only bytes trimmed are whitespace at the two ends of the whole assembled prompt, which is also what the inspection surface reports. It sits after the agent's own prompt and before any MCP guidance, in the order the including layer lists it. There is no length cap: what each block costs is reported by `samtal-server config prompt <agent>`, and the operator is the one who knows what their model tolerates. |
 
 Nothing is added around the text, not one heading: it is prompt text the
 operator wrote, and a heading would editorialize. The blocks are injected in
 the order the including layer lists them, after the agent's own prompt and
-before any MCP server's guidance.
+before any MCP server's guidance, and the only bytes trimmed are whitespace at
+the two ends of the whole assembled prompt.
 
 A fragment that some layer still includes cannot be deleted, which is the same
 reference rule that keeps a referenced provider or MCP server from being taken

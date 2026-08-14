@@ -167,7 +167,8 @@ ENTITIES: tuple[Entity, ...] = (
             "Nothing is added around the text, not one heading: it is prompt text the "
             "operator wrote, and a heading would editorialize. The blocks are injected "
             "in the order the including layer lists them, after the agent's own prompt "
-            "and before any MCP server's guidance.",
+            "and before any MCP server's guidance, and the only bytes trimmed are "
+            "whitespace at the two ends of the whole assembled prompt.",
             "A fragment that some layer still includes cannot be deleted, which is the "
             "same reference rule that keeps a referenced provider or MCP server from "
             "being taken away underneath an agent.",

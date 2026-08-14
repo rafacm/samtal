@@ -12,7 +12,10 @@
 # after the agent's own prompt and before any MCP server's guidance, in
 # the order the layer lists it, and nothing is added around it: no
 # heading, no separator of its own, no rewriting. What is written here
-# is what the model reads, indentation and blank lines included.
+# is what the model reads, this file's indentation and its own blank
+# lines included; the only bytes trimmed are whitespace at the two ends
+# of the whole assembled prompt, and `samtal-server config prompt
+# <agent>` reports what was sent rather than what was stored.
 #
 # What belongs here is standing context every agent in the house shares,
 # so that it is written once instead of being copied into every persona
