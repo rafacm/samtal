@@ -144,11 +144,16 @@ Concretely, one parametrized test in
 Each case seeds what the act needs through the existing `run`
 fixture's HTTP path, captures the ordinary path's stderr notice for
 the act, re-seeds, and captures the `--local` stderr. The comparison
-takes the final stderr line of each invocation: the `--local` path
-prints `LOCAL_NOTICE` first, and the notice is the line `_report`
-prints last on both paths. The existing hand-synced comment in
-`_delete_device` stays as it is; its claim is now enforced by this
-test.
+does not stop at the final line: the `--local` invocation's stderr
+is pinned as a whole shape, the revised `LOCAL_NOTICE` followed by
+exactly the applicability notice the ordinary path answered for the
+same act, and nothing else. Pinning the whole shape is what catches
+the contradiction the final line alone would miss: a preamble that
+reasserted restart timing ahead of a reload notice would fail the
+equality, and to say so explicitly the MCP cases also assert
+`RESTART_NOTICE` appears nowhere in the local invocation's stderr.
+The existing hand-synced comment in `_delete_device` stays as it
+is; its claim is now enforced by this test.
 
 The fix lands before the test only in the sense that both are one
 commit series; the test is written to the API's answers, so it fails
@@ -249,6 +254,11 @@ resolution once the amendment addressing it lands.
    revised neutral `LOCAL_NOTICE` followed by the expected
    applicability notice; at minimum, MCP cases must assert that no
    preceding line claims restart is required.
+   *Resolution*: adopted. The test decision now pins the local
+   invocation's entire stderr shape (revised `LOCAL_NOTICE`, then
+   exactly the ordinary path's notice for the act, nothing else),
+   and the MCP cases additionally assert `RESTART_NOTICE` appears
+   nowhere in that stderr.
 3. **P2: operator documentation would remain false after the fix.**
    The file list excludes `samtal-server/README.md`, which
    repeatedly promises that every local change waits for restart
