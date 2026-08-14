@@ -359,6 +359,27 @@ async def test_a_listing_is_walked_page_by_page(
     assert skips(caplog) == []
 
 
+async def test_a_name_is_looked_up_exactly_as_it_was_written() -> None:
+    """A published prompt's name is an identifier the server chose, so a
+    configured `  spaced  ` is the prompt called `  spaced  ` and not
+    the one called `spaced`. A stripping type here would have fetched a
+    different prompt without saying so."""
+    written = "  spaced out  "
+    session = StubSession(
+        pages=[([listed(written), listed(written.strip())], None)],
+        results={
+            written: text_result("the padded one"),
+            written.strip(): text_result("the tidy one"),
+        },
+    )
+
+    captured = await discovered(session, with_prompts(), inject_prompts=[written])
+
+    assert session.fetched == [written]
+    assert [prompt.text for prompt in captured] == ["the padded one"]
+    assert [prompt.name for prompt in captured] == [written]
+
+
 async def test_a_server_without_the_capability_skips_every_name_at_once(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
