@@ -2,10 +2,11 @@
 stored.
 
 The status read answers from the MCP registry the serving application
-was handed, so what is checked here is the transport around it: the
-gate, the shape, the honest empty answer when there is no server, and
-the one structural reason this namespace exists at all, that an entity
-may legally be named after a word a route wants.
+was handed, and the prompt read from the assembly the composition root
+closed over, so what is checked here is the transport around them: the
+gate, the shape, the honest answer when there is no server, and the one
+structural reason this namespace exists at all, that an entity may
+legally be named after a word a route wants.
 """
 
 import sys
@@ -31,9 +32,12 @@ from samtal_server.config.loader import (
     ReloadInProgressError,
     StorageError,
 )
+from samtal_server.config.models import MemoryConfig
 from samtal_server.config.secrets import MASTER_KEY_ENV, generate_key
 from samtal_server.config.store import ConfigStore
 from samtal_server.db import open_database
+from samtal_server.runtime import prompt
+from samtal_server.runtime.prompt import Guidance
 from samtal_server.tools.mcp import CONNECTED, DOWN, UNUSED, McpReload, McpServers
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
@@ -102,9 +106,18 @@ def keys(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @contextmanager
 def serving(
-    directory: Path, servers: McpServers | None, reload: object = None
+    directory: Path,
+    servers: McpServers | None,
+    reload: object = None,
+    agent_prompt: object = None,
 ) -> Iterator[TestClient]:
-    api = build_api(TOKEN, directory, mcp_servers=servers, mcp_reload=reload)
+    api = build_api(
+        TOKEN,
+        directory,
+        mcp_servers=servers,
+        mcp_reload=reload,
+        agent_prompt=agent_prompt,
+    )
     with TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"}) as client:
         yield client
 
@@ -354,3 +367,115 @@ def test_the_reload_describes_a_422_of_its_own() -> None:
     assert rendered["/mcp-servers/{name}"]["put"]["responses"]["422"]["description"] == (
         PROBLEM_DESCRIPTIONS[422]
     )
+
+
+# The assembled-prompt read
+#
+# What this module owns, again: the gate, the shape of the answer, the
+# status code each refusal maps to, and the honest one when there is no
+# server. What the blocks hold is the assembler's, and the wiring that
+# hands a real one to a mounted application is checked at the end.
+
+PROMPT_PATH = "/runtime/agents/assistant/prompt"
+
+
+def previewing(assembled: object):
+    async def assemble(agent: str) -> object:
+        return assembled if agent == "assistant" else None
+
+    return assemble
+
+
+def test_the_prompt_read_needs_the_bearer_token(directory: Path) -> None:
+    with TestClient(build_api(TOKEN, directory)) as anonymous:
+        assert anonymous.get(PROMPT_PATH).status_code == 401
+        wrong = anonymous.get(PROMPT_PATH, headers={"Authorization": "Bearer wrong"})
+        assert wrong.status_code == 401
+
+
+def test_an_application_without_a_server_has_no_prompt_to_assemble(
+    client: TestClient,
+) -> None:
+    """Unlike the status read, there is no honest empty answer: an
+    application with no runtime cannot say what a session would be
+    sent, and an empty block list would say it had."""
+    response = client.post(RELOAD_PATH)
+    assert response.status_code == 503
+
+    response = client.get(PROMPT_PATH)
+
+    assert response.status_code == 503
+    assert set(response.json()) == {"detail"}
+    assert "no running server" in response.json()["detail"]
+
+
+def test_an_agent_this_server_did_not_load_is_a_404_naming_the_restart(
+    directory: Path,
+) -> None:
+    with serving(directory, None, agent_prompt=previewing(prompt.know_how("P"))) as client:
+        response = client.get("/runtime/agents/stranger/prompt")
+
+    assert response.status_code == 404
+    detail = response.json()["detail"]
+    assert "restart" in detail
+    # The name arrived in the path and is not quoted back.
+    assert "stranger" not in detail
+
+
+def test_the_blocks_and_the_total_are_the_assemblers_own(directory: Path) -> None:
+    assembled = prompt.with_memory(
+        prompt.know_how("POET", [Guidance("home", "Ask first.")]), "- a fact"
+    )
+
+    with serving(directory, None, agent_prompt=previewing(assembled)) as client:
+        answered = client.get(PROMPT_PATH)
+
+    assert answered.status_code == 200
+    body = answered.json()
+    assert set(body) == {"blocks", "characters"}
+    assert [block["provenance"] for block in body["blocks"]] == [
+        "persona",
+        "instructions:home",
+        "memory",
+    ]
+    assert [block["characters"] for block in body["blocks"]] == [
+        block.characters for block in assembled.blocks
+    ]
+    assert [block["text"] for block in body["blocks"]] == [
+        block.text for block in assembled.blocks
+    ]
+    # The total is the whole prompt rather than the sum of the blocks:
+    # the blank lines between them count.
+    assert body["characters"] == assembled.characters
+    assert body["characters"] > sum(block["characters"] for block in body["blocks"])
+
+
+def test_a_running_server_hands_its_own_assembly_to_the_api(
+    monkeypatch: pytest.MonkeyPatch, directory: Path, tmp_path: Path
+) -> None:
+    """The wiring, through the mount a deployment gets: the loaded
+    agent, the running slice and the memory store, none of which the API
+    application knows anything about."""
+    monkeypatch.setenv(API_SECRET_ENV, TOKEN)
+    config = config_with({"tools": entry_data(instructions="Ask first.")}, ["tools"], directory)
+    config = config.model_copy(update={"memory": MemoryConfig(dir=tmp_path / "memory")})
+    served = TestClient(create_app(config))
+
+    answered = served.get(
+        f"{MOUNT_PATH}{PROMPT_PATH}", headers={"Authorization": f"Bearer {TOKEN}"}
+    )
+
+    assert answered.status_code == 200, answered.text
+    body = answered.json()
+    assert [block["provenance"] for block in body["blocks"]] == [
+        "persona",
+        "instructions:tools",
+    ]
+    assert body["blocks"][0]["text"] == "A"
+    assert "Ask first." in body["blocks"][1]["text"]
+    # And an agent nothing loaded is the 404, through the same mount.
+    missing = served.get(
+        f"{MOUNT_PATH}/runtime/agents/stranger/prompt",
+        headers={"Authorization": f"Bearer {TOKEN}"},
+    )
+    assert missing.status_code == 404
