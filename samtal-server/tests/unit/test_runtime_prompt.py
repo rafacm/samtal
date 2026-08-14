@@ -192,6 +192,74 @@ def test_guidance_is_injected_verbatim_under_its_heading() -> None:
     assert assembled.text.endswith(guidance.text)
 
 
+def test_an_entrys_own_guidance_comes_before_what_its_server_shipped() -> None:
+    """The order inside one entry is the order the trust decisions were
+    taken: the operator's words, then the server's own description of
+    itself, then the prompts it publishes in the order the entry named
+    them. Each server-shipped block says the server is the one talking,
+    because the model is the one reader that cannot see a provenance."""
+    assembled = prompt.know_how(
+        "You are the house assistant.",
+        guidance=[
+            prompt.Guidance("home", "Ask before unlocking the door."),
+            prompt.ServerInstructions("home", "Call list_devices first."),
+            prompt.ServerPrompt("home", 1, "house_style", "Answer in short sentences."),
+        ],
+    )
+
+    assert assembled.text == (
+        "You are the house assistant.\n"
+        "\n"
+        "Guidance for using the tools whose names begin with home__:\n"
+        "Ask before unlocking the door.\n"
+        "\n"
+        "The server behind the tools whose names begin with home__ says this about "
+        "using them:\n"
+        "Call list_devices first.\n"
+        "\n"
+        "The server behind the tools whose names begin with home__ publishes this "
+        "guidance:\n"
+        "Answer in short sentences."
+    )
+    assert [block.provenance for block in assembled.blocks] == [
+        "persona",
+        "instructions:home",
+        "server_instructions:home",
+        "server_prompt:home:1",
+    ]
+
+
+def test_a_shipped_prompt_is_reported_by_position_and_carries_its_name() -> None:
+    """The token is the position, since it is printed in a log and in a
+    structured event and a server-chosen name belongs in neither; the
+    name travels beside it as data, for the surfaces that echo what the
+    operator wrote."""
+    assembled = prompt.know_how(
+        "P",
+        guidance=[
+            prompt.ServerPrompt("home", 2, "sk-not-a-real-credential\x1b[2J", "G")
+        ],
+    )
+
+    shipped = assembled.blocks[1]
+    assert shipped.provenance == "server_prompt:home:2"
+    assert shipped.name == "sk-not-a-real-credential\x1b[2J"
+    assert shipped.name not in shipped.provenance
+
+
+def test_an_ordinary_block_carries_no_name() -> None:
+    assembled = prompt.with_memory(
+        prompt.know_how(
+            "P",
+            fragments=[prompt.Fragment("household", "F")],
+            guidance=[prompt.Guidance("home", "G")],
+        ),
+        "- a fact",
+    )
+
+    assert [block.name for block in assembled.blocks] == [None, None, None, None]
+
+
 # The blocks are the prompt
 #
 # The surface exists to say what the model receives, so the blocks it
@@ -207,12 +275,24 @@ AWKWARD = [
     ("", (prompt.Guidance("home", "Ask first."),), ""),
     ("   ", (), "- a fact"),
     ("POET", (prompt.Guidance("home", "Ask first."),), "- a fact\n"),
+    # A server's own bytes are inside the same contract rather than
+    # exempt from it: this is a third party's whitespace, and the block
+    # still reports exactly what was sent.
+    ("  POET", (prompt.ServerInstructions("home", "Call list_devices.\n\n"),), ""),
+    (
+        "",
+        (
+            prompt.ServerInstructions("home", "  Shipped.\n"),
+            prompt.ServerPrompt("home", 1, "house_style", "Published.\n\n"),
+        ),
+        "",
+    ),
 ]
 
 
 @pytest.mark.parametrize(("persona", "guidance", "facts"), AWKWARD)
 def test_the_prompt_is_the_blocks_and_nothing_else(
-    persona: str, guidance: tuple[prompt.Guidance, ...], facts: str
+    persona: str, guidance: tuple[prompt.GuidanceBlock, ...], facts: str
 ) -> None:
     """The equality the inspection surface is worth nothing without: a
     byte the model is sent is a byte some block reports, and a byte a
@@ -229,7 +309,7 @@ def test_the_prompt_is_the_blocks_and_nothing_else(
 
 @pytest.mark.parametrize(("persona", "guidance", "facts"), AWKWARD)
 def test_no_block_holds_whitespace_the_prompt_does_not(
-    persona: str, guidance: tuple[prompt.Guidance, ...], facts: str
+    persona: str, guidance: tuple[prompt.GuidanceBlock, ...], facts: str
 ) -> None:
     """The other side of it, stated as the rule that produces it: the
     ends of the prompt are trimmed, so the ends of the first and last

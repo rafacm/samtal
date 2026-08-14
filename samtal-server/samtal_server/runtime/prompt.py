@@ -38,6 +38,14 @@ persona speaks within; the guidance blocks after those in grant order,
 each under a one-line heading naming the prefix its tools carry,
 because they are about the tools rather than about the speaker; the
 remembered facts last, which is where they already were.
+
+One entry contributes up to three guidance blocks, and their order is
+the order the trust decisions were taken: what the operator wrote about
+the entry, then what the server shipped about itself where the entry
+opted into it, then the prompts that server publishes in the order the
+entry named them. The two server-shipped kinds sit under headings that
+say the server is the one talking, because the model is the one reader
+that cannot see the provenance every other surface reports.
 """
 
 from collections.abc import Sequence
@@ -66,6 +74,15 @@ INSTRUCTIONS = "instructions"
 # parse time unless it is written in that charset.
 FRAGMENT = "fragment"
 
+# What one MCP server shipped about itself, through each of the two
+# channels it has. Qualified by the entry name for the instructions, and
+# by the entry name and the position in the entry's `inject_prompts` for
+# a published prompt: a prompt's own name is a server-chosen string the
+# operator copied, so nothing bounds what it holds and it is not part of
+# a token this server prints.
+SERVER_INSTRUCTIONS = "server_instructions"
+SERVER_PROMPT = "server_prompt"
+
 
 def instructions_provenance(entry: str) -> str:
     return f"{INSTRUCTIONS}:{entry}"
@@ -73,6 +90,14 @@ def instructions_provenance(entry: str) -> str:
 
 def fragment_provenance(name: str) -> str:
     return f"{FRAGMENT}:{name}"
+
+
+def server_instructions_provenance(entry: str) -> str:
+    return f"{SERVER_INSTRUCTIONS}:{entry}"
+
+
+def server_prompt_provenance(entry: str, position: int) -> str:
+    return f"{SERVER_PROMPT}:{entry}:{position}"
 
 
 def guidance_heading(entry: str) -> str:
@@ -85,6 +110,29 @@ def guidance_heading(entry: str) -> str:
     is about.
     """
     return f"Guidance for using the tools whose names begin with {entry}{names.SERVER_SEPARATOR}:"
+
+
+def server_instructions_heading(entry: str) -> str:
+    """The one line the server's own description of itself sits under.
+
+    It names the server rather than the deployment, which the operator
+    block's heading does not have to: these are a third party's words,
+    injected because an entry opted into them, and a model reading the
+    prompt should be able to tell whose advice it is following as
+    plainly as the operator reading the inspection surface can.
+    """
+    return (
+        f"The server behind the tools whose names begin with "
+        f"{entry}{names.SERVER_SEPARATOR} says this about using them:"
+    )
+
+
+def server_prompt_heading(entry: str) -> str:
+    """The same, for one of the prompts that server publishes."""
+    return (
+        f"The server behind the tools whose names begin with "
+        f"{entry}{names.SERVER_SEPARATOR} publishes this guidance:"
+    )
 
 
 @dataclass(frozen=True)
@@ -113,12 +161,53 @@ class Guidance:
 
 
 @dataclass(frozen=True)
+class ServerInstructions:
+    """What one connected MCP server shipped about itself, as the
+    registry captured it: the entry it came in on, and the text.
+
+    A separate shape from `Guidance` rather than a flag on it, because
+    the two are separate trust decisions with separate provenance and
+    separate headings, and a boolean would leave every reader to
+    remember which way round it went."""
+
+    entry: str
+    text: str
+
+
+@dataclass(frozen=True)
+class ServerPrompt:
+    """One prompt an MCP server published, rendered and captured: the
+    entry, the position the operator listed it at, the name they wrote,
+    and the text.
+
+    The position is what every token and every log line identifies it
+    by; the name travels beside them for the surfaces that echo
+    operator-written configuration back, and nowhere else."""
+
+    entry: str
+    position: int
+    name: str
+    text: str
+
+
+# What an MCP entry contributes to a prompt, in the order the entry's
+# blocks are injected: the operator's own guidance, then whatever the
+# server shipped that the entry opted into.
+GuidanceBlock = Guidance | ServerInstructions | ServerPrompt
+
+
+@dataclass(frozen=True)
 class Block:
     """One block of the assembled prompt: where it came from, and the
     text as the model receives it, heading included."""
 
     provenance: str
     text: str
+    # The configured name behind a `server_prompt` block, and None for
+    # every other kind. Carried as data rather than folded into the
+    # provenance: the token is printed in logs and in a structured
+    # event, and a server-chosen name belongs in neither.
+    name: str | None = None
 
     @property
     def characters(self) -> int:
@@ -158,7 +247,7 @@ class Assembled:
 def know_how(
     persona: str,
     fragments: Sequence[Fragment] = (),
-    guidance: Sequence[Guidance] = (),
+    guidance: Sequence[GuidanceBlock] = (),
 ) -> Assembled:
     """The half of the prompt that changes only when the agent does: the
     persona, the shared fragments it includes in the order it lists
@@ -176,6 +265,13 @@ def know_how(
     block like any other, so what `_assembled` trims at the two ends of
     the prompt it trims here too, and everything inside a fragment is
     left as it was written.
+
+    An entry's guidance is one to three blocks, in the order the trust
+    decisions were taken: what the operator wrote, then what the server
+    shipped about itself where the entry opted into it, then the prompts
+    that server publishes in the order the entry named them. The caller
+    hands them over already in that order, since which of them exist is
+    a question about grants, opt-ins and what a connection captured.
     """
     return _assembled(
         [
@@ -184,14 +280,34 @@ def know_how(
                 Block(fragment_provenance(block.name), block.text)
                 for block in fragments
             ),
-            *(
-                Block(
-                    instructions_provenance(block.entry),
-                    f"{guidance_heading(block.entry)}\n{block.text}",
-                )
-                for block in guidance
-            ),
+            *(_guidance_block(block) for block in guidance),
         ]
+    )
+
+
+def _guidance_block(block: GuidanceBlock) -> Block:
+    """One entry-guidance block, under the heading its source earns.
+
+    Three headings rather than one, because the model is the reader that
+    cannot see the provenance the surfaces report: the operator's block
+    says what the tools are for, and each server-shipped block says that
+    the server itself is the one saying it, which is the trust boundary
+    made legible where it matters most.
+    """
+    if isinstance(block, Guidance):
+        return Block(
+            instructions_provenance(block.entry),
+            f"{guidance_heading(block.entry)}\n{block.text}",
+        )
+    if isinstance(block, ServerInstructions):
+        return Block(
+            server_instructions_provenance(block.entry),
+            f"{server_instructions_heading(block.entry)}\n{block.text}",
+        )
+    return Block(
+        server_prompt_provenance(block.entry, block.position),
+        f"{server_prompt_heading(block.entry)}\n{block.text}",
+        name=block.name,
     )
 
 
@@ -247,7 +363,8 @@ def _assembled(blocks: Sequence[Block]) -> Assembled:
     texts[0] = texts[0].lstrip()
     texts[-1] = texts[-1].rstrip()
     trimmed = tuple(
-        Block(block.provenance, text) for block, text in zip(kept, texts, strict=True)
+        Block(block.provenance, text, block.name)
+        for block, text in zip(kept, texts, strict=True)
     )
     return Assembled(trimmed, "\n\n".join(block.text for block in trimmed))
 
@@ -258,13 +375,22 @@ __all__ = [
     "MEMORY",
     "MEMORY_HEADING",
     "PERSONA",
+    "SERVER_INSTRUCTIONS",
+    "SERVER_PROMPT",
     "Assembled",
     "Block",
     "Fragment",
     "Guidance",
+    "GuidanceBlock",
+    "ServerInstructions",
+    "ServerPrompt",
     "fragment_provenance",
     "guidance_heading",
     "instructions_provenance",
     "know_how",
+    "server_instructions_heading",
+    "server_instructions_provenance",
+    "server_prompt_heading",
+    "server_prompt_provenance",
     "with_memory",
 ]
