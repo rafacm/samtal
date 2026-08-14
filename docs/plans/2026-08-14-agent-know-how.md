@@ -126,7 +126,10 @@ glued.
 
 Every injected block competes with memory for the prompt budget on
 small local models, and the issue asks for the sizes to be visible
-somewhere. The answer is the assembled-prompt surface (milestone 4):
+somewhere. The answer is the assembled-prompt surface, which lands
+with the first injection milestone and grows a provenance with each
+later one, so no injected block ever ships before the surface that
+counts it:
 it reports each block with its provenance and its size in characters,
 plus the total, which is the number an operator tunes against. It is
 not the MCP status surface, although the issue names it as a
@@ -595,12 +598,14 @@ doc drift checks.
   stops injecting while the connection stands; containment proven
   with a stalled prompt fetch and a fetch sequence summing past
   `CONNECT_TIMEOUT_S`, the connection and tools surviving both.
-- Unit, milestone 4: the route (bearer-gated, 404 for an unloaded
-  agent with the restart sentence, 503 serverless); the block shapes
-  and totals agree with the assembler; the CLI's full-block
-  sanitizer replaces non-printables without stripping and truncates
-  nothing, proven with a block longer than `GLIMPSE_LENGTH` whose
-  tail survives; OpenAPI drift.
+- Unit, milestone 1, the inspection surface: the route
+  (bearer-gated, 404 for an unloaded agent with the restart
+  sentence, 503 serverless); the block shapes and totals agree with
+  the assembler; the CLI's full-block sanitizer replaces
+  non-printables without stripping and truncates nothing, proven
+  with a block longer than `GLIMPSE_LENGTH` whose tail survives;
+  OpenAPI drift. Milestones 2 and 3 extend these assertions to each
+  provenance they add.
 - Integration: the issue's verification steps. Two agents granted the
   same entry both speak its guidance through `{system}`, and an
   `mcp: []` agent does not; a fragment written through the API changes
@@ -991,42 +996,45 @@ the amendments land.
 
 Stacked branches, one PR each, every merge leaving `main` releasable:
 milestone 1 is additive (no guidance configured means byte-identical
-prompts), milestone 2 is a new optional section, milestone 3 is a
-default-off flag, milestone 4 is a new read surface.
+prompts) and carries the inspection surface from the start, milestone
+2 is a new optional section, milestone 3 is a default-off flag; no
+injection milestone merges without the surface that counts it.
 
-- [ ] **Per-server guidance**: the `instructions` field, migration
-  0002, the assembler in `runtime/prompt.py` subsuming `with_memory`,
-  per-leg assembly beside the tool snapshot, `guidance_for_agent` on
-  the slice, the connection-identity exclusion,
-  `Config.prompt_for_agent` as the persona's one source with
-  `AgentProviders.prompt` removed, examples, README, reference and
-  OpenAPI regen, CHANGELOG. Accept: lint and both lanes
-  green; the two-agents/opt-out proof and the instructions-only
-  reload proof in tests; the no-guidance byte-equality pin; drift
+- [ ] **Per-server guidance, with the inspection surface**: the
+  `instructions` field, migration 0002, the assembler in
+  `runtime/prompt.py` subsuming `with_memory`, the know-how half
+  cached in `_activate_agent`, the per-round memory read off the
+  event loop, `guidance_for_agent` by effective grant on the slice,
+  the connection-identity exclusion, `Config.prompt_for_agent` as
+  the persona's one source with `AgentProviders.prompt` removed,
+  `GET /runtime/agents/{name}/prompt` with `config prompt <agent>`
+  and its full-block sanitizer, the `prompt_assembled` event,
+  examples, README, reference and OpenAPI regen, CHANGELOG. Accept:
+  lint and both lanes green; the two-agents/opt-out proof and the
+  instructions-only reload proof in tests; the no-guidance
+  byte-equality pin; the surface answering persona, guidance and
+  memory provenance with sizes and totals over a real socket, 404
+  and 503 honest, the sanitizer's long-block tail surviving; drift
   checks pass.
 - [ ] **Shared prompt fragments**: the `prompt_fragments` section and
   `prompt_includes` on both layers, migration 0003, store, views, API
-  routes, CLI verbs, write sentences, reference checks, assembly
-  slot, `examples/prompt-fragment.yaml` and the two agent examples,
-  README, docs regen, CHANGELOG. Accept: lint and both lanes green;
-  the write, read-back, boot, assembled loop proven; unknown and
-  duplicate includes refused; pre-upgrade rows load; drift checks
-  pass.
+  routes, CLI verbs, write sentences, reference checks, the
+  moved-key command, assembly slot, `fragment:<name>` provenance on
+  the inspection surface, `examples/prompt-fragment.yaml` and the
+  two agent examples, `config.example.yaml` wording, README, docs
+  regen, CHANGELOG. Accept: lint and both lanes green; the write,
+  read-back, boot, assembled loop proven; unknown and duplicate
+  includes refused by position, the sentinels clean; pre-upgrade
+  rows load; the surface counting fragments; drift checks pass.
 - [ ] **Server-shipped guidance opt-ins**: `use_server_instructions`
-  and `inject_prompts`, migration 0004, capture at `initialize` and
-  the prompt fetches at connect under the cap, injection after the
-  operator's block, the skip rules for unusable named prompts, the
-  reflection sentinel, the trust paragraph in README and the
+  and `inject_prompts`, migration 0004, capture at `initialize`,
+  listing-first discovery and the contained prompt fetches, the
+  defined rendering, injection after the operator's block, the skip
+  rules, the reflection sentinel, the two server provenances on the
+  inspection surface, the trust paragraph in README and the
   generated reference, examples, regen, CHANGELOG. Accept: lint and
   both lanes green; default-off proven silent and fetch-free;
-  opted-in proven injected, ordered and capped; unusable named
-  prompts skipped visibly; no server bytes in any log record; drift
-  checks pass.
-- [ ] **The assembled-prompt surface**: `GET
-  /runtime/agents/{name}/prompt`, `config prompt <agent>`, the
-  `prompt_assembled` event, the assembly-order documentation, OpenAPI
-  regen, CHANGELOG. Accept: lint and both lanes green; the surface
-  answers all four provenances with sizes and totals over a real
-  socket; 404 and 503 honest; the CLI sanitizer replaces without
-  stripping or truncating, the long-block tail surviving;
-  drift checks pass.
+  opted-in proven injected, ordered, rendered as defined and capped;
+  unusable named prompts skipped visibly; the tools surviving a
+  stalled fetch; no server bytes in any log record; the surface
+  counting both server block kinds; drift checks pass.
