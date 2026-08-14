@@ -280,11 +280,21 @@ the committed reference all learn it in the same milestone.
 names on `agents.<name>` and on `agent_defaults`, with exactly the
 `mcp` field's semantics: unset inherits, a list replaces rather than
 extends, `[]` opts out. Duplicate names in one list are refused by
-position; a name that matches no fragment is refused at write time by
-`check_references` (unlike a grant's tool allow list, the referent is
-in the same database, so there is no reason to defer the check to a
-live connection). A nullable `prompt_includes` JSON column on both
-layer tables, in the same migration.
+position; a name that matches no fragment is refused at write time
+and at boot by `check_references` (unlike a grant's tool allow list,
+the referent is in the same database, so there is no reason to defer
+the check to a live connection). Both refusals follow the rule the
+#121 round fixed for grants, not the older reference sentences that
+quote the unresolved value: an unresolved include is reported by the
+layer, the list position and the rule, never by what was written,
+because a rejected fragment may hold a pasted credential and the
+sentence travels out as a CLI line, an HTTP 422 body and a boot log.
+The safe charset does not close this on its own (a credential can
+match `[A-Za-z0-9_-]+`), so the sentinel tests below assert the
+value's absence from HTTP responses, CLI stdout and stderr, every
+log record and the whole exception chain. A nullable
+`prompt_includes` JSON column on both layer tables, in the same
+migration.
 
 **`mcp_servers.<name>.use_server_instructions`** and
 **`mcp_servers.<name>.inject_prompts`** (milestone 3): a boolean,
@@ -424,9 +434,13 @@ doc drift checks.
   value would be echoed); store, views, API and CLI round-trips;
   `prompt_includes` semantics (inherit, replace, `[]` opt-out,
   duplicates refused, unknown fragment refused at write time and at
-  boot, `agent_defaults` parity); assembly order with fragments in
-  include order; migration loads pre-upgrade agent rows; docgen and
-  examples drift checks.
+  boot, `agent_defaults` parity); the unresolved-include refusal
+  names layer, position and rule only, with a credential-sentinel
+  include asserted absent from the HTTP response, CLI stdout and
+  stderr, every log record and the full exception chain, for agent
+  and defaults writes and for boot validation; assembly order with
+  fragments in include order; migration loads pre-upgrade agent
+  rows; docgen and examples drift checks.
 - Unit, milestone 3: default-off ignores shipped instructions
   entirely and fetches no prompts; opted-in captures and injects
   after the operator's block, prompts in `inject_prompts` order after
@@ -566,6 +580,15 @@ its resolution once the amendment addressing it lands.
    responses, CLI stdout and stderr, every log record and the full
    exception chain, for agent and defaults writes and boot
    validation.
+   *Resolution*: adopted. The `prompt_includes` decision now states
+   that unresolved includes are refused by layer, list position and
+   rule only, never by value, following the rule the #121 round
+   fixed for grants rather than the older quoting reference
+   sentences, and says why the charset rule alone does not close the
+   leak. Milestone 2's unit tests gain the credential-sentinel
+   include asserted absent from HTTP responses, CLI stdout and
+   stderr, every log record and the whole exception chain, on both
+   write paths and at boot.
 
 4. **P2: the new example breaks the existing example suite.**
    `test_config_examples.py` recognizes a fixed creation order and
