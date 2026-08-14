@@ -305,11 +305,21 @@ column is NOT NULL with a database-level default of false, so a row
 written before the migration reads false from the database itself
 rather than through a Python-side rescue of NULL; `inject_prompts`
 and milestone 1's `instructions` are nullable, where NULL is the
-unset the models already mean. The manager
-captures `InitializeResult.instructions` and fetches the named
-prompts at connect, holds them beside the published tools (cleared
-when the connection drops, like them), and applies the cap at
-capture.
+unset the models already mean. The capture path is
+named exactly, because today's code discards what it needs:
+`initialize()` is awaited inside `_connect`, which returns only the
+session, so `_connect` grows the initialization result in its return
+value and `_run` does the capturing. Shipped instructions are
+captured whenever the server sends them, regardless of the current
+opt-in, and the slice's flag decides injection and inspection only:
+the flag is excluded from connection identity, so a false-to-true
+reload must be able to expose instructions on a connection that
+never restarts, which only works if they were captured while the
+flag was still false. The named prompts are fetched only when
+`inject_prompts` names them, since fetching costs round trips and
+the field participates in connection identity anyway. Both captures
+are held beside the published tools, cleared wherever they are (the
+normal unwind and `_mark_down` alike), and capped at capture.
 
 ### Where the pieces live at runtime
 
@@ -467,8 +477,12 @@ doc drift checks.
   server shipping a credential sentinel in its instructions and in a
   prompt's rendered text, asserted absent from every log record and
   from the status surface, with or without the opt-ins; cleared when
-  the connection drops; an `inject_prompts` edit restarts the
-  connection on reload, and the two injection-only fields do not.
+  the connection drops, on the normal unwind and on `_mark_down`
+  both; an `inject_prompts` edit restarts the connection on reload,
+  and the two injection-only fields do not, proven in both toggle
+  directions on the same manager object: false-to-true exposes the
+  already captured instructions without a reconnect, true-to-false
+  stops injecting while the connection stands.
 - Unit, milestone 4: the route (bearer-gated, 404 for an unloaded
   agent with the restart sentence, 503 serverless); the block shapes
   and totals agree with the assembler; CLI rendering strips control
@@ -654,6 +668,15 @@ its resolution once the amendment addressing it lands.
    use the flag only to control injection and inspection, and test
    both toggle directions on the same manager object plus clearing
    on `_mark_down` and normal unwind.
+   *Resolution*: adopted. The capture decision now names the real
+   path: `_connect` returns the initialization result it currently
+   discards, `_run` captures shipped instructions regardless of the
+   opt-in, and the flag decides injection and inspection only, which
+   is what makes a false-to-true reload work on a connection that
+   never restarts. Prompts are fetched only when named, since the
+   field participates in connection identity. Milestone 3's tests
+   carry both toggle directions on the same manager object and
+   clearing on both unwind paths.
 
 7. **P2: "injected verbatim" conflicts with `NonBlankStr`.** The
    repository's nonblank type strips surrounding whitespace, so
