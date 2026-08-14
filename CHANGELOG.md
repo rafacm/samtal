@@ -36,25 +36,25 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   lists it, between the agent's own prompt and any MCP guidance, with
   nothing added around it and nothing trimmed inside it, and it is
   counted under `fragment:<name>` by `samtal-server config prompt` and
-  by the `prompt_assembled` event. A name that matches no fragment is refused
-  when it is written and reported by layer and list position rather than
-  by value, since a name written beside prompt text is where a
-  credential gets pasted. Fragments are part of the boot-time snapshot,
+  by the `prompt_assembled` event. A name that matches no fragment is
+  refused when it is written and reported by layer and list position
+  rather than by value, since a name written beside prompt text is
+  where a credential gets pasted. Fragments are part of the boot-time snapshot,
   so a write applies at the next server start.
 - **An operator can read an agent's assembled prompt** (#122):
   `GET /api/runtime/agents/{name}/prompt`, and `samtal-server config
   prompt <agent>` as its client, answer the system prompt a session
   opening now as that agent would be sent: the ordered blocks, each
-  with its provenance (`persona`, `instructions:<entry>`, `memory`),
-  its size in characters and its text, plus the total to tune a small
-  model's context budget against. It is assembled from the loaded
-  agents, the running MCP slice and the memory store rather than from
-  the database, so it cannot disagree with what a session would get,
-  and it is a preview of a new session rather than a readback of a
-  running one. The CLI prints whole blocks and truncates nothing, since
-  a concealed tail is exactly what an operator came to see. Agent
-  activation also logs a `prompt_assembled` event with the same
-  per-source counts.
+  with its provenance (`persona`, `fragment:<name>`,
+  `instructions:<entry>`, `memory`), its size in characters and its
+  text, plus the total to tune a small model's context budget against.
+  It is assembled from the loaded agents, the running MCP slice and the
+  memory store rather than from the database, so it cannot disagree with
+  what a session would get, and it is a preview of a new session rather
+  than a readback of a running one. The CLI prints whole blocks and
+  truncates nothing, since a concealed tail is exactly what an operator
+  came to see. Agent activation also logs a `prompt_assembled` event
+  with the same per-source counts.
 
 ### Changed
 
