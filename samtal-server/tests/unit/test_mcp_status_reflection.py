@@ -191,6 +191,57 @@ async def test_a_stdio_server_cannot_reflect_its_credential_onto_the_surfaces(
     assert SENTINEL not in rendered(watched)
 
 
+@pytest.mark.parametrize("opted_in", [False, True], ids=["opted-out", "opted-in"])
+async def test_what_a_server_ships_reaches_no_operator_surface(
+    opted_in: bool,
+    tmp_path: Path,
+    watched: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The two guidance channels, held to the same rule as the tool
+    metadata above, in both trust states.
+
+    Opting in moves those bytes into the model's prompt and onto the
+    inspection surface, which is what the opt-in means. It moves them
+    nowhere else: not into the status response, not into the command
+    that prints one, and not into a log record. And the prompt name,
+    which this server chose to be the credential with a terminal escape
+    after it, is never printed at all, because every line about a
+    configured prompt names its position instead.
+    """
+    monkeypatch.setenv("SAMTAL_TEST_REFLECTED_SECRET", SENTINEL)
+    entry = {
+        "transport": "stdio",
+        "command": sys.executable,
+        "args": [str(REFLECTING_SERVER)],
+        "env": {REFLECTED_ENV: "$SAMTAL_TEST_REFLECTED_SECRET"},
+        "use_server_instructions": opted_in,
+        "inject_prompts": [f"{SENTINEL}\x1b[2J"] if opted_in else None,
+    }
+    servers = McpServers.build(config_with(entry))
+    await servers.start_all()
+    try:
+        status = servers.status()
+        guidance = servers.guidance_for_agent("assistant")
+        printed = cli_status(tmp_path / "db", servers, monkeypatch, capsys)
+    finally:
+        await servers.stop_all()
+
+    # The opt-in did what it says, or the assertions below would hold
+    # for the wrong reason.
+    if opted_in:
+        assert [block.entry for block in guidance] == ["weather", "weather"]
+        assert SENTINEL in "".join(block.text for block in guidance)
+    else:
+        assert guidance == ()
+
+    assert SENTINEL not in json.dumps(status)
+    assert SENTINEL not in printed
+    assert SENTINEL not in rendered(watched)
+    assert "\x1b" not in printed
+
+
 async def test_an_http_server_cannot_reflect_its_credential_onto_the_surfaces(
     tmp_path: Path,
     watched: pytest.LogCaptureFixture,
