@@ -184,6 +184,54 @@ shape or meaning. `api.py` is untouched by decision, above.
   command would be added to; #139's dispatch unification removes
   the class of drift entirely.
 
+## Plan review round
+
+One external review of the plan as first committed (5daf6ed): codex
+CLI, model gpt-5.6-sol, read-only against this repository with the
+issue #134 body supplied, 2026-08-14. Verdict: ready after the P1/P2
+amendments. Findings as received, condensed; each carries its
+resolution once the amendment addressing it lands.
+
+1. **P1: the command would still print contradictory restart and
+   reload guidance.** The plan changes only `_report`'s final
+   notice, but every local invocation first prints `LOCAL_NOTICE`
+   (cli.py:130), which says a running server observes no local
+   change until restart, device bindings excepted. An MCP local
+   write would therefore tell the operator both "until its next
+   start" and "run config reload". Update `LOCAL_NOTICE` to make no
+   universal timing claim (it bypasses the API, and each successful
+   write reports separately when it takes effect), update the
+   module docstring at cli.py:21-28, and name both changes in the
+   milestone and file list.
+2. **P2: the proposed final-line assertion deliberately misses that
+   contradiction.** The test design discards all but the final
+   stderr line, and existing local-preamble coverage only checks
+   for the phrase "bypassing the configuration API", so the planned
+   suite would pass while the command still gives mutually
+   exclusive instructions. Retain the API-versus-final-notice
+   comparison, but also pin the complete local stderr shape: the
+   revised neutral `LOCAL_NOTICE` followed by the expected
+   applicability notice; at minimum, MCP cases must assert that no
+   preceding line claims restart is required.
+3. **P2: operator documentation would remain false after the fix.**
+   The file list excludes `samtal-server/README.md`, which
+   repeatedly promises that every local change waits for restart
+   (README.md:1139, 1365, 2113) and describes device binding as the
+   sole exception (README.md:2001-2007), despite the documented MCP
+   reload path elsewhere. Add the README to the milestone and
+   revise the absolute claims to describe three applicability
+   cases: restart, MCP reload, and live device binding; the
+   break-glass procedure may still instruct restarting a server
+   that is down, but must not claim a running server cannot apply
+   MCP changes through reload.
+4. **P3: the claimed automatic completeness protection is not
+   real.** The grammar is imperative parser construction and the
+   parametrization is a separate hand-maintained list; adding
+   another `local_ok=True` command would not fail the test. Either
+   describe the nine cases honestly as manual coverage of the
+   current subset, or add a mechanically enforced inventory check.
+   A docstring alone is not a regression guard.
+
 ## Milestones
 
 - [ ] **Align the three --local notices with the API and pin every
