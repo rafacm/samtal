@@ -2926,6 +2926,23 @@
             "default": null,
             "description": "Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly rather than merging with it, so `filler: {enabled: false}` opts an agent out."
           },
+          "prompt_includes": {
+            "anyOf": [
+              {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The shared prompt fragments this layer's system prompt carries, each by the name it is defined under in prompt_fragments, injected in the order listed and directly after the agent's own prompt. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the fragments its siblings share. Every name has to be a fragment that exists, since the fragment is in this same database, and a name listed twice is refused. Fragments are part of the boot-time snapshot, so a change here reaches a conversation at the next server start rather than at a reload.",
+            "title": "Prompt Includes"
+          },
           "prompt": {
             "default": "",
             "description": "The instruction this agent replies under, sent as the system prompt on every turn. State the reply language explicitly: a model otherwise picks one by its training bias.",
@@ -3031,6 +3048,23 @@
             ],
             "default": null,
             "description": "Latency masking with a pre-synthesized filled pause. Unset inherits the agent_defaults section; naming one replaces it wholly rather than merging with it, so `filler: {enabled: false}` opts an agent out."
+          },
+          "prompt_includes": {
+            "anyOf": [
+              {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "The shared prompt fragments this layer's system prompt carries, each by the name it is defined under in prompt_fragments, injected in the order listed and directly after the agent's own prompt. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the fragments its siblings share. Every name has to be a fragment that exists, since the fragment is in this same database, and a name listed twice is refused. Fragments are part of the boot-time snapshot, so a change here reaches a conversation at the next server start rather than at a reload.",
+            "title": "Prompt Includes"
           }
         },
         "title": "AgentDefaults",
