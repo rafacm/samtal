@@ -1959,6 +1959,106 @@ def test_every_local_invocation_says_what_it_is(
     assert "bypassing the configuration API" in capsys.readouterr().err
 
 
+# What a local write says it did, against what the API says for the same
+# act
+#
+# The two paths write the same rows, so they may not describe one act
+# differently, and a sentence copied into the break-glass branch by hand
+# is a sentence that drifts. The expected value here is therefore not a
+# constant but the ordinary path's own answer for the same act, captured
+# a moment earlier against equivalent state, so a change to either side
+# that the other does not follow fails rather than passing quietly.
+#
+# The nine cases are the whole `--local` mutating subset as the grammar
+# stands: five deletes, and set-secret and clear-secret on each kind of
+# entity a secret lives on. That completeness is kept by review, not by
+# machinery: the grammar is imperative parser construction, so a new
+# `local_ok=True` command that skips this list fails nothing.
+
+
+def _a_provider(run) -> None:
+    run("set", "provider", "llm", "claude", "-f", "-", stdin="type: anthropic\nmodel: m\n")
+
+
+def _an_mcp_server(run) -> None:
+    run("set", "mcp-server", "home", "-f", "-", stdin="transport: stdio\ncommand: uvx\n")
+
+
+def _a_prompt_fragment(run) -> None:
+    run("set", "prompt-fragment", "household", "-f", "-", stdin=FRAGMENT_INPUT)
+
+
+def _an_unreferenced_agent(run) -> None:
+    """Nothing names it, so the delete is not refused for a reason that
+    has nothing to do with what it would then say."""
+    run("set", "agent", "sam", "-f", "-", stdin="prompt: You are Sam.\n")
+
+
+def _a_bound_device(run) -> None:
+    _an_unreferenced_agent(run)
+    run("bind-device", "aa:bb:cc:dd:ee:ff", "sam")
+
+
+def _a_provider_secret(run) -> None:
+    _a_provider(run)
+    run("set-secret", "provider", "llm", "claude", "api_key", stdin=SECRET)
+
+
+def _an_mcp_secret(run) -> None:
+    _an_mcp_server(run)
+    run("set-secret", "mcp-server", "home", "env.API_TOKEN", stdin=OTHER_SECRET)
+
+
+# Each case: what the act needs in the database, the act itself, and
+# whether it is one a running server applies by reloading.
+LOCAL_MUTATIONS = [
+    (_a_provider, ("delete", "provider", "llm", "claude"), False),
+    (_an_mcp_server, ("delete", "mcp-server", "home"), True),
+    (_a_prompt_fragment, ("delete", "prompt-fragment", "household"), False),
+    (_an_unreferenced_agent, ("delete", "agent", "sam"), False),
+    (_a_bound_device, ("delete", "device", "aa:bb:cc:dd:ee:ff"), False),
+    (_a_provider, ("set-secret", "provider", "llm", "claude", "api_key"), False),
+    (_an_mcp_server, ("set-secret", "mcp-server", "home", "env.API_TOKEN"), True),
+    (_a_provider_secret, ("clear-secret", "provider", "llm", "claude", "api_key"), False),
+    (_an_mcp_secret, ("clear-secret", "mcp-server", "home", "env.API_TOKEN"), True),
+]
+
+
+@pytest.mark.parametrize(
+    ("seed", "argv", "reloadable"),
+    LOCAL_MUTATIONS,
+    ids=[" ".join(argv) for _, argv, _ in LOCAL_MUTATIONS],
+)
+def test_a_local_write_says_what_the_api_says_for_the_same_act(
+    run, capsys: pytest.CaptureFixture[str], seed, argv: tuple[str, ...], reloadable: bool
+) -> None:
+    """Run one act both ways against equivalent state, and pin the whole
+    shape of what the break-glass path printed: what it is, then exactly
+    the sentence the ordinary path answered, and nothing else.
+
+    Not the last line alone. The contradiction this exists to catch is a
+    preamble that reasserts restart timing ahead of a reload notice,
+    which a last-line comparison would step straight over."""
+    typed = SECRET if argv[0] == "set-secret" else None
+
+    seed(run)
+    capsys.readouterr()
+    assert run(*argv, stdin=typed) == 0
+    answered = capsys.readouterr().err.rstrip("\n")
+
+    seed(run)
+    capsys.readouterr()
+    assert run("--local", *argv, stdin=typed) == 0
+
+    said = capsys.readouterr().err
+    assert said.splitlines() == [cli.LOCAL_NOTICE, answered]
+    if reloadable:
+        # Said out loud for the acts the reload applies: the restart
+        # sentence must not appear anywhere in this invocation, preamble
+        # included.
+        assert cli.RESTART_NOTICE not in said
+
+
 def test_the_recovery_subset_needs_no_server(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
