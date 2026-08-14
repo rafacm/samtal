@@ -593,6 +593,42 @@ beside them or add up to its total. Repaired while the fragment block
 was added to it, since a counting surface documented with wrong counts
 is the one place a reader checks the arithmetic.
 
+### Rebase onto the PR #130 review round
+
+This milestone was written on the milestone 1 branch as it stood before
+its review round, and rebased onto b678f3d afterwards. Finding 1's fix
+changed the assembler's contract underneath it: the prompt is now
+exactly the blocks joined by blank lines, a block that would hold
+nothing contributes nothing and is reported nowhere, the first block
+loses its leading whitespace and the last its trailing, and only a
+prompt of one block is handed over untouched. The fragments landed
+inside that contract rather than beside it, and five of the conflicts
+were semantic rather than textual.
+
+- `know_how` keeps the review round's docstring and gains one sentence
+  of its own: a fragment is a block like every other, so what the ends
+  trim it trims here too, and the absence of a heading is the only way
+  it differs.
+- `AssembledPrompt.blocks` is the review round's description with the
+  fragment slot written into its order, rather than either version
+  standing alone.
+- `test_a_fragment_is_injected_byte_for_byte` now asserts the interior
+  where a fragment is neither end of the prompt, because a fragment
+  that is the last block loses its trailing newline exactly as any
+  other last block does. Beside it, a new parametrized test puts
+  fragments through the review round's own two equalities over awkward
+  bodies (a trailing blank line, leading indentation, a whitespace-only
+  neighbour), so the new block type is inside the contract rather than
+  exempt from it.
+- Milestone 1's positional `know_how(persona, guidance)` calls became
+  keyword ones, since the second positional argument is now the
+  fragments.
+- The fragment's own descriptions, the field, the generated reference,
+  the README, the example and the changelog entry, say what
+  `instructions` now says: as written, its indentation and its own
+  blank lines included, with the two ends of the whole assembled prompt
+  the only bytes trimmed and the surface reporting what was sent.
+
 ### Verification
 
 Run from `samtal-server/` with `PYTHONDONTWRITEBYTECODE=1` exported for
@@ -603,11 +639,16 @@ uv run ruff check .
 All checks passed!
 
 uv run pytest tests/unit -q
-1724 passed, 15 skipped in 153.97s
+1747 passed, 15 skipped in 152.41s
 
 uv run pytest tests/integration -q
-52 passed in 158.18s
+52 passed in 157.06s
 ```
+
+Run again after the rebase onto the review round, which is where these
+numbers come from: twenty-three more unit tests than milestone 1 left,
+which is what this milestone added, four of them the parametrized
+fragment equalities the rebase called for.
 
 The two doc drift checks pass inside the unit lane
 (`test_the_committed_reference_matches_the_models` and the OpenAPI pair
