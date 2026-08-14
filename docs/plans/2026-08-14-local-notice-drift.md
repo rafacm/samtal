@@ -161,6 +161,28 @@ on the unfixed branches and passes after the three changes, which is
 the honest order to commit them in (test alongside fix, red-to-green
 stated in the PR body).
 
+### The README's absolute restart claims move with the code
+
+`samtal-server/README.md` states in four places that a `--local`
+change (or any config edit) waits for the next server start, with
+device bindings as the sole exception: the write-order section
+(~line 1139), the break-glass section (~1365), the "an edit applies
+at the next server start" trap paragraph (~2001-2007), and the
+deployment section's description of the `--local` stderr line
+(~2113). After the fix, each of those is false for MCP entries and
+their secrets, which the README's own reload documentation says a
+running server applies without a restart.
+
+The four places are revised to describe the three applicability
+cases as the write's own answer: most writes apply at the next
+start, MCP entries and their stored secrets apply at the next
+`config reload`, and device bindings are read live. Where the text
+describes what the `--local` preamble says, it now describes the
+revised sentence. The break-glass procedure still ends in starting
+the server (the path exists for a server that will not start, and
+starting it is the goal), but no longer claims a running server
+cannot apply MCP changes through the reload.
+
 ### One milestone, one PR
 
 The diff is three `_report` call sites, one helper in `writes.py`,
@@ -176,6 +198,7 @@ on push requires.
 samtal-server/samtal_server/config/writes.py    secret_notice helper
 samtal-server/samtal_server/config/cli.py       three --local branches; LOCAL_NOTICE and the module docstring paragraph
 samtal-server/tests/unit/test_config_cli.py     the two-path pin
+samtal-server/README.md                         the four absolute restart claims
 CHANGELOG.md                                    2026-08-14 entry under Fixed
 docs/plans/2026-08-14-local-notice-drift.md
 docs/plans/2026-08-14-local-notice-drift-implementation.md
@@ -270,6 +293,12 @@ resolution once the amendment addressing it lands.
    break-glass procedure may still instruct restarting a server
    that is down, but must not claim a running server cannot apply
    MCP changes through reload.
+   *Resolution*: adopted. A new decision section names the four
+   README places and revises them to describe the three
+   applicability cases (restart, MCP reload, live device bindings)
+   as the write's own answer, keeping the break-glass procedure's
+   ending but not its false claim; the files-touched list and
+   milestone carry the README.
 4. **P3: the claimed automatic completeness protection is not
    real.** The grammar is imperative parser construction and the
    parametrization is a separate hand-maintained list; adding
@@ -286,6 +315,8 @@ resolution once the amendment addressing it lands.
   and `_clear_secret` pass `secret_notice(location.kind)`;
   `LOCAL_NOTICE` and the module docstring paragraph drop the
   universal timing claim and defer to the write's own notice; the
+  README's four absolute restart claims become the three
+  applicability cases; the
   parametrized two-path test covers the complete `--local` mutating
   subset; CHANGELOG entry under Fixed, 2026-08-14; the
   implementation doc section written in the change that ticks this
