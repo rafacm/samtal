@@ -342,7 +342,15 @@ contribute tools to that agent, the same per-reply question
 
 Fragments follow the boot `Config`, which the pipeline already holds:
 `Config.prompt_for_agent(agent)` resolves the persona plus the
-effective include list (own or inherited) against `prompt_fragments`.
+effective include list (own or inherited) against `prompt_fragments`,
+and it is the persona's only source. `AgentProviders.prompt` is
+removed rather than left standing beside it: it is a boot-time copy
+of the same `agents.<name>.prompt` field, two sources for one string
+is how the pipeline and the inspection surface come to disagree, and
+what remains of `AgentProviders` is exactly what its name says, the
+four providers. The registry's builder and its tests drop the field
+in milestone 1, and the pipeline and the inspection hook both read
+`Config.prompt_for_agent`.
 The assembler takes the resolved pieces (persona, fragment blocks,
 guidance blocks, memory text) and produces the prompt and the
 per-block accounting in one place, so the pipeline, the
@@ -410,10 +418,13 @@ samtal_server/tools/mcp.py            slice carries instructions and opt-ins;
                                       instructions under the cap;
                                       guidance_for_agent; connection
                                       identity excludes the prompt fields
-samtal_server/config/models.py        instructions and use_server_instructions
-                                      on McpServerConfig; prompt_fragments
-                                      section and name rule; prompt_includes
-                                      on both layers; reference checks
+samtal_server/config/models.py        instructions, use_server_instructions
+                                      and inject_prompts on McpServerConfig;
+                                      prompt_fragments section and name rule;
+                                      prompt_includes on both layers;
+                                      reference checks; prompt_for_agent
+samtal_server/providers/registry.py   AgentProviders loses its prompt copy;
+                                      the four providers remain
 samtal_server/db/schema.py            the new columns and table
 samtal_server/db/migrations/versions/ 0002 (instructions), 0003 (fragments,
                                       includes), 0004 (use_server_instructions)
@@ -738,6 +749,11 @@ its resolution once the amendment addressing it lands.
    `providers/registry.py` is absent from the module layout. Decide
    which source survives and make the pipeline and the inspection
    hook consume the same one.
+   *Resolution*: adopted. `Config.prompt_for_agent` is the persona's
+   only source; `AgentProviders.prompt` is removed in milestone 1,
+   its builder and tests updated, and `providers/registry.py` joins
+   the module layout. The pipeline and the inspection hook read the
+   same helper, so they cannot disagree.
 
 ## Milestones
 
@@ -749,8 +765,10 @@ default-off flag, milestone 4 is a new read surface.
 - [ ] **Per-server guidance**: the `instructions` field, migration
   0002, the assembler in `runtime/prompt.py` subsuming `with_memory`,
   per-leg assembly beside the tool snapshot, `guidance_for_agent` on
-  the slice, the connection-identity exclusion, examples, README,
-  reference and OpenAPI regen, CHANGELOG. Accept: lint and both lanes
+  the slice, the connection-identity exclusion,
+  `Config.prompt_for_agent` as the persona's one source with
+  `AgentProviders.prompt` removed, examples, README, reference and
+  OpenAPI regen, CHANGELOG. Accept: lint and both lanes
   green; the two-agents/opt-out proof and the instructions-only
   reload proof in tests; the no-guidance byte-equality pin; drift
   checks pass.
