@@ -32,6 +32,7 @@ from samtal_server.config.models import (
     AgentConfig,
     AgentDefaults,
     McpServerConfig,
+    PromptFragmentConfig,
     ProviderConfig,
     is_mcp_secret_key,
     is_secret_option,
@@ -49,6 +50,10 @@ def provider(read: Entity[ProviderConfig]) -> dict[str, object]:
 
 def mcp_server(read: Entity[McpServerConfig]) -> dict[str, object]:
     return _envelope(mcp_server_body(read.entry), read.secrets)
+
+
+def prompt_fragment(read: Entity[PromptFragmentConfig]) -> dict[str, object]:
+    return _envelope(prompt_fragment_body(read.entry), read.secrets)
 
 
 def agent(read: Entity[AgentConfig]) -> dict[str, object]:
@@ -95,6 +100,10 @@ def config(snapshot: Snapshot) -> dict[str, object]:
                 name: mcp_server_body(entry)
                 for name, entry in sorted(domain.mcp_servers.items())
             },
+            "prompt_fragments": {
+                name: prompt_fragment_body(entry)
+                for name, entry in sorted(domain.prompt_fragments.items())
+            },
             "agent_defaults": layer_body(domain.agent_defaults),
             "agents": {
                 name: agent_body(entry) for name, entry in sorted(domain.agents.items())
@@ -124,6 +133,13 @@ def mcp_servers(snapshot: Snapshot) -> dict[str, object]:
     return {
         name: _envelope(mcp_server_body(entry), stored.get(("mcp_server", name), ()))
         for name, entry in sorted(snapshot.domain.mcp_servers.items())
+    }
+
+
+def prompt_fragments(snapshot: Snapshot) -> dict[str, object]:
+    return {
+        name: _envelope(prompt_fragment_body(entry), ())
+        for name, entry in sorted(snapshot.domain.prompt_fragments.items())
     }
 
 
@@ -208,6 +224,13 @@ def mcp_server_body(entry: McpServerConfig) -> dict[str, object]:
     return data
 
 
+def prompt_fragment_body(entry: PromptFragmentConfig) -> dict[str, object]:
+    """One fragment as it may be displayed, which is as it was written:
+    it is prompt text for the model to read, and there is nothing in it
+    to mask."""
+    return {"text": entry.text}
+
+
 def agent_body(entry: AgentConfig) -> dict[str, object]:
     return {"prompt": entry.prompt, **layer_body(entry)}
 
@@ -226,6 +249,11 @@ def layer_body(entry: AgentDefaults) -> dict[str, object]:
         data["mcp"] = [mcp_entry_fragment(item) for item in entry.mcp]
     if entry.filler is not None:
         data["filler"] = entry.filler.model_dump()
+    # Shown only when the layer wrote one, so an unset list reads as the
+    # inherit it is rather than as an empty one, which means the
+    # opposite.
+    if entry.prompt_includes is not None:
+        data["prompt_includes"] = list(entry.prompt_includes)
     return data
 
 
@@ -302,6 +330,9 @@ __all__ = [
     "mcp_server",
     "mcp_server_body",
     "mcp_servers",
+    "prompt_fragment",
+    "prompt_fragment_body",
+    "prompt_fragments",
     "provider",
     "provider_body",
     "providers",
