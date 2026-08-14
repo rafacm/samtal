@@ -153,6 +153,43 @@ Examples:
 - [`mcp-server-stdio.yaml`](../../samtal-server/examples/mcp-server-stdio.yaml)
 - [`mcp-server-streamable-http.yaml`](../../samtal-server/examples/mcp-server-streamable-http.yaml)
 
+### Prompt fragment
+
+`prompt_fragments.<name>`
+
+One named block of prompt text, shared by the agents that include it. A
+fragment is written once and injected verbatim into the system prompt of every
+agent whose `prompt_includes` names it, which is how household facts or a
+house style stay in one place instead of being copied into every persona
+prompt and drifting apart. The name appears in the provenance the assembled
+prompt is reported under (`fragment:<name>`), so it must match
+`[A-Za-z0-9_-]+`.
+
+```bash
+samtal-server config set prompt-fragment <name> -f fragment.yaml
+```
+
+| Field | Type | Default | Description |
+| --- | --- | --- | --- |
+| `text` | `str` | `required` | The text injected into the system prompt of every agent whose prompt_includes names this fragment, exactly as written: indentation and blank lines are part of it, and nothing is added around it, not even a heading, since this is prompt text the operator wrote and a heading would editorialize. It sits after the agent's own prompt and before any MCP guidance, in the order the including layer lists it. There is no length cap: what each block costs is reported by `samtal-server config prompt <agent>`, and the operator is the one who knows what their model tolerates. |
+
+Nothing is added around the text, not one heading: it is prompt text the
+operator wrote, and a heading would editorialize. The blocks are injected in
+the order the including layer lists them, after the agent's own prompt and
+before any MCP server's guidance.
+
+A fragment that some layer still includes cannot be deleted, which is the same
+reference rule that keeps a referenced provider or MCP server from being taken
+away underneath an agent.
+
+There is no length cap. `samtal-server config prompt <agent>` reports what
+each block costs and what the whole prompt costs, which is what an operator
+tunes a small model's context budget against.
+
+Examples:
+
+- [`prompt-fragment.yaml`](../../samtal-server/examples/prompt-fragment.yaml)
+
 ### Agent
 
 `agents.<name>`
