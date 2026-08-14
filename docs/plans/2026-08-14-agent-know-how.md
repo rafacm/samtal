@@ -187,10 +187,15 @@ guidance in, each behind its own explicit opt-in on the entry:
   prompt declares required arguments (a template cannot be rendered
   without them). Only names the listing proves eligible are fetched
   with `prompts/get` and no arguments. Prompts are refetched on
-  every reconnect, like the tool list, and `inject_prompts`
-  participates in connection identity (below): editing it changes
-  what the connect fetches, so it restarts the connection, unlike
-  the two fields that configure only injection. The blocks are
+  every reconnect, like the tool list, and what a reconnect captures
+  follows the cache rule the assembly section fixes: it reaches the
+  inspection preview at once and conversations at their next
+  activation, never a running session's cached half, since
+  activation precedes the background revival that reconnects. The
+  `inject_prompts` field participates in connection identity
+  (below): editing it changes what the connect fetches, so it
+  restarts the connection, unlike the two fields that configure only
+  injection. The blocks are
   injected in the order the operator listed them, after the entry's
   other guidance.
 
@@ -309,7 +314,9 @@ editing it changes what the connect fetches from the server, so it
 restarts the connection, which is the honest cost of a new fetch. An instructions-only edit therefore applies on
 reload as `unchanged` in the reload report, which is honest about the
 connection, and the new guidance is visible on the assembled-prompt
-surface and in the next reply. The README and the reload response
+surface at once and in conversations at the next activation, a new
+session or a switch, per the cache rule; a running session's cached
+half keeps the old text. The README and the reload response
 documentation say that `unchanged` speaks about the connection, not
 the entry's text. `MCP_RELOAD_NOTICE` is already what entry writes
 answer, so the write path needs no new sentence.
@@ -660,8 +667,9 @@ doc drift checks.
   session held open across a memory write, an MCP reload, a server
   reconnect and an agent switch, asserting through `{system}` that
   the memory write appears on the next reply as today, the reload's
-  guidance stays invisible until the switch, and the switch
-  re-assembles the know-how half; the
+  guidance and the reconnect's captures both leave the running
+  session's cached half untouched, and the switch re-assembles the
+  know-how half and sees both; the
   assembled prompt of a live deployment is read back through
   `GET /runtime/agents/{name}/prompt` over a real socket and matches
   what `{system}` shows the model receiving.
