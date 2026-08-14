@@ -646,6 +646,48 @@ session or an agent switch, and a conversation already running keeps
 the text it was activated with until it ends. Sessions are minutes
 long, so what an edit buys is the next one.
 
+**Guidance the server ships about itself** is a different thing, and it
+is off. A server has two channels of its own: the `instructions` of its
+handshake, which the specification describes as how to use the server
+and its features, and the prompts it publishes. Both are a third party
+writing part of your agent's system prompt, so each is an explicit
+opt-in on the entry, and there is no way to turn them on for a whole
+deployment at once:
+
+```yaml
+use_server_instructions: true
+inject_prompts: [forecast_style]
+```
+
+`use_server_instructions` injects the handshake's text. What a server
+ships is captured on every connect whether or not the entry opted in,
+so turning it on applies at the next reload with no reconnection, and
+turning it off stops the injection while the connection stands.
+
+`inject_prompts` names published prompts, one at a time, by the name
+the server lists them under. Wholesale is not offered: the
+specification defines prompts as user-controlled templates and a server
+may publish dozens, so the operator who read its documentation names
+the ones that are standing guidance. The names are checked against the
+server's own listing before anything is fetched, and a name it does not
+publish, a prompt that declares required arguments, and one that
+renders anything but text are each skipped with a warning naming the
+entry and the **position in the list**, never the name: a prompt name
+is a string the server chose and you copied, so it may hold anything,
+and the same is true of every byte of what it publishes. None of it is
+ever written to a log. Editing the list changes what a connect fetches,
+so applying it does restart the connection.
+
+Both channels are capped at 4000 characters per block, and a longer one
+is skipped whole rather than truncated: half an instruction is an
+instruction nobody reviewed. What is injected appears under
+`server_instructions:<entry>` and `server_prompt:<entry>:<position>` in
+the surface below, with a heading in the prompt itself saying the
+server is the one talking, so neither you nor the model has to guess
+whose words they are. The prompts are re-fetched on every reconnect,
+which reaches new sessions and switched-in agents the way a reload's
+guidance does.
+
 **The device's own tools** need no configuration. A board whose hello
 advertises `features.mcp` is asked for its tools over the same socket
 the audio runs on, and they arrive under their firmware names with the
@@ -722,12 +764,17 @@ The lights, the blinds and the front door are on this server. Turn
 lights on and off freely. Always ask the user to confirm before
 unlocking the door.
 
+server_instructions:home (172 characters)
+What the server behind the home__ tools says about using them:
+Device names are the ones set in Home Assistant. A scene is turned on
+like a light, not called like a script.
+
 memory (108 characters)
 You remember these facts about past conversations:
 - the user is vegetarian
 - the user's dog is called Bosse
 
-total: 557 characters
+total: 731 characters
 ```
 
 **The order is fixed and documented**, and deliberately not
@@ -736,8 +783,10 @@ speaking and everything after it is read in that voice; then the shared
 fragments it includes, in the order its layer lists them, because they
 are standing context the persona speaks within; then the guidance of
 each MCP entry the agent is granted, in the order the grants name them,
-each under its heading; then the remembered facts last, under the
-heading they have always had. Blocks are separated by blank lines. One
+each under its heading, and within one entry what the operator wrote
+first and what the server itself ships after it; then the remembered
+facts last, under the heading they have always had. Blocks are
+separated by blank lines. One
 documented order beats a per-deployment permutation, and it is what lets
 a later feature compose against a known base.
 

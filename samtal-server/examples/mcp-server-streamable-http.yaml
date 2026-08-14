@@ -45,3 +45,34 @@ instructions: |
   Forecasts from this server are for the user's own town unless they
   name another one. Give temperatures in Celsius and round them to whole
   degrees: this is spoken out loud.
+
+# A server can also ship guidance about itself, through two channels of
+# its own: the `instructions` of its handshake, and the prompts it
+# publishes. That text is the third party steering your agent rather
+# than you steering it, so nothing of it is injected until this entry
+# says so, channel by channel. Read what the server ships before you
+# turn either of these on, and remember that what it ships can change
+# under you: it is re-read on every connect.
+#
+# Whatever comes in this way is capped at 4000 characters per block,
+# skipped whole rather than truncated if it is longer, and reported by
+# `samtal-server config prompt <agent>` under its own provenance, so you
+# can see whose words are in the prompt and what they cost.
+
+# The handshake channel. Turning this on applies at the next reload
+# without dropping the connection, since what the server shipped was
+# captured when it connected.
+use_server_instructions: true
+
+# The prompts channel, opted into one prompt at a time and by the name
+# the server lists it under: the specification calls prompts
+# user-controlled templates and a server may publish dozens, so name the
+# ones that are standing guidance. They are injected in this order,
+# after everything above. Editing this list changes what a connect
+# fetches, so a reload restarts the connection to apply it.
+#
+# A name this server does not list, a prompt that needs arguments, and
+# one that renders anything but text are each skipped with a warning
+# naming this entry and the position in this list.
+inject_prompts:
+  - forecast_style
