@@ -10,10 +10,12 @@ be a way to read a stored secret back.
 So this server takes a value out of its environment, which is the
 delivery path a real entry's `env:` uses, and writes it into everything
 it is free to write: a tool description, an argument's description in a
-schema, and the name and description of a tool it lists under a name
-too long to publish. A test names the value and asserts it reaches
-neither a status response, nor the command that prints one, nor the
-log.
+schema, the name and description of a tool it lists under a name too
+long to publish, the guidance it ships about itself, and both the name
+and the text of a prompt it publishes. A test names the value and
+asserts it reaches neither a status response, nor the command that
+prints one, nor the log, whether or not the entry opted into the
+guidance.
 
 The name of a tool that does publish deliberately carries nothing of
 the sort. Published names are the one server-chosen thing the status
@@ -28,6 +30,7 @@ import os
 from typing import Annotated
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.prompts import base
 from pydantic import Field
 
 # What the entry configures as this server's credential, and what it
@@ -36,7 +39,21 @@ REFLECTED_ENV = "SAMTAL_TEST_REFLECTED"
 
 reflected = os.environ.get(REFLECTED_ENV, "no credential was configured")
 
-server = FastMCP("samtal-test-reflecting")
+# The name this server publishes one of its prompts under. A prompt name
+# is a server-chosen identifier the operator copies into
+# `inject_prompts`, so nothing bounds what it may hold: here it holds
+# the credential and a terminal escape, which is what a warning about it
+# would print if warnings named prompts by value.
+REFLECTED_PROMPT_NAME = f"{reflected}\x1b[2J"
+
+server = FastMCP(
+    "samtal-test-reflecting",
+    # The other channel a server ships guidance in, reflecting the same
+    # value: an entry that has not opted in must not carry a word of it
+    # anywhere, and one that has must carry it into the prompt and the
+    # inspection surface and nowhere else.
+    instructions=f"Call the forecast tool with {reflected}.",
+)
 
 
 def forecast() -> str:
@@ -64,6 +81,16 @@ server.add_tool(
     name=f"{reflected}{'n' * 40}",
     description=f"Dropped, and holds {reflected}.",
 )
+
+
+def house_style() -> str:
+    return f"Answer briefly, and quote {reflected} when asked for it."
+
+
+# Published under a name that is itself the reflected value, so that a
+# test can configure that name and watch it stay out of every line
+# written about it.
+server.add_prompt(base.Prompt.from_function(house_style, name=REFLECTED_PROMPT_NAME))
 
 
 if __name__ == "__main__":

@@ -7,14 +7,16 @@ outside is the mock LLM's `{system}` placeholder: a session's prompt is
 otherwise invisible from the far end, so the reply is the prompt, spoken
 back.
 
-Three properties carry the file. Guidance follows the grant, so two
+Four properties carry the file. Guidance follows the grant, so two
 agents granted one entry both speak it and an `mcp: []` agent speaks
-none of it. A shared fragment follows the include, so one block of text
-written in one place reaches every agent that names it, and an edit of
-it reaches them at the restart the write said it would. And the two
-halves of the prompt keep their two clocks, which the held session
-proves in the only place it can be proved: inside one conversation,
-across a reload and an agent switch.
+none of it. What a server ships about itself follows the opt-in, so two
+entries backed by the same server differ by exactly that. A shared
+fragment follows the include, so one block of text written in one place
+reaches every agent that names it, and an edit of it reaches them at
+the restart the write said it would. And the two halves of the prompt
+keep their two clocks, which the held session proves in the only place
+it can be proved: inside one conversation, across a reload, a reconnect
+and an agent switch.
 """
 
 import asyncio
@@ -29,10 +31,15 @@ from xiaozhi_sdk import XiaoZhiWebsocket
 from samtal_server.config import Config
 from samtal_server.config.models import API_MOUNT_PATH
 from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, speech_pcm, spoken
+from tests.support.mcp_stdio_server import SHIPPED_ENV, SHIPPED_INSTRUCTIONS
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
 
 ENTRY = "home"
+
+# The variable the held session moves between two connections, so that a
+# reconnect captures something the running session must not be given.
+SHIPPED_TEXT_ENV = "SAMTAL_TEST_SHIPPED_TEXT"
 
 # Short on purpose: the mock voice speaks at 40 ms a character, and the
 # reply here is the whole system prompt.
@@ -225,6 +232,64 @@ async def test_the_api_reads_back_the_prompt_the_model_was_given(
     )
 
 
+# What the server itself ships, and the opt-in that lets it through
+
+
+SHIPPED_MAC = "aa:bb:cc:dd:ee:45"
+
+
+def opting_in_config() -> Config:
+    """Two entries backed by the same server, one of which opted into
+    the guidance that server ships about itself, granted to one agent so
+    the difference between them is the opt-in and nothing else."""
+    return Config(
+        providers={
+            "llm": {"mock": speaks_its_prompt()},
+            "asr": {"mock": {"type": "mock", "text": "what can you do"}},
+            "tts": {"mock": {"type": "mock"}},
+            "vad": {"mock": {"type": "mock"}},
+        },
+        mcp_servers={
+            "trusted": stdio_entry(use_server_instructions=True),
+            "plain": stdio_entry(),
+        },
+        agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
+        agents={"house": {"prompt": "HOUSE", "mcp": ["trusted", "plain"]}},
+        devices={SHIPPED_MAC: ["house"]},
+        default_agent="house",
+    )
+
+
+async def test_a_servers_own_guidance_is_spoken_only_where_the_entry_opted_in(
+    serve_app_in, tmp_path: Path
+) -> None:
+    """The issue's third deliverable, end to end. The same server is
+    behind both entries, so what separates them is the opt-in: the words
+    it ships reach the model once, under the entry that asked for them,
+    and the surface says whose words they are."""
+    async with serve_app_in(tmp_path / "db", opting_in_config()) as (port, _), control_client(
+        port
+    ) as control:
+        device = Device(port, SHIPPED_MAC)
+        await device.connect()
+        try:
+            said = await device.say_something()
+        finally:
+            await device.close()
+
+        answered = await control.get("/runtime/agents/house/prompt")
+
+    assert answered.status_code == 200, answered.text
+    assert [block["provenance"] for block in answered.json()["blocks"]] == [
+        "persona",
+        "server_instructions:trusted",
+    ]
+    # Spoken once, by the entry that opted in, although both entries are
+    # the same server shipping the same sentence.
+    assert collapsed(said).count(collapsed(SHIPPED_INSTRUCTIONS)) == 1
+    assert "trusted__" in collapsed(said)
+
+
 # A shared fragment, written once and spoken by everyone who includes it
 
 
@@ -333,7 +398,16 @@ def held_config(directory: Path) -> Config:
             "tts": {"mock": {"type": "mock"}},
             "vad": {"mock": {"type": "mock"}},
         },
-        mcp_servers={ENTRY: stdio_entry(instructions=GUIDANCE)},
+        mcp_servers={
+            ENTRY: stdio_entry(
+                instructions=GUIDANCE,
+                use_server_instructions=True,
+                # The child reads this at startup, and a reconnect
+                # resolves it again, so what two connections ship can
+                # differ without anything about the entry changing.
+                env={SHIPPED_ENV: f"${SHIPPED_TEXT_ENV}"},
+            )
+        },
         agent_defaults=dict.fromkeys(("asr", "tts", "vad"), "mock") | {"mcp": [ENTRY]},
         agents={
             "alpha": {"prompt": "ALPHA", "llm": "to-beta"},
@@ -353,7 +427,14 @@ async def rewrite_guidance(control: httpx.AsyncClient, text: str) -> None:
     the connection never sees, so applying it keeps the connection that
     is up.
     """
-    written = await control.put(f"/mcp-servers/{ENTRY}", json=stdio_entry(instructions=text))
+    written = await control.put(
+        f"/mcp-servers/{ENTRY}",
+        json=stdio_entry(
+            instructions=text,
+            use_server_instructions=True,
+            env={SHIPPED_ENV: f"${SHIPPED_TEXT_ENV}"},
+        ),
+    )
     assert written.status_code == 200, written.text
     applied = await control.post("/runtime/mcp-servers/reload")
     assert applied.status_code == 200, applied.text
@@ -362,8 +443,28 @@ async def rewrite_guidance(control: httpx.AsyncClient, text: str) -> None:
     assert applied.json()["servers"][ENTRY]["state"] == "connected"
 
 
+async def reconnect(app, shipping: str) -> None:
+    """Drop this entry's connection and let it come back, shipping
+    something else.
+
+    The manager is reached through the registry rather than through a
+    request, because a reconnect is not something an operator asks for:
+    it is what happens when a server goes away and comes back, and what
+    this test is about is the capture that arrives with the new
+    connection. Nothing about the configuration moves, so the slice is
+    the same one the running session's agent was activated against.
+    """
+    os.environ[SHIPPED_TEXT_ENV] = shipping
+    manager = app.state.mcp_servers._managers[ENTRY]
+    await manager.stop()
+    manager.ensure_reconnecting()
+    async with asyncio.timeout(30):
+        while not manager.up:
+            await asyncio.sleep(0.05)
+
+
 async def test_one_session_across_a_reload_a_switch_and_a_memory_write(
-    serve_app_in, tmp_path: Path
+    serve_app_in, monkeypatch, tmp_path: Path
 ) -> None:
     """The clocks, proven where they can only be proven: inside one
     conversation on one socket.
@@ -371,11 +472,13 @@ async def test_one_session_across_a_reload_a_switch_and_a_memory_write(
     A switch re-assembles the know-how half, so an agent switched in
     after a reload speaks the guidance the reload applied. A session
     already holding a half keeps it, so a later reload's guidance is not
-    in its next reply. And memory keeps the clock it always had, so a
-    fact written by something else while this conversation is running is
-    in that same reply.
+    in its next reply, and neither is what a reconnect captured in the
+    meantime. And memory keeps the clock it always had, so a fact
+    written by something else while this conversation is running is in
+    that same reply.
     """
     fact = "the user is vegetarian"
+    monkeypatch.setenv(SHIPPED_TEXT_ENV, "Shipped first.")
     async with serve_app_in(tmp_path / "db", held_config(tmp_path / "memory")) as (
         port,
         app,
@@ -399,20 +502,29 @@ async def test_one_session_across_a_reload_a_switch_and_a_memory_write(
             assert second.startswith("GAMMA")
             assert "Ask twice." in second
             assert GUIDANCE not in second
+            # And what the server shipped about itself, which this entry
+            # opted into, as the connection gamma was activated over
+            # captured it.
+            assert "Shipped first." in second
 
             # A memory write from outside this conversation, which is
-            # what a concurrent session would do, and a second reload
-            # gamma must not see.
+            # what a concurrent session would do, a second reload gamma
+            # must not see, and a reconnect capturing something else,
+            # which gamma must not see either.
             await app.state.memory.remember("gamma", fact)
             await rewrite_guidance(control, "Ask three times.")
+            await reconnect(app, "Shipped second.")
 
             third = await device.say_something()
 
-            # The cached half is untouched by the reload: gamma still
-            # speaks the guidance it was activated with.
+            # The cached half is untouched by the reload and by the
+            # reconnect alike: gamma still speaks the guidance and the
+            # shipped block it was activated with.
             assert third.startswith("GAMMA")
             assert "Ask twice." in third
             assert "Ask three times." not in third
+            assert "Shipped first." in third
+            assert "Shipped second." not in third
             # And the memory block is not cached with it: the fact
             # written between the two replies is in this one, which is
             # the contract this feature deliberately did not move.
@@ -432,4 +544,5 @@ async def test_one_session_across_a_reload_a_switch_and_a_memory_write(
         assert preview.status_code == 200, preview.text
         blocks = {block["provenance"]: block["text"] for block in preview.json()["blocks"]}
         assert "Ask three times." in blocks[f"instructions:{ENTRY}"]
+        assert "Shipped second." in blocks[f"server_instructions:{ENTRY}"]
         assert fact in blocks["memory"]

@@ -10,6 +10,7 @@ Run it by path: `python tests/support/mcp_stdio_server.py`.
 """
 
 import asyncio
+import os
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.prompts import base
@@ -23,6 +24,13 @@ SHIPPED_INSTRUCTIONS = (
     "only when you are asked for it."
 )
 
+# An entry may override that through the environment, which is the one
+# way a test can make two connections to this server ship two different
+# things: a reconnect resolves the entry's `env` again and spawns a new
+# child, so a test that wants to watch a capture change changes this
+# between them.
+SHIPPED_ENV = "SAMTAL_TEST_SHIPPED"
+
 # One published prompt per shape the client has a rule about: a single
 # message, several messages, and a template that cannot be rendered
 # without an argument.
@@ -30,7 +38,9 @@ HOUSE_STYLE = "Answer in short sentences. Never spell out a number over ten."
 FIRST_VOICE = "Introduce yourself before the first tool call of a conversation."
 SECOND_VOICE = "Say what a tool answered, not that you called one."
 
-server = FastMCP("samtal-test-tools", instructions=SHIPPED_INSTRUCTIONS)
+server = FastMCP(
+    "samtal-test-tools", instructions=os.environ.get(SHIPPED_ENV, SHIPPED_INSTRUCTIONS)
+)
 
 
 @server.tool()
