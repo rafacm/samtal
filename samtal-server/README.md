@@ -758,10 +758,13 @@ inherits the `agent_defaults` list, naming a list replaces the inherited
 one rather than extending it, and `prompt_includes: []` opts one agent
 out of what its siblings share. A name that matches no fragment is
 refused when it is written, since the fragment is a row in the same
-database. The text is injected exactly as written, with no heading over
-it: it is prompt text the operator composed, and a heading would
-editorialize. Fragments are part of the boot-time snapshot, so writing
-or editing one applies at the next server start, and the write says so.
+database. The text is injected as written, with no heading over it: it
+is prompt text the operator composed, and a heading would editorialize.
+Its indentation and its own blank lines are part of it, and the only
+bytes trimmed are whitespace at the two ends of the whole prompt, which
+the surface above reports trimmed with them. Fragments are part of the
+boot-time snapshot, so writing or editing one applies at the next server
+start, and the write says so.
 
 **Each block is counted** because every one of them competes with the
 others for the context budget of a small local model, and there is no

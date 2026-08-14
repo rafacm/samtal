@@ -32,11 +32,11 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   The list follows the `mcp` field's rules exactly: unset inherits the
   `agent_defaults` list, naming a list replaces the inherited one rather
   than extending it, and `prompt_includes: []` opts one agent out of
-  what its siblings share. A fragment is injected verbatim, in the order
-  the layer lists it, between the agent's own prompt and any MCP
-  guidance, with nothing added around it, and it is counted under
-  `fragment:<name>` by `samtal-server config prompt` and by the
-  `prompt_assembled` event. A name that matches no fragment is refused
+  what its siblings share. A fragment is injected in the order the layer
+  lists it, between the agent's own prompt and any MCP guidance, with
+  nothing added around it and nothing trimmed inside it, and it is
+  counted under `fragment:<name>` by `samtal-server config prompt` and
+  by the `prompt_assembled` event. A name that matches no fragment is refused
   when it is written and reported by layer and list position rather than
   by value, since a name written beside prompt text is where a
   credential gets pasted. Fragments are part of the boot-time snapshot,
@@ -62,10 +62,11 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   the agent's own prompt, then the shared fragments it includes in the
   order its layer lists them, then the guidance of each granted MCP
   entry in grant order, then the remembered facts last under the
-  heading they have always had, separated by blank lines. For a deployment with no
-  guidance configured, the prompt is character for character what it
-  was. The persona and the guidance are assembled when a conversation
-  starts and again when it switches agents, and held for the life of
+  heading they have always had, separated by blank lines. For a
+  deployment with no guidance and no fragments configured, the prompt is
+  character for character what it was. The persona, the fragments and
+  the guidance are assembled when a conversation starts and again when
+  it switches agents, and held for the life of
   that activation; the remembered facts keep the clock they had, read
   on every reply, so a fact stored by one conversation is still known
   to a concurrent one on its next reply. That read now happens in a
