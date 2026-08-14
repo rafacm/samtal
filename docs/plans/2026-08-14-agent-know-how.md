@@ -992,6 +992,99 @@ the amendments land.
    so this is a small repair shipped with milestone 1, tested by
    the existing session suites.
 
+## Plan review round, third pass
+
+A third review of the twice-amended plan (fe8fac8), same reviewer
+setup, 2026-08-14, asked to verify the second round's resolutions.
+Round two's findings were confirmed resolved as amended, finding 13
+partially (see finding 2 below). Verdict: ready after the P1/P2
+amendments. Findings as received, condensed, with resolutions
+appended as the amendments land.
+
+1. **P1: raw prompt names create log-leak and terminal-control
+   paths.** `inject_prompts` entries are only non-blank strings, and
+   an MCP prompt name is a server-chosen identifier the operator
+   copies, so it can hold anything; printing it in skip warnings and
+   provenance makes "safe to print by construction" false. Identify
+   prompts in logs, warnings and structured events by entry and
+   `inject_prompts` position, never by value; sanitize provenance at
+   the CLI like block text; add configured-name credential and
+   control-character sentinels across every surface.
+   *Resolution*: adopted. Every log line, warning and structured
+   event now identifies a configured prompt by the entry and its
+   position in `inject_prompts`, counted from one; the provenance
+   token becomes `server_prompt:<entry>:<position>`. The configured
+   name itself appears only where operator-written configuration is
+   already echoed write-shaped (entity reads and the inspection
+   response body, both JSON-encoded), and the CLI's full-block
+   sanitizer covers provenance strings as well as text. Milestone
+   3's sentinels gain a credential-shaped and a control-character
+   prompt name asserted absent from logs, CLI streams and refusal
+   sentences.
+
+2. **P1: prompt discovery destroys the bounded startup and reload
+   contract.** Per-call bounds alone let an unlimited listing or a
+   repeating pagination cursor hold `start()` and the reload
+   indefinitely while each request stays within its bound, against
+   #121's one-connect-timeout envelope and the CLI's 60 s read
+   timeout. Give discovery an aggregate deadline and bounded
+   pagination, skip everything remaining when either is reached,
+   state the worst-case start and reload envelope below the CLI
+   timeout, and test elapsed completion, not just tool survival.
+   *Resolution*: adopted. The whole discovery phase (listing pages
+   and fetches together) runs under one aggregate deadline equal to
+   `CONNECT_TIMEOUT_S`, with a fixed page cap as the cursor-loop
+   backstop; reaching either skips all remaining prompts with one
+   positional warning. The worst case for a manager start is
+   therefore one connect timeout plus one discovery deadline plus
+   small change, about 20 s, and the reload envelope stays where
+   #121 pinned it plus that same deadline, comfortably inside the
+   60 s CLI read timeout; the plan states both numbers. Milestone
+   3's tests measure elapsed boot and reload completion against the
+   envelope, and cover a repeating cursor and a listing whose pages
+   exceed the cap.
+
+3. **P2: an activation-time event cannot account for per-round
+   memory.** `_activate_agent` is synchronous and memory is read per
+   round, so the event cannot carry a memory count; either emit per
+   round after the memory read, or keep it activation-only and
+   exclude memory explicitly.
+   *Resolution*: adopted, the second branch. `prompt_assembled`
+   stays at activation, where the know-how half is actually
+   assembled, and carries that half's block sizes only; memory is
+   explicitly out of the event, because a per-round emission would
+   double the round's log volume for a number that moves slowly and
+   the existing `llm_round` event already carries per-round token
+   counts, while the inspection surface reads memory fresh and
+   answers its size on demand. The claims and milestone 1 tests are
+   reworded to know-how provenance.
+
+4. **P2: the fragment CRUD representation is incompatible with the
+   existing substrate.** Entity parsing, `Envelope.entity` and the
+   CLI all require mapping-shaped entities, and the plan never
+   defines the PUT body. Define a concrete entity model with one
+   verbatim text field and use the ordinary mapping path.
+   *Resolution*: adopted. `prompt_fragments` maps names to a
+   `PromptFragmentConfig` entity with a single verbatim `text`
+   field; the PUT body, the read envelope and the CLI fragment all
+   carry `{text: ...}` through the ordinary entity path, and
+   milestone 2 pins the exact CLI input and API read representation.
+
+5. **P2: reload and reconnect cache semantics still contain
+   contradictory promises.** The instructions-edit section says new
+   guidance appears in the next reply, against the cache rule; and a
+   reconnect capture cannot update a running session's cached half,
+   since activation precedes revival. Say "next activation" in both
+   places, document the reconnect case beside the reload, and make
+   the held-session test prove the reconnect does not mutate the
+   cached half.
+   *Resolution*: adopted. The instructions-edit section now says the
+   next activation, the trust section documents that a reconnect's
+   captures reach the inspection preview and later activations only,
+   and the held-session integration test asserts the reconnect
+   leaves the running session's cached half untouched while a
+   subsequent switch or new session sees the capture.
+
 ## Milestones
 
 Stacked branches, one PR each, every merge leaving `main` releasable:
