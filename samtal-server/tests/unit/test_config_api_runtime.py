@@ -20,7 +20,9 @@ from fastapi.testclient import TestClient
 from samtal_server.app import create_app
 from samtal_server.config import Config
 from samtal_server.config.api import (
+    MALFORMED_REQUEST_DESCRIPTION,
     MOUNT_PATH,
+    NO_RUNTIME_PROMPT_DESCRIPTION,
     PROBLEM_DESCRIPTIONS,
     RELOAD_REFUSED_DESCRIPTION,
     build_api,
@@ -378,6 +380,10 @@ def test_the_reload_describes_a_422_of_its_own() -> None:
 
 PROMPT_PATH = "/runtime/agents/assistant/prompt"
 
+# The same route as the document names it, since a path parameter is a
+# template there and an agent name here.
+PROMPT_TEMPLATE = "/runtime/agents/{name}/prompt"
+
 
 def previewing(assembled: object):
     async def assemble(agent: str) -> object:
@@ -451,6 +457,34 @@ def test_the_blocks_and_the_total_are_the_assemblers_own(directory: Path) -> Non
         "\n\n".join(block["text"] for block in body["blocks"])
     )
     assert body["characters"] > sum(block["characters"] for block in body["blocks"])
+
+
+def test_the_prompt_read_describes_the_refusals_it_can_actually_answer() -> None:
+    """Two of its refusals cannot inherit a shared sentence.
+
+    The 422 is the framework's own, and FastAPI's default body for it
+    lists the input it rejected, which this API replaces globally with
+    the sanitized `Problem`. A document that advertised the other shape
+    would have a client reading a field this server never sends.
+
+    And the shared 503 says the reads in this namespace answer emptily,
+    which is true of the status read next door and false here: an empty
+    block list would say a session is sent nothing.
+    """
+    responses = document()["paths"][PROMPT_TEMPLATE]["get"]["responses"]
+
+    for status in ("401", "404", "422", "503"):
+        schema = responses[status]["content"]["application/json"]["schema"]
+        assert schema == {"$ref": "#/components/schemas/Problem"}, status
+    assert responses["422"]["description"] == MALFORMED_REQUEST_DESCRIPTION
+    assert responses["422"]["description"] != PROBLEM_DESCRIPTIONS[422]
+    assert responses["503"]["description"] == NO_RUNTIME_PROMPT_DESCRIPTION
+    assert responses["503"]["description"] != PROBLEM_DESCRIPTIONS[503]
+    assert "no honest empty answer" in responses["503"]["description"]
+    # Per route rather than a global edit: the reload, which is an
+    # action, keeps the shared sentence about actions.
+    reload_503 = document()["paths"][RELOAD_PATH]["post"]["responses"]["503"]
+    assert reload_503["description"] == PROBLEM_DESCRIPTIONS[503]
 
 
 def test_a_running_server_hands_its_own_assembly_to_the_api(

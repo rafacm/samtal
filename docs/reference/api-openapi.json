@@ -2118,8 +2118,8 @@
               }
             }
           },
-          "503": {
-            "description": "This application has no running server around it, so there is nothing for a runtime action to act on. A deployment reaches the API on its server's own port; an application built without one serves the reads in the /runtime namespace emptily and refuses the actions.",
+          "422": {
+            "description": "The request could not be read in the shape this endpoint expects. The refusal is the sanitized `Problem` body every other refusal uses, and nothing sent is quoted back.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2128,12 +2128,12 @@
               }
             }
           },
-          "422": {
-            "description": "Validation Error",
+          "503": {
+            "description": "This application has no running server around it, so there is no loaded agent, no running MCP slice and no memory store to assemble a prompt from. Unlike the MCP status read beside it, there is no honest empty answer: an empty block list would say a session opening now is sent nothing.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "$ref": "#/components/schemas/Problem"
                 }
               }
             }
@@ -2334,19 +2334,6 @@
         ],
         "title": "Envelope",
         "description": "One entity as a read returns it: the entity, and its stored-secret\nslots beside it."
-      },
-      "HTTPValidationError": {
-        "properties": {
-          "detail": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationError"
-            },
-            "type": "array",
-            "title": "Detail"
-          }
-        },
-        "type": "object",
-        "title": "HTTPValidationError"
       },
       "McpReloadResult": {
         "properties": {
@@ -2630,46 +2617,6 @@
         ],
         "title": "StoredSecretLocation",
         "description": "Where one stored secret is, in the whole-configuration read."
-      },
-      "ValidationError": {
-        "properties": {
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "type": "array",
-            "title": "Location"
-          },
-          "msg": {
-            "type": "string",
-            "title": "Message"
-          },
-          "type": {
-            "type": "string",
-            "title": "Error Type"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "ctx": {
-            "type": "object",
-            "title": "Context"
-          }
-        },
-        "type": "object",
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
-        "title": "ValidationError"
       },
       "ProviderConfig": {
         "additionalProperties": true,

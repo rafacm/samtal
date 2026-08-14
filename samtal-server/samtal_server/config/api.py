@@ -399,6 +399,27 @@ UNLOADED_AGENT_DESCRIPTION = (
     "since then waits for the restart that builds its providers."
 )
 
+# Declared on the routes whose only 422 is the framework's own, so the
+# document carries the sanitized shape this API actually answers with
+# rather than FastAPI's default one, which lists the input it rejected
+# per error. Nothing here validates a body, so this is the request that
+# could not be read at all.
+MALFORMED_REQUEST_DESCRIPTION = (
+    "The request could not be read in the shape this endpoint expects. The refusal is "
+    "the sanitized `Problem` body every other refusal uses, and nothing sent is quoted "
+    "back."
+)
+
+# The shared 503 sentence is about actions, and says the reads in this
+# namespace answer emptily. That is true of the MCP status read and
+# false of this one: there is no honest empty prompt.
+NO_RUNTIME_PROMPT_DESCRIPTION = (
+    "This application has no running server around it, so there is no loaded agent, no "
+    "running MCP slice and no memory store to assemble a prompt from. Unlike the MCP "
+    "status read beside it, there is no honest empty answer: an empty block list would "
+    "say a session opening now is sent nothing."
+)
+
 # The reload takes no body and addresses nothing, so the shared sentence
 # for 422 (a stage that is not a stage, a MAC that is not one) cannot be
 # what one of its own means. What it means instead is the whole of the
@@ -1171,7 +1192,17 @@ def _runtime(api: FastAPI) -> None:
     @api.get(
         "/runtime/agents/{name}/prompt",
         response_model=AssembledPrompt,
-        responses=_problems(401, 404, 503, instead={404: UNLOADED_AGENT_DESCRIPTION}),
+        responses=_problems(
+            401,
+            404,
+            422,
+            503,
+            instead={
+                404: UNLOADED_AGENT_DESCRIPTION,
+                422: MALFORMED_REQUEST_DESCRIPTION,
+                503: NO_RUNTIME_PROMPT_DESCRIPTION,
+            },
+        ),
     )
     async def read_agent_prompt(name: str, assemble: AgentPromptDep) -> dict[str, Any]:
         """The system prompt a session opening now as this agent would
