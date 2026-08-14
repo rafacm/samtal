@@ -412,6 +412,104 @@ doc drift checks.
 - **Committed contracts drift.** Regeneration rides in the same
   commit as the change that moves it; CI's drift checks are the net.
 
+## Plan review round
+
+One external review of the plan as first committed (dec79b2): codex
+CLI 0.147.0, model gpt-5.6-sol, read-only against this repository
+with the issue #122 body supplied, 2026-08-14. Verdict: not ready,
+on findings 1 to 3. Findings as received, condensed; each carries
+its resolution once the amendment addressing it lands.
+
+1. **P1: the plan drops the required MCP prompts primitive.**
+   Deliverable 3 explicitly requires consuming server-published MCP
+   prompts; the plan substitutes `InitializeResult.instructions` and
+   defers prompts, which replaces a settled deliverable with a
+   different protocol field. Define how `prompts/list` and
+   `prompts/get` are consumed at connect or reload, never during a
+   turn, with handling for required arguments, selection, size caps,
+   reconnects and opt-in; `InitializeResult.instructions` may be
+   supported additionally, but cannot replace the deliverable.
+   Resources may stay deferred as the issue permits.
+
+2. **P1: per-reply assembly contradicts the settled session-open
+   boundary, and the byte-equality claim is false.** The plan
+   restates assembly at session open, then specifies per-leg
+   assembly with reload pickup on the next utterance; the
+   guidance-iff-tools-contribute rule cannot coexist with a
+   session-open cache, since tools change per reply after
+   activation. And today `_system_prompt()` re-reads memory on every
+   LLM round, so moving to per-leg assembly changes when newly
+   remembered facts appear; a static byte-equality test would not
+   detect that. Either cache at activation and base guidance on the
+   grant edge, or say explicitly what per-leg assembly means for the
+   settled decision; document the memory-visibility change and test
+   a persistent session across memory writes, reloads, reconnects
+   and an agent switch; make the inspection endpoint's
+   new-session-preview nature explicit.
+
+3. **P1: unknown `prompt_includes` can become a secret-reflection
+   path.** The plan delegates unknown includes to
+   `check_references`, whose existing refusals quote the unresolved
+   value, and the #121 round already recorded that rejected
+   fragments may hold pasted credentials; the `[A-Za-z0-9_-]+` rule
+   does not close the leak, since a credential can match it.
+   Unresolved includes must be reported by list position and rule
+   only, never by value, with credential-sentinel tests over HTTP
+   responses, CLI stdout and stderr, every log record and the full
+   exception chain, for agent and defaults writes and boot
+   validation.
+
+4. **P2: the new example breaks the existing example suite.**
+   `test_config_examples.py` recognizes a fixed creation order and
+   requires every example listed in `examples/README.md`; adding
+   `examples/prompt-fragment.yaml` fails `ORDER.index(...)`, and
+   neither the test nor the README is named by the plan.
+
+5. **P2: the upgrade verification does not prove real 0001
+   databases survive.** The database tests migrate a fresh database
+   to head rather than seeding a 0001 schema and advancing it; the
+   expected-table sets in `test_db_open.py` and the installed-wheel
+   CI check omit `prompt_fragments`; and a boolean added with only a
+   Python default can leave existing rows `NULL`. Seed a real 0001
+   database with nonempty rows, upgrade through all three
+   migrations, load through `ConfigStore` and assert preservation
+   plus `use_server_instructions == false`; specify the boolean's
+   database-level default; update both expected-table sets.
+
+6. **P2: server-instruction capture is attached to the wrong code
+   path, and flag toggles are unproven.** `initialize()` is awaited
+   in `_connect()`, which discards its result, not in `_run`; and
+   with the opt-in excluded from connection identity, a
+   false-to-true reload cannot expose instructions that were never
+   captured. Capture capped instructions regardless of the opt-in,
+   use the flag only to control injection and inspection, and test
+   both toggle directions on the same manager object plus clearing
+   on `_mark_down` and normal unwind.
+
+7. **P2: "injected verbatim" conflicts with `NonBlankStr`.** The
+   repository's nonblank type strips surrounding whitespace, so
+   using it for fragment bodies and instructions would alter
+   deliberate leading and trailing newlines, and no test pins
+   preservation. Use a plain string validated nonblank on a stripped
+   copy but returned unmodified, with byte-exact tests through
+   store, API, CLI and assembly.
+
+8. **P2: the CLI inspection test would not catch silent
+   truncation.** The CLI's response renderer strips and truncates
+   every value to `GLIMPSE_LENGTH`, so reusing it would make
+   `config prompt` conceal most realistic prompts while appearing
+   successful, and the planned test covers only control characters.
+   Use a dedicated full-block sanitizer that replaces nonprintables
+   without stripping or truncating, and test a block longer than
+   `GLIMPSE_LENGTH`.
+
+9. **P3: two persona sources are left standing.** The plan has
+   `Config.prompt_for_agent` resolving the persona while
+   `AgentProviders.prompt` still carries a boot-time copy, and
+   `providers/registry.py` is absent from the module layout. Decide
+   which source survives and make the pipeline and the inspection
+   hook consume the same one.
+
 ## Milestones
 
 Stacked branches, one PR each, every merge leaving `main` releasable:
