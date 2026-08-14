@@ -1190,3 +1190,52 @@ from the specification's deprecation and from the example that already
 shipped, not from a run. Nothing was run against hardware or a
 deployment, and the placeholder rendering was not re-exercised, no code
 having changed.
+
+### PR #128 review round
+
+One external review of the milestone's diff: codex CLI 0.147.0, model
+gpt-5.6-sol, read-only, 2026-08-14. Verdict: mergeable after the listed
+fixes. Both findings P2, both adopted; each carries the commit that
+addressed it.
+
+1. **P2: the schema's non-text sentence stops before the revisit
+   condition.** The plan's gap 6 asks for the condition wherever the
+   decision is documented, and `DOMAIN_DESCRIPTIONS["mcp_servers"]`
+   ended at the placeholder rule, so the README's reader learned what
+   would lift the limitation and the schema's reader met it as a flat
+   shortcoming. Suggested: add the condition compactly and regenerate.
+   *Resolution*: adopted in 17df7dd. One sentence: carrying structured
+   content to a device is the display protocol's work, once the display
+   path can render more than speech, rather than the tool loop's. The
+   generated reference was regenerated with its command; the OpenAPI
+   document was regenerated too and did not move, this description
+   belonging to a section of the composed configuration rather than to
+   an entity the API serves, which is the case the milestone's own
+   discovery about description changes names.
+2. **P2: the verification figures are the pre-rebase tree's.** 1538
+   unit and 47 integration were recorded before the branch was rebased
+   onto the merged milestone 3 and its review round, whose own figures
+   are 1585 and 48, so a documentation milestone appeared to have
+   removed forty-seven tests. Suggested: rerun both lanes and replace
+   them.
+   *Resolution*: adopted in 3e40e10. Both lanes were rerun on the
+   rebased tip and the Verification section carries that run's figures,
+   with the rebase said out loud and the equality it makes checkable:
+   milestone 3's round left 1585 and 48 on `main`, and this milestone
+   adds no test.
+
+### Verification after the review round
+
+Same commands, from `samtal-server/`, on the tree at this commit.
+
+- `uv run ruff check .`: "All checks passed!".
+- `uv run pytest tests/unit -q`: 1585 passed, 15 skipped in 145.81s.
+  The round adds no test either: one finding moved a description, whose
+  agreement with the committed reference the existing drift check is
+  what asserts, and the other moved this document.
+- `uv run pytest tests/integration -q`: 48 passed in 96.62s.
+
+Not verified, and not claimed: what was true of the milestone is still
+true of the round. No SSE-only server was put behind `mcp-proxy` and
+reached from this server, nothing was run against hardware or a
+deployment, and no code changed, so no behaviour was re-exercised.
