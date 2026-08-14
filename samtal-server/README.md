@@ -1140,9 +1140,9 @@ and an illegitimate one to serve from.
 which is what `--local` is for: `show`, `delete`, `clear-secret` and
 `set-secret` against the database directly, the four commands that get a
 deployment out of a state its own server refuses. Every `--local`
-invocation says on stderr that it bypasses the API and that a running
-server will not observe the change until its next start; every other
-command refuses `--local` by naming the four.
+invocation says on stderr that it bypasses the API, and each write then
+says when it takes effect, the same answer the API gives for that act;
+every other command refuses `--local` by naming the four.
 
 Every field of the domain half is documented in
 [`../docs/reference/domain-config.md`](../docs/reference/domain-config.md),
@@ -1365,9 +1365,12 @@ transport error.
 **`--local` is the break-glass path**, for when there is no server to
 write through. It covers four commands, `show`, `delete`, `clear-secret`
 and `set-secret`, opens the database directly, and prints on stderr
-every time that it bypasses the API and that a running server will not
-observe the change until its next start. Every other command refuses the
-flag by naming the four. It does not check whether a server is running:
+every time that it bypasses the API. When a change made this way is
+observed is then the write's own answer, in the same three cases as
+over the API: the next server start for most of it, the next `config
+reload` for an MCP entry and the secrets stored on it, and the device's
+next check-in for a binding. Every other command refuses the flag by
+naming the four. It does not check whether a server is running:
 there is no reliable way to, and a wrong refusal would wedge the
 recovery path in exactly the situation it exists for. What makes that
 safe is that a write is one transaction either way, so two writers
@@ -1999,12 +2002,14 @@ the variable names, so the file belongs on the data volume and in
 access-controlled backups, not in a repository.
 
 And the operational one, said again because it is the trap of a
-boot-time snapshot: **an edit applies at the next server start.** A
-`config set` against a running deployment is accepted by that server and
-changes nothing it is doing until the process restarts, which both the
-command and the API's answer say every time they write. Binding a device
-is the exception, and says so: the running server reads the binding at
-that device's next check-in.
+boot-time snapshot: **most of an edit applies at the next server
+start.** A `config set` against a running deployment is accepted by that
+server and changes nothing it is doing until the process restarts, which
+both the command and the API's answer say every time they write. There
+are two exceptions, and each write says which of the three cases it is
+in: an MCP entry, a secret stored on one, and the agents' grant lists
+reach a running server when it is asked to reload, and a device binding
+reaches the running server at that device's next check-in.
 
 ### The configuration API in a deployment
 
@@ -2111,10 +2116,13 @@ beyond the master key is passed, because nothing here serves anything or
 reaches the API.
 
 Every `--local` invocation prints one line on stderr saying that it
-bypasses the API and that a running server will not observe the change
-until its next start, device bindings excepted. That is not a warning about a hazard: it is the
-boot-time snapshot contract, said out loud at the one moment an operator
-is most likely to expect otherwise. It is printed rather than enforced
+bypasses the API, and every write under it then says when it takes
+effect, the same sentence the API answers that act with: the next server
+start, the next `config reload` for an MCP entry or a secret on one, or
+the device's next check-in for a binding. That is not a warning about a
+hazard: it is the boot-time snapshot contract and its two exceptions,
+said out loud at the one moment an operator is most likely to expect
+otherwise. The line itself is printed rather than enforced
 because there is no reliable way to tell whether a server is running
 against the same file, and a wrong refusal would wedge the recovery path
 in exactly the situation it exists for. Concurrency is safe regardless:
@@ -2124,8 +2132,12 @@ lock and then commits. The retryable refusal is what a writer meets only
 if the lock has not come free inside the 10 second busy timeout, and it
 says nothing was changed and to run the command again.
 
-Restart the server when the repair is done. Nothing written this way is
-observed until then.
+Restart the server when the repair is done. That is the point of the
+path: it exists for a server that will not start, and starting it is
+the goal. It is not that a running server could observe none of this,
+which the write itself says: an MCP repair made this way is applied by
+`samtal-server config reload` like any other, and a binding is read at
+the device's next check-in.
 
 ### Choosing an image
 
