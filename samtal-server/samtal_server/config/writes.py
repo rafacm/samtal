@@ -17,6 +17,8 @@ act differently.
 
 from collections.abc import Sequence
 
+from samtal_server.config.secrets import EntityKind
+
 # Printed after most mutating commands, and answered with most
 # successful writes over HTTP. The configuration is a boot-time snapshot
 # by design, and a write that quietly waits for a restart is the one
@@ -60,6 +62,20 @@ def binding_notice(unloaded: Sequence[str] = ()) -> str:
     every one of them is loaded and the write is live.
     """
     return RESTART_NOTICE if unloaded else BINDING_NOTICE
+
+
+def secret_notice(kind: EntityKind) -> str:
+    """When a stored credential takes effect, which follows the entity it
+    is stored on.
+
+    The reload rebuilds the MCP entries with their credentials, so a
+    secret written on one is applied by it; a provider reads its
+    credential as it is built at boot, so a secret written on one waits
+    for the restart. The API says the same by having four secret routes,
+    two per kind, each statically one of these sentences; one CLI
+    command covers both kinds, so it asks here.
+    """
+    return MCP_RELOAD_NOTICE if kind == "mcp_server" else RESTART_NOTICE
 
 
 def wrote_provider(stage: str, name: str) -> str:
@@ -135,6 +151,7 @@ __all__ = [
     "deleted_mcp_server",
     "deleted_prompt_fragment",
     "deleted_provider",
+    "secret_notice",
     "wrote_agent",
     "wrote_default_agent",
     "wrote_mcp_server",

@@ -20,12 +20,13 @@ not made at all.
 
 `--local` is the break-glass path, for a database whose server will not
 start. It covers four commands (show, delete, clear-secret, set-secret),
-opens the database directly, and says so on stderr every time: a change
-made that way is not observed by a running server until its next start,
-which is the boot-time snapshot contract rather than a hazard, but it is
-not something to discover. Device bindings are the exception the server
-side makes, so a `--local` device delete says the device meets it at its
-next check-in, the same sentence the API answers that delete with.
+opens the database directly, and says so on stderr every time, which is
+not something to discover. When a change made that way is observed is
+the write's own answer rather than the preamble's: the boot-time
+snapshot is the default story, and the exceptions the server side makes
+are the exceptions here too, so a `--local` device delete says the
+device meets it at its next check-in and a `--local` MCP write names the
+reload. Each is the sentence the API answers that same act with.
 
 Two commands stand outside all of this, because onboarding a board
 happens before there is anything to configure. `ota-url` derives the
@@ -73,6 +74,7 @@ from samtal_server.config.secrets import (
 from samtal_server.config.store import ConfigStore, check_transportable
 from samtal_server.config.writes import (
     BINDING_NOTICE,
+    MCP_RELOAD_NOTICE,
     RESTART_NOTICE,
     cleared_secret,
     deleted_agent,
@@ -80,6 +82,7 @@ from samtal_server.config.writes import (
     deleted_mcp_server,
     deleted_prompt_fragment,
     deleted_provider,
+    secret_notice,
     wrote_secret,
 )
 from samtal_server.db import open_database
@@ -129,9 +132,8 @@ RELOAD_READ_TIMEOUT_S = 60.0
 # situation it exists for. Saying what this is, is the honest substitute.
 LOCAL_NOTICE = (
     "--local is the break-glass path: it reads and writes the database directly, "
-    "bypassing the configuration API, and a running server will not observe a change "
-    "made this way until its next start, device bindings excepted: those it reads as "
-    "a device asks for them."
+    "bypassing the configuration API. Each write says separately when it takes "
+    "effect, the same answer the API gives for the same act."
 )
 
 # What --local does not cover, said by naming what it does. The subset is
@@ -370,7 +372,10 @@ def _delete_mcp_server(args: argparse.Namespace) -> None:
     if args.local:
         with _store(args) as store:
             store.delete_mcp_server(args.name)
-        _report(deleted_mcp_server(args.name))
+        # The same sentence the API answers this delete with. The row is
+        # the one the reload re-reads, so the entry stops when a running
+        # server is asked to reload, whichever path deleted it.
+        _report(deleted_mcp_server(args.name), MCP_RELOAD_NOTICE)
         return
     _wrote(_call(args, "DELETE", _path("mcp-servers", args.name)))
 
@@ -551,7 +556,9 @@ def _set_secret(args: argparse.Namespace) -> None:
         # The one recovery command that needs a key: it encrypts.
         with _store(args, keyed=True) as store:
             store.set_secret(location, secret)
-        _report(wrote_secret(location.describe()))
+        # Which sentence follows the entity the credential is stored on,
+        # the same split the API's four secret routes make.
+        _report(wrote_secret(location.describe()), secret_notice(location.kind))
         return
     _wrote(_call(args, "PUT", _secret_path(args), {"secret": secret}))
 
@@ -561,7 +568,7 @@ def _clear_secret(args: argparse.Namespace) -> None:
     if args.local:
         with _store(args) as store:
             store.clear_secret(location)
-        _report(cleared_secret(location.describe()))
+        _report(cleared_secret(location.describe()), secret_notice(location.kind))
         return
     _wrote(_call(args, "DELETE", _secret_path(args)))
 
