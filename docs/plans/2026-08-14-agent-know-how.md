@@ -256,8 +256,8 @@ one sentence long.
 ### The new shapes
 
 **`mcp_servers.<name>.instructions`** (milestone 1): an optional
-non-blank string on the entry, operator-written guidance injected for
-every granted agent. Ordinary domain field: stored in a nullable
+string on the entry, operator-written guidance injected for every
+granted agent. Ordinary domain field: stored in a nullable
 `instructions` column, written through the existing generic
 `set mcp-server` CLI and REST routes with no route changes, shown by
 reads (it is not a secret), covered by the generated reference.
@@ -266,9 +266,18 @@ reads (it is not a secret), covered by the generated reference.
 fragment names to instruction blocks. Names match the MCP entry-name
 pattern (`[A-Za-z0-9_-]+`): they appear in refusals, logs and the
 inspection surface, so the same safe-charset rule applies, enforced at
-parse time like `check_mcp_entry_names`. Bodies are non-blank text
-with no server-imposed length cap; the counting surface is the guard,
-and the operator is trusted with their own prompt budget. A new
+parse time like `check_mcp_entry_names`. Bodies have no
+server-imposed length cap; the counting surface is the guard, and the
+operator is trusted with their own prompt budget.
+
+Fragment bodies and the `instructions` field share one type
+decision, because both are promised verbatim: not `NonBlankStr`,
+which strips surrounding whitespace and would silently alter
+deliberate leading indentation and trailing newlines, but a plain
+string whose validator checks a stripped copy for non-blankness and
+returns the original untouched. Byte-exact preservation is pinned
+through the store, the API, the CLI and the assembled prompt, with a
+body that carries leading indentation and trailing blank lines. A new
 `prompt_fragments` table (name primary key, text) with its own
 Alembic migration; `DOMAIN_DESCRIPTIONS`/`DOMAIN_KEYS` gain the
 section; store, views, API routes (`GET/PUT/DELETE
@@ -685,6 +694,12 @@ its resolution once the amendment addressing it lands.
    preservation. Use a plain string validated nonblank on a stripped
    copy but returned unmodified, with byte-exact tests through
    store, API, CLI and assembly.
+   *Resolution*: adopted. Fragment bodies and `instructions` share
+   the stated type decision: a plain string validated non-blank on a
+   stripped copy and returned untouched, with byte-exact
+   preservation pinned through store, API, CLI and the assembled
+   prompt using a body carrying leading indentation and trailing
+   blank lines.
 
 8. **P2: the CLI inspection test would not catch silent
    truncation.** The CLI's response renderer strips and truncates
