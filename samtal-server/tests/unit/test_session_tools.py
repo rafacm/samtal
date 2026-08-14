@@ -498,3 +498,45 @@ async def test_a_hello_without_mcp_gets_no_device_tool_client() -> None:
             websocket.send_text(json.dumps({"type": "mcp", "payload": {"jsonrpc": "2.0"}}))
             texts, _ = say_something(websocket)
     assert sentences(texts) == ["POET heard hello."]
+
+
+async def test_a_tool_of_an_entry_whose_name_holds_the_separator_is_dispatched() -> None:
+    """The session's own routing, on the name shape that used to break
+    it: `home__inside` is a legal entry name, and reading the name by
+    splitting at the first separator looked for a server called `home`,
+    so the tool was offered in the snapshot and answered "there is no
+    tool called" when the model asked for it. Both the dispatch and the
+    per-entry timeout ask the registry which entry owns the name."""
+    config = base_config(
+        mcp_servers={
+            "home__inside": {
+                "transport": "stdio",
+                "command": sys.executable,
+                "args": [str(STDIO_SERVER)],
+                "tool_timeout_s": 7.5,
+            }
+        },
+        agents={
+            "poet": {"prompt": "POET", "tts": "tenor", "mcp": ["home__inside"]},
+            "tutor": {"prompt": "TUTOR", "tts": "alto"},
+        },
+    )
+    servers = McpServers.build(config)
+    await servers.start_all()
+    script = ScriptedLlm([[call("home__inside__secret_word")], "The word is rhubarb."])
+    session = session_for(base_config(), POET_MAC, {"poet": script}, mcp_servers=servers)
+    try:
+        assert await run_reply(session, "tell me") == ["The word is rhubarb."]
+    finally:
+        await servers.stop_all()
+
+    offered = {tool.name for tool in script.seen[0][1]}
+    assert "home__inside__secret_word" in offered
+    (result,) = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert not result.is_error
+    assert result.content == "rhubarb"
+    # The entry's own timeout, found through the same resolution the
+    # dispatch used rather than by reading the name here.
+    assert session.runtime._timeout_for("home__inside__secret_word") == 7.5
