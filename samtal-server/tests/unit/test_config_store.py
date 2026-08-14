@@ -15,7 +15,7 @@ from cryptography.fernet import Fernet, MultiFernet
 from sqlalchemy import select, update
 
 from samtal_server.config import ConfigError
-from samtal_server.config.loader import StorageError
+from samtal_server.config.loader import StorageError, UnknownEntityError
 from samtal_server.config.models import mcp_entry_fragment
 from samtal_server.config.secrets import SecretLocation, generate_key
 from samtal_server.config.store import ConfigStore, verify_secrets
@@ -186,6 +186,159 @@ def test_a_row_written_before_the_guidance_column_loads_unchanged(
     entry = store.load().domain.mcp_servers["home"]
     assert entry.instructions is None
     assert entry.command == "uvx"
+
+
+def test_a_fragment_round_trips_byte_for_byte(store: ConfigStore) -> None:
+    """A fragment is injected into a prompt as it stands, so what the
+    column holds and what a read gives back are the bytes that were
+    written, indentation and trailing blank lines included."""
+    _populate(store)
+    written = "  The bins go out on Tuesday.\n\n    The radio is called Bosse.\n"
+    store.set_prompt_fragment("household", {"text": written})
+
+    with store._engine.connect() as connection:
+        stored = connection.execute(
+            select(schema.prompt_fragments.c.text).where(
+                schema.prompt_fragments.c.name == "household"
+            )
+        ).scalar_one()
+    assert stored == written
+    assert store.load().domain.prompt_fragments["household"].text == written
+    assert store.read_prompt_fragment("household").entry.text == written
+
+
+def test_a_fragment_that_is_not_there_names_itself(store: ConfigStore) -> None:
+    with pytest.raises(UnknownEntityError) as caught:
+        store.read_prompt_fragment("household")
+
+    assert str(caught.value) == "prompt_fragments.household: no such prompt fragment"
+
+
+def test_an_unusable_fragment_name_is_refused_without_being_quoted(
+    store: ConfigStore,
+) -> None:
+    with pytest.raises(ConfigError) as caught:
+        store.set_prompt_fragment(f"{SECRET}.pasted", {"text": "a"})
+
+    rendered = _chain(caught.value)
+    assert "prompt_fragments" in rendered
+    assert "[A-Za-z0-9_-]+" in rendered
+    assert SECRET not in rendered
+
+
+@pytest.mark.parametrize("layer", ["agent_defaults", "agents"])
+def test_an_include_list_round_trips_write_shaped(store: ConfigStore, layer: str) -> None:
+    """Both layers hold the list the way it was written, so a read of
+    one is a fragment a write of it accepts back."""
+    _populate(store)
+    store.set_prompt_fragment("household", {"text": "The bins go out on Tuesday."})
+    written = ["household"]
+    if layer == "agent_defaults":
+        store.set_agent_defaults({"llm": "claude", "prompt_includes": written})
+        table, where = schema.agent_defaults, schema.agent_defaults.c.id
+        identity = schema.AGENT_DEFAULTS_ID
+    else:
+        store.set_agent("poet", {"prompt": "P", "prompt_includes": written})
+        table, where = schema.agents, schema.agents.c.name
+        identity = "poet"
+
+    with store._engine.connect() as connection:
+        stored = connection.execute(
+            select(table.c.prompt_includes).where(where == identity)
+        ).scalar_one()
+    assert stored == written
+
+    domain = store.load().domain
+    entry = domain.agent_defaults if layer == "agent_defaults" else domain.agents["poet"]
+    assert entry.prompt_includes == written
+
+
+def test_an_empty_include_list_is_stored_apart_from_an_unset_one(
+    store: ConfigStore,
+) -> None:
+    """None is inherit and `[]` is opt out, so the column has to keep
+    them apart the way the mcp column does."""
+    _populate(store)
+    store.set_agent("poet", {"prompt": "P", "prompt_includes": []})
+    store.set_agent("critic", {"prompt": "C"})
+
+    agents = store.load().domain.agents
+    assert agents["poet"].prompt_includes == []
+    assert agents["critic"].prompt_includes is None
+
+
+def test_a_row_written_before_the_includes_column_loads_unchanged(
+    store: ConfigStore,
+) -> None:
+    """The column is nullable because NULL is the inherit the model
+    already means, so a row from a database written before the migration
+    is a layer that includes nothing of its own."""
+    _populate(store)
+    with store._engine.begin() as connection:
+        connection.execute(
+            update(schema.agents)
+            .where(schema.agents.c.name == "sam")
+            .values(prompt_includes=None)
+        )
+        connection.execute(
+            update(schema.agent_defaults)
+            .where(schema.agent_defaults.c.id == schema.AGENT_DEFAULTS_ID)
+            .values(prompt_includes=None)
+        )
+
+    domain = store.load().domain
+    assert domain.agents["sam"].prompt_includes is None
+    assert domain.agents["sam"].prompt == "You are Sam."
+    assert domain.agent_defaults.prompt_includes is None
+    assert domain.agent_defaults.llm == "claude"
+
+
+@pytest.mark.parametrize("layer", ["agent_defaults", "agents"])
+def test_an_unknown_include_is_refused_by_position_and_never_by_value(
+    store: ConfigStore, layer: str
+) -> None:
+    """A rejected include may be a pasted credential, and this refusal
+    leaves the repository as a printed line, an HTTP body and a log
+    record, so the sentinel is looked for in the whole chain behind the
+    exception as well as in its message."""
+    _populate(store)
+    write = (
+        (lambda: store.set_agent_defaults({"llm": "claude", "prompt_includes": [SECRET]}))
+        if layer == "agent_defaults"
+        else (lambda: store.set_agent("poet", {"prompt": "P", "prompt_includes": [SECRET]}))
+    )
+
+    with pytest.raises(ConfigError) as caught:
+        write()
+
+    rendered = _chain(caught.value)
+    assert "prompt_includes: entry 1" in rendered
+    assert SECRET not in rendered
+
+
+def test_a_fragment_an_agent_includes_cannot_be_deleted(store: ConfigStore) -> None:
+    """The reference pass every delete runs, applied to the section that
+    is now referenced: taking a fragment away would leave an agent
+    including nothing."""
+    _populate(store)
+    store.set_prompt_fragment("household", {"text": "The bins go out on Tuesday."})
+    store.set_agent("poet", {"prompt": "P", "prompt_includes": ["household"]})
+
+    with pytest.raises(ConfigError, match="prompt_includes"):
+        store.delete_prompt_fragment("household")
+
+    assert "household" in store.load().domain.prompt_fragments
+
+
+def test_an_unincluded_fragment_deletes(store: ConfigStore) -> None:
+    _populate(store)
+    store.set_prompt_fragment("household", {"text": "a"})
+
+    store.delete_prompt_fragment("household")
+
+    assert store.load().domain.prompt_fragments == {}
+    with pytest.raises(UnknownEntityError):
+        store.delete_prompt_fragment("household")
 
 
 def test_a_pre_upgrade_string_row_loads_and_is_written_back_unchanged(
