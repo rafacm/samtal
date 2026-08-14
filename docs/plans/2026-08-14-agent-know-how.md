@@ -1175,7 +1175,7 @@ injection milestone merges without the surface that counts it.
   includes refused by position, the sentinels clean; pre-upgrade
   rows load; the surface counting fragments; drift checks pass.
 - [x] **[Server-shipped guidance opt-ins](2026-08-14-agent-know-how-implementation.md#milestone-3-server-shipped-guidance-opt-ins)**
-  (PR TBD): `use_server_instructions`
+  (PR #133): `use_server_instructions`
   and `inject_prompts`, migration 0004, capture at `initialize`,
   listing-first discovery and the contained prompt fetches, the
   defined rendering, injection after the operator's block, the skip
