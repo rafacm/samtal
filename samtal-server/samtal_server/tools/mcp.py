@@ -34,6 +34,7 @@ import asyncio
 import contextlib
 import functools
 import logging
+import os
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from contextlib import AsyncExitStack
@@ -167,10 +168,11 @@ def _emit_nothing(_record: logging.LogRecord) -> bool:
     return False
 
 
-# The SDK's HTTP client logs what the far end chose: the session id a
-# server picked, the raw body of an initialization result that would not
-# parse, and, through logger.exception, a traceback whose validation
-# message quotes the bytes that failed. JSON log events are this
+# The SDK's clients log what the far end chose: the session id a server
+# picked, the raw body of an initialization result that would not parse,
+# and, through logger.exception, a traceback whose validation message
+# quotes the bytes that failed. The stdio client does the same for a
+# child that writes malformed JSON at it. JSON log events are this
 # server's observability surface and its transcript store
 # (docs/adr/2026-08-04-json-logs-are-the-observability-surface.md), and
 # nothing a third-party server writes was ever part of it, which is the
@@ -179,7 +181,25 @@ def _emit_nothing(_record: logging.LogRecord) -> bool:
 # reached. What an operator reads about an MCP server is what this
 # module writes: the entry name, the outcome, and tool names that have
 # been through the publishing rule.
-logging.getLogger("mcp.client.streamable_http").addFilter(_emit_nothing)
+SDK_LOGGERS = (
+    "mcp.client.stdio",
+    "mcp.client.streamable_http",
+    "mcp.client.session",
+    "mcp.shared.session",
+)
+
+for _sdk_logger in SDK_LOGGERS:
+    logging.getLogger(_sdk_logger).addFilter(_emit_nothing)
+
+# And the net under the list, because a list of module names is a thing
+# that goes stale: a filter stops the records logged through the logger
+# it sits on, and nothing else, so an SDK module this list does not name
+# would reach the handlers unfiltered. Turning propagation off at the
+# root of the SDK's namespace closes that without naming anything: no
+# record from any `mcp.*` logger reaches a handler of ours. An operator
+# who wants the SDK's own diagnostics can still attach a handler to
+# `mcp` itself, which is a deliberate act rather than the default.
+logging.getLogger("mcp").propagate = False
 
 
 class McpConfigError(ValueError):
@@ -564,7 +584,19 @@ class McpServerManager:
                 # needs a PATH and a HOME to find its own tools.
                 env={**get_default_environment(), **self._resolve("env")},
             )
-            read, write = await stack.enter_async_context(stdio_client(parameters))
+            # The child's stderr goes nowhere. The SDK's default hands it
+            # this process's own stderr, which makes a spawned server's
+            # every line part of what a deployment collects: a server
+            # that logs the credential it was given, or that prints a
+            # stack trace holding what it was asked, would be publishing
+            # through us. Nothing here reads it, and a child that cannot
+            # be diagnosed from its own logs is diagnosed by running it
+            # by hand. Opened on the stack so the sink closes with the
+            # connection that used it.
+            errlog = stack.enter_context(open(os.devnull, "w"))
+            read, write = await stack.enter_async_context(
+                stdio_client(parameters, errlog=errlog)
+            )
         else:
             assert self._config.url is not None
             # The transport takes a caller-managed httpx client rather

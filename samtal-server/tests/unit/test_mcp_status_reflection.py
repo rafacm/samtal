@@ -25,6 +25,7 @@ names which do publish arrive.
 
 import json
 import logging
+import os
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -34,6 +35,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from mcp.server.fastmcp import FastMCP
 
+import samtal_server.tools.mcp as mcp_module
 from samtal_server import logs
 from samtal_server.config import Config, cli
 from samtal_server.config.api import build_api, mount_api
@@ -50,6 +52,7 @@ TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 API_SECRET_ENV = "SAMTAL_API_SECRET"
 
 REFLECTING_SERVER = Path(__file__).parents[1] / "support" / "mcp_reflecting_server.py"
+NOISY_SERVER = Path(__file__).parents[1] / "support" / "mcp_noisy_server.py"
 
 # The logger an operator watches for these servers.
 MANAGER_LOGGER = "samtal_server.tools.mcp"
@@ -189,6 +192,72 @@ async def test_a_stdio_server_cannot_reflect_its_credential_onto_the_surfaces(
     assert SENTINEL not in json.dumps(status)
     assert SENTINEL not in printed
     assert SENTINEL not in rendered(watched)
+
+
+async def test_a_child_that_writes_where_it_likes_reaches_no_operator_surface(
+    watched: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The two channels a spawned server owns and this one does not.
+
+    Its stderr is its own, and the SDK's default hands it this process's,
+    which would make every line a child logs part of what a deployment
+    collects, credential included. And a line of stdout that is not a
+    JSON-RPC message is answered by the SDK with `logger.exception`,
+    whose traceback quotes the bytes that failed.
+
+    The stderr half is asserted on the sink the transport is handed
+    rather than on captured output, and the reason is worth writing
+    down: `stdio_client` binds `sys.stderr` as a default argument when
+    the SDK module is imported, which under pytest is a capture object
+    belonging to whatever was in force at collection time, so the leak
+    this fixes is invisible to `capfd` and a test written that way would
+    pass either way. What the sink is, is checkable and is the fix.
+    """
+    monkeypatch.setenv("SAMTAL_TEST_REFLECTED_SECRET", SENTINEL)
+    sinks: list[object] = []
+    spawning = mcp_module.stdio_client
+
+    def watching(parameters: object, errlog: object = None) -> object:
+        sinks.append(errlog)
+        return spawning(parameters, errlog=errlog)
+
+    monkeypatch.setattr(mcp_module, "stdio_client", watching)
+    entry = {
+        "transport": "stdio",
+        "command": sys.executable,
+        "args": [str(NOISY_SERVER)],
+        "env": {REFLECTED_ENV: "$SAMTAL_TEST_REFLECTED_SECRET"},
+    }
+    servers = McpServers.build(config_with(entry))
+    await servers.start_all()
+    try:
+        # The connection survived the noise, so this is a test about the
+        # boundary rather than about a server that never came up.
+        assert servers.status()["weather"]["state"] == CONNECTED
+        assert [tool.name for tool in servers.tools_for(["weather"])] == [
+            "weather__forecast"
+        ]
+    finally:
+        await servers.stop_all()
+
+    (sink,) = sinks
+    assert sink is not None, "the transport was left to its own default"
+    assert sink.name == os.devnull
+    # And it went when the connection did, rather than being a handle
+    # this process accumulates one of per reconnect.
+    assert sink.closed
+    # The connect line is there, so an absence below is an absence from a
+    # log something was written to.
+    assert [record for record in watched.records if record.name == MANAGER_LOGGER]
+    assert SENTINEL not in watched.text + "".join(
+        logs.JsonFormatter().format(record) for record in watched.records
+    )
+    # And nothing of the SDK's own diagnostics reached a handler, which is
+    # the half a sentinel search cannot see: the child put a line on its
+    # stdout that is not a JSON-RPC message, and the traceback the SDK
+    # writes about it names the bytes it tripped on.
+    assert not [record for record in watched.records if record.name.startswith("mcp.")]
 
 
 @pytest.mark.parametrize("opted_in", [False, True], ids=["opted-out", "opted-in"])
