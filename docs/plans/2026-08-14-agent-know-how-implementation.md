@@ -770,3 +770,286 @@ parametrization added: the bodies an unusable name can arrive with on
 three paths, the missing-name reads and deletes on two, and the two
 name tests the round rewrote. The installed-wheel migration check still
 runs in CI only.
+
+## Milestone 3: Server-shipped guidance opt-ins
+
+An MCP server can now tell the agents that use it how to use it, in its
+own words, through both channels the specification gives it: the
+`instructions` of its handshake, and the prompts it publishes. Neither
+reaches a prompt until the entry says so, channel by channel, because
+neither is the operator's own writing.
+
+### What landed
+
+**`samtal_server/config/models.py`.** Two fields on `McpServerConfig`.
+`use_server_instructions` is a boolean defaulting to false;
+`inject_prompts` is an optional list of non-blank names, refused when
+one is listed twice, by its positions and never by its value. Both
+descriptions carry the trust sentence, because the generated reference
+is where an operator reads what a field means and the thing to say
+about these two is whose words they let in.
+
+**`samtal_server/db/`.** `schema.py` gains the two columns and
+migration `0004_server_guidance_opt_ins` adds them. The boolean's column
+is NOT NULL with a database-level default of false rather than a
+nullable one rescued in Python: a row written before the migration then
+reads its opt-in as closed from the database itself, which is what a
+trust decision has to mean on an upgraded deployment. The prompt list is
+nullable, where NULL is the "none" the model already means.
+
+**`samtal_server/config/store.py` and `views.py`.** Both columns are
+written and read. A read shows the flag in either state, like the
+timeout beside it, since what a read answers about a trust decision is
+the decision; the prompt names are shown only when the operator wrote
+some, and this read body and the inspection response are the only two
+places a server-chosen name appears at all, both JSON-encoded.
+
+**`samtal_server/runtime/prompt.py`.** `ServerInstructions` and
+`ServerPrompt` join `Guidance` as block shapes, under the union
+`GuidanceBlock`, with the provenances `server_instructions:<entry>` and
+`server_prompt:<entry>:<position>`. Separate shapes rather than a flag
+on `Guidance`, because they carry separate provenance and separate
+headings and a boolean would leave every reader to remember which way
+round it went. `Block` gains an optional `name`, which only a
+`server_prompt` carries. Each server-shipped block sits under a heading
+of its own saying the server is the one talking (see Discoveries).
+
+**`samtal_server/tools/mcp.py`.** `_connect` returns the initialization
+result it used to discard, and `_run` captures its `instructions` on
+every connect whatever the entry's opt-in says, which is what makes a
+false-to-true reload work on a connection nobody restarted. The prompts
+an entry names are discovered listing first: the full paginated
+`prompts/list` is walked and every configured name is judged against it
+before anything is fetched, so no skip decision rests on interpreting an
+untrusted server's error. The rules are `NoPromptsCapability`,
+`NotListed`, `RequiresArguments`, `NonTextContent`, `NothingToInject`,
+`DiscoveryDeadline` and `PageCap`, each logged with the entry, the
+positions in `inject_prompts` counted from one, and the rule. A block
+past the 4000-character cap is skipped whole with a warning naming the
+entry, the channel and the size. `_PROMPT_ONLY_FIELDS` gains
+`use_server_instructions` and deliberately not `inject_prompts`.
+`McpSlice.guidance_for` takes a `shipped` callable so that one loop
+produces an entry's blocks in order, with the registry supplying what
+its managers captured and a slice on its own answering the operator's
+blocks alone.
+
+**Bounds.** Discovery runs after the connect envelope has closed and the
+tools are published, in the same task, so a raised exception cannot mark
+the manager down and take a working tool list away. Each call gets
+`PROMPT_CALL_TIMEOUT_S` (5 s), the whole phase gets
+`PROMPT_DISCOVERY_TIMEOUT_S` (equal to `CONNECT_TIMEOUT_S`), and the
+listing walk gets `PROMPT_PAGE_CAP` (20 pages) as the backstop against a
+cursor that repeats itself. Which bound expired decides what happens:
+a per-call expiry skips that prompt, the phase's expiry skips every
+position that is left with one warning.
+
+**`samtal_server/config/api.py` and `cli.py`.** `PromptBlock` gains
+`name`, the provenance description learns the two new tokens, and the
+`blocks` description learns the order inside one entry. The CLI prints
+the name beside the provenance and the size, through the same full-block
+sanitizer, and its shape check learns the field. The reload timeout's
+comment in `cli.py` now says the server's envelope is one connect
+timeout plus one discovery deadline.
+
+**Documentation.** `docs/reference/domain-config.md` and
+`docs/reference/api-openapi.json` regenerated.
+`examples/mcp-server-streamable-http.yaml` carries both fields with
+their trust comments. The README gains the trust paragraph and the
+server block in the assembly order and in the `config prompt` example,
+with the counts recomputed. `CHANGELOG.md`'s `## 2026-08-14` section
+gains the entry.
+
+**Tests.** Everything the plan's Tests section assigns to this
+milestone.
+
+- `tests/support/mcp_stdio_server.py`: the shared stdio server now
+  declares `instructions` (overridable from its environment, see
+  Discoveries) and publishes four prompts: one message, two messages,
+  one that declares a required argument, and one that never answers.
+- `tests/unit/test_tools_mcp_prompts.py` (new): the default entry
+  ignoring both channels and fetching nothing; the opt-in injecting in
+  the plan's order; the rendering pinned over the multi-message prompt;
+  the required-argument and unlisted-name skips; both clearing paths;
+  and, against a stub session, the pagination walk, the missing
+  capability, a non-text prompt, an empty rendering, the cap on both
+  channels, a stalled fetch, the phase deadline, a repeating cursor, a
+  listing that fails, and a configured name holding a credential and a
+  terminal escape asserted absent from every record. The envelope
+  itself is measured twice: as arithmetic against the CLI's reload
+  timeout, and as elapsed boot and reload against a real server whose
+  prompt does not answer.
+- `tests/unit/test_tools_mcp_reload.py`: the flag toggled in both
+  directions on the same manager object, and an `inject_prompts` edit
+  restarting the connection.
+- `tests/unit/test_runtime_prompt.py`: the order inside one entry, the
+  headings, the position-not-name rule, and the two new block kinds
+  inside the trim contract's own parametrized equalities.
+- `tests/unit/test_session_prompt.py`: the event carrying both new
+  provenances and none of the bytes, and the shipped block reaching the
+  model under its heading.
+- `tests/unit/test_config_api_runtime.py`, `test_config_cli.py`: the two
+  provenances on the surface with the configured name beside the
+  `server_prompt` block, and the CLI sanitizing that name.
+- `tests/unit/test_mcp_status_reflection.py`: the reflecting server now
+  reflects its credential through both guidance channels and through a
+  prompt name with a terminal escape in it, asserted absent from the
+  status response, the `config status` output and every log record, with
+  the entry opted out and opted in.
+- `tests/unit/test_db_open.py`, `test_config_store.py`,
+  `test_config_reads.py`, `test_config_tools.py`: the fields parse,
+  round trip, read back write-shaped, and are unset on a seeded
+  pre-upgrade row, with the boolean asserted false in the row itself.
+- `tests/integration/test_agent_guidance.py`: two entries backed by the
+  same server differing by the opt-in alone, and the held session grown
+  with the reconnect.
+
+### Deviations from the plan
+
+**The document regeneration rode one commit late.** The plan's risk
+section says regeneration rides in the same commit as the change that
+moves it. The reference did; the OpenAPI document did not, because the
+entry model is a request and response schema and that was noticed when
+the suite ran rather than when the fields were written. It is its own
+commit immediately after, with nothing else in it.
+
+**The hostile shapes are proven against a stub session rather than
+against a mock server.** The plan names the FastMCP-on-uvicorn fixture
+as reusable, and the capture, the listing-first discovery, the
+rendering, the required-argument rule and the containment envelope are
+all proven against the real stdio server. A listing that never ends, a
+cursor that repeats, a fetch that stalls and a message carrying an image
+are not: a server cooperative enough to be scripted into those shapes
+would be a second implementation of the SDK's server half, and the test
+would be about that. They are proven against a stub session instead,
+which is also where they belong, since each of them is a rule this
+client applies rather than anything on the wire.
+
+**The finer-grained bound tests run at scaled-down bounds.** The plan
+asks for elapsed boot and reload measured against the stated envelope,
+and one test does exactly that, against a real server publishing a
+prompt that never answers, at the bounds that ship. The stub-session
+tests that ask which bound expired scale both constants down, because
+what they are about is the classification and not the number of
+seconds, and four sleeping prompts at the shipped bounds would cost the
+unit lane forty. The shipped arithmetic is pinned on its own beside
+them, against the CLI's reload read timeout.
+
+**The integration reconnect reaches for the manager.** A reconnect is
+not something an operator asks for, so there is no request that causes
+one; the test stops the entry's manager through
+`app.state.mcp_servers._managers` and lets it come back, which is the
+same private reach the unit suite's reload tests already make for
+`manager_of`. Everything else about that test stays on the socket.
+
+**The stdio example was left alone.** The plan says the opt-ins go in
+the streamable_http example "and stdio if it reads naturally". It does
+not: the stdio example is a proxy to a Home Assistant, and neither
+channel has anything to say through an mcp-proxy bridge, so the two
+fields would have been a paragraph about a thing that example is not
+about.
+
+No deviation from the plan's design decisions. The capture path, the
+flag's exclusion from connection identity and `inject_prompts`'
+inclusion in it, the listing-first discovery and its skip rules, the
+rendering, the two bounds and the page cap, the injection order, the
+provenances, the publishing rule for logs and the sentinels all landed
+as written.
+
+### Discoveries
+
+**Where `_settled.set()` sits is the whole envelope, and it sits after
+discovery.** `start()` waits for `_settled`, so the choice is between a
+manager that settles once its tools are up and finishes fetching in the
+background, and one that settles when its whole answer is in place. The
+second is what the plan's arithmetic describes ("a manager start is now
+bounded by one connect timeout plus one discovery deadline ... and the
+reload's whole envelope grows by the same one deadline"), and it is the
+better of the two anyway: a reload that answered before its prompts had
+arrived would tell an operator the new configuration was applied while
+the entry was still assembling what an activation reads, which is the
+inert-configuration ambiguity the reload surface exists to remove. What
+it costs is one discovery deadline on the boot and on a reload, and both
+stay well inside the CLI's 60 s reload timeout, which is asserted rather
+than asserted about.
+
+**A server-shipped block needed a heading of its own.** The plan fixes
+the heading for an entry's guidance and says nothing about the two new
+kinds, and repeating the operator's heading three times would have been
+the literal reading. It is the wrong one: the model is the only reader
+of the prompt that cannot see the provenance every other surface
+reports, and the point of an opt-in is knowing whose words are steering
+the agent. So each server-shipped kind sits under a heading saying the
+server is the one talking. They were shortened once written, in a commit
+of their own: the first version spelled the prefix rule out again, which
+is eighty characters of every prompt carrying one, and the operator's
+heading above it has already said it.
+
+**"Shipped nothing" and "shipped whitespace" are one answer.** A server
+that sends an empty `instructions`, or a prompt that renders to nothing,
+would otherwise contribute a heading with no words under it, which is
+not guidance. Both are treated as nothing shipped; for a configured
+prompt it is a visible skip (`NothingToInject`) because a position the
+operator wrote deserves an answer, and for the handshake it is silent
+because nobody asked for it.
+
+**The block's name could not go in the provenance.** The plan puts the
+configured name on the inspection response as data, and the reason
+becomes concrete in the code: `Assembled.sizes()` is keyed by
+provenance and goes straight into the `prompt_assembled` event, so a
+provenance carrying the name would have put a server-chosen string into
+the JSON log by the shortest possible path. `Block.name` is a field
+beside it, null for every other kind, and the CLI sanitizes it like the
+text.
+
+**One loop, and the slice does not own half of it.** An entry
+contributes the operator's block and then whatever its connection
+captured, and only the registry knows the second half. Rather than
+splitting the loop between `McpSlice.guidance_for` and
+`McpServers.guidance_for_agent`, the slice takes a `shipped` callable
+whose default answers nothing. A slice asked on its own still answers
+what the configuration says, which is what the milestone 1 tests ask it,
+and there is one place that decides the order.
+
+**A reconnect can only capture something new if the far side changes.**
+Proving that a reconnect's capture does not reach a running session
+needs two different captures from one entry, and nothing about the entry
+moves during a reconnect. What does is the environment its `env`
+references resolve from, which `_resolve` reads per connection: the
+shared stdio server reads its `instructions` from a variable, the held
+session's entry passes that variable through as a `$VAR`, and moving the
+value between two connections is enough. It is also the honest shape of
+the risk this rule exists for, a server whose shipped guidance changes
+under a running deployment.
+
+### Verification
+
+Run from `samtal-server/` with `PYTHONDONTWRITEBYTECODE=1` exported for
+everything that is not pytest.
+
+```
+uv run ruff check .
+All checks passed!
+
+uv run pytest tests/unit -q
+1798 passed, 15 skipped in 166.85s
+
+uv run pytest tests/integration -q
+53 passed in 152.14s
+```
+
+Fifty-one more unit tests than milestone 2 left and one more integration
+test, which is what this milestone added. The unit lane is about twelve
+seconds slower, almost all of it the one test that watches a real
+server's prompt fail to answer inside the bounds that ship.
+
+The two doc drift checks pass inside the unit lane
+(`test_the_committed_reference_matches_the_models` and the OpenAPI pair
+in `test_api_openapi.py`), and both artifacts were regenerated with
+`uv run samtal-server config reference` and `uv run samtal-server config
+openapi`, the reference in the commit that moved it and the document in
+the commit immediately after.
+
+Not verified locally, and stated rather than claimed: the
+installed-wheel migration check, which builds a wheel and migrates a
+fresh database from it, runs in CI only. It learned the two new columns
+in the same change as the migration.
