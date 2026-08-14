@@ -319,6 +319,136 @@ def test_pending_lists_the_code_each_device_is_showing(
     assert "2.4.0" in printed
 
 
+# Shared prompt fragments
+#
+# The exact CLI input and the exact rendering, pinned: a fragment is
+# written as `text: ...` like every other entity's body, and what comes
+# back out is the same bytes, because those bytes are what the model is
+# given.
+
+
+# Leading indentation, an inner blank line and a trailing newline, none
+# of which a round trip through YAML, HTTP and the database may tidy up.
+FRAGMENT_TEXT = "  The bins go out on Tuesday.\n\n    The radio is called Bosse.\n"
+
+# The fragment exactly as an operator writes it: one key, a literal
+# block, and the explicit indentation indicator that is what makes a
+# body whose own first line is indented writable in YAML at all.
+FRAGMENT_INPUT = "text: |2\n" + "".join(
+    f"  {line}\n" if line else "\n" for line in FRAGMENT_TEXT.splitlines()
+)
+
+
+def test_a_prompt_fragment_is_written_shown_and_listed(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run("set", "prompt-fragment", "household", "-f", "-", stdin=FRAGMENT_INPUT) == 0
+    written = capsys.readouterr()
+    assert written.out == "wrote prompt-fragment household\n"
+    assert cli.RESTART_NOTICE in written.err
+
+    assert run("show", "prompt-fragment", "household") == 0
+    assert _document(capsys.readouterr().out) == {"text": FRAGMENT_TEXT}
+
+    assert run("list") == 0
+    listed = capsys.readouterr().out
+    assert "prompt_fragments:" in listed
+    assert f"  household ({len(FRAGMENT_TEXT)} characters)" in listed
+
+    assert run("show") == 0
+    assert _document(capsys.readouterr().out)["prompt_fragments"] == {
+        "household": {"text": FRAGMENT_TEXT}
+    }
+
+
+def test_a_prompt_fragment_reads_and_deletes_through_the_recovery_path(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--local` is the way in when the server will not start, and it
+    covers this section the way it covers the others."""
+    run("set", "prompt-fragment", "household", "-f", "-", stdin=FRAGMENT_INPUT)
+    capsys.readouterr()
+
+    assert run("--local", "show", "prompt-fragment", "household") == 0
+    assert _document(capsys.readouterr().out) == {"text": FRAGMENT_TEXT}
+
+    assert run("--local", "delete", "prompt-fragment", "household") == 0
+    assert capsys.readouterr().out == "wrote prompt-fragment household deleted\n"
+
+    assert run("show", "prompt-fragment", "household") == 1
+    assert "no such prompt fragment" in capsys.readouterr().err
+
+
+def test_an_agent_includes_a_fragment_and_reads_it_back(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The write, read-back loop across the two entities: the fragment
+    exists first, the agent names it, and the include is echoed in the
+    shape it was written in."""
+    _an_agent(run)
+    run("set", "prompt-fragment", "household", "-f", "-", stdin=FRAGMENT_INPUT)
+    assert run(
+        "set", "agent", "sam", "-f", "-", stdin="llm: claude\nprompt_includes: [household]\n"
+    ) == 0
+    capsys.readouterr()
+
+    assert run("show", "agent", "sam") == 0
+
+    assert _document(capsys.readouterr().out)["prompt_includes"] == ["household"]
+
+
+def test_a_fragment_an_agent_includes_is_not_deleted_from_under_it(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _an_agent(run)
+    run("set", "prompt-fragment", "household", "-f", "-", stdin=FRAGMENT_INPUT)
+    run("set", "agent", "sam", "-f", "-", stdin="llm: claude\nprompt_includes: [household]\n")
+    capsys.readouterr()
+
+    assert run("delete", "prompt-fragment", "household") == 1
+
+    assert "prompt_includes" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("layer", ["agent", "agent-defaults"])
+def test_an_unknown_include_is_refused_without_printing_it(
+    run, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture, layer: str
+) -> None:
+    """The sentinel is looked for on both streams and in every log
+    record: a name written beside prompt text is where a paste lands,
+    and this refusal is the line an operator reads."""
+    _an_agent(run)
+    written = (
+        f"llm: claude\nprompt_includes: [{SECRET}]\n"
+        if layer == "agent-defaults"
+        else f"llm: claude\nprompt: hi\nprompt_includes: [{SECRET}]\n"
+    )
+    argv = ("set", layer) if layer == "agent-defaults" else ("set", "agent", "sam")
+    capsys.readouterr()
+
+    with caplog.at_level(logging.DEBUG):
+        assert run(*argv, "-f", "-", stdin=written) == 1
+
+    captured = capsys.readouterr()
+    assert "prompt_includes: entry 1" in captured.err
+    assert SECRET not in captured.err
+    assert SECRET not in captured.out
+    assert all(SECRET not in record.getMessage() for record in caplog.records)
+    assert "Traceback" not in captured.err
+
+
+def test_an_unusable_fragment_name_is_refused_without_printing_it(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert run("set", "prompt-fragment", f"{SECRET}.pasted", "-f", "-", stdin="text: a\n") == 1
+
+    captured = capsys.readouterr()
+    assert "[A-Za-z0-9_-]+" in captured.err
+    assert SECRET not in captured.err
+    assert SECRET not in captured.out
+    assert "Traceback" not in captured.err
+
+
 # What the MCP servers are doing
 #
 # The other read of the running server rather than of the database.

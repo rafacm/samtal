@@ -78,6 +78,7 @@ from samtal_server.config.writes import (
     deleted_agent,
     deleted_device,
     deleted_mcp_server,
+    deleted_prompt_fragment,
     deleted_provider,
     wrote_secret,
 )
@@ -336,6 +337,12 @@ def _set_mcp_server(args: argparse.Namespace) -> None:
     _wrote(_call(args, "PUT", _path("mcp-servers", args.name), fragment))
 
 
+def _set_prompt_fragment(args: argparse.Namespace) -> None:
+    fragment = _fragment(args.file)
+    check_transportable(f"prompt_fragments.{args.name}", fragment)
+    _wrote(_call(args, "PUT", _path("prompt-fragments", args.name), fragment))
+
+
 def _set_agent(args: argparse.Namespace) -> None:
     fragment = _fragment(args.file)
     check_transportable(f"agents.{args.name}", fragment)
@@ -364,6 +371,15 @@ def _delete_mcp_server(args: argparse.Namespace) -> None:
         _report(deleted_mcp_server(args.name))
         return
     _wrote(_call(args, "DELETE", _path("mcp-servers", args.name)))
+
+
+def _delete_prompt_fragment(args: argparse.Namespace) -> None:
+    if args.local:
+        with _store(args) as store:
+            store.delete_prompt_fragment(args.name)
+        _report(deleted_prompt_fragment(args.name))
+        return
+    _wrote(_call(args, "DELETE", _path("prompt-fragments", args.name)))
 
 
 def _delete_agent(args: argparse.Namespace) -> None:
@@ -575,6 +591,14 @@ def _show_mcp_server(args: argparse.Namespace) -> None:
             _print_entity(views.mcp_server(store.read_mcp_server(args.name)))
         return
     _print_entity(_envelope(_call(args, "GET", _path("mcp-servers", args.name))))
+
+
+def _show_prompt_fragment(args: argparse.Namespace) -> None:
+    if args.local:
+        with _store(args) as store:
+            _print_entity(views.prompt_fragment(store.read_prompt_fragment(args.name)))
+        return
+    _print_entity(_envelope(_call(args, "GET", _path("prompt-fragments", args.name))))
 
 
 def _show_agent(args: argparse.Namespace) -> None:
@@ -1566,6 +1590,16 @@ def _summary(document: Mapping[str, object]) -> str:
         for name, body in config["mcp_servers"].items()
     ] or ["  (none)"]
 
+    lines.append("prompt_fragments:")
+    # The size rather than the text: this is the tree, and what an
+    # operator reads it for is which fragments exist and what each of
+    # them costs the prompt budget. `show prompt-fragment` prints one
+    # whole, and `prompt <agent>` prints what an agent adds up to.
+    lines += [
+        f"  {name} ({len(str(body.get('text', '')))} characters)"
+        for name, body in config["prompt_fragments"].items()
+    ] or ["  (none)"]
+
     defaults = _inline(config["agent_defaults"])
     lines.append("agent_defaults: " + (defaults or "(none)"))
 
@@ -1842,6 +1876,9 @@ def _parser() -> argparse.ArgumentParser:
     entity = _fragment_parser(kinds, "mcp-server", [common, fragment])
     entity.add_argument("name", metavar="NAME")
     entity.set_defaults(run=_set_mcp_server)
+    entity = _fragment_parser(kinds, "prompt-fragment", [common, fragment])
+    entity.add_argument("name", metavar="NAME")
+    entity.set_defaults(run=_set_prompt_fragment)
     entity = _fragment_parser(kinds, "agent", [common, fragment])
     entity.add_argument("name", metavar="NAME")
     entity.set_defaults(run=_set_agent)
@@ -1858,6 +1895,9 @@ def _parser() -> argparse.ArgumentParser:
     entity = kinds.add_parser("mcp-server", parents=[common])
     entity.add_argument("name", metavar="NAME")
     entity.set_defaults(run=_delete_mcp_server)
+    entity = kinds.add_parser("prompt-fragment", parents=[common])
+    entity.add_argument("name", metavar="NAME")
+    entity.set_defaults(run=_delete_prompt_fragment)
     entity = kinds.add_parser("agent", parents=[common])
     entity.add_argument("name", metavar="NAME")
     entity.set_defaults(run=_delete_agent)
@@ -2054,6 +2094,9 @@ def _parser() -> argparse.ArgumentParser:
     entity = kinds.add_parser("mcp-server", parents=[common])
     entity.add_argument("name", metavar="NAME")
     entity.set_defaults(run=_show_mcp_server)
+    entity = kinds.add_parser("prompt-fragment", parents=[common])
+    entity.add_argument("name", metavar="NAME")
+    entity.set_defaults(run=_show_prompt_fragment)
     entity = kinds.add_parser("agent", parents=[common])
     entity.add_argument("name", metavar="NAME")
     entity.set_defaults(run=_show_agent)
