@@ -1966,8 +1966,9 @@ def test_every_local_invocation_says_what_it_is(
 # differently, and a sentence copied into the break-glass branch by hand
 # is a sentence that drifts. The expected value here is therefore not a
 # constant but the ordinary path's own answer for the same act, captured
-# a moment earlier against equivalent state, so a change to either side
-# that the other does not follow fails rather than passing quietly.
+# a moment earlier against state put back to what the local run then
+# meets, so a change to either side that the other does not follow fails
+# rather than passing quietly.
 #
 # The nine cases are the whole `--local` mutating subset as the grammar
 # stands: five deletes, and set-secret and clear-secret on each kind of
@@ -2073,6 +2074,10 @@ def test_a_local_write_says_what_the_api_says_for_the_same_act(
     shape of what the break-glass path printed: what it is, then exactly
     the sentence the ordinary path answered, and nothing else.
 
+    Equivalent is established between the runs rather than assumed, by
+    taking the entity out and seeding it again; the comment below says
+    what re-seeding alone would have left behind.
+
     Not the last line alone. The contradiction this exists to catch is a
     preamble that reasserts restart timing ahead of a reload notice,
     which a last-line comparison would step straight over."""
@@ -2082,6 +2087,18 @@ def test_a_local_write_says_what_the_api_says_for_the_same_act(
     capsys.readouterr()
     assert run(*argv, stdin=typed) == 0
     answered = capsys.readouterr().err.rstrip("\n")
+
+    # Back to nothing before the second run, because re-seeding is not
+    # by itself a reset: a write that names only an entity's
+    # model-shaped columns leaves the rest as it was, the secrets column
+    # above all, so seeding a provider again after a set-secret leaves
+    # the credential the act just stored. The second run would then be
+    # rotating a secret where the first created one, which is a
+    # different act from the one being compared. A delete takes the row
+    # and its stored secrets together; the acts that are deletes have
+    # already left nothing behind, and there is nothing to address.
+    if argv[0] != "delete":
+        assert run("delete", *argv[1:-1]) == 0
 
     seed(run)
     capsys.readouterr()
