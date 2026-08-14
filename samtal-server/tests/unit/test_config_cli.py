@@ -437,16 +437,45 @@ def test_an_unknown_include_is_refused_without_printing_it(
     assert "Traceback" not in captured.err
 
 
+# The bodies an unusable name can be written with. The invalid ones are
+# the point: a refusal about a body names where the body was written,
+# and for a fragment that location is the name.
+UNUSABLE_FRAGMENTS = [
+    "text: a\n",
+    "{}\n",
+    "text: ''\n",
+    "text: 4\n",
+    "text: a\nextra: b\n",
+    "- a list\n",
+    f"text: {SECRET}\n",
+]
+
+
+@pytest.mark.parametrize("written", UNUSABLE_FRAGMENTS)
 def test_an_unusable_fragment_name_is_refused_without_printing_it(
-    run, capsys: pytest.CaptureFixture[str]
+    run, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture, written: str
 ) -> None:
-    assert run("set", "prompt-fragment", f"{SECRET}.pasted", "-f", "-", stdin="text: a\n") == 1
+    """Whatever else is wrong with the write, the name is what is
+    refused, and the name is not printed: it is checked before the body
+    it arrived with is parsed, so no sentence about the body carries the
+    location it was written at."""
+    with caplog.at_level(logging.DEBUG):
+        argv = ("set", "prompt-fragment", f"{SECRET}.pasted", "-f", "-")
+        assert run(*argv, stdin=written) == 1
 
     captured = capsys.readouterr()
     assert "[A-Za-z0-9_-]+" in captured.err
     assert SECRET not in captured.err
     assert SECRET not in captured.out
     assert "Traceback" not in captured.err
+    # The server's own records, for the reason the API suite gives: a
+    # name travels in the request path, so the HTTP client that sends it
+    # holds it by construction and writes it into its own request line.
+    served = [
+        record for record in caplog.records if record.name.startswith("samtal_server")
+    ]
+    assert all(SECRET not in record.getMessage() for record in served)
+    assert all(SECRET not in str(record.__dict__) for record in served)
 
 
 # What the MCP servers are doing
