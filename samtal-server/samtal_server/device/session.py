@@ -907,16 +907,27 @@ class DeviceSession:
     async def _send_text(self, text: str) -> None:
         """One outgoing message, with a device that has gone away
         reported as the boundary's own failure rather than as
-        starlette's, so no runtime imports a transport to catch one."""
+        starlette's, so no runtime imports a transport to catch one.
+
+        A vanished device arrives in two shapes and both are translated.
+        Starlette raises `WebSocketDisconnect` when it has seen the
+        close, and a bare `RuntimeError` when the send comes after one
+        ("Cannot call send once a close message has been sent"), which
+        is a race a paced reply loses regularly. The `try` covers the
+        socket call and nothing else, so the only `RuntimeError` caught
+        here is one the socket raised: this is a translation, not a
+        blanket. Untranslated, the second shape reaches a runtime as a
+        bare `RuntimeError`, which is indistinguishable from a local
+        bug and is why the reply body used to have to catch both."""
         try:
             await self.websocket.send_text(text)
-        except WebSocketDisconnect as exc:
+        except (WebSocketDisconnect, RuntimeError) as exc:
             raise DeviceGone("the device disconnected") from exc
 
     async def _send_frame(self, data: bytes) -> None:
         try:
             await self.websocket.send_bytes(data)
-        except WebSocketDisconnect as exc:
+        except (WebSocketDisconnect, RuntimeError) as exc:
             raise DeviceGone("the device disconnected") from exc
 
     async def _close(self, code: int, reason: str) -> None:
