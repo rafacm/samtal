@@ -1236,6 +1236,10 @@ carries its resolution once the amendment addressing it lands.
     The installed-wheel CI step proves only the primary database's
     migrations ship. Extend it to open `conversations.db` from the
     packaged helper and assert its revision and DDL.
+    *Resolution*: adopted. Milestone 1 extends the installed-wheel
+    step to migrate a fresh `conversations.db` from the installed
+    artifact alone, asserting revision, tables and the cursor
+    tables' `AUTOINCREMENT` DDL.
 21. **P2: the stated inventory and pin strategy are not
     reliable.** The token grep also matches `Usage` and provider
     adapters; "pins move in the same commit" is not
@@ -1262,9 +1266,16 @@ its section of the implementation doc when written.
   behavior), pruning, purge; the `conversations` CLI group (purge,
   schema); the schema reference generator, the committed
   `docs/reference/conversations-schema.md` and its drift test.
+  The workflow's installed-wheel step (the #86 pattern, which
+  today proves only `samtal.db`'s migrations ship) extends to open
+  a fresh `conversations.db` through the packaged helper from the
+  installed artifact alone and assert its Alembic revision, its
+  tables and the `AUTOINCREMENT` DDL on the cursor tables, because
+  a source-tree test cannot catch an omitted migrations package.
   Dormant machinery: nothing constructs the store, no config key
   exists, no server behavior changes. Accept: the milestone 1 test
-  list green; both lanes and lint green; `git grep conversations
+  list green; the extended wheel step green in this PR's own CI;
+  both lanes and lint green; `git grep conversations
   samtal_server/app.py` empty.
 - [ ] **The content record** (`feature/conversation-store-m2`):
   `records.py` with `TurnRecord` and `ToolInvocation`; the
