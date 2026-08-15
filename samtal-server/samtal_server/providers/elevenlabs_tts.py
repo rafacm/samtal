@@ -163,15 +163,48 @@ class ElevenLabsTts(TtsProvider):
         failure: ProviderCallError | None = None
         try:
             if response.status_code != httpx.codes.OK:
-                raise _api_error(response.status_code)
-            async for chunk in aligned_pcm(LABEL, response.aiter_bytes()):
-                yield chunk
+                failure = _api_error(response.status_code)
+            else:
+                async for chunk in aligned_pcm(LABEL, response.aiter_bytes()):
+                    yield chunk
         except REQUEST_FAILURES as exc:
             failure = call_failure(LABEL, exc)
-        finally:
-            await response.aclose()
+        except BaseException:
+            # A cancelled reply (barge-in), a consumer walking away, or
+            # a bug of ours: each passes through as itself, and the
+            # release must not take its place, so a failure there is
+            # dropped on this path rather than raised. Releasing the
+            # response is still what has to happen, which is why this
+            # arm exists at all rather than a `finally`: an exception
+            # raised inside a `finally` replaces the one in flight, and
+            # a connection reset while closing would have replaced the
+            # cancellation.
+            await self._released(response)
+            raise
+        closing = await self._released(response)
+        # The first failure is the one that explains the sentence; a
+        # release that failed after it is a consequence of the same
+        # broken connection, and it is only the whole story when nothing
+        # else went wrong.
+        if failure is None:
+            failure = closing
         if failure is not None:
             raise failure from None
+
+    async def _released(self, response: httpx.Response) -> ProviderCallError | None:
+        """Give the connection back, answering with a close-time failure
+        rather than raising it.
+
+        Closing talks to the socket, so it fails the way any other
+        request does, and the caller decides whether that failure is the
+        one worth telling anyone about. A body read to completion has
+        closed itself already, which makes this a no-op on the ordinary
+        path."""
+        try:
+            await response.aclose()
+        except REQUEST_FAILURES as exc:
+            return call_failure(LABEL, exc)
+        return None
 
 
 def _api_error(status_code: int) -> ProviderCallError:

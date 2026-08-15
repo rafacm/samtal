@@ -348,3 +348,83 @@ async def test_a_cancelled_synthesis_is_not_a_provider_failure() -> None:
 
     with pytest.raises(asyncio.CancelledError):
         await collect(provider(handler))
+
+
+# --- failures while releasing the connection -------------------------
+
+
+class ClosingStream(httpx.AsyncByteStream):
+    """A response body that fails when it is released, which is what a
+    connection reset at the end of a sentence looks like. `chunks` is
+    what it delivers first, and a stream that raises mid-body never
+    reaches completion, so the release is still ours to make."""
+
+    def __init__(self, chunks: list[bytes], mid_body: BaseException | None = None) -> None:
+        self._chunks = chunks
+        self._mid_body = mid_body
+
+    async def __aiter__(self):
+        for chunk in self._chunks:
+            yield chunk
+        if self._mid_body is not None:
+            raise self._mid_body
+
+    async def aclose(self) -> None:
+        raise httpx.ReadError(f"the connection reset while closing, carrying {SENTINEL}")
+
+
+async def test_a_failure_while_releasing_a_refused_request_keeps_the_status() -> None:
+    """The status is what explains the sentence; a release that failed
+    afterwards is a consequence of the same broken connection, and it
+    used to replace the sanitized error on its way out of the finally."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, stream=ClosingStream([]))
+
+    with pytest.raises(ProviderCallError) as failure:
+        await collect(provider(handler))
+
+    assert "HTTP 401" in str(failure.value)
+    assert SENTINEL not in chain(failure.value)
+
+
+async def test_a_failure_while_releasing_after_a_mid_stream_failure_keeps_the_first() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, stream=ClosingStream([b"\x01\x02"], httpx.ReadTimeout("the rest never came"))
+        )
+
+    with pytest.raises(ProviderCallTimeout) as failure:
+        await collect(provider(handler))
+
+    assert "ReadTimeout" in str(failure.value)
+    assert SENTINEL not in chain(failure.value)
+
+
+async def test_a_failure_while_releasing_a_good_response_is_still_the_taxonomy() -> None:
+    """With nothing else wrong it is the whole story, so it is reported,
+    but as the taxonomy rather than as a raw httpx error the pipeline
+    would have to guess at."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=ClosingStream([b"\x01\x02"]))
+
+    with pytest.raises(ProviderCallError) as failure:
+        await collect(provider(handler))
+
+    assert "ReadError" in str(failure.value)
+    assert SENTINEL not in chain(failure.value)
+
+
+async def test_a_failure_while_releasing_a_cancelled_sentence_keeps_the_cancellation() -> None:
+    """Barge-in is the whole reason cancellation passes through
+    untouched, and a connection that also broke while closing must not
+    turn it into a provider failure the reply path would report."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=ClosingStream([b"\x01\x02"], asyncio.CancelledError()))
+
+    with pytest.raises(asyncio.CancelledError) as failure:
+        await collect(provider(handler))
+
+    assert SENTINEL not in chain(failure.value)
