@@ -103,9 +103,13 @@ thirty rows is a second copy to drift. The store copies field names verbatim
 from the payload, minus `event`, `session` and `device`, which live on the row
 and on the session.
 
-One field never arrives: the writer strips `text` from the text-bearing events
-before the row lands. Conversation text has its own columns and its own
-switch, and the `events` table is metadata-only from its first row.
+Some fields never arrive. The writer strips `text` from `heard`, `replied` and
+`agent_said`, and `tool` from `tool_call`, before the row lands, and does so
+whatever the storage switches say: the `events` table is metadata-only from
+its first row. A called tool's name is content for the same reason its result
+is, since it is a device's self-description or an MCP server's vocabulary
+rather than anything this server authored, and it is kept on
+`tool_invocations` where the text switch decides its fate.
 
 ## The OpenTelemetry GenAI correspondence
 
@@ -204,4 +208,4 @@ carries the per-leg counts, and the per-round, per-model truth is the
 | `t_ms` | `INTEGER` | no | The event's offset from session open, in milliseconds, aligned with the capture's decision track. |
 | `name` | `TEXT` | no | The event name, from the event vocabulary the README's table defines. |
 | `level` | `INTEGER` | no | The numeric logging level the event was emitted at. |
-| `fields` | `JSON` | no | The event's payload minus `event`, `session` and `device`, which live on this row and on the session. Field names are the event vocabulary's own, copied verbatim, which is the contract. Never conversation text: the writer strips it, because content has its own tables and its own switch. |
+| `fields` | `JSON` | no | The event's payload minus `event`, `session` and `device`, which live on this row and on the session. Field names are the event vocabulary's own, copied verbatim, which is the contract. Never content: the writer strips an utterance's or a reply's `text` and a tool call's `tool` name whatever the storage switches say, because content has its own tables and its own switch and this table is metadata-only by construction. |

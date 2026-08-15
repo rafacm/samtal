@@ -191,10 +191,13 @@ def reference() -> str:
         ),
         "",
         *_paragraph(
-            "One field never arrives: the writer strips `text` from the "
-            "text-bearing events before the row lands. Conversation text has its own "
-            "columns and its own switch, and the `events` table is metadata-only from "
-            "its first row."
+            "Some fields never arrive. The writer strips `text` from `heard`, "
+            "`replied` and `agent_said`, and `tool` from `tool_call`, before the row "
+            "lands, and does so whatever the storage switches say: the `events` table "
+            "is metadata-only from its first row. A called tool's name is content for "
+            "the same reason its result is, since it is a device's self-description or "
+            "an MCP server's vocabulary rather than anything this server authored, and "
+            "it is kept on `tool_invocations` where the text switch decides its fate."
         ),
         "",
         "## The OpenTelemetry GenAI correspondence",

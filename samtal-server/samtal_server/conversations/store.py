@@ -37,6 +37,15 @@ skipping the events rows entirely in the second case. Nothing that
 leaves this module carries row content, SQL or exception text: the
 failure reports are built in the `except` arm out of the exception's
 class name.
+
+One thing is not policy and does not follow a switch. The `events`
+table is metadata-only by construction, so `EVENT_CONTENT` is stripped
+from every event's fields whatever the switches say: content has its own
+tables, and an events row is the wrong place for it at any setting.
+Milestone 5 narrows the events themselves, at which point the strip
+stops being a live guard and becomes defense in depth; it is written to
+be correct either way, which is what lets the store behave identically
+on both sides of that change.
 """
 
 import datetime as dt
@@ -89,13 +98,28 @@ RETENTION_DAYS_DEFAULT = 90
 # cannot hold shutdown past this.
 STOP_TIMEOUT_S = BUSY_TIMEOUT_MS / 1000 + 5.0
 
-# The events whose fields carry conversation text today. The writer
-# strips the key before the row lands, because content has its own
-# tables and its own switch. A live guard until the narrowing removes
-# those fields, and defense in depth afterwards, which is what makes the
-# store behave identically on both sides of that change.
-TEXT_BEARING_EVENTS = frozenset({"heard", "replied", "agent_said"})
-TEXT_FIELD = "text"
+# The content each event carries in its fields today, stripped before
+# the row lands. One table, consulted in one place, because a content
+# key that is scrubbed at some call sites and not others is a leak
+# waiting for the next event to be added.
+#
+# Unconditional, and deliberately not under the text switch: the events
+# table is metadata-only by construction, from its first row. `text` is
+# the transcript half of three events. `tool` is the called tool's name,
+# which is content for the same reason its result is, a device's
+# self-description or an MCP far side's vocabulary rather than anything
+# this application authored; the name lives on `tool_invocations`, where
+# the text switch decides whether it is kept.
+#
+# A live guard until the narrowing milestone removes these fields from
+# the events themselves, and defense in depth after it, which is what
+# makes the store behave identically on both sides of that change.
+EVENT_CONTENT: dict[str, tuple[str, ...]] = {
+    "heard": ("text",),
+    "replied": ("text",),
+    "agent_said": ("text",),
+    "tool_call": ("tool",),
+}
 
 # How many distinct unknown sessions are remembered for the warn-once
 # rule. Bounded so that a defect cannot grow the set without limit; when
@@ -681,8 +705,8 @@ class ConversationStore:
 
     def _event_row(self, record: Event) -> dict[str, Any]:
         fields = dict(record.fields)
-        if record.name in TEXT_BEARING_EVENTS:
-            fields.pop(TEXT_FIELD, None)
+        for key in EVENT_CONTENT.get(record.name, ()):
+            fields.pop(key, None)
         return {
             "session": record.session,
             "t_ms": record.t_ms,
