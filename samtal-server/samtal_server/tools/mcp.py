@@ -57,6 +57,7 @@ from samtal_server.config.loader import (
 )
 from samtal_server.config.secrets import SecretStore, resolve_mcp_values
 from samtal_server.egress import EgressRefusal, check_mcp_server
+from samtal_server.events import ServerEvents
 from samtal_server.providers import ToolDef
 from samtal_server.runtime.prompt import (
     Guidance,
@@ -68,6 +69,12 @@ from samtal_server.tools import names
 from samtal_server.tools.publish import PublishedTools, publish
 
 logger = logging.getLogger(__name__)
+
+# The lifecycle this subsystem records, on the channel above. Five
+# events (#138), and what they carry is the entry name the operator
+# wrote, a token out of a closed set, and counts and durations this
+# server measured: never a name, a message or a byte a far side chose.
+events = ServerEvents(__name__)
 
 # How long connecting and listing a server's tools may take. The boot
 # waits for this once per server, concurrently.
@@ -175,6 +182,23 @@ UNUSED = "unused"
 # `_reason` answers with and for the same reason, since here there is no
 # exception left to name.
 DROPPED_AFTER_FAILED_CALL = "DroppedAfterFailedCall"
+
+# And why a connection is not there, as the `mcp_down` event says it: a
+# closed set of six tokens, one per place the decision is actually made
+# (#138). Beside the type names `_reason` answers with rather than
+# instead of them, and the difference is who is asking. An operator
+# reading one line wants to know that this particular handshake came
+# back as a validation error, which is what the sentence carries; a
+# collector filtering a month of them wants six buckets, which is what
+# the field carries. The two never disagree, because the sentence is
+# rendered from `_reason` and the field is chosen where the failure is
+# classified, and neither is ever built out of an exception's message.
+TRANSPORT_FAILED = "transport_failed"
+INITIALIZE_FAILED = "initialize_failed"
+DISCOVERY_FAILED = "discovery_failed"
+CONNECT_TIMEOUT = "connect_timeout"
+CALL_FAILED = "call_failed"
+STOPPED = "stopped"
 
 
 def _emit_nothing(_record: logging.LogRecord) -> bool:
@@ -508,10 +532,29 @@ class McpServerManager:
 
     async def _run(self) -> None:
         self._stop.clear()
+        began = time.monotonic()
+        # Which part of the envelope below a failure would be about.
+        # Three quite different things happen inside one `try` (a
+        # transport that has to be brought up, a handshake the far side
+        # answers, and a listing it has to produce), and by the time an
+        # exception arrives at the handler they are indistinguishable:
+        # any of the three can raise the same wrapped group. So the
+        # marker is advanced between the stack entries, here and inside
+        # `_connect`, and it is what the down event's reason is read
+        # off. A local rather than a field on the manager, because it
+        # means nothing between two runs and outside this one it is
+        # nobody's business.
+        phase = TRANSPORT_FAILED
+
+        def reached(next_phase: str) -> None:
+            nonlocal phase
+            phase = next_phase
+
         try:
             async with AsyncExitStack() as stack:
                 async with asyncio.timeout(CONNECT_TIMEOUT_S):
-                    session, initialized = await self._connect(stack)
+                    session, initialized = await self._connect(stack, reached)
+                    reached(DISCOVERY_FAILED)
                     listed = await session.list_tools()
                 # A third-party server's names are no more trustworthy
                 # than a device's: they publish through the same rule,
@@ -526,11 +569,22 @@ class McpServerManager:
                 )
                 self._session = session
                 self._became(CONNECTED, None)
-                logger.info(
+                # The names go in the sentence, as they always have, and
+                # the field is their count: a published name has been
+                # through the publishing rule and is this server's to
+                # print, but a list of them is not a value anything can
+                # aggregate, and the field half of this surface is read
+                # by machines.
+                events.info(
                     "mcp server %s connected with %d tool(s): %s",
                     self._name,
                     len(self._published.tools),
                     ", ".join(tool.name for tool in self._published.tools) or "none",
+                    event="mcp_connected",
+                    entry=self._name,
+                    transport=self._config.transport,
+                    tools=len(self._published.tools),
+                    duration_ms=round((time.monotonic() - began) * 1000),
                 )
                 self._warn_about_unpublished()
                 # The optional half, and it runs here for a reason. The
@@ -550,10 +604,14 @@ class McpServerManager:
             raise
         except Exception as exc:
             self._became(DOWN, _reason(exc))
-            logger.warning(
+            events.warning(
                 "mcp server %s is unavailable, its tools are absent: %s",
                 self._name,
                 self._reason,
+                event="mcp_down",
+                entry=self._name,
+                reason=_down_reason(exc, phase),
+                duration_ms=round((time.monotonic() - began) * 1000),
             )
         finally:
             self._session = None
@@ -565,6 +623,21 @@ class McpServerManager:
             # asked this task to end, so neither is overwritten here.
             if self._state == CONNECTED:
                 self._became(DOWN, None)
+                # And it is the one way down that is not a warning: a
+                # shutdown and a reload both come through here, and an
+                # operator who asked for one is not being told about a
+                # problem. No duration either, deliberately: what the
+                # field means everywhere else on this event is how long
+                # the connect ran before it failed, and how long a
+                # working connection lasted is a different number that
+                # would be answering under the same name.
+                events.info(
+                    "mcp server %s is stopped and its tools are gone",
+                    self._name,
+                    event="mcp_down",
+                    entry=self._name,
+                    reason=STOPPED,
+                )
             self._settled.set()
 
     def _resolve(self, group: str) -> dict[str, str]:
@@ -576,7 +649,7 @@ class McpServerManager:
         return resolve_mcp_values(self._name, group, values, self._secrets)
 
     async def _connect(
-        self, stack: AsyncExitStack
+        self, stack: AsyncExitStack, reached: Callable[[str], None]
     ) -> tuple[ClientSession, mcp.types.InitializeResult]:
         """The connected session, and what the handshake answered with.
 
@@ -585,6 +658,12 @@ class McpServerManager:
         is one of the two channels this entry may opt into, and its
         capabilities are what says whether asking for prompts is a
         question this server answers at all.
+
+        `reached` is `_run`'s phase marker, advanced once here: bringing
+        a transport up and speaking the handshake over it are two
+        failures an operator does about different things, and this is
+        the only place that can tell them apart, since afterwards they
+        are the same wrapped exception arriving at the same handler.
         """
         if self._config.transport == "stdio":
             assert self._config.command is not None
@@ -634,6 +713,7 @@ class McpServerManager:
             read, write, _ = await stack.enter_async_context(
                 streamable_http_client(self._config.url, http_client=client)
             )
+        reached(INITIALIZE_FAILED)
         session = await stack.enter_async_context(ClientSession(read, write))
         return session, await session.initialize()
 
@@ -968,13 +1048,43 @@ class McpServerManager:
         except asyncio.CancelledError:
             raise
         except Exception:
-            self._mark_down()
+            self._mark_down(published)
             raise
         return _result_text(result), bool(result.isError)
 
-    def _mark_down(self) -> None:
-        """Unwind the connection so the next session reconnects it."""
-        logger.warning("mcp server %s: dropping the connection after a failed call", self._name)
+    def _mark_down(self, tool: str) -> None:
+        """Unwind the connection so the next session reconnects it.
+
+        Two events rather than one, and the pairing is contract (#138):
+        one failed call is two stories, and they are read by different
+        questions. `mcp_call_dropped` is the tool's: something the model
+        asked for did not happen, and which tool it was is the whole of
+        what a conversation's reader needs. `mcp_down` is the
+        connection's: this entry is gone until something revives it,
+        which is the same fact a connect failure reports and belongs in
+        the same bucket as one. Emitting only the first would hide an
+        entry going away inside a line about a tool; only the second
+        would lose which call took it away.
+
+        The tool is named under the published name, the one the model
+        was given and the one this server's own publishing rule made.
+        What the far side called it stays where it is.
+        """
+        events.warning(
+            "mcp server %s: the call to %s failed, so its answer is lost",
+            self._name,
+            tool,
+            event="mcp_call_dropped",
+            entry=self._name,
+            tool=tool,
+        )
+        events.warning(
+            "mcp server %s: dropping the connection after a failed call",
+            self._name,
+            event="mcp_down",
+            entry=self._name,
+            reason=CALL_FAILED,
+        )
         self._became(DOWN, DROPPED_AFTER_FAILED_CALL)
         self._session = None
         self._published = PublishedTools(tools=[], originals={})
@@ -1029,6 +1139,47 @@ def _reason(exc: BaseException) -> str:
     if isinstance(exc, BaseExceptionGroup):
         return ", ".join(sorted({_reason(sub) for sub in exc.exceptions})) or "ExceptionGroup"
     return type(exc).__name__
+
+
+def _carries(exc: BaseException, kind: type[BaseException]) -> bool:
+    """Whether one failure, or anything inside the group it may be, is
+    of this kind.
+
+    Types and nothing else, and a group is walked to the bottom rather
+    than read at the top: the transports raise inside anyio task groups,
+    and sometimes inside a group holding a group, so the thing that
+    actually went wrong is never the object the handler catches.
+    Matching on a message instead would put a far side's own words in
+    the branch that decides what this server publishes about it.
+    """
+    if isinstance(exc, BaseExceptionGroup):
+        return any(_carries(sub, kind) for sub in exc.exceptions)
+    return isinstance(exc, kind)
+
+
+def _down_reason(exc: BaseException, phase: str) -> str:
+    """Which of the closed set one failed connect belongs in.
+
+    The phase marker is the answer, and two failure types override it,
+    because both cross a phase boundary and the phase would be the
+    wrong half of the story:
+
+    - a bound that expired is `connect_timeout` whichever call was
+      outstanding when it did, since what an operator does about it is
+      the same thing (look at the box, or raise the bound) and it is
+      not the same thing they would do about a server that answered;
+    - a transport error is `transport_failed` even when it surfaces
+      during the handshake, which is where an unanswered TCP connection
+      surfaces: the streamable_http client is entered before it has
+      spoken to anything, so a URL nobody answers raises on the first
+      request rather than on the way in. Calling that an initialization
+      failure would say the far side answered.
+    """
+    if _carries(exc, TimeoutError):
+        return CONNECT_TIMEOUT
+    if _carries(exc, httpx.TransportError):
+        return TRANSPORT_FAILED
+    return phase
 
 
 def _instant(when: float) -> str:
@@ -1426,6 +1577,49 @@ RELOAD_IN_PROGRESS = (
     "this request; make it again once the first has answered."
 )
 
+# What one reload did, as the `mcp_reload` event says it. Two outcomes
+# and no third, because the two phases leave no other end: preparation
+# refuses with nothing touched, or the apply runs to its end. An apply
+# that started a server which then failed to connect is `applied`, which
+# is the reload's own rule (`McpReload` deliberately counts no failures)
+# and the server says so itself, in an `mcp_down` of its own.
+APPLIED = "applied"
+REFUSED = "refused"
+
+# And why a refused one was refused: a closed set taken from the
+# refusals that actually exist, one token per type, chosen where the
+# exception is classified and never built out of its message. The
+# messages themselves still travel to the caller that asked, which is
+# where a sentence naming a configuration location belongs; what goes
+# into a field a collector groups by is the kind of refusal it was.
+REFUSED_IN_PROGRESS = "in_progress"
+REFUSED_BUSY = "database_busy"
+REFUSED_UNREADABLE = "unreadable"
+REFUSED_INVALID = "invalid"
+# The net under the four, for a `read` callable that fails in a way the
+# configuration layer has no type for. Nothing in the tree raises it
+# today, and a closed set with no fallback would be a set that quietly
+# opens the first time something does.
+REFUSED_UNEXPECTED = "unexpected"
+
+
+def _refusal(exc: BaseException) -> str:
+    """Which token one refused reload's exception is.
+
+    Ordered from the most specific down, because the three named types
+    are all `ConfigError`s: their type is the answer the API turns into
+    a status code, and it is the same answer this event carries.
+    """
+    if isinstance(exc, ReloadInProgressError):
+        return REFUSED_IN_PROGRESS
+    if isinstance(exc, DatabaseBusyError):
+        return REFUSED_BUSY
+    if isinstance(exc, StorageError):
+        return REFUSED_UNREADABLE
+    if isinstance(exc, ConfigError):
+        return REFUSED_INVALID
+    return REFUSED_UNEXPECTED
+
 
 class McpServers:
     """Every MCP server some agent references, built at startup."""
@@ -1536,17 +1730,24 @@ class McpServers:
                 kept.append(tool)
             elif (entry, tool.name) not in self._reported:
                 # The position and the entry that owns the name, never
-                # the name: the half of it this server did not choose is
-                # the far side's bytes, and a tool that does not reach
-                # the model has no claim on the log. Once per tool per
-                # manager set, since this is read once a reply.
+                # the name, in the sentence and in the fields alike: the
+                # half of it this server did not choose is the far
+                # side's bytes, sanitizing replaces only characters an
+                # API refuses so a credential survives it whole, and a
+                # tool that does not reach the model has no claim on the
+                # log. Once per tool per manager set, since this is read
+                # once a reply.
                 self._reported.add((entry, tool.name))
-                logger.warning(
+                events.warning(
                     "mcp server %s: dropping published tool %d, its name is inside the "
                     "namespace of the entry %s, which owns it",
                     entry,
                     position,
                     owner,
+                    event="mcp_tool_shadowed",
+                    entry=entry,
+                    position=position,
+                    owner=owner,
                 )
         return kept
 
@@ -1657,18 +1858,20 @@ class McpServers:
         done. So the apply runs in a task of its own behind a shield:
         cancelling the request cancels the waiting, and the world still
         arrives in one piece.
+
+        Which is also why the `mcp_reload` event is emitted at the two
+        ends rather than here: a refusal says so where it is
+        classified, and an apply says so as its last act, from inside
+        the shielded task. One reload is therefore one event, whether
+        or not anybody is still waiting for the answer.
         """
         if self._reloading:
+            self._refused(REFUSED_IN_PROGRESS)
             raise ReloadInProgressError(RELOAD_IN_PROGRESS)
         self._reloading = True
         applying: asyncio.Task[McpReload] | None = None
         try:
-            config, secrets = await self._read(read)
-            # One slice, composed before preparation and applied after
-            # it, so the world the candidates were built for is the
-            # world that gets installed.
-            configured = McpSlice.of(config)
-            candidates = self._prepared(config, secrets, configured)
+            configured, candidates = await self._preparation(read)
             applying = asyncio.create_task(
                 self._apply(configured, candidates), name="mcp-reload"
             )
@@ -1682,6 +1885,55 @@ class McpServers:
                 self._release(applying)
             else:
                 applying.add_done_callback(self._release)
+
+    async def _preparation(
+        self, read: Callable[[], tuple[Config, SecretStore | None]]
+    ) -> tuple[McpSlice, dict[str, McpServerManager]]:
+        """The first phase, whole: the re-read, the slice it composes,
+        and every manager the new world needs, with nothing running
+        touched.
+
+        Gathered into one call so that the refusal has one place to be
+        said out loud. Both halves refuse the same way as far as a
+        caller is concerned (nothing changed, and here is why), and an
+        operator counting refused reloads does not care which half of a
+        preparation the refusal came out of, which is the same thing
+        `_read`'s own wording already decided.
+
+        A cancellation is not a refusal and is not reported as one: the
+        caller went away before the world was even a candidate, and
+        nothing happened that anybody has to be told about.
+        """
+        try:
+            config, secrets = await self._read(read)
+            # One slice, composed before preparation and applied after
+            # it, so the world the candidates were built for is the
+            # world that gets installed.
+            configured = McpSlice.of(config)
+            return configured, self._prepared(config, secrets, configured)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._refused(_refusal(exc))
+            raise
+
+    @staticmethod
+    def _refused(reason: str) -> None:
+        """One reload that changed nothing, said once.
+
+        The token and nothing else. The refusal's own sentence names a
+        configuration location and travels to whoever asked for the
+        reload, which is where it belongs; this line is the one an
+        operator finds afterwards, and what it has to answer is that
+        the servers are as they were.
+        """
+        events.warning(
+            "mcp servers were not reloaded and nothing was changed (%s)",
+            reason,
+            event="mcp_reload",
+            outcome=REFUSED,
+            reason=reason,
+        )
 
     def _release(self, applying: "asyncio.Task[McpReload] | None") -> None:
         """The reload is over, however it ended. Also where an apply
@@ -1756,6 +2008,7 @@ class McpServers:
         starts after them, so an entry whose command was edited does not
         have two copies of the same child process alive at once.
         """
+        began = time.monotonic()
         keep: dict[str, McpServerManager] = {}
         started: list[str] = []
         restarted: list[str] = []
@@ -1796,12 +2049,24 @@ class McpServers:
         self._shadowed = _shadowed(keep)
         self._reported = set()
         self._since = time.time()
-        logger.info(
+        # Counts rather than names, in the fields as in the sentence.
+        # Entry names are the operator's own words and would be safe to
+        # print, but what this event answers is how much a reload moved
+        # and how long it took; which entries they were is the status
+        # surface's answer, taken in the same breath by whoever asked.
+        events.info(
             "mcp servers reloaded: %d started, %d restarted, %d stopped, %d unchanged",
             len(started),
             len(restarted),
             len(stopped),
             len(unchanged),
+            event="mcp_reload",
+            outcome=APPLIED,
+            started=len(started),
+            restarted=len(restarted),
+            stopped=len(stopped),
+            unchanged=len(unchanged),
+            duration_ms=round((time.monotonic() - began) * 1000),
         )
         return McpReload(
             started=tuple(started),
