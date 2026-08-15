@@ -55,7 +55,7 @@ import logging
 import os
 import re
 import time
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
@@ -164,6 +164,52 @@ class Consumer:
                     parts += [str(cause), repr(cause)]
                     cause = cause.__cause__ or cause.__context__
         return "\n".join(parts)
+
+
+class Vandal:
+    """A tap that edits what it was handed, before the log tap runs.
+
+    Non-log taps dispatch first and are given the emission's own `args`
+    tuple. Its members are deliberately not copied (copying an arbitrary
+    argument is a copy that can fail), so an object passed as a `%`
+    argument is a live object every consumer can read and write before
+    the record exists. The only defence is not to pass one, which is
+    what this proves: it finds nothing to vandalize."""
+
+    def __init__(self) -> None:
+        self.exceptions: list[BaseException] = []
+
+    def emit(self, emission: Emission) -> None:
+        for argument in emission.args:
+            if isinstance(argument, BaseException):
+                self.exceptions.append(argument)
+                argument.args = ("injected by a tap",)
+
+
+def planted() -> Exception:
+    """An exception shaped like the ones these catches really meet: a
+    message holding a value nobody wrote for a log, and a cause behind
+    it holding another, since a renderer that walks the chain reaches
+    both."""
+    try:
+        try:
+            raise ValueError(f"while reading {SENTINEL}")
+        except ValueError as cause:
+            raise OSError(f"gave up on {SENTINEL}") from cause
+    except OSError as exc:
+        return exc
+
+
+@pytest.fixture
+def vandal() -> Iterator[Vandal]:
+    """A consumer attached to the server hub that writes to whatever it
+    is handed."""
+    consumer = Vandal()
+    attach_server_tap(consumer)
+    try:
+        yield consumer
+    finally:
+        detach_server_tap(consumer)
 
 
 @pytest.fixture
@@ -875,15 +921,20 @@ def test_capture_declined_because_the_directory_is_unusable(
 
     assert pinned(
         only(caplog, "capture_declined"),
-        dynamic_args=(1, 2),
+        dynamic_args=(1,),
         scrub=(str(keeper.directory),),
     ) == {
         "logger": "samtal_server.capture",
         "level": logging.WARNING,
-        "template": "session %s: not capturing, %s is unusable: %s",
-        "args": ("s1", "<PosixPath>", "<OSError>"),
-        "sentence": f"session s<n>: not capturing, {DYNAMIC} is unusable: the volume said no",
-        "fields": {"event": "capture_declined", "session": "s1", "reason": "unusable"},
+        "template": "session %s: not capturing, %s is unusable (%s)",
+        "args": ("s1", "<PosixPath>", "OSError"),
+        "sentence": f"session s<n>: not capturing, {DYNAMIC} is unusable (OSError)",
+        "fields": {
+            "event": "capture_declined",
+            "session": "s1",
+            "reason": "unusable",
+            "failure": "OSError",
+        },
     }
 
 
@@ -923,13 +974,18 @@ def test_capture_declined_because_the_files_would_not_open(
     with caplog.at_level("WARNING"):
         assert keeper.open("s1", time.monotonic(), MANIFEST) is None
 
-    assert pinned(only(caplog, "capture_declined"), dynamic_args=(1,)) == {
+    assert pinned(only(caplog, "capture_declined")) == {
         "logger": "samtal_server.capture",
         "level": logging.WARNING,
-        "template": "session %s: not capturing, could not open the files: %s",
-        "args": ("s1", "<OSError>"),
-        "sentence": "session s<n>: not capturing, could not open the files: no room for the files",
-        "fields": {"event": "capture_declined", "session": "s1", "reason": "open"},
+        "template": "session %s: not capturing, could not open the files (%s)",
+        "args": ("s1", "OSError"),
+        "sentence": "session s<n>: not capturing, could not open the files (OSError)",
+        "fields": {
+            "event": "capture_declined",
+            "session": "s1",
+            "reason": "open",
+            "failure": "OSError",
+        },
     }
 
 
@@ -963,17 +1019,75 @@ def test_capture_failed(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> Non
         capture.microphone(tone(100, 1000), opened)
         capture.microphone(tone(100, 1000), opened + 3.0)
 
-    assert pinned(only(caplog, "capture_failed"), dynamic_args=(2,)) == {
+    assert pinned(only(caplog, "capture_failed")) == {
         "logger": "samtal_server.capture",
         "level": logging.WARNING,
-        "template": "session %s: capture stopped after failing to %s: %s",
-        "args": ("s1", "write audio", "<ValueError>"),
-        "sentence": (
-            "session s<n>: capture stopped after failing to write audio: "
-            "write to closed file"
-        ),
-        "fields": {"event": "capture_failed", "session": "s1", "reason": "write audio"},
+        "template": "session %s: capture stopped after failing to %s (%s)",
+        "args": ("s1", "write audio", "ValueError"),
+        "sentence": "session s<n>: capture stopped after failing to write audio (ValueError)",
+        "fields": {
+            "event": "capture_failed",
+            "session": "s1",
+            "reason": "write audio",
+            "failure": "ValueError",
+        },
     }
+
+
+def test_a_failed_writes_own_words_reach_no_record_or_consumer(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, tap: Consumer, vandal: Vandal
+) -> None:
+    """The sentinel for the capture's own failures. `_disable` catches a
+    bare `Exception` around a write, so what reaches it is whatever the
+    filesystem, the wave module or a JSON encoder raised, and those
+    messages carry the path they tripped on or the bytes they choked on.
+    Driven through `_disable` directly, because the point is the
+    exception's contents and a real failed write raises what it raises.
+    """
+    capture = store(tmp_path).open("s1", time.monotonic(), MANIFEST)
+    assert capture is not None
+
+    with caplog.at_level("DEBUG"):
+        capture._disable("write audio", planted())
+
+    failed = only(caplog, "capture_failed")
+    assert SENTINEL not in failed.getMessage()
+    assert SENTINEL not in str(failed.args)
+    assert SENTINEL not in str(payload_of(failed))
+    assert SENTINEL not in logged(caplog)
+    assert tap.saw("capture_failed"), "it reached no tap at all, so this proves nothing"
+    assert SENTINEL not in tap.rendered()
+    assert vandal.exceptions == [], "a consumer was handed the exception itself"
+    # And the diagnosis survives it: what the capture was doing, and
+    # what kind of failure stopped it.
+    assert (failed.reason, failed.failure) == ("write audio", "OSError")
+
+
+def test_an_unusable_directorys_own_words_reach_no_record_or_consumer(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    tap: Consumer,
+    vandal: Vandal,
+) -> None:
+    """The same for the decline, which is the one an operator meets: a
+    volume that will not take a capture answers with the operating
+    system's own sentence about it."""
+    keeper = store(tmp_path)
+    monkeypatch.setattr(CaptureStore, "_free_mb", lambda self: (_ for _ in ()).throw(planted()))
+
+    with caplog.at_level("DEBUG"):
+        assert keeper.open("s1", time.monotonic(), MANIFEST) is None
+
+    declined = only(caplog, "capture_declined")
+    assert SENTINEL not in declined.getMessage()
+    assert SENTINEL not in str(declined.args)
+    assert SENTINEL not in str(payload_of(declined))
+    assert SENTINEL not in logged(caplog)
+    assert tap.saw("capture_declined"), "it reached no tap at all"
+    assert SENTINEL not in tap.rendered()
+    assert vandal.exceptions == []
+    assert (declined.reason, declined.failure) == ("unusable", "OSError")
 
 
 def recorded(tmp_path: Path, sessions: int) -> CaptureStore:
@@ -1239,19 +1353,51 @@ async def test_filler_disabled(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level("WARNING"):
         await build_agent_fillers(config, providers)
 
-    assert pinned(only(caplog, "filler_disabled"), dynamic_args=(2,)) == {
+    assert pinned(only(caplog, "filler_disabled")) == {
         "logger": "samtal_server.filler",
         "level": logging.WARNING,
         "template": (
-            "agent %s: filler synthesis failed, latency masking is off for this agent: %s: %s"
+            "agent %s: filler synthesis failed, latency masking is off for this agent (%s)"
         ),
-        "args": ("poet", "RuntimeError", "<RuntimeError>"),
+        "args": ("poet", "RuntimeError"),
         "sentence": (
             "agent poet: filler synthesis failed, latency masking is off for this "
-            "agent: RuntimeError: no voice today"
+            "agent (RuntimeError)"
         ),
         "fields": {"event": "filler_disabled", "agent": "poet", "error": "RuntimeError"},
     }
+
+
+async def test_a_broken_voices_own_words_reach_no_record_or_consumer(
+    caplog: pytest.LogCaptureFixture, tap: Consumer, vandal: Vandal
+) -> None:
+    """The sentinel for the boot's one degrading path. The catch is
+    around a whole synthesis, so an exception raised near a provider's
+    response can carry a fragment of one, and this line is written once
+    per agent at every start."""
+
+    class PlantedTts:
+        sample_rate = 24000
+
+        def synthesize(self, text: str) -> AsyncIterator[bytes]:
+            raise planted()
+
+    config = masked_config()
+    providers = build_agent_providers(config)
+    providers["poet"] = replace(providers["poet"], tts=cast(Any, PlantedTts()))
+
+    with caplog.at_level("DEBUG"):
+        await build_agent_fillers(config, providers)
+
+    disabled = only(caplog, "filler_disabled")
+    assert SENTINEL not in disabled.getMessage()
+    assert SENTINEL not in str(disabled.args)
+    assert SENTINEL not in str(payload_of(disabled))
+    assert SENTINEL not in logged(caplog)
+    assert tap.saw("filler_disabled"), "it reached no tap at all"
+    assert SENTINEL not in tap.rendered()
+    assert vandal.exceptions == []
+    assert (disabled.agent, disabled.error) == ("poet", "OSError")
 
 
 # --- device/bindings.py: the live view's two lines ---------------------

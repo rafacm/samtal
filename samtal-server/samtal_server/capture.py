@@ -228,14 +228,24 @@ class SessionCapture:
         return self._at(now) >= self._max_session_s
 
     def _disable(self, doing: str, exc: BaseException) -> None:
+        # The class name and never the exception (the PR #153 review).
+        # Every caller here catches a bare `Exception` around a write,
+        # so what arrives is whatever the filesystem, the wave module or
+        # a JSON encoder raised, and those messages carry the path they
+        # tripped on, the bytes they choked on, or the value they could
+        # not encode. Handing the object itself as a `%` argument was
+        # worse than rendering it: `Emission.args` is deliberately not
+        # copied for a tap, so a consumer was given the live exception,
+        # its chain and everything the chain closes over.
         events.warning(
-            "session %s: capture stopped after failing to %s: %s",
+            "session %s: capture stopped after failing to %s (%s)",
             self._session_id,
             doing,
-            exc,
+            type(exc).__name__,
             event="capture_failed",
             session=self._session_id,
             reason=doing,
+            failure=type(exc).__name__,
         )
         self._stopped = True
         with contextlib.suppress(Exception):
@@ -546,13 +556,14 @@ class CaptureStore:
             free_mb = self._free_mb()
         except OSError as exc:
             events.warning(
-                "session %s: not capturing, %s is unusable: %s",
+                "session %s: not capturing, %s is unusable (%s)",
                 session_id,
                 self.directory,
-                exc,
+                type(exc).__name__,
                 event="capture_declined",
                 session=session_id,
                 reason="unusable",
+                failure=type(exc).__name__,
             )
             return None
         if free_mb < self._min_free_mb:
@@ -581,12 +592,13 @@ class CaptureStore:
         except OSError as exc:
             self._active.discard(session_id)
             events.warning(
-                "session %s: not capturing, could not open the files: %s",
+                "session %s: not capturing, could not open the files (%s)",
                 session_id,
-                exc,
+                type(exc).__name__,
                 event="capture_declined",
                 session=session_id,
                 reason="open",
+                failure=type(exc).__name__,
             )
             return None
         events.info(
