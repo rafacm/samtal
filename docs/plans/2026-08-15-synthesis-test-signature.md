@@ -117,8 +117,10 @@ untouched. The issue is a test bug; the diff is one test function
 plus the docs. A type annotation or runtime check in `_Synthesis`
 to reject non-callables is deliberately not added: the constructor
 is private to the runtime package, its one production caller passes
-the pipeline's bound method, and mypy-style enforcement is not part
-of this repository's toolchain today.
+the pipeline's adapter lambda
+(`lambda exc, elapsed: self._provider_failed("tts", tts, exc, elapsed)`,
+pipeline.py:1054), and mypy-style enforcement is not part of this
+repository's toolchain today.
 
 ### One milestone, one PR
 
@@ -210,6 +212,8 @@ resolution once the amendment addressing it lands.
    bound method.** `speak_after` receives
    `lambda exc, elapsed: self._provider_failed("tts", tts, exc, elapsed)`
    (pipeline.py:1054). Describe it accurately.
+   *Resolution*: adopted. The no-production-changes section now
+   quotes the adapter lambda and its location.
 
 ## Milestones
 
