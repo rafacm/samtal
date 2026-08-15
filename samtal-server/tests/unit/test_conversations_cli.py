@@ -197,18 +197,39 @@ def test_a_malformed_date_names_the_format_rather_than_the_value(
 
 
 def test_a_mistake_in_the_grammar_leaves_by_the_same_door(
-    tmp_path: Path, run, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path, run, caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """argparse writes to stderr and exits 2 from inside parse_args,
     which would make an unknown command the one failure that bypasses
-    the documented exit code, and it echoes the arguments it did not
-    recognize."""
-    assert run("nonsense") == 1
-    assert run("purge", "--session", "x", SENTINEL) == 1
+    the documented exit code. It also quotes what was typed: an
+    unrecognized command comes back as `invalid choice: 'x'` and extra
+    arguments come back verbatim, so the sentinel is planted as each in
+    turn and hunted everywhere the command writes."""
+    with caplog.at_level(logging.DEBUG):
+        # As the command word, which argparse answers with invalid
+        # choice.
+        assert run(SENTINEL) == 1
+        # As an extra argument, which it answers with unrecognized
+        # arguments.
+        assert run("purge", "--session", "x", SENTINEL) == 1
+        # And as an option's missing value, which reports the option
+        # rather than the value but is checked with the rest.
+        assert run("purge", "--session") == 1
+        assert run() == 1
 
     captured = capsys.readouterr()
+    rendered = caplog.text + "".join(
+        logs.JsonFormatter().format(record) for record in caplog.records
+    )
     assert SENTINEL not in captured.err
+    assert SENTINEL not in captured.out
+    assert SENTINEL not in rendered
     assert "Traceback" not in captured.err
+    # And the refusal for a word that is not a command still says which
+    # words are.
+    assert "purge" in captured.err
+    assert "schema" in captured.err
 
 
 def test_a_failed_purge_leaks_nothing_of_what_it_held(
