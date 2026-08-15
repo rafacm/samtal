@@ -43,6 +43,7 @@ from typing import Any
 
 from samtal_server.audio.resample import Resampler
 from samtal_server.config import Config
+from samtal_server.conversations.records import SessionTurns, TurnRecorder, TurnStore
 from samtal_server.device.boundary import (
     PIPELINE_SAMPLE_RATE,
     DeviceGone,
@@ -166,6 +167,7 @@ class PipelineRuntime:
         memory: MemoryStore | None,
         fillers: dict[str, FillerClips] | None,
         agents: Sequence[str],
+        recorder: TurnRecorder | None = None,
     ) -> None:
         self._output = output
         self._config = config
@@ -174,6 +176,13 @@ class PipelineRuntime:
         self._agent_providers = agent_providers
         self._mcp_servers = mcp_servers
         self._memory = memory
+        # The conversation's content channel, beside the event tap and
+        # separate from it on purpose: tool arguments and results never
+        # rode the events, and the events are losing their text (#120).
+        # None means nobody is listening, which is every deployment until
+        # the store is wired, and the reply path then behaves exactly as
+        # it did before the channel existed.
+        self._recorder = recorder
         # The agents this device may talk to. The one it is talking to
         # now lives on the events object, because both sides of the
         # boundary attribute events to it.
@@ -1522,6 +1531,7 @@ def bespoke_runtime_factory(
     mcp_servers: McpServers,
     memory: MemoryStore | None,
     fillers: dict[str, FillerClips],
+    conversations: TurnStore | None = None,
 ) -> RuntimeFactory:
     """The composition root's half of the seam: everything this runtime
     needs that outlives one connection, closed over once at startup.
@@ -1532,6 +1542,12 @@ def bespoke_runtime_factory(
     dict the boot fills once synthesis has run, so a factory built
     before the clips exist still sees them.
 
+    `conversations` is closed over the same way, and is the reason the
+    recorder reaches a runtime without the `RuntimeFactory` type moving:
+    the store outlives every connection, and the per-session channel is
+    derived here from the identity the edge already hands over. None
+    means no store, which is every deployment that has not asked for one.
+
     Deliberately one function rather than a config-selectable registry:
     one runtime exists, and a selection mechanism with one option is
     surface without a reader. This is the seam a second runtime plugs
@@ -1541,7 +1557,15 @@ def bespoke_runtime_factory(
         output: DeviceOutput, events: SessionEvents, agents: Sequence[str]
     ) -> SessionInput:
         return PipelineRuntime(
-            output, config, events, agent_providers, mcp_servers, memory, fillers, agents
+            output,
+            config,
+            events,
+            agent_providers,
+            mcp_servers,
+            memory,
+            fillers,
+            agents,
+            None if conversations is None else SessionTurns(conversations, events.session_id),
         )
 
     return build

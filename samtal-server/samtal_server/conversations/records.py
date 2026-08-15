@@ -18,7 +18,7 @@ latency query has to be able to make.
 """
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 
 @dataclass(frozen=True)
@@ -102,4 +102,49 @@ class TurnRecord:
     tools: tuple[ToolInvocation, ...] = ()
 
 
-__all__ = ["ToolInvocation", "TurnLeg", "TurnRecord"]
+class TurnRecorder(Protocol):
+    """One session's content channel, as the runtime sees it.
+
+    Structural rather than an import, and for the same reason the event
+    tap is: the runtime hands a record to whoever is listening and must
+    not learn that a database is behind it. A runtime built without one
+    behaves exactly as it did before this channel existed, which is what
+    the optional dependency compared `is not None` buys.
+
+    Never blocking and never raising is the contract: this is called on
+    the session loop at the end of a reply, and a store that made a
+    reply wait would be the one thing the whole write path is built to
+    prevent."""
+
+    def record_turn(self, record: TurnRecord) -> None: ...
+
+
+class TurnStore(Protocol):
+    """The same channel from the composition root's side, where one
+    object serves every session and the records are keyed by one."""
+
+    def record_turn(self, session_id: str, record: TurnRecord) -> None: ...
+
+
+@dataclass(frozen=True)
+class SessionTurns:
+    """A `TurnStore` bound to one session, which is what a runtime holds.
+
+    The binding happens where the session id is first known, so nothing
+    downstream has to carry an identity it has no other use for."""
+
+    store: TurnStore
+    session_id: str
+
+    def record_turn(self, record: TurnRecord) -> None:
+        self.store.record_turn(self.session_id, record)
+
+
+__all__ = [
+    "SessionTurns",
+    "ToolInvocation",
+    "TurnLeg",
+    "TurnRecord",
+    "TurnRecorder",
+    "TurnStore",
+]
