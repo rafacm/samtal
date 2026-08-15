@@ -376,7 +376,16 @@ migrations.
 `ConversationStore` is built in `create_app` when the section is
 enabled (beside the `CaptureStore` construction, `app.py:230-237`),
 opens and migrates the database at construction through the shared
-helpers, starts one daemon writer thread, and is stopped in the
+helpers. When the section is disabled or absent but a
+`conversations.db` already exists in `server.database.dir`,
+`create_app` migrates it and opens nothing else: an upgraded
+deployment that recorded last month and records nothing today must
+still serve its history through reads against the current schema,
+and migration is maintenance of what exists, not recording. A
+missing file is never created on that path, which keeps acceptance
+criterion 1 exactly true (no `conversations.db` is created), and
+the disabled-boot-against-a-prior-revision test pins it. The store
+itself starts one daemon writer thread and is stopped in the
 lifespan's `finally` (`app.py:49-54`): stop accepts no new records,
 drains what is queued under a bound, commits, joins the thread and
 disposes the engine.
@@ -982,6 +991,11 @@ carries its resolution once the amendment addressing it lands.
     recording disabled serves an old schema. Migrate any existing
     conversations database at boot without creating one, and test
     a disabled boot against a prior revision.
+    *Resolution*: adopted. `create_app` migrates an existing
+    `conversations.db` even when the section is disabled or
+    absent, and never creates one on that path, so acceptance
+    criterion 1 stays exactly true; the
+    disabled-boot-against-a-prior-revision test is named.
 11. **P1: milestone 2 publishes a misleading, incomplete enabled
     feature.** Every merge publishes an image; the milestone that
     ships `enabled` and `text: true` stores no conversation
