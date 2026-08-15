@@ -397,3 +397,271 @@ success line, and the artifact's manifest lists
 `.../versions/0001_baseline_conversation_schema.py`. The step's own run
 inside this PR's CI is what proves it on the runner, and is unchecked in
 the PR's verification list until it goes green there.
+
+## Milestone 2: the content record
+
+The pipeline now assembles one `TurnRecord` per completed turn and hands
+it to an optional recorder where `replied` is emitted. Nothing injects
+one: `bespoke_runtime_factory`'s new parameter defaults to None, `app.py`
+does not mention it, `device/session.py` is untouched, and the
+`RuntimeFactory` type is byte-identical. A deployment behaves exactly as
+it did, which the whole unit lane passing unmodified beside this is the
+evidence for.
+
+Six commits. The one that lands this section and ticks the milestone is
+the seventh:
+
+1. `42cfdc9` Stamp a turn's offset where the clock is known
+2. `7549ecb` Give the runtime an optional turn recorder
+3. `019c2b8` Assemble one turn's record while the reply runs
+4. `e9b141a` Time the reply's first audio at the synthesizer
+5. `f8fe1c7` Record the content record in the changelog
+6. `470df00` Stamp a turn off the session's own clock
+
+### The seam
+
+Three things in `conversations/records.py`, which still imports nothing:
+`TurnRecorder`, the one-method protocol a runtime holds; `TurnStore`, the
+same channel keyed by session, which is what a store offers; and
+`SessionTurns`, the frozen binder between them. `bespoke_runtime_factory`
+closes over a `TurnStore | None` beside `mcp_servers` and `memory`, and
+its `build` binds `events.session_id` into a recorder when the store is
+not None. Every comparison is `is not None`.
+
+Two protocols rather than one because the two shapes are genuinely
+different objects: the composition root holds one store for every
+session, and a runtime must not know which session it is one of. The
+binder is where the identity stops travelling.
+
+### The assembly
+
+`runtime/turns.py` is new: `TurnUnderway`, the accumulator the reply path
+writes into, and `tool_source`, the classifier. It imports `records.py`
+and `tools/names.py` and nothing else.
+
+`PipelineRuntime` holds one `TurnUnderway`, replaced at the top of
+`_reply` and read once in its `finally`. Always present rather than
+optional, because the reply path writes into it from half a dozen places
+and a guard at each would be six chances to forget one; a session with no
+recorder assembles a record nobody reads, which costs a few list appends
+per turn.
+
+Where each half is filled:
+
+- `_reply` stamps `at` and the utterance's fields beside the `heard`
+  emission, reading `SessionEvents.now()` so the two are on one clock by
+  construction, and times its own `transcribe` call into `asr_ms`.
+- `_llm_round_done` folds the round into `rounds`, `llm_ms`,
+  `first_token_ms` and the token sums, so all four describe the rounds
+  that finished.
+- `_speak_reply` closes a leg at each handover.
+- `_speak_after` numbers the reply's syntheses and binds the index into
+  the first-audio callback.
+- `_run_one` and `_run_tools` record every call the model issued.
+- `_reply`'s `finally` builds the record and hands it over, beside
+  `replied` and under the same guard an event tap gets.
+
+### The classification
+
+`tool_source(name, device_tools, owner)` answers a source and, for `mcp`,
+its entry. It is the routing `_dispatch` applies, hoisted and consulted
+before anything runs, which is what closes the set over the paths the
+routing hides: a malformed call is classified by its name and flagged, an
+unknown name is recorded with its canned refusal, and a handover is
+recorded from `_run_tools`, refusals with their error results and a
+successful switch with neither result nor duration.
+
+It classifies names rather than outcomes, and the docstring says so: a
+`remember` call where no memory is configured is a builtin that was asked
+for and refused, not an `unknown`. Builtins are checked first, which puts
+the namespace's precedence in one readable place.
+
+### Deviations from the plan
+
+Eight, each with its reason.
+
+1. **`TurnRecord.t_ms` became `at`, and the store stamps the offset.**
+   The plan has the record carry "the utterance's offset from session
+   open", which the pipeline cannot answer: a runtime is constructed at
+   `device/session.py:310`, before the hello that opens the session, so
+   it never learns the reading offsets are measured from. The record now
+   carries the session loop's clock reading, the same thing an `Emission`
+   carries, and `ConversationStore.record_turn` turns it into `t_ms`
+   against the reading it was opened with. One origin, held by the object
+   that has it. The `turns.t_ms` column and every read of it are
+   unchanged; milestone 1's switch-combination case still asserts 1200 ms
+   and now proves the stamping as well.
+2. **`TurnLeg.agent` is nullable.** It was `str`, and the only value the
+   pipeline could offer for an unactivated session was `""`, which is a
+   lie in a row. Widened to match `TurnRecord.agent`, which was already
+   nullable for the same reason.
+3. **A leg is recorded for every agent that took part, not only for one
+   that spoke.** An agent that only asked for the handover said nothing
+   and spent tokens all the same, and the leg is the only place those can
+   be attributed to the agent that spent them, which is the whole reason
+   the plan gives for per-leg counts. The `turns.legs` column comment
+   moved from "one entry per agent that spoke this turn" to "took part
+   in", and `docs/reference/conversations-schema.md` was regenerated;
+   the drift test is green.
+4. **`runtime/turns.py` is a module the plan's layout does not name.**
+   The plan puts `records.py` under `conversations/` and says nothing
+   about where the assembly lives. `pipeline.py` was already 1547 lines,
+   the classifier needs one home that both the record and milestone 5's
+   narrowed `tool_call` can reach, and `records.py` may not import
+   `runtime/`. A leaf module under `runtime/` is the only place all three
+   hold.
+5. **The seam is two protocols and a binder rather than one protocol.**
+   See above; the plan says "an injected recorder" and leaves the shape
+   open.
+6. **`asr_ms` is null on the barge-in reuse path.** The plan allows the
+   confirming run's elapsed "where one was measured this turn". It is
+   measured, in `_gate_barge_in`, as part of deciding whether to cancel a
+   different reply, and threading it across `_finish_utterance` would put
+   a number measured for one decision in a column that answers a
+   question about another. Null is "not measured this turn", which is
+   what `records.py` says null means everywhere else.
+7. **The hand-off is guarded.** The plan does not say what a recorder
+   that raises should cost. The line after it is the closing
+   `finish_speaking`, which in auto mode is what re-arms the device's
+   listening, so a raising consumer could strand a board. It is caught
+   and reported by class name on the session channel, no event, exactly
+   as `events.py` guards a tap, and for the reason stated there.
+8. **`_refuse_handover`'s `position` parameter is now `order`.** It was
+   never the model's call-list position: it counts which switch_agent of
+   the round the loop is resolving, which is what a second one is refused
+   for. Recording positions beside it would have made two different
+   numbers share a name at one call site.
+9. **`SessionEvents` gained `now()`.** The plan says the turn's `t_ms` is
+   aligned with its `heard` event, and the store derives both from the
+   reading the session opened at, so the two have to come from one clock.
+   The pipeline first read the module-level `session_clock`, which is the
+   emitter's default and therefore agrees with it in every deployment and
+   not in a session constructed with a clock of its own, which is what a
+   test wanting deterministic offsets does. A read-only accessor makes it
+   the same clock rather than two that happen to agree; no event, field,
+   level or channel moves.
+
+One thing the plan left to the implementation, recorded rather than
+deviated from: `rounds` is the count of rounds that produced an
+`llm_round` event, not of rounds started, so a reply cancelled
+mid-generation reports the rounds whose durations and token counts are
+also in the record. That is what makes milestone 3's cross-check of turn
+rows against event rows exact.
+
+### The suite
+
+`tests/unit/test_session_record.py`, 20 tests, driven through
+`session_for` and `drive_reply`/`start_reply` against a spy standing
+where the store will stand. `device_session` and `session_for` gained one
+optional `conversations` parameter, and every other suite calls them
+exactly as before. The only other change to an existing suite is
+`test_session.py`'s two direct `_Synthesis(...)` constructions, which
+now pass the first-audio callback beside the failure one; the suites
+that pin the event surface and the ones that assert events are untouched
+and green, which is what says this milestone changed no behavior.
+
+- The single turn: text, agent, the utterance's duration, the token sums
+  and their absence, no transcript recording nothing, the reused
+  transcription's language fields with a null `asr_ms`, a timed one where
+  the turn ran its own, and the stamp taken off a session whose clock is
+  not the loop's.
+- The legs: a handover's per-agent text and per-agent tokens summing to
+  the turn's totals, and a silent leg recorded with its tokens and no
+  text.
+- The calls: one round holding a builtin, a device tool, an MCP tool, an
+  unknown name and a malformed call, asserted by the position the model
+  issued each at; a refused handover with its refusal and no duration; a
+  successful one with neither result nor duration; and two switches in
+  one round keeping the model's positions while the second is refused for
+  being the second resolved.
+- The finally: a reply cancelled mid-second-round recording the sentence
+  the user heard, the round that finished and the tool that ran.
+- The synthesizer: a voice with a real time to first byte measured into
+  `tts_first_audio_ms`, and a reply that only ever asked for tools timing
+  nothing.
+- The classifier: the closed set asserted equal to `schema.TOOL_SOURCES`,
+  each branch at its one site, and a builtin name staying a builtin
+  whatever else claims it.
+- The dormancy: the same reply with a recorder and without producing the
+  same speech and the same events, and a recorder that raises costing the
+  reply nothing but a warning naming a class.
+
+### Discoveries
+
+- **The record could not carry an offset, and only writing the test
+  showed it.** The store computes an event's `t_ms` from the reading the
+  session opened at; the runtime has neither that reading nor any way to
+  get it, because it is built before the hello that supplies it. Hence
+  deviation 1.
+- **A synthesis starts draining the provider the moment it is
+  constructed**, so the first-audio measurement fires whether or not
+  anybody consumes the audio. The suite's speaking stub therefore drains
+  the synthesis instead of cancelling it, which is what makes the
+  measurement a real one rather than a race with the cancel.
+- **`_refuse_handover`'s "position" was two numbers wearing one name.**
+  Passing the model's call-list index into it would have refused the
+  first handover of a round whenever the model happened to issue it
+  second, which is a behavior change nothing in the suite would have
+  caught. Hence deviation 8, made before the first test ran.
+- **`asyncio.gather` returns in order and finishes in whatever order it
+  likes**, so the invocations land in the accumulator by completion. The
+  suite asserts a position-keyed mapping rather than a list, which is the
+  honest shape of what the record promises: the position is the model's
+  order, the row order is not.
+
+### Verification
+
+From `samtal-server/`, at `470df00`:
+
+```
+$ uv run ruff check .
+All checks passed!
+```
+
+```
+$ uv run pytest tests/unit -q
+2123 passed, 15 skipped in 260.55s (0:04:20)
+```
+
+```
+$ uv run pytest tests/integration -q
+53 passed in 155.32s (0:02:35)
+```
+
+The unit lane was 2103 at milestone 1 and is 2123 here: the twenty new
+tests, and no other suite changed count.
+
+The dormancy, by tooling. Nothing in the composition root, the device
+edge or the boundary moved:
+
+```
+$ git diff dc02141 --stat -- samtal_server/app.py samtal_server/device/session.py \
+    samtal_server/device/boundary.py
+$ echo $?
+0
+$ git grep conversations samtal_server/app.py
+$ echo $?
+1
+$ grep -n "RuntimeFactory =" samtal_server/device/boundary.py
+236:RuntimeFactory = Callable[[DeviceOutput, SessionEvents, Sequence[str]], SessionInput]
+```
+
+The suites this milestone's acceptance names are untouched, which is
+what says the reply path behaves as it did:
+
+```
+$ git diff dc02141 --stat -- tests/unit/test_event_surface_pins.py \
+    tests/unit/test_server_event_pins.py tests/unit/test_event_surface_guard.py \
+    tests/unit/test_events.py tests/unit/test_session_events.py \
+    tests/unit/test_session_characterization.py
+$ echo $?
+0
+```
+
+And the plan's own inventory pointer, unchanged at three emit sites,
+since the narrowing is milestone 5's:
+
+```
+$ grep -c "text=" samtal_server/runtime/pipeline.py
+3
+```
