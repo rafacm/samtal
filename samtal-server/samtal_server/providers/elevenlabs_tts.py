@@ -120,10 +120,14 @@ class ElevenLabsTts(TtsProvider):
         # per sentence would show up as latency in the gap the user
         # hears. Providers are built at startup and live as long as the
         # server, which is also this client's lifetime.
-        self._client = client or httpx.AsyncClient(
-            base_url=API_BASE_URL,
-            timeout=httpx.Timeout(timeout_s, connect=timeout_s),
-            headers={"xi-api-key": api_key},
+        self._client = (
+            client
+            if client is not None
+            else httpx.AsyncClient(
+                base_url=API_BASE_URL,
+                timeout=httpx.Timeout(timeout_s, connect=timeout_s),
+                headers={"xi-api-key": api_key},
+            )
         )
 
     def _body(self, text: str) -> dict[str, object]:

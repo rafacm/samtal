@@ -804,3 +804,17 @@ async def test_the_timeout_is_the_one_the_entry_asked_for(
     assert isinstance(built, OpenAiAsr)
     assert built._client.timeout == 7  # type: ignore[attr-defined]
     assert built._client.max_retries == 0  # type: ignore[attr-defined]
+
+
+async def test_a_falsey_injected_client_is_still_the_one_used() -> None:
+    """`client or ...` drops a double that answers False to a truth test,
+    which any object defining __bool__ or __len__ does, and builds a real
+    client in its place."""
+
+    class Falsey:
+        def __bool__(self) -> bool:
+            return False
+
+    given = Falsey()
+    asr = OpenAiAsr(model="gpt-4o-mini-transcribe", api_key="test-key", client=given)  # type: ignore[arg-type]
+    assert asr._client is given

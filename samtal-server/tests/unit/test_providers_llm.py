@@ -114,6 +114,40 @@ def test_an_injected_openai_compatible_client_is_used_as_given() -> None:
     assert llm._client is given
 
 
+class FalseyClient:
+    """A double that answers False to a truth test, which is what any
+    object defining __bool__ or __len__ does. `client or ...` drops one
+    of these on the floor and builds a real client instead, and the test
+    that thought it had injected a client watches the provider talk to
+    the vendor."""
+
+    def __bool__(self) -> bool:
+        return False
+
+
+def test_a_falsey_anthropic_client_is_still_the_one_used() -> None:
+    given = FalseyClient()
+    llm = AnthropicLlm(
+        model="claude-sonnet-5",
+        max_tokens=64,
+        api_key="sk-test",
+        client=given,  # type: ignore[arg-type]
+    )
+    assert llm._client is given
+
+
+def test_a_falsey_openai_compatible_client_is_still_the_one_used() -> None:
+    given = FalseyClient()
+    llm = OpenAiCompatibleLlm(
+        base_url="http://localhost:11434/v1",
+        model="qwen3:8b",
+        max_tokens=64,
+        api_key=None,
+        client=given,  # type: ignore[arg-type]
+    )
+    assert llm._client is given
+
+
 def test_chat_messages_prepend_the_system_prompt() -> None:
     turns = [Turn("user", "hi"), Turn("assistant", "hello"), Turn("user", "bye")]
     assert chat_messages("be brief", turns) == [

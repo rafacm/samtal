@@ -145,11 +145,15 @@ class OpenAiCompatibleLlm(LlmProvider):
         # produces nothing. Not a configuration option, deliberately;
         # until now these clients had no bound at all, and a deployment
         # needing a nonstandard one is a change with its own issue.
-        self._client = client or AsyncOpenAI(
-            base_url=base_url,
-            api_key=api_key or "unused",
-            timeout=timeout_s,
-            max_retries=MAX_RETRIES,
+        self._client = (
+            client
+            if client is not None
+            else AsyncOpenAI(
+                base_url=base_url,
+                api_key=api_key or "unused",
+                timeout=timeout_s,
+                max_retries=MAX_RETRIES,
+            )
         )
         self._model = model
         self._max_tokens = max_tokens

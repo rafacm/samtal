@@ -119,8 +119,12 @@ class AnthropicLlm(LlmProvider):
         # A None api_key is the SDK resolving its own (ANTHROPIC_API_KEY
         # or a logged-in profile), which is what it does with the
         # argument absent.
-        self._client = client or AsyncAnthropic(
-            api_key=api_key, timeout=timeout_s, max_retries=MAX_RETRIES
+        self._client = (
+            client
+            if client is not None
+            else AsyncAnthropic(
+                api_key=api_key, timeout=timeout_s, max_retries=MAX_RETRIES
+            )
         )
         self._model = model
         self._max_tokens = max_tokens
