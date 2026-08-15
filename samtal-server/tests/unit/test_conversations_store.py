@@ -20,6 +20,7 @@ the only place they are provable:
   fields, an attached server tap and the process output.
 """
 
+import datetime as dt
 import json
 import logging
 import threading
@@ -35,6 +36,7 @@ from samtal_server.conversations import store as store_module
 from samtal_server.conversations.records import ToolInvocation, TurnLeg, TurnRecord
 from samtal_server.conversations.store import (
     MAX_EVENTS_IN_FLIGHT,
+    RETENTION_DAYS_DEFAULT,
     STOP_TIMEOUT_S,
     ConversationStore,
     _Batch,
@@ -397,12 +399,62 @@ def test_control_records_are_never_dropped(
     assert rows(tmp_path, "events") == []
 
 
-def test_the_writers_defaults_are_the_documented_ones() -> None:
-    """The bound and the join budget are the two numbers a test that
-    injects a seam cannot prove, so they are pinned where they are
-    written."""
+def test_the_writers_defaults_are_the_documented_ones(tmp_path: Path, stores) -> None:
+    """The numbers a test that injects a seam cannot prove, pinned as
+    values and, where a value is not the whole claim, as behavior.
+
+    Every test above either injects a clock, a gate or a smaller bound,
+    so a store built the way the server will build it is the one thing
+    none of them exercises. This builds one.
+    """
+    from sqlalchemy import text as sql
+
     assert MAX_EVENTS_IN_FLIGHT == 1024
-    assert STOP_TIMEOUT_S > BUSY_TIMEOUT_MS / 1000
+    # Not merely "above the busy timeout": the margin is what a wedged
+    # commit is given to finish after the lock it is parked on clears,
+    # and a budget that drifted down to the timeout itself would still
+    # satisfy a greater-than.
+    assert STOP_TIMEOUT_S == BUSY_TIMEOUT_MS / 1000 + 5.0
+    assert BUSY_TIMEOUT_MS == 10_000
+
+    store = stores()
+    assert store.retention_days == RETENTION_DAYS_DEFAULT == 90
+    # Both storage switches default on under an enabled store, which is
+    # what makes enabling it alone give the documented defaults.
+    assert (store.metrics, store.text) == (True, True)
+    # The pragma the connection really carries, rather than the constant
+    # it was meant to be built from.
+    with store._engine.connect() as connection:
+        assert connection.execute(sql("PRAGMA busy_timeout")).scalar() == 10_000
+        assert connection.execute(sql("PRAGMA secure_delete")).scalar() == 1
+        assert connection.execute(sql("PRAGMA journal_mode")).scalar() == "wal"
+
+
+def test_a_default_store_really_prunes_at_ninety_days(tmp_path: Path) -> None:
+    """The retention default asserted as the behavior it names, not as
+    the number it is written with: a store built with nothing but a
+    directory has to delete a session older than the window and keep one
+    inside it. Only the clock is injected, because the alternative is a
+    test that waits ninety days."""
+    now = dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC)
+
+    def manifest_at(started: dt.datetime) -> dict[str, Any]:
+        return {**MANIFEST, "started_at": started.isoformat()}
+
+    seeding = ConversationStore(tmp_path, now=lambda: now, retention_days=0)
+    seeding.start()
+    for name, age in (("ancient", 91), ("recent", 89)):
+        seeding.open_session(name, 100.0, manifest_at(now - dt.timedelta(days=age)))
+        seeding.close_session(name, duration_s=1.0, reason="client")
+    seeding.stop()
+    assert {row["session"] for row in rows(tmp_path, "sessions")} == {"ancient", "recent"}
+
+    # Built the way the server will build it: a directory and a clock.
+    store = ConversationStore(tmp_path, now=lambda: now)
+    store.start()
+    store.stop()
+
+    assert [row["session"] for row in rows(tmp_path, "sessions")] == ["recent"]
 
 
 def test_no_producer_path_can_wait_on_the_writer(tmp_path: Path, stores) -> None:
