@@ -231,7 +231,21 @@ seam, no `_client` assignment and no monkeypatching internals: a
 fake client whose request raises the SDK's timeout class must
 surface `ProviderCallTimeout`, and one raising the SDK's error
 class must surface `ProviderCallError` with the SDK class named in
-the message. The elevenlabs failure tests that pin `RuntimeError`
+the message.
+
+The streaming adapters are additionally covered after the first
+chunk (the review round's finding 5), because every one of them
+has failure points past the request: Anthropic's event iteration
+and its final-message assembly, the OpenAI LLM's iteration, and
+both TTS byte iterators. For each streaming provider the fake
+client yields at least one chunk and then raises, once with the
+SDK's timeout class and once with its error class, surfacing the
+matching taxonomy type; a raw `httpx` transport error raised from
+an SDK-backed stream after the response has opened is covered for
+the providers whose SDKs ride httpx; Anthropic's final-message
+assembly failure is its own case; and a mid-stream
+`asyncio.CancelledError` propagates unwrapped with no
+provider-failure report, which is the barge-in path's guarantee. The elevenlabs failure tests that pin `RuntimeError`
 (test_providers_elevenlabs.py:225,233) move to the taxonomy type
 with their message assertions kept; that is the error-contract
 change the issue orders, not a weakening.
@@ -423,6 +437,8 @@ resolution once the amendment addressing it lands.
    chunk, cover raw httpx failures from SDK-backed streams and
    Anthropic final-message failure, and prove mid-stream
    cancellation propagates unwrapped.
+   *Resolution*: adopted. The tests decision gains the mid-stream
+   paragraph naming all of these cases per streaming provider.
 6. **P2: `DEFAULT_MAX_TOKENS` has no destination.** openai_llm
    imports it from anthropic_llm, and the plan promises no
    cross-provider imports without assigning the constant a home.
