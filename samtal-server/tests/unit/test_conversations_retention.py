@@ -81,17 +81,25 @@ def record(store: ConversationStore, session: str, started_at: dt.datetime, **fa
     store.close_session(session, duration_s=5.0, reason="client")
 
 
-def _settled(store: ConversationStore) -> None:
-    """Wait for the writer to have consumed everything queued, without
-    stopping it: stopping disposes the engine, which checkpoints the log
-    and takes the sidecar cases away. One more marker whose commit is
-    observable is what proves the ones before it landed."""
+def _until(ready, complaint: str) -> None:
+    """Wait for what the test is about, on a store that is still
+    running.
+
+    Still running matters here: stopping disposes the engine, which
+    checkpoints the log on the way out and takes the sidecar cases
+    away. Not an empty queue either, because `get()` returns before the
+    record it returned has been written, so waiting on the condition
+    itself is what has no window in it."""
     deadline = time.monotonic() + 30.0
     while time.monotonic() < deadline:
-        if store._queue.empty():
+        if ready():
             return
-        time.sleep(0.01)
-    raise AssertionError("the writer never drained the queue")
+        time.sleep(0.005)
+    raise AssertionError(complaint)
+
+
+def _holds(path: Path, sentinel: str) -> bool:
+    return sentinel.encode() in path.read_bytes()
 
 
 def counts(directory: Path) -> dict[str, int]:
@@ -314,12 +322,10 @@ def test_a_purged_utterance_is_gone_from_the_files_bytes(tmp_path: Path, stores)
     store.open_session("secret", 100.0, manifest(NOW))
     store.record_turn("secret", a_turn(heard=f"my password is {SENTINEL}"))
     store.close_session("secret", duration_s=3.0, reason="client")
-    _settled(store)
 
     database = tmp_path / "conversations.db"
     log = tmp_path / "conversations.db-wal"
-    assert log.is_file(), "the commits were checkpointed before the purge could matter"
-    assert SENTINEL.encode() in log.read_bytes(), "the sentinel never reached the log"
+    _until(lambda: _holds(log, SENTINEL), "the sentinel never reached the write-ahead log")
 
     taken = purge(tmp_path, session="secret")
 
@@ -351,7 +357,7 @@ def test_a_reader_defers_the_stores_truncation_and_the_next_marker_takes_it(
     seeding.stop()
 
     database = tmp_path / "conversations.db"
-    assert SENTINEL.encode() in database.read_bytes()
+    assert _holds(database, SENTINEL)
 
     # Held across the pruning store's start, which is when it prunes.
     reader = read_conversations(tmp_path)
@@ -359,11 +365,13 @@ def test_a_reader_defers_the_stores_truncation_and_the_next_marker_takes_it(
     held.execute(text("select count(*) from sessions")).scalar()
     pruning = stores(retention_days=90)
     pruning.start()
-    _settled(pruning)
+    _until(
+        lambda: pruning._truncation_due,
+        "the prune never ran, or was checkpointed past a held reader",
+    )
 
     assert stored_sessions(tmp_path) == []
-    assert pruning._truncation_due, "a held reader cannot be checkpointed past"
-    assert SENTINEL.encode() in database.read_bytes(), "the frames went while a reader held them"
+    assert _holds(database, SENTINEL), "the frames went while a reader held them"
 
     held.close()
     reader.dispose()
@@ -371,10 +379,12 @@ def test_a_reader_defers_the_stores_truncation_and_the_next_marker_takes_it(
     # The next quiet moment: a marker on the still-running store.
     pruning.open_session("after", 200.0, manifest(NOW))
     pruning.record_turn("after", a_turn(heard="nothing secret"))
-    _settled(pruning)
+    _until(
+        lambda: not pruning._truncation_due,
+        "the owed truncation was never taken at a later marker",
+    )
 
-    assert not pruning._truncation_due
-    assert SENTINEL.encode() not in database.read_bytes()
+    assert not _holds(database, SENTINEL)
 
 
 def test_a_reader_defers_a_purges_truncation_and_a_later_purge_takes_it(
@@ -390,10 +400,9 @@ def test_a_reader_defers_a_purges_truncation_and_a_later_purge_takes_it(
     store.record_turn("secret", a_turn(heard=f"my password is {SENTINEL}"))
     store.open_session("other", 100.0, manifest(NOW, device="bb:bb:bb:bb:bb:bb"))
     store.close_session("secret", duration_s=3.0, reason="client")
-    _settled(store)
 
     log = tmp_path / "conversations.db-wal"
-    assert SENTINEL.encode() in log.read_bytes()
+    _until(lambda: _holds(log, SENTINEL), "the sentinel never reached the write-ahead log")
 
     reader = read_conversations(tmp_path)
     held = reader.connect()
@@ -402,7 +411,7 @@ def test_a_reader_defers_a_purges_truncation_and_a_later_purge_takes_it(
         taken = purge(tmp_path, session="secret")
         assert taken.sessions == 1
         assert not taken.truncated
-        assert SENTINEL.encode() in log.read_bytes()
+        assert _holds(log, SENTINEL)
     finally:
         held.close()
         reader.dispose()
@@ -410,8 +419,8 @@ def test_a_reader_defers_a_purges_truncation_and_a_later_purge_takes_it(
     assert purge(tmp_path, session="other").truncated
 
     assert log.stat().st_size == 0
-    assert SENTINEL.encode() not in log.read_bytes()
-    assert SENTINEL.encode() not in (tmp_path / "conversations.db").read_bytes()
+    assert not _holds(log, SENTINEL)
+    assert not _holds(tmp_path / "conversations.db", SENTINEL)
 
 
 def test_the_checkpoint_runs_outside_a_transaction(tmp_path: Path, stores) -> None:
@@ -426,8 +435,8 @@ def test_the_checkpoint_runs_outside_a_transaction(tmp_path: Path, stores) -> No
     store = stores(retention_days=0)
     store.start()
     record(store, "one", NOW)
-    _settled(store)
     log = tmp_path / "conversations.db-wal"
+    _until(lambda: stored_sessions(tmp_path) == ["one"], "the session was never committed")
     assert log.stat().st_size > 0
 
     assert _checkpoint(store._engine) is True

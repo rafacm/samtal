@@ -23,6 +23,7 @@ the only place they are provable:
 import json
 import logging
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,7 @@ from samtal_server.conversations.store import (
     MAX_EVENTS_IN_FLIGHT,
     STOP_TIMEOUT_S,
     ConversationStore,
+    _Batch,
     open_conversations,
     read_conversations,
 )
@@ -117,6 +119,22 @@ def stores(tmp_path: Path):
     yield _build
     for store in built:
         store.stop()
+
+
+def _until(ready: Any, complaint: str) -> None:
+    """Wait for what the test is about, on a running writer.
+
+    Not for an empty queue: `get()` returns before the record it
+    returned has been accepted, so an empty queue says the writer has
+    taken the last item and nothing about what it did with it. Waiting
+    on the condition itself has no such window, and a wait that never
+    ends is the test failing with its own sentence."""
+    deadline = time.monotonic() + TIMEOUT_S
+    while time.monotonic() < deadline:
+        if ready():
+            return
+        time.sleep(0.005)
+    raise AssertionError(complaint)
 
 
 def rows(directory: Path, table: str, **where: Any) -> list[dict[str, Any]]:
@@ -298,6 +316,62 @@ def test_events_beyond_the_bound_are_dropped_counted_and_said_once(
     (session,) = rows(tmp_path, "sessions")
     assert session["dropped"] == 6
     assert len(rows(tmp_path, "events")) == 4
+
+
+def test_the_bound_counts_events_the_writer_is_holding_in_a_batch(
+    tmp_path: Path, stores, caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In flight means not yet written off, which a batch nobody has
+    committed is not.
+
+    A count that stopped at the queue would bound nothing: the writer
+    here is running and drains everything it is given, so a session
+    that never reaches a marker would hold its events in memory while
+    the producer saw a fresh allowance every time, which is unbounded
+    memory behind a bound that reads as satisfied. The events below sit
+    in the batch, demonstrably off the queue, and the allowance stays
+    spent."""
+    monkeypatch.setattr(store_module, "MAX_EVENTS_IN_FLIGHT", 4)
+    store = stores()
+    store.start()
+    store.open_session("alpha", 100.0, MANIFEST)
+
+    with caplog.at_level(logging.INFO):
+        for index in range(10):
+            store.record_event("alpha", "vad_edge", logging.DEBUG, {"n": index}, 101.0)
+        _until(
+            lambda: len(store._batches.get("alpha", _Batch()).events) == 4,
+            "the writer never took the accepted events into its batch",
+        )
+
+    # Off the queue and into the batch, with no marker to commit them.
+    assert store._queue.empty()
+    assert store._in_flight == 4
+    assert (
+        len(
+            [
+                record
+                for record in caplog.records
+                if getattr(record, "event", "") == "conversations_dropped"
+            ]
+        )
+        == 1
+    )
+
+    # And the allowance comes back when the marker writes them off.
+    store.record_turn("alpha", a_turn())
+    _until(
+        lambda: store._in_flight == 0,
+        "a committed batch never gave its allowance back",
+    )
+    store.record_event("alpha", "vad_edge", logging.DEBUG, {"n": 99}, 102.0)
+    store.close_session("alpha", duration_s=1.0, reason="client")
+    store.stop()
+
+    assert len(rows(tmp_path, "events")) == 5
+    (session,) = rows(tmp_path, "sessions")
+    assert session["dropped"] == 6
 
 
 def test_control_records_are_never_dropped(

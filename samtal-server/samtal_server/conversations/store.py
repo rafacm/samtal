@@ -12,7 +12,11 @@ arbitrary:
 - **The queue is unbounded and the bound lives on the droppable class.**
   `Event` records are what a wedged database backs up, and dropping them
   is the documented behavior, so they are refused at the producer beyond
-  `MAX_EVENTS_IN_FLIGHT`. `Open`, `Turn` and `Close` are control records
+  `MAX_EVENTS_IN_FLIGHT`. In flight means not yet written off: queued,
+  or sitting in a per-session batch that no marker has committed. A
+  count that stopped at the queue would bound nothing, since a session
+  that never reaches a marker holds its events in memory while the
+  producer sees a fresh allowance. `Open`, `Turn` and `Close` are control records
   and are never refused: they are the store's structural truth, they
   arrive at conversational pace, and a dropped `Close` would leave the
   store unable to record its own incompleteness.
@@ -444,12 +448,16 @@ class ConversationStore:
 
     def _accept(self, item: Any) -> None:
         if isinstance(item, Event):
-            with self._lock:
-                self._in_flight -= 1
             batch = self._batches.get(item.session)
             if batch is None:
+                # Refused, so it is written off here: nothing further
+                # will happen to it.
+                self._release(1)
                 self._refuse(item.session)
                 return
+            # Still in flight: moving from the queue to a batch is not
+            # writing it off, and the batch is where an unbounded
+            # backlog would otherwise accumulate.
             batch.events.append(item)
             return
         if isinstance(item, Open):
@@ -472,6 +480,16 @@ class ConversationStore:
             self._batches.pop(item.session, None)
             self._lost.pop(item.session, None)
             self._prune()
+
+    def _release(self, count: int) -> None:
+        """Write off `count` events: committed, rolled back, discarded
+        by a tombstone, or refused. Until one of those happens they are
+        in flight, and the producer's allowance is what they are counted
+        against."""
+        if count <= 0:
+            return
+        with self._lock:
+            self._in_flight -= count
 
     def _refuse(self, session_id: str) -> None:
         """A record for a session this writer is not recording: one it
@@ -538,6 +556,7 @@ class ConversationStore:
                     # so nothing in flight can resurrect it as orphan
                     # rows.
                     self._batches.pop(session_id, None)
+                    self._release(len(batch.events))
                     return
                 self._write(connection, session_id, batch)
                 if closing is not None:
@@ -548,6 +567,8 @@ class ConversationStore:
                     )
         except Exception as exc:  # noqa: BLE001 - a write never breaks a session
             self._failed(session_id, batch, exc)
+        # Committed or rolled back, this batch is written off either way.
+        self._release(len(batch.events))
         # Never for a session the tombstone just removed: recreating its
         # state here is exactly the resurrection the check above exists
         # to prevent.
