@@ -384,3 +384,266 @@ uv run pytest tests/integration -q  53 passed
 The unit count grows by four: two sentinel cases in the pin suite, and
 the mutating-tap and reattach cases in the contract test. No file
 outside milestone 1's list moved.
+
+## Milestone 2: the server scope emits through it
+
+Every hand-built structured `extra={...}` dict in the production package
+is gone. Eleven modules now emit through a `ServerEvents` built on the
+module logger name each of them already had, `openai_asr.py`'s private
+`_echo_event` builder is dissolved, and the surface they produce did not
+move: the pin suite committed before the migration passes through it
+without a byte changing, and so does every event-assertion suite next
+door.
+
+Six commits, in the order the milestone was built:
+
+1. `df0be70` Pin every server event before migrating it
+2. `37110c1` Emit the HTTP edge's events through ServerEvents
+3. `1397c49` Emit the server's own plumbing through ServerEvents
+4. `7abc5e1` Dissolve _echo_event into the provider's emitter
+5. `f9f0db6` Guard the one emitter with the package's own AST
+6. `0e14070` Pin the templates and the arguments here too
+
+The branch is stacked on milestone 1's, which was under review while
+this was built, so these hashes move with every rebase onto it. Their
+order and their titles do not.
+
+### The pin suite, first and unchanged
+
+`samtal-server/tests/unit/test_server_event_pins.py` (new, 1201 lines,
+42 tests covering 42 emit paths, one each). A sibling module rather than
+an extension of `test_event_surface_pins.py`, because the two scopes
+normalize differently and the session file must not be touched again:
+milestone 1's evidence is that it did not move.
+
+Per path it pins the same five things as the session suite:
+`record.name`, `record.levelno`, `record.msg` (the unrendered
+template), `record.args` (by value and by type), and the exact set of
+nonstandard record attributes with their values, read through
+`logs._STANDARD_ATTRIBUTES` rather than through a list written in the
+test. The rendered sentence is carried alongside as the readable half a
+reviewer reads in a diff, and the docstring says which of the two is the
+pin and which is the courtesy.
+
+Two normalizations, both declared in the module docstring:
+
+- **Per path**, the fields whose values move between runs are named in
+  `dynamic=` and replaced by a placeholder. There are seven of them
+  across the whole suite: an activation `code`, a capture's `path` and
+  `free_mb` and `total_mb`, the bindings failure's class name, the ASR
+  retry's `retry_ms`, and the capacity refusal's `session`.
+- **In the sentence**, strings named in `scrub=` (a `tmp_path`, an
+  activation code) are replaced first, and then every numeric run
+  becomes `<n>`. Scrubbing runs first because a temporary path is full
+  of digits.
+
+Unlike the session scope, `session` is pinned rather than normalized:
+these paths are driven directly enough to name the session themselves
+(`"s1"`), and a server event carries no session identity of its own.
+
+The suite was committed green against the unmigrated code, and the
+migration commits did not touch it: the only test file any of them
+carries is the new guard.
+
+It was touched once afterwards, deliberately, in `0e14070`. The PR #152
+review round landed on the session suite while this milestone was being
+built, and its finding 6 applies here word for word: normalizing every
+numeric run in the rendered sentence lets a swapped argument, a changed
+value and a `%d` turning into a `%s` pass unnoticed. So `record.msg` and
+`record.args` joined the pin, with sixteen argument positions declared
+in `dynamic_args=` (a `tmp_path`, a duration, or one of five exceptions,
+which can only be pinned by class since two exceptions carrying the same
+message are not equal to each other).
+
+Adding pins after a migration would ordinarily weaken the evidence they
+exist to be. It does not here, because the strengthened suite was run
+against the pre-migration tree as well: restoring `samtal_server/` at
+`df0be70`, all forty-two pass, and they pass again with the migrated
+tree back. Both halves of the "before and after" therefore hold for all
+five dimensions, not only for the original four.
+
+### Every path was driven, six of them with a planted failure
+
+None had to be approximated. Most reuse the fixtures the existing suites
+use (`test_ota.py`'s `post_system_info`, `test_onboarding_activation.py`'s
+`check_in` and `activate`, `test_capture.py`'s `store` and `tone`,
+`test_drain.py`'s `FakeSession`, `test_device_bindings.py`'s `booted`,
+`test_ws_auth.py`'s `handshake`), which is what keeps a 42-path suite to
+one file.
+
+Six paths are reached only by a failure that cannot be provoked
+portably, and each plants one instead, which is a decision rather than a
+convenience:
+
+- The three `capture_declined` reasons and `capture_failed` render an
+  exception into their sentence. An unwritable volume answers with the
+  operating system's own words, which differ between platforms, so
+  `_free_mb` and `SessionCapture.start` are monkeypatched to raise a
+  fixed `OSError`. `capture_failed` is the exception: it is driven for
+  real, by closing the WAV handle under a live capture and writing past
+  the flush lag, and it pins CPython's own `write to closed file`.
+- `activation_not_offered` with reason `unreadable` needs a database
+  that will not read, which `test_device_bindings.py`'s recipe supplies
+  (boot an app on a real database, then overwrite the file); the same
+  drive covers `device_bindings_unreadable`.
+- `activation_not_offered` with the budget reason lowers `MINT_BUDGET`
+  to zero rather than making thirty check-ins. What is under test is the
+  line, not the counter, which `test_onboarding_activation.py` drives
+  for real.
+
+Two other choices worth naming. The onboarding banner and the two key
+misses are driven with a **pinned** onboarding key rather than one
+derived from a secret in the environment, so the URL in the sentence is
+a literal instead of something recomputed by the code under test;
+pinning is a supported configuration, for a secret rotation. And
+`capture_enabled`/`capture_disabled` name a fixed absolute directory
+rather than a `tmp_path`, because `CaptureStore` creates nothing until a
+session opens and none opens in those tests.
+
+### The migration
+
+Eleven production modules, 42 emit sites, split into three commits by
+subsystem rather than landed as one. Milestone 1's migration had to be
+atomic (the payload factory it replaced could not survive a partial
+move); this one does not, and three diffs of four, six and one file each
+are three readable stories.
+
+The diff at each site is mechanical, exactly as the plan says:
+
+```python
+logger.warning(msg, args, extra={"event": "capture_declined", "session": session_id, ...})
+events.warning(msg, args, event="capture_declined", session=session_id, ...)
+```
+
+Two sites carried a dict across several calls and still do, minus the
+`event` key the emitter now owns: `ota_check`'s common fields are
+splatted into all four branches (`**fields`), and the three activation
+refusals splat the pair they share. Field order is preserved at every
+site, because `ServerEvents` builds `{"event": ..., **fields}` and
+`event` was the first key of every hand-built dict.
+
+The module `logger` goes from nine of the eleven modules, where every
+logging call was an event. It stays in two: `filler.py` logs that a
+filler was cached, and `openai_asr.py` logs the under-the-minimum debug
+line and the one saying a retry is being sent. All three narrate
+progress rather than record an outcome, which is the line milestone 1
+drew for `pipeline.py` and `session.py`.
+
+`_echo_event` became `_echo_fields`. The event's name went back to the
+five call sites, beside the sentences it belongs to; what survives is
+the three fields the outcomes share and the rule that `retry_ms` is
+absent on a skip.
+
+### The AST guard
+
+`samtal-server/tests/unit/test_event_surface_guard.py` (new, 151 lines,
+5 tests). The rule walks every module of the production package and
+fails on a call whose function is an attribute with a logging method's
+name and which carries an `extra=` keyword. One exception is enumerated
+with its reason: `events.py`, where `LogTap` attaches the finished
+payload, which is the concentration the rule exists to produce. Checked
+by hand at the time of writing, `events.py:121` is the only hit in the
+package.
+
+Two tests keep the rule honest rather than merely green. One plants the
+three shapes that evaded the grep this replaces (a one-line `extra={`, a
+multi-line one, and `extra={**record, ...}`) and asserts all three are
+caught. The other plants pydantic's `ConfigDict(extra="forbid")`,
+`json_schema_extra=` and `openapi_extra=` and asserts none is, which is
+why the rule is written for logging calls rather than for every call
+with an `extra=` keyword.
+
+The last two tests assert the absences: `_echo_event` appears in no
+production module, and nothing imports or names `device.events`
+(milestone 1's deviation about the two prose mentions does not apply
+here, since both spell it `device/events.py`).
+
+### Deviations from the plan
+
+Three, none of them a departure from a decision.
+
+**The import cycle the plan ruled out was real, and milestone 1 fixed
+it.** The plan says `capture.py` importing `events.py` "is not a cycle
+... because `events.py` imports nothing from `capture.py`". Milestone 1
+shipped it importing `SessionCapture` for the annotations on
+`CaptureTap` and `attach_capture`, which is harmless while nothing else
+emits and is a genuine cycle the moment `capture.py` builds a
+`ServerEvents`: importing the capture starts `events.py`, which imports
+the capture back before `SessionCapture` exists. This milestone hit it,
+fixed it here first behind `TYPE_CHECKING`, and then dropped that commit
+in a rebase: milestone 1's own review round landed a better answer on
+the parent branch, a structural `SessionRecording` protocol describing
+the three methods this module uses, which is a shape rather than a
+deferred name. Nothing of the cycle is left for this milestone to
+carry.
+
+**There are 42 server emit sites, not 23.** The plan's inventory counts
+"ota 8, onboarding 4, capture 8, registry 3, ws 2, app 2, bindings 2,
+filler 1, memory 1, config/api 2". Those are `extra={` counts, and two
+things escape them: `ota.py`'s four `ota_check` branches attach a
+prebuilt dict as `extra=event`, so ota has 12 sites rather than 8; and
+`openai_asr.py`'s five `_echo_event` sites are named in the plan's prose
+but absent from its arithmetic. 12 + 4 + 8 + 2 + 2 + 3 + 1 + 2 + 1 + 2 +
+5 = 42, which is also the number of tests in the pin suite. Nothing
+about the work changes; the milestone's own arithmetic does.
+
+**The `ota_check` sentence carries the header, not the normalized MAC.**
+Not a change, a discovery worth writing down, because the pin makes it
+permanent: the four `ota_check` sentences interpolate `device_id`, the
+raw `Device-Id` header, while the `device` field carries
+`normalize_mac`'s answer. A board sending `AA:BB:CC:DD:EE:FF` therefore
+produces a sentence in upper case and a field in lower. The pin fixes
+both spellings, so a future tidy-up of one of them is a deliberate act.
+
+### Discoveries
+
+**A server event's sentence is where the platform leaks in.** Four of
+the six planted failures exist because an exception's `str()` is
+rendered into the sentence, and four of the events that carry a path
+render an absolute one. The session scope has almost none of this: its
+sentences are about a conversation. It is the reason this suite needed a
+`scrub=` the session suite did not.
+
+**The hub is now populated, and nothing is attached to it.** Eleven
+`ServerEvents` are constructed at import time, so `server_emitters()`
+answers with eleven channels rather than the empty tuple it answered
+with at the end of milestone 1. That is the attachment point #66/#67
+were promised, and it now has something to reach.
+
+**A stacked branch pays for the review round above it.** Milestone 1's
+PR was reviewed while this was being built, and six commits landed on
+the parent branch during it, two of them in `events.py` itself. One of
+those overlapped this milestone's own work closely enough that a rebase
+resolved it wrongly and had to be redone by dropping the commit
+outright. The lesson for the next link of the chain is to diff against
+the parent branch after every rebase and read what moved, not only what
+merged.
+
+**`_STANDARD_ATTRIBUTES` is what makes a 42-path pin affordable.**
+Reading the field set through `logs.py` rather than listing it means a
+path's pin is written by naming what moves, not by naming what exists.
+Sixteen of the 42 name a `dynamic=` field, sixteen a `dynamic_args=`
+position and five a `scrub=` string; the rest pin every value they
+carry, verbatim.
+
+### Verification
+
+From `samtal-server/`, at `0e14070`:
+
+```
+uv run ruff check .                 All checks passed!
+uv run pytest tests/unit -q         2001 passed, 15 skipped
+uv run pytest tests/integration -q  53 passed
+```
+
+This milestone adds 47 unit tests and no integration test: the 42 of the
+pin suite, all green before any production line moved, and the guard's
+five. The migration commits changed no test file, so the count at
+`df0be70` is this one less the guard's five, and the parent branch's is
+that less 42.
+
+`git diff --stat refactor/event-surface` lists this milestone's files
+and nothing else: the eleven migrated modules, the two new test files,
+the plan and this document. `events.py` is not among them, which is the
+point of the deviation above. Milestone 3 owns `tools/mcp.py`, the
+README table and the CHANGELOG, and none of them moved.
