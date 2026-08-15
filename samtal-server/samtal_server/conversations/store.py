@@ -407,17 +407,20 @@ class ConversationStore:
             self._prune()
 
     def _refuse(self, session_id: str) -> None:
-        """A record for a session this writer never opened. Dropped, and
-        said once: by construction it cannot happen, so it is a defect
-        report rather than an operational condition."""
+        """A record for a session this writer is not recording: one it
+        never opened, or one a deletion tombstoned out from under a live
+        conversation. Dropped, and said once. Never opened cannot happen
+        by construction, so this is a defect report rather than an
+        operational condition; tombstoned is ordinary, and the record is
+        refused for exactly the reason the tombstone exists."""
         if session_id in self._unknown:
             return
         if len(self._unknown) >= _UNKNOWN_WARNED_MAX:
             self._unknown.clear()
         self._unknown.add(session_id)
         logger.warning(
-            "the conversation store dropped records for session %s, which it "
-            "never opened",
+            "the conversation store dropped records for session %s, which it is "
+            "not recording",
             session_id,
         )
 
