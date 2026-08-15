@@ -218,9 +218,140 @@ milestone 1 list and the write-path specifics its review round added.
   instead of the turn's. They now park at the marker they mean to break,
   which is what makes "exactly one failure" assertable.
 
+### PR #156 review round
+
+One external review of the milestone as first pushed. Seven findings,
+four P1, two P2 and one P3; verdict mergeable after fixes. All seven
+adopted, one commit each, in the order the findings imply: the
+checkpoint first, because two of the tests below assert on the bytes it
+moves, then the two refusal paths, then the scrub, then the bound, then
+the two test-strength findings.
+
+1. **P1: the truncating checkpoint never ran.** It went through the
+   engine, whose begin listener takes `BEGIN IMMEDIATE` before the
+   first statement, and SQLite refuses to checkpoint inside a
+   transaction; the suppressed exception turned that into silence. The
+   busy result row was also ignored, and the sentinel test stopped the
+   writer first (which checkpoints on the way out) and skipped sidecars
+   that were absent.
+   *Resolution*: adopted in `b86e9da`. Measured before it was changed:
+   through the engine the pragma raises "database table is locked"
+   every single time, and with a long reader held open it answers
+   `(1, 25, 20)` after the full ten-second busy timeout. It now runs on
+   a raw DBAPI connection outside any transaction and reads its answer.
+   The wait is a quarter of a second rather than ten, because by then
+   the deletion is committed and durable and truncating is tidying up.
+   A blocked truncation is owed rather than lost: the store retries at
+   every marker it commits and once more at stop, which is what "the
+   next quiet moment" means concretely. A purge has no next marker in a
+   process about to exit, so it answers whether it truncated and the
+   command says so, naming what will take it. Three tests: the sentinel
+   proven present in the real `-wal` file before the purge and gone
+   after, a reader holding the store's own prune off its truncation
+   until a later marker takes it, and a reader holding a purge's off
+   until a later purge does.
+2. **P1: database failures escaped the purge command as tracebacks.**
+   `purge()` let connection, `BEGIN` and `DELETE` failures propagate
+   and the CLI catches only `ConfigError`; a SQLAlchemy error holds the
+   statement it failed on together with the parameters bound to it, and
+   a purge binds the selector it was given.
+   *Resolution*: adopted in `1b674b2`. Classified inside the store into
+   the refusals the CLI already speaks: `DatabaseBusyError` with the
+   retryable sentence for the lock that did not clear inside the busy
+   timeout, `StorageError` naming `server.database.dir` for everything
+   else, the file that vanished between the existence check and the
+   open included. Neither carries the driver's line, unlike
+   `db.migration_failure`, because a purge's bound parameters are the
+   operator's own selectors. Built in the handler and raised outside
+   it, so the library's exception is not reachable through
+   `__context__`; `from None` would have suppressed the display and
+   left the reference. Four tests: a held write lock, a poisoned driver
+   message hunted through stdout, stderr and both log formats, the
+   absent chain, and the preflight race.
+3. **P1: argparse quoted the rejected command back.** The parser
+   special-cased unrecognized arguments and interpolated argparse's own
+   text for everything else, and an unknown command comes back as
+   `invalid choice: 'x'`.
+   *Resolution*: adopted in `3255fa1`. Every shape this grammar can
+   produce maps to a fixed sentence of its own, and an unrecognized
+   shape maps to a general one, because a message this code has not
+   seen is exactly the one that might carry a value. The refusal for a
+   word that is not a command still names the words that are, from the
+   same tuple the parser is built from. The test plants the sentinel as
+   the command word, as an extra argument and as a missing option
+   value.
+4. **P1: `tool_call` kept a peer-chosen tool name in `events.fields`
+   under text-off.** The switch nulled the name on `tool_invocations`
+   and left the same name on the event beside it.
+   *Resolution*: adopted in `56f22ea`, in the form the direction gave:
+   the scrub is not a switch at all. One table, `EVENT_CONTENT`, names
+   the content each event carries and one place consults it, stripping
+   `text` from `heard`, `replied` and `agent_said` and `tool` from
+   `tool_call` whatever the switches say, because the events table is
+   metadata-only by construction. The event keeps what this deployment
+   configured or measured, so "this entry was called, it was routed
+   this way, it took this long" still answers. The store's docstring
+   records that milestone 5 narrows the events themselves and turns
+   this into defense in depth. The switch test runs under both text
+   settings with peer-name sentinels.
+5. **P2: the bound stopped counting at the queue.** An event was
+   released the moment the writer took it off the queue, so a session
+   that never reaches a marker could hold an unbounded number of them
+   in its batch while the producer saw a fresh allowance for each one.
+   *Resolution*: adopted in `b6e7239`. In flight now means not yet
+   written off: released at commit, at rollback, at a tombstone's
+   discard, and at a refusal, and counted everywhere else, batch
+   included. The test runs a writer that drains everything it is given
+   into a markerless batch and watches the producer start refusing,
+   with the events demonstrably off the queue and in the batch.
+6. **P2: the resurrection test bypassed the purge.** It deleted the
+   session row with a hand-written `DELETE`, which exercises the half
+   the suite already controls rather than the two-writer interaction
+   the tombstone exists for.
+   *Resolution*: adopted in `4fe7b72`. The real `purge()` runs against
+   a live store at both interleavings the direction named: before the
+   session's first turn marker commits anything, and after a commit
+   with more records in flight. The conversation then finishes normally,
+   because neither the runtime nor the device edge knows a purge
+   happened, and all four tables are asserted empty for it.
+7. **P3: the default pins were loose.** They asserted the bound's
+   number and that the stop budget merely exceeded the busy timeout,
+   which a budget that had drifted down to the timeout would satisfy.
+   *Resolution*: adopted in `3551f9d`. The derived budget is pinned
+   exactly, the busy timeout's own value with it, and the pragmas are
+   read off a default store's connection rather than off the constants
+   it was meant to be built from. Retention gets a case of its own that
+   builds the store the way the server will, injects only the clock,
+   and watches a session a day past the window go while its neighbour a
+   day inside it stays.
+
+Nothing was done differently from the direction given. Two notes worth
+recording anyway:
+
+- **The store's retry and the purge's report are two mechanisms, not
+  one.** The direction for finding 1 named "a retry at the next marker
+  commit or at stop", which is what the store does for deletions the
+  store performs. A purge runs in another process and has no marker to
+  wait for, so it gets a longer single attempt and answers whether it
+  truncated; the command prints that, naming what will take the
+  truncation. The alternative considered and declined was silence,
+  which would have made the reference's promise unfalsifiable from the
+  command that makes it.
+- **One commit carried a correction that belonged to its predecessor.**
+  Finding 1 changed the reference's deletion paragraph without moving
+  the docgen assertions that pin it, which the finding 4 commit picked
+  up and its message records. The cause was running the suites the
+  change touched rather than the whole lane; the lane is what would
+  have caught it, and did.
+
 ### Verification
 
-From `samtal-server/`, at `2cfed4f`:
+Rerun after the review round, from `samtal-server/`, at the round's
+last code commit `3551f9d`. The unit lane is eleven cases larger than
+before it: the round added a checkpoint case, two deferred-truncation
+cases, four refusal cases, a batched-bound case, a second interleaving
+of the resurrection case, a second text setting of the events-content
+case, and a retention-default case.
 
 ```
 $ uv run ruff check .
@@ -229,12 +360,12 @@ All checks passed!
 
 ```
 $ uv run pytest tests/unit -q
-2103 passed, 15 skipped in 261.13s (0:04:21)
+2114 passed, 15 skipped in 262.61s (0:04:22)
 ```
 
 ```
 $ uv run pytest tests/integration -q
-53 passed in 155.24s (0:02:35)
+53 passed in 155.68s (0:02:35)
 ```
 
 The acceptance criterion that nothing is wired:
@@ -245,7 +376,8 @@ $ echo $?
 1
 ```
 
-One integration flake, seen once and not since: an earlier run of the
+The integration lane has been green on every run since, the round's
+included. One flake, seen once and not since: an earlier run of the
 same lane failed
 `test_smoke_seeds.py::test_an_interrupted_seeding_fails_and_leaves_no_server_behind`,
 which boots a real server on a free port and interrupts it. It passes
@@ -256,10 +388,11 @@ a server in a test as a thing that can flake. Recorded rather than
 smoothed over.
 
 The wheel step cannot be run by CI from this session, so it was run by
-hand exactly as the workflow runs it: `uv build --wheel`, a fresh venv,
-`uv pip install` of the artifact, and the step's script executed with
-`-P` from outside the checkout against the installed package. Both
-halves printed their success line, and the artifact's manifest lists
+hand exactly as the workflow runs it, and again after the review round:
+`uv build --wheel`, a fresh venv, `uv pip install` of the artifact, and
+the step's script executed unmodified with `-P` from outside the
+checkout against the installed package. Both halves printed their
+success line, and the artifact's manifest lists
 `samtal_server/conversations/migrations/env.py` and
 `.../versions/0001_baseline_conversation_schema.py`. The step's own run
 inside this PR's CI is what proves it on the runner, and is unchecked in
