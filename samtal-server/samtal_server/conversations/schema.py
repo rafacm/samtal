@@ -1,0 +1,535 @@
+"""The tables holding what was said, and what it cost to say it.
+
+Its own `MetaData` and its own file (`conversations.db`), beside the
+domain configuration rather than inside it: the configuration is what an
+operator writes and the server reads at boot, this is what the server
+writes and an operator reads afterwards, and the two have different
+retention, different privacy switches and different reasons to be
+deleted.
+
+Typed columns carry identity, the references between rows and the
+numbers a query filters on; JSON carries the structures the manifest and
+the pydantic layers already own. Referential integrity is the writer's,
+not SQLite's, for the reason `db/schema.py` gives: validation belongs in
+one layer, and a per-connection pragma would be a second, weaker place.
+The writer is not the only writer either (retention and the purge
+command delete), so what keeps its inserts honest against a concurrent
+deletion is a check inside each of its transactions, described in
+`store.py`, rather than a constraint here.
+
+Every column carries a `comment=`. That is what
+`docs/reference/conversations-schema.md` is rendered from, and the drift
+test fails on a column without one, the same discipline
+`Field(description=...)` enforces for the domain models.
+
+Two conventions run through the whole schema:
+
+- **Timestamps are UTC ISO-8601 text and offsets are integer
+  milliseconds**, the offsets aligned with the capture's `t_ms` because
+  both derive from the session loop's clock reading at session open. A
+  row and a capture triplet for the same session share one timeline.
+- **The three cursor tables are `AUTOINCREMENT`**. A plain `INTEGER
+  PRIMARY KEY` reuses the deleted maximum rowid, and retention deletes
+  from exactly the end a cursor points past, so a reused id would hand a
+  paginating client someone else's row under a cursor it had already
+  consumed. `tool_invocations` is not a cursor table: it is read through
+  its parent turn, never paginated on its own.
+"""
+
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    Column,
+    Float,
+    Index,
+    Integer,
+    MetaData,
+    Table,
+    Text,
+    text,
+)
+
+# The same convention the domain schema uses, and for the same reason:
+# SQLite cannot drop an unnamed constraint, and Alembic's batch mode
+# needs a name to rebuild a table around one.
+NAMING_CONVENTION = {
+    "ix": "ix_%(table_name)s_%(column_0_name)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s",
+    "pk": "pk_%(table_name)s",
+}
+
+metadata = MetaData(naming_convention=NAMING_CONVENTION)
+
+# Where a tool call was routed, decided once by the classifier the
+# pipeline consults before it executes anything and stored as written.
+# A closed set in the schema rather than only in the code, because the
+# whole value of the column is that a query may enumerate it.
+TOOL_SOURCES = ("builtin", "device", "mcp", "unknown")
+
+# What ended a session, written from the `session_closed` event's own
+# token. Not a check constraint: the five tokens are latched at five
+# sites in the device edge, which is where they are enforced, and a
+# database that refused an unforeseen sixth would drop the session row
+# rather than record the close it could not name.
+CLOSE_REASONS = ("limit", "idle", "drain", "client", "error")
+
+sessions = Table(
+    "sessions",
+    metadata,
+    Column(
+        "id",
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+        comment="Monotonic row id, never reused. The session list's cursor.",
+    ),
+    Column(
+        "session",
+        Text,
+        nullable=False,
+        unique=True,
+        comment=(
+            "The session's uuid hex: the join key for every other table here, "
+            "and the correlation key to the capture triplet of the same name."
+        ),
+    ),
+    Column(
+        "device",
+        Text,
+        nullable=True,
+        comment=(
+            "The device's MAC in canonical form. Null when the session was "
+            "rejected before one was understood."
+        ),
+    ),
+    Column(
+        "client",
+        Text,
+        nullable=True,
+        comment="The client identifier the device announced, when it announced one.",
+    ),
+    Column(
+        "agent",
+        Text,
+        nullable=True,
+        comment="The agent the session opened with, before any handover.",
+    ),
+    Column(
+        "agents",
+        JSON,
+        nullable=True,
+        comment="Every agent the device is bound to, as the binding resolved at open.",
+    ),
+    Column(
+        "protocol",
+        Text,
+        nullable=True,
+        comment="The device protocol version this session negotiated.",
+    ),
+    Column(
+        "started_at",
+        Text,
+        nullable=False,
+        comment=(
+            "When the session opened, UTC ISO-8601. Survives both storage "
+            "switches: retention prunes on this column, and a record that "
+            "cannot be pruned cannot be kept."
+        ),
+    ),
+    Column(
+        "closed_at",
+        Text,
+        nullable=True,
+        comment=(
+            "When the session closed, UTC ISO-8601. Null in a session that is "
+            "still running, and in one whose close was never persisted, which "
+            "a crash and a failed close transaction both leave behind."
+        ),
+    ),
+    Column(
+        "duration_s",
+        Float,
+        nullable=True,
+        comment=(
+            "How long the session lasted, in seconds. A measured number: null "
+            "under metrics-off."
+        ),
+    ),
+    Column(
+        "close_reason",
+        Text,
+        nullable=True,
+        comment=(
+            "What ended the session, one of: " + ", ".join(CLOSE_REASONS) + ". "
+            "The first cause to fire wins. Null until the session closes."
+        ),
+    ),
+    Column(
+        "server_version",
+        Text,
+        nullable=True,
+        comment="The server version that recorded this session.",
+    ),
+    Column(
+        "revision",
+        Text,
+        nullable=True,
+        comment="The build revision that recorded this session.",
+    ),
+    Column(
+        "providers",
+        JSON,
+        nullable=True,
+        comment=(
+            "The resolved provider entry per pipeline stage, the same structure "
+            "the capture manifest carries. Holds environment variable names, "
+            "never credentials."
+        ),
+    ),
+    Column(
+        "metrics",
+        Boolean,
+        nullable=False,
+        comment=(
+            "Whether metrics storage was on for this session, so a null number "
+            "is distinguishable from a number that was never stored."
+        ),
+    ),
+    Column(
+        "text",
+        Boolean,
+        nullable=False,
+        comment=(
+            "Whether text storage was on for this session, so a null utterance "
+            "is distinguishable from an utterance that was never stored."
+        ),
+    ),
+    Column(
+        "dropped",
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+        comment=(
+            "Records this session lost: events refused at the in-flight bound, "
+            "and anything a failed transaction rolled back. Written at close, "
+            "so the store records its own incompleteness the way the capture "
+            "manifest records `complete`. Zero under metrics-off."
+        ),
+    ),
+    Index("ix_sessions_device", "device"),
+    Index("ix_sessions_started_at", "started_at"),
+    # A cursor table: see the module docstring.
+    sqlite_autoincrement=True,
+)
+
+turns = Table(
+    "turns",
+    metadata,
+    Column(
+        "id",
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+        comment="Monotonic row id, never reused. The turn timeline's cursor.",
+    ),
+    Column(
+        "session",
+        Text,
+        nullable=False,
+        comment="The `sessions.session` this turn belongs to.",
+    ),
+    Column(
+        "t_ms",
+        Integer,
+        nullable=False,
+        comment=(
+            "The utterance's offset from session open, in milliseconds, aligned "
+            "with its `heard` event and with the capture's audio. Structural "
+            "rather than telemetry: it survives both switches."
+        ),
+    ),
+    Column(
+        "agent",
+        Text,
+        nullable=True,
+        comment="The agent that answered, which a handover makes different from the session's.",
+    ),
+    Column(
+        "heard",
+        Text,
+        nullable=True,
+        comment="What the device's user said, as transcribed. Null under text-off.",
+    ),
+    Column(
+        "heard_duration_s",
+        Float,
+        nullable=True,
+        comment="How long the utterance lasted, in seconds. Null under metrics-off.",
+    ),
+    Column(
+        "language",
+        Text,
+        nullable=True,
+        comment=(
+            "The language the transcript was recognized as. Neither a measured "
+            "number nor conversation text, so it survives both switches."
+        ),
+    ),
+    Column(
+        "language_confidence",
+        Float,
+        nullable=True,
+        comment="How sure the recognizer was of that language. Null under metrics-off.",
+    ),
+    Column(
+        "reply",
+        Text,
+        nullable=True,
+        comment=(
+            "What the assistant said, the legs joined. Null under text-off, and "
+            "null when the reply spoke nothing."
+        ),
+    ),
+    Column(
+        "legs",
+        JSON,
+        nullable=True,
+        comment=(
+            "One entry per agent that spoke this turn, `{agent, text, "
+            "input_tokens, output_tokens}`, present only when a handover split "
+            "the reply. The text half is null under text-off and the token "
+            "halves under metrics-off, because a turn's totals blend agents "
+            "that may use different models."
+        ),
+    ),
+    Column(
+        "asr_ms",
+        Integer,
+        nullable=True,
+        comment=(
+            "Transcription elapsed, in milliseconds. Null where no elapsed was "
+            "measured this turn, and under metrics-off."
+        ),
+    ),
+    Column(
+        "first_token_ms",
+        Integer,
+        nullable=True,
+        comment="Request to first token of the reply, in milliseconds. Null under metrics-off.",
+    ),
+    Column(
+        "llm_ms",
+        Integer,
+        nullable=True,
+        comment="The reply's LLM round durations summed, in milliseconds. Null under metrics-off.",
+    ),
+    Column(
+        "tts_first_audio_ms",
+        Integer,
+        nullable=True,
+        comment=(
+            "The reply's first synthesis request to its first audio bytes, in "
+            "milliseconds, measured at the provider boundary and deliberately "
+            "not at the device. Null when the reply spoke nothing, and under "
+            "metrics-off."
+        ),
+    ),
+    Column(
+        "rounds",
+        Integer,
+        nullable=True,
+        comment="How many LLM rounds the reply took. Null under metrics-off.",
+    ),
+    Column(
+        "input_tokens",
+        Integer,
+        nullable=True,
+        comment=(
+            "Input tokens summed across the turn's rounds; OTel's "
+            "`gen_ai.usage.input_tokens`. Null when the provider reported no "
+            "usage, and under metrics-off."
+        ),
+    ),
+    Column(
+        "output_tokens",
+        Integer,
+        nullable=True,
+        comment=(
+            "Output tokens summed across the turn's rounds; OTel's "
+            "`gen_ai.usage.output_tokens`. Null when the provider reported no "
+            "usage, and under metrics-off."
+        ),
+    ),
+    Column(
+        "tool_calls",
+        Integer,
+        nullable=False,
+        comment=(
+            "How many tool invocations this turn issued, which is how many "
+            "`tool_invocations` rows point at it. Structural rather than "
+            "telemetry: it survives both switches."
+        ),
+    ),
+    Index("ix_turns_session", "session", "id"),
+    # A cursor table: see the module docstring.
+    sqlite_autoincrement=True,
+)
+
+tool_invocations = Table(
+    "tool_invocations",
+    metadata,
+    Column("id", Integer, primary_key=True, comment="Row id."),
+    Column(
+        "turn",
+        Integer,
+        nullable=False,
+        comment=(
+            "The `turns.id` this call belongs to, resolved by the writer "
+            "inserting the turn and its calls in one transaction."
+        ),
+    ),
+    Column(
+        "session",
+        Text,
+        nullable=False,
+        comment=(
+            "The `sessions.session` this call belongs to, denormalized so a "
+            "purge and a session-scoped query need no join."
+        ),
+    ),
+    Column(
+        "position",
+        Integer,
+        nullable=False,
+        comment=(
+            "Order within the round's call list, as the model issued it, "
+            "handovers included."
+        ),
+    ),
+    Column(
+        "source",
+        Text,
+        nullable=False,
+        comment="Where the call was routed, one of: " + ", ".join(TOOL_SOURCES) + ".",
+    ),
+    Column(
+        "entry",
+        Text,
+        nullable=True,
+        comment=(
+            "The owning MCP entry's configured name for an `mcp` call, null "
+            "otherwise. A name this deployment chose, so it survives text-off."
+        ),
+    ),
+    Column(
+        "name",
+        Text,
+        nullable=True,
+        comment=(
+            "The called tool's name. Null under text-off: a tool's name "
+            "originates off this server (a device's self-description, an MCP "
+            "far side) exactly as its result does."
+        ),
+    ),
+    Column(
+        "malformed",
+        Boolean,
+        nullable=False,
+        comment="Whether the model's arguments were not a JSON object.",
+    ),
+    Column(
+        "arguments",
+        JSON,
+        nullable=True,
+        comment="What the model passed. Null under text-off, and null when malformed.",
+    ),
+    Column(
+        "result",
+        Text,
+        nullable=True,
+        comment="What the call answered, including a refusal. Null under text-off.",
+    ),
+    Column(
+        "is_error",
+        Boolean,
+        nullable=False,
+        comment="Whether the call answered as an error.",
+    ),
+    Column(
+        "duration_ms",
+        Integer,
+        nullable=True,
+        comment=(
+            "How long the call took, in milliseconds. Null where nothing ran, "
+            "as for a refused or a successful handover, and under metrics-off."
+        ),
+    ),
+    CheckConstraint(
+        "source in (" + ", ".join(f"'{name}'" for name in TOOL_SOURCES) + ")",
+        name="source",
+    ),
+    Index("ix_tool_invocations_session", "session"),
+    Index("ix_tool_invocations_turn", "turn"),
+)
+
+events = Table(
+    "events",
+    metadata,
+    Column(
+        "id",
+        Integer,
+        primary_key=True,
+        autoincrement=True,
+        comment="Monotonic row id, never reused. The reconcile cursor.",
+    ),
+    Column(
+        "session",
+        Text,
+        nullable=False,
+        comment="The `sessions.session` this event belongs to.",
+    ),
+    Column(
+        "t_ms",
+        Integer,
+        nullable=False,
+        comment=(
+            "The event's offset from session open, in milliseconds, aligned "
+            "with the capture's decision track."
+        ),
+    ),
+    Column(
+        "name",
+        Text,
+        nullable=False,
+        comment="The event name, from the event vocabulary the README's table defines.",
+    ),
+    Column(
+        "level",
+        Integer,
+        nullable=False,
+        comment="The numeric logging level the event was emitted at.",
+    ),
+    Column(
+        "fields",
+        JSON,
+        nullable=False,
+        comment=(
+            "The event's payload minus `event`, `session` and `device`, which "
+            "live on this row and on the session. Field names are the event "
+            "vocabulary's own, copied verbatim, which is the contract. Never "
+            "conversation text: the writer strips it, because content has its "
+            "own tables and its own switch."
+        ),
+    ),
+    Index("ix_events_session", "session", "id"),
+    # A cursor table: see the module docstring.
+    sqlite_autoincrement=True,
+)
+
+# Declaration order, which is also the order the reference documents
+# them in and the order a reader meets them: the spine, the timeline,
+# what the timeline called, and the decision track underneath.
+TABLES = (sessions, turns, tool_invocations, events)
