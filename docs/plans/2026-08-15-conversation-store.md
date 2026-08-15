@@ -805,6 +805,14 @@ move, which the content-path decision above bought.
   carries the breaking entries, including the operational
   migration in one line each (transcripts: query the store;
   token-count dashboards: two field renames).
+- Every prose claim that the logs are the transcript store moves
+  in the same milestone, found by inventory rather than memory
+  (`rg -in "transcript" samtal-server docs`): the `events.py`
+  module docstring and its `SESSION_LOGGER` comment
+  (`events.py:3-8`, `:65-74`), the `log_format` field description
+  in `config/models.py`, and whatever else the sweep finds, each
+  rewritten to name the store as the record and the events as the
+  operator's live metadata view.
 - The capture's decision track inherits the narrowing, since it is
   a tap consumer: its JSONL keeps every event minus the text, and
   the WAV it sits beside carries the content, which is the
@@ -824,12 +832,16 @@ move, which the content-path decision above bought.
   in both formats, every event field, an attached server tap, API
   error bodies, and, with text off, from the whole database file's
   bytes after a checkpoint.
-- **Pin before reshaping.** The db/ helper extraction is proven by
-  `test_db_open.py` passing unmodified with its error messages
-  byte-identical. Every deliberate surface change (the
-  `session_closed` field, the four narrowed events) moves its pins
-  in the same commit as the change, the #152 precedent, and touches
-  nothing the pin suites cover otherwise.
+- **Pin before reshaping.** The characterization baseline already
+  exists and is committed: the #138 pin suites pin `record.msg`
+  and typed `record.args` for every emit path this issue touches,
+  which is the "before" half. A deliberate surface change then
+  moves its pin and lands its sentinels in the same commit as the
+  change, the #152-round precedent; what is forbidden is a
+  reshaping commit against paths no pin covers, and none exists
+  here. The db/ helper extraction is behavior-preserving and is
+  proven by `test_db_open.py` passing unmodified with its error
+  messages byte-identical.
 - **Closed sets mapped to decision sites.** `close_reason` tokens
   map to the five sites named above; `source` tokens to
   `_dispatch`'s routing; the store's event names are enumerated
@@ -1247,6 +1259,14 @@ carries its resolution once the amendment addressing it lands.
     claims in `events.py` and `config/models.py` survive the
     narrowing. Scope the inventories, state the characterization
     baseline, and update every stale claim in the narrowing.
+    *Resolution*: adopted. The lenses section now states the
+    baseline (the #138 pin suites are the committed "before", and
+    pins move with the change per the #152 precedent, never ahead
+    of one); the verification section declares the greps pointers
+    whose scoped re-runs carry enumerated allowlists; and the
+    narrowing gains an inventoried sweep of every transcript-store
+    prose claim, hit list and dispositions recorded in the
+    implementation doc.
 22. **P2: the wedged-writer latency test cannot establish the
     claimed guarantee.** "Indistinguishable latency" is noisy and
     can pass despite event-loop blocking. Combine a structural
@@ -1336,3 +1356,12 @@ grep -rn "request_shutdown(" samtal_server                 # the token sites
 
 Anything unverifiable locally (the published image, the smoke lane)
 is stated plainly in the PR's Verification section, never claimed.
+
+The greps above are pointers, not proofs: each inventory claim is
+re-established at implementation time with a scoped search whose
+expected non-surface matches are enumerated as an allowlist (the
+token-field sweep, for instance, legitimately also hits `Usage` in
+`providers/base.py` and the provider adapters that fill it, none
+of which is surface), and the narrowing's transcript-claim sweep
+(`rg -in "transcript"`) records its full hit list and each hit's
+disposition in the implementation doc.
