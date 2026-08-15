@@ -506,7 +506,7 @@ resolution once the amendment addressing it lands.
   unmodified and green; no `device.events` import anywhere; the
   contract test covers attach, fan-out, detach, and ordering.
 - [x] [**The server scope emits through it**](2026-08-15-event-surface-implementation.md#milestone-2-the-server-scope-emits-through-it)
-  (PR TBD): as decided above. Accept: no hand-built structured
+  (PR #153): as decided above. Accept: no hand-built structured
   `extra=` in production code; logger names, event names, and fields
   byte-identical; before/after pairs recorded.
 - [ ] **The MCP lifecycle speaks** (PR TBD): as decided above.
