@@ -30,12 +30,13 @@ cancellation leaks its own voice back: those frames are dropped here,
 before the decode, so the capture still records the evidence.
 
 What happens in a conversation is logged twice over: as a human
-sentence, and as structured `extra=` fields (`event`, `session`,
-`device`, and whatever the event carries) that the JSON log format
-emits as top-level keys. Retained JSON logs are therefore the
-transcript store until v3 brings a real one. Both sides log through the
-session's `SessionEvents`, so which module a line came from is not
-visible in the record.
+sentence, and as structured fields (`event`, `session`, `device`, and
+whatever the event carries) that the JSON log format emits as top-level
+keys. Retained JSON logs are therefore the transcript store until v3
+brings a real one. Both sides emit through the session's
+`SessionEvents` ([events](../events.py)), so which module a line came
+from is not visible in the record, and every consumer attached to the
+session sees the same events.
 """
 
 import asyncio
@@ -68,7 +69,7 @@ from samtal_server.device.boundary import (
     RuntimeFactory,
     SessionInput,
 )
-from samtal_server.device.events import SessionEvents, logger
+from samtal_server.events import SessionEvents, logger
 from samtal_server.protocol import framing, messages
 from samtal_server.protocol import mcp as mcp_protocol
 from samtal_server.providers.base import ToolDef
@@ -232,9 +233,6 @@ class DeviceSession:
         session: this is the flag that keeps it on."""
         return self._listen_mode == "realtime"
 
-    def _event(self, event: str, **fields: Any) -> dict[str, Any]:
-        return self._events.event(event, **fields)
-
     def _replying(self) -> bool:
         """Whether the conversation behind this connection is mid-answer.
         A connection with no runtime yet is not."""
@@ -249,11 +247,12 @@ class DeviceSession:
         try:
             mac = self._mac = normalize_mac(device_id)
         except ValueError as exc:
-            logger.warning(
+            self._events.warning(
                 "session %s rejected: Device-Id header: %s",
                 self.session_id,
                 exc,
-                extra=self._event("session_rejected", reason="bad_device_id"),
+                event="session_rejected",
+                reason="bad_device_id",
             )
             await self._close(POLICY_VIOLATION, "Device-Id must be the device MAC")
             return
@@ -270,21 +269,23 @@ class DeviceSession:
         agents = list(resolution.agents)
         if not agents:
             if resolution.unloaded:
-                logger.warning(
+                self._events.warning(
                     "session %s rejected: device %s is bound to agent %s, which this "
                     "server has not loaded; restart to load it",
                     self.session_id,
                     mac,
                     ", ".join(resolution.unloaded),
-                    extra=self._event("session_rejected", reason="agent_not_loaded"),
+                    event="session_rejected",
+                    reason="agent_not_loaded",
                 )
             else:
-                logger.warning(
+                self._events.warning(
                     "session %s rejected: device %s has no agent: bind it under devices "
                     "or set default_agent",
                     self.session_id,
                     mac,
-                    extra=self._event("session_rejected", reason="no_agent"),
+                    event="session_rejected",
+                    reason="no_agent",
                 )
             # One sentence for both: the difference is between two
             # things an operator does, and the device can act on
@@ -305,7 +306,7 @@ class DeviceSession:
         # line of the decision track rather than missing from it.
         self._start_capture(client_id)
         await self.websocket.send_text(messages.server_hello(self.session_id, OUTPUT_AUDIO))
-        logger.info(
+        self._events.info(
             "session %s open: device %s (client %s) agent %s%s, protocol v%d, "
             "%d Hz %d ms frames in",
             self.session_id,
@@ -316,18 +317,16 @@ class DeviceSession:
             self.protocol_version,
             hello.audio_params.sample_rate,
             hello.audio_params.frame_duration,
-            extra=self._event(
-                "session_open",
-                client=client_id or None,
-                agent=self._agent,
-                agents=list(self._agents),
-                protocol=self.protocol_version,
-                # The widest payoff for one field: the JSON logs already
-                # ship to a collector, so every session from here on is
-                # attributable to a build, not only the ones somebody
-                # thought to investigate.
-                revision=revision(),
-            ),
+            event="session_open",
+            client=client_id or None,
+            agent=self._agent,
+            agents=list(self._agents),
+            protocol=self.protocol_version,
+            # The widest payoff for one field: the JSON logs already
+            # ship to a collector, so every session from here on is
+            # attributable to a build, not only the ones somebody
+            # thought to investigate.
+            revision=revision(),
         )
         self._start_device_discovery(hello)
         self._start_idle_watchdog()
@@ -341,11 +340,12 @@ class DeviceSession:
             async with asyncio.timeout(self.config.server.limits.max_session_s):
                 await self._serve()
         except TimeoutError:
-            logger.info(
+            self._events.info(
                 "session %s reached the %.0f s time limit",
                 self.session_id,
                 self.config.server.limits.max_session_s,
-                extra=self._event("session_limit", duration_s=self._open_duration_s()),
+                event="session_limit",
+                duration_s=self._open_duration_s(),
             )
             # The firmware reads a close as the end of a conversation and
             # reconnects on the next wake word, so this is invisible in
@@ -358,11 +358,12 @@ class DeviceSession:
             if self.runtime is not None:
                 await self.runtime.close()
             await self._stop_device_discovery()
-            logger.info(
+            self._events.info(
                 "session %s closed (device %s)",
                 self.session_id,
                 mac,
-                extra=self._event("session_closed", duration_s=self._open_duration_s()),
+                event="session_closed",
+                duration_s=self._open_duration_s(),
             )
             # After session_closed, so it is the last line of the
             # decision track and the WAV header is patched with a length
@@ -539,13 +540,13 @@ class DeviceSession:
             if remaining > 0:
                 await asyncio.sleep(remaining)
                 continue
-            logger.info(
+            self._events.info(
                 "session %s idle for %.0f s, hanging up",
                 self.session_id,
                 timeout,
-                extra=self._event(
-                    "session_idle", idle_s=timeout, duration_s=self._open_duration_s()
-                ),
+                event="session_idle",
+                idle_s=timeout,
+                duration_s=self._open_duration_s(),
             )
             # A normal closure rather than going away: the server is
             # fine, this conversation is simply over. The firmware reads
@@ -887,10 +888,11 @@ class DeviceSession:
             # measurable (#22).
             self._speaking_started = True
             self._speaking_started_at = loop.time()
-            logger.info(
+            self._events.info(
                 "session %s: speaking started",
                 self.session_id,
-                extra=self._event("speaking_started", agent=self._agent),
+                event="speaking_started",
+                agent=self._agent,
             )
         frame_s = OUTPUT_AUDIO.frame_duration / 1000
         if self._pace_start is None:
