@@ -635,18 +635,21 @@ async def test_only_a_sentence_whose_audio_finished_counts_as_spoken() -> None:
     )
 
     spoken: list[str] = []
+    failures: list[tuple[BaseException, float]] = []
+
+    def record_failure(exc: BaseException, elapsed: float) -> None:
+        failures.append((exc, elapsed))
+
     tts = session.runtime._providers.tts
     await session.runtime._speak(
-        _Synthesis("Short and finished.", tts, session.session_id),
+        _Synthesis("Short and finished.", tts, record_failure),
         resampler,
         spoken,
     )
     finished_frames = socket.frames
 
     cut = asyncio.create_task(
-        session.runtime._speak(
-            _Synthesis(LONG_REPLY, tts, session.session_id), resampler, spoken
-        )
+        session.runtime._speak(_Synthesis(LONG_REPLY, tts, record_failure), resampler, spoken)
     )
     await asyncio.sleep(0.1)
     cut.cancel()
@@ -656,6 +659,10 @@ async def test_only_a_sentence_whose_audio_finished_counts_as_spoken() -> None:
     # The interrupted sentence was audible, and is still not recorded.
     assert socket.frames > finished_frames
     assert spoken == ["Short and finished."]
+    # The mock voice works, so neither synthesis has anything to report:
+    # one finished and one was cancelled, and a failure from either would
+    # mean this test is no longer about what counts as spoken.
+    assert failures == []
 
 
 async def test_the_utterance_buffer_keeps_only_a_bounded_tail(
