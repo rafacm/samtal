@@ -37,7 +37,7 @@ from samtal_server.device.boundary import (
     PlayableAudio,
     SessionInput,
 )
-from samtal_server.device.events import SessionEvents
+from samtal_server.events import SessionEvents
 from samtal_server.providers import (
     LlmEvent,
     LlmProvider,

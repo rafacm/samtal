@@ -28,10 +28,11 @@ are as often noise or the reply's own bleed as the user (#28). A manual
 `listen stop` mid-reply is a deliberate act and cancels unconditionally.
 
 What happens in a conversation is logged twice over: as a human
-sentence, and as structured `extra=` fields that the JSON log format
-emits as top-level keys, through the session's `SessionEvents` so that
-every record carries the same channel and the same identity whichever
-side of the boundary emitted it.
+sentence, and as the structured fields the JSON log format emits as
+top-level keys. Both halves go out through the session's
+`SessionEvents` ([events](../events.py)), so that every record carries
+the same channel and the same identity whichever side of the boundary
+emitted it, and so that every consumer of the events sees it.
 """
 
 import asyncio
@@ -50,7 +51,7 @@ from samtal_server.device.boundary import (
     RuntimeFactory,
     SessionInput,
 )
-from samtal_server.device.events import SessionEvents, logger
+from samtal_server.events import SessionEvents, logger
 from samtal_server.filler import FillerClips
 from samtal_server.providers import (
     AgentProviders,
@@ -440,18 +441,16 @@ class PipelineRuntime:
                     )
                     self._provider_failed("llm", provider, failure, elapsed)
                     raise failure from exc
-                logger.warning(
+                self._events.warning(
                     "session %s: no first token after %.1f s, retrying round %d",
                     self.session_id,
                     elapsed,
                     self._llm_round,
-                    extra=self._events.event(
-                        "llm_retry",
-                        agent=self._agent,
-                        round=self._llm_round,
-                        duration_ms=round(elapsed * 1000),
-                        **provider_fields("llm", provider),
-                    ),
+                    event="llm_retry",
+                    agent=self._agent,
+                    round=self._llm_round,
+                    duration_ms=round(elapsed * 1000),
+                    **provider_fields("llm", provider),
                 )
                 continue
             if not isinstance(first, StreamStarted):
@@ -498,22 +497,20 @@ class PipelineRuntime:
             tokens["completion_tokens"] = usage.completion_tokens
         if first_token_at is not None:
             tokens["first_token_ms"] = round((first_token_at - began) * 1000)
-        logger.info(
+        self._events.info(
             "session %s: %s round %d took %.2f s over %d turns",
             self.session_id,
             self._agent,
             self._llm_round,
             elapsed,
             len(working),
-            extra=self._events.event(
-                "llm_round",
-                agent=self._agent,
-                round=self._llm_round,
-                turns=len(working),
-                duration_ms=round(elapsed * 1000),
-                **provider_fields("llm", provider),
-                **tokens,
-            ),
+            event="llm_round",
+            agent=self._agent,
+            round=self._llm_round,
+            turns=len(working),
+            duration_ms=round(elapsed * 1000),
+            **provider_fields("llm", provider),
+            **tokens,
         )
 
     def _provider_failed(
@@ -534,7 +531,7 @@ class PipelineRuntime:
         fields = provider_fields(stage, provider)
         named = f' "{fields["provider"]}"' if "provider" in fields else ""
         where = f" reaching {fields['host']}" if "host" in fields else ""
-        logger.warning(
+        self._events.warning(
             "session %s: %s provider%s %s after %.2f s%s: %s: %s",
             self.session_id,
             stage,
@@ -544,13 +541,11 @@ class PipelineRuntime:
             where,
             type(exc).__name__,
             exc,
-            extra=self._events.event(
-                "provider_failed",
-                agent=self._agent,
-                error=type(exc).__name__,
-                duration_ms=round(elapsed * 1000),
-                **fields,
-            ),
+            event="provider_failed",
+            agent=self._agent,
+            error=type(exc).__name__,
+            duration_ms=round(elapsed * 1000),
+            **fields,
         )
 
     def _activate_agent(self, name: str) -> None:
@@ -608,17 +603,15 @@ class PipelineRuntime:
         inspection surface reads memory fresh and answers its size on
         demand.
         """
-        logger.info(
+        self._events.info(
             "session %s: assembled %d characters of prompt for %s",
             self.session_id,
             half.characters,
             agent,
-            extra=self._events.event(
-                "prompt_assembled",
-                agent=agent,
-                characters=half.characters,
-                sources=half.sizes(),
-            ),
+            event="prompt_assembled",
+            agent=agent,
+            characters=half.characters,
+            sources=half.sizes(),
         )
 
     async def _reply(self, pcm: bytes, result: AsrResult | None = None) -> None:
@@ -659,17 +652,15 @@ class PipelineRuntime:
                     language_fields["language_confidence"] = round(
                         result.language_confidence, 2
                     )
-                logger.info(
+                self._events.info(
                     'session %s: heard "%s"',
                     self.session_id,
                     transcript,
-                    extra=self._events.event(
-                        "heard",
-                        agent=self._agent,
-                        text=transcript,
-                        duration_s=heard_s,
-                        **language_fields,
-                    ),
+                    event="heard",
+                    agent=self._agent,
+                    text=transcript,
+                    duration_s=heard_s,
+                    **language_fields,
                 )
             else:
                 logger.info("session %s: nothing transcribed", self.session_id)
@@ -722,11 +713,13 @@ class PipelineRuntime:
             if spoken:
                 said = " ".join(spoken)
                 self._turns.append(Turn("assistant", said))
-                logger.info(
+                self._events.info(
                     'session %s: replied "%s"',
                     self.session_id,
                     said,
-                    extra=self._events.event("replied", agent=self._agent, text=said),
+                    event="replied",
+                    agent=self._agent,
+                    text=said,
                 )
             # Broad on purpose, and narrow in what it covers: the one
             # statement inside is a device send, so the `RuntimeError`
@@ -761,23 +754,27 @@ class PipelineRuntime:
             if spoken:
                 said = " ".join(spoken)
                 self._turns.append(Turn("assistant", said))
-                logger.info(
+                self._events.info(
                     'session %s: %s said "%s"',
                     self.session_id,
                     self._agent,
                     said,
-                    extra=self._events.event("agent_said", agent=self._agent, text=said),
+                    event="agent_said",
+                    agent=self._agent,
+                    text=said,
                 )
                 spoken.clear()
             previous = self._agent
             self._activate_agent(target)
             switches_left -= 1
-            logger.info(
+            self._events.info(
                 "session %s: handed over from agent %s to %s",
                 self.session_id,
                 previous,
                 target,
-                extra=self._events.event("handover", from_agent=previous, to_agent=target),
+                event="handover",
+                from_agent=previous,
+                to_agent=target,
             )
             greeting = Turn("user", SWITCH_GREETING)
 
@@ -980,19 +977,17 @@ class PipelineRuntime:
         except Exception as exc:
             content, is_error = f'the tool "{call.name}" failed: {exc}', True
         elapsed = loop.time() - started
-        logger.info(
+        self._events.info(
             "session %s: tool %s took %.2f s%s",
             self.session_id,
             call.name,
             elapsed,
             " and failed" if is_error else "",
-            extra=self._events.event(
-                "tool_call",
-                agent=self._agent,
-                tool=call.name,
-                duration_ms=round(elapsed * 1000),
-                is_error=is_error,
-            ),
+            event="tool_call",
+            agent=self._agent,
+            tool=call.name,
+            duration_ms=round(elapsed * 1000),
+            is_error=is_error,
         )
         return ToolResult(tool_call_id=call.id, content=content, is_error=is_error)
 
@@ -1184,12 +1179,12 @@ class PipelineRuntime:
                     return
                 pcm, result = gated
             else:
-                logger.info(
+                self._events.info(
                     "session %s: barge-in, cancelling the reply in flight",
                     self.session_id,
-                    extra=self._events.event(
-                        "barge_in", speech_ms=speech_ms, **self._speaking_ms_field()
-                    ),
+                    event="barge_in",
+                    speech_ms=speech_ms,
+                    **self._speaking_ms_field(),
                 )
                 await self._cancel_reply()
         logger.info(
@@ -1221,23 +1216,24 @@ class PipelineRuntime:
         stopped, so a wrong pause costs one ASR latency, not a reply."""
         server = self._config.server
         if speech_ms < server.barge_in_min_speech_ms:
-            logger.info(
+            self._events.info(
                 "session %s: barge-in suppressed, %d ms of speech is under the "
                 "%.0f ms floor",
                 self.session_id,
                 speech_ms,
                 server.barge_in_min_speech_ms,
-                extra=self._events.event(
-                    "barge_in_suppressed", reason="min_speech", speech_ms=speech_ms
-                ),
+                event="barge_in_suppressed",
+                reason="min_speech",
+                speech_ms=speech_ms,
             )
             return None
         if self._reply_pcm is not None:
             head = self._reply_pcm
-            logger.info(
+            self._events.info(
                 "session %s: barge-in mid-transcription, merging the utterances",
                 self.session_id,
-                extra=self._events.event("barge_in_merged", speech_ms=speech_ms),
+                event="barge_in_merged",
+                speech_ms=speech_ms,
             )
             await self._cancel_reply()
             return head + pcm, None
@@ -1247,12 +1243,12 @@ class PipelineRuntime:
             and (loop.time() - self._output.speaking_started_at()) * 1000
             < server.barge_in_refractory_ms
         ):
-            logger.info(
+            self._events.info(
                 "session %s: barge-in suppressed inside the refractory window",
                 self.session_id,
-                extra=self._events.event(
-                    "barge_in_suppressed", reason="refractory", speech_ms=speech_ms
-                ),
+                event="barge_in_suppressed",
+                reason="refractory",
+                speech_ms=speech_ms,
             )
             return None
         assert self._providers is not None
@@ -1269,19 +1265,21 @@ class PipelineRuntime:
             self._resume_output()
             return None
         if not result.text.strip():
-            logger.info(
+            self._events.info(
                 "session %s: barge-in suppressed, nothing transcribed",
                 self.session_id,
-                extra=self._events.event(
-                    "barge_in_suppressed", reason="no_transcript", speech_ms=speech_ms
-                ),
+                event="barge_in_suppressed",
+                reason="no_transcript",
+                speech_ms=speech_ms,
             )
             self._resume_output()
             return None
-        logger.info(
+        self._events.info(
             "session %s: barge-in, cancelling the reply in flight",
             self.session_id,
-            extra=self._events.event("barge_in", speech_ms=speech_ms, **self._speaking_ms_field()),
+            event="barge_in",
+            speech_ms=speech_ms,
+            **self._speaking_ms_field(),
         )
         await self._cancel_reply()
         # The pause belonged to the cancelled reply; the one about to
@@ -1408,25 +1406,23 @@ class PipelineRuntime:
             return
         speech_ms = round(self._endpointer.speech_ms()) if self._endpointer is not None else 0
         if speech_ms > 0:
-            logger.info(
+            self._events.info(
                 "session %s: filler skipped, the user is speaking (%d ms heard)",
                 self.session_id,
                 speech_ms,
-                extra=self._events.event(
-                    "filler_skipped",
-                    agent=self._agent,
-                    reason="user_speaking",
-                    speech_ms=speech_ms,
-                ),
+                event="filler_skipped",
+                agent=self._agent,
+                reason="user_speaking",
+                speech_ms=speech_ms,
             )
             return
         if self._output_paused:
-            logger.info(
+            self._events.info(
                 "session %s: filler skipped, a barge-in is being confirmed",
                 self.session_id,
-                extra=self._events.event(
-                    "filler_skipped", agent=self._agent, reason="barge_in_pending"
-                ),
+                event="filler_skipped",
+                agent=self._agent,
+                reason="barge_in_pending",
             )
             return
         clips = self._fillers.get(self._agent or "")
@@ -1439,17 +1435,15 @@ class PipelineRuntime:
         index = self._filler_fires % len(clips.clips)
         self._filler_fires += 1
         elapsed_ms = round((asyncio.get_running_loop().time() - armed_at) * 1000)
-        logger.info(
+        self._events.info(
             "session %s: no reply audio after %d ms, playing filler %d",
             self.session_id,
             elapsed_ms,
             index,
-            extra=self._events.event(
-                "filler_played",
-                agent=self._agent,
-                delay_ms=elapsed_ms,
-                phrase_index=index,
-            ),
+            event="filler_played",
+            agent=self._agent,
+            delay_ms=elapsed_ms,
+            phrase_index=index,
         )
         try:
             await self._output.begin_speaking()

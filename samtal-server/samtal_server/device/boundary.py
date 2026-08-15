@@ -28,7 +28,7 @@ All PCM crossing it is s16le mono.
 from collections.abc import Callable, Sequence
 from typing import Any, Protocol, runtime_checkable
 
-from samtal_server.device.events import SessionEvents
+from samtal_server.events import SessionEvents
 from samtal_server.providers.base import ToolDef
 
 # The rate the input side of the pipeline runs at: what devices send,
