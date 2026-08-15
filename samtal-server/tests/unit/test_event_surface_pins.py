@@ -41,14 +41,17 @@ evidence rather than a description: the surface it pins is the one that
 existed before the reshape. Strengthened afterwards by the PR #152
 review round, which found the sentence normalization too generous to
 catch what this docstring claimed of it, and which deliberately blunted
-one pinned sentence: the bad-Device-Id rejection no longer renders the
-header a caller submitted. A pin says a sentence is what it is, not
-that it is safe, so that one is guarded by a sentinel case beside it.
+two pinned sentences: the bad-Device-Id rejection no longer renders the
+header a caller submitted, and `provider_failed` no longer renders a
+failing provider's own message. A pin says a sentence is what it is,
+not that it is safe, so each of those two carries a sentinel case
+beside it.
 """
 
 import asyncio
 import logging
 import re
+from dataclasses import replace
 from typing import Any, cast
 
 import pytest
@@ -78,7 +81,7 @@ from tests.unit.test_session_barge_in import (
     ScriptedEndpointer,
     realtime_session,
 )
-from tests.unit.test_session_events import only, reply_with
+from tests.unit.test_session_events import Unreachable, only
 from tests.unit.test_session_filler import (
     DELAY_MS,
     SPEECH,
@@ -95,6 +98,7 @@ from tests.unit.test_session_tools import (
     BOTH_MAC,
     POET_MAC,
     ScriptedLlm,
+    _nothing,
     base_config,
     call,
     run_reply,
@@ -639,13 +643,51 @@ async def test_llm_retry(caplog: pytest.LogCaptureFixture) -> None:
     }
 
 
-async def test_provider_failed(caplog: pytest.LogCaptureFixture) -> None:
-    failed = await reply_with("asr", ConnectionRefusedError("no route"), caplog)
+class Consumer:
+    """A tap that keeps what it was handed, so a claim about what
+    reaches a consumer is asserted at the consumer rather than inferred
+    from the log."""
 
-    assert pinned(failed, dynamic=("duration_ms",), dynamic_args=(4, 7)) == {
+    def __init__(self) -> None:
+        self.seen: list[Any] = []
+
+    def emit(self, emission: Any) -> None:
+        self.seen.append(emission)
+
+
+async def failing_provider_reply(
+    stage: str, exc: BaseException, caplog: pytest.LogCaptureFixture
+) -> tuple[logging.LogRecord, Consumer]:
+    """One reply against a provider that fails, with a consumer
+    attached: the record it produced, and everything the tap was
+    handed."""
+
+    class TextSink:
+        async def send_text(self, text: str) -> None:
+            return None
+
+    session = session_for(base_config(), POET_MAC, {"poet": ScriptedLlm(["One sentence."])})
+    assert session.runtime._providers is not None
+    session.runtime._providers = replace(
+        session.runtime._providers, **{stage: cast(Any, Unreachable(stage, exc))}
+    )
+    session.websocket = cast(Any, TextSink())
+    session._mac = POET_MAC
+    session.send_audio = _nothing  # type: ignore[method-assign]
+    consumer = Consumer()
+    session._events.attach(consumer)
+    with caplog.at_level("INFO"):
+        await session.runtime._reply(UTTERANCE)
+    return only(caplog, "provider_failed"), consumer
+
+
+async def test_provider_failed(caplog: pytest.LogCaptureFixture) -> None:
+    failed, _ = await failing_provider_reply("asr", ConnectionRefusedError("no route"), caplog)
+
+    assert pinned(failed, dynamic=("duration_ms",), dynamic_args=(4,)) == {
         "logger": "samtal_server.session",
         "level": logging.WARNING,
-        "template": "session %s: %s provider%s %s after %.2f s%s: %s: %s",
+        "template": "session %s: %s provider%s %s after %.2f s%s: %s",
         "args": (
             SESSION,
             "asr",
@@ -654,11 +696,10 @@ async def test_provider_failed(caplog: pytest.LogCaptureFixture) -> None:
             "<float>",
             " reaching api.example.com",
             "ConnectionRefusedError",
-            "<ConnectionRefusedError>",
         ),
         "sentence": (
             'session <session>: asr provider "cloud" failed after <n> s '
-            "reaching api.example.com: ConnectionRefusedError: no route"
+            "reaching api.example.com: ConnectionRefusedError"
         ),
         "fields": {
             "event": "provider_failed",
@@ -673,6 +714,39 @@ async def test_provider_failed(caplog: pytest.LogCaptureFixture) -> None:
             "host": "api.example.com",
         },
     }
+
+
+async def test_a_failing_providers_own_words_reach_no_record(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other sentence a pin cannot vouch for. `_provider_failed`
+    takes a `BaseException` from four call sites, one of them the LLM
+    stream, so an SDK's or a transport's own exception can arrive here
+    unwrapped, and an exception raised near a response body can carry
+    one in its message. Only the class name is reported, and the check
+    runs at the consumer as well as at the log: a tap is handed the
+    same arguments the record carries."""
+    failed, consumer = await failing_provider_reply(
+        "llm", ConnectionRefusedError(SENTINEL), caplog
+    )
+
+    assert SENTINEL not in failed.getMessage()
+    assert SENTINEL not in str(failed.args)
+    assert SENTINEL not in str(payload_of(failed))
+    assert not any(SENTINEL in record.getMessage() for record in caplog.records)
+    events = [emission.payload["event"] for emission in consumer.seen]
+    assert "provider_failed" in events, "it reached no tap at all, so this proves nothing"
+    assert not any(
+        SENTINEL in str(emission.payload) or SENTINEL in str(emission.args)
+        for emission in consumer.seen
+    )
+    # And the diagnosis survives it: what failed, where, and how long.
+    assert failed.error == "ConnectionRefusedError"
+    assert (failed.stage, failed.provider, failed.host) == (
+        "llm",
+        "cloud",
+        "api.example.com",
+    )
 
 
 # --- the barge-in gates, each driven onto its own decision ------------
