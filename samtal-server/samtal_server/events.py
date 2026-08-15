@@ -62,8 +62,6 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
-from samtal_server.capture import SessionCapture
-
 # The session log channel, by name rather than by `__name__`.
 #
 # `logs.py` emits `record.name` as the `logger` field of every JSON
@@ -105,6 +103,30 @@ class EventTap(Protocol):
     def emit(self, emission: Emission) -> None: ...
 
 
+class SessionRecording(Protocol):
+    """The three methods a session capture answers, as this module sees
+    them.
+
+    Described here rather than imported from `capture.py`, and the
+    reason is the direction of the arrows. This module is the one every
+    subsystem imports downward into, `capture.py` among them once it
+    emits its own events, and an import back the other way is a cycle
+    that shows up at boot as a partially initialized module rather than
+    as anything a reader would recognize. A capture reaches this module
+    as an object anyway, which is the whole point of the tap, so what
+    was ever needed here was the shape, and a structural type is
+    exactly the shape.
+    """
+
+    def event(self, payload: dict[str, Any], now: float) -> None: ...
+
+    def vad(
+        self, speech_ms: float, listening: bool, replying: bool, now: float
+    ) -> None: ...
+
+    def dropped(self, reason: str, now: float) -> None: ...
+
+
 class LogTap:
     """The tap the surface is named after: one logging call per event,
     on the channel the emitter was built for, with the payload riding
@@ -130,7 +152,7 @@ class CaptureTap:
     capture keeps the surface it has (`event(payload, at)`), and this is
     the adapter that makes it one of many."""
 
-    def __init__(self, capture: SessionCapture) -> None:
+    def __init__(self, capture: SessionRecording) -> None:
         self.capture = capture
 
     def emit(self, emission: Emission) -> None:
@@ -239,7 +261,7 @@ class SessionEvents:
         self._clock = clock
         self._taps: list[EventTap] = []
         self._log = LogTap(logger)
-        self._capture: SessionCapture | None = None
+        self._capture: SessionRecording | None = None
         self._capture_tap: CaptureTap | None = None
 
     # --- the consumers ------------------------------------------------
@@ -258,7 +280,7 @@ class SessionEvents:
         with contextlib.suppress(ValueError):
             self._taps.remove(tap)
 
-    def attach_capture(self, capture: SessionCapture) -> None:
+    def attach_capture(self, capture: SessionRecording) -> None:
         """Begin recording the decision track. The capture keeps its own
         pair of methods rather than being attached as a bare tap,
         because `vad` and `dropped` below need the capture itself."""
