@@ -277,3 +277,18 @@ of this milestone in place:
 The bytecode trap in `AGENTS.md` did not apply: no file was restored
 mid-run, and everything outside pytest ran with
 `PYTHONDONTWRITEBYTECODE=1`.
+
+### PR #149 review round
+
+One external review of the PR diff (codex CLI, model gpt-5.6-sol,
+read-only, 2026-08-15), posted on the PR by the review run itself.
+Verdict: mergeable as is. One finding:
+
+1. **P3: the implementation record misstated the import graph.**
+   This doc claimed `config.models` imports neither `providers` nor
+   `tools`; it in fact imports the leaf `samtal_server.tools.names`,
+   and the no-cycle argument holds for a different reason (the leaf
+   imports nothing back into `tools.mcp`, and `tools/__init__.py`
+   is inert). Corrected above in its own commit.
+
+No code was touched by the round.
