@@ -224,6 +224,9 @@ framework runs the pipeline, the interesting decision sites stay in
 samtal's own components so their reasons keep flowing into the
 structured log, which is the observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)).
+The surface carries metadata, never conversation content, which lives
+in its own store
+([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
 
 **Example.** `barge_in_suppressed` carrying a reason and `speech_ms`,
 and `filler_skipped` carrying why the clip stood down. Field-test

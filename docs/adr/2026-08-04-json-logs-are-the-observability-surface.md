@@ -1,7 +1,9 @@
 # JSON log events are the observability surface and transcript store
 
 **Status:** Accepted (recorded 2026-08-04, backfilling a decision made
-in M7)
+in M7); the transcript-store role is superseded by
+[2026-08-15-content-and-telemetry-are-separate-surfaces.md](2026-08-15-content-and-telemetry-are-separate-surfaces.md)
+when the conversation store of #120 lands
 
 ## Context
 
