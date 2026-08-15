@@ -576,11 +576,14 @@ sentences. The store copies the token to `sessions.close_reason`.
 New server-scoped events, all metadata-only, all added to the README
 event table: `conversations_enabled` (warning, like
 `capture_enabled`, because it means the server is recording;
-carries the database path), `conversations_disabled` (info, when
-the section is present and off), `conversations_dropped` (warning,
+carries the database path), `conversations_dropped` (warning,
 `session`), `conversations_failed` (warning, `failure` class name),
 `conversations_pruned` (info, `sessions` count). Their channel is
-the store module's logger name, per the #138 convention.
+the store module's logger name, per the #138 convention. There is
+deliberately no disabled-mode event: acceptance criterion 1
+requires an absent or disabled section to leave the server
+byte-for-byte as today, and that criterion outranks the
+`capture_disabled` precedent, which predates it.
 
 ### The read API: three GETs under the existing gate
 
@@ -1176,6 +1179,10 @@ carries its resolution once the amendment addressing it lands.
     disabled behavior to remain byte-for-byte unchanged; a new
     event when the section is present and off breaks that. Remove
     it.
+    *Resolution*: adopted. The event set is four
+    (`conversations_enabled`, `_dropped`, `_failed`, `_pruned`),
+    with the no-disabled-event decision and its reason stated
+    where the events are named.
 18. **P2: close-reason selection lacks deterministic state and a
     guaranteed close path.** Competing shutdown causes have no
     precedence rule, and the close path awaits three operations
