@@ -37,7 +37,6 @@ says so on every session it records.
 
 import contextlib
 import json
-import logging
 import shutil
 import struct
 import time
@@ -46,7 +45,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO, TextIO
 
-logger = logging.getLogger(__name__)
+from samtal_server.events import ServerEvents
+
+events = ServerEvents(__name__)
 
 # The rate both channels are written at, which is the rate the input
 # side of the pipeline runs at. The reply is resampled down to it so
@@ -227,12 +228,14 @@ class SessionCapture:
         return self._at(now) >= self._max_session_s
 
     def _disable(self, doing: str, exc: BaseException) -> None:
-        logger.warning(
+        events.warning(
             "session %s: capture stopped after failing to %s: %s",
             self._session_id,
             doing,
             exc,
-            extra={"event": "capture_failed", "session": self._session_id, "reason": doing},
+            event="capture_failed",
+            session=self._session_id,
+            reason=doing,
         )
         self._stopped = True
         with contextlib.suppress(Exception):
@@ -279,11 +282,12 @@ class SessionCapture:
         conversation carries on; only the recording stops."""
         if self._closing:
             return
-        logger.info(
+        events.info(
             "session %s: capture reached its %.0f s limit",
             self._session_id,
             self._max_session_s,
-            extra={"event": "capture_limit", "session": self._session_id},
+            event="capture_limit",
+            session=self._session_id,
         )
         self.close()
 
@@ -497,22 +501,24 @@ class CaptureStore:
                     path.unlink()
             removed.append(oldest.stem)
         if removed:
-            logger.info(
+            events.info(
                 "capture: pruned %d session(s) to stay under %.0f MB: %s",
                 len(removed),
                 self._max_total_mb,
                 ", ".join(removed),
-                extra={"event": "capture_pruned", "sessions": removed},
+                event="capture_pruned",
+                sessions=removed,
             )
         over = self._total_mb()
         if over > self._max_total_mb:
-            logger.warning(
+            events.warning(
                 "capture: %.0f MB on disk is over the %.0f MB budget and "
                 "nothing more can be pruned; raise max_total_mb or lower "
                 "max_session_s",
                 over,
                 self._max_total_mb,
-                extra={"event": "capture_over_budget", "total_mb": round(over)},
+                event="capture_over_budget",
+                total_mb=round(over),
             )
         return removed
 
@@ -539,26 +545,26 @@ class CaptureStore:
             self.prune()
             free_mb = self._free_mb()
         except OSError as exc:
-            logger.warning(
+            events.warning(
                 "session %s: not capturing, %s is unusable: %s",
                 session_id,
                 self.directory,
                 exc,
-                extra={"event": "capture_declined", "session": session_id, "reason": "unusable"},
+                event="capture_declined",
+                session=session_id,
+                reason="unusable",
             )
             return None
         if free_mb < self._min_free_mb:
-            logger.warning(
+            events.warning(
                 "session %s: not capturing, %.0f MB free is below the %.0f MB floor",
                 session_id,
                 free_mb,
                 self._min_free_mb,
-                extra={
-                    "event": "capture_declined",
-                    "session": session_id,
-                    "reason": "min_free_mb",
-                    "free_mb": round(free_mb),
-                },
+                event="capture_declined",
+                session=session_id,
+                reason="min_free_mb",
+                free_mb=round(free_mb),
             )
             return None
         capture = SessionCapture(
@@ -574,22 +580,22 @@ class CaptureStore:
             capture.start()
         except OSError as exc:
             self._active.discard(session_id)
-            logger.warning(
+            events.warning(
                 "session %s: not capturing, could not open the files: %s",
                 session_id,
                 exc,
-                extra={"event": "capture_declined", "session": session_id, "reason": "open"},
+                event="capture_declined",
+                session=session_id,
+                reason="open",
             )
             return None
-        logger.info(
+        events.info(
             "session %s: capturing to %s",
             session_id,
             capture.wav_path,
-            extra={
-                "event": "capture_started",
-                "session": session_id,
-                "path": str(capture.wav_path),
-            },
+            event="capture_started",
+            session=session_id,
+            path=str(capture.wav_path),
         )
         return capture
 

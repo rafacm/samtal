@@ -12,13 +12,14 @@ front of the device, talking.
 """
 
 import asyncio
-import logging
 from typing import TYPE_CHECKING
+
+from samtal_server.events import ServerEvents
 
 if TYPE_CHECKING:  # the session imports nothing from here
     from samtal_server.device.session import DeviceSession
 
-logger = logging.getLogger(__name__)
+events = ServerEvents(__name__)
 
 # Held back from the drain budget for the closes themselves, so the
 # overall bound is a backstop for a session stuck somewhere other than
@@ -74,15 +75,13 @@ class SessionRegistry:
         if not sessions:
             return
 
-        logger.info(
+        events.info(
             "draining %d session(s), up to %.0f s",
             len(sessions),
             timeout_s,
-            extra={
-                "event": "drain_started",
-                "sessions": len(sessions),
-                "timeout_s": timeout_s,
-            },
+            event="drain_started",
+            sessions=len(sessions),
+            timeout_s=timeout_s,
         )
         # The drain's budget is what a reply is given, rather than some
         # constant inside the session: an operator who raises drain_s to
@@ -105,20 +104,17 @@ class SessionRegistry:
         # and reporting it as a clean drain would hide exactly that.
         cut = sum(1 for task in done if task.exception() is None and not task.result())
         if pending or cut:
-            logger.warning(
+            events.warning(
                 "drained with %d session(s) cut mid-reply and %d that did not finish",
                 cut,
                 len(pending),
-                extra={
-                    "event": "drain_incomplete",
-                    "sessions": len(sessions),
-                    "cut_mid_reply": cut,
-                    "unfinished": len(pending),
-                    "timeout_s": timeout_s,
-                },
+                event="drain_incomplete",
+                sessions=len(sessions),
+                cut_mid_reply=cut,
+                unfinished=len(pending),
+                timeout_s=timeout_s,
             )
         else:
-            logger.info(
-                "every session drained",
-                extra={"event": "drain_finished", "sessions": len(sessions)},
+            events.info(
+                "every session drained", event="drain_finished", sessions=len(sessions)
             )
