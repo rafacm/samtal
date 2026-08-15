@@ -758,21 +758,22 @@ failure is classified and neither ever built from an exception's
 message, and `_run` grew the phase tracking that makes the first of them
 honest.
 
-Four commits, in the order the milestone was built:
+Four commits, in the order the milestone was built, plus the six the
+review round below added:
 
-1. `d4e797c` Give the MCP lifecycle its five events
-2. `effee88` Assert each MCP event through a running manager
-3. `528262b` Write the five MCP events into the surface
-4. this one
+1. `54759e6` Give the MCP lifecycle its five events
+2. `cb4a9de` Assert each MCP event through a running manager
+3. `69adb5c` Write the five MCP events into the surface
+4. `2caa96e` Record milestone 3 and tick it in the plan
 
-The branch is stacked on milestone 2's, so these hashes move with every
-rebase onto it. Their order and their titles do not. Milestone 2's own
-review round was landing while this was built, and two of its commits
-arrived on the parent branch mid-milestone, which is the lesson that
-milestone recorded: diff against the parent after every rebase and read
-what moved. Both narrow a record that quoted something it should not,
-and both are named in the changelog entry this milestone carries,
-because that entry is the issue's rather than this milestone's.
+Milestone 2's own review round was landing on the parent branch while
+this was built, which is the lesson that milestone recorded: diff
+against the parent after every rebase and read what moved. Three of its
+commits arrived mid-milestone, each narrowing a record that quoted
+something it should not, and all three are covered by the changelog
+entry this milestone carries, because that entry is the issue's rather
+than this milestone's. Milestone 2 has since merged, so this branch is
+stacked on `main` rather than on it.
 
 ### Every sentence, and what became of it
 
@@ -873,7 +874,8 @@ fields as in the sentence it already had.
 Twenty-four new tests across four files, and not one existing test
 touched. Each event is driven through a real manager against the servers
 the MCP suites already run: the stdio child process, and the in-process
-uvicorn one.
+uvicorn one. (The review round below adds six more and moves three of
+these, each where a finding changed the behaviour they pinned.)
 
 - `test_tools_mcp.py` (nine): what the manager decides. The connect
   count, `transport_failed`, `discovery_failed` (through a class-level
@@ -901,7 +903,21 @@ read one way in all three. `fields_of` reads the field set through
 
 ### Deviations from the plan
 
-Three, none of them a departure from a decision.
+Four. Three are choices this milestone made; the fourth is a decision
+the PR review round below overruled, which supersedes the plan on that
+point.
+
+**`mcp_call_dropped` carries a position and not a tool name.** The
+plan's table gives its fields as `entry` and `tool`, and this milestone
+shipped that. The review's first finding rejected it, on the same
+reasoning the plan itself used to strip the name from
+`mcp_tool_shadowed`: a published name is half whatever the far side
+called its tool, and sanitizing only replaces the characters both LLM
+APIs refuse, so an alphanumeric credential goes through untouched. The
+plan applied that reasoning to one event and not to the other two that
+carry names, which is the inconsistency the review found rather than a
+new argument. The fields are `entry`, `position` and `error`, and the
+README's table is the surface of record.
 
 **`mcp_down` classification is not the phase marker alone.** The plan
 says the six tokens map one-to-one onto decision sites and that
@@ -969,26 +985,36 @@ next door already makes in a comment about its own scoping.
 
 ### Verification
 
-From `samtal-server/`, at `528262b`:
+From `samtal-server/`, at `a2eb111`, which is after the review round
+below:
 
 ```
 uv run ruff check .                 All checks passed!
-uv run pytest tests/unit -q         2030 passed, 15 skipped
+uv run pytest tests/unit -q         2039 passed, 15 skipped
 uv run pytest tests/integration -q  53 passed
 ```
 
-The unit count grows by the milestone's twenty-four, and by the five its
-parent branch gained while this was built: milestone 2 ended at 2001 and
-its review round took it to 2006. No integration test was added here:
-every one of these events is reachable from a unit driver holding a real
-manager, which is where the MCP suites already live.
+The arithmetic, since an earlier draft of this section got it wrong and
+the review's last finding caught it. Milestone 2 ended at 2001 and its
+own review round took it to 2009, which is the number its section
+records; this milestone adds twenty-four, and its review round adds six
+more. 2009 + 24 + 6 = 2039. The 2030 an earlier draft reported was
+measured before milestone 2's round had finished landing, against a
+parent that was still moving, and the 2006 it explained itself with was
+a guess at a number that turned out to be 2009. Both are gone rather
+than reconciled: a measurement taken against a base that no longer
+exists is not evidence of anything.
 
-`git diff --stat refactor/server-events` lists this milestone's files
-and nothing else: `tools/mcp.py`, the four test files, the stdio test
-server, `samtal-server/README.md`, `CHANGELOG.md`, the plan and this
-document. `events.py` is not among them, which is the point of the two
-milestones below: the MCP subsystem emits through the same emitter as
-everything else and needed nothing added to it.
+No integration test was added here: every one of these events is
+reachable from a unit driver holding a real manager, which is where the
+MCP suites already live.
+
+`git diff --stat origin/main` lists this milestone's files and nothing
+else: `tools/mcp.py`, `tools/publish.py`, the six test files, the stdio
+test server, `samtal-server/README.md`, `CHANGELOG.md`, the plan and
+this document. `events.py` is not among them, which is the point of the
+two milestones above: the MCP subsystem emits through the same emitter
+as everything else and needed nothing added to it.
 
 ### The issue, closed
 
