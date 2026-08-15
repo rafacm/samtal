@@ -751,9 +751,16 @@ sits alone in the last PR.
 
 Five PRs, stacked, each independently green, each with its
 CHANGELOG entry, each landing its implementation-doc section in the
-change that ticks its milestone. The stacked-PR trap from #86 is
-procedure: retarget every child to `main` before its parent merges,
-rebase children with `git rebase --onto` after each merge.
+change that ticks its milestone. The stack is ordered so the
+configuration key, the wiring and the documentation all land in
+one PR with the content path already beneath them: a released
+image must never offer `enabled: true` and `text: true` and then
+store no conversation text, so the two dormant milestones (the
+store machinery, the content record) merge first and the milestone
+that makes the switch exist is the milestone at which the switch
+does everything the documentation says. The stacked-PR trap from
+#86 is procedure: retarget every child to `main` before its parent
+merges, rebase children with `git rebase --onto` after each merge.
 
 ## Tests
 
@@ -778,24 +785,32 @@ New coverage, by milestone:
   planted sentinel; the schema reference regenerating
   byte-identically with every column commented; the shared-helper
   refactor leaving `test_db_open.py` untouched and green.
-- **Unit + integration, milestone 2**: enabled boot creates and
-  migrates the file and emits `conversations_enabled`; disabled and
-  absent sections create nothing and change nothing (the existing
-  suites are the byte-for-byte proof, per #138's pins); a
-  multi-turn integration conversation lands one `sessions` row and
-  one `events` row per decision-track event with field names
-  matching the README table; the session row is readable
-  mid-session after the open commit; `session_closed` carries its
-  token at each of the five sites; close updates the row.
-- **Unit + integration, milestone 3**: a multi-turn conversation
-  with tool calls lands turns and tool invocations with the
-  measured numbers; the mid-session read shows everything up to
-  the last completed turn and nothing of the open one; text-off
-  end to end (the sentinel absent from the file's bytes); the
-  wedged-writer acceptance: with the database locked from another
-  connection, a scripted conversation's replies complete with
-  latencies indistinguishable from the unlocked run, rows drop,
-  the warning fires, the session row records the count.
+- **Unit, milestone 2**: the `TurnRecord` assembly driven through
+  the existing session drivers against a spy recorder: text, legs
+  on a handover, tool invocations per source including the
+  malformed, unknown and handover branches with their positions,
+  and the measured numbers including the new ASR and TTS
+  first-audio measurements against scripted providers; the closed
+  source classification at its one site; the recorder seam
+  defaulting to none with no production behavior change (the
+  event-assertion and pin suites unmodified are the proof).
+- **Unit + integration, milestone 3**: enabled boot creates and
+  migrates the file and emits `conversations_enabled`; disabled
+  and absent sections create nothing and change nothing (the
+  existing suites are the byte-for-byte proof, per #138's pins),
+  and a pre-existing file still migrates on a disabled boot; a
+  multi-turn integration conversation with tool calls lands the
+  `sessions` row, one `events` row per decision-track event with
+  field names matching the README table, and turns and tool
+  invocations with the measured numbers, cross-checked against a
+  spy at the same tap position; the session row is readable
+  mid-session after the open commit and the mid-session read shows
+  everything up to the last completed turn and nothing of the open
+  one; `session_closed` carries its token at each of the five
+  sites and close updates the row; the four switch combinations at
+  the row level end to end, with the text-off sentinel absent from
+  the file's bytes; the wedged-writer acceptance as specified in
+  the write-path section.
 - **Unit, milestone 4**: the three routes' round trips through the
   acceptance seam; pagination edges (empty store, one page, exact
   boundary, cursor beyond the end); the device filter; 404 without
@@ -1002,6 +1017,16 @@ carries its resolution once the amendment addressing it lands.
     content because the content path lands a milestone later. Move
     construction, public configuration and documentation to land
     with the complete content path.
+    *Resolution*: adopted. The stack is restructured: milestone 2
+    is now the content record (the `TurnRecord` assembly, the
+    recorder seam defaulting to none, the measurements and the
+    tool classification), dormant because nothing injects a
+    recorder in production; milestone 3 is the wiring milestone
+    where the config section, the store construction, the session
+    sink, the events, the examples and the README all land
+    together, so the first release in which the switch exists is
+    the first in which it does everything its documentation says.
+    The PR-structure section states the ordering rule.
 12. **P1: the required TTS timing has been deferred contrary to
     the issue.** The issue settles that turn rollups contain ASR,
     LLM and TTS timings; the plan's schema has none and defers it.
@@ -1087,28 +1112,31 @@ its section of the implementation doc when written.
   exists, no server behavior changes. Accept: the milestone 1 test
   list green; both lanes and lint green; `git grep conversations
   samtal_server/app.py` empty.
-- [ ] **Sessions and events on the record**
-  (`feature/conversation-store-m2`): `ConversationsConfig` on
-  `ServerConfig` with the three keys and their `config.example.yaml`
-  and `config.deploy.example.yaml` blocks; `create_app` building
-  and the lifespan stopping the store; `DeviceSession` opening,
-  attaching and closing the per-session sink with the manifest;
-  the `session_closed` `reason` field with its five tokens, pins
-  moved in the same commit; the five `conversations_*` events and
-  their README table rows; the store's README section (what is
-  stored, the switches, retention, the WAL-safe copy note).
-  Accept: the milestone 2 test list green; acceptance criterion 1
-  holds (disabled means no file and byte-for-byte behavior); lanes
-  green.
-- [ ] **The content path** (`feature/conversation-store-m3`):
+- [ ] **The content record** (`feature/conversation-store-m2`):
+  `records.py` with `TurnRecord` and `ToolInvocation`; the
   `TurnRecord` assembly in the pipeline (text, legs, tool
-  invocations, measured numbers, the new ASR elapsed where
-  measured); the recorder through `bespoke_runtime_factory`'s
-  closure, `RuntimeFactory` untouched; turns and tool invocations
-  written at turn boundaries; the text switch end to end; the
-  wedged-writer and mid-session acceptance tests; the sentinel
-  no-leak suite for the content path. Accept: the milestone 3 test
-  list green; criteria 2, 3, 4 and 6 hold; lanes green.
+  invocations with the centralized source classification and their
+  positions, the measured numbers, the new ASR and TTS first-audio
+  measurements); the recorder through `bespoke_runtime_factory`'s
+  closure, defaulting to none, `RuntimeFactory` untouched. Dormant
+  machinery: nothing injects a recorder in production. Accept: the
+  milestone 2 test list green; the event-assertion and pin suites
+  unmodified; lanes green.
+- [ ] **Sessions, turns and events on the record**
+  (`feature/conversation-store-m3`): `ConversationsConfig` on
+  `ServerConfig` with its `config.example.yaml` and
+  `config.deploy.example.yaml` blocks; `create_app` building the
+  store, migrating a pre-existing file on disabled boots, and the
+  lifespan stopping the writer; `DeviceSession` opening, attaching
+  and closing the per-session sink with the manifest; the recorder
+  injected so turns and tool invocations land beside the events;
+  the `session_closed` `reason` field with its five tokens, pins
+  moved in the same commit; the four `conversations_*` events and
+  their README table rows; the store's README section (what is
+  stored, the switches, retention, deletion semantics, the
+  WAL-safe copy note). The switch becomes real and complete in the
+  same release. Accept: the milestone 3 test list green;
+  acceptance criteria 1, 2, 3, 4 and 6 hold; lanes green.
 - [ ] **Conversation reads under `/api`**
   (`feature/conversation-store-m4`): the three routes with typed
   response models and cursor pagination; the read-only per-request
