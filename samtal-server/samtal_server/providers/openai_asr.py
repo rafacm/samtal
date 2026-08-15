@@ -56,7 +56,7 @@ from samtal_server.providers.base import (
 from samtal_server.providers.kit import (
     DEFAULT_TIMEOUT_S,
     MAX_RETRIES,
-    REQUEST_FAILURES,
+    OPENAI_FAILURES,
     call_failure,
 )
 from samtal_server.providers.openai_endpoint import (
@@ -216,14 +216,14 @@ class OpenAiAsr(AsrProvider):
         # and an asr_prompt_echo event, and that discard is a decision
         # rather than a failure. What is left here is a call that could
         # not answer at all, which is a failed provider call.
-        # Cancellation and genuine bugs are outside REQUEST_FAILURES and
-        # pass through as themselves.
+        # Cancellation, a genuine bug, and another vendor's SDK error are
+        # outside OPENAI_FAILURES and pass through as themselves.
         failure: ProviderCallError | None = None
         try:
             text = await self._request(pcm, sample_rate, pinned, self._prompt)
             if self._is_echoed_prompt(text):
                 text = await self._retry_without_prompt(pcm, sample_rate, pinned, deadline)
-        except REQUEST_FAILURES as exc:
+        except OPENAI_FAILURES as exc:
             failure = call_failure(LABEL, exc)
         # Raised out here rather than in the except arm, so the SDK
         # exception is not even the new error's `__context__`: `from

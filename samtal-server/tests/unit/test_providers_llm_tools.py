@@ -774,3 +774,23 @@ async def test_a_failed_openai_request_leaks_nothing_into_the_logs(
     assert SENTINEL not in chain(failure)
     assert SENTINEL not in caplog.text
     assert all(SENTINEL not in str(record.__dict__) for record in caplog.records)
+
+
+async def test_anthropic_does_not_claim_the_other_vendors_failure() -> None:
+    """An Anthropic entry holding an OpenAI client is a wiring bug, and
+    dressing its errors as an Anthropic request failure would file that
+    bug under "the API was slow" in the logs. Each provider catches its
+    own SDK's families and httpx's, and nothing else."""
+    _, failure = await until_it_fails(
+        anthropic_failing(opening=status_error(openai, 500, "from the wrong sdk"))
+    )
+    assert isinstance(failure, openai.APIStatusError)
+    assert not isinstance(failure, ProviderCallError)
+
+
+async def test_openai_does_not_claim_the_other_vendors_failure() -> None:
+    _, failure = await until_it_fails(
+        openai_failing(opening=status_error(anthropic, 500, "from the wrong sdk"))
+    )
+    assert isinstance(failure, anthropic.APIStatusError)
+    assert not isinstance(failure, ProviderCallError)
