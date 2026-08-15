@@ -478,7 +478,7 @@ the namespace's precedence in one readable place.
 
 ### Deviations from the plan
 
-Eight, each with its reason.
+Nine, each with its reason.
 
 1. **`TurnRecord.t_ms` became `at`, and the store stamps the offset.**
    The plan has the record carry "the utterance's offset from session
