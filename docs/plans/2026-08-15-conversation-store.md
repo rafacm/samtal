@@ -105,8 +105,18 @@ its language fields, the joined reply, the per-agent legs (what
 `agent_said` carries per handover), the tool invocations of the
 reply (name, source, arguments, result, `is_error`, `duration_ms`),
 and the turn's measured numbers (rounds, summed token counts,
-`first_token_ms`, summed LLM round durations, and the ASR elapsed
-where one was measured this turn). A reply that was cancelled or
+`first_token_ms`, summed LLM round durations, the ASR elapsed
+where one was measured this turn, and the TTS first-audio
+latency). The TTS number is a new success-path measurement,
+because none exists today and the issue's rollup requires one:
+the elapsed from the reply's first synthesis request to the first
+audio bytes that synthesis yields, measured at the provider
+boundary in `runtime/speech.py` where the synthesis stream is
+consumed and the failure callback is already threaded through.
+Null when the reply spoke nothing (a tool-only or empty reply),
+which is its stated semantics; it measures the synthesis
+provider, deliberately not the device (`speaking_started` is the
+device edge's event and stays one). A reply that was cancelled or
 failed records what its `finally` sees, exactly as `replied` does
 today; an utterance that produced no transcript produces no turn,
 mirroring the events.
@@ -325,7 +335,9 @@ asserts the new id exceeds every id ever issued.
   `legs` (JSON list of `{agent, text}`, null under text-off; only
   present when a handover split the reply), `asr_ms` (null where no
   ASR elapsed was measured this turn), `first_token_ms`, `llm_ms`
-  (summed round durations), `rounds`, `input_tokens`,
+  (summed round durations), `tts_first_audio_ms` (the reply's
+  first synthesis request to its first audio bytes; null when
+  nothing was spoken), `rounds`, `input_tokens`,
   `output_tokens` (summed across rounds; null when the provider
   reported no usage), `tool_calls` (integer count, always present).
 - `tool_invocations`: `id`, `turn` (the parent turn's id, resolved
@@ -859,10 +871,6 @@ New coverage, by milestone:
   issue; the SQL surface serves until then.
 - API deletion endpoints, deferred to the admin UI's controls as
   decided above.
-- Whether `speaking_started`-to-turn correlation deserves a stored
-  `tts_ms` on turns. No success-path TTS latency measurement exists
-  today, so there is nothing honest to store; if #22-style analysis
-  wants it, that is a new measurement first and a column second.
 - Per-user and per-agent storage switches, v3, shaped-for and not
   built, as the issue requires.
 
@@ -1032,6 +1040,12 @@ carries its resolution once the amendment addressing it lands.
     LLM and TTS timings; the plan's schema has none and defers it.
     Define and instrument a success-path TTS latency at the
     provider boundary, state its null semantics, and store it.
+    *Resolution*: adopted. `tts_first_audio_ms` is defined (the
+    reply's first synthesis request to its first audio bytes,
+    measured where `runtime/speech.py` consumes the synthesis
+    stream), its null semantics stated (nothing spoken), stored on
+    turns, served by the timeline, and tested against scripted
+    providers; the open question deferring it is withdrawn.
 13. **P1: tool classification is neither closed nor leak-safe at
     the real decision sites.** `_dispatch` handles malformed calls
     before routing and has an unknown fallback; `switch_agent`
