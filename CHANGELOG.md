@@ -7,7 +7,63 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-08-15
 
+### Added
+
+- **The MCP lifecycle is on the event surface, and consumers have an
+  interface to attach to** (#138): the subsystem that runs an
+  operator's MCP servers recorded nothing structured, so a collector
+  could not count a connection that came up, group failures by kind,
+  or tell a reload that applied from one that refused. Five events now
+  say all of it on the channel that module already logged on:
+  `mcp_connected` (`entry`, `transport`, a count of `tools`,
+  `duration_ms`), `mcp_down` (`entry`, `reason` from a closed set of
+  six, `duration_ms` where a connect ran), `mcp_call_dropped`
+  (`entry`, `tool`), `mcp_reload` (`outcome` applied or refused, with
+  the four counts or a refusal reason) and `mcp_tool_shadowed`
+  (`entry`, `position`, `owner`). All five are in the README's event
+  table and are a compatibility surface from here on. None of them
+  carries a byte a third-party server chose: the reasons are tokens
+  picked where a failure is classified, by exception type and never by
+  message, and the shadowed-tool line names a position where a name
+  would be, because sanitizing a tool name only replaces the
+  characters an LLM API refuses and a credential survives that whole.
+  Alongside them, every event this server emits is now offered to an
+  explicit **tap** interface (`Emission`, `EventTap`) before it is
+  logged, with a hub a server-scope consumer attaches to once for
+  every subsystem; the JSON log and the session capture are its first
+  two implementations, and #120's conversation store and the #66/#67
+  exporters attach without touching a single emit site. **Operator-visible:**
+  two new lines an MCP deployment did not see before, an intentional
+  stop (at INFO, because a shutdown is not a problem) and a refused
+  reload (at WARNING).
+
 ### Changed
+
+- **One emitter serves every event, at an altitude no subsystem owns**
+  (#138): the emitter behind the declared observability surface lived
+  in `device/events.py` and was called by the device edge and the
+  pipeline alone, while eleven other modules hand-built an
+  `extra={...}` dict at each of forty-two sites and one provider had
+  invented a private builder of its own. It now lives in
+  `samtal_server/events.py`, which imports nothing from the packages
+  that import it, and it emits rather than returning a payload for a
+  call site to log around: a site says
+  `events.info("heard %r", text, event="heard", ...)` and the emitter
+  builds the payload, wraps it and offers it to every consumer.
+  Session-scoped events keep the pinned `samtal_server.session`
+  channel and server-scoped ones each keep the module logger name they
+  already had, so every retained record's `logger` field, event name,
+  level and field set is byte-identical; two characterization suites
+  written before the move and unchanged after it are the evidence, and
+  an AST test now fails any production logging call that carries its
+  own `extra=`. The capture is offered every event before it is
+  logged, as it always was, and a consumer that raises no longer costs
+  the operator a log line. **Operator-visible:** two sentences got
+  shorter, both because they were quoting something they should not.
+  A rejected `Device-Id` is no longer echoed into the line that turns
+  the device away, and `provider_failed` renders the failure's class
+  name rather than a vendor exception's own words; neither event's
+  name, level, channel or fields changed.
 
 - **The egress guarantee is one rule, and a provider's marking is
   mandatory** (#136): the `server.local_only` enforcement behind the
