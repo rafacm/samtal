@@ -1707,6 +1707,13 @@ def _refusal(exc: BaseException) -> str:
     return REFUSED_UNEXPECTED
 
 
+# What a reload's first phase produces: the world it read, and the
+# managers that world needs, neither of them installed anywhere yet.
+# Named because it is now a task's result type as well as a return
+# value, and a task is declared where its result is not in sight.
+type _Preparation = tuple[McpSlice, dict[str, "McpServerManager"]]
+
+
 class McpServers:
     """Every MCP server some agent references, built at startup."""
 
@@ -1735,6 +1742,15 @@ class McpServers:
         # request that asked for it when that request is cancelled, and
         # the loop keeps only a weak reference to a task nobody awaits.
         self._applying: asyncio.Task[McpReload] | None = None
+        # And the preparation in flight, held for that reason and for a
+        # stronger one. Its re-read runs in a worker thread, taking the
+        # database's write lock and waiting out its busy timeout, and a
+        # thread is not a thing that can be cancelled: a caller who goes
+        # away while it is running leaves it running. The exclusion has
+        # to outlive it or the next reload's read meets the first one's
+        # still holding the lock, and answers a caller who did nothing
+        # wrong that the database is busy.
+        self._preparing: asyncio.Task[_Preparation] | None = None
 
     @classmethod
     def build(cls, config: Config, secrets: SecretStore | None = None) -> "McpServers":
@@ -1960,31 +1976,58 @@ class McpServers:
         classified, and an apply says so as its last act, from inside
         the shielded task. One reload is therefore one event, whether
         or not anybody is still waiting for the answer.
+
+        The preparation is behind a shield of its own, and for a
+        different reason. Nothing it does can leave a half-changed
+        world, but its re-read runs in a worker thread, and a thread
+        cannot be cancelled: a client that disconnects during it leaves
+        it holding the database's write lock for as long as it takes.
+        Releasing the exclusion there would let the next reload start a
+        read against a lock the last one still holds, and answer a
+        caller who did nothing wrong that the database is busy. So both
+        halves are owned tasks, and the exclusion is held until
+        whichever of them is still running has finished.
         """
         if self._reloading:
             self._refused(REFUSED_IN_PROGRESS)
             raise ReloadInProgressError(RELOAD_IN_PROGRESS)
         self._reloading = True
+        preparing: asyncio.Task[_Preparation] | None = None
         applying: asyncio.Task[McpReload] | None = None
         try:
-            configured, candidates = await self._preparation(read)
+            preparing = asyncio.create_task(
+                self._preparation(read), name="mcp-reload-read"
+            )
+            self._preparing = preparing
+            configured, candidates = await asyncio.shield(preparing)
             applying = asyncio.create_task(
                 self._apply(configured, candidates), name="mcp-reload"
             )
             self._applying = applying
             return await asyncio.shield(applying)
         finally:
-            # Held until the apply itself is over, cancelled caller or
-            # not: a second reload starting against a world the first is
-            # still changing is exactly what the exclusion is for.
-            if applying is None or applying.done():
-                self._release(applying)
-            else:
-                applying.add_done_callback(self._release)
+            # The apply exists only once the preparation returned, so
+            # the later of the two is the one still capable of running,
+            # and it is the one the exclusion waits on.
+            self._hold_until(applying if applying is not None else preparing)
+
+    def _hold_until(self, running: "asyncio.Task[Any] | None") -> None:
+        """Keep the exclusion until this half of the reload has really
+        finished, whatever happened to the caller.
+
+        A second reload starting against a world the first is still
+        changing, or against a database lock the first is still holding,
+        is exactly what the exclusion is for, and a cancelled caller
+        stops neither of those from being true.
+        """
+        if running is None or running.done():
+            self._release(running)
+        else:
+            running.add_done_callback(self._release)
 
     async def _preparation(
         self, read: Callable[[], tuple[Config, SecretStore | None]]
-    ) -> tuple[McpSlice, dict[str, McpServerManager]]:
+    ) -> "_Preparation":
         """The first phase, whole: the re-read, the slice it composes,
         and every manager the new world needs, with nothing running
         touched.
@@ -2048,15 +2091,18 @@ class McpServers:
             reason=reason,
         )
 
-    def _release(self, applying: "asyncio.Task[McpReload] | None") -> None:
-        """The reload is over, however it ended. Also where an apply
-        whose caller went away has its outcome consumed, so it does not
-        end as an unretrieved exception at shutdown."""
+    def _release(self, finished: "asyncio.Task[Any] | None") -> None:
+        """The reload is over, however it ended. Also where a half whose
+        caller went away has its outcome consumed, so it does not end as
+        an unretrieved exception at shutdown: that is true of a
+        preparation a client abandoned mid-read as much as of an
+        apply."""
         self._reloading = False
         self._applying = None
-        if applying is not None and applying.done():
+        self._preparing = None
+        if finished is not None and finished.done():
             with contextlib.suppress(Exception, asyncio.CancelledError):
-                applying.exception()
+                finished.exception()
 
     @staticmethod
     async def _read(
