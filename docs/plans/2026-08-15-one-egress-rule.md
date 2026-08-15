@@ -217,6 +217,45 @@ docs/plans/2026-08-15-one-egress-rule-implementation.md
   checks presence first) and tests; the subagent greps for other
   readers and records the result.
 
+## Plan review round
+
+One external review of the plan as first committed (a8ec8d9): codex
+CLI, model gpt-5.6-sol, read-only against this repository with the
+issue #136 body supplied, 2026-08-15. Verdict: ready after the
+P1/P2 amendments. Findings as received, condensed; each carries its
+resolution once the amendment addressing it lands.
+
+1. **P1: inherited markings bypass the mandatory declaration
+   rule.** The plan requires a marking "of its own" but then
+   defines absence across the whole MRO and proposes
+   `getattr(type(provider), "egress", MISSING)`, which traverses
+   the MRO, so an undeclared subclass of a marked concrete
+   provider silently inherits its marking; the proposed
+   `Forgetful(Provider)` test catches only a missing root default.
+   Read only the concrete class namespace
+   (`vars(type(provider)).get("egress", MISSING)`), add a
+   build-path regression test where an unmarked class inherits
+   from a marked provider and is refused with `local_only` off,
+   and relax the "exactly one rewrite and one addition"
+   constraint accordingly.
+   *Resolution*: adopted. The mandatory-marking decision now reads
+   the concrete class's own namespace, the tests section gains the
+   inherited-marking refusal case, and the tests-diff constraint
+   is restated as one rewrite plus the three named additions.
+2. **P2: present but invalid markings are neither rejected nor
+   tested.** The settled rule permits exactly `True`, `False`, or
+   `None`, but presence-only checking lets `egress = 0` or
+   `egress = ""` pass `local_only` as local with no static type
+   lane to catch it. Validate by identity that the declared value
+   is `True`, `False`, or `None`; refuse any other value in every
+   mode with a value-free message naming the class; add a
+   build-path test for an invalid declaration with `local_only`
+   off.
+   *Resolution*: adopted. The mandatory-marking decision now
+   validates the declared value by identity and refuses anything
+   else in any mode, and the tests section gains the invalid-value
+   refusal case.
+
 ## Milestones
 
 - [ ] **Move both egress checks into one module and make the
