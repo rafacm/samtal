@@ -561,6 +561,7 @@ def device_session(
     fillers: dict[str, Any] | None = None,
     websocket: Any = None,
     mcp_servers: McpServers | None = None,
+    conversations: Any = None,
 ) -> session_module.DeviceSession:
     """A device session with a real bespoke runtime behind it, built the
     way `run` builds one: the agents resolved from the binding, then the
@@ -570,13 +571,17 @@ def device_session(
 
     `mcp_servers` is the running registry, which a test that is about
     tools supplies; an empty one is what every other test here needs,
-    and is what a deployment with no MCP entries has."""
+    and is what a deployment with no MCP entries has. `conversations` is
+    the store a turn's record is handed to, None everywhere but in the
+    suite that is about the record, which is what a deployment that has
+    not asked for one has."""
     factory = bespoke_runtime_factory(
         config,
         providers if providers is not None else build_agent_providers(config),
         mcp_servers if mcp_servers is not None else McpServers({}),
         memory,
         fillers if fillers is not None else {},
+        conversations,
     )
     session = session_module.DeviceSession(cast(Any, websocket), config, factory)
     session._agents = config.agents_for_device(mac)

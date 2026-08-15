@@ -39,11 +39,17 @@ import asyncio
 import contextlib
 import functools
 from collections.abc import AsyncIterator, Callable, Sequence
+from dataclasses import replace
 from typing import Any
 
 from samtal_server.audio.resample import Resampler
 from samtal_server.config import Config
-from samtal_server.conversations.records import SessionTurns, TurnRecorder, TurnStore
+from samtal_server.conversations.records import (
+    SessionTurns,
+    ToolInvocation,
+    TurnRecorder,
+    TurnStore,
+)
 from samtal_server.device.boundary import (
     PIPELINE_SAMPLE_RATE,
     DeviceGone,
@@ -52,7 +58,7 @@ from samtal_server.device.boundary import (
     RuntimeFactory,
     SessionInput,
 )
-from samtal_server.events import SessionEvents, logger
+from samtal_server.events import SessionEvents, logger, session_clock
 from samtal_server.filler import FillerClips
 from samtal_server.providers import (
     AgentProviders,
@@ -70,6 +76,7 @@ from samtal_server.providers import (
 )
 from samtal_server.runtime import prompt
 from samtal_server.runtime.speech import _Synthesis, speak_after
+from samtal_server.runtime.turns import TurnUnderway, tool_source
 from samtal_server.text import SentenceSplitter
 from samtal_server.tools import builtin, names
 from samtal_server.tools.mcp import McpServers
@@ -183,6 +190,12 @@ class PipelineRuntime:
         # the store is wired, and the reply path then behaves exactly as
         # it did before the channel existed.
         self._recorder = recorder
+        # The turn being assembled, replaced at the start of every reply
+        # and read once at the end of it. Always present rather than
+        # optional: the reply path writes into it from half a dozen
+        # places, and a guard at each of them would be six chances to
+        # forget one.
+        self._turn = TurnUnderway()
         # The agents this device may talk to. The one it is talking to
         # now lives on the events object, because both sides of the
         # boundary attribute events to it.
@@ -521,6 +534,16 @@ class PipelineRuntime:
             **provider_fields("llm", provider),
             **tokens,
         )
+        # Counted here rather than where the round starts, so that the
+        # turn's rounds, its summed duration and its token totals all
+        # describe one set of rounds: the ones that finished, which is
+        # the set an `llm_round` row exists for.
+        self._turn.round_done(
+            round(elapsed * 1000),
+            tokens.get("first_token_ms"),
+            None if usage is None else usage.prompt_tokens,
+            None if usage is None else usage.completion_tokens,
+        )
 
     def _provider_failed(
         self, stage: str, provider: object, exc: BaseException, elapsed: float
@@ -651,12 +674,22 @@ class PipelineRuntime:
         spoken: list[str] = []
         self._output.reply_started()
         heard_s = round(len(pcm) / 2 / PIPELINE_SAMPLE_RATE, 2)
+        self._turn = TurnUnderway()
         try:
             if result is None:
+                started = asyncio.get_running_loop().time()
                 async with self._watching("asr", providers.asr):
                     result = await providers.asr.transcribe(
                         pcm, PIPELINE_SAMPLE_RATE, language_hint=self._asr_language
                     )
+                # Only where this turn ran one. A reply handed a
+                # transcription reuses a confirmed barge-in's, measured
+                # at a different call site as part of a different
+                # decision, and a null here says "not measured this
+                # turn" rather than reporting somebody else's wait.
+                self._turn.asr_ms = round(
+                    (asyncio.get_running_loop().time() - started) * 1000
+                )
             # ASR is done, so the mid-ASR marker comes down: from here a
             # barge-in has nothing of the user's left to destroy.
             self._reply_pcm = None
@@ -674,6 +707,11 @@ class PipelineRuntime:
                     language_fields["language_confidence"] = round(
                         result.language_confidence, 2
                     )
+                # Read once and used twice: the event is stamped by the
+                # emitter with the same clock, so a turn and its `heard`
+                # land on the timeline together rather than a wrapped
+                # reading apart.
+                heard_at = session_clock()
                 self._events.info(
                     'session %s: heard "%s"',
                     self.session_id,
@@ -683,6 +721,13 @@ class PipelineRuntime:
                     text=transcript,
                     duration_s=heard_s,
                     **language_fields,
+                )
+                self._turn.heard_utterance(
+                    heard_at,
+                    transcript,
+                    heard_s,
+                    language_fields.get("language"),
+                    language_fields.get("language_confidence"),
                 )
             else:
                 logger.info("session %s: nothing transcribed", self.session_id)
@@ -743,6 +788,11 @@ class PipelineRuntime:
                     agent=self._agent,
                     text=said,
                 )
+            # Beside `replied` and for the same reason: this is where a
+            # reply ends however it ended, so a cancelled or a failed one
+            # records what its finally sees rather than nothing at all.
+            if self._recorder is not None:
+                self._record_turn(spoken)
             # Broad on purpose, and narrow in what it covers: the one
             # statement inside is a device send, so the `RuntimeError`
             # half can only be the transport's, and this closing pair
@@ -754,6 +804,28 @@ class PipelineRuntime:
                 # `stop` it was never told to expect is the one way this
                 # could strand a device.
                 await self._output.finish_speaking()
+
+    def _record_turn(self, spoken: Sequence[str]) -> None:
+        """Hand the finished turn to the content channel.
+
+        Under the same guard an event tap gets, and for the same reason:
+        a consumer nobody has met yet must not be able to cost the device
+        the closing `tts stop` that follows this line, which in auto mode
+        is what re-arms its listening. The class name and nothing else,
+        because a recorder may be holding whatever a far side answered
+        it with."""
+        assert self._recorder is not None
+        record = self._turn.record(self._agent, spoken)
+        if record is None:
+            return
+        try:
+            self._recorder.record_turn(record)
+        except Exception as exc:  # noqa: BLE001 - a consumer never breaks a reply
+            logger.warning(
+                "session %s: the turn recorder failed and was skipped: %s",
+                self.session_id,
+                type(exc).__name__,
+            )
 
     async def _speak_reply(self, transcript: str, spoken: list[str]) -> None:
         """One reply, which may be spoken by more than one agent.
@@ -773,8 +845,8 @@ class PipelineRuntime:
             target = await self._tool_loop(spoken, greeting, switches_left)
             if target is None:
                 return
-            if spoken:
-                said = " ".join(spoken)
+            said = " ".join(spoken) if spoken else None
+            if said is not None:
                 self._turns.append(Turn("assistant", said))
                 self._events.info(
                     'session %s: %s said "%s"',
@@ -787,6 +859,11 @@ class PipelineRuntime:
                 )
                 spoken.clear()
             previous = self._agent
+            # Closed whether or not this agent spoke: a leg that only
+            # asked for the handover still spent tokens, and the leg is
+            # the only place they can be attributed to the agent that
+            # spent them.
+            self._turn.leg_ended(previous, said)
             self._activate_agent(target)
             switches_left -= 1
             self._events.info(
@@ -934,27 +1011,58 @@ class PipelineRuntime:
         """Execute one round of calls. Everything but switch_agent runs
         concurrently, since device and server tools are independent;
         switch_agent is resolved here instead, because a successful one
-        ends the loop rather than producing a result the model reads."""
-        plain = [call for call in calls if call.name != names.SWITCH_AGENT]
-        handovers = [call for call in calls if call.name == names.SWITCH_AGENT]
-        results = list(await asyncio.gather(*(self._run_one(call) for call in plain)))
+        ends the loop rather than producing a result the model reads.
+
+        The position each call is recorded under is its place in the
+        list the model issued, which is why both halves are enumerated
+        over `calls` rather than over their own group: a handover the
+        model asked for third is the third call, whatever order this
+        method runs things in."""
+        plain = [
+            (position, call)
+            for position, call in enumerate(calls)
+            if call.name != names.SWITCH_AGENT
+        ]
+        handovers = [
+            (position, call)
+            for position, call in enumerate(calls)
+            if call.name == names.SWITCH_AGENT
+        ]
+        results = list(
+            await asyncio.gather(*(self._run_one(call, position) for position, call in plain))
+        )
 
         switch_to: str | None = None
-        for position, call in enumerate(handovers):
-            refusal = self._refuse_handover(call, switches_left, position)
+        for order, (position, call) in enumerate(handovers):
+            classified = self._classified(call, position)
+            refusal = self._refuse_handover(call, switches_left, order)
             if refusal is not None:
                 results.append(refusal)
+                # An error result and no duration: nothing ran, and the
+                # refusal is what the turn's record shows in place of it.
+                self._turn.tool(
+                    replace(classified, result=refusal.content, is_error=True)
+                )
                 continue
             switch_to = str(call.arguments["agent"])
+            # A successful switch answers the model nothing, so the row
+            # carries no result and no duration either. Recorded all the
+            # same, because the handover is otherwise only implied by the
+            # legs it produced.
+            self._turn.tool(classified)
         return results, switch_to
 
     def _refuse_handover(
-        self, call: ToolCall, switches_left: int, position: int
+        self, call: ToolCall, switches_left: int, order: int
     ) -> ToolResult | None:
         """Why this switch_agent cannot happen, as an error result the
         current agent phrases in its own voice and language, or None
-        when it can."""
-        if switches_left <= 0 or position > 0:
+        when it can.
+
+        `order` is which switch_agent of this round it is, not its place
+        in the model's call list: what a second one is refused for is
+        being the second the loop resolves."""
+        if switches_left <= 0 or order > 0:
             return ToolResult(
                 call.id,
                 "this conversation has already been handed over once in this reply; "
@@ -982,11 +1090,16 @@ class PipelineRuntime:
             )
         return None
 
-    async def _run_one(self, call: ToolCall) -> ToolResult:
+    async def _run_one(self, call: ToolCall, position: int) -> ToolResult:
         """One tool call, bounded and never raising into the loop. Every
         failure becomes an error result: the model explains it in its
         own words, where a canned apology would be fixed-language and
         would throw away whatever the model could still salvage."""
+        # Before anything runs, so that what the record says a call was
+        # is what the dispatch below decided against, and so that a call
+        # the dispatch turns away at its first line is classified like
+        # any other.
+        classified = self._classified(call, position)
         loop = asyncio.get_running_loop()
         started = loop.time()
         try:
@@ -1011,7 +1124,38 @@ class PipelineRuntime:
             duration_ms=round(elapsed * 1000),
             is_error=is_error,
         )
+        self._turn.tool(
+            replace(
+                classified,
+                result=content,
+                is_error=is_error,
+                duration_ms=round(elapsed * 1000),
+            )
+        )
         return ToolResult(tool_call_id=call.id, content=content, is_error=is_error)
+
+    def _classified(self, call: ToolCall, position: int) -> ToolInvocation:
+        """The half of a call's record that is known before it runs:
+        where its name came from, and what the model asked with it.
+
+        Malformed arguments are the model's own bytes rather than a JSON
+        object, so the flag stands in for them and nothing carries them
+        into a row. The name is still classified, because a model that
+        mangles its arguments still says which tool it meant."""
+        malformed = call.malformed_arguments is not None
+        source, entry = tool_source(
+            call.name,
+            {tool.name for tool in self._output.device_tools()},
+            self._mcp_servers.owner_of(call.name),
+        )
+        return ToolInvocation(
+            position=position,
+            source=source,
+            entry=entry,
+            name=call.name,
+            malformed=malformed,
+            arguments=None if malformed else dict(call.arguments),
+        )
 
     async def _dispatch(self, call: ToolCall) -> tuple[str, bool]:
         """Route a call by the structure of its name: builtins are bare,
