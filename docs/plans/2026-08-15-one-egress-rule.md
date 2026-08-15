@@ -71,11 +71,18 @@ It holds:
   (marked or declared egress; `None` with no declaration; the
   config-key conflict, which refuses in any mode as today) and the
   two MCP outcomes (declared egress; no declaration).
-- The mandatory-marking check: a provider class whose MRO never
-  assigns `egress` is refused at build time, in any mode, with a
-  message naming the class (`type(provider).__name__`) and the
-  configured type. Class names are code identifiers, not
-  configuration values, so the message stays value-free.
+- The mandatory-marking check: the built provider's concrete class
+  must assign `egress` in its own namespace
+  (`vars(type(provider)).get("egress", MISSING)`), not merely
+  inherit one, so an undeclared subclass of a marked provider is
+  refused rather than silently riding its parent's marking. The
+  declared value is then validated by identity: exactly `True`,
+  `False`, or `None`, and anything else (`0`, `""`, a property, a
+  typo) is refused. Both refusals fire at build time, in any mode,
+  with a message naming the class (`type(provider).__name__`) and
+  the configured type; class names are code identifiers, not
+  configuration values, so the messages stay value-free, and the
+  invalid-value refusal names the class without echoing the value.
 - Every refusal sentence, verbatim as the two implementations word
   them today. The message texts are pinned by existing tests
   (`test_providers_egress.py` asserts fragments like
@@ -110,9 +117,10 @@ refused outright. The abstract stage bases (`VadProvider`,
 are never built, and requiring markings on abstract classes would
 force meaningless declarations.
 
-The check is presence-based at build time
-(`getattr(type(provider), "egress", MISSING)`), not a
-definition-time `__init_subclass__` hook. A definition-time hook
+The check runs at build time against the concrete class's own
+namespace (the review round's finding 1: `getattr` traverses the
+MRO, so it cannot tell a declaration from an inheritance), not as
+a definition-time `__init_subclass__` hook. A definition-time hook
 would fire for every hand-built test double that subclasses a
 stage base without caring about egress, and the suite is full of
 those by design; the guarantee only needs to hold for providers
@@ -135,10 +143,18 @@ so the PR review can hold the diff to exactly this one test.
 Every other test in `test_providers_egress.py`, and every MCP
 egress test in `test_tools_mcp.py`, passes unmodified.
 
-One addition in the same file: a test that the docstring contract
-holds, asserting the stage bases and `Provider` itself expose no
-`egress` attribute at runtime, so a future "helpful" default
-cannot come back silently.
+Three additions in the same file, all building through
+`build_provider` with `local_only` off:
+
+- The no-runtime-default test: the stage bases and `Provider`
+  itself expose no `egress` attribute at runtime, so a future
+  "helpful" default cannot come back silently.
+- The inherited-marking refusal (review finding 1): an unmarked
+  class subclassing a marked concrete provider is refused, naming
+  the subclass.
+- The invalid-value refusal (review finding 2): a class declaring
+  `egress = 0` (a falsey non-bool that presence-only checking
+  would wave through as local) is refused, naming the class.
 
 ### Call sites shrink to translation
 
@@ -186,9 +202,9 @@ docs/plans/2026-08-15-one-egress-rule-implementation.md
   `uv run pytest tests/integration -q`, all from `samtal-server/`.
 - `git diff --stat` over `tests/` shows exactly one file touched
   (`test_providers_egress.py`), and its diff shows exactly the one
-  rewrite and the one addition; every other egress and local_only
-  test passes unmodified, which is the issue's fourth acceptance
-  criterion made checkable.
+  rewrite and the three named additions; every other egress and
+  local_only test passes unmodified, which is the issue's fourth
+  acceptance criterion made checkable.
 - The rewritten test demonstrably fails against the old code (the
   silent default builds Forgetful without complaint) and passes
   with the module in place.
@@ -261,12 +277,14 @@ resolution once the amendment addressing it lands.
 - [ ] **Move both egress checks into one module and make the
   marking mandatory** (PR TBD): `samtal_server/egress.py` lands
   with the resolution rule, the verbatim refusal sentences, the
-  presence check naming an undeclared class, and `EgressRefusal`;
+  own-namespace marking check with identity validation of the
+  declared value, and `EgressRefusal`;
   `registry.py` and `tools/mcp.py` shrink to wrapping calls;
   `base.py` keeps the annotation, drops the value, rewrites the
   docstring; `test_a_type_that_forgot_to_declare_counts_as_egress`
-  becomes the construction-refusal test and the no-runtime-default
-  test joins it; CHANGELOG entry under Changed, 2026-08-15; the
+  becomes the construction-refusal test, joined by the
+  no-runtime-default, inherited-marking and invalid-value tests;
+  CHANGELOG entry under Changed, 2026-08-15; the
   implementation doc section written in the change that ticks this
   box. Accept: lint and both lanes green; the tests diff touches
   exactly the named file with exactly the named changes; no
