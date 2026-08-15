@@ -130,6 +130,20 @@ elevenlabs_tts returns `ProviderCallError` instead of
 (`CancelledError` above all, and genuine bugs) pass through
 untouched: the taxonomy claims request failures, not all failures.
 
+For openai_asr the taxonomy applies to the failure of `transcribe`
+as a whole, not to every internal request (the review round's
+finding 3): the prompt-echo retry deliberately converts its own
+retry's timeout into an empty transcript and an
+`asr_prompt_echo(outcome="timed_out")` event, and that
+timeout-as-discard policy is behavior the existing tests pin. The
+wrapping therefore sits where `transcribe`'s failure leaves the
+provider, and the retry's internal policy keeps eating what it
+already eats (catching the taxonomy timeout there if the internal
+call sites are what get wrapped). Two tests split the cases: an
+initial request timeout surfaces `ProviderCallTimeout`; a
+retry-phase timeout still yields the empty transcript and the
+echo event, never a raised taxonomy error.
+
 The local engines (`SileroVad`, `FasterWhisperAsr`, `PiperTts`) and
 the mocks stay outside the taxonomy: they make no requests, their
 failures are bugs in this process rather than answers a network did
@@ -377,6 +391,10 @@ resolution once the amendment addressing it lands.
    echo retry's timeout-as-discard behavior is preserved, with
    separate tests for an initial request timeout and a retry
    timeout.
+   *Resolution*: adopted. The provider-rules decision now scopes
+   the ASR taxonomy to `transcribe` as a whole, preserves the
+   retry's discard policy explicitly, and names the two split
+   tests.
 4. **P2: the proposed reply-path test cannot prove the catch was
    narrowed.** A `ProviderCallError` already reaches the generic
    arm before milestone 2, and an old-shaped TTS `RuntimeError`
