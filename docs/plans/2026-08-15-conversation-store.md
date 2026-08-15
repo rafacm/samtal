@@ -717,6 +717,150 @@ New coverage, by milestone:
 - Per-user and per-agent storage switches, v3, shaped-for and not
   built, as the issue requires.
 
+## Plan review round
+
+One external review of the plan as first committed (88c60d1): codex
+CLI 0.147.0, model gpt-5.6-sol, read-only against this repository
+with the issue #120 body supplied, 2026-08-15. Verdict: not ready
+as first committed; the P1 findings include contradictions with
+settled issue decisions and write/read designs that could not meet
+their stated contracts. Findings as received, condensed; each
+carries its resolution once the amendment addressing it lands.
+
+1. **P1: the plan removes a settled privacy switch.** The issue
+   requires separate store-enabled, metrics-storage and
+   text-storage controls; the plan collapses enabled and metrics
+   into one switch, making content-only storage with metrics
+   disabled unrepresentable.
+2. **P1: per-user deletion is not designed.** The issue revision
+   and the ADR require records keyed by session and user and
+   deletion by user; the plan substitutes device deletion, offers
+   only `--session`, `--device` and `--before`, and the schema has
+   no ownership field. Introduce an ownership seam or distinguish
+   future-shaped ownership from deletion enforceable today.
+3. **P1: attaching after the hello misses an existing session
+   event.** The runtime is constructed at `device/session.py:310`
+   and its agent activation emits `prompt_assembled` before the
+   proposed attach at `:318`; the capture-based comparison cannot
+   catch this because the capture is attached after that emission
+   too. Attach or buffer earlier, or scope the claim.
+4. **P1: a global "next marker" cannot provide per-session turn
+   commits.** With one queue, session A's marker commits session
+   B's incomplete work, or inserting as records arrive holds a
+   write transaction across the inter-turn interval. Require
+   per-session in-memory batches and one short transaction per
+   marker, with an interleaved two-session test.
+5. **P1: queue markers can be dropped, invalidating the store's
+   completeness claims.** All item types share the bounded
+   `put_nowait` queue, so `Open`, `Turn` or `Close` can be
+   rejected, and a dropped `Close` cannot persist the promised
+   drop count. Define a non-droppable control path, transaction
+   rollback behavior, and the semantics when closure cannot be
+   persisted.
+6. **P1: purging beside a live writer is not safe as claimed.**
+   The purge CLI is a second writer; purging an active session
+   lets queued records recreate children without a parent or lets
+   the close update affect no row. Serialize through the writer
+   with tombstones, or refuse active sessions, or guarantee queued
+   content cannot reappear, with resurrection tests.
+7. **P2: right-to-delete lacks physical-erasure semantics for
+   SQLite WAL.** Ordinary deletes leave text in freelist pages and
+   old WAL frames. State whether deletion is query-level or
+   physical; for physical, specify `secure_delete`, checkpoint and
+   truncation behavior, and sentinel checks over the database and
+   sidecar files.
+8. **P1: the cursor DDL does not guarantee monotonic, never-reused
+   identifiers.** A plain `INTEGER PRIMARY KEY` reuses the deleted
+   maximum rowid, especially after retention. Require SQLite
+   `AUTOINCREMENT` (the SQLAlchemy table option) and test
+   delete-maximum, reopen, insert.
+9. **P1: the proposed read mode contradicts the repository's WAL
+   implementation.** `db/__init__.py` uses URI `mode=rw` because a
+   WAL reader may create or extend `-shm`; `mode=ro` cannot serve
+   a live WAL database reliably. Parameterize the existing
+   read-engine behavior instead, with a read-during-active-WAL
+   test.
+10. **P2: a disabled store can expose an unmigrated historical
+    database.** Reads serve an existing file while migration only
+    runs when the enabled store is constructed, so an upgrade with
+    recording disabled serves an old schema. Migrate any existing
+    conversations database at boot without creating one, and test
+    a disabled boot against a prior revision.
+11. **P1: milestone 2 publishes a misleading, incomplete enabled
+    feature.** Every merge publishes an image; the milestone that
+    ships `enabled` and `text: true` stores no conversation
+    content because the content path lands a milestone later. Move
+    construction, public configuration and documentation to land
+    with the complete content path.
+12. **P1: the required TTS timing has been deferred contrary to
+    the issue.** The issue settles that turn rollups contain ASR,
+    LLM and TTS timings; the plan's schema has none and defers it.
+    Define and instrument a success-path TTS latency at the
+    provider boundary, state its null semantics, and store it.
+13. **P1: tool classification is neither closed nor leak-safe at
+    the real decision sites.** `_dispatch` handles malformed calls
+    before routing and has an unknown fallback; `switch_agent`
+    bypasses `_dispatch` entirely; and the narrowing retains
+    device tool names, which are peer-controlled far-side bytes.
+    Centralize classification before execution covering malformed,
+    unknown, handover, builtin, device and MCP paths, record
+    handover results, preserve call positions, and emit only
+    trusted source metadata, with sentinels in every branch.
+14. **P1: provider and model vocabulary contradicts the settled
+    GenAI decision.** The issue requires token counts and
+    model/provider identifiers in turns and events to use the
+    adapted `gen_ai.*` vocabulary; the plan renames only token
+    counts, stores no model identity, and per-round attribution
+    can collapse different agents and models into one ambiguous
+    total.
+15. **P1: routes registered only by `build_api` will be absent
+    from OpenAPI.** `document()` builds `_application()` directly,
+    so routes registered in `build_api` never reach the committed
+    document, and the exact route inventory in
+    `test_api_openapi.py` must change. Register routes
+    unconditionally in `_application` and update the tests
+    explicitly.
+16. **P2: writer lifecycle cleanup is not guaranteed.** The
+    lifespan performs startup work before its `try`, so a startup
+    failure can bypass cleanup, and tests that never enter the
+    lifespan can leak the thread. Start inside a guarded region,
+    make stop idempotent and time-bounded, and test startup
+    failure, wedged shutdown, and repeated cleanup.
+17. **P2: `conversations_disabled` violates disabled-mode
+    compatibility.** The acceptance criteria require absent or
+    disabled behavior to remain byte-for-byte unchanged; a new
+    event when the section is present and off breaks that. Remove
+    it.
+18. **P2: close-reason selection lacks deterministic state and a
+    guaranteed close path.** Competing shutdown causes have no
+    precedence rule, and the close path awaits three operations
+    before `session_closed`, so a cleanup exception prevents both
+    the event and the store's close. Specify a first-cause-wins
+    latch and individually guarded cleanup.
+19. **P2: the schema reference generator cannot document the
+    promised event contract.** `events.fields` is opaque JSON, so
+    a column-metadata renderer cannot derive event names or their
+    fields. Provide a declared event-vocabulary input, or a
+    checked inventory tied to emit sites, or name where that
+    authority lives.
+20. **P2: the wheel verification omits the new migration chain.**
+    The installed-wheel CI step proves only the primary database's
+    migrations ship. Extend it to open `conversations.db` from the
+    packaged helper and assert its revision and DDL.
+21. **P2: the stated inventory and pin strategy are not
+    reliable.** The token grep also matches `Usage` and provider
+    adapters; "pins move in the same commit" is not
+    pin-before-reshape on its own; and stale transcript-store
+    claims in `events.py` and `config/models.py` survive the
+    narrowing. Scope the inventories, state the characterization
+    baseline, and update every stale claim in the narrowing.
+22. **P2: the wedged-writer latency test cannot establish the
+    claimed guarantee.** "Indistinguishable latency" is noisy and
+    can pass despite event-loop blocking. Combine a structural
+    nonblocking-enqueue assertion, a gated writer, an event-loop
+    heartbeat, and a fixed completion bound, with separate
+    deterministic queue-full and marker tests.
+
 ## Milestones
 
 One PR per milestone, ticked with its PR number, each linking to
