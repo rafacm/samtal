@@ -7,6 +7,26 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-08-15
 
+### Changed
+
+- **The egress guarantee is one rule, and a provider's marking is
+  mandatory** (#136): the `server.local_only` enforcement behind the
+  local-first promise lived in two places, the provider registry and
+  the MCP build path, each with its own semantics, wording and
+  exception type. Both now call `samtal_server/egress.py`, which holds
+  the rule and every refusal sentence unchanged, word for word,
+  including the provider messages' "off this host" and the MCP ones'
+  "off this network"; each call site keeps only the exception type its
+  surface promises. The registry no longer defaults an undeclared
+  provider type to egress, and the `Provider` base no longer carries
+  `egress = True`: every provider class declares its own marking in its
+  own class body, inheriting one from a parent does not count, and a
+  class that declared nothing or declared something other than true,
+  false or null is refused when it is built, in any mode, with a
+  message naming the class and not the value. Operator-visible
+  behavior is unchanged for every declared provider and MCP entry; the
+  new refusals can only be reached by code adding a provider type.
+
 ### Fixed
 
 - **A session test's synthesis fixtures pass a real failure callback**
