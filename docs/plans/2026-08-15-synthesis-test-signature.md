@@ -217,8 +217,9 @@ resolution once the amendment addressing it lands.
 
 ## Milestones
 
-- [ ] **Fix the two _Synthesis constructions and pin the callback's
-  silence** (PR TBD): both constructions pass a shared recording
+- [x] [**Fix the two _Synthesis constructions and pin the callback's
+  silence**](2026-08-15-synthesis-test-signature-implementation.md#milestone-1-fix-the-two-_synthesis-constructions-and-pin-the-callbacks-silence)
+  (PR TBD): both constructions pass a shared recording
   callback with the spelled-out `(BaseException, float)` signature;
   the test asserts `failures == []`; the wrong-reason check is run
   both ways against a failing TTS and recorded in the
