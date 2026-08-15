@@ -152,3 +152,20 @@ The bytecode trap in `AGENTS.md` does not apply to any of this:
 everything above ran through pytest, whose `conftest.py` writes no
 bytecode and clears the caches it finds, and no file was restored
 mid-run.
+
+### PR #148 review round
+
+One external review of the PR diff (codex CLI, model gpt-5.6-sol,
+read-only, 2026-08-15), posted on the PR by the review run itself.
+Verdict: mergeable after the listed fix. One finding:
+
+1. **P2: stale coverage claim contradicts the adopted plan
+   resolution.** The plan's scope-creep risk paragraph still said
+   the invoked callback arm is covered by `test_tts_lookahead.py`,
+   which only checks propagation and cleanup; the plan's own review
+   round had already placed the callback-observing coverage in
+   `test_session_events.py`. Fixed in a652faf: the paragraph now
+   cites each test for what it covers.
+
+No code was touched by the round; the finding was documentation
+consistency inside the plan.
