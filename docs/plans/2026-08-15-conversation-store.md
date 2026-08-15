@@ -929,8 +929,8 @@ New coverage, by milestone:
   one; `session_closed` carries its token at each of the five
   sites and close updates the row; the four switch combinations at
   the row level end to end, with the text-off sentinel absent from
-  the file's bytes; the wedged-writer acceptance as specified in
-  the write-path section.
+  the file's bytes; the wedged-writer acceptance in its three
+  deterministic parts as specified in the risks section.
 - **Unit, milestone 4**: the three routes' round trips through the
   acceptance seam; pagination edges (empty store, one page, exact
   boundary, cursor beyond the end); the device filter; 404 without
@@ -947,9 +947,19 @@ New coverage, by milestone:
 
 - **The writer thread against the session loop.** All producer
   paths are `put_nowait` plus in-memory assembly; nothing on the
-  loop waits on the store. The wedged-writer test measures reply
-  latency under a locked database rather than asserting an
-  implementation detail.
+  loop waits on the store. The wedged-writer acceptance is
+  deterministic rather than a noisy latency comparison, in three
+  parts: a structural test asserts every producer-side store call
+  is nonblocking (the sink's public surface offers nothing that
+  can wait, and a spy queue whose blocking `put` raises proves no
+  path reaches one); the behavioral test gates the writer (parked
+  on an injected event, the same seam a locked database exercises)
+  while a scripted conversation runs with an event-loop heartbeat
+  task asserting the loop was never blocked beyond its tick and
+  the replies complete within a fixed bound; and separate
+  deterministic cases drive the queue-full drop path and the
+  failed-marker path through the injected queue and a raising
+  engine.
 - **Two sources of one truth.** Turns are assembled by the pipeline
   while events flow through the tap, and the two could drift. The
   milestone 3 integration test cross-checks a conversation's turn
@@ -1273,6 +1283,13 @@ carries its resolution once the amendment addressing it lands.
     nonblocking-enqueue assertion, a gated writer, an event-loop
     heartbeat, and a fixed completion bound, with separate
     deterministic queue-full and marker tests.
+    *Resolution*: adopted. The risk entry now specifies the three
+    deterministic parts: the structural nonblocking assertion
+    through a spy queue whose blocking `put` raises, the
+    gated-writer run under an event-loop heartbeat with a fixed
+    completion bound, and separate queue-full and failed-marker
+    cases through injected seams. The milestone 3 list references
+    this specification.
 
 ## Milestones
 
