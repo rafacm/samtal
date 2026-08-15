@@ -42,13 +42,18 @@ class DeviceGone(RuntimeError):
     """The device disconnected while the runtime was speaking to it.
 
     Raised by the edge in place of the transport's own disconnect, so a
-    runtime never imports starlette to catch one. It subclasses
-    `RuntimeError` deliberately: every site that must swallow a vanished
-    device already catches `RuntimeError` broadly, so this wraps what
-    those sites catch rather than narrowing it. The consequence is
-    accepted and stated in the ADR: a broad `RuntimeError` catch also
-    swallows a vanished device, which is exactly how those sites treat
-    the transport's disconnect today.
+    runtime never imports starlette to catch one. The edge translates
+    both of the shapes a starlette socket produces, the disconnect it
+    saw and the bare `RuntimeError` it raises for a send that came after
+    the close, so a runtime catching this type alone catches every
+    vanished device (#137). The reply body does exactly that.
+
+    It still subclasses `RuntimeError`, which is what the sites that
+    stayed broad rely on: the closing `tts stop` pair and the filler
+    playback both suppress `RuntimeError` around a device send, and this
+    falls inside what they already swallow. The consequence is accepted
+    and stated in the ADR: a broad `RuntimeError` catch also swallows a
+    vanished device, which at those two sites is what is wanted.
     """
 
 

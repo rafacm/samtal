@@ -122,18 +122,6 @@ def provider_fields(stage: str, provider: object) -> dict[str, Any]:
     return fields
 
 
-def is_timeout(exc: BaseException) -> bool:
-    """Whether a provider failure was a wait rather than an answer.
-
-    Decided by class name as well as by type, because every SDK has its
-    own: `asyncio.TimeoutError` is the builtin `TimeoutError`, but
-    `openai.APITimeoutError` is an `APIConnectionError` and
-    `httpx.TimeoutException` inherits from neither. Nothing hangs on
-    getting it right beyond the wording of one sentence, since the
-    event carries the exact class either way."""
-    return isinstance(exc, TimeoutError) or "Timeout" in type(exc).__name__
-
-
 class FirstTokenTimeout(TimeoutError):
     """The LLM produced nothing within the first-token watchdog window,
     twice in a row. The class name is what the `provider_failed` event
@@ -533,7 +521,16 @@ class PipelineRuntime:
     ) -> None:
         """One `provider_failed` event, and the sentence that goes with
         it. A timeout is worded as one, because where traffic is
-        dropped rather than refused the whole symptom is a wait."""
+        dropped rather than refused the whole symptom is a wait.
+
+        Which failure is a wait is a question of type. Every provider
+        raises `ProviderCallTimeout` for its SDK's timeouts and that is
+        a `TimeoutError`, as are `asyncio.TimeoutError` and the
+        watchdog's own `FirstTokenTimeout`, so one `isinstance` covers
+        the lot (#137). It used to be decided by looking for "Timeout"
+        in the class name, because the SDKs' own classes agreed on
+        nothing: `openai.APITimeoutError` is an `APIConnectionError` and
+        `httpx.TimeoutException` inherits from neither."""
         fields = provider_fields(stage, provider)
         named = f' "{fields["provider"]}"' if "provider" in fields else ""
         where = f" reaching {fields['host']}" if "host" in fields else ""
@@ -542,7 +539,7 @@ class PipelineRuntime:
             self.session_id,
             stage,
             named,
-            "timed out" if is_timeout(exc) else "failed",
+            "timed out" if isinstance(exc, TimeoutError) else "failed",
             elapsed,
             where,
             type(exc).__name__,
@@ -680,8 +677,14 @@ class PipelineRuntime:
                 self._turns.append(Turn("user", transcript))
                 self._arm_filler()
                 await self._speak_reply(transcript, spoken)
-        except (DeviceGone, RuntimeError):
-            return  # the device went away mid-reply
+        except DeviceGone:
+            # The device went away mid-reply. Only this type: the edge
+            # translates both of the transport's disconnect shapes into
+            # it, so a bare `RuntimeError` arriving here is a bug in
+            # this process (#137) and belongs under "reply failed" with
+            # its traceback rather than being read as a disconnect and
+            # returned on in silence.
+            return
         except asyncio.CancelledError:
             # A barge-in or an abort is cancelling this reply, and the
             # filler is reply audio: it dies with the reply rather than
@@ -711,6 +714,10 @@ class PipelineRuntime:
                     said,
                     extra=self._events.event("replied", agent=self._agent, text=said),
                 )
+            # Broad on purpose, and narrow in what it covers: the one
+            # statement inside is a device send, so the `RuntimeError`
+            # half can only be the transport's, and this closing pair
+            # is not worth a report whichever way it fails.
             with contextlib.suppress(DeviceGone, RuntimeError):
                 # A reply that never spoke still sends the pair. The
                 # device leaves its speaking state on `tts stop`, and in
@@ -1444,6 +1451,13 @@ class PipelineRuntime:
             )
             await self._output.send_audio(batch)
         except (DeviceGone, RuntimeError):
+            # Broader than the reply body's, and knowingly so. The `try`
+            # above covers resampling, encoding and the encoder flush as
+            # well as the send, so the `RuntimeError` half can still be
+            # a local bug swallowed as a disconnect. Narrowing it means
+            # deciding what a filler that fails to encode should do,
+            # which is the filler path's own question and belongs to
+            # #141 rather than to #137.
             return
         except asyncio.CancelledError:
             raise
