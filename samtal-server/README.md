@@ -1755,7 +1755,7 @@ and `device`, plus its own:
 | `session_idle`     | the idle timeout hangs up on a realtime session | `idle_s`, `duration_s`     |
 | `session_closed`   | a conversation ends             | `duration_s`                       |
 | `session_rejected` | a device is turned away         | `reason`                           |
-| `auth_rejected`    | a handshake is refused          | `reason`                           |
+| `auth_rejected`    | a handshake is refused          | `reason`; no device, since nothing is authenticated yet and the Device-Id header is whatever the caller sent |
 | `drain_started`    | a shutdown begins draining      | `sessions`, `timeout_s`            |
 | `drain_finished`   | every reply finished speaking   | `sessions`                         |
 | `drain_incomplete` | a reply was cut, or a session hung | `cut_mid_reply`, `unfinished`   |

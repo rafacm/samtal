@@ -120,7 +120,12 @@ def test_a_refusal_is_logged_as_an_auth_rejection(
 
     (rejected,) = [r for r in caplog.records if getattr(r, "event", None) == "auth_rejected"]
     assert rejected.reason == "no_token"
-    assert rejected.device == DEVICE_MAC.lower()
+    # No device, and none in the sentence either. Nothing is
+    # authenticated when this line is written, so the Device-Id header
+    # is a string whoever opened the socket chose (the PR #153 review);
+    # the reason token is this server's own word and is what is left.
+    assert rejected.device is None
+    assert DEVICE_MAC.lower() not in rejected.getMessage()
 
 
 def test_a_bad_token_is_never_logged(caplog: pytest.LogCaptureFixture) -> None:

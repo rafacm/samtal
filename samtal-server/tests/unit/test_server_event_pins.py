@@ -1091,27 +1091,66 @@ def test_capture_disabled(caplog: pytest.LogCaptureFixture) -> None:
 # --- ws.py: the two handshakes that never became sessions -------------
 
 
-def test_auth_rejected(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level("WARNING"):
+def refused_handshake(
+    token: str | None, device_id: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """One handshake that never becomes a session, with the Device-Id of
+    the caller's choosing."""
+    with caplog.at_level("DEBUG"):
         with TestClient(create_app(config_with_agent())) as client:
             with pytest.raises(WebSocketDisconnect):
-                with handshake(client, device_headers(None)):
+                with handshake(client, device_headers(token, device_id)):
                     pass
+
+
+def test_auth_rejected(caplog: pytest.LogCaptureFixture) -> None:
+    """No device, and a sentence with nothing of the request in it (the
+    PR #153 review). Nothing is authenticated at this point, so the
+    Device-Id header is a string whoever opened the socket chose."""
+    refused_handshake(None, DEVICE_MAC, caplog)
 
     assert pinned(only(caplog, "auth_rejected")) == {
         "logger": "samtal_server.ws",
         "level": logging.WARNING,
-        "template": "refused a websocket handshake from %s: %s",
-        "args": (RESOLVED, "no_token"),
-        "sentence": f"refused a websocket handshake from {RESOLVED}: no_token",
-        "fields": {"event": "auth_rejected", "device": RESOLVED, "reason": "no_token"},
+        "template": "refused a websocket handshake from an unidentified client: %s",
+        "args": ("no_token",),
+        "sentence": "refused a websocket handshake from an unidentified client: no_token",
+        "fields": {"event": "auth_rejected", "device": None, "reason": "no_token"},
     }
+
+
+@pytest.mark.parametrize(
+    ("token", "reason"),
+    [(None, "no_token"), ("a-token-this-server-never-issued.1700000000", "bad_token")],
+)
+def test_a_refused_handshakes_device_id_reaches_nothing(
+    token: str | None, reason: str, caplog: pytest.LogCaptureFixture, tap: Consumer
+) -> None:
+    """The sentinel for both refusals. This endpoint is reachable by
+    anything that finds it, and a caller who is turned away can retry as
+    fast as the socket opens, so a header echoed here is a value of
+    their choosing written into the retained surface once per attempt."""
+    refused_handshake(token, SENTINEL, caplog)
+
+    rejected = only(caplog, "auth_rejected")
+    assert rejected.reason == reason
+    assert SENTINEL not in rejected.getMessage()
+    assert SENTINEL not in str(rejected.args)
+    assert SENTINEL not in str(payload_of(rejected))
+    assert SENTINEL not in logged(caplog)
+    assert tap.saw("auth_rejected"), "it reached no tap at all, so this proves nothing"
+    assert SENTINEL not in tap.rendered()
+    assert payload_of(rejected)["device"] is None
 
 
 def test_session_rejected_at_capacity(caplog: pytest.LogCaptureFixture) -> None:
     """The other half of `session_rejected`: the edge emits three of
     them on the session channel, and this one is the server's, on the
-    websocket router's own channel and with no session behind it."""
+    websocket router's own channel and with no session behind it.
+
+    This one does name the device, and may: capacity is checked after
+    the token, so by here the header is one the token verified against
+    rather than a name a stranger sent."""
     config = config_with_agent()
     config.server.limits.max_sessions = 1
 
