@@ -14,6 +14,7 @@ from samtal_server.config.models import ProviderConfig
 from samtal_server.providers.base import (
     LlmEvent,
     LlmProvider,
+    ProviderCallError,
     StreamStarted,
     TextDelta,
     ToolCall,
@@ -26,9 +27,15 @@ from samtal_server.providers.kit import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_TIMEOUT_S,
     MAX_RETRIES,
+    REQUEST_FAILURES,
+    call_failure,
     resolve_api_key,
 )
 from samtal_server.providers.registry import OptionsReader
+
+# How this provider names itself in the message a failed request
+# carries.
+LABEL = "anthropic"
 
 # The one host this type reaches; it has no base_url to point anywhere
 # else.
@@ -135,25 +142,43 @@ class AnthropicLlm(LlmProvider):
         if tools:
             request["tools"] = anthropic_tools(tools)
             request["tool_choice"] = {"type": tool_choice}
-        async with self._client.messages.stream(**request) as stream:
-            # The stream's own events rather than its text_stream view,
-            # because text_stream hides everything that is not a text
-            # delta: a round streaming only tool-call fragments would
-            # yield nothing at all until the end, and the session's
-            # first-token watchdog could not tell it from a request the
-            # API never answered (#68). The first event off the wire is
-            # announced whatever it holds.
-            started = False
-            async for event in stream:
-                if not started:
-                    started = True
-                    yield StreamStarted()
-                if event.type == "content_block_delta" and event.delta.type == "text_delta":
-                    yield TextDelta(event.delta.text)
-            # Tool calls come from the assembled message rather than the
-            # deltas: their arguments arrive as JSON fragments, and the
-            # SDK has already stitched them together by this point.
-            message = await stream.get_final_message()
+        # Everything that waits on the wire is inside: the request, the
+        # events after it, and the assembled message at the end are
+        # three separate places this API can stop answering, and all
+        # three are a failed provider call rather than a bug here.
+        # Cancellation and genuine bugs are outside REQUEST_FAILURES and
+        # pass through as themselves.
+        failure: ProviderCallError | None = None
+        try:
+            async with self._client.messages.stream(**request) as stream:
+                # The stream's own events rather than its text_stream
+                # view, because text_stream hides everything that is not
+                # a text delta: a round streaming only tool-call
+                # fragments would yield nothing at all until the end,
+                # and the session's first-token watchdog could not tell
+                # it from a request the API never answered (#68). The
+                # first event off the wire is announced whatever it
+                # holds.
+                started = False
+                async for event in stream:
+                    if not started:
+                        started = True
+                        yield StreamStarted()
+                    if event.type == "content_block_delta" and event.delta.type == "text_delta":
+                        yield TextDelta(event.delta.text)
+                # Tool calls come from the assembled message rather than
+                # the deltas: their arguments arrive as JSON fragments,
+                # and the SDK has already stitched them together by this
+                # point.
+                message = await stream.get_final_message()
+        except REQUEST_FAILURES as exc:
+            failure = call_failure(LABEL, exc)
+        # Raised out here rather than in the except arm, so the SDK
+        # exception is not even the new error's `__context__`: `from
+        # None` suppresses its rendering but leaves it reachable, and
+        # what it can carry is the reason the message is metadata only.
+        if failure is not None:
+            raise failure from None
         for block in message.content:
             if block.type == "tool_use":
                 yield ToolCall(id=block.id, name=block.name, arguments=dict(block.input or {}))
