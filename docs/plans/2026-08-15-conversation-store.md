@@ -213,10 +213,22 @@ than a migration, and preclude nothing:
   member reads only their own devices' sessions" is a WHERE clause,
   and a stricter per-user storage switch is a layer above the
   deployment-wide one.
-- The right-to-delete unit is already a session and a device: the
-  purge command takes `--session`, `--device` and `--before`, so
-  "delete what the guest said" is deletable today at session
-  granularity without waiting for user identity.
+- The right-to-delete unit is a session and a user. Sessions are
+  deletable directly (`--session`). Users do not exist in this
+  system yet anywhere, so a stored ownership column would be a
+  guess at v3's data model, exactly the half-built per-family
+  shape the #86 plan refused for `agent_defaults`; when v3 users
+  arrive they own devices (the product decision this issue's
+  revision records), so "delete a user's history" is the purge of
+  that user's devices, composed through the ownership mapping that
+  will live where users live, with no migration of this store. The
+  honest limit is stated rather than papered over: on a shared
+  device, attributing a session to one member of the household
+  needs voiceprint identification (the product vision's v3
+  territory), and until then the enforceable per-user deletion is
+  per-session deletion, which is why `--session` exists and why
+  the session id is surfaced everywhere (the read API, the capture
+  correlation, the events).
 - Nothing aggregates across devices or builds profiles keyed to a
   person; the schema holds conversations, not people.
 - The deployment-wide switches are the only policy layer this
@@ -768,6 +780,17 @@ carries its resolution once the amendment addressing it lands.
    only `--session`, `--device` and `--before`, and the schema has
    no ownership field. Introduce an ownership seam or distinguish
    future-shaped ownership from deletion enforceable today.
+   *Resolution*: adopted in its second form; the ownership-column
+   prescription is declined with reasons. No user exists anywhere
+   in the system yet, so a stored owner would be a guess at v3's
+   data model, the half-built shape #86 refused for
+   `agent_defaults`. The household section now states the
+   composition precisely: v3 users own devices, so user deletion
+   is the purge of the user's devices through the mapping that
+   will live where users live, no store migration required; and
+   the enforceable per-user unit today is the session, with the
+   shared-device attribution limit (voiceprint, v3) stated out
+   loud instead of implied away.
 3. **P1: attaching after the hello misses an existing session
    event.** The runtime is constructed at `device/session.py:310`
    and its agent activation emits `prompt_assembled` before the
