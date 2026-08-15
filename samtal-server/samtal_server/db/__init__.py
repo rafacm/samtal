@@ -187,9 +187,11 @@ def existing_engine(
 
     @event.listens_for(engine, "begin")
     def _begin(connection: object) -> None:
-        # Spelled out rather than left to the default, because the
-        # default for this project is the immediate one above and the
-        # difference is the reason this engine exists.
+        # Spelled out rather than left to the default, because a read
+        # taking no lock is the reason this engine exists at all and it
+        # is not what the rest of the project does. Under WAL a deferred
+        # transaction that only reads takes no lock and reads the last
+        # committed snapshot, so a write in progress cannot stall it.
         statement = "BEGIN IMMEDIATE" if immediate else "BEGIN"
         connection.exec_driver_sql(statement)  # type: ignore[attr-defined]
 
