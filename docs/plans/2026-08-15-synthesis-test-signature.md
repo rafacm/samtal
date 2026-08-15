@@ -81,11 +81,16 @@ the honest one for this test: its subject is what counts as spoken,
 not how failure is reported.
 
 The invoked arm already has real coverage where it belongs:
-`tests/unit/test_tts_lookahead.py` exercises the failing-sentence
-path end to end through the pipeline
-(`test_a_failing_sentence_still_lets_the_earlier_ones_be_heard`),
-which passes the pipeline's real callback. No new failure-path test
-is added here: duplicating that coverage against a directly
+`tests/unit/test_session_events.py` observes the callback's effect
+end to end through the pipeline
+(`test_a_failing_tts_provider_is_reported_as_the_tts`, and the
+assertion that the failure is reported exactly once), so a `_drain`
+that stopped calling `_report_failure` fails there.
+`tests/unit/test_tts_lookahead.py`'s
+`test_a_failing_sentence_still_lets_the_earlier_ones_be_heard`
+covers the ordered failure propagation and cleanup around the same
+path, without observing the callback. No new failure-path test is
+added here: duplicating the events coverage against a directly
 constructed `_Synthesis` would pin the private constructor harder
 for no new information. If the review disagrees, that is a plan
 question, not an implementation one.
@@ -197,6 +202,10 @@ resolution once the amendment addressing it lands.
    once-only assertion, ~500 and ~523). Cite that, and describe
    the lookahead test as covering ordered failure propagation and
    cleanup only.
+   *Resolution*: adopted. The invoked-arm citation now points at
+   `test_session_events.py`'s two assertions, and the lookahead
+   test is described as covering propagation and cleanup without
+   observing the callback.
 3. **P3: the production caller passes an adapter lambda, not a
    bound method.** `speak_after` receives
    `lambda exc, elapsed: self._provider_failed("tts", tts, exc, elapsed)`
