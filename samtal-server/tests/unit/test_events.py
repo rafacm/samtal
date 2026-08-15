@@ -80,17 +80,26 @@ class Vandal:
 
 
 class CaptureSpy:
-    """The capture's own surface and nothing else, which is all
-    `CaptureTap` uses: it also reads the log as it is being told, which
-    is what turns "before the record exists" into an assertion rather
-    than a claim about source order."""
+    """The capture's own surface and nothing else, which is what
+    `SessionRecording` describes: a real `SessionCapture` is not needed
+    here, and the protocol is what says so. It also reads the log as it
+    is being told, which is what turns "before the record exists" into
+    an assertion rather than a claim about source order."""
 
     def __init__(self, caplog: pytest.LogCaptureFixture) -> None:
         self._caplog = caplog
         self.seen: list[tuple[dict, float, int]] = []
+        self.samples: list[tuple[float, bool, bool, float]] = []
+        self.drops: list[tuple[str, float]] = []
 
     def event(self, payload: dict, at: float) -> None:
         self.seen.append((payload, at, len(self._caplog.records)))
+
+    def vad(self, speech_ms: float, listening: bool, replying: bool, now: float) -> None:
+        self.samples.append((speech_ms, listening, replying, now))
+
+    def dropped(self, reason: str, now: float) -> None:
+        self.drops.append((reason, now))
 
 
 def payload_of(record: logging.LogRecord) -> dict:
@@ -148,7 +157,7 @@ def test_the_log_is_the_last_consumer_told(caplog: pytest.LogCaptureFixture) -> 
     spy = CaptureSpy(caplog)
 
     with caplog.at_level("INFO"):
-        events.attach_capture(spy)  # type: ignore[arg-type]
+        events.attach_capture(spy)
         events.info("something %s", "happened", event="heard", text="hello")
 
     (payload, _, records_at_the_time) = spy.seen[0]
@@ -164,7 +173,7 @@ def test_the_capture_detaches_and_the_events_carry_on(caplog: pytest.LogCaptureF
     spy = CaptureSpy(caplog)
 
     with caplog.at_level("INFO"):
-        events.attach_capture(spy)  # type: ignore[arg-type]
+        events.attach_capture(spy)
         events.info("recorded", event="one")
         events.detach_capture()
         events.info("not recorded", event="two")
