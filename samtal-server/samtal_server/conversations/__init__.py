@@ -11,7 +11,8 @@ The pieces, in the order they are met:
 - `schema.py`: the tables, every column carrying the comment the
   reference is rendered from.
 - `records.py`: `TurnRecord` and `ToolInvocation`, what the pipeline
-  hands over per completed turn.
+  hands over per completed turn, and the recorder seam it hands them
+  through.
 - `store.py`: the writer thread, its queue, retention and the purge
   helper.
 - `docgen.py`: the reference renderer behind
@@ -25,7 +26,14 @@ which an operator can turn recording on is the first in which it does
 everything its documentation says.
 """
 
-from samtal_server.conversations.records import ToolInvocation, TurnLeg, TurnRecord
+from samtal_server.conversations.records import (
+    SessionTurns,
+    ToolInvocation,
+    TurnLeg,
+    TurnRecord,
+    TurnRecorder,
+    TurnStore,
+)
 from samtal_server.conversations.store import (
     DATABASE_FILENAME,
     ConversationStore,
@@ -38,9 +46,12 @@ from samtal_server.conversations.store import (
 __all__ = [
     "DATABASE_FILENAME",
     "ConversationStore",
+    "SessionTurns",
     "ToolInvocation",
     "TurnLeg",
     "TurnRecord",
+    "TurnRecorder",
+    "TurnStore",
     "conversations_path",
     "open_conversations",
     "purge",
