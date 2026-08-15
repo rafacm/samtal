@@ -42,8 +42,9 @@ PING_TIMEOUT_S = 20.0
 # wait for but sockets that would not go.
 UVICORN_GRACEFUL_SHUTDOWN_S = 5
 
-# The first word that means "configure, do not serve".
+# The first words that mean "do this, do not serve".
 CONFIG_COMMAND = "config"
+CONVERSATIONS_COMMAND = "conversations"
 
 
 class DrainingServer(uvicorn.Server):
@@ -141,6 +142,15 @@ def main() -> None:
         from samtal_server.config import cli
 
         raise SystemExit(cli.main(sys.argv[2:]))
+
+    if sys.argv[1:2] == [CONVERSATIONS_COMMAND]:
+        # The second group, dispatched the same way and for the same
+        # reasons. It has to work when the server will not start, which
+        # is the whole point of a purge command, so it reaches nothing
+        # here beyond the file half of the configuration.
+        from samtal_server.conversations import cli as conversations_cli
+
+        raise SystemExit(conversations_cli.main(sys.argv[2:]))
 
     parser = argparse.ArgumentParser(prog="samtal-server")
     parser.add_argument(
