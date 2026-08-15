@@ -362,10 +362,11 @@ untouched; only module-level exception classes are added.
 - **The event `error` field changes for real deployments.** Wrapped
   SDK failures now report the taxonomy class where they reported
   `APITimeoutError` before. This is the issue's stated intent
-  (classify by type), the SDK class stays in the message and
-  `__cause__`, and no committed assertion pins the old names for
-  wrapped paths; the CHANGELOG entry says it out loud for anyone
-  querying retained logs.
+  (classify by type), the SDK class name survives as metadata in the
+  message (and only there: the review round's finding 1 keeps the SDK
+  exception out of the chain entirely, `__cause__` included), and no
+  committed assertion pins the old names for wrapped paths; the
+  CHANGELOG entry says it out loud for anyone querying retained logs.
 - **Narrowing the catch surfaces latent bare RuntimeErrors.** If
   some device-edge path raises bare `RuntimeError` where the edge
   should raise `DeviceGone`, it now logs "reply failed" with a
