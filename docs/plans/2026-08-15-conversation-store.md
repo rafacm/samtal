@@ -368,14 +368,22 @@ lifespan's `finally` (`app.py:49-54`): stop accepts no new records,
 drains what is queued under a bound, commits, joins the thread and
 disposes the engine.
 
-The queue is a `queue.Queue` bounded at 1024 records (a named
-constant with this reason beside it: a turn produces tens of
-records, so the bound is minutes of backlog; a queue that deep
-means the database is wedged and dropping is the contract,
-decision 4). Producers only ever `put_nowait`: the session loop
-never blocks on the store, which is the whole of the off-audio-path
-guarantee, and it holds whether the database is locked, the disk is
-full, or the writer is dead.
+The queue is unbounded and the bound lives on the droppable class:
+producers only ever `put_nowait`, so the session loop never blocks
+on the store, which is the whole of the off-audio-path guarantee,
+and it holds whether the database is locked, the disk is full, or
+the writer is dead. `Event` records are the droppable class,
+bounded by a producer-side in-flight count of 1024 (a named
+constant with its reason beside it: a turn produces tens of event
+records, so the bound is minutes of backlog, and a backlog that
+deep means the database is wedged and dropping is the contract,
+decision 4). `Open`, `Turn` and `Close` are control records and
+are never dropped at the queue: they are the store's structural
+truth, they arrive at human conversational pace (one `Turn` per
+utterance, one `Open` and `Close` per session), so accepting them
+unconditionally is bounded by the same thing that bounds sessions
+themselves, and a dropped `Close` would make the store unable to
+record its own incompleteness.
 
 Queue items are typed: `Open` (session id, opened-at reading, the
 manifest dict), `Event` (session id, `t_ms`, name, level, fields),
@@ -400,18 +408,25 @@ construction that cannot happen from the real call sites, since
 `Open` is enqueued before the runtime can produce anything, on the
 same loop.
 
-Failure behavior, all of it metadata-only: a full queue drops the
-record, increments the session's drop count, and emits
-`conversations_dropped` (warning, the session id, once per session
-at the first drop); the total lands on the session row's `dropped`
-column at close, so the store records its own incompleteness the
-way the capture manifest records `complete`. A writer-side database
-failure logs `conversations_failed` (warning, the exception class
-name and nothing else) and drops the batch; the writer keeps
-consuming. No exception text, no SQL, no row content reaches any
-log, event field, or exception chain that leaves the store; the
-sanitized report is built in the `except` arm from the class name
-alone.
+Failure behavior, all of it metadata-only: an event beyond the
+in-flight bound is dropped at the producer, the session's drop
+count increments, and `conversations_dropped` is emitted (warning,
+the session id, once per session at the first drop); the total
+lands on the session row's `dropped` column at close, so the store
+records its own incompleteness the way the capture manifest
+records `complete`. A marker transaction that fails rolls back
+atomically (SQLite's transaction is the unit); the batch it was
+writing is dropped and counted, `conversations_failed` is emitted
+(warning, the exception class name and nothing else), and the
+writer keeps consuming. When the failed transaction was the
+`Close` itself, the session row stays open-shaped (`closed_at`
+null), which is the store's documented incomplete-session state:
+readable, listed by the API with its null close, and pruned by
+retention on `started_at` like any other row, the same semantics a
+crash mid-session leaves behind. No exception text, no SQL, no row
+content reaches any log, event field, or exception chain that
+leaves the store; the sanitized report is built in the `except`
+arm from the class name alone.
 
 The per-session sink is one object wearing both hats: it implements
 `EventTap` (attached to the session's `SessionEvents`, so every
@@ -854,6 +869,15 @@ carries its resolution once the amendment addressing it lands.
    drop count. Define a non-droppable control path, transaction
    rollback behavior, and the semantics when closure cannot be
    persisted.
+   *Resolution*: adopted. The queue is unbounded with the bound
+   moved to the droppable class: `Event` records are bounded by a
+   producer-side in-flight count, while `Open`, `Turn` and `Close`
+   are control records accepted unconditionally, bounded by
+   conversational pace. A failed marker transaction rolls back
+   atomically, drops and counts its batch, and emits
+   `conversations_failed`; a failed `Close` leaves the documented
+   incomplete-session state (`closed_at` null, readable, pruned by
+   `started_at`), the same shape a crash leaves.
 6. **P1: purging beside a live writer is not safe as claimed.**
    The purge CLI is a second writer; purging an active session
    lets queued records recreate children without a parent or lets
