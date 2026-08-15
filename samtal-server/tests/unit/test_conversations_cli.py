@@ -67,7 +67,7 @@ def recorded(tmp_path: Path):
             store.record_turn(
                 session,
                 TurnRecord(
-                    t_ms=1000,
+                    at=101.0,
                     agent="sam",
                     heard="hello",
                     reply="Hi.",

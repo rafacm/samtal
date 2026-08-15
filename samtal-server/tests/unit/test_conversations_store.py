@@ -155,7 +155,7 @@ def rows(directory: Path, table: str, **where: Any) -> list[dict[str, Any]]:
 
 def a_turn(**overrides: Any) -> TurnRecord:
     fields: dict[str, Any] = {
-        "t_ms": 1200,
+        "at": 101.2,
         "agent": "sam",
         "heard": "turn the light on",
         "heard_duration_s": 1.4,
@@ -271,7 +271,7 @@ def test_one_sessions_marker_exposes_nothing_of_another(tmp_path: Path, stores) 
     gate.let_through()
     # And another alpha marker, whose arrival proves the one above
     # committed.
-    store.record_turn("alpha", a_turn(t_ms=4000))
+    store.record_turn("alpha", a_turn(at=104.0))
     gate.wait()
 
     assert [row["session"] for row in rows(tmp_path, "turns")] == ["alpha"]
@@ -498,7 +498,7 @@ def test_records_for_a_session_it_never_opened_are_refused_once(
     store.start()
     with caplog.at_level(logging.WARNING):
         store.record_turn("ghost", a_turn())
-        store.record_turn("ghost", a_turn(t_ms=2000))
+        store.record_turn("ghost", a_turn(at=102.0))
         store.close_session("ghost", duration_s=1.0, reason="client")
         store.stop()
 
@@ -548,7 +548,7 @@ def test_a_purged_session_is_never_resurrected(
         gate.let_through()
         # Committed, and more already on its way.
         store.record_event("alpha", "heard", logging.INFO, {"duration_s": 1.0}, 102.0)
-        store.record_turn("alpha", a_turn(t_ms=3000))
+        store.record_turn("alpha", a_turn(at=103.0))
         gate.wait()
     else:
         # Nothing of this session but its open row has been committed.
@@ -564,7 +564,7 @@ def test_a_purged_session_is_never_resurrected(
     gate.open_forever()
     # And the conversation carries on to its natural end.
     store.record_event("alpha", "replied", logging.INFO, {"duration_s": 2.0}, 104.0)
-    store.record_turn("alpha", a_turn(t_ms=5000))
+    store.record_turn("alpha", a_turn(at=105.0))
     store.close_session("alpha", duration_s=8.0, reason="client")
     store.stop()
 
@@ -858,7 +858,7 @@ def test_a_reader_sees_committed_rows_while_the_wal_is_uncheckpointed(
     # Parked in front of a third marker, so the turn above is committed
     # and the writer still holds its connection: closing the last one
     # would checkpoint the log and take the case away.
-    store.record_turn("alpha", a_turn(t_ms=9000))
+    store.record_turn("alpha", a_turn(at=109.0))
     gate.wait()
     wal = tmp_path / "conversations.db-wal"
     assert wal.is_file() and wal.stat().st_size > 0

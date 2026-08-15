@@ -50,7 +50,7 @@ def manifest(started_at: dt.datetime, device: str = "aa:bb:cc:dd:ee:ff") -> dict
 
 def a_turn(heard: str = "hello there") -> TurnRecord:
     return TurnRecord(
-        t_ms=1000,
+        at=101.0,
         agent="sam",
         heard=heard,
         reply="Hi.",
