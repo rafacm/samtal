@@ -65,12 +65,18 @@ async def build_agent_fillers(
                     raise ValueError(f'the voice answered "{phrase}" with no audio')
                 clips.append(bytes(pcm))
         except Exception as exc:  # noqa: BLE001 - degrade, never fail the boot
+            # The class name and never the exception (the PR #153
+            # review). This catch is around a whole synthesis, so what
+            # arrives is whatever a voice provider or its transport
+            # raised, and an exception raised near a response can carry
+            # a fragment of one. Handing the object itself as a `%`
+            # argument also handed it to every consumer, since
+            # `Emission.args` is deliberately not copied for a tap.
             events.warning(
                 "agent %s: filler synthesis failed, latency masking is off "
-                "for this agent: %s: %s",
+                "for this agent (%s)",
                 name,
                 type(exc).__name__,
-                exc,
                 event="filler_disabled",
                 agent=name,
                 error=type(exc).__name__,
