@@ -150,6 +150,42 @@ No README claim depends on this test's shape.
   test_tts_lookahead.py) and leaves the decision visible for the
   plan review to challenge.
 
+## Plan review round
+
+One external review of the plan as first committed (2a4f00f): codex
+CLI, model gpt-5.6-sol, read-only against this repository with the
+issue #135 body supplied, 2026-08-15. Verdict: ready after the P2
+amendments. Findings as received, condensed; each carries its
+resolution once the amendment addressing it lands.
+
+1. **P2: the plan predicts the wrong failure behavior and the wrong
+   "passing for the wrong reason" conclusion.** `chunks()` raises
+   the stored provider failure, but `_speak`'s `finally`
+   (pipeline.py:1098-1105) then awaits the drain task through
+   `wait_cancelled()`, which suppresses only `CancelledError`, so
+   the drain task's `TypeError` propagates and REPLACES the
+   original provider exception; the plan claimed the TypeError
+   stays unobserved and the provider failure reaches `_speak`. And
+   the affected test exercises successful and cancelled synthesis,
+   neither of which invokes the callback, so its spoken-count
+   assertions are not false positives; the fixture violates the
+   constructor contract without changing those verdicts. Say both
+   correctly.
+2. **P2: the cited lookahead test does not verify callback
+   invocation.** `test_a_failing_sentence_still_lets_the_earlier_ones_be_heard`
+   asserts propagation, spoken sentences, audio and cancellation,
+   never the callback; it would pass if `_drain` stopped calling
+   `_report_failure`. The committed invoked-arm coverage is in
+   `tests/unit/test_session_events.py`
+   (`test_a_failing_tts_provider_is_reported_as_the_tts` and the
+   once-only assertion, ~500 and ~523). Cite that, and describe
+   the lookahead test as covering ordered failure propagation and
+   cleanup only.
+3. **P3: the production caller passes an adapter lambda, not a
+   bound method.** `speak_after` receives
+   `lambda exc, elapsed: self._provider_failed("tts", tts, exc, elapsed)`
+   (pipeline.py:1054). Describe it accurately.
+
 ## Milestones
 
 - [ ] **Fix the two _Synthesis constructions and pin the callback's
