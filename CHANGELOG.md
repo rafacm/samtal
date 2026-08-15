@@ -68,6 +68,23 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   failing test rather than an unnoticed one. No production code
   changed.
 
+- **A provider failure during a reply is reported instead of read as a
+  vanished device** (#137): the reply body caught `RuntimeError`
+  broadly and returned in silence, because that is what a starlette
+  socket raises for a send that comes after the close and a
+  disconnected device is not worth a word. A provider failure raised as
+  a bare `RuntimeError` went out the same door, with the reply ending
+  quietly and nothing on the record. Both of the transport's disconnect
+  shapes are now translated at the device edge into the `DeviceGone`
+  the boundary always promised, the reply body catches that type alone,
+  and everything else is logged as "reply failed" with its traceback. A
+  local bug in a reply, in the encoder or the resampler or anywhere
+  else that speaks, is likewise on the record now instead of being
+  taken for a device that went away. Whether a failure was a wait is
+  decided by type rather than by looking for "Timeout" in a class name;
+  the `provider_failed` event's fields and its sentence are unchanged.
+  The filler playback keeps its broad catch, whose narrowing is #141's.
+
 ## 2026-08-14
 
 ### Added
