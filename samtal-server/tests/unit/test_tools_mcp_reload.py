@@ -40,8 +40,15 @@ from samtal_server.config.secrets import (
 )
 from samtal_server.runtime.prompt import Guidance, ServerInstructions
 from samtal_server.tools.mcp import (
+    APPLIED,
     CONNECTED,
     DOWN,
+    REFUSED,
+    REFUSED_BUSY,
+    REFUSED_IN_PROGRESS,
+    REFUSED_INVALID,
+    REFUSED_UNEXPECTED,
+    REFUSED_UNREADABLE,
     RELOAD_REFUSED,
     UNUSED,
     McpServerManager,
@@ -50,6 +57,7 @@ from samtal_server.tools.mcp import (
     McpToolNotGranted,
 )
 from tests.support.mcp_stdio_server import SHIPPED_INSTRUCTIONS
+from tests.unit.test_tools_mcp import MANAGER_LOGGER, fields_of, one_event
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
 
@@ -858,3 +866,178 @@ async def test_a_caller_that_goes_away_during_the_starts_leaves_one_world(
         }
     finally:
         await servers.stop_all()
+
+
+# The reload, as one event
+#
+# `mcp_reload` is emitted exactly once per reload, at whichever of the
+# two ends the reload reached: a refusal where it is classified, an
+# apply as the last act of the shielded task. Both halves matter to an
+# operator counting them, and the second one has to survive the caller
+# going away, which is the whole reason the apply is shielded.
+
+
+async def test_an_applied_reload_counts_what_it_moved(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    before = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    after = config_with(
+        {"tools": entry_data(), "extra": entry_data()}, {"assistant": ["tools", "extra"]}
+    )
+    servers = await started(before)
+    try:
+        with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
+            await servers.reload(reading(after))
+
+        applied = one_event(caplog, "mcp_reload")
+        assert applied.levelno == logging.INFO
+        fields = fields_of(applied)
+        assert isinstance(fields.pop("duration_ms"), int)
+        # Counts rather than names: which entries they were is the
+        # status surface's answer, taken in the same breath.
+        assert fields == {
+            "event": "mcp_reload",
+            "outcome": APPLIED,
+            "started": 1,
+            "restarted": 0,
+            "stopped": 0,
+            "unchanged": 1,
+        }
+    finally:
+        await servers.stop_all()
+
+
+@pytest.mark.parametrize(
+    ("raiser", "token"),
+    [
+        (ConfigError, REFUSED_INVALID),
+        (DatabaseBusyError, REFUSED_BUSY),
+        (StorageError, REFUSED_UNREADABLE),
+        (RuntimeError, REFUSED_UNEXPECTED),
+    ],
+)
+async def test_a_refused_reload_says_which_kind_of_refusal_it_was(
+    raiser: type[Exception], token: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """One token per refusal type, chosen where the exception is
+    classified. The types are the same ones the API turns into status
+    codes, which is what makes the set closed and worth grouping by; the
+    fourth is the net under them, for a `read` that fails in a way the
+    configuration layer has no type for.
+    """
+    config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    servers = await started(config)
+
+    def refuse() -> tuple[Config, SecretStore | None]:
+        raise raiser("a message this line has no business carrying")
+
+    try:
+        with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
+            with pytest.raises(raiser):
+                await servers.reload(refuse)
+
+        refused = one_event(caplog, "mcp_reload")
+        assert refused.levelno == logging.WARNING
+        assert fields_of(refused) == {
+            "event": "mcp_reload",
+            "outcome": REFUSED,
+            "reason": token,
+        }
+        # The refusal's own sentence travels to whoever asked for the
+        # reload, which is where a message belongs; this line is a
+        # token and a fact about the servers.
+        assert "no business" not in refused.getMessage()
+    finally:
+        await servers.stop_all()
+
+
+async def test_a_candidate_that_will_not_build_is_refused_as_invalid(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half of the preparation, which refuses after the read
+    succeeded. One event either way: an operator counting refused
+    reloads does not care which half of a two-phase apply refused."""
+    monkeypatch.delenv("SAMTAL_TEST_ABSENT_TOKEN", raising=False)
+    config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    broken = config_with(
+        {
+            "tools": entry_data(),
+            "extra": entry_data(env={"API_TOKEN": "$SAMTAL_TEST_ABSENT_TOKEN"}),
+        },
+        {"assistant": ["tools", "extra"]},
+    )
+    servers = await started(config)
+    try:
+        with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
+            with pytest.raises(ConfigError):
+                await servers.reload(reading(broken))
+
+        assert fields_of(one_event(caplog, "mcp_reload")) == {
+            "event": "mcp_reload",
+            "outcome": REFUSED,
+            "reason": REFUSED_INVALID,
+        }
+    finally:
+        await servers.stop_all()
+
+
+async def test_a_second_reload_is_refused_as_one_already_running(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    servers = await started(config)
+    gate = threading.Event()
+
+    def held() -> tuple[Config, SecretStore | None]:
+        gate.wait(30)
+        return config, None
+
+    first = asyncio.create_task(servers.reload(held))
+    try:
+        await asyncio.sleep(0)
+        with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
+            with pytest.raises(ReloadInProgressError):
+                await servers.reload(reading(config))
+
+            # Read while the first reload is still held, so the one
+            # event in hand is the refusal and not the apply that
+            # follows it.
+            assert fields_of(one_event(caplog, "mcp_reload")) == {
+                "event": "mcp_reload",
+                "outcome": REFUSED,
+                "reason": REFUSED_IN_PROGRESS,
+            }
+    finally:
+        gate.set()
+        await first
+        await servers.stop_all()
+
+
+async def test_an_apply_whose_caller_went_away_is_still_reported_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The exactly-once promise, at the one point it is hard to keep. A
+    client that disconnects cancels the handler awaiting the reload, and
+    the apply carries on behind its shield; the event is that task's
+    last act, so the reload that really happened is recorded whether or
+    not anybody is left to be told about it."""
+    config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    after = config_with({"extra": entry_data()}, {"assistant": ["extra"]})
+    going = SlowStopManager("tools", stdio_entry())
+    servers = McpServers({"tools": going}, McpSlice.of(config))
+    await going.start()
+
+    with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
+        asked = asyncio.create_task(servers.reload(reading(after)))
+        await asyncio.sleep(0.05)
+        asked.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asked
+        try:
+            await settled(servers)
+        finally:
+            await servers.stop_all()
+
+    fields = fields_of(one_event(caplog, "mcp_reload"))
+    assert fields["outcome"] == APPLIED
+    assert (fields["started"], fields["stopped"]) == (1, 1)

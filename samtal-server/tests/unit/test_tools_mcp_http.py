@@ -30,9 +30,18 @@ import uvicorn
 from mcp.server.fastmcp import FastMCP
 from sse_starlette.sse import AppStatus
 
+import samtal_server.tools.mcp as mcp_module
 from samtal_server import logs
 from samtal_server.config import McpServerConfig
-from samtal_server.tools.mcp import McpServerDown, McpServerManager, _reason
+from samtal_server.tools.mcp import (
+    CONNECT_TIMEOUT,
+    INITIALIZE_FAILED,
+    TRANSPORT_FAILED,
+    McpServerDown,
+    McpServerManager,
+    _reason,
+)
+from tests.unit.test_tools_mcp import fields_of, one_event
 
 # The logger an operator watches for these servers, and the SDK one that
 # talks to them, named rather than spelled out at each assertion.
@@ -441,3 +450,134 @@ def test_a_failure_reason_names_types_and_not_messages() -> None:
     grouped = ExceptionGroup(quoted, [ValueError(quoted), TimeoutError()])
     assert _reason(grouped) == "TimeoutError, ValueError"
     assert quoted not in _reason(grouped)
+
+
+# The lifecycle events this transport decides
+#
+# The five are covered over stdio, where the manager's logic lives. What
+# is here is what only a socket can say: which transport the connect
+# event names, the two down reasons a network produces that a child
+# process does not, and the sanitization sentinel, which belongs beside
+# the malformed-handshake test above because that is where a far side's
+# bytes actually arrive.
+
+
+async def test_the_connect_event_names_the_transport_it_came_up_on(
+    server_url: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
+        manager = await running(http_entry(server_url))
+        await manager.stop()
+
+    assert fields_of(one_event(caplog, "mcp_connected"))["transport"] == "streamable_http"
+
+
+async def test_a_url_nobody_answers_is_down_for_the_transport(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """And it is the reason `_down_reason` overrides the phase marker
+    for a transport error. This client is entered before it has spoken
+    to anything, so a refused connection raises on the first request of
+    the handshake rather than on the way in; the marker says
+    initialization and the truth is that nothing answered."""
+    with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
+        manager = await running(http_entry(unused_url()))
+        await manager.stop()
+
+    assert fields_of(one_event(caplog, "mcp_down"))["reason"] == TRANSPORT_FAILED
+
+
+async def test_a_server_that_never_answers_is_down_for_the_bound(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A socket the kernel accepts into its backlog and nothing behind
+    it ever reads: the handshake is sent and no answer comes, which is
+    the shape of a box that is powered on and wedged. The envelope's own
+    bound is what ends it, and that is a reason of its own rather than
+    whichever call happened to be outstanding.
+
+    The bound is shortened to keep the test short. What is under test is
+    the token, not the production constant.
+    """
+    monkeypatch.setattr(mcp_module, "CONNECT_TIMEOUT_S", 0.3)
+    with socket.socket() as listening:
+        listening.bind(("127.0.0.1", 0))
+        listening.listen(1)
+        url = f"http://127.0.0.1:{listening.getsockname()[1]}/mcp"
+
+        with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
+            manager = await running(http_entry(url))
+            await manager.stop()
+
+    assert not manager.up
+    assert fields_of(one_event(caplog, "mcp_down"))["reason"] == CONNECT_TIMEOUT
+
+
+async def test_a_handshake_this_server_cannot_read_keeps_its_bytes_out_of_the_fields(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The sentinel case for the event surface. The suite above proves
+    the SDK's own records do not reach a handler; this proves the record
+    that replaces them carries the phase and nothing else, in its fields
+    as well as in its sentence, with the far side's bytes in the one
+    place they are guaranteed to be read: the result the handshake could
+    not be parsed out of.
+    """
+    sentinel = "not-a-real-value-3f9a2b6c-poison"
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:  # noqa: N802 - the stdlib's spelling
+            length = int(self.headers.get("Content-Length") or 0)
+            asked = json.loads(self.rfile.read(length)) if length else {}
+            body = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": asked.get("id", 0),
+                    "result": {"protocolVersion": sentinel, "capabilities": sentinel},
+                }
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Mcp-Session-Id", f"{sentinel}-session")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args: object) -> None:
+            """Silence: the stub is not the subject of the test."""
+
+    stub = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=stub.serve_forever, daemon=True)
+    thread.start()
+    try:
+        # Every logger in the process, at the level a deployment runs.
+        # Not at DEBUG, which is what the test above uses for the SDK's
+        # own channel: at DEBUG httpcore prints the headers of every
+        # response any httpx client receives, this stub answers with the
+        # sentinel in one of them, and what that would measure is
+        # somebody else's debug logging rather than this surface.
+        with caplog.at_level(logging.INFO):
+            manager = await running(
+                http_entry(f"http://127.0.0.1:{stub.server_port}/mcp"), name="weather"
+            )
+            await manager.stop()
+    finally:
+        stub.shutdown()
+        thread.join(timeout=LIFECYCLE_TIMEOUT_S)
+        stub.server_close()
+
+    assert not manager.up
+    # The transport carried the bytes and the handshake would not parse,
+    # which is the phase this is, and it is neither of the two the type
+    # rules override.
+    down = one_event(caplog, "mcp_down")
+    fields = fields_of(down)
+    assert isinstance(fields.pop("duration_ms"), int)
+    assert fields == {"event": "mcp_down", "entry": "weather", "reason": INITIALIZE_FAILED}
+    # Rendered as the container renders it, so the fields are searched
+    # and not only the sentences, and across every record the drive
+    # produced rather than only the one under test.
+    rendered = caplog.text + "".join(
+        logs.JsonFormatter().format(record) for record in caplog.records
+    )
+    assert sentinel not in rendered
