@@ -45,6 +45,37 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   SDK put in its exception, which could quote a response body straight
   into the conversation. What the failure was is in the
   `mcp_call_dropped` event instead, by class.
+- **The conversation store's foundation, dormant** (#120): a second
+  SQLite database, `conversations.db`, beside `samtal.db` in
+  `server.database.dir`, with its own metadata and its own migration
+  chain, holding sessions, turns, tool invocations and events as the
+  queryable record of what was said. Nothing constructs it yet: no
+  configuration key exists, no server behaviour changes, and no
+  `conversations.db` is created by a server that is not asked for one.
+  What landed is the machinery. The writer runs on one background
+  thread behind an unbounded queue, so no producer on the session loop
+  can ever wait on it; the bound sits on the droppable class, so a
+  wedged database drops events with one warning per session and a count
+  on the session row, and never drops a turn or a close. It commits at
+  markers into per-session batches, so a session's turn commits its own
+  session and holds no write lock between turns, and every marker first
+  confirms its session row still exists, so a purge of a running
+  session is final rather than a race the next turn undoes. Retention
+  deletes whole sessions older than a stated window (90 days by
+  default, `0` an explicit opt-out) and deletion is physical:
+  `secure_delete` and a truncating checkpoint, so a purge reaches the
+  file's bytes and not only its index. The two storage switches
+  (metrics, text) are applied at write time, with the events table
+  stripped of conversation text from its first row.
+  Alongside it, `samtal-server conversations purge --session | --device
+  | --before` deletes from the file with no server running, because
+  deletion has to work exactly when the server is broken or gone, and
+  `samtal-server conversations schema` prints the generated reference
+  committed at `docs/reference/conversations-schema.md`, which states
+  the compatibility promise, what each switch takes away, the retention
+  and deletion semantics with their limits, the WAL-safe way to take a
+  copy, and the OpenTelemetry GenAI correspondence. **Operator-visible:**
+  nothing yet, by design.
 
 ### Changed
 

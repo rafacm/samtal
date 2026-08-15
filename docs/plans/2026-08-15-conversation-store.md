@@ -1296,7 +1296,8 @@ carries its resolution once the amendment addressing it lands.
 One PR per milestone, ticked with its PR number, each linking to
 its section of the implementation doc when written.
 
-- [ ] **Store foundation** (branch `feature/conversation-store`):
+- [x] **[Store foundation](2026-08-15-conversation-store-implementation.md#milestone-1-store-foundation)**
+  (PR TBD, branch `feature/conversation-store`):
   this plan; the db/ shared-helper extraction with `test_db_open.py`
   untouched; `samtal_server/conversations/` with schema, baseline
   migration, records, the writer (queue, markers, drops, failure
