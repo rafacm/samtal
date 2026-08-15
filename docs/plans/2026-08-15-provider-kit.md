@@ -236,19 +236,25 @@ the message. The elevenlabs failure tests that pin `RuntimeError`
 with their message assertions kept; that is the error-contract
 change the issue orders, not a weakening.
 
-The reply-path test the issue requires: a session whose TTS raises
-`ProviderCallError` mid-reply produces a `provider_failed` event
-and does not take the vanished-device return, asserted through the
-event stream the way test_session_events already asserts provider
-failures, plus the negative half: the reply body's swallow arm is
-reached only by `DeviceGone`.
+The reply path gets two tests, because one cannot prove the catch
+changed (the review round's finding 4: a taxonomy error already
+misses the `RuntimeError` arm before milestone 2, and an old-shaped
+TTS `RuntimeError` already produces `provider_failed` through
+`_Synthesis`'s report before the outer catch sees anything, so a
+single event assertion is green under both implementations):
 
-Red-to-green: the reply-path test fails against the old catch (the
-failure must be raised as a `RuntimeError`-shaped error to
-demonstrate the old swallowing, which is exactly what the old
-elevenlabs `RuntimeError` did; the demonstration uses the old
-exception shape against the old catch and the taxonomy against the
-new), recorded in the implementation doc.
+- The taxonomy half: a session whose TTS raises
+  `ProviderCallError` mid-reply produces a `provider_failed` event,
+  asserted through the event stream the way test_session_events
+  already asserts provider failures.
+- The catch half, the one that is red before milestone 2 and green
+  after: a bare non-device `RuntimeError` raised inside the reply
+  body reaches the generic failure arm (the "reply failed" log
+  record is present) instead of the silent vanished-device return,
+  while a `DeviceGone` in the same place stays quiet.
+
+Red-to-green for milestone 2 is the catch-half test, recorded in
+the implementation doc.
 
 ### Two milestones, two PRs, second stacked on the first
 
@@ -404,6 +410,9 @@ resolution once the amendment addressing it lands.
    `provider_failed`; a bare non-device `RuntimeError` reaches the
    generic failure handler while `DeviceGone` stays quiet, and
    only the second demonstrates the catch change.
+   *Resolution*: adopted. The reply-path test design is now the
+   two named tests, with the catch half carrying milestone 2's
+   red-to-green.
 5. **P2: the tests do not exercise the mid-stream failures the
    plan claims to handle.** All four streaming adapters have
    failure points after the first chunk (Anthropic iteration and
