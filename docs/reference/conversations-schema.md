@@ -68,10 +68,12 @@ Deletion is physical, not query-level. The database is opened with `PRAGMA
 secure_delete=ON`, so a freed page is overwritten with zeros instead of
 lingering in the freelist, and both retention and purge finish with `PRAGMA
 wal_checkpoint(TRUNCATE)` so the deleted frames do not survive in the
-write-ahead log. Two limits are stated rather than implied: a checkpoint
-blocked by a concurrent long reader truncates at the next quiet moment instead
-of failing the deletion, and copies that have already left the file (backups,
-filesystem snapshots) are the operator's to manage.
+write-ahead log. Two limits are stated rather than implied. A checkpoint a
+reader is blocking does not fail the deletion: the rows are committed, the
+truncation is owed, and it is retried at the next quiet moment, which is the
+server's next write or the next purge. `samtal-server conversations purge`
+says so when it leaves one owed. And copies that have already left the file
+(backups, filesystem snapshots) are the operator's to manage.
 
 ## Reading it
 

@@ -15,6 +15,7 @@ approached.
 
 import datetime as dt
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,7 @@ from samtal_server.conversations.store import (
     ConversationStore,
     open_conversations,
     purge,
+    read_conversations,
 )
 
 NOW = dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC)
@@ -77,6 +79,19 @@ def record(store: ConversationStore, session: str, started_at: dt.datetime, **fa
     store.record_event(session, "heard", logging.INFO, {"duration_s": 1.0}, 101.0)
     store.record_turn(session, a_turn())
     store.close_session(session, duration_s=5.0, reason="client")
+
+
+def _settled(store: ConversationStore) -> None:
+    """Wait for the writer to have consumed everything queued, without
+    stopping it: stopping disposes the engine, which checkpoints the log
+    and takes the sidecar cases away. One more marker whose commit is
+    observable is what proves the ones before it landed."""
+    deadline = time.monotonic() + 30.0
+    while time.monotonic() < deadline:
+        if store._queue.empty():
+            return
+        time.sleep(0.01)
+    raise AssertionError("the writer never drained the queue")
 
 
 def counts(directory: Path) -> dict[str, int]:
@@ -201,7 +216,7 @@ def test_purge_by_session_takes_that_session_and_its_children(
 
     taken = purge(tmp_path, session="drop")
 
-    assert taken == {"sessions": 1, "turns": 1, "tool_invocations": 1, "events": 1}
+    assert taken.counts() == {"sessions": 1, "turns": 1, "tool_invocations": 1, "events": 1}
     assert stored_sessions(tmp_path) == ["keep"]
 
 
@@ -217,7 +232,7 @@ def test_purge_by_device_takes_every_session_of_that_device(
 
     taken = purge(tmp_path, device="aa:aa:aa:aa:aa:aa")
 
-    assert taken["sessions"] == 2
+    assert taken.sessions == 2
     assert stored_sessions(tmp_path) == ["study"]
 
 
@@ -232,7 +247,7 @@ def test_purge_before_a_date_keeps_the_day_itself(tmp_path: Path, stores) -> Non
 
     taken = purge(tmp_path, before=dt.date(2026, 8, 15))
 
-    assert taken["sessions"] == 1
+    assert taken.sessions == 1
     assert stored_sessions(tmp_path) == ["this-morning"]
 
 
@@ -249,7 +264,7 @@ def test_selectors_combine_with_and(tmp_path: Path, stores) -> None:
 
     taken = purge(tmp_path, device=kitchen, before=dt.date(2026, 8, 10))
 
-    assert taken["sessions"] == 1
+    assert taken.sessions == 1
     assert stored_sessions(tmp_path) == ["new-kitchen", "old-study"]
 
 
@@ -261,7 +276,7 @@ def test_a_purge_that_matches_nothing_is_zero_rather_than_an_error(
     record(store, "keep", NOW)
     store.stop()
 
-    assert purge(tmp_path, session="never-existed") == {
+    assert purge(tmp_path, session="never-existed").counts() == {
         "sessions": 0,
         "turns": 0,
         "tool_invocations": 0,
@@ -286,24 +301,134 @@ def test_a_purge_with_no_selector_is_refused(tmp_path: Path, stores) -> None:
 
 
 def test_a_purged_utterance_is_gone_from_the_files_bytes(tmp_path: Path, stores) -> None:
-    """The sentinel case. `secure_delete` overwrites the freed pages
-    with zeros instead of leaving them in the freelist, and the
-    truncating checkpoint keeps the deleted frames from surviving in the
-    write-ahead log, so what is asserted is the bytes of the database
-    and of both sidecars rather than the answer to a query."""
+    """The sentinel case, asserted against a store that is still open.
+
+    Stopping the writer first would checkpoint the log on the way out
+    and take the interesting half of the case away, so the store stays
+    up: the sentinel is proven to be in the real `-wal` file before the
+    purge, and the purge's own checkpoint is what has to remove it.
+    `secure_delete` is what keeps the freed pages of the database from
+    holding it too."""
     store = stores(retention_days=0)
     store.start()
     store.open_session("secret", 100.0, manifest(NOW))
     store.record_turn("secret", a_turn(heard=f"my password is {SENTINEL}"))
     store.close_session("secret", duration_s=3.0, reason="client")
-    store.stop()
+    _settled(store)
 
     database = tmp_path / "conversations.db"
-    assert SENTINEL.encode() in database.read_bytes(), "the test never stored the sentinel"
+    log = tmp_path / "conversations.db-wal"
+    assert log.is_file(), "the commits were checkpointed before the purge could matter"
+    assert SENTINEL.encode() in log.read_bytes(), "the sentinel never reached the log"
 
-    purge(tmp_path, session="secret")
+    taken = purge(tmp_path, session="secret")
 
-    for path in (database, tmp_path / "conversations.db-wal", tmp_path / "conversations.db-shm"):
-        if path.exists():
-            assert SENTINEL.encode() not in path.read_bytes(), f"{path.name} still holds it"
+    assert taken.truncated
+    assert log.stat().st_size == 0
+    for path in (database, log, tmp_path / "conversations.db-shm"):
+        assert path.exists(), f"{path.name} went missing"
+        assert SENTINEL.encode() not in path.read_bytes(), f"{path.name} still holds it"
     assert stored_sessions(tmp_path) == []
+
+
+def test_a_reader_defers_the_stores_truncation_and_the_next_marker_takes_it(
+    tmp_path: Path, stores
+) -> None:
+    """A checkpoint cannot move frames a reader is still reading. It
+    reports busy rather than raising, the deletion stands, and the
+    truncation stays owed until a checkpoint gets its moment.
+
+    Asserted on the database file rather than on the log, because that
+    is where the evidence is: `secure_delete` writes the zeroed page
+    into the write-ahead log, so until the checkpoint copies it over the
+    old page the sentinel is still in `conversations.db` itself.
+    """
+    seeding = stores(retention_days=0)
+    seeding.start()
+    seeding.open_session("old", 100.0, manifest(NOW - dt.timedelta(days=400)))
+    seeding.record_turn("old", a_turn(heard=f"my password is {SENTINEL}"))
+    seeding.close_session("old", duration_s=3.0, reason="client")
+    seeding.stop()
+
+    database = tmp_path / "conversations.db"
+    assert SENTINEL.encode() in database.read_bytes()
+
+    # Held across the pruning store's start, which is when it prunes.
+    reader = read_conversations(tmp_path)
+    held = reader.connect()
+    held.execute(text("select count(*) from sessions")).scalar()
+    pruning = stores(retention_days=90)
+    pruning.start()
+    _settled(pruning)
+
+    assert stored_sessions(tmp_path) == []
+    assert pruning._truncation_due, "a held reader cannot be checkpointed past"
+    assert SENTINEL.encode() in database.read_bytes(), "the frames went while a reader held them"
+
+    held.close()
+    reader.dispose()
+
+    # The next quiet moment: a marker on the still-running store.
+    pruning.open_session("after", 200.0, manifest(NOW))
+    pruning.record_turn("after", a_turn(heard="nothing secret"))
+    _settled(pruning)
+
+    assert not pruning._truncation_due
+    assert SENTINEL.encode() not in database.read_bytes()
+
+
+def test_a_reader_defers_a_purges_truncation_and_a_later_purge_takes_it(
+    tmp_path: Path, stores
+) -> None:
+    """A purge runs in a process of its own with no next marker to wait
+    for, so it answers that the truncation is owed instead of pretending
+    otherwise, and the next purge is what the command tells the operator
+    will take it."""
+    store = stores(retention_days=0)
+    store.start()
+    store.open_session("secret", 100.0, manifest(NOW))
+    store.record_turn("secret", a_turn(heard=f"my password is {SENTINEL}"))
+    store.open_session("other", 100.0, manifest(NOW, device="bb:bb:bb:bb:bb:bb"))
+    store.close_session("secret", duration_s=3.0, reason="client")
+    _settled(store)
+
+    log = tmp_path / "conversations.db-wal"
+    assert SENTINEL.encode() in log.read_bytes()
+
+    reader = read_conversations(tmp_path)
+    held = reader.connect()
+    held.execute(text("select count(*) from sessions")).scalar()
+    try:
+        taken = purge(tmp_path, session="secret")
+        assert taken.sessions == 1
+        assert not taken.truncated
+        assert SENTINEL.encode() in log.read_bytes()
+    finally:
+        held.close()
+        reader.dispose()
+
+    assert purge(tmp_path, session="other").truncated
+
+    assert log.stat().st_size == 0
+    assert SENTINEL.encode() not in log.read_bytes()
+    assert SENTINEL.encode() not in (tmp_path / "conversations.db").read_bytes()
+
+
+def test_the_checkpoint_runs_outside_a_transaction(tmp_path: Path, stores) -> None:
+    """SQLite refuses to checkpoint inside a transaction, and every
+    connection this engine hands out through SQLAlchemy opens BEGIN
+    IMMEDIATE before its first statement. Run through the engine the
+    pragma raises every time, which a suppressed exception turns into a
+    checkpoint that silently never happened; this is the pin that it
+    runs and answers."""
+    from samtal_server.conversations.store import _checkpoint
+
+    store = stores(retention_days=0)
+    store.start()
+    record(store, "one", NOW)
+    _settled(store)
+    log = tmp_path / "conversations.db-wal"
+    assert log.stat().st_size > 0
+
+    assert _checkpoint(store._engine) is True
+    assert log.stat().st_size == 0
