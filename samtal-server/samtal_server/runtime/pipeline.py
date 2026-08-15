@@ -58,7 +58,7 @@ from samtal_server.device.boundary import (
     RuntimeFactory,
     SessionInput,
 )
-from samtal_server.events import SessionEvents, logger, session_clock
+from samtal_server.events import SessionEvents, logger
 from samtal_server.filler import FillerClips
 from samtal_server.providers import (
     AgentProviders,
@@ -707,11 +707,6 @@ class PipelineRuntime:
                     language_fields["language_confidence"] = round(
                         result.language_confidence, 2
                     )
-                # Read once and used twice: the event is stamped by the
-                # emitter with the same clock, so a turn and its `heard`
-                # land on the timeline together rather than a wrapped
-                # reading apart.
-                heard_at = session_clock()
                 self._events.info(
                     'session %s: heard "%s"',
                     self.session_id,
@@ -722,8 +717,12 @@ class PipelineRuntime:
                     duration_s=heard_s,
                     **language_fields,
                 )
+                # Stamped off the emitter's own clock rather than from
+                # beside it, so the turn and the `heard` just emitted are
+                # on one timeline by construction rather than by two
+                # readings happening to agree.
                 self._turn.heard_utterance(
-                    heard_at,
+                    self._events.now(),
                     transcript,
                     heard_s,
                     language_fields.get("language"),
