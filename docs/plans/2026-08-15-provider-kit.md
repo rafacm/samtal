@@ -180,22 +180,35 @@ change, and the existing event assertions (test_session_events and
 friends drive failures through fakes whose exceptions reach the
 pipeline unwrapped) pass unmodified.
 
-The reply-body catch at pipeline.py:683 narrows from
-`(DeviceGone, RuntimeError)` to `DeviceGone`. The edge raises
-`DeviceGone` in place of the transport's own disconnect (its
-docstring, boundary.py:41-51), so the extra `RuntimeError` there
-was defensive; after this change a bare `RuntimeError` that does
-slip through lands in the existing `except Exception` arm and is
-logged as "reply failed" instead of being silently swallowed as a
-vanished device, which is strictly more honest. The two
-device-edge-only sites keep their breadth with a comment saying
-why: the `contextlib.suppress(DeviceGone, RuntimeError)` around
-`finish_speaking()` (pipeline.py:714) and the filler playback catch
-(pipeline.py:1446) wrap only device sends, where the ADR's accepted
-broad catch is about the transport, not about providers.
-`DeviceGone`'s docstring is updated where it cites "every site":
-the reply body no longer catches `RuntimeError` broadly, and the
-docstring should not claim it does.
+Narrowing the reply-body catch is a two-step change, because the
+device edge does not yet earn it (the review round's finding 2):
+`_send_text` and `_send_frame` in `device/session.py` translate
+only `WebSocketDisconnect` into `DeviceGone`, while Starlette's
+post-close send raises a bare `RuntimeError` that today reaches
+the reply body untranslated, and
+`test_session_characterization.py` pins both shapes as quiet
+disconnects. So milestone 2 first finishes the edge's own promise:
+the two send helpers translate the socket's post-close
+`RuntimeError` into `DeviceGone` alongside `WebSocketDisconnect`,
+which keeps the characterization test's observable behavior (a
+disconnect stays quiet) while changing only which type carries it.
+Only then does the reply-body catch at pipeline.py:683 narrow from
+`(DeviceGone, RuntimeError)` to `DeviceGone`. After both, a bare
+`RuntimeError` in the reply body can only be a local bug, lands in
+the existing `except Exception` arm, and is logged as "reply
+failed" instead of being silently swallowed as a vanished device.
+
+Two broad sites keep their breadth, described accurately: the
+`contextlib.suppress(DeviceGone, RuntimeError)` around
+`finish_speaking()` (pipeline.py:714) wraps only a device send;
+the filler playback catch (pipeline.py:1446) wraps resampling,
+encoding, and the send together, so its breadth can still swallow
+a local bug, and narrowing it is deliberately out of this issue's
+scope (the filler path is #141's territory). Both get a comment
+saying what they cover. `DeviceGone`'s docstring is updated where
+it cites "every site": the reply body no longer catches
+`RuntimeError` broadly, and the docstring should not claim it
+does.
 
 ### Tests
 
@@ -350,6 +363,12 @@ resolution once the amendment addressing it lands.
    inside the two send helpers, add `device/session.py` to
    milestone 2, preserve the characterization test, then narrow
    the reply-body catch.
+   *Resolution*: adopted. The catch decision is now a two-step
+   change: the send helpers translate the socket's post-close
+   `RuntimeError` into `DeviceGone` first (keeping the
+   characterization test's quiet-disconnect behavior), and only
+   then does the reply-body catch narrow; `device/session.py`
+   joins milestone 2's files.
 3. **P2: blanket ASR wrapping conflicts with the prompt-echo
    retry's soft-timeout contract.** openai_asr deliberately
    converts retry failures into an empty transcript and
