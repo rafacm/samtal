@@ -1,23 +1,31 @@
 """Egress marking and the server.local_only boot check (#30).
 
-Every provider type carries a class-level `egress` marking; building an
-egress-marked provider under `server.local_only: true` fails the boot
-with an error naming the stage and provider. openai_compatible is the
-special case: its base_url decides, so under local_only the entry needs
-the operator's own `egress: false` declaration.
+Every provider type carries a class-level `egress` marking of its own;
+building an egress-marked provider under `server.local_only: true` fails
+the boot with an error naming the stage and provider, and building one
+whose class declared no marking, or declared something that is not one
+of the three, fails in any mode (#136). openai_compatible is the special
+case: its base_url decides, so under local_only the entry needs the
+operator's own `egress: false` declaration.
 """
 
 import importlib.util
+from collections.abc import Callable
 
 import pytest
 
 from samtal_server.config import Config
 from samtal_server.config.models import ProviderConfig
 from samtal_server.providers import (
+    AsrProvider,
+    LlmProvider,
     Provider,
     ProviderError,
+    TtsProvider,
+    VadProvider,
     build_agent_providers,
     build_provider,
+    registry,
 )
 from samtal_server.providers.anthropic_llm import AnthropicLlm
 from samtal_server.providers.mock import MockAsr, MockLlm, MockTts, MockVad
@@ -51,6 +59,25 @@ def config_with_llm(llm_entry: dict[str, object], local_only: bool) -> Config:
     )
 
 
+def build_a_throwaway_llm(
+    monkeypatch: pytest.MonkeyPatch, make: Callable[[], object]
+) -> object:
+    """Build a throwaway provider class through `build_provider`, with
+    local_only off.
+
+    The marking is checked where a provider is built rather than where
+    its class is defined, so a test about a class that declares wrongly
+    has to reach the build. The factory table is rebuilt on every call,
+    which is why the type is registered by replacing the function that
+    returns it."""
+    monkeypatch.setattr(
+        registry,
+        "_factories",
+        lambda: {"llm": {"throwaway": lambda label, config: make()}},
+    )
+    return build_provider("llm", "brain", provider_config(type="throwaway"))
+
+
 def test_local_engines_and_mocks_are_marked_local() -> None:
     assert SileroVad.egress is False
     for mock_class in (MockLlm, MockAsr, MockTts, MockVad):
@@ -76,11 +103,52 @@ def test_the_cloud_and_configurable_types_carry_their_marking() -> None:
     assert OpenAiCompatibleLlm.egress is None
 
 
-def test_a_type_that_forgot_to_declare_counts_as_egress() -> None:
+def test_a_type_that_forgot_to_declare_is_refused_at_construction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class Forgetful(Provider):
         pass
 
-    assert Forgetful.egress is True
+    with pytest.raises(ProviderError) as excinfo:
+        build_a_throwaway_llm(monkeypatch, Forgetful)
+    message = str(excinfo.value)
+    assert "providers.llm.brain" in message
+    assert "Forgetful" in message
+
+
+def test_the_provider_bases_declare_no_egress_at_runtime() -> None:
+    # A default on a base is the same hole as a default in the check:
+    # every subclass would inherit an answer nobody wrote.
+    for base in (Provider, VadProvider, AsrProvider, LlmProvider, TtsProvider):
+        assert not hasattr(base, "egress")
+
+
+def test_an_unmarked_subclass_does_not_ride_its_parents_marking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Quiet(MockLlm):
+        pass
+
+    with pytest.raises(ProviderError) as excinfo:
+        build_a_throwaway_llm(monkeypatch, lambda: Quiet("hello"))
+    message = str(excinfo.value)
+    assert "Quiet" in message
+
+
+def test_a_marking_that_is_not_one_of_the_three_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Sloppy(Provider):
+        egress = 0
+
+    with pytest.raises(ProviderError) as excinfo:
+        build_a_throwaway_llm(monkeypatch, Sloppy)
+    message = str(excinfo.value)
+    assert "Sloppy" in message
+    # Value-free like every other refusal: what was read never reaches
+    # the message, so a marking holding a credential-shaped typo cannot
+    # print one.
+    assert "0" not in message
 
 
 def test_local_only_refuses_an_egress_provider_naming_stage_and_provider(
