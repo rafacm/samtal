@@ -1227,13 +1227,21 @@ class PipelineRuntime:
         leg: list[str],
         spoken: list[str],
     ) -> asyncio.Task[None]:
-        """The lookahead, with this session's failure reporting and its
-        way of actually speaking a synthesis bound in."""
+        """The lookahead, with this session's failure reporting, its
+        first-audio measurement, and its way of actually speaking a
+        synthesis bound in.
+
+        The measurement is bound to the synthesis's place in the reply
+        rather than to the moment it answers: only the first request
+        waited against silence, and a later one that happened to answer
+        first spent its wait against playback already happening."""
+        index = self._turn.synthesis_started()
         return await speak_after(
             speaking,
             sentence,
             tts,
             lambda exc, elapsed: self._provider_failed("tts", tts, exc, elapsed),
+            lambda elapsed_ms: self._turn.first_audio(index, elapsed_ms),
             lambda synthesis: self._speak_and_record(synthesis, resampler, leg, spoken),
         )
 

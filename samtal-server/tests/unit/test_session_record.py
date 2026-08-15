@@ -15,6 +15,7 @@ and pin suites say it by passing unmodified.
 
 import asyncio
 from collections.abc import AsyncIterator, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -32,6 +33,7 @@ from samtal_server.providers import (
     ToolCall,
     ToolChoice,
     ToolDef,
+    TtsProvider,
     Turn,
     Usage,
 )
@@ -430,6 +432,59 @@ async def test_a_cancelled_reply_records_what_its_finally_saw() -> None:
     assert record.rounds == 1
     assert (record.input_tokens, record.output_tokens) == (9, 3)
     assert [invocation.name for invocation in record.tools] == ["ghost_tool"]
+
+
+# The synthesizer's first bytes
+
+
+class DelayedTts(TtsProvider):
+    """A voice with a real time to first byte, so the measurement has
+    something to measure."""
+
+    egress = False
+
+    def __init__(self, latency_s: float) -> None:
+        self.sample_rate = 24000
+        self._latency_s = latency_s
+
+    async def synthesize(self, text: str) -> AsyncIterator[bytes]:
+        await asyncio.sleep(self._latency_s)
+        yield b"\x00\x00" * 240
+
+
+LATENCY_S = 0.05
+
+
+async def test_the_first_audio_of_the_reply_is_timed_at_the_synthesizer() -> None:
+    script = ScriptedLlm(["One here. Two here."])
+    session, spy, _ = recording_session(scripts={"poet": script})
+    assert session.runtime._providers is not None
+    session.runtime._providers = replace(
+        session.runtime._providers, tts=cast(Any, DelayedTts(LATENCY_S))
+    )
+
+    await drive_reply(session, UTTERANCE)
+
+    record = only_record(spy)
+    assert record.tts_first_audio_ms is not None
+    # The first request's own wait, not the second sentence's: that one
+    # was started against playback already happening.
+    assert record.tts_first_audio_ms >= LATENCY_S * 1000
+    assert record.tts_first_audio_ms < LATENCY_S * 1000 * 4
+
+
+async def test_a_reply_that_spoke_nothing_times_no_audio() -> None:
+    """A model that only ever asks for tools reaches the round cap
+    without speaking, so there was no synthesis to time and no reply to
+    record."""
+    session, spy, _ = recording_session(scripts={"poet": ScriptedLlm([[call("ghost_tool")]])})
+
+    await drive_reply(session, UTTERANCE)
+
+    record = only_record(spy)
+    assert record.tts_first_audio_ms is None
+    assert record.reply is None
+    assert len(record.tools) == 4
 
 
 # The classifier, at its one site

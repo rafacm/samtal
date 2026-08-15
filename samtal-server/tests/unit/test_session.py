@@ -645,16 +645,26 @@ async def test_only_a_sentence_whose_audio_finished_counts_as_spoken() -> None:
     def record_failure(exc: BaseException, elapsed: float) -> None:
         failures.append((exc, elapsed))
 
+    def record_first_audio(elapsed_ms: int) -> None:
+        # What a reply does with the measurement is the reply's; this
+        # test drives one sentence, with no reply around it to have a
+        # first synthesis.
+        return None
+
     tts = session.runtime._providers.tts
     await session.runtime._speak(
-        _Synthesis("Short and finished.", tts, record_failure),
+        _Synthesis("Short and finished.", tts, record_failure, record_first_audio),
         resampler,
         spoken,
     )
     finished_frames = socket.frames
 
     cut = asyncio.create_task(
-        session.runtime._speak(_Synthesis(LONG_REPLY, tts, record_failure), resampler, spoken)
+        session.runtime._speak(
+            _Synthesis(LONG_REPLY, tts, record_failure, record_first_audio),
+            resampler,
+            spoken,
+        )
     )
     await asyncio.sleep(0.1)
     cut.cancel()
