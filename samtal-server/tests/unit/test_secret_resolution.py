@@ -116,7 +116,7 @@ def test_without_a_store_the_behaviour_is_exactly_todays(
         == "sk-from-the-environment"
     )
     monkeypatch.delenv("SAMTAL_TEST_KEY")
-    with pytest.raises(ProviderError, match="SAMTAL_TEST_KEY"):
+    with pytest.raises(ProviderError, match="references an unset environment variable"):
         build_provider("llm", "claude", config, secrets=SecretStore())
 
 
@@ -138,6 +138,35 @@ def test_building_leaks_nothing_into_the_logs(caplog: pytest.LogCaptureFixture) 
 
     assert SECRET not in caplog.text
     assert all(SECRET not in str(record.__dict__) for record in caplog.records)
+
+
+def test_an_unset_reference_is_refused_without_repeating_what_was_written(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`api_key_env` takes the name of a variable, and the mistake that
+    field invites is writing the credential into it instead. The model
+    refuses anything that does not look like a variable name, which
+    catches most of that; this is the line behind it, and it repeats
+    nothing an operator wrote. main prints this sentence to stderr
+    verbatim (main.py, the ConfigError and ProviderError arm) and the
+    logs keep it, so the print below is what a terminal would show."""
+    # Shaped like a variable name, so it gets past the model's own
+    # check, and shaped so a substring test for it cannot match by
+    # accident.
+    written = "SK_TEST_4F8B2C9E_NEVER_A_REAL_CREDENTIAL"
+    monkeypatch.delenv(written, raising=False)
+    config = ProviderConfig.model_validate(
+        {"type": "anthropic", "model": "claude-sonnet-5", "api_key_env": written}
+    )
+
+    with pytest.raises(ProviderError) as caught:
+        build_provider("llm", "claude", config)
+
+    assert "providers.llm.claude" in str(caught.value)
+    assert written not in _chain(caught.value)
+
+    print(caught.value, file=sys.stderr)
+    assert written not in capsys.readouterr().err
 
 
 def test_a_credential_that_cannot_be_opened_names_the_slot_and_not_the_value() -> None:
