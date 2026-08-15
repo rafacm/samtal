@@ -15,7 +15,6 @@ because by then the device has proved who it is and the useful thing to
 tell it is what is wrong with its configuration.
 """
 
-import logging
 
 from fastapi import APIRouter
 from starlette.websockets import WebSocket
@@ -23,8 +22,9 @@ from starlette.websockets import WebSocket
 from samtal_server.auth import DeviceAuth
 from samtal_server.config.models import normalize_mac
 from samtal_server.device.session import DeviceSession
+from samtal_server.events import ServerEvents
 
-logger = logging.getLogger(__name__)
+events = ServerEvents(__name__)
 
 WEBSOCKET_PATH = "/xiaozhi/v1/"
 
@@ -83,11 +83,13 @@ async def conversation(websocket: WebSocket) -> None:
 
     refusal = refusal_reason(state.device_auth, websocket)
     if refusal is not None:
-        logger.warning(
+        events.warning(
             "refused a websocket handshake from %s: %s",
             device_id or "an unidentified device",
             refusal,
-            extra={"event": "auth_rejected", "device": device_id or None, "reason": refusal},
+            event="auth_rejected",
+            device=device_id or None,
+            reason=refusal,
         )
         # Closed before the accept, so the upgrade is answered 403 and no
         # websocket is ever established.
@@ -105,15 +107,13 @@ async def conversation(websocket: WebSocket) -> None:
     # Capacity is checked after the token, so a full server still answers a
     # bad token with a refusal about the token.
     if not state.sessions.try_add(session):
-        logger.warning(
+        events.warning(
             "refused a websocket handshake from %s: the server is at capacity",
             device_id or "an unidentified device",
-            extra={
-                "event": "session_rejected",
-                "device": device_id or None,
-                "session": session.session_id,
-                "reason": "capacity",
-            },
+            event="session_rejected",
+            device=device_id or None,
+            session=session.session_id,
+            reason="capacity",
         )
         await websocket.close()
         return

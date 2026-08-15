@@ -33,7 +33,6 @@ after a restart.
 Upstream reference: `main/ota.cc` in 78/xiaozhi-esp32 parses this response.
 """
 
-import logging
 import time
 from collections.abc import Sequence
 from datetime import datetime
@@ -48,6 +47,7 @@ from samtal_server.build_info import revision
 from samtal_server.config import Config
 from samtal_server.config.models import normalize_mac
 from samtal_server.device.bindings import DeviceAgents, DeviceBindings
+from samtal_server.events import ServerEvents
 from samtal_server.ws import WEBSOCKET_PATH
 
 if TYPE_CHECKING:
@@ -56,7 +56,7 @@ if TYPE_CHECKING:
     # in this direction would not load. Nothing here runs at runtime.
     from samtal_server.onboarding import PendingDevice, PendingDevices
 
-logger = logging.getLogger(__name__)
+events = ServerEvents(__name__)
 
 # The default path, and the one every test and the README use. An operator
 # who exposes the server publicly overrides it with server.ota_path.
@@ -236,8 +236,7 @@ async def check_version(request: Request) -> Response:
     # No session exists yet, so the structured record carries the device
     # rather than a session id; the websocket events pick the device up
     # from here.
-    event = {
-        "event": "ota_check",
+    fields: dict[str, Any] = {
         "device": mac,
         "client": client_id,
         "board": board,
@@ -254,10 +253,10 @@ async def check_version(request: Request) -> Response:
         # A code is a claim ticket read off a screen, not a credential:
         # it belongs in the log line an operator greps for the board
         # they are holding. A device token never does.
-        event["code"] = activation["code"]
+        fields["code"] = activation["code"]
 
     if activation is not None:
-        logger.warning(
+        events.warning(
             "device %s (%s, firmware %s) has no agent and is showing activation code "
             "%s; bind it with: samtal-server config add-device %s <agent>",
             device_id,
@@ -265,38 +264,42 @@ async def check_version(request: Request) -> Response:
             version,
             activation["code"],
             activation["code"],
-            extra=event,
+            event="ota_check",
+            **fields,
         )
     elif not agents and resolution.unloaded:
         # A different problem from having no agent, and a different
         # answer: the binding is there, this process is what is behind.
-        logger.warning(
+        events.warning(
             "device %s (%s, firmware %s) is bound to agent %s, which this server has "
             "not loaded; restart to load it",
             device_id,
             board,
             version,
             ", ".join(resolution.unloaded),
-            extra=event,
+            event="ota_check",
+            **fields,
         )
     elif not agents:
-        logger.warning(
+        events.warning(
             "device %s (%s, firmware %s) has no agent: bind it under devices "
             "or set default_agent",
             device_id,
             board,
             version,
-            extra=event,
+            event="ota_check",
+            **fields,
         )
     else:
-        logger.info(
+        events.info(
             "device %s (%s, firmware %s) resolved to agent %s%s",
             device_id,
             board,
             version,
             agents[0],
             f" (also bound to {', '.join(agents[1:])})" if len(agents) > 1 else "",
-            extra=event,
+            event="ota_check",
+            **fields,
         )
 
     body: dict[str, Any] = {}
@@ -371,13 +374,15 @@ def _activation(
         # ticket for a board an operator has already bound, to whoever
         # is holding the endpoint. The warning naming the failure is
         # already in the log, from the view itself.
-        logger.warning(
+        events.warning(
             "device %s is unbound in the configuration this server started with, but "
             "the database could not be read, so no activation code was issued: this "
             "device may already be bound. Fix the database and it is offered one at "
             "its next check",
             mac,
-            extra={"event": "activation_not_offered", "device": mac, "reason": "unreadable"},
+            event="activation_not_offered",
+            device=mac,
+            reason="unreadable",
         )
         return None
     # Imported here for the reason `describe` imports it below: the
@@ -386,14 +391,16 @@ def _activation(
 
     offer = request.app.state.pending.observe(mac, client_id, board, firmware)
     if offer.device is None:
-        logger.warning(
+        events.warning(
             "device %s is unbound but was offered no activation code: %s. It is "
             "answered exactly as it was before onboarding existed, with no token; "
             "bind it by its MAC with: samtal-server config bind-device %s <agent>",
             mac,
             offer.refused,
             mac,
-            extra={"event": "activation_not_offered", "device": mac, "reason": offer.refused},
+            event="activation_not_offered",
+            device=mac,
+            reason=offer.refused,
         )
         return None
     return activation_object(config.server, offer.device)
@@ -436,14 +443,12 @@ async def activate(request: Request) -> Response:
     bindings: DeviceBindings = request.app.state.bindings
     resolution = await bindings.resolve(mac)
     if resolution.agents:
-        logger.info(
+        events.info(
             "device %s is activated: its next configuration check hands it a token",
             mac,
-            extra={
-                "event": "activation_complete",
-                "device": mac,
-                "agents": list(resolution.agents),
-            },
+            event="activation_complete",
+            device=mac,
+            agents=list(resolution.agents),
         )
         return Response(status_code=200)
 
@@ -451,15 +456,13 @@ async def activate(request: Request) -> Response:
     waiting = pending.waiting_for(mac)
     if waiting is not None:
         await _version_two(request, pending, waiting)
-    logger.debug(
+    events.debug(
         "device %s is still waiting to be claimed",
         mac,
-        extra={
-            "event": "activation_pending",
-            "device": mac,
-            "code": None if waiting is None else waiting.code,
-            "unloaded": list(resolution.unloaded),
-        },
+        event="activation_pending",
+        device=mac,
+        code=None if waiting is None else waiting.code,
+        unloaded=list(resolution.unloaded),
     )
     return Response(status_code=202)
 
@@ -475,31 +478,37 @@ async def _version_two(
         # Version 1 is `{}` and upstream's own server never reads it.
         return
     payload = await _json_object(request)
-    record = {"event": "activation_refused", "device": waiting.mac, "code": waiting.code}
+    refusal = {"device": waiting.mac, "code": waiting.code}
     if payload is None:
-        logger.warning(
+        events.warning(
             "device %s sent a version-2 activation body that is not a JSON object; it "
             "is answered as still waiting. Nothing of the body is quoted here",
             waiting.mac,
-            extra={**record, "reason": "unreadable_body"},
+            event="activation_refused",
+            **refusal,
+            reason="unreadable_body",
         )
         return
     algorithm = payload.get("algorithm")
     if not isinstance(algorithm, str) or algorithm not in ACTIVATION_ALGORITHMS:
-        logger.warning(
+        events.warning(
             "device %s sent a version-2 activation body naming an algorithm this "
             "server does not know; it is answered as still waiting. The value is not "
             "quoted here, since it is whatever the request carried",
             waiting.mac,
-            extra={**record, "reason": "unknown_algorithm"},
+            event="activation_refused",
+            **refusal,
+            reason="unknown_algorithm",
         )
         return
     if payload.get("challenge") != waiting.challenge:
-        logger.warning(
+        events.warning(
             "device %s sent a version-2 activation body answering a challenge this "
             "server did not issue for it; it is answered as still waiting",
             waiting.mac,
-            extra={**record, "reason": "challenge_mismatch"},
+            event="activation_refused",
+            **refusal,
+            reason="challenge_mismatch",
         )
         return
     serial_number = payload.get("serial_number")
@@ -533,9 +542,7 @@ def _bad_request(message: str) -> JSONResponse:
     interpolated into either channel, which is what keeps a header this
     endpoint could not read out of the log a deployment ships.
     """
-    logger.warning(
-        "rejected OTA request: %s", message, extra={"event": "ota_request_rejected"}
-    )
+    events.warning("rejected OTA request: %s", message, event="ota_request_rejected")
     return JSONResponse({"error": message}, status_code=400)
 
 
