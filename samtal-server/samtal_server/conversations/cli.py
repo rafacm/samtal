@@ -38,6 +38,15 @@ Delete whole sessions, with their turns, tool invocations and events.
 At least one selector is required; selectors given together combine
 with AND."""
 
+# What a purge says when a reader kept it from truncating the log. The
+# deletion is committed either way, so this is a report and not a
+# failure, and it names what makes the frames go.
+DEFERRED_TRUNCATION = (
+    "the rows are deleted, but a reader was holding the write-ahead log open, "
+    "so its frames were not truncated yet; the next purge, or the running "
+    "server's next write, truncates them"
+)
+
 PURGE_NOTES = """\
 Capture files are never touched: purging removes rows from
 conversations.db and leaves the session's WAV, JSONL and manifest where
@@ -149,8 +158,14 @@ def _purge(args: argparse.Namespace) -> None:
             f"the directory it would live in, and nothing is created by asking"
         )
     taken = purge(directory, session=args.session, device=args.device, before=before)
-    for name in ("sessions", "turns", "tool_invocations", "events"):
-        print(f"{name}: {taken[name]}")
+    for name, count in taken.counts().items():
+        print(f"{name}: {count}")
+    if not taken.truncated:
+        # Said rather than left to be discovered. The rows are gone; the
+        # frames that held their bytes are still in the write-ahead log
+        # because a reader was holding it open, and the next checkpoint
+        # that gets its moment is what removes them.
+        print(DEFERRED_TRUNCATION)
 
 
 def _schema(_args: argparse.Namespace) -> None:

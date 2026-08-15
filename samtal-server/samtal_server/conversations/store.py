@@ -39,7 +39,6 @@ failure reports are built in the `except` arm out of the exception's
 class name.
 """
 
-import contextlib
 import datetime as dt
 import logging
 import queue as queuing
@@ -100,6 +99,20 @@ TEXT_FIELD = "text"
 # rule. Bounded so that a defect cannot grow the set without limit; when
 # it fills it is emptied, and the warnings begin again.
 _UNKNOWN_WARNED_MAX = 64
+
+# How long a checkpoint waits for a reader to let go before it defers.
+# Far below the busy timeout on purpose: by the time it runs, the
+# deletion is committed and durable, and truncating the log is tidying
+# up after it. A quarter of a second covers a reader that is about to
+# finish; waiting the full ten seconds would queue the writer behind a
+# reader it has no reason to wait for, which is exactly what deferring
+# to the next quiet moment exists to avoid.
+CHECKPOINT_WAIT_MS = 250
+
+# What the purge command waits instead. Longer, because a CLI process
+# has no next marker to retry at: this is its only chance before it
+# exits, and it reports the deferral when it does not get one.
+PURGE_CHECKPOINT_WAIT_MS = 1_000
 
 
 def conversations_path(directory: str | Path) -> Path:
@@ -180,6 +193,30 @@ class _Stop:
     a second code path."""
 
 
+@dataclass(frozen=True)
+class Deletion:
+    """What a purge removed, and whether the log went with it."""
+
+    sessions: int
+    turns: int
+    tool_invocations: int
+    events: int
+    # False when a reader blocked the truncating checkpoint. The rows
+    # are gone either way; the frames holding their bytes are not, until
+    # a checkpoint gets its moment.
+    truncated: bool = True
+
+    def counts(self) -> dict[str, int]:
+        """The four numbers a caller prints, in the order it prints
+        them."""
+        return {
+            "sessions": self.sessions,
+            "turns": self.turns,
+            "tool_invocations": self.tool_invocations,
+            "events": self.events,
+        }
+
+
 @dataclass
 class _Batch:
     """One session's records since its last marker, held in memory so
@@ -247,6 +284,10 @@ class ConversationStore:
         # folded into the session row's count at close. Writer-side, so
         # unlike the producer's counter it needs no lock.
         self._lost: dict[str, int] = {}
+        # Whether a deletion's truncating checkpoint was blocked and is
+        # still owed. Retried at the next marker and at stop, which is
+        # what "the next quiet moment" means concretely.
+        self._truncation_due = False
 
     # --- lifecycle ----------------------------------------------------
 
@@ -432,6 +473,9 @@ class ConversationStore:
         for session_id in list(self._batches):
             self._commit(session_id)
             self._batches.pop(session_id, None)
+        # The last quiet moment there will be. A truncation still owed
+        # when the server stops has no later marker to wait for.
+        self._settle()
 
     def _commit(
         self, session_id: str, opening: Open | None = None, closing: Close | None = None
@@ -483,6 +527,15 @@ class ConversationStore:
         # to prevent.
         if session_id in self._batches:
             self._batches[session_id] = _Batch()
+        self._settle()
+
+    def _settle(self) -> None:
+        """The next quiet moment, taken when one arrives. A deletion
+        whose checkpoint a reader blocked leaves the deleted frames in
+        the write-ahead log, so the truncation is owed until it lands,
+        and every marker the writer commits is another chance at it."""
+        if self._truncation_due and _checkpoint(self._engine):
+            self._truncation_due = False
 
     def _alive(self, connection: Any, session_id: str) -> bool:
         found = connection.execute(
@@ -660,7 +713,8 @@ class ConversationStore:
                 # offset, which they are: the cutoff is built here and
                 # the column is written from the same clock.
                 counts = _delete_sessions(connection, [sessions.c.started_at < cutoff])
-            _checkpoint(self._engine)
+            if counts["sessions"]:
+                self._truncation_due = not _checkpoint(self._engine)
         except Exception as exc:  # noqa: BLE001 - retention never breaks a session
             events.warning(
                 "the conversation store could not prune (%s)",
@@ -700,6 +754,13 @@ def purge(
     writer finds the row gone at its next marker and stops writing for
     that session. Capture files are a separate instrument and are never
     touched.
+
+    The answer says whether the write-ahead log was truncated as well as
+    what was deleted. A reader holding the log open defers the
+    truncation, and a CLI process has no next marker to retry at, so the
+    caller is told rather than left to assume: the deletion is committed
+    either way, and the frames go at the next checkpoint that gets its
+    moment.
     """
     criteria: list[ColumnElement[bool]] = []
     if session is not None:
@@ -717,13 +778,14 @@ def purge(
         # would be a truncation wearing the same command name.
         raise ValueError("a purge needs at least one selector")
     engine = existing_engine(conversations_path(directory), immediate=True, secure_delete=True)
+    truncated = False
     try:
         with engine.begin() as connection:
             counts = _delete_sessions(connection, criteria)
-        _checkpoint(engine)
+        truncated = _checkpoint(engine, PURGE_CHECKPOINT_WAIT_MS)
     finally:
         engine.dispose()
-    return counts
+    return Deletion(**counts, truncated=truncated)
 
 
 def _delete_sessions(
@@ -752,15 +814,45 @@ def _delete_sessions(
     return counts
 
 
-def _checkpoint(engine: Engine) -> None:
+def _checkpoint(engine: Engine, wait_ms: int = CHECKPOINT_WAIT_MS) -> bool:
     """Fold the write-ahead log back into the database and truncate it,
     so the deleted frames stop existing rather than merely stop being
-    read. A checkpoint blocked by a long reader truncates at the next
-    quiet moment instead of failing the deletion, which is the stated
-    limit rather than a silent one; copies that already left the file
-    are the operator's to manage."""
-    with contextlib.suppress(Exception), engine.connect() as connection:
-        connection.exec_driver_sql("PRAGMA wal_checkpoint(TRUNCATE)")
+    read. Answers whether it truncated.
+
+    On a raw DBAPI connection, deliberately, and not through the engine:
+    SQLite refuses to checkpoint inside a transaction, and every
+    connection this engine hands out through SQLAlchemy takes `BEGIN
+    IMMEDIATE` before its first statement. Through the engine the
+    statement raises "database table is locked" every single time, which
+    a suppressed exception turns into a checkpoint that silently never
+    happened. The pragma runs in autocommit here because the connect
+    listener hands transaction control to SQLAlchemy, and SQLAlchemy is
+    not in the way of a raw connection.
+
+    A checkpoint a reader blocks reports busy in its first column rather
+    than raising, so the answer is read rather than assumed. Its caller
+    retries at the next quiet moment; the copies that already left the
+    file (backups, snapshots) stay the operator's to manage.
+    """
+    raw = engine.raw_connection()
+    try:
+        cursor = raw.cursor()
+        try:
+            cursor.execute(f"PRAGMA busy_timeout={wait_ms}")
+            row = cursor.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            # Back to the connection's own budget before it returns to
+            # the pool: the short wait belongs to this statement, not to
+            # every transaction that borrows the connection next.
+            cursor.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+        finally:
+            cursor.close()
+    except Exception:  # noqa: BLE001 - tidying up never breaks a deletion
+        return False
+    finally:
+        raw.close()
+    # (busy, log frames, frames checkpointed). Busy is 0 only when every
+    # frame moved and the log was truncated.
+    return row is not None and row[0] == 0
 
 
 def _utc_now() -> dt.datetime:
@@ -774,6 +866,7 @@ __all__ = [
     "STOP_TIMEOUT_S",
     "Close",
     "ConversationStore",
+    "Deletion",
     "Event",
     "Open",
     "Turn",
