@@ -75,9 +75,12 @@ class TurnRecord:
     mirrors the events.
     """
 
-    # The utterance's offset from session open, aligned with its `heard`
-    # event and with the capture's audio.
-    t_ms: int
+    # The session loop's clock reading at the utterance's `heard`, the
+    # same reading an `Emission` carries. The store turns it into the
+    # row's `t_ms`, because only the store knows the reading the session
+    # opened at, which is what the offset is measured from and what
+    # aligns a turn with its event and with the capture's audio.
+    at: float
     agent: str | None = None
     heard: str | None = None
     heard_duration_s: float | None = None

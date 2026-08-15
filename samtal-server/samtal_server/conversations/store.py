@@ -200,10 +200,16 @@ class Event:
 
 @dataclass(frozen=True)
 class Turn:
-    """One completed utterance-and-reply cycle. A marker."""
+    """One completed utterance-and-reply cycle. A marker.
+
+    `t_ms` is stamped by the producer rather than carried on the record:
+    the runtime hands over the clock reading it heard the utterance at,
+    and turning that into an offset needs the session's opening reading,
+    which only this store holds."""
 
     session: str
     record: TurnRecord
+    t_ms: int
 
 
 @dataclass(frozen=True)
@@ -252,7 +258,7 @@ class _Batch:
     """One session's records since its last marker, held in memory so
     that no transaction is open while the writer waits."""
 
-    turns: list[TurnRecord] = field(default_factory=list)
+    turns: list[Turn] = field(default_factory=list)
     events: list[Event] = field(default_factory=list)
 
 
@@ -403,10 +409,21 @@ class ConversationStore:
 
     def record_turn(self, session_id: str, record: TurnRecord) -> None:
         """One completed turn. A control record and a marker: reaching it
-        commits everything this session has accumulated."""
+        commits everything this session has accumulated.
+
+        The offset is taken here, off the reading the record carries, for
+        the reason the queue item states: the runtime is built before the
+        session opens and never learns the reading its offsets are
+        measured from."""
         if self._stopped:
             return
-        self._queue.put_nowait(Turn(session_id, record))
+        with self._lock:
+            # A turn for a session this store never opened is refused by
+            # the writer, which says so once. Stamping a zero rather than
+            # asking for an offset there keeps that the writer's decision
+            # instead of an exception raised on the session loop.
+            t_ms = self._offset(session_id, record.at) if session_id in self._opened_at else 0
+        self._queue.put_nowait(Turn(session_id, record, t_ms))
 
     def close_session(
         self, session_id: str, duration_s: float | None = None, reason: str | None = None
@@ -469,7 +486,7 @@ class ConversationStore:
             if batch is None:
                 self._refuse(item.session)
                 return
-            batch.turns.append(item.record)
+            batch.turns.append(item)
             self._commit(item.session)
             return
         if isinstance(item, Close):
@@ -591,13 +608,13 @@ class ConversationStore:
         return found is not None
 
     def _write(self, connection: Any, session_id: str, batch: _Batch) -> None:
-        for record in batch.turns:
+        for item in batch.turns:
             turn = connection.execute(
-                turns.insert().values(self._turn_row(session_id, record))
+                turns.insert().values(self._turn_row(session_id, item))
             )
             turn_id = turn.inserted_primary_key[0]
             rows = [
-                self._tool_row(session_id, turn_id, call) for call in record.tools
+                self._tool_row(session_id, turn_id, call) for call in item.record.tools
             ]
             if rows:
                 connection.execute(tool_invocations.insert(), rows)
@@ -666,10 +683,11 @@ class ConversationStore:
             "dropped": lost if self.metrics else 0,
         }
 
-    def _turn_row(self, session_id: str, record: TurnRecord) -> dict[str, Any]:
+    def _turn_row(self, session_id: str, item: Turn) -> dict[str, Any]:
+        record = item.record
         return {
             "session": session_id,
-            "t_ms": record.t_ms,
+            "t_ms": item.t_ms,
             "agent": record.agent,
             "heard": record.heard if self.text else None,
             "heard_duration_s": record.heard_duration_s if self.metrics else None,
