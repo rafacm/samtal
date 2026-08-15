@@ -4,32 +4,43 @@ The retained JSON logs are the observability surface (ADR 2026-08-04)
 and the transcript store until v3, so the records a session emits are
 output rather than an implementation detail. The suites next door assert
 what an event is about: this one asserts what it *is*. Per emit path it
-pins four things, which together are the whole of what a consumer sees:
+pins five things, which together are the whole of what a consumer sees:
 
 - `record.name`, the channel, which is the `logger` field of the JSON
   line;
 - `record.levelno`, because a level is part of the surface (a filter set
   to INFO decides what a collector keeps);
-- `record.getMessage()`, the rendered human sentence, which is what
-  proves no `%` argument was lost or reordered;
+- `record.msg`, the unrendered template, which is what catches a
+  reworded sentence, a lost `%` argument, and a `%d` quietly becoming a
+  `%s`;
+- `record.args`, the substituted values themselves, by value and by
+  type, which is what catches two arguments swapping places even where
+  the rendering happens to read the same;
 - the exact set of nonstandard record attributes and their values, which
   is the JSON object's own keys: `logs.py` emits precisely the
   attributes `logging` did not put there, so this suite reads them the
   same way rather than listing them by hand.
 
-Two normalizations, and no others. Values that move between runs (the
-session id, wall-clock durations, latencies) are declared per path in
-`dynamic=` and replaced by a placeholder, so the key is still pinned and
-only its value is not. In the sentence, the session id and every numeric
-run become placeholders, since a duration is rendered into the sentence
-too; what remains pinned there is every word, every argument's position,
-and the type of what was substituted. Numeric literals inside a sentence
-are therefore not pinned; the fields are where the exact values live.
+The template and the arguments are the pin. `sentence` is carried
+alongside as the rendering a person reads in a review diff, with the
+session id and every numeric run replaced, and it is deliberately the
+weaker of the two: numeric literals inside it are not pinned at all,
+which is precisely why the two fields above it exist.
+
+Values that move between runs are named rather than guessed. `dynamic=`
+names the payload fields whose value is not pinned (the key still is),
+and `dynamic_args=` the argument positions, which keep their type as
+`<float>` or `<ConnectionRefusedError>` so a duration that turned into
+a string is still a failure. Argument 0 is the session id in every one
+of these sentences, since each opens with "session %s", so it is
+normalized without being declared.
 
 Written before the emitter moved out of `device/events.py` (#138,
 milestone 1) and left untouched through the move, which is what makes it
 evidence rather than a description: the surface it pins is the one that
-existed before the reshape.
+existed before the reshape. Strengthened afterwards by the PR #152
+review round, which found the sentence normalization too generous to
+catch what this docstring claimed of it.
 """
 
 import asyncio
@@ -96,6 +107,10 @@ UTTERANCE = b"\x00\x00" * 320
 # is pinned and the value deliberately is not.
 DYNAMIC = "<dynamic>"
 
+# And what the session id is replaced by, which is worth telling apart
+# from the rest: it is the one dynamic value every sentence carries.
+SESSION = "<session>"
+
 # A session id is a uuid4 hex, and it appears in the sentence as well as
 # in the fields.
 _SESSION_ID = re.compile(r"\b[0-9a-f]{32}\b")
@@ -119,14 +134,31 @@ def payload_of(record: logging.LogRecord) -> dict[str, Any]:
 
 def sentence_of(record: logging.LogRecord) -> str:
     """The rendered human sentence, with the values that move between
-    runs standing in for themselves."""
-    return _NUMBER.sub("<n>", _SESSION_ID.sub("<session>", record.getMessage()))
+    runs standing in for themselves. The readable half of the pin, and
+    the weaker one: see the module docstring."""
+    return _NUMBER.sub("<n>", _SESSION_ID.sub(SESSION, record.getMessage()))
 
 
-def pinned(record: logging.LogRecord, dynamic: tuple[str, ...] = ()) -> dict[str, Any]:
-    """What one emit path produces, in the four dimensions a consumer
-    sees. `dynamic` names the fields whose value is not pinned; the
-    session id always is one."""
+def args_of(record: logging.LogRecord, dynamic_args: tuple[int, ...]) -> tuple[Any, ...]:
+    """The values substituted into the template, in order.
+
+    A declared-dynamic position keeps its type rather than its value,
+    so a duration that stopped being a float is still a failure. The
+    first position is the session id in every sentence here."""
+    return tuple(
+        SESSION
+        if index == 0
+        else (f"<{type(value).__name__}>" if index in dynamic_args else value)
+        for index, value in enumerate(record.args or ())
+    )
+
+
+def pinned(
+    record: logging.LogRecord,
+    dynamic: tuple[str, ...] = (),
+    dynamic_args: tuple[int, ...] = (),
+) -> dict[str, Any]:
+    """What one emit path produces, in the dimensions a consumer sees."""
     fields = {
         key: DYNAMIC if key == "session" or key in dynamic else value
         for key, value in payload_of(record).items()
@@ -134,6 +166,8 @@ def pinned(record: logging.LogRecord, dynamic: tuple[str, ...] = ()) -> dict[str
     return {
         "logger": record.name,
         "level": record.levelno,
+        "template": record.msg,
+        "args": args_of(record, dynamic_args),
         "sentence": sentence_of(record),
         "fields": fields,
     }
@@ -188,9 +222,11 @@ async def test_session_rejected_bad_device_id(caplog: pytest.LogCaptureFixture) 
     with caplog.at_level("WARNING"):
         await turned_away(config_with_agent(), "not-a-mac")
 
-    assert pinned(only(caplog, "session_rejected")) == {
+    assert pinned(only(caplog, "session_rejected"), dynamic_args=(1,)) == {
         "logger": "samtal_server.session",
         "level": logging.WARNING,
+        "template": "session %s rejected: Device-Id header: %s",
+        "args": (SESSION, "<ValueError>"),
         "sentence": (
             "session <session> rejected: Device-Id header: "
             '"not-a-mac" is not a MAC address; expected six colon-separated hex '
@@ -212,6 +248,11 @@ async def test_session_rejected_no_agent(caplog: pytest.LogCaptureFixture) -> No
     assert pinned(only(caplog, "session_rejected")) == {
         "logger": "samtal_server.session",
         "level": logging.WARNING,
+        "template": (
+            "session %s rejected: device %s has no agent: bind it under devices "
+            "or set default_agent"
+        ),
+        "args": (SESSION, DEVICE_MAC.lower()),
         "sentence": (
             "session <session> rejected: device aa:bb:cc:dd:ee:ff has no agent: "
             "bind it under devices or set default_agent"
@@ -234,6 +275,11 @@ async def test_session_rejected_agent_not_loaded(caplog: pytest.LogCaptureFixtur
     assert pinned(only(caplog, "session_rejected")) == {
         "logger": "samtal_server.session",
         "level": logging.WARNING,
+        "template": (
+            "session %s rejected: device %s is bound to agent %s, which this "
+            "server has not loaded; restart to load it"
+        ),
+        "args": (SESSION, DEVICE_MAC.lower(), "poet"),
         "sentence": (
             "session <session> rejected: device aa:bb:cc:dd:ee:ff is bound to agent poet, "
             "which this server has not loaded; restart to load it"
@@ -264,6 +310,11 @@ def test_session_open(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "session_open"), dynamic=("revision",)) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
+        "template": (
+            "session %s open: device %s (client %s) agent %s%s, protocol v%d, "
+            "%d Hz %d ms frames in"
+        ),
+        "args": (SESSION, DEVICE_MAC.lower(), DEVICE_UUID, "assistant", "", 1, 16000, 60),
         "sentence": (
             f"session <session> open: device aa:bb:cc:dd:ee:ff (client {CLIENT}) "
             "agent assistant, protocol v<n>, <n> Hz <n> ms frames in"
@@ -288,6 +339,8 @@ def test_session_closed(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "session_closed"), dynamic=("duration_s",)) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
+        "template": "session %s closed (device %s)",
+        "args": (SESSION, DEVICE_MAC.lower()),
         "sentence": "session <session> closed (device aa:bb:cc:dd:ee:ff)",
         "fields": {
             "event": "session_closed",
@@ -308,6 +361,8 @@ def test_session_limit(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "session_limit"), dynamic=("duration_s",)) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
+        "template": "session %s reached the %.0f s time limit",
+        "args": (SESSION, 0.3),
         "sentence": "session <session> reached the <n> s time limit",
         "fields": {
             "event": "session_limit",
@@ -329,6 +384,8 @@ def test_session_idle(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "session_idle"), dynamic=("duration_s",)) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
+        "template": "session %s idle for %.0f s, hanging up",
+        "args": (SESSION, 0.3),
         "sentence": "session <session> idle for <n> s, hanging up",
         "fields": {
             "event": "session_idle",
@@ -347,6 +404,8 @@ def test_speaking_started(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "speaking_started")) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
+        "template": "session %s: speaking started",
+        "args": (SESSION,),
         "sentence": "session <session>: speaking started",
         "fields": {
             "event": "speaking_started",
@@ -375,6 +434,8 @@ async def test_prompt_assembled(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "prompt_assembled")) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
+        "template": "session %s: assembled %d characters of prompt for %s",
+        "args": (SESSION, 4, "poet"),
         "sentence": "session <session>: assembled <n> characters of prompt for poet",
         "fields": {
             "event": "prompt_assembled",
@@ -395,6 +456,8 @@ async def test_heard(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "heard")) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
+        "template": 'session %s: heard "%s"',
+        "args": (SESSION, "hello"),
         "sentence": 'session <session>: heard "hello"',
         "fields": {
             "event": "heard",
@@ -415,6 +478,8 @@ async def test_replied(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "replied")) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
+        "template": 'session %s: replied "%s"',
+        "args": (SESSION, "Two words."),
         "sentence": 'session <session>: replied "Two words."',
         "fields": {
             "event": "replied",
@@ -432,10 +497,14 @@ async def test_llm_round(caplog: pytest.LogCaptureFixture) -> None:
         await session.runtime._reply(UTTERANCE)
 
     assert pinned(
-        only(caplog, "llm_round"), dynamic=("duration_ms", "first_token_ms")
+        only(caplog, "llm_round"),
+        dynamic=("duration_ms", "first_token_ms"),
+        dynamic_args=(3,),
     ) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
+        "template": "session %s: %s round %d took %.2f s over %d turns",
+        "args": (SESSION, "poet", 1, "<float>", 1),
         "sentence": "session <session>: poet round <n> took <n> s over <n> turns",
         "fields": {
             "event": "llm_round",
@@ -465,6 +534,8 @@ async def test_agent_said_and_handover(caplog: pytest.LogCaptureFixture) -> None
     assert pinned(only(caplog, "agent_said")) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
+        "template": 'session %s: %s said "%s"',
+        "args": (SESSION, "poet", "Handing you over."),
         "sentence": 'session <session>: poet said "Handing you over."',
         "fields": {
             "event": "agent_said",
@@ -477,6 +548,8 @@ async def test_agent_said_and_handover(caplog: pytest.LogCaptureFixture) -> None
     assert pinned(only(caplog, "handover")) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
+        "template": "session %s: handed over from agent %s to %s",
+        "args": (SESSION, "poet", "tutor"),
         "sentence": "session <session>: handed over from agent poet to tutor",
         "fields": {
             "event": "handover",
@@ -494,9 +567,11 @@ async def test_tool_call(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level("INFO"):
         await run_reply(session, "do it")
 
-    assert pinned(only(caplog, "tool_call"), dynamic=("duration_ms",)) == {
+    assert pinned(only(caplog, "tool_call"), dynamic=("duration_ms",), dynamic_args=(2,)) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
+        "template": "session %s: tool %s took %.2f s%s",
+        "args": (SESSION, "ghost_tool", "<float>", " and failed"),
         "sentence": "session <session>: tool ghost_tool took <n> s and failed",
         "fields": {
             "event": "tool_call",
@@ -516,9 +591,11 @@ async def test_llm_retry(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level("INFO"):
         await run_reply(session, "are you there")
 
-    assert pinned(only(caplog, "llm_retry"), dynamic=("duration_ms",)) == {
+    assert pinned(only(caplog, "llm_retry"), dynamic=("duration_ms",), dynamic_args=(1,)) == {
         "logger": "samtal_server.session",
         "level": logging.WARNING,
+        "template": "session %s: no first token after %.1f s, retrying round %d",
+        "args": (SESSION, "<float>", 1),
         "sentence": "session <session>: no first token after <n> s, retrying round <n>",
         "fields": {
             "event": "llm_retry",
@@ -537,9 +614,20 @@ async def test_llm_retry(caplog: pytest.LogCaptureFixture) -> None:
 async def test_provider_failed(caplog: pytest.LogCaptureFixture) -> None:
     failed = await reply_with("asr", ConnectionRefusedError("no route"), caplog)
 
-    assert pinned(failed, dynamic=("duration_ms",)) == {
+    assert pinned(failed, dynamic=("duration_ms",), dynamic_args=(4, 7)) == {
         "logger": "samtal_server.session",
         "level": logging.WARNING,
+        "template": "session %s: %s provider%s %s after %.2f s%s: %s: %s",
+        "args": (
+            SESSION,
+            "asr",
+            ' "cloud"',
+            "failed",
+            "<float>",
+            " reaching api.example.com",
+            "ConnectionRefusedError",
+            "<ConnectionRefusedError>",
+        ),
         "sentence": (
             'session <session>: asr provider "cloud" failed after <n> s '
             "reaching api.example.com: ConnectionRefusedError: no route"
@@ -582,6 +670,8 @@ async def test_barge_in_on_a_manual_stop(caplog: pytest.LogCaptureFixture) -> No
     assert pinned(only(caplog, "barge_in")) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
+        "template": "session %s: barge-in, cancelling the reply in flight",
+        "args": (SESSION,),
         "sentence": "session <session>: barge-in, cancelling the reply in flight",
         "fields": {
             "event": "barge_in",
@@ -613,6 +703,11 @@ async def test_barge_in_suppressed_under_the_speech_floor(
     assert pinned(only(caplog, "barge_in_suppressed")) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
+        "template": (
+            "session %s: barge-in suppressed, %d ms of speech is under the "
+            "%.0f ms floor"
+        ),
+        "args": (SESSION, 100, 500.0),
         "sentence": (
             "session <session>: barge-in suppressed, <n> ms of speech is under "
             "the <n> ms floor"
@@ -645,6 +740,8 @@ async def test_barge_in_merged_mid_transcription(caplog: pytest.LogCaptureFixtur
     assert pinned(only(caplog, "barge_in_merged")) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
+        "template": "session %s: barge-in mid-transcription, merging the utterances",
+        "args": (SESSION,),
         "sentence": "session <session>: barge-in mid-transcription, merging the utterances",
         "fields": {
             "event": "barge_in_merged",
@@ -688,6 +785,8 @@ async def test_barge_in_suppressed_inside_the_refractory_window(
     assert pinned(only(caplog, "barge_in_suppressed")) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
+        "template": "session %s: barge-in suppressed inside the refractory window",
+        "args": (SESSION,),
         "sentence": "session <session>: barge-in suppressed inside the refractory window",
         "fields": {
             "event": "barge_in_suppressed",
@@ -719,6 +818,8 @@ async def test_barge_in_suppressed_with_nothing_transcribed(
     assert pinned(only(caplog, "barge_in_suppressed")) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
+        "template": "session %s: barge-in suppressed, nothing transcribed",
+        "args": (SESSION,),
         "sentence": "session <session>: barge-in suppressed, nothing transcribed",
         "fields": {
             "event": "barge_in_suppressed",
@@ -749,6 +850,8 @@ async def test_barge_in_confirmed_by_a_transcript(caplog: pytest.LogCaptureFixtu
     assert pinned(only(caplog, "barge_in"), dynamic=("speaking_ms",)) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
+        "template": "session %s: barge-in, cancelling the reply in flight",
+        "args": (SESSION,),
         "sentence": "session <session>: barge-in, cancelling the reply in flight",
         "fields": {
             "event": "barge_in",
@@ -768,9 +871,11 @@ async def test_filler_played(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level("INFO"):
         await session.runtime._reply(UTTERANCE)
 
-    assert pinned(only(caplog, "filler_played"), dynamic=("delay_ms",)) == {
+    assert pinned(only(caplog, "filler_played"), dynamic=("delay_ms",), dynamic_args=(1,)) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
+        "template": "session %s: no reply audio after %d ms, playing filler %d",
+        "args": (SESSION, "<int>", 0),
         "sentence": "session <session>: no reply audio after <n> ms, playing filler <n>",
         "fields": {
             "event": "filler_played",
@@ -794,9 +899,13 @@ async def test_filler_skipped_for_a_user_still_speaking(
         session.runtime._endpointer.feed(SPEECH)
         await session.runtime._reply_task
 
-    assert pinned(only(caplog, "filler_skipped"), dynamic=("speech_ms",)) == {
+    assert pinned(
+        only(caplog, "filler_skipped"), dynamic=("speech_ms",), dynamic_args=(1,)
+    ) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
+        "template": "session %s: filler skipped, the user is speaking (%d ms heard)",
+        "args": (SESSION, "<int>"),
         "sentence": "session <session>: filler skipped, the user is speaking (<n> ms heard)",
         "fields": {
             "event": "filler_skipped",
@@ -824,6 +933,8 @@ async def test_filler_skipped_while_a_barge_in_is_confirmed(
     assert pinned(only(caplog, "filler_skipped")) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
+        "template": "session %s: filler skipped, a barge-in is being confirmed",
+        "args": (SESSION,),
         "sentence": "session <session>: filler skipped, a barge-in is being confirmed",
         "fields": {
             "event": "filler_skipped",
