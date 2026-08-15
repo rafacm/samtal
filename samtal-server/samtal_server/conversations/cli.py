@@ -29,17 +29,24 @@ from samtal_server.conversations.store import conversations_path, purge
 # What the operator has to be told, because it is a consequence they
 # cannot see in the counts: the two instruments are separate, and one of
 # them may still be running.
-PURGE_NOTES = (
-    "Capture files are never touched: purging removes rows from "
-    "conversations.db and leaves the session's WAV, JSONL and manifest "
-    "where they are. The session id is the correlation key for whoever "
-    "needs to remove the matching triplet.\n"
-    "\n"
-    "Purging a session that is still running ends its recording. The "
-    "writer finds the row gone at its next turn and stops writing for "
-    "that session, so what the conversation says after the purge is not "
-    "recorded."
-)
+#
+# Wrapped here rather than by argparse, and narrower than a terminal:
+# the raw formatter prints these verbatim, and a line that wraps on its
+# own is worse than one that was wrapped on purpose.
+PURGE_DESCRIPTION = """\
+Delete whole sessions, with their turns, tool invocations and events.
+At least one selector is required; selectors given together combine
+with AND."""
+
+PURGE_NOTES = """\
+Capture files are never touched: purging removes rows from
+conversations.db and leaves the session's WAV, JSONL and manifest where
+they are. The session id is the correlation key for whoever needs to
+remove the matching triplet.
+
+Purging a session that is still running ends its recording. The writer
+finds the row gone at its next turn and stops writing for that session,
+so what the conversation says after the purge is not recorded."""
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -90,14 +97,11 @@ def _parser() -> argparse.ArgumentParser:
     purging = commands.add_parser(
         "purge",
         help="delete sessions from the store",
-        description=(
-            "Delete whole sessions, with their turns, tool invocations and events. "
-            "At least one selector is required; selectors given together combine "
-            "with AND."
-        ),
+        description=PURGE_DESCRIPTION,
         epilog=PURGE_NOTES,
-        # The epilog is laid out already; the default formatter would
-        # reflow it into one paragraph.
+        # Both are laid out already; the default formatter would reflow
+        # each into one paragraph and lose the blank line between the
+        # two notes.
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     purging.add_argument(
