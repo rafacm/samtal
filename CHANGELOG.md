@@ -18,15 +18,19 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   `mcp_connected` (`entry`, `transport`, a count of `tools`,
   `duration_ms`), `mcp_down` (`entry`, `reason` from a closed set of
   six, `duration_ms` where a connect ran), `mcp_call_dropped`
-  (`entry`, `tool`), `mcp_reload` (`outcome` applied or refused, with
-  the four counts or a refusal reason) and `mcp_tool_shadowed`
-  (`entry`, `position`, `owner`). All five are in the README's event
-  table and are a compatibility surface from here on. None of them
-  carries a byte a third-party server chose: the reasons are tokens
-  picked where a failure is classified, by exception type and never by
-  message, and the shadowed-tool line names a position where a name
-  would be, because sanitizing a tool name only replaces the
-  characters an LLM API refuses and a credential survives that whole.
+  (`entry`, `position`, `error`), `mcp_reload` (`outcome` applied or
+  refused, with the four counts or a refusal reason) and
+  `mcp_tool_shadowed` (`entry`, `position`, `owner`). All five are in
+  the README's event table and are a compatibility surface from here
+  on. None of them carries a byte a third-party server chose: the
+  reasons and the failure classes are tokens and type names picked
+  where a failure is classified, never a message, and no line names a
+  tool at all. A published tool name is half whatever the far side
+  called it, sanitizing replaces only the characters both LLM APIs
+  refuse, and an alphanumeric credential goes through that untouched,
+  so every line about one tool says which one by its position in that
+  server's listing and `samtal-server config status` prints the names
+  to a terminal for whoever asks.
   Alongside them, every event this server emits is now offered to an
   explicit **tap** interface (`Emission`, `EventTap`) before it is
   logged, with a hub a server-scope consumer attaches to once for
@@ -35,7 +39,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   exporters attach without touching a single emit site. **Operator-visible:**
   two new lines an MCP deployment did not see before, an intentional
   stop (at INFO, because a shutdown is not a problem) and a refused
-  reload (at WARNING).
+  reload (at WARNING). A tool call that fails because its MCP server
+  did also changes what the model is told: it now gets a fixed sentence
+  naming the entry, where it used to be handed whatever the far side's
+  SDK put in its exception, which could quote a response body straight
+  into the conversation. What the failure was is in the
+  `mcp_call_dropped` event instead, by class.
 
 ### Changed
 
