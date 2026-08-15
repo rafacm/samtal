@@ -68,6 +68,18 @@ jobs:
             exit 1
           fi
 
+      # And the conversation store's schema reference, generated from
+      # the SQLAlchemy metadata under the same rule: the committed copy
+      # is a cache of what the tables say, and one that can drift from
+      # them is worth nothing.
+      - name: Check the committed conversations reference is current
+        run: |
+          uv run samtal-server conversations schema > "$RUNNER_TEMP/conversations-schema.md"
+          if ! diff -u ../docs/reference/conversations-schema.md "$RUNNER_TEMP/conversations-schema.md"; then
+            echo "::error::docs/reference/conversations-schema.md is stale; regenerate it with: uv run samtal-server conversations schema > ../docs/reference/conversations-schema.md"
+            exit 1
+          fi
+
       # The same for the configuration API's OpenAPI document, which is
       # generated from the routes and committed for the same reason: it
       # is the machine-readable contract, and a copy that can drift from
@@ -80,7 +92,7 @@ jobs:
             exit 1
           fi
 
-      # The database's Alembic scripts live inside the package so that a
+      # The databases' Alembic scripts live inside the package so that a
       # built wheel carries them, and no test run from the checkout can
       # prove that: the source tree makes every file discoverable
       # whether it was packaged or not. So build the artifact, install
@@ -89,6 +101,11 @@ jobs:
       # sys.path, and the run happens outside the checkout as well, so
       # `samtal_server` can only resolve to the installed wheel; the
       # script asserts that too rather than trusting it.
+      #
+      # Both databases, because they have separate chains packaged
+      # separately: a wheel that shipped the domain migrations and
+      # omitted the conversations ones would pass the first half of this
+      # and fail on a deployment at the moment recording is turned on.
       - name: Migrate a fresh database from the built wheel
         run: |
           uv build --wheel --out-dir "$RUNNER_TEMP/dist"
@@ -102,8 +119,9 @@ jobs:
           import tempfile
 
           import samtal_server
+          from samtal_server.conversations.store import open_conversations
           from samtal_server.db import open_database
-          from sqlalchemy import inspect
+          from sqlalchemy import inspect, text
 
           installed = pathlib.Path(samtal_server.__file__).resolve()
           if "site-packages" not in installed.parts:
@@ -143,6 +161,40 @@ jobs:
               if absent:
                   sys.exit(f"the wheel's migrations did not add {table}: " + ", ".join(sorted(absent)))
           print(f"migrated a fresh database from {installed.parent}")
+
+          # The conversation store, from the same installed artifact.
+          store = open_conversations(pathlib.Path(tempfile.mkdtemp()) / "db")
+          with store.connect() as connection:
+              revisions = {
+                  row[0] for row in connection.execute(text("select * from alembic_version"))
+              }
+              ddl = {
+                  row[0]: row[1] or ""
+                  for row in connection.execute(
+                      text("select name, sql from sqlite_master where type = 'table'")
+                  )
+              }
+          store_tables = set(inspect(store).get_table_names())
+          store.dispose()
+
+          # The head of the packaged chain. A new migration moves this
+          # line, deliberately: a wheel that carried an older chain than
+          # the one this commit expects is exactly what the check is for.
+          if revisions != {"0001"}:
+              sys.exit(f"the wheel's conversations chain is at {sorted(revisions)}, not ['0001']")
+          expected = {"sessions", "turns", "tool_invocations", "events"}
+          missing = expected - store_tables
+          if missing:
+              sys.exit("the wheel's conversations migrations did not create: " + ", ".join(sorted(missing)))
+          # The cursor tables, whose ids are handed out as pagination
+          # cursors. Without AUTOINCREMENT SQLite reuses the deleted
+          # maximum rowid and retention deletes from exactly the end a
+          # cursor points past, so this is asserted on the DDL SQLite
+          # stored rather than on the metadata that asked for it.
+          for name in ("sessions", "turns", "events"):
+              if "AUTOINCREMENT" not in ddl[name]:
+                  sys.exit(f"the wheel's {name} table would reuse deleted row ids")
+          print(f"migrated a fresh conversation store from {installed.parent}")
           PY
 
   # The image is built and smoke-tested on every run, and published only
