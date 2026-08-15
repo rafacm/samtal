@@ -1016,6 +1016,117 @@ this document. `events.py` is not among them, which is the point of the
 two milestones above: the MCP subsystem emits through the same emitter
 as everything else and needed nothing added to it.
 
+### PR #154 review round
+
+One external review of the milestone as first pushed. Six findings,
+three P1, two P2 and one P3; verdict mergeable after fixes. All six
+adopted, one commit each, applied in an order the findings themselves
+imply: the listing position first, because the two events the first
+finding rewrites both come to rest on a position, and a position
+pointing at the wrong tool would have been a worse identifier than the
+name it replaces.
+
+1. **P1: peer-controlled tool names violate the no-leak contract.**
+   `mcp_connected` listed every published name in its sentence and
+   `mcp_call_dropped` repeated one in a sentence and a field. This
+   document had recorded the first as acceptable, on the grounds that a
+   published name has been through the publishing rule; it has not been
+   through anything that bounds it, since sanitizing replaces only the
+   characters both LLM APIs refuse, so an alphanumeric credential goes
+   through untouched and half of what comes out is still what the far
+   side called its tool. The milestone's own sentinel test had written
+   the leak down as correct.
+   *Resolution*: adopted in `bcaa3d5`. Both lines say which tool by its
+   position in the far side's listing, which is what the shadow drop
+   and the publication's warnings already used, and the connect line
+   says how many tools arrived rather than which. The collision drop in
+   `publish.py` went with them, though the finding named only the two
+   events: it printed a published name on the stated grounds that the
+   name was on the connect line already, and that ceased to be true in
+   the same commit. The sentinel now plants a credential-shaped name
+   where it publishes and is then shadowed, and hunts it through every
+   record's arguments, its fields, both shipped formats, and a consumer
+   attached to the hub. The status surface is deliberately untouched:
+   it prints names to a terminal for whoever asked, which is a
+   different thing to be than a log store.
+2. **P1: touched failure paths propagate unsanitized exception
+   chains.** A failed tool call re-raised the SDK's exception, and the
+   pipeline renders that into the tool result the model is given, so an
+   exception raised near a response body puts the body in the
+   conversation. A reload whose `read` failed unexpectedly re-raised
+   that too, and one of this milestone's own tests required it to.
+   *Resolution*: adopted in `6bf17bd`. The call path answers with
+   `McpCallFailed`, a `RuntimeError` like `McpServerDown` because that
+   is what the one production caller catches, carrying a fixed sentence
+   and built after the handler closed so there is no cause and no
+   context. What failed is classified inside the handler and recorded
+   by class in `mcp_call_dropped`'s new `error` field, the one
+   `provider_failed` has carried since #137, so the diagnosis moves to
+   the log rather than disappearing. The reload path answers with a
+   `StorageError` and a fixed sentence, that type being both what this
+   is and what the API already maps to a status; the four modelled
+   refusals are untouched, since their messages are this application's
+   own words and are meant to be shown. Assertions cover the message,
+   the cause, the context, the rendered traceback, the logs, and, for
+   the reload, the HTTP body a client actually reads.
+3. **P1: `mcp_tool_shadowed.position` is not the far side's listing
+   position.** The loop enumerated the published list, which is the
+   listing with the unpublishable dropped out of it, and the test
+   server's sixth tool is too long to publish, so its seventh was
+   reported as its sixth and the pin had blessed the wrong number.
+   *Resolution*: adopted in `95e5ec7`, and first. The position is
+   recorded in `publish`, which is the only place that sees the listing
+   whole, and read back through `PublishedTools.position_of` and a
+   `listed_at` accessor. The pins move from six to seven, and the stdio
+   suite now asserts that the two ways of counting really do disagree
+   in this fixture, so the case cannot quietly stop covering itself.
+   The finding matters more than a mistyped integer usually would,
+   because after finding 1 the position is the whole of what these
+   events say about which tool they mean.
+4. **P2: a cancelled preparation released the exclusion while its read
+   continued.** The re-read runs in a worker thread, which a
+   cancellation does not reach, so the next reload could start a read
+   against a database lock the last one still held and answer a blameless
+   caller that the database is busy.
+   *Resolution*: adopted in `676c11d`. The preparation is an owned task
+   behind a shield of its own, and the exclusion is held until whichever
+   half is still capable of running has finished. It is a shield for a
+   different reason from the apply's: nothing the preparation does can
+   leave a half-changed world, and what has to be waited out is simply
+   the thread. The test gates a read in its worker thread, cancels the
+   caller, and finds the second reload refused as one already running
+   until the gate opens; reverting the shield makes it fail on exactly
+   that line.
+5. **P2: the applied reload's duration excluded the read.** It started
+   inside `_apply`, so it timed the diff, the stops and the starts, and
+   not the re-read that waits out a busy database's timeout. It
+   therefore called a reload fast on precisely the days it was slow.
+   *Resolution*: adopted in `5659fe0`. The instant is taken when
+   `reload` accepts the request and passed into `_apply`, which is also
+   what makes it the caller's number rather than a phase's. The refused
+   event still carries none, because how long it took to decide to
+   change nothing is not a thing anybody tunes. The test holds the read
+   for 300 ms against a reload that stops and starts nothing.
+6. **P3: this record's verification counts contradicted each other.**
+   *Resolution*: adopted in `9ba76d2`, and the corrected arithmetic is
+   in the verification section above, along with what the two stale
+   numbers were and why neither is reconcilable rather than merely
+   wrong.
+
+The documents the first three findings moved are updated together in
+`a2eb111` rather than one row at a time, because a table that lost the
+tool name from one row per commit would have read, in between, as though
+the rule had exceptions.
+
+Two surfaces changed for people rather than for collectors. An operator
+loses the list of published tool names from the connect line, and gets
+it from `samtal-server config status` instead, which is where it was
+always available and is the only one of the two that is not shipped to a
+log store. And a model whose MCP tool call fails is now told a fixed
+sentence naming the entry, where it used to be handed whatever the far
+side's SDK wrote; what an assistant says about a broken tool is
+therefore this deployment's words in every case.
+
 ### The issue, closed
 
 All three milestones are in. `samtal_server/events.py` holds the
