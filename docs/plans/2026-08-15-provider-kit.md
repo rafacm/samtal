@@ -89,14 +89,28 @@ class inherits `TimeoutError` as well, so the pipeline's
 classification becomes plain `isinstance(exc, TimeoutError)`: it
 covers `asyncio.TimeoutError`, the watchdog's own
 `FirstTokenTimeout` (already a `TimeoutError` subclass), and every
-wrapped SDK timeout, with no substring anywhere. The exception
-message carries the SDK exception's class name and message
-(value-free: SDK messages for these APIs name models and status
-codes, not credentials, and the wrapped exception rides as
-`__cause__` for the traceback), so the `provider_failed` event's
-`error` field, which reports `type(exc).__name__`, now reads
-`ProviderCallTimeout`/`ProviderCallError` with the SDK's own class
-preserved in the logged traceback and message.
+wrapped SDK timeout, with no substring anywhere.
+
+The message carries trusted metadata only (the review round's
+finding 1): the SDK exception's class name, and the HTTP status
+code when there is one, never the vendor's message text. An SDK
+exception's string can embed the response body, and elevenlabs'
+current error deliberately does; a compatible endpoint can echo
+request content or credentials there, `_provider_failed` renders
+`str(exc)` into the log line, and the observability ADR makes that
+log the retained surface. For the same reason the taxonomy error
+is raised `from None`: the SDK exception must not ride into
+`logger.exception`'s rendered chain either. What an operator loses
+(the vendor's prose) they recover by re-running the request by
+hand; what the logs keep (taxonomy class, SDK class, status code,
+stage, entry, host, elapsed) is the diagnosable part. Sentinel
+tests prove it: a secret planted in the SDK exception's message,
+in a response body, and in a cause is absent from the raised
+chain, from `caplog.text`, and from every log record's fields.
+
+The `provider_failed` event's `error` field, which reports
+`type(exc).__name__`, now reads
+`ProviderCallTimeout`/`ProviderCallError` for wrapped failures.
 
 ### Who raises it: the five request-making providers
 
@@ -318,6 +332,13 @@ resolution once the amendment addressing it lands.
    unsafe cause chain; add sentinel tests proving secrets in SDK
    messages, response bodies, and causes are absent from the
    exception chain, `caplog.text`, and every log record.
+   *Resolution*: adopted. The taxonomy decision now specifies
+   metadata-only messages (SDK class name, status code when known,
+   never vendor text), `raise ... from None` so the SDK exception
+   stays out of rendered chains, the diagnosability tradeoff
+   stated, and the sentinel tests named; the elevenlabs message
+   consequently loses its response-body detail, which its updated
+   tests reflect.
 2. **P1: narrowing the reply catch breaks characterized
    device-disconnect behavior.** `_send_text`/`_send_frame`
    (device/session.py:~907) translate only `WebSocketDisconnect`
