@@ -25,7 +25,12 @@ from samtal_server.providers.base import (
     Turn,
     Usage,
 )
-from samtal_server.providers.kit import DEFAULT_MAX_TOKENS, resolve_api_key
+from samtal_server.providers.kit import (
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_TIMEOUT_S,
+    MAX_RETRIES,
+    resolve_api_key,
+)
 from samtal_server.providers.openai_endpoint import OPENAI_HOST, endpoint_host
 from samtal_server.providers.registry import OptionsReader
 
@@ -111,8 +116,33 @@ class OpenAiCompatibleLlm(LlmProvider):
     # therefore needs its own explicit `egress` declaration.
     egress = None
 
-    def __init__(self, base_url: str, model: str, max_tokens: int, api_key: str | None) -> None:
-        self._client = AsyncOpenAI(base_url=base_url, api_key=api_key or "unused")
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        max_tokens: int,
+        api_key: str | None,
+        timeout_s: float = DEFAULT_TIMEOUT_S,
+        client: AsyncOpenAI | None = None,
+    ) -> None:
+        # One client per provider entry, so its connection pool is
+        # reused across turns and sessions, and the seam the other cloud
+        # providers already have: a test hands its own client in through
+        # the front door rather than assigning over this attribute.
+        #
+        # The timeout is a per-operation transport bound with the SDK's
+        # retries off, not a wall-clock deadline for the reply: a stream
+        # that keeps delivering may legitimately run longer, and the
+        # session's first-token watchdog is what bounds a stream that
+        # produces nothing. Not a configuration option, deliberately;
+        # until now these clients had no bound at all, and a deployment
+        # needing a nonstandard one is a change with its own issue.
+        self._client = client or AsyncOpenAI(
+            base_url=base_url,
+            api_key=api_key or "unused",
+            timeout=timeout_s,
+            max_retries=MAX_RETRIES,
+        )
         self._model = model
         self._max_tokens = max_tokens
         self.host = endpoint_host(base_url)

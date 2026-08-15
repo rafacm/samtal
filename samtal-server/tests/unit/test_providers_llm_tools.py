@@ -171,9 +171,13 @@ class FakeMessages:
 
 
 def anthropic_with(texts: list[str], blocks: list[FakeBlock]) -> tuple[AnthropicLlm, FakeMessages]:
-    llm = AnthropicLlm(model="claude-sonnet-5", max_tokens=64, api_key="sk-test")
     messages = FakeMessages(FakeStream(texts, FakeMessage(blocks)))
-    llm._client = type("Client", (), {"messages": messages})()  # type: ignore[assignment]
+    llm = AnthropicLlm(
+        model="claude-sonnet-5",
+        max_tokens=64,
+        api_key="sk-test",
+        client=type("Client", (), {"messages": messages})(),  # type: ignore[arg-type]
+    )
     return llm, messages
 
 
@@ -355,13 +359,16 @@ class FakeCompletions:
 
 
 def openai_with(chunks: list[FakeChunk]) -> tuple[OpenAiCompatibleLlm, FakeCompletions]:
-    llm = OpenAiCompatibleLlm(
-        base_url="http://localhost:11434/v1", model="qwen3:8b", max_tokens=64, api_key=None
-    )
     completions = FakeCompletions(chunks)
-    llm._client = type(  # type: ignore[assignment]
-        "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
-    )()
+    llm = OpenAiCompatibleLlm(
+        base_url="http://localhost:11434/v1",
+        model="qwen3:8b",
+        max_tokens=64,
+        api_key=None,
+        client=type(  # type: ignore[arg-type]
+            "Client", (), {"chat": type("Chat", (), {"completions": completions})()}
+        )(),
+    )
     return llm, completions
 
 
