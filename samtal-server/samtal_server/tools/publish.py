@@ -16,13 +16,16 @@ same on every run.
 
 What a drop is logged with is bounded by the same rule the rest of the
 observability surface keeps: the name a far side listed is bytes it
-chose, and one that received a credential of this deployment's can put
-it there. A name that publishes crosses anyway, because the model has
-to be given it and an operator has to be able to write it down. A name
-that does not publish has no such claim on anybody, so it is never
-written to the log: a dropped tool is identified by its position in the
-listing, which says which one it was without repeating anything it
-said.
+chose, sanitizing only replaces the characters an LLM API refuses, and
+a server that was handed a credential of this deployment's can hand it
+back by listing a tool under it. So no name reaches a log line here,
+whether it published or not. The model is given the published ones
+because it has to be, and an operator reads them from
+`samtal-server config status`, in a terminal, on request; a log is
+shipped to whatever collects it and kept as long as that keeps things,
+which is a different thing to be. Every line below therefore says which
+tool it means by its position in the listing, a number this code
+counted, which identifies the tool without repeating a syllable of it.
 """
 
 import logging
@@ -108,16 +111,19 @@ def publish(
             )
             continue
         if published in originals:
-            # The one published name a drop may print, because it is not
-            # this tool's: an earlier one already published under it, so
-            # it is on the connect line and in front of the model
-            # already.
+            # Two positions and no name. This line used to print the
+            # published name, on the grounds that it was the earlier
+            # tool's rather than this one's and was on the connect line
+            # already; the connect line stopped naming tools, and the
+            # grounds went with it. Saying which two collided is what an
+            # operator acts on anyway, and neither number can carry a
+            # syllable either server chose.
             logger.warning(
-                "%s: dropping tool %d in the listing, it publishes as %s, which an "
-                "earlier one already took",
+                "%s: dropping tool %d in the listing, it publishes as the name tool %d "
+                "already took",
                 label,
                 position,
-                published,
+                positions[published],
             )
             continue
         originals[published] = original

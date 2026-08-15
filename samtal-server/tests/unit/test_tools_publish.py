@@ -95,17 +95,23 @@ def test_a_name_that_does_not_publish_never_reaches_the_log(
     assert SENTINEL not in caplog.text
 
 
-def test_a_collision_names_only_what_already_published(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """The one drop that may print a name, because the name is not the
-    dropped tool's: an earlier one published under it, so it is on the
-    connect line and in front of the model already."""
+def test_a_collision_names_neither_of_the_two(caplog: pytest.LogCaptureFixture) -> None:
+    """The last drop that printed a name, and it prints two positions
+    now. The name was the earlier tool's rather than the dropped one's,
+    which was the whole justification, and it rested on that name being
+    on the connect line already; the connect line stopped naming tools
+    (#138, PR #154 review), so the justification went with it."""
     with caplog.at_level("WARNING"):
-        publish(listing("weather.today", "weather/today"), prefix="ha", label="mcp server ha")
+        publish(
+            listing("kept", SENTINEL + ".x", SENTINEL + "/x"),
+            prefix="ha",
+            label="mcp server ha",
+        )
 
-    assert "weather/today" not in caplog.text
-    assert "ha__weather_today" in caplog.text
+    assert SENTINEL not in caplog.text
+    # Which two collided, which is what an operator acts on.
+    assert "dropping tool 3 in the listing" in caplog.text
+    assert "tool 2 already took" in caplog.text
 
 
 def test_a_published_tool_remembers_where_the_far_side_listed_it() -> None:

@@ -250,14 +250,12 @@ def logged(caplog: pytest.LogCaptureFixture) -> str:
     )
 
 
-# What the MCP test server publishes under the entry `tools`, in the
-# order it lists them, which is what the connect sentence prints. Six of
-# the seven it registers: one is dropped by the publishing rule for
-# being too long once the entry prefix is on it.
-PUBLISHED = (
-    "tools__secret_word, tools__add, tools__slow_answer, tools__always_fails, "
-    "tools__weather_today_v2, tools__inside__secret_word"
-)
+# How many tools the MCP test server publishes under one entry: six of
+# the seven it registers, one being dropped by the publishing rule for
+# being too long once the entry prefix is on it. A count and not a list,
+# because the connect line stopped naming them (PR #154 review) and a
+# list here would only be a copy of what nothing prints.
+PUBLISHED_TOOLS = 6
 
 
 def payload_of(record: logging.LogRecord) -> dict[str, Any]:
@@ -1784,15 +1782,18 @@ async def test_mcp_connected(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "mcp_connected"), dynamic=("duration_ms",)) == {
         "logger": "samtal_server.tools.mcp",
         "level": logging.INFO,
-        "template": "mcp server %s connected with %d tool(s): %s",
-        "args": ("tools", 6, PUBLISHED),
-        "sentence": f"mcp server tools connected with <n> tool(s): {_NUMBER.sub('<n>', PUBLISHED)}",
+        "template": "mcp server %s connected with %d tool(s)",
+        # A count, and no names in the arguments: half of a published
+        # name is what the far side called its tool, and which names an
+        # entry published is answered by `samtal-server config status`
+        # rather than by the retained logs (PR #154 review).
+        "args": ("tools", PUBLISHED_TOOLS),
+        "sentence": "mcp server tools connected with <n> tool(s)",
         "fields": {
             "event": "mcp_connected",
             "entry": "tools",
             "transport": "stdio",
-            # A count, never a list. The names are in the sentence.
-            "tools": 6,
+            "tools": PUBLISHED_TOOLS,
             "duration_ms": DYNAMIC,
         },
     }
@@ -1839,17 +1840,19 @@ async def test_mcp_call_dropped(
     assert pinned(only(caplog, "mcp_call_dropped")) == {
         "logger": "samtal_server.tools.mcp",
         "level": logging.WARNING,
-        "template": "mcp server %s: the call to %s failed, so its answer is lost",
-        # The published name, which this server's own publishing rule
-        # made, rather than whatever the far side listed.
-        "args": ("tools", "tools__secret_word"),
+        "template": (
+            "mcp server %s: the call to published tool %s failed, so its answer is lost"
+        ),
+        # The position in the far side's listing, never the name.
+        # `secret_word` is the first tool this server lists.
+        "args": ("tools", 1),
         "sentence": (
-            "mcp server tools: the call to tools__secret_word failed, so its answer is lost"
+            "mcp server tools: the call to published tool <n> failed, so its answer is lost"
         ),
         "fields": {
             "event": "mcp_call_dropped",
             "entry": "tools",
-            "tool": "tools__secret_word",
+            "position": 1,
         },
     }
 
