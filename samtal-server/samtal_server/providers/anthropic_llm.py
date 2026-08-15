@@ -5,18 +5,15 @@ per the configuration rules; without one the SDK's own resolution
 applies (ANTHROPIC_API_KEY, or a logged-in profile).
 """
 
-import os
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
 from anthropic import AsyncAnthropic
 
 from samtal_server.config.models import ProviderConfig
-from samtal_server.config.secrets import stored_provider_secret
 from samtal_server.providers.base import (
     LlmEvent,
     LlmProvider,
-    ProviderError,
     StreamStarted,
     TextDelta,
     ToolCall,
@@ -25,20 +22,12 @@ from samtal_server.providers.base import (
     Turn,
     Usage,
 )
+from samtal_server.providers.kit import DEFAULT_MAX_TOKENS, resolve_api_key
 from samtal_server.providers.registry import OptionsReader
-
-# Spoken replies are short; this caps runaways, not conversation.
-DEFAULT_MAX_TOKENS = 1024
 
 # The one host this type reaches; it has no base_url to point anywhere
 # else.
 API_HOST = "api.anthropic.com"
-
-# The credential slot every provider type here fills, and the name a
-# stored secret is written under. The seam is `<slot>_env` in the
-# configuration and `<slot>` in the store, which is what lets one
-# resolver serve both.
-API_KEY_SLOT = "api_key"
 
 
 def anthropic_messages(turns: Sequence[Turn]) -> list[dict[str, Any]]:
@@ -145,34 +134,6 @@ class AnthropicLlm(LlmProvider):
             prompt_tokens=message.usage.input_tokens,
             completion_tokens=message.usage.output_tokens,
         )
-
-
-def resolve_api_key(label: str, api_key_env: str | None) -> str | None:
-    """The credential for the `api_key` slot of the provider being
-    built, or None to leave resolution to the SDK.
-
-    Two sources, in one place, because a provider must not care which
-    one a deployment used: a secret stored in the configuration database
-    for this entry's `api_key` slot, or the environment variable an
-    `api_key_env` reference names. A named but unset variable fails the
-    build, because at request time it would fail every conversation.
-
-    Ciphertext wins, and the reference it shadows is not read at all:
-    set-secret is the later and more deliberate act, and an unset
-    variable left behind it must not fail the boot the stored secret was
-    set to fix. The value goes straight into the client here and lands
-    on no model on the way."""
-    stored = stored_provider_secret(API_KEY_SLOT)
-    if stored is not None:
-        return stored
-    if api_key_env is None:
-        return None
-    api_key = os.environ.get(api_key_env, "")
-    if not api_key:
-        raise ProviderError(
-            f"{label}: api_key_env names {api_key_env}, but it is not set in the environment"
-        )
-    return api_key
 
 
 def build(label: str, config: ProviderConfig) -> AnthropicLlm:

@@ -18,8 +18,8 @@ which decides whether the request may ask for token counts (#55).
 
 from urllib.parse import urlsplit
 
-from samtal_server.providers.anthropic_llm import resolve_api_key
 from samtal_server.providers.base import ProviderError
+from samtal_server.providers.kit import resolve_api_key
 
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
 
@@ -30,16 +30,6 @@ DEFAULT_BASE_URL = "https://api.openai.com/v1"
 # boot keyless and then fail on its first request, which is the
 # per-conversation failure building providers at startup avoids.
 OPENAI_HOST = "api.openai.com"
-
-# The SDK retries twice by default, which would make `timeout_s` a
-# third of the truth: three attempts plus backoff, all of it inside one
-# stage of a turn the user is waiting through in silence. A voice turn
-# has no use for that. A request that fails should fail now, so the
-# session can log it and the conversation moves on, rather than the
-# user waiting a minute and a half for a result nobody wants any more.
-# The ElevenLabs provider speaks raw httpx and has never retried, so
-# this also makes every network provider here behave alike.
-MAX_RETRIES = 0
 
 
 def parse_base_url(label: str, base_url: str) -> bool:

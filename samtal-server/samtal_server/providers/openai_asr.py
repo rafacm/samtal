@@ -48,9 +48,9 @@ from openai import NOT_GIVEN, APITimeoutError, AsyncOpenAI, Omit
 
 from samtal_server.config.models import ProviderConfig
 from samtal_server.providers.base import AsrProvider, AsrResult, ProviderError
+from samtal_server.providers.kit import DEFAULT_TIMEOUT_S, MAX_RETRIES
 from samtal_server.providers.openai_endpoint import (
     DEFAULT_BASE_URL,
-    MAX_RETRIES,
     endpoint_api_key,
     endpoint_host,
     parse_base_url,
@@ -66,12 +66,6 @@ logger = logging.getLogger(__name__)
 # difference between them is small on the short utterances a voice
 # assistant hears; an operator who wants the larger one sets `model`.
 DEFAULT_MODEL = "gpt-4o-mini-transcribe"
-
-# Long enough for a slow answer on a long utterance, short enough that
-# a hung request does not hold a turn open for the whole conversation.
-# It is a real bound only because retries are off, which is the shared
-# endpoint module's MAX_RETRIES.
-DEFAULT_TIMEOUT_S = 30.0
 
 # The API's own range for `temperature`.
 TEMPERATURE_RANGE = (0.0, 1.0)
