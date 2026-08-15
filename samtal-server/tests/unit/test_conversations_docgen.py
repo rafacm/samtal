@@ -84,7 +84,8 @@ def test_the_reference_says_what_deletion_means_in_the_file() -> None:
     rendered = docgen.reference()
     assert "secure_delete=ON" in rendered
     assert "wal_checkpoint(TRUNCATE)" in rendered
-    assert "blocked by a concurrent long reader" in flat(rendered)
+    assert "A checkpoint a reader is blocking does not fail the deletion" in flat(rendered)
+    assert "retried at the next quiet moment" in flat(rendered)
     assert "backups, filesystem snapshots" in flat(rendered)
     assert "Capture files are a" in flat(rendered)
 
@@ -105,7 +106,10 @@ def test_the_reference_points_at_the_event_vocabularys_authority() -> None:
     rendered = docgen.reference()
     assert docgen.EVENT_TABLE in rendered
     assert "restated here" in flat(rendered)
+    # Both content keys, and that neither depends on a switch.
     assert "strips `text`" in flat(rendered)
+    assert "`tool` from `tool_call`" in flat(rendered)
+    assert "whatever the storage switches say" in flat(rendered)
 
 
 def test_the_reference_maps_the_gen_ai_vocabulary() -> None:

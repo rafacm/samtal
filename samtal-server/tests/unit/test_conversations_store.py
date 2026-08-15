@@ -494,32 +494,55 @@ def test_each_switch_combination_nulls_its_own_half(
         assert rows(tmp_path, "events") == []
 
 
-def test_the_text_bearing_events_lose_their_text_before_the_row_lands(
-    tmp_path: Path, stores
+@pytest.mark.parametrize("text_storage", [True, False])
+def test_an_events_row_never_carries_content_whatever_the_switches_say(
+    tmp_path: Path, stores, text_storage: bool
 ) -> None:
     """The events table is metadata-only by construction, from the first
-    row: content has its own tables and its own switch. A live guard
-    until the narrowing removes those fields, and defense in depth
-    after, which is what makes the store behave identically either side
-    of that change."""
-    store = stores()
+    row, and that is not a policy the text switch decides: content has
+    its own tables, and an events row is the wrong place for it at any
+    setting.
+
+    Both kinds are planted. The transcript half of the three text-
+    bearing events, and the called tool's name on `tool_call`, which is
+    content for the same reason a result is: a device's
+    self-description or an MCP server's vocabulary, never anything this
+    application authored. Under text-on especially, since that is the
+    setting where nulling by switch would have let the peer's bytes
+    through.
+
+    A live guard until the narrowing removes these fields from the
+    events, and defense in depth after it, which is what makes the store
+    behave identically on both sides of that change."""
+    store = stores(text=text_storage)
     store.start()
     store.open_session("alpha", 100.0, MANIFEST)
     for name in ("heard", "replied", "agent_said"):
         store.record_event("alpha", name, logging.INFO, {"text": SENTINEL, "kept": 1}, 101.0)
+    store.record_event(
+        "alpha",
+        "tool_call",
+        logging.INFO,
+        {"tool": SENTINEL, "source": "mcp", "entry": "home", "duration_ms": 42},
+        101.5,
+    )
     store.record_event("alpha", "llm_round", logging.INFO, {"duration_ms": 12}, 102.0)
     store.close_session("alpha", duration_s=3.0, reason="client")
     store.stop()
 
     stored = rows(tmp_path, "events")
-    assert len(stored) == 4
+    assert len(stored) == 5
     for row in stored:
         fields = json.loads(row["fields"])
         assert "text" not in fields
+        assert "tool" not in fields
     assert json.loads(stored[0]["fields"]) == {"kept": 1}
-    assert SENTINEL not in (tmp_path / "conversations.db").read_bytes().decode(
-        "utf-8", "ignore"
-    )
+    # What the event is still worth reading for: which entry was called,
+    # how it was routed, and how long it took. Names this deployment
+    # configured, never one a peer chose.
+    call = json.loads(stored[3]["fields"])
+    assert call == {"source": "mcp", "entry": "home", "duration_ms": 42}
+    assert SENTINEL.encode() not in (tmp_path / "conversations.db").read_bytes()
 
 
 # Failure, and what it may say

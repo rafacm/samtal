@@ -526,8 +526,10 @@ events = Table(
             "The event's payload minus `event`, `session` and `device`, which "
             "live on this row and on the session. Field names are the event "
             "vocabulary's own, copied verbatim, which is the contract. Never "
-            "conversation text: the writer strips it, because content has its "
-            "own tables and its own switch."
+            "content: the writer strips an utterance's or a reply's `text` and "
+            "a tool call's `tool` name whatever the storage switches say, "
+            "because content has its own tables and its own switch and this "
+            "table is metadata-only by construction."
         ),
     ),
     Index("ix_events_session", "session", "id"),
