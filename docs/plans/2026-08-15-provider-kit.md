@@ -298,6 +298,85 @@ untouched; only module-level exception classes are added.
   runbook forbids running this issue concurrently with #141;
   milestone 2 is the reason. Mitigation: sequencing, not code.
 
+## Plan review round
+
+One external review of the plan as first committed (ed55317): codex
+CLI, model gpt-5.6-sol, read-only against this repository with the
+issue #137 body supplied, 2026-08-15. Verdict: ready after the
+P1/P2 amendments. Findings as received, condensed; each carries its
+resolution once the amendment addressing it lands.
+
+1. **P1: provider error messages would violate the no-leak
+   contract.** The plan preserves SDK messages and causes;
+   `_provider_failed` renders `str(exc)` and the reply body logs
+   the full chain via `logger.exception`; OpenAI SDK exceptions
+   carry response-body text and elevenlabs deliberately includes
+   arbitrary response bodies, and a compatible endpoint can echo
+   credentials or request content there. Taxonomy messages and
+   logs must carry only trusted metadata (taxonomy class, SDK
+   class, sanitized status code), no vendor message text and no
+   unsafe cause chain; add sentinel tests proving secrets in SDK
+   messages, response bodies, and causes are absent from the
+   exception chain, `caplog.text`, and every log record.
+2. **P1: narrowing the reply catch breaks characterized
+   device-disconnect behavior.** `_send_text`/`_send_frame`
+   (device/session.py:~907) translate only `WebSocketDisconnect`
+   to `DeviceGone`; Starlette's post-close `RuntimeError` passes
+   untranslated, and `test_session_characterization.py:482` pins
+   both as quiet disconnects. Milestone 2 as written fails that
+   test and turns a normal disconnect into "reply failed". First
+   translate socket-originated `RuntimeError` to `DeviceGone`
+   inside the two send helpers, add `device/session.py` to
+   milestone 2, preserve the characterization test, then narrow
+   the reply-body catch.
+3. **P2: blanket ASR wrapping conflicts with the prompt-echo
+   retry's soft-timeout contract.** openai_asr deliberately
+   converts retry failures into an empty transcript and
+   `asr_prompt_echo(outcome="timed_out")`, pinned by tests.
+   Taxonomy applies to failure of `transcribe` as a whole; the
+   echo retry's timeout-as-discard behavior is preserved, with
+   separate tests for an initial request timeout and a retry
+   timeout.
+4. **P2: the proposed reply-path test cannot prove the catch was
+   narrowed.** A `ProviderCallError` already reaches the generic
+   arm before milestone 2, and an old-shaped TTS `RuntimeError`
+   already emits `provider_failed` via `_Synthesis` before the
+   outer catch, so the single test is green under both
+   implementations. Use two tests: taxonomy TTS failure emits
+   `provider_failed`; a bare non-device `RuntimeError` reaches the
+   generic failure handler while `DeviceGone` stays quiet, and
+   only the second demonstrates the catch change.
+5. **P2: the tests do not exercise the mid-stream failures the
+   plan claims to handle.** All four streaming adapters have
+   failure points after the first chunk (Anthropic iteration and
+   final-message assembly, OpenAI LLM iteration, both TTS byte
+   iterators), and raw httpx errors can escape SDK iterators after
+   the response opens. For every streaming provider, test a
+   timeout and a non-timeout raised after at least one yielded
+   chunk, cover raw httpx failures from SDK-backed streams and
+   Anthropic final-message failure, and prove mid-stream
+   cancellation propagates unwrapped.
+6. **P2: `DEFAULT_MAX_TOKENS` has no destination.** openai_llm
+   imports it from anthropic_llm, and the plan promises no
+   cross-provider imports without assigning the constant a home.
+   Move it into the kit (or deliberately localize it) and verify
+   both symbols.
+7. **P2: nothing tests that the LLM clients actually receive the
+   timeout and retry policy.** Injected-client tests pass even if
+   the production constructors omit both arguments; existing ASR
+   and TTS tests pin these properties. Add one default-client
+   construction test per LLM checking timeout and retry settings,
+   plus a test that an injected client is used unchanged.
+8. **P3: the plan overstates SDK timeouts as whole-request
+   bounds.** The SDK/httpx timeout is per phase, not an
+   end-to-end deadline; a streaming response may run longer while
+   delivering. Say the kit supplies a per-operation transport
+   timeout with retries disabled, not a wall-clock deadline.
+9. **P3: the filler catch is not device-send-only as asserted.**
+   Its `try` also covers resampling, encoding, and encoder
+   flushing. Describe the breadth accurately and preserve it
+   explicitly as out of scope.
+
 ## Milestones
 
 - [ ] **Kit, taxonomy, and the five providers** (PR TBD):
