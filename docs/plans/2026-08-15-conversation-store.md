@@ -575,9 +575,16 @@ the store module's logger name, per the #138 convention.
 Mounted on the same sub-application `build_api` builds, so the
 bearer middleware, the sanitized handlers, and the committed
 OpenAPI document cover them by construction. The route functions
-live in `conversations/api.py` and are registered by `build_api`,
-which gains the conversations section and the database directory it
-already has.
+live in `conversations/api.py` and are registered inside
+`_application()` (`config/api.py:1950`), not in `build_api`,
+because `document()` renders the document from `_application()`
+directly (`config/api.py:907`) and a route registered only by
+`build_api` would serve requests while being structurally absent
+from the committed contract. `_application()` registers every
+route unconditionally; `build_api` injects the runtime facts the
+handlers need (the database directory it already has, and whether
+the store section exists), the same division the config routes
+already use between route shape and injected store dependency.
 
 ```
 GET /api/conversations                    the session list
@@ -604,8 +611,12 @@ Cursors are the monotonic ids and nothing else: no timestamps in
 cursors, no opaque encodings to version. Response models are typed
 transport models beside the existing ones in the API module's
 style, so the committed document carries real schemas; the OpenAPI
-document is regenerated in the same change and the existing drift
-test covers it without modification.
+document is regenerated in the same change, and
+`test_api_openapi.py` is updated explicitly: its exact route
+inventory (`test_api_openapi.py:122`) gains the three paths, and
+the byte-identical, determinism, validity and
+reference-resolution cases then cover the new routes by
+construction.
 
 Reads open the database per request by parameterizing the
 repository's existing read-engine behavior (`db/__init__.py:72`,
@@ -1133,6 +1144,10 @@ carries its resolution once the amendment addressing it lands.
     `test_api_openapi.py` must change. Register routes
     unconditionally in `_application` and update the tests
     explicitly.
+    *Resolution*: adopted. Routes register in `_application()`
+    with `build_api` injecting only runtime dependencies, and the
+    read-API section now names the route-inventory test update
+    instead of claiming the drift test needs no modification.
 16. **P2: writer lifecycle cleanup is not guaranteed.** The
     lifespan performs startup work before its `try`, so a startup
     failure can bypass cleanup, and tests that never enter the
