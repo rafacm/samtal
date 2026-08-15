@@ -390,3 +390,171 @@ From `samtal-server/`, with all six fix commits in place:
   samtal-server/samtal_server/device`: still empty. The one file
   touched outside `providers/` is `samtal_server/logs.py`, which
   finding 1 required.
+## Milestone 2: the pipeline classifies by type
+
+The reply body no longer reads a bare `RuntimeError` as a device that
+went away, because the device edge now makes sure a device that went
+away never arrives as one. `is_timeout` is gone, the two sites that stay
+broad say what they cover, and four tests hold both sides of the catch.
+
+### What landed
+
+**`samtal-server/samtal_server/device/session.py`.** `_send_text` and
+`_send_frame` translate `(WebSocketDisconnect, RuntimeError)` into
+`DeviceGone` instead of `WebSocketDisconnect` alone. One `except` arm
+for both, since starlette's `WebSocketDisconnect` inherits from
+`Exception` rather than from `RuntimeError`. `_send_text`'s docstring
+carries the reasoning for the pair, including why this is a translation
+rather than a blanket: the `try` covers the socket call and nothing
+else, so the only `RuntimeError` it can catch is one the socket raised.
+
+**`samtal-server/samtal_server/runtime/pipeline.py`.**
+
+- `is_timeout` deleted. `_provider_failed` words a failure with
+  `isinstance(exc, TimeoutError)`, and its docstring gained the
+  paragraph explaining what makes one `isinstance` enough now and what
+  the substring match was working around.
+- The reply body's `except (DeviceGone, RuntimeError)` became
+  `except DeviceGone`, with a comment saying that a bare `RuntimeError`
+  arriving there is a bug in this process.
+- The `contextlib.suppress(DeviceGone, RuntimeError)` around
+  `finish_speaking()` keeps its breadth and gained a comment: the one
+  statement inside is a device send, so the `RuntimeError` half can only
+  be the transport's.
+- The filler playback catch keeps its breadth and gained a comment
+  saying accurately what it covers (resampling, encoding and the encoder
+  flush as well as the send), that the breadth can therefore still
+  swallow a local bug, and that narrowing it is #141's question rather
+  than this issue's.
+
+**`samtal-server/samtal_server/device/boundary.py`.** `DeviceGone`'s
+docstring no longer claims "every site that must swallow a vanished
+device already catches `RuntimeError` broadly". It now says the edge
+translates both of the transport's shapes so a runtime catching this
+type alone catches every vanished device, that the reply body does
+exactly that, and that the subclassing still matters for the two sites
+that stayed broad, which are both device sends.
+
+**`samtal-server/tests/unit/test_session_reply_failures.py`** (new, 118
+lines). A new module rather than an addition to an existing one:
+`test_session_events.py` and `test_session_characterization.py` are both
+pinned by this milestone's acceptance criteria, and the other session
+suites are each about one subject. Four tests, none of them touching a
+provider implementation:
+
+- The taxonomy half, through `test_session_events`'s own `reply_with`
+  helper: a TTS raising `ProviderCallError` mid-reply produces a
+  `provider_failed` record with `stage == "tts"` and
+  `error == "ProviderCallError"`, and the reply ends in the arm that
+  reports rather than the one that returns.
+- A `ProviderCallTimeout` from the same place is worded as a wait, which
+  is the classification change seen from outside.
+- The catch half: a bare `RuntimeError` raised while speaking is logged
+  under "reply failed" with its message.
+- Its other side: a `DeviceGone` raised in the same place still says
+  nothing.
+
+The two catch-half tests share a helper that replaces `runtime._speak`,
+the same seam `run_reply` in `test_session_tools.py` already uses, and
+drive a whole reply through `drive_reply` against a socket that accepts
+everything. Speaking is where a local bug in a reply actually lives, it
+sits inside the reply body's `try`, and it is past every provider, so
+nothing reports the failure before the outer catch decides what to make
+of it.
+
+**`CHANGELOG.md`.** One entry under `## 2026-08-15` / `### Fixed`. Fixed
+rather than Changed because the load-bearing half is a defect: a
+provider failure during a reply left no record at all. The commit body
+says so.
+
+### Red to green
+
+The catch-half test, run with the new module present and the pipeline
+still catching `(DeviceGone, RuntimeError)`, from `samtal-server/`:
+
+```
+uv run pytest tests/unit/test_session_reply_failures.py -q
+```
+
+```
+FAILED test_a_bug_while_speaking_is_reported_rather_than_swallowed
+E       assert 'reply failed' in 'INFO ... heard "hello"\nINFO ... poet round 1 took 0.00 s over 1 turns\n'
+1 failed, 3 passed in 1.11s
+```
+
+The captured log is the evidence rather than the assertion: the reply
+ended with `heard` and one LLM round on the record and nothing else, so
+the `RuntimeError` really was swallowed as a vanished device. After the
+catch narrowed, the same command reports `4 passed`.
+
+The other three are green under both implementations, which is the
+plan's finding 4 exactly: a `ProviderCallError` is not a `RuntimeError`
+and already missed the broad catch, and a `DeviceGone` is caught either
+way. They are worth having anyway, since between them they pin that the
+narrowing did not stop reporting provider failures and did not start
+reporting disconnects.
+
+### The greps the plan asks for
+
+From `samtal-server/`:
+
+```
+grep -rn "is_timeout" samtal_server            (no matches, exit 1)
+```
+
+`git diff refactor/provider-kit -- samtal-server/tests/unit/test_session_events.py
+samtal-server/tests/unit/test_session_characterization.py` is empty: the
+event assertions and the characterization pins pass unmodified, and the
+whole milestone's diff is five files (the two production modules, the
+boundary docstring, the new test module, and the changelog).
+
+### Deviations from the plan
+
+None. Every decision the plan makes for this milestone landed as
+written, including the two-step order finding 2 asks for: the edge
+translation is its own commit and its own green test run before the
+catch narrows in the next one.
+
+### Discoveries
+
+**The close path had already made this decision.** `_close` suppresses
+`RuntimeError` around `websocket.close()`, and has since before this
+issue: a socket that raises on close was already being read as a device
+that is gone. The translation in the two send helpers makes the send
+path agree with the close path rather than introducing a new reading.
+
+**Nothing latent surfaced.** The plan's third risk was that narrowing
+would expose some device-edge path raising bare `RuntimeError` where it
+should raise `DeviceGone`, which would now log "reply failed" with a
+traceback. Both lanes are green and no new "reply failed" appears
+anywhere in them, so there is no such site in what the suites reach. The
+milestone-1 discovery about `ProviderCallTimeout` being an `OSError`
+stayed harmless for the same reason: none of the seven `except OSError`
+sites is anywhere near a reply.
+
+**One characterization docstring is now half historical, deliberately
+left alone.** `test_a_reply_ends_quietly_when_the_send_path_raises`
+explains its `RuntimeError` parameter as covering "an encoder or a
+resampler failing while speaking" as well as the socket, and that half
+is exactly what stopped being covered. Its assertions still hold, and
+hold for the right reason, because the failure in the test comes from
+the socket; only the sentence about the other case is stale. The file is
+pinned by this milestone's acceptance criteria and was not touched.
+Whoever revisits the characterization suite for #85 should correct the
+sentence then.
+
+### Verification
+
+From `samtal-server/`, on `refactor/pipeline-provider-errors` with every
+commit of this milestone in place:
+
+- `uv run ruff check .`: **All checks passed!**
+- `uv run pytest tests/unit -q`: **1892 passed, 15 skipped** in 175 s.
+  Four more than milestone 1's 1888, which is the four tests added here.
+- `uv run pytest tests/integration -q`: **53 passed** in 154 s.
+- `git diff refactor/provider-kit` over the two pinned test files:
+  empty.
+
+Nothing was restored mid-run, so the bytecode trap in `AGENTS.md` did
+not apply; the red run and the green run of the catch-half test are both
+pytest, which writes no bytecode.
