@@ -47,6 +47,7 @@ import wave
 from openai import NOT_GIVEN, APITimeoutError, AsyncOpenAI, Omit
 
 from samtal_server.config.models import ProviderConfig
+from samtal_server.events import ServerEvents
 from samtal_server.providers.base import (
     AsrProvider,
     AsrResult,
@@ -68,6 +69,12 @@ from samtal_server.providers.openai_endpoint import (
 from samtal_server.providers.registry import OptionsReader
 
 logger = logging.getLogger(__name__)
+
+# The provider scope's emitter, on the channel this module already logged
+# on. One per module rather than one per provider: an entry's identity is
+# the host it speaks to, which every event names, and the guard's outcome
+# is about the endpoint rather than about the object holding the client.
+events = ServerEvents(__name__)
 
 # How this provider names itself in the message a failed request
 # carries.
@@ -300,13 +307,14 @@ class OpenAiAsr(AsrProvider):
         loop = asyncio.get_running_loop()
         remaining_s = deadline - loop.time()
         if remaining_s < RETRY_FLOOR_S:
-            logger.warning(
+            events.warning(
                 "openai asr: the transcript came back as the configured prompt "
                 "with %.1f s of the timeout left, too little to retry, "
                 "treating %.2f s of audio as nothing said",
                 remaining_s,
                 duration_s,
-                extra=self._echo_event("skipped", duration_s),
+                event="asr_prompt_echo",
+                **self._echo_fields("skipped", duration_s),
             )
             return ""
         logger.warning(
@@ -330,52 +338,60 @@ class OpenAiAsr(AsrProvider):
                 )
         except (TimeoutError, APITimeoutError):
             retry_ms = round((loop.time() - started) * 1000)
-            logger.warning(
+            events.warning(
                 "openai asr: the retry outran the timeout's remaining %.1f s, "
                 "treating %.2f s of audio as nothing said",
                 remaining_s,
                 duration_s,
-                extra=self._echo_event("timed_out", duration_s, retry_ms),
+                event="asr_prompt_echo",
+                **self._echo_fields("timed_out", duration_s, retry_ms),
             )
             return ""
         retry_ms = round((loop.time() - started) * 1000)
         if self._is_echoed_prompt(retry):
-            logger.warning(
+            events.warning(
                 "openai asr: the retry came back as the prompt again, "
                 "treating %.2f s of audio as nothing said",
                 duration_s,
-                extra=self._echo_event("confirmed_echo", duration_s, retry_ms),
+                event="asr_prompt_echo",
+                **self._echo_fields("confirmed_echo", duration_s, retry_ms),
             )
             return ""
         if not retry:
-            logger.warning(
+            events.warning(
                 "openai asr: the retry came back empty, "
                 "treating %.2f s of audio as nothing said",
                 duration_s,
-                extra=self._echo_event("confirmed_empty", duration_s, retry_ms),
+                event="asr_prompt_echo",
+                **self._echo_fields("confirmed_empty", duration_s, retry_ms),
             )
             return ""
-        logger.info(
+        events.info(
             'openai asr: the retry recovered "%s" from %.2f s of audio '
             "the echo guard would have discarded",
             retry,
             duration_s,
-            extra=self._echo_event("recovered", duration_s, retry_ms),
+            event="asr_prompt_echo",
+            **self._echo_fields("recovered", duration_s, retry_ms),
         )
         return retry
 
-    def _echo_event(
+    def _echo_fields(
         self, outcome: str, duration_s: float, retry_ms: int | None = None
     ) -> dict[str, object]:
-        """The structured half of a tripped guard's outcome: exactly one
-        `asr_prompt_echo` event per trip, so retained logs can say how
+        """What one tripped guard's `asr_prompt_echo` carries beside its
+        name: exactly one event per trip, so retained logs can say how
         often the guard was swallowing real speech and what each retry
         cost. `retry_ms` is absent when no retry was sent, which is what
         a skip is. No `session` or `device`: providers are shared
         singletons with no session identity, so the event names the
-        host instead, like the entry it belongs to."""
+        host instead, like the entry it belongs to.
+
+        The five outcomes share these three fields and differ in level
+        and sentence, which is why they are gathered here rather than
+        written out at each site; the event's own name belongs to the
+        call, beside the sentence it goes with."""
         fields: dict[str, object] = {
-            "event": "asr_prompt_echo",
             "outcome": outcome,
             "duration_s": duration_s,
             "host": self.host,
