@@ -276,7 +276,7 @@ resolution once the amendment addressing it lands.
 
 - [x] [**Move both egress checks into one module and make the
   marking mandatory**](2026-08-15-one-egress-rule-implementation.md#milestone-1-move-both-egress-checks-into-one-module-and-make-the-marking-mandatory)
-  (PR TBD): `samtal_server/egress.py` lands
+  (PR #149): `samtal_server/egress.py` lands
   with the resolution rule, the verbatim refusal sentences, the
   own-namespace marking check with identity validation of the
   declared value, and `EgressRefusal`;
