@@ -283,7 +283,19 @@ class SessionEvents:
     def attach_capture(self, capture: SessionRecording) -> None:
         """Begin recording the decision track. The capture keeps its own
         pair of methods rather than being attached as a bare tap,
-        because `vad` and `dropped` below need the capture itself."""
+        because `vad` and `dropped` below need the capture itself.
+
+        A second capture replaces the first rather than joining it. One
+        session records once, so two attached captures can only mean a
+        caller that attached twice; leaving the first adapter in the tap
+        list would keep writing to a recording nobody is going to close,
+        while `vad` and `dropped` went to the second one, which is a
+        recording split down the middle. Replacing rather than refusing,
+        because there is a legitimate second attach in reach (a capture
+        that rolls over at its size limit) and refusing would make that
+        a caller's problem to sequence.
+        """
+        self.detach_capture()
         self._capture = capture
         self._capture_tap = CaptureTap(capture)
         self.attach(self._capture_tap)
