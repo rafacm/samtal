@@ -284,9 +284,12 @@ One baseline migration. Typed columns carry identity, references
 and the numbers queries filter on; JSON carries what the pydantic
 and manifest layers already own. Referential integrity is enforced
 by the writer, not with SQLite foreign keys, for the reason the
-domain schema gives (`db/schema.py:7-11`): the writer is the single
-producer and a per-connection pragma would be a second, weaker
-place. All timestamps are UTC ISO-8601 text; all offsets are
+domain schema gives (`db/schema.py:7-11`): validation belongs in
+one layer, and a per-connection pragma would be a second, weaker
+place. The writer is not the only writer (purge and retention
+delete), so the mechanism that keeps its inserts honest against a
+concurrent deletion is stated below in the write path, not assumed
+from a single-producer claim that is not true. All timestamps are UTC ISO-8601 text; all offsets are
 integer milliseconds aligned with the capture's `t_ms` (both derive
 from the session loop clock reading taken at session open).
 
@@ -407,6 +410,20 @@ a session it has not opened (drops them with one warning); by
 construction that cannot happen from the real call sites, since
 `Open` is enqueued before the runtime can produce anything, on the
 same loop.
+
+Deletion is a concurrent writer (the purge CLI, retention), so
+every marker transaction begins by confirming its session row
+still exists; a row deleted out from under a live session is a
+tombstone by absence, and the writer discards that session's batch
+and its per-session state and writes nothing further for it, so a
+purged session cannot be resurrected as orphan turn or event rows
+by records still in flight. A `Close` whose row is gone updates
+nothing and is not an error. The consequence is documented on the
+purge command: purging a session that is still running ends its
+recording, and what the conversation says after the purge is not
+recorded. The test purges an active session mid-conversation,
+completes the conversation, and asserts no session, turn, tool or
+event row for it exists afterwards.
 
 Failure behavior, all of it metadata-only: an event beyond the
 in-flight bound is dropped at the producer, the session's drop
@@ -884,6 +901,16 @@ carries its resolution once the amendment addressing it lands.
    the close update affect no row. Serialize through the writer
    with tombstones, or refuse active sessions, or guarantee queued
    content cannot reappear, with resurrection tests.
+   *Resolution*: adopted in its third form. Every marker
+   transaction confirms its session row exists before writing;
+   absence is the tombstone, the writer discards the batch and the
+   session's state, and nothing in flight can recreate a purged
+   session's children. Refusing active sessions was declined
+   because a crashed session is indistinguishable from a live one
+   from another process, and a refusal would wedge deletion in
+   exactly the recovery situations purge exists for. The schema
+   section's single-producer claim is corrected, and the
+   resurrection test is named.
 7. **P2: right-to-delete lacks physical-erasure semantics for
    SQLite WAL.** Ordinary deletes leave text in freelist pages and
    old WAL frames. State whether deletion is query-level or
