@@ -747,3 +747,255 @@ The eight new tests are the whole of the growth from 2001. No test was
 deleted and none was weakened: the three suites above assert more after
 the change than before it, because "this value is not here" is a
 stronger claim than "this value is here".
+
+## Milestone 3: the MCP lifecycle speaks
+
+`tools/mcp.py` builds a `ServerEvents` on the channel it already logged
+on and emits the plan's five events from eight sites. Five of them are
+sentences that were already there and kept their wording; three are new
+lines. The reason tokens are two closed sets, both chosen where a
+failure is classified and neither ever built from an exception's
+message, and `_run` grew the phase tracking that makes the first of them
+honest.
+
+Four commits, in the order the milestone was built:
+
+1. `d4e797c` Give the MCP lifecycle its five events
+2. `effee88` Assert each MCP event through a running manager
+3. `528262b` Write the five MCP events into the surface
+4. this one
+
+The branch is stacked on milestone 2's, so these hashes move with every
+rebase onto it. Their order and their titles do not. Milestone 2's own
+review round was landing while this was built, and two of its commits
+arrived on the parent branch mid-milestone, which is the lesson that
+milestone recorded: diff against the parent after every rebase and read
+what moved. Both narrow a record that quoted something it should not,
+and both are named in the changelog entry this milestone carries,
+because that entry is the issue's rather than this milestone's.
+
+### Every sentence, and what became of it
+
+The plan asks for both columns, so here are all thirteen `logger.*`
+calls the module had, plus the three sites that had none. The rule
+applied is the one milestones 1 and 2 drew: a line that records an
+outcome becomes an event, a line that narrates progress stays prose.
+
+| site | sentence, in short | became |
+| --- | --- | --- |
+| `_run`, after publication | "connected with N tool(s)" | `mcp_connected` |
+| `_run`, the failure handler | "is unavailable, its tools are absent" | `mcp_down` |
+| `_run`, the `finally` | (new line) | `mcp_down`, reason `stopped` |
+| `_mark_down` | (new line) | `mcp_call_dropped` |
+| `_mark_down` | "dropping the connection after a failed call" | `mcp_down`, reason `call_failed` |
+| `McpServers._reachable` | "dropping published tool N" | `mcp_tool_shadowed` |
+| `McpServers._apply` | "mcp servers reloaded: ..." | `mcp_reload`, outcome `applied` |
+| `McpServers._refused` | (new line) | `mcp_reload`, outcome `refused` |
+| `_warn_about_unpublished` | "allowed by a grant but not published" | prose: a mismatch between two configurations, not a lifecycle transition, and nothing about the connection changed when it was said |
+| `stop`, past the bound | "did not close within N s; cancelling it" | prose: the stop is still in progress, and its outcome is the `mcp_down` above |
+| `stop`, past the cancel bound | "has not finished unwinding" | prose, for the same reason |
+| `ensure_reconnecting` | "reconnecting in the background" | prose: an attempt beginning, whose outcome is `mcp_connected` or `mcp_down` |
+| `_capture` | "its own configured values could not be resolved" | prose: the optional half failed and the connection stands, so no lifecycle field would be true of it |
+| `_too_long` | "the block it shipped is N characters" | prose: guidance, not lifecycle |
+| `_skipped` | "nothing is injected for position N" | prose, for the same reason |
+| `_announce_shipped` | "shipped guidance: N characters" | prose, for the same reason |
+
+Eight prose lines and eight emit sites. No site does both: a line that
+became an event is one call, and the two calls in `_mark_down` are two
+events rather than an event and a sentence, which is the pairing the
+plan makes contract.
+
+### The phase marker, and the two type rules above it
+
+`_run` puts three quite different failures behind one handler, and by
+the time an exception arrives there they are indistinguishable: any of
+them can be the same wrapped `ExceptionGroup`. So a local `phase`
+starts at `transport_failed`, `_connect` advances it to
+`initialize_failed` once the transport's streams are in hand, and `_run`
+advances it to `discovery_failed` after the handshake returns. A local
+with a `reached` closure passed into `_connect`, rather than a field on
+the manager: it means nothing between two runs, and `_connect` is the
+only code that can see the boundary it marks.
+
+Two type rules sit above the marker, both recursing into exception
+groups (`_carries`) and neither reading a message:
+
+- a `TimeoutError` anywhere inside is `connect_timeout`, whichever call
+  was outstanding when the envelope's bound expired;
+- an `httpx.TransportError` anywhere inside is `transport_failed` even
+  when it surfaces during the handshake.
+
+The second one exists because of a discovery below, and without it the
+most common HTTP failure there is would be misfiled.
+
+`call_failed` and `stopped` need no classification: they are decided by
+the code that emits them.
+
+The refusal set is the second closed set, and it is the one the plan
+left to be fixed at implementation. The refusals that exist are all
+`ConfigError` subclasses whose type the API already turns into a status
+code, so the classification is the same one and reads from the most
+specific down: `in_progress`, `database_busy`, `unreadable`, `invalid`,
+and `unexpected` as the net under them, for a `read` callable that fails
+in a way the configuration layer has no type for. Nothing in the tree
+raises the fifth today; a closed set with no fallback is a set that
+opens quietly the first time something does.
+
+### What each event carries, and what it does not
+
+`mcp_connected` names the transport and counts the tools. The sentence
+still lists the published names, which is deliberate and unchanged: a
+published name has been through this application's own publishing rule,
+it is what the model was given, and the status surface answers with it.
+The field is a count because a list is not something a collector can
+aggregate.
+
+`mcp_down` carries `duration_ms` on the four reasons that failed on the
+way up and on neither of the other two. The temptation was to give
+`stopped` the connection's uptime, and it is the wrong answer: the field
+would then mean two different things under one name. `stopped` is also
+the only reason emitted at INFO, because a shutdown or a reload is not a
+problem an operator has.
+
+`mcp_reload` is emitted inside the refusal and inside the shielded apply
+rather than at the caller, which is what makes it exactly once: a client
+that disconnects cancels the handler awaiting the reload, and the apply
+carries on behind its shield with the event as its last act. Counts
+rather than names, for the reason `McpReload`'s own docstring gives:
+which entries moved is the status surface's answer, taken in the same
+breath by whoever asked.
+
+`mcp_tool_shadowed` carries a position where a name would be, in the
+fields as in the sentence it already had.
+
+### The tests
+
+Twenty-four new tests across four files, and not one existing test
+touched. Each event is driven through a real manager against the servers
+the MCP suites already run: the stdio child process, and the in-process
+uvicorn one.
+
+- `test_tools_mcp.py` (nine): what the manager decides. The connect
+  count, `transport_failed`, `discovery_failed` (through a class-level
+  patch of `ClientSession.list_tools`, so the transport and the
+  handshake really did succeed), `stopped` with its level and its
+  absent duration, the call-drop pairing asserted in emission order,
+  the shadow drop, and the credential sentinel.
+- `test_tools_mcp_http.py` (four): what only a socket can say. The
+  transport name, `transport_failed` over a refused connection,
+  `connect_timeout` against a listening socket nothing reads (the
+  kernel accepts into the backlog, so the handshake is sent and no
+  answer comes), and `initialize_failed` with the malformed-handshake
+  sentinel.
+- `test_tools_mcp_reload.py` (six): applied with its counts, each of the
+  four refusal tokens, the preparation half of a refusal, the
+  already-running one, and the apply whose caller went away.
+- `test_server_event_pins.py` (five): one pin per event, in the suite's
+  established style.
+
+Three helpers (`emitted`, `one_event`, `fields_of`) live in the stdio
+suite and are imported by the other two, so "what an event carries" is
+read one way in all three. `fields_of` reads the field set through
+`logs._STANDARD_ATTRIBUTES`, like both pin suites, which is what makes
+`assert fields == {...}` catch a field nobody meant to add.
+
+### Deviations from the plan
+
+Three, none of them a departure from a decision.
+
+**`mcp_down` classification is not the phase marker alone.** The plan
+says the six tokens map one-to-one onto decision sites and that
+classification is by exception type. Both are true, and they are two
+rules rather than one: the marker decides, and two type rules override
+it. The `httpx.TransportError` rule is not an embellishment, it is what
+makes the most common HTTP failure honest (see the discoveries).
+
+**The refusal reason set has five tokens, not four.** The four refusal
+types that exist are `ReloadInProgressError`, `DatabaseBusyError`,
+`StorageError` and `ConfigError`, and `_read` re-raises anything else a
+`read` callable raises. Rather than let that one escape unreported, or
+let the set quietly open later, `unexpected` is declared as the fifth
+and documented as the net.
+
+**`_connect` takes a callback.** The plan says "a local marker advanced
+between the stack entries in `_run`'s envelope", which reads as the
+stack entries being visible in `_run`. They are not: `_connect` owns
+them, and its name appears in four test docstrings. So the marker stays
+a local of `_run` and reaches `_connect` as a one-line `reached`
+closure, which advances it at the one boundary only `_connect` can see.
+
+### Discoveries
+
+**The streamable_http transport is entered before it has spoken to
+anything.** `streamable_http_client` starts its task group and yields
+without contacting the server, so a URL nobody answers raises on the
+first request of the handshake. The phase marker therefore says
+`initialize_failed` for the single most common HTTP failure there is,
+which would tell an operator the far side answered. This was found by
+running the classification against the existing dead-URL test before
+writing an assertion about it, and it is the whole reason for the
+transport-error rule above. The stdio transport does not behave this
+way: `stdio_client` spawns the child in `__aenter__`, so a bad command
+raises on the way in.
+
+**A credential-shaped tool name that is published reaches the log, and
+always did.** The plan's finding 5 is about the shadowed line, and that
+line is clean. But the sentinel test then found the same planted name in
+the connect sentence, which lists the published names, and it would also
+appear in the status surface's `tools` array. That is the documented
+rule (`mcp.py`'s module docstring: what an operator reads is "the entry
+name, the outcome, and tool names that have been through the publishing
+rule"), and sanitizing replaces only the characters an LLM API refuses,
+so an alphanumeric secret survives it. Rather than assert an absence
+that is not true, the test pins the exposure: exactly one record in the
+whole drive carries the planted name and it is `mcp_connected`. Whether
+a published name should be printed at all is a wider question than this
+issue, and it now has a test that will notice if the answer changes.
+
+**A pin suite has no "before" for a new event.** The forty-two server
+pins are evidence because they ran green against the unmigrated tree.
+These five cannot be: there was nothing to be identical to. What they
+are instead is the README's table, executable, from the day it was
+written, and the note at the head of the section says so rather than
+letting a reader assume the stronger thing.
+
+**Sentinel tests are sensitive to the level they capture at.** The first
+version of the malformed-handshake pin captured the root logger at
+DEBUG, and failed: at DEBUG, httpcore prints the headers of every
+response any httpx client in the process receives, and the stub answers
+with the sentinel in one of them. That measures somebody else's debug
+logging rather than this surface, which is a point the existing test
+next door already makes in a comment about its own scoping.
+
+### Verification
+
+From `samtal-server/`, at `528262b`:
+
+```
+uv run ruff check .                 All checks passed!
+uv run pytest tests/unit -q         2030 passed, 15 skipped
+uv run pytest tests/integration -q  53 passed
+```
+
+The unit count grows by the milestone's twenty-four, and by the five its
+parent branch gained while this was built: milestone 2 ended at 2001 and
+its review round took it to 2006. No integration test was added here:
+every one of these events is reachable from a unit driver holding a real
+manager, which is where the MCP suites already live.
+
+`git diff --stat refactor/server-events` lists this milestone's files
+and nothing else: `tools/mcp.py`, the four test files, the stdio test
+server, `samtal-server/README.md`, `CHANGELOG.md`, the plan and this
+document. `events.py` is not among them, which is the point of the two
+milestones below: the MCP subsystem emits through the same emitter as
+everything else and needed nothing added to it.
+
+### The issue, closed
+
+All three milestones are in. `samtal_server/events.py` holds the
+emitter, the tap and the hub; the session scope and the server scope
+both emit through it and the surface they produce is byte-identical to
+the one they produced before; the MCP lifecycle has events for the first
+time. What #138 deliberately did not do is attach a consumer: the store
+sink is #120's and the exporters are #66/#67's, and both now have one
+interface to attach to rather than forty-two emit sites to touch.
