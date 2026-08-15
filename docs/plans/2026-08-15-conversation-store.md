@@ -343,13 +343,32 @@ asserts the new id exceeds every id ever issued.
 - `tool_invocations`: `id`, `turn` (the parent turn's id, resolved
   by the writer inserting both in one transaction), `session`
   (indexed, denormalized for purge and session-scoped queries),
-  `position` (order within the turn), `source` (closed set:
-  `builtin`, `device`, `mcp`, decided where `_dispatch` already
-  routes, `pipeline.py:1007`), `entry` (the owning MCP entry's
-  configured name for `mcp`, null otherwise), `name` (the called
-  tool's name, null under text-off), `arguments` (JSON, null under
-  text-off), `result` (text, null under text-off), `is_error`,
-  `duration_ms`.
+  `position` (order within the round's call list as the model
+  issued it, handovers included), `source` (closed set: `builtin`,
+  `device`, `mcp`, `unknown`; the classification below), `entry`
+  (the owning MCP entry's configured name for `mcp`, null
+  otherwise), `name` (the called tool's name, null under
+  text-off), `malformed` (boolean: the arguments were not a JSON
+  object), `arguments` (JSON, null under text-off and null when
+  malformed), `result` (text, null under text-off), `is_error`,
+  `duration_ms` (null where nothing ran, as for a refused or
+  successful handover).
+
+  Every call the model issues becomes an invocation row, and the
+  classification is one function used everywhere a source is
+  named: `switch_agent` and `remember` are `builtin`, a name the
+  device listed is `device`, a name the MCP registry owns is
+  `mcp`, anything else is `unknown`, the same routing rules
+  `_dispatch` applies (`pipeline.py:1007-1030`) hoisted to one
+  classifier consulted before execution. That closes the set over
+  the paths the routing hides today: a malformed call is
+  classified by its name and recorded with `malformed` true; an
+  unknown name is recorded as `unknown` with its canned refusal
+  result; a handover is recorded from `_run_tools`'s own handling
+  (`pipeline.py:922-940`), refusals with their error results and
+  a successful switch with no result and no duration, so the
+  turn's record shows the handover the timeline otherwise only
+  implies.
 - `events`: `id` (integer autoincrement primary key: the reconcile
   cursor), `session` (indexed), `t_ms`, `name` (the event), `level`
   (the numeric logging level), `fields` (JSON: the payload minus
@@ -688,16 +707,21 @@ move, which the content-path decision above bought.
   better names for, and the store's `turns` columns were named
   `input_tokens`/`output_tokens` from the first migration so the
   two surfaces already agree.
-- `tool_call` stops carrying half-far-side bytes: for an MCP-owned
-  call the `tool` field is replaced by `entry` (the trusted
-  configured name), decided where `_dispatch` already routes;
-  builtin and device tool names keep `tool` (first-party, and the
-  authenticated device's own vocabulary). Exactly one of the two is
-  present. #154 stripped far-side names from the MCP lifecycle
-  events and recorded the published-name exposure on `tool_call`'s
-  neighbor as a wider question; the store now records the full name
-  as content, so the log no longer has a reason to. The sentence
-  moves the same way.
+- `tool_call` stops carrying peer bytes: the event gains `source`
+  from the closed set the store's classifier defines, keeps `tool`
+  only for `builtin` (the only names this application authors),
+  carries `entry` (the trusted configured name) for `mcp`, and
+  names nothing for `device` and `unknown`, because a device tool
+  name is the peer's own vocabulary exactly as an MCP tool's is,
+  and the ADR admits no far-side bytes on the events whichever
+  peer sent them. #154 stripped far-side names from the MCP
+  lifecycle events and recorded the published-name exposure on
+  this event's neighbor as a wider question; the store now records
+  the full name as content, so the log no longer has a reason to.
+  The sentence moves the same way, and the sentinels plant
+  credential-shaped names through every branch (builtin excepted),
+  hunting them in sentences, positional arguments, fields, both
+  shipped formats and an attached tap.
 - `_dispatch`'s malformed-arguments warning stops interpolating
   `call.malformed_arguments` (`pipeline.py:1012-1017`): model
   output on the retained surface, replaced by its length.
@@ -1055,6 +1079,15 @@ carries its resolution once the amendment addressing it lands.
     unknown, handover, builtin, device and MCP paths, record
     handover results, preserve call positions, and emit only
     trusted source metadata, with sentinels in every branch.
+    *Resolution*: adopted in full. The source set gains `unknown`,
+    classification is one function hoisted from `_dispatch`'s
+    routing rules and consulted before execution, malformed calls
+    carry a `malformed` boolean, handovers are recorded from
+    `_run_tools` including refusal results, positions are the
+    model's call-list order, and the narrowed `tool_call` names
+    only what this application authors: `tool` for builtins,
+    `entry` for MCP, nothing for device and unknown. The sentinel
+    coverage is named per branch.
 14. **P1: provider and model vocabulary contradicts the settled
     GenAI decision.** The issue requires token counts and
     model/provider identifiers in turns and events to use the
