@@ -565,9 +565,16 @@ style, so the committed document carries real schemas; the OpenAPI
 document is regenerated in the same change and the existing drift
 test covers it without modification.
 
-Reads open the database per request through a read-only engine
-(URI `mode=ro`, busy timeout, no migration), the API's per-request
-precedent with the write half removed. When no `conversations.db`
+Reads open the database per request by parameterizing the
+repository's existing read-engine behavior (`db/__init__.py:72`,
+today hard-bound to `samtal.db`): URI `mode=rw` because a WAL
+reader may need to create or extend the `-shm` file and `mode=ro`
+would refuse exactly the live-database case this API serves, while
+`mode=rw` still refuses to create a missing database; deferred
+`BEGIN`; the busy timeout; no journal-mode pragma (a write from
+the read path) and no migration. A test reads through this engine
+while a writer holds committed-but-uncheckpointed frames in the
+WAL and asserts the committed rows are visible. When no `conversations.db`
 exists, the routes answer 404 with a problem body naming
 `server.conversations.enabled`; when the file exists, reads serve
 it whether or not the store is currently enabled, because disabling
@@ -964,6 +971,11 @@ carries its resolution once the amendment addressing it lands.
    a live WAL database reliably. Parameterize the existing
    read-engine behavior instead, with a read-during-active-WAL
    test.
+   *Resolution*: adopted. The read path is the existing
+   `read_engine` behavior parameterized for `conversations.db`:
+   URI `mode=rw` with no create, deferred transactions, the busy
+   timeout, no pragmas that write, no migration; the
+   read-during-active-WAL test is named.
 10. **P2: a disabled store can expose an unmigrated historical
     database.** Reads serve an existing file while migration only
     runs when the enabled store is constructed, so an upgrade with
