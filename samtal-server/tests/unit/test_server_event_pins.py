@@ -55,6 +55,7 @@ import logging
 import os
 import re
 import time
+from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
@@ -73,8 +74,9 @@ from samtal_server.config import Config
 from samtal_server.config.api import build_api
 from samtal_server.config.loader import StorageError
 from samtal_server.device.bindings import DeviceBindings
+from samtal_server.events import Emission, attach_server_tap, detach_server_tap
 from samtal_server.filler import build_agent_fillers
-from samtal_server.logs import _STANDARD_ATTRIBUTES
+from samtal_server.logs import _STANDARD_ATTRIBUTES, JsonFormatter
 from samtal_server.onboarding import BUDGET_SPENT
 from samtal_server.ota import ACTIVATE_SEGMENT, OTA_PATH
 from samtal_server.providers import build_agent_providers
@@ -119,6 +121,78 @@ _NUMBER = re.compile(r"\d+(?:\.\d+)?")
 # One 16 kHz second of s16le silence, which the ASR guard's paths are
 # driven with; the same clip test_providers_openai_asr.py uses.
 ONE_SECOND = b"\x00\x00" * 16000
+
+# Not a real credential, and shaped so a substring check for it cannot
+# match by accident. It stands in for whatever a value a pin blesses
+# could turn out to be: a key, a header a stranger chose, a message an
+# exception carried up from a dependency.
+SENTINEL = "sk-test-6c1e9a4f-never-a-real-credential"
+
+
+class Consumer:
+    """A server-scope tap that keeps what it was handed.
+
+    A pin says what a record holds; it cannot say what a *consumer*
+    holds, and the two are not the same object. `Emission.args` is
+    deliberately not copied for a tap (the payload is), so anything
+    passed as a `%` argument reaches every consumer as the object
+    itself. A claim that a value reaches nobody is therefore asserted
+    here as well as at the log."""
+
+    def __init__(self) -> None:
+        self.seen: list[Emission] = []
+
+    def emit(self, emission: Emission) -> None:
+        self.seen.append(emission)
+
+    def saw(self, event: str) -> list[Emission]:
+        return [one for one in self.seen if one.payload.get("event") == event]
+
+    def rendered(self) -> str:
+        """Everything a consumer could read off what it was handed:
+        every payload and every argument, including what an exception
+        renders as and what its chain renders as."""
+        parts = []
+        for emission in self.seen:
+            parts.append(str(emission.payload))
+            for argument in emission.args:
+                parts += [str(argument), repr(argument)]
+                cause = getattr(argument, "__cause__", None) or getattr(
+                    argument, "__context__", None
+                )
+                while cause is not None:
+                    parts += [str(cause), repr(cause)]
+                    cause = cause.__cause__ or cause.__context__
+        return "\n".join(parts)
+
+
+@pytest.fixture
+def tap() -> Iterator[Consumer]:
+    """A consumer attached to the server hub for one test, which is what
+    a #66/#67 exporter will be."""
+    consumer = Consumer()
+    attach_server_tap(consumer)
+    try:
+        yield consumer
+    finally:
+        detach_server_tap(consumer)
+
+
+def logged(caplog: pytest.LogCaptureFixture) -> str:
+    """Every record this server wrote, in both shipped formats, so a
+    sentinel is hunted in the human sentence, in the JSON object, and in
+    the arguments behind both.
+
+    Only this server's channels. A driver that goes through
+    `TestClient` puts httpx's own request line in `caplog` too, and what
+    the test's HTTP client says about the URL it just fetched is not
+    something this server chose to write."""
+    formatter = JsonFormatter()
+    return "\n".join(
+        f"{record.getMessage()}\n{record.args!r}\n{formatter.format(record)}"
+        for record in caplog.records
+        if record.name.startswith("samtal_server")
+    )
 
 
 def payload_of(record: logging.LogRecord) -> dict[str, Any]:
@@ -562,10 +636,10 @@ def test_ota_request_rejected(caplog: pytest.LogCaptureFixture) -> None:
 
 # --- onboarding.py: the banner and the key that missed ----------------
 
-# A pinned key rather than a derived one, so the banner's URL is a
-# literal instead of something recomputed from the secret by the code
-# under test. Pinning is a supported configuration: it is what carries
-# provisioned boards across a secret rotation.
+# A pinned key rather than a derived one, so what the tests below hunt
+# for is a literal instead of something recomputed from the secret by
+# the code under test. Pinning is a supported configuration: it is what
+# carries provisioned boards across a secret rotation.
 PINNED_KEY = "ABCDEFGH"
 
 
@@ -579,25 +653,78 @@ def banner_config(**onboarding_options: object) -> Config:
 
 
 def test_onboarding_banner_with_onboarding_on(caplog: pytest.LogCaptureFixture) -> None:
+    """The narrowing the PR #153 review asked for: the banner names the
+    origin and where to read the URL, and no longer the URL itself. The
+    key stands in front of the endpoint that issues device tokens, and a
+    startup line is a retained record like every other."""
     with caplog.at_level("INFO"):
         onboarding.log_banner(banner_config().server)
 
     assert pinned(only(caplog, "onboarding_banner")) == {
         "logger": "samtal_server.onboarding",
         "level": logging.INFO,
-        "template": "device onboarding URL: %s (%s)",
-        "args": (f"https://voice.example/x/{PINNED_KEY}/", "from server.public_url"),
+        "template": (
+            "device onboarding is on: devices are configured on %s (%s), at the short path "
+            "samtal-server config ota-url prints. The path is not repeated here, since its key "
+            "stands in front of the endpoint that issues device tokens"
+        ),
+        "args": ("https://voice.example", "from server.public_url"),
         "sentence": (
-            f"device onboarding URL: https://voice.example/x/{PINNED_KEY}/ "
-            "(from server.public_url)"
+            "device onboarding is on: devices are configured on https://voice.example "
+            "(from server.public_url), at the short path samtal-server config ota-url "
+            "prints. The path is not repeated here, since its key stands in front of "
+            "the endpoint that issues device tokens"
         ),
         "fields": {
             "event": "onboarding_banner",
-            "url": f"https://voice.example/x/{PINNED_KEY}/",
+            "origin": "https://voice.example",
             "origin_source": "server.public_url",
             "onboarding": True,
+            "keyed": True,
         },
     }
+
+
+def test_a_keyless_short_route_says_so_rather_than_naming_a_key(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """With device auth off there is no secret to derive a key from and
+    the route mounts at /x/ bare. That is a fact about the deployment
+    rather than about the key, which is what makes it safe to say."""
+    config = Config(server={"public_url": "https://voice.example", "auth": {"enabled": False}})
+
+    with caplog.at_level("INFO"):
+        onboarding.log_banner(config.server)
+
+    assert payload_of(only(caplog, "onboarding_banner"))["keyed"] is False
+
+
+def test_the_onboarding_key_reaches_no_record_and_no_consumer(
+    caplog: pytest.LogCaptureFixture, tap: Consumer
+) -> None:
+    """The sentinel for the banner. A pin says the sentence is what it
+    is; it does not say the sentence is safe. The key is planted as the
+    pinned one, so a URL built from it anywhere in the line, the fields,
+    the arguments or a consumer's copy is found."""
+    key = "S7K3XQ2M"
+    config = Config(
+        server={"public_url": "https://voice.example", "onboarding": {"key": key}}
+    )
+
+    with caplog.at_level("DEBUG"):
+        onboarding.log_banner(config.server)
+
+    banner = only(caplog, "onboarding_banner")
+    assert key not in banner.getMessage()
+    assert key not in str(banner.args)
+    assert key not in str(payload_of(banner))
+    assert key not in logged(caplog)
+    assert tap.saw("onboarding_banner"), "it reached no tap at all, so this proves nothing"
+    assert key not in tap.rendered()
+    # And the line still does its job: which deployment, and where the
+    # URL comes from.
+    assert banner.origin == "https://voice.example"
+    assert "samtal-server config ota-url" in banner.getMessage()
 
 
 def test_onboarding_banner_with_onboarding_off(caplog: pytest.LogCaptureFixture) -> None:
@@ -627,8 +754,10 @@ def test_onboarding_banner_with_onboarding_off(caplog: pytest.LogCaptureFixture)
 
 
 def test_onboarding_key_mismatch(caplog: pytest.LogCaptureFixture) -> None:
-    """The typo the line exists for: a key a person could have typed, so
-    the attempt is repeated back beside the right one."""
+    """The typo the line exists for: a key a person could have typed.
+    Since the PR #153 review neither key is repeated, only the shape of
+    what arrived, so the event's name is what says which kind of miss
+    this was."""
     client = TestClient(create_app(banner_config()))
 
     with caplog.at_level("WARNING"):
@@ -638,21 +767,46 @@ def test_onboarding_key_mismatch(caplog: pytest.LogCaptureFixture) -> None:
         "logger": "samtal_server.onboarding",
         "level": logging.WARNING,
         "template": (
-            "onboarding key %s does not match this server's key %s: check the URL typed into the "
-            "device's captive portal, character by character"
+            "a request reached the onboarding path carrying %d characters shaped like a key, and "
+            "not this server's; neither is repeated here. Check the URL typed into the device's "
+            "captive portal against the one samtal-server config ota-url prints"
         ),
-        "args": (f"{PINNED_KEY[:-1]}X", PINNED_KEY),
+        "args": (8,),
         "sentence": (
-            f"onboarding key {PINNED_KEY[:-1]}X does not match this server's key "
-            f"{PINNED_KEY}: check the URL typed into the device's captive portal, "
-            "character by character"
+            "a request reached the onboarding path carrying <n> characters shaped "
+            "like a key, and not this server's; neither is repeated here. Check the "
+            "URL typed into the device's captive portal against the one "
+            "samtal-server config ota-url prints"
         ),
-        "fields": {
-            "event": "onboarding_key_mismatch",
-            "attempted": f"{PINNED_KEY[:-1]}X",
-            "expected": PINNED_KEY,
-        },
+        "fields": {"event": "onboarding_key_mismatch", "attempted_length": 8},
     }
+
+
+def test_neither_key_reaches_a_record_or_a_consumer_on_a_miss(
+    caplog: pytest.LogCaptureFixture, tap: Consumer
+) -> None:
+    """The sentinel for the miss, and it needs two: the server's own key
+    is what a probe was fishing for, and the attempted one is a string a
+    stranger chose that a near miss would turn into a hint at the real
+    one."""
+    key = "S7K3XQ2M"
+    attempted = "S7K3XQ2N"
+    client = TestClient(
+        create_app(Config(server={"onboarding": {"key": key}}))
+    )
+
+    with caplog.at_level("DEBUG"):
+        assert client.get(f"/x/{attempted}/").status_code == 404
+
+    miss = only(caplog, "onboarding_key_mismatch")
+    for planted in (key, attempted):
+        assert planted not in miss.getMessage()
+        assert planted not in str(miss.args)
+        assert planted not in str(payload_of(miss))
+        assert planted not in logged(caplog)
+        assert planted not in tap.rendered()
+    assert tap.saw("onboarding_key_mismatch"), "it reached no tap at all"
+    assert miss.attempted_length == len(attempted)
 
 
 def test_onboarding_key_unshaped(caplog: pytest.LogCaptureFixture) -> None:
@@ -669,13 +823,14 @@ def test_onboarding_key_unshaped(caplog: pytest.LogCaptureFixture) -> None:
         "level": logging.WARNING,
         "template": (
             "a request reached the onboarding path carrying %d characters that are not shaped like "
-            "a key at all, so they are not repeated here; the URL to type is in the startup line"
+            "a key at all, so they are not repeated here; the URL to type comes from "
+            "samtal-server config ota-url"
         ),
         "args": (500,),
         "sentence": (
             "a request reached the onboarding path carrying <n> characters that are "
             "not shaped like a key at all, so they are not repeated here; the URL to "
-            "type is in the startup line"
+            "type comes from samtal-server config ota-url"
         ),
         "fields": {"event": "onboarding_key_unshaped", "attempted_length": 500},
     }

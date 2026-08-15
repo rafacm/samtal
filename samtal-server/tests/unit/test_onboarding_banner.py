@@ -1,10 +1,19 @@
-"""The startup banner, and the same line on the OTA GET.
+"""The startup banner, and the portal line on the OTA GET.
 
-What is being pinned is not the wording but the three things the line
-has to carry: the URL a person types, which of the three sources it came
-from, and, when it is the listen address, that this is a guess. Plus
-what it must never carry: the configured `ota_path` segment, and
-userinfo riding in from `websocket_url`.
+What is being pinned is not the wording but the three things the banner
+has to carry: the origin a device reaches, which of the three sources it
+came from, and, when it is the listen address, that this is a guess.
+Plus what it must never carry: userinfo riding in from `websocket_url`,
+the configured `ota_path` segment, and, since the PR #153 review, the
+derived onboarding key or any URL built from it.
+
+That last one is the deliberate narrowing. The banner used to hand the
+operator the whole short URL, key and all, so that a typo diagnosed
+itself; a startup line is a retained record, and the key stands in front
+of the endpoint that issues device tokens. `samtal-server config
+ota-url` prints it instead, to the operator's own terminal. The portal
+line on the OTA GET still carries the full URL, and may: it is served
+only to whoever already reached the path it names.
 """
 
 import logging
@@ -38,7 +47,18 @@ def _fixed_secret(monkeypatch: pytest.MonkeyPatch) -> None:
 def banner_for(config: Config, caplog: pytest.LogCaptureFixture) -> str:
     with caplog.at_level(logging.INFO):
         onboarding.log_banner(config.server)
+    # The key must be in no part of the line, at any origin and from any
+    # source, so every test through this helper checks it rather than
+    # one of them checking it once.
+    assert KEY not in caplog.text
     return caplog.text
+
+
+def banner_record(config: Config, caplog: pytest.LogCaptureFixture):
+    with caplog.at_level(logging.INFO):
+        onboarding.log_banner(config.server)
+    (record,) = [r for r in caplog.records if r.__dict__.get("event") == "onboarding_banner"]
+    return record
 
 
 def test_the_banner_names_the_public_url_it_was_given(
@@ -46,18 +66,21 @@ def test_the_banner_names_the_public_url_it_was_given(
 ) -> None:
     config = Config(server={"public_url": "https://voice.example"})
     line = banner_for(config, caplog)
-    assert f"https://voice.example/x/{KEY}/" in line
+    assert "https://voice.example" in line
     assert "from server.public_url" in line
     # An origin that was configured is not a guess and must not read as
     # one.
     assert "guessed" not in line
+    # And the operator is told where the rest of the URL comes from,
+    # since the line no longer holds it.
+    assert "samtal-server config ota-url" in line
 
 
 def test_a_public_url_with_a_path_prefix_keeps_it(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     config = Config(server={"public_url": "https://voice.example/samtal/"})
-    assert f"https://voice.example/samtal/x/{KEY}/" in banner_for(config, caplog)
+    assert "https://voice.example/samtal" in banner_for(config, caplog)
 
 
 @pytest.mark.parametrize(
@@ -76,7 +99,7 @@ def test_the_websocket_url_is_the_second_source(
     listen address, with wss mapped to https and ws to http."""
     config = Config(server={"websocket_url": websocket_url})
     line = banner_for(config, caplog)
-    assert f"{origin}/x/{KEY}/" in line
+    assert origin in line
     assert "from server.websocket_url" in line
 
 
@@ -90,7 +113,7 @@ def test_the_public_url_wins_over_the_websocket_url(
         }
     )
     line = banner_for(config, caplog)
-    assert f"https://voice.example/x/{KEY}/" in line
+    assert "https://voice.example" in line
     assert "192.168.1.10" not in line
 
 
@@ -98,7 +121,7 @@ def test_the_listen_address_is_a_guess_and_says_so(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     line = banner_for(Config(), caplog)
-    assert f"http://0.0.0.0:8003/x/{KEY}/" in line
+    assert "http://0.0.0.0:8003" in line
     assert "guessed from" in line
     # The wildcard address is not somewhere a device can go, and a
     # reader who copies it needs to be told that here rather than after
@@ -112,17 +135,24 @@ def test_a_guess_from_a_real_address_still_reads_as_a_guess(
 ) -> None:
     config = Config(server={"host": "192.168.1.10", "port": 9000})
     line = banner_for(config, caplog)
-    assert f"http://192.168.1.10:9000/x/{KEY}/" in line
+    assert "http://192.168.1.10:9000" in line
     assert "guessed from" in line
 
 
-def test_the_keyless_route_is_what_the_banner_names_without_auth(
+def test_the_banner_says_whether_anything_guards_the_short_route(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    config = Config(server={"public_url": "http://192.168.1.10:8003", "auth": {"enabled": False}})
-    line = banner_for(config, caplog)
-    assert "http://192.168.1.10:8003/x/ " in f"{line} "
-    assert KEY not in line
+    """With device auth off there is no secret to derive a key from and
+    the route mounts at /x/ bare. Which key it is stays unsaid; whether
+    there is one at all is a fact about the deployment and is said."""
+    keyless = Config(
+        server={"public_url": "http://192.168.1.10:8003", "auth": {"enabled": False}}
+    )
+    assert banner_record(keyless, caplog).keyed is False
+    caplog.clear()
+
+    keyed = Config(server={"public_url": "http://192.168.1.10:8003"})
+    assert banner_record(keyed, caplog).keyed is True
 
 
 def test_onboarding_off_names_the_ota_path_without_quoting_it(
@@ -162,7 +192,7 @@ def test_userinfo_never_reaches_the_banner_even_if_it_slipped_past(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     line = banner_for(credentialed_config(), caplog)
-    assert f"https://voice.example/x/{KEY}/" in line
+    assert "https://voice.example" in line
     assert PASTED not in line
     assert "admin" not in line
 
@@ -203,7 +233,7 @@ def test_an_unreadable_websocket_url_falls_back_instead_of_raising(
     server = ServerConfig.model_construct(websocket_url=websocket_url)
     line = banner_for(Config.model_construct(server=server), caplog)
 
-    assert f"http://0.0.0.0:8003/x/{KEY}/" in line
+    assert "http://0.0.0.0:8003" in line
     # A guess that had a better source and could not use it is not the
     # same guess as one that never had a source, and says so.
     assert "guessed from" in line
