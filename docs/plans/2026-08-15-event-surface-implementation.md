@@ -649,3 +649,101 @@ the eleven migrated modules, the two new test files, the plan and this
 document. `events.py` is not among them, which is the point of the
 deviation above. Milestone 3 owns `tools/mcp.py`, the README table and
 the CHANGELOG, and none of them moved.
+
+### PR #153 review round
+
+One external review of the milestone as first pushed. Four findings,
+three P1 and one P3; verdict mergeable after fixes. All four adopted,
+one commit each.
+
+Three of the four are the same shape, and it is a shape this milestone
+invited. A byte-compatible migration faithfully preserves what it moves,
+and these events were carrying things nobody would put in a log if they
+were writing the line today; the pins then wrote each of them down as
+correct. So the review's real finding is that a characterization suite
+records a leak as precisely as it records anything else, and that
+migrating a surface is the moment to read what is on it. Each fix is
+therefore a deliberate narrowing, made in the same commit as the pin
+that has to move with it, and none of them touches an event's name, its
+level, its channel, or a field that is not the leak.
+
+1. **P1: the onboarding events expose the derived route key and the
+   keys that missed.** The startup banner emitted the complete short
+   URL, key and all, in its sentence, its arguments and a `url` field;
+   the key miss emitted the rejected attempt beside this server's own
+   key. The key is the path segment standing in front of the endpoint
+   that issues device tokens, and both lines are retained records.
+   *Resolution*: adopted in `816f4d8`. The banner names the origin, its
+   source, whether onboarding is on, and whether a key stands in front
+   of the short route at all, and points at `samtal-server config
+   ota-url`; the miss reports the length of what arrived, with the
+   event's own name saying which kind of miss it was. The operator
+   workflow is intact because that command was already the documented
+   route to the URL: it derives the same string from the same file and
+   the same secret, contacts nothing, and prints to a terminal rather
+   than to a log. It is now the only route, which the README says. The
+   attempted key goes with the expected one, because a near miss of a
+   real key is a hint at the real key.
+2. **P1: an unauthenticated client controls `auth_rejected.device` and
+   its sentence.** The refusal read the Device-Id header before anything
+   had authenticated. The endpoint is reachable by whatever finds it and
+   a refusal costs the caller one socket open, so the retry loop was
+   theirs: a value of their choosing, one record per attempt.
+   *Resolution*: adopted in `57e0c9b`. A fixed sentence naming an
+   unidentified client, and `device=None`. The header is read only after
+   the refusal check, which makes the rule structural rather than a
+   comment. The capacity refusal on the same handler keeps its device
+   and is not an inconsistency: capacity is checked after the token.
+3. **P1: capture and filler failures broadcast unsanitized exception
+   objects.** Four sites passed the exception itself as a `%` argument.
+   The catches are broad, around a write or around a whole synthesis, so
+   the messages carry paths, phrases, bytes and response fragments; and
+   `Emission.args` is deliberately not copied for a tap, so a consumer
+   was handed the live exception and its chain before the log tap turned
+   anything into text.
+   *Resolution*: adopted in `249a480`. Only `type(exc).__name__` is
+   rendered, and the three capture events gain a `failure` field
+   carrying it, as `device_bindings_unreadable` has since it was
+   written. A vandal tap in the sentinel cases proves the second half:
+   with the fix reverted it rewrites the exception and the log renders
+   "injected by a tap".
+4. **P3: the milestone 2 record is stale after the rebase.** The six
+   commit ids predated milestone 1's merge, the pin suite's line count
+   predated its own strengthening, and `events.py`'s one `extra=` call
+   had moved.
+   *Resolution*: adopted in `5fbc9d7`. All three refreshed against the
+   branch as it stands, plus the verification block's unit count and the
+   diff it names, both of which were against the old parent branch.
+
+Eight tests joined the pin suite, in the commits that changed what they
+watch: a planted key hunted on the banner and both keys hunted on a
+miss, a credential-shaped Device-Id on a no-token and a bad-token
+handshake, and an exception whose message and whose chained cause both
+carry a sentinel, planted at the capture's write failure, the capture's
+decline, and the filler's. Each asserts absence in five places rather
+than one: the sentence, the arguments, the fields, every record in both
+shipped formats, and an attached server tap. That last one is what a
+pin cannot reach, and it is where the #66/#67 exporters will be.
+
+The two suites next door that had recorded the old behavior moved with
+the fixes rather than being worked around:
+`test_onboarding_banner.py` now pins the origin and its provenance and
+asserts the key appears in no line at all, and `test_onboarding.py`'s
+two miss tests assert both keys absent from both shipped formats.
+`test_config_cli_onboarding.py` no longer compares the banner's URL with
+the command's, because there is no longer a banner URL to compare; it
+asserts instead that the command prints it, the banner does not, and the
+two still agree about the origin.
+
+Verification from `samtal-server/`, at `5fbc9d7`:
+
+```
+uv run ruff check .                 All checks passed!
+uv run pytest tests/unit -q         2009 passed, 15 skipped
+uv run pytest tests/integration -q  53 passed
+```
+
+The eight new tests are the whole of the growth from 2001. No test was
+deleted and none was weakened: the three suites above assert more after
+the change than before it, because "this value is not here" is a
+stronger claim than "this value is here".
