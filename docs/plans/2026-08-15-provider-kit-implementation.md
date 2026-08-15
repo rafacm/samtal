@@ -450,7 +450,8 @@ provider implementation:
 - A `ProviderCallTimeout` from the same place is worded as a wait, which
   is the classification change seen from outside.
 - The catch half: a bare `RuntimeError` raised while speaking is logged
-  under "reply failed" with its message.
+  under "reply failed" (naming its class, and nothing more, after the
+  review round's finding 1).
 - Its other side: a `DeviceGone` raised in the same place still says
   nothing.
 
@@ -525,8 +526,8 @@ path agree with the close path rather than introducing a new reading.
 
 **Nothing latent surfaced.** The plan's third risk was that narrowing
 would expose some device-edge path raising bare `RuntimeError` where it
-should raise `DeviceGone`, which would now log "reply failed" with a
-traceback. Both lanes are green and no new "reply failed" appears
+should raise `DeviceGone`, which would now log "reply failed". Both
+lanes are green and no new "reply failed" appears
 anywhere in them, so there is no such site in what the suites reach. The
 milestone-1 discovery about `ProviderCallTimeout` being an `OSError`
 stayed harmless for the same reason: none of the seven `except OSError`
