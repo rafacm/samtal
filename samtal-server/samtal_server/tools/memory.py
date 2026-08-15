@@ -16,12 +16,13 @@ outgrows the prompt.
 """
 
 import asyncio
-import logging
 import os
 import re
 from pathlib import Path
 
-logger = logging.getLogger(__name__)
+from samtal_server.events import ServerEvents
+
+events = ServerEvents(__name__)
 
 # What keeps injection cheap: whichever trips first wins, and an append
 # that overflows drops the oldest lines.
@@ -69,16 +70,14 @@ class MemoryStore:
         except FileNotFoundError:
             return ""
         except (OSError, ValueError) as exc:
-            logger.warning(
+            events.warning(
                 "could not read memory for agent %s (%s); it remembers nothing this "
                 "round",
                 agent,
                 type(exc).__name__,
-                extra={
-                    "event": "memory_unreadable",
-                    "agent": agent,
-                    "error": type(exc).__name__,
-                },
+                event="memory_unreadable",
+                agent=agent,
+                error=type(exc).__name__,
             )
             return ""
 

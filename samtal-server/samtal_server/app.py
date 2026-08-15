@@ -1,6 +1,5 @@
 import asyncio
 import contextlib
-import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 
 from fastapi import FastAPI
@@ -14,6 +13,7 @@ from samtal_server.config.api import api_token, build_api, mount_api
 from samtal_server.config.boot import load_boot_config, reload_domain_config
 from samtal_server.config.secrets import SecretStore
 from samtal_server.device.bindings import DeviceBindings
+from samtal_server.events import ServerEvents
 from samtal_server.filler import build_agent_fillers
 from samtal_server.providers import build_agent_providers
 from samtal_server.registry import SessionRegistry
@@ -22,7 +22,7 @@ from samtal_server.runtime.pipeline import bespoke_runtime_factory
 from samtal_server.tools.mcp import McpReload, McpServers
 from samtal_server.tools.memory import MemoryStore
 
-logger = logging.getLogger(__name__)
+events = ServerEvents(__name__)
 
 
 @contextlib.asynccontextmanager
@@ -236,19 +236,21 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
         )
     )
     if app.state.capture is not None:
-        logger.warning(
+        events.warning(
             "session capture is on: room audio and transcripts are being written to %s",
             capture.dir,
-            extra={"event": "capture_enabled", "path": str(capture.dir)},
+            event="capture_enabled",
+            path=str(capture.dir),
         )
     elif capture is not None:
         # Said out loud, because a configured section that records
         # nothing is otherwise a silence an operator has to debug.
-        logger.info(
+        events.info(
             "session capture is configured but off; set server.capture.enabled "
             "to record to %s",
             capture.dir,
-            extra={"event": "capture_disabled", "path": str(capture.dir)},
+            event="capture_disabled",
+            path=str(capture.dir),
         )
 
     @app.get("/healthz")

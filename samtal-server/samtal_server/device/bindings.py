@@ -41,7 +41,6 @@ Three properties this component exists to keep:
 """
 
 import asyncio
-import logging
 from dataclasses import dataclass
 
 from sqlalchemy import Engine
@@ -50,8 +49,9 @@ from samtal_server.config import Config
 from samtal_server.config.models import normalize_mac
 from samtal_server.config.store import LiveBinding, read_live_binding
 from samtal_server.db import DATABASE_FILENAME, read_engine
+from samtal_server.events import ServerEvents
 
-logger = logging.getLogger(__name__)
+events = ServerEvents(__name__)
 
 
 @dataclass(frozen=True)
@@ -120,11 +120,12 @@ class DeviceBindings:
         """
         path = config.server.database.dir / DATABASE_FILENAME
         if not path.exists():
-            logger.debug(
+            events.debug(
                 "no configuration database at %s: device bindings resolve from the "
                 "configuration this server was built with",
                 path,
-                extra={"event": "device_bindings_snapshot_only", "path": str(path)},
+                event="device_bindings_snapshot_only",
+                path=str(path),
             )
             return cls(config, None)
         return cls(config, read_engine(config.server.database.dir))
@@ -219,16 +220,14 @@ class DeviceBindings:
         structured field rather than into the sentence so the sentence
         is the same string every time.
         """
-        logger.warning(
+        events.warning(
             "cannot read the device bindings for %s; answering from the configuration "
             "this server started with, which may be older than the database. The "
             "failure's kind is recorded beside this line",
             mac,
-            extra={
-                "event": "device_bindings_unreadable",
-                "device": mac,
-                "failure": type(exc).__name__,
-            },
+            event="device_bindings_unreadable",
+            device=mac,
+            failure=type(exc).__name__,
         )
 
 

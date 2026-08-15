@@ -21,9 +21,12 @@ import logging
 from dataclasses import dataclass
 
 from samtal_server.config import Config
+from samtal_server.events import ServerEvents
 from samtal_server.providers import AgentProviders
 
 logger = logging.getLogger(__name__)
+
+events = ServerEvents(__name__)
 
 
 @dataclass(frozen=True)
@@ -62,17 +65,15 @@ async def build_agent_fillers(
                     raise ValueError(f'the voice answered "{phrase}" with no audio')
                 clips.append(bytes(pcm))
         except Exception as exc:  # noqa: BLE001 - degrade, never fail the boot
-            logger.warning(
+            events.warning(
                 "agent %s: filler synthesis failed, latency masking is off "
                 "for this agent: %s: %s",
                 name,
                 type(exc).__name__,
                 exc,
-                extra={
-                    "event": "filler_disabled",
-                    "agent": name,
-                    "error": type(exc).__name__,
-                },
+                event="filler_disabled",
+                agent=name,
+                error=type(exc).__name__,
             )
             continue
         fillers[name] = FillerClips(
