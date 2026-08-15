@@ -136,39 +136,57 @@ Not a view. Three reasons, each sufficient:
 - Push-readiness requires monotonic ids on `turns` (decision 7),
   and a view has none to offer.
 
-### The two switches, concretely: `enabled` is the metrics switch
+### The three controls, concretely
 
-The issue names two switches, storing events and timings (metrics)
-and storing conversation text, plus an `enabled` switch for the
-store itself. A store with metrics off stores nothing worth having
-(a `sessions` shell with no record), so the metrics switch and the
-store switch are the same switch, and the section has three keys:
+The issue settles three controls: the store's `enabled` switch,
+default off, and under it two separate storage switches, metrics
+(events and timings) and conversation text, both defaulting on
+when the store is enabled. The section has four keys:
 
 ```yaml
 server:
   conversations:
-    # Store sessions, turns and events in conversations.db.
+    # Record conversations into conversations.db.
     enabled: false
-    # Store conversation text and tool arguments/results. With this
-    # off, rows still land with the content columns null, so timing
-    # analysis survives the stricter setting.
+    # Store the structured events and every measured number
+    # (durations, token counts, timings). With this off, no events
+    # rows land and the numeric columns on turns and tool
+    # invocations are null.
+    metrics: true
+    # Store conversation text and tool names, arguments and
+    # results. With this off, rows still land with the content
+    # columns null, so timing analysis survives the stricter
+    # setting.
     text: true
     # Prune sessions older than this many days; 0 keeps forever,
     # and must be chosen deliberately.
     retention_days: 90
 ```
 
+The two storage switches are independent, and every combination is
+a supported configuration: metrics without text is the issue's
+stated stricter setting; text without metrics stores the
+conversation record (turns with their text, tool invocations with
+their content) with the numbers nulled and no events rows, which
+is a transparency-first deployment that keeps what was said
+without keeping behavioral telemetry. `sessions` rows land in
+every enabled configuration: they are the record's spine, and
+retention, purging and the read API all key on them. Timestamps
+(`started_at`, `closed_at`) survive both switches because
+retention and pruning are impossible without them; `duration_s`
+and the drop count are metrics and follow the metrics switch.
+
 The section is optional and `ConversationsConfig | None = None` on
 `ServerConfig`, mirroring `CaptureConfig` (`config/models.py:446`):
 absent, or present with `enabled: false`, means no store, no file,
-no behavior change. `text` and `retention_days` are read only when
-the store is enabled, and both default to the values above, so
-enabling the store alone gives the issue's stated defaults (both
-switches on, a stated retention). `extra="forbid"` like every
-server section. The switches are deployment-wide; the shape
-deliberately leaves room for per-user and per-agent layers later
-(the UI's per-user controls are a stricter filter applied above
-this layer, never a replacement for it).
+no behavior change. `metrics`, `text` and `retention_days` are
+read only when the store is enabled and default to the values
+above, so enabling the store alone gives the issue's stated
+defaults. `extra="forbid"` like every server section. The switches
+are deployment-wide; the shape deliberately leaves room for
+per-user and per-agent layers later (the UI's per-user controls
+are a stricter filter applied above this layer, never a
+replacement for it).
 
 ### The retention default is 90 days, and 0 is the explicit opt-out
 
@@ -268,11 +286,12 @@ from the session loop clock reading taken at session open).
   `close_reason` (null until close; closed token set below),
   `server_version`, `revision`, `providers` (JSON: the same
   resolved per-stage entries the capture manifest carries, built by
-  `_provider_manifest`, `device/session.py:478`), `text` (boolean:
-  whether content storage was on for this session, so a null
-  content column is distinguishable from disabled storage),
-  `dropped` (integer, default 0: rows this session lost to the
-  bounded queue, written at close).
+  `_provider_manifest`, `device/session.py:478`), `metrics` and
+  `text` (booleans: which storage switches were on for this
+  session, so a null column is distinguishable from disabled
+  storage), `dropped` (integer, default 0, following the metrics
+  switch: rows this session lost to the bounded queue, written at
+  close).
 - `turns`: `id` (integer autoincrement primary key: the timeline
   cursor), `session` (indexed), `t_ms` (the utterance's offset,
   aligned with its `heard` event), `agent`, `heard` (text, null
@@ -387,11 +406,13 @@ session after `session_closed` is emitted, so that event is the
 last row of the session's record as it is the last line of the
 decision track.
 
-The text switch is applied by the store, not the pipeline: the
-pipeline always hands the full record, and the writer nulls the
-content columns when `text` is off. Storage policy lives with
-storage; the runtime stays policy-free, and the sentinel tests
-assert the policy where it matters, on the file.
+Both storage switches are applied by the store, not the pipeline:
+the pipeline always hands the full record, the writer nulls the
+content columns when `text` is off and the numeric columns when
+`metrics` is off, and skips events rows entirely when `metrics` is
+off. Storage policy lives with storage; the runtime stays
+policy-free, and the sentinel tests assert the policy where it
+matters, on the file.
 
 ### `session_closed` gains a `reason`, a closed set at its sites
 
@@ -732,6 +753,15 @@ carries its resolution once the amendment addressing it lands.
    text-storage controls; the plan collapses enabled and metrics
    into one switch, making content-only storage with metrics
    disabled unrepresentable.
+   *Resolution*: adopted. The section is now "the three controls,
+   concretely": `enabled`, `metrics` and `text` as independent
+   keys, every combination supported and stated (text without
+   metrics is the transparency-first deployment), sessions rows as
+   the spine in every enabled configuration, timestamps surviving
+   both switches because retention needs them, `duration_s` and
+   the drop count following the metrics switch, and the sessions
+   row recording both switch states. The writer applies both
+   switches; the test lists cover the combinations.
 2. **P1: per-user deletion is not designed.** The issue revision
    and the ADR require records keyed by session and user and
    deletion by user; the plan substitutes device deletion, offers
