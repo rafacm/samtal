@@ -12,18 +12,20 @@ session's resampler has nothing to do. The API bills by character and
 the request carries the reply text, so the type marks egress.
 """
 
-import logging
 import re
 from collections.abc import AsyncIterator
 
 import httpx
 
 from samtal_server.config.models import ProviderConfig
-from samtal_server.providers.anthropic_llm import resolve_api_key
 from samtal_server.providers.base import ProviderError, TtsProvider
+from samtal_server.providers.kit import DEFAULT_TIMEOUT_S, aligned_pcm, resolve_api_key
 from samtal_server.providers.registry import OptionsReader
 
-logger = logging.getLogger(__name__)
+# How this provider names itself where the kit speaks on its behalf: the
+# warning a truncated stream produces, and the message a failed request
+# carries.
+LABEL = "elevenlabs"
 
 API_BASE_URL = "https://api.elevenlabs.io"
 
@@ -38,10 +40,6 @@ API_HOST = "api.elevenlabs.io"
 DEFAULT_MODEL = "eleven_flash_v2_5"
 
 DEFAULT_OUTPUT_FORMAT = "pcm_24000"
-
-# Long enough for a slow first byte, short enough that a hung request
-# does not hold a sentence open for the whole conversation.
-DEFAULT_TIMEOUT_S = 30.0
 
 # Only the PCM formats are usable here: the stage's contract is s16le
 # PCM, and decoding mp3 or opus just to re-encode it would add both a
@@ -131,14 +129,8 @@ class ElevenLabsTts(TtsProvider):
         return body
 
     async def synthesize(self, text: str) -> AsyncIterator[bytes]:
-        """Stream one sentence, yielding PCM as it arrives.
-
-        Chunks are yielded sample-aligned. HTTP chunk boundaries fall
-        wherever the network puts them, so a response chunk can end on
-        the first byte of a sample; the odd byte is carried into the
-        next chunk rather than passed on, because everything downstream
-        counts samples in pairs and would shift the rest of the reply
-        by one byte."""
+        """Stream one sentence, yielding PCM as it arrives, sample-aligned
+        by the kit's helper."""
         request = self._client.build_request(
             "POST",
             f"/v1/text-to-speech/{self._voice_id}/stream",
@@ -149,18 +141,8 @@ class ElevenLabsTts(TtsProvider):
         try:
             if response.status_code != httpx.codes.OK:
                 raise await _api_error(response)
-            remainder = b""
-            async for chunk in response.aiter_bytes():
-                chunk = remainder + chunk
-                aligned = len(chunk) - len(chunk) % 2
-                remainder = chunk[aligned:]
-                if aligned:
-                    yield chunk[:aligned]
-            if remainder:
-                logger.warning(
-                    "elevenlabs: dropping %d trailing byte of an incomplete sample",
-                    len(remainder),
-                )
+            async for chunk in aligned_pcm(LABEL, response.aiter_bytes()):
+                yield chunk
         finally:
             await response.aclose()
 

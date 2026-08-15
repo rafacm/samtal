@@ -22,23 +22,25 @@ re-encoded, costing a dependency and latency.
 The request carries the reply text, so the type marks egress.
 """
 
-import logging
 from collections.abc import AsyncIterator
 
 from openai import AsyncOpenAI, Omit
 
 from samtal_server.config.models import ProviderConfig
 from samtal_server.providers.base import ProviderError, TtsProvider
+from samtal_server.providers.kit import DEFAULT_TIMEOUT_S, MAX_RETRIES, aligned_pcm
 from samtal_server.providers.openai_endpoint import (
     DEFAULT_BASE_URL,
-    MAX_RETRIES,
     endpoint_api_key,
     endpoint_host,
     parse_base_url,
 )
 from samtal_server.providers.registry import OptionsReader
 
-logger = logging.getLogger(__name__)
+# How this provider names itself where the kit speaks on its behalf: the
+# warning a truncated stream produces, and the message a failed request
+# carries.
+LABEL = "openai tts"
 
 # What `response_format="pcm"` produces, fixed by the API.
 SAMPLE_RATE = 24000
@@ -47,12 +49,6 @@ SAMPLE_RATE = 24000
 # `tts-1-hd` its higher fidelity sibling; an operator who prefers one
 # sets `model`.
 DEFAULT_MODEL = "gpt-4o-mini-tts"
-
-# Long enough for a slow first byte, short enough that a hung request
-# does not hold a sentence open for the whole conversation. It is a
-# real bound only because retries are off, which is the shared
-# endpoint module's MAX_RETRIES.
-DEFAULT_TIMEOUT_S = 30.0
 
 # The API's own range for `speed`.
 SPEED_RANGE = (0.25, 4.0)
@@ -106,14 +102,8 @@ class OpenAiTts(TtsProvider):
         )
 
     async def synthesize(self, text: str) -> AsyncIterator[bytes]:
-        """Stream one sentence, yielding PCM as it arrives.
-
-        Chunks are yielded sample-aligned. HTTP chunk boundaries fall
-        wherever the network puts them, so a response chunk can end on
-        the first byte of a sample; the odd byte is carried into the
-        next chunk rather than passed on, because everything downstream
-        counts samples in pairs and would shift the rest of the reply
-        by one byte."""
+        """Stream one sentence, yielding PCM as it arrives, sample-aligned
+        by the kit's helper."""
         async with self._client.audio.speech.with_streaming_response.create(
             model=self._model,
             voice=self._voice,
@@ -122,18 +112,8 @@ class OpenAiTts(TtsProvider):
             instructions=self._instructions if self._instructions else Omit(),
             speed=self._speed if self._speed is not None else Omit(),
         ) as response:
-            remainder = b""
-            async for chunk in response.iter_bytes():
-                chunk = remainder + chunk
-                aligned = len(chunk) - len(chunk) % 2
-                remainder = chunk[aligned:]
-                if aligned:
-                    yield chunk[:aligned]
-            if remainder:
-                logger.warning(
-                    "openai tts: dropping %d trailing byte of an incomplete sample",
-                    len(remainder),
-                )
+            async for chunk in aligned_pcm(LABEL, response.iter_bytes()):
+                yield chunk
 
 
 def check_steering(

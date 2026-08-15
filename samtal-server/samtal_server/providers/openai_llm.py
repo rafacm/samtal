@@ -14,7 +14,6 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from samtal_server.config.models import ProviderConfig
-from samtal_server.providers.anthropic_llm import DEFAULT_MAX_TOKENS, resolve_api_key
 from samtal_server.providers.base import (
     LlmEvent,
     LlmProvider,
@@ -26,6 +25,7 @@ from samtal_server.providers.base import (
     Turn,
     Usage,
 )
+from samtal_server.providers.kit import DEFAULT_MAX_TOKENS, resolve_api_key
 from samtal_server.providers.openai_endpoint import OPENAI_HOST, endpoint_host
 from samtal_server.providers.registry import OptionsReader
 
