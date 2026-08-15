@@ -565,8 +565,23 @@ closed token set, chosen where the code already decides:
   normally
 - `error`: the `finally` ran with anything else propagating
 
-`request_shutdown` callers pass their token; the `finally` renders
-the recorded token or the default. This is an additive change to
+The token is a first-cause-wins latch: it is set exactly once, at
+the first termination site to fire, and later causes racing in (an
+idle timeout expiring while a drain is closing the same session, a
+client disconnect surfacing mid-drain) do not overwrite it, so the
+recorded reason is deterministically the one that initiated the
+close. `request_shutdown` callers latch their token before they
+begin closing; the `finally` renders the latched token, `client`
+when the serve loop ended with none latched, or `error` when it is
+unwinding an exception. The close path itself becomes reliable
+enough to carry the contract: the cleanup steps ahead of
+`session_closed` (`device/session.py:367-378`: the watchdog stop,
+the runtime close, the discovery stop) are individually guarded so
+an exception in one cannot swallow the event, the store's `Close`,
+or the capture's close behind it; a cleanup failure is reported by
+class, latches `error` if nothing else was latched, and the close
+still lands. Tested with competing shutdown causes and with a
+runtime whose `close()` raises. This is an additive change to
 the event surface (a new field, no rename, no removal): the README
 table row updates, the CHANGELOG notes it, and the pin suite's
 `session_closed` entries move with it in the same commit,
@@ -1189,6 +1204,11 @@ carries its resolution once the amendment addressing it lands.
     before `session_closed`, so a cleanup exception prevents both
     the event and the store's close. Specify a first-cause-wins
     latch and individually guarded cleanup.
+    *Resolution*: adopted. The token is a set-once latch with the
+    precedence stated (the initiating cause wins), the three
+    cleanup steps ahead of `session_closed` are individually
+    guarded with failures reported by class, and the competing-
+    causes and raising-cleanup tests are named.
 19. **P2: the schema reference generator cannot document the
     promised event contract.** `events.fields` is opaque JSON, so
     a column-metadata renderer cannot derive event names or their
