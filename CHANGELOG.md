@@ -27,6 +27,30 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   behavior is unchanged for every declared provider and MCP entry; the
   new refusals can only be reached by code adding a provider type.
 
+- **Providers share a kit, and a failed request has a type** (#137):
+  the five provider types that reach a network re-implemented the same
+  plumbing, three of them importing credential resolution from the
+  Anthropic provider and two carrying identical copies of the PCM
+  alignment loop, while `DEFAULT_TIMEOUT_S` was declared three times.
+  `samtal_server/providers/kit.py` now owns credential resolution, the
+  timeout and token defaults, the retries-off policy and the alignment
+  helper, and no provider imports another. Request failures leave as
+  `ProviderCallError`, or `ProviderCallTimeout` when the failure was a
+  wait; neither is a `RuntimeError`, so a provider failure can no
+  longer be mistaken for a vanished device, and the timeout one is a
+  `TimeoutError`, so classifying it needs no substring matching. Both
+  LLM providers gained the injectable `client=` seam the other three
+  already had, and their SDK clients now carry a 30 s per-operation
+  transport timeout with automatic retries off, where they previously
+  had no bound at all and the SDK's two retries; no new configuration
+  key, and a streaming reply that keeps delivering is not cut off by
+  it. **Operator-visible:** a wrapped failure's message and the
+  `provider_failed` event's `error` field now report the taxonomy class
+  with the SDK's class name and the HTTP status, and no longer the
+  vendor's own sentence or response body, which could echo request
+  content or a credential into the retained logs. The ElevenLabs
+  failure message loses its quoted body detail for the same reason.
+
 ### Fixed
 
 - **A session test's synthesis fixtures pass a real failure callback**
