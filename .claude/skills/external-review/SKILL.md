@@ -25,6 +25,13 @@ CLI with the prompts in this skill's directory.
 - Do not edit the worktree while a review runs: codex reads files
   live, and a mid-run edit means it reviews a mixture.
 
+The recurring lenses the reviews of the 2026-08-14 batch applied
+(no-leak sentinels, pin-before-reshape, closed token sets at real
+decision sites, honest seams, tooling-backed inventories) are
+written into the `implement-issue` skill's Step 1; when assembling
+a review prompt, name any of them the diff's territory touches, so
+the reviewer confirms rather than discovers.
+
 ## Plan mode
 
 1. The plan must already be committed on its feature branch.

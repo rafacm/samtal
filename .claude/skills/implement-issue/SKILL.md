@@ -51,6 +51,43 @@ violates a settled decision (two co-equal write paths, a mandatory
 variable CI does not set). Cut milestones so behavior changes sit
 alone in review. Commit the plan.
 
+### The standing review lenses
+
+The external reviews of the 2026-08-14 batch applied the same
+lenses round after round; a plan that pre-answers them merges with
+empty rounds instead of multi-finding ones. Address each where the
+issue's territory touches it, in the plan and again in the
+subagent brief:
+
+- **No-leak, at every retained surface.** No secret, far-side, or
+  untrusted bytes in any message, field, argument, exception text,
+  or `__cause__`/`__context__` chain that reaches logs, events,
+  CLI/stderr, or API bodies. Render exception classes, never their
+  words; build the sanitized error in the `except` arm and raise it
+  after the block. Plans name the sentinel tests (plant a
+  credential-shaped value; assert absence from sentence, args,
+  fields, records in both log formats, and any attached consumer).
+  The full model is
+  `docs/architecture/observability-surfaces.md`.
+- **Pin before reshaping.** A behavior-preserving move is proven by
+  characterization pins (`record.msg` and typed `record.args`, not
+  normalized renderings) committed green before the move and
+  byte-unchanged after; "existing tests pass" alone is not proof
+  when they pin only a fraction of the surface.
+- **Closed sets mapped to decision sites.** Reason tokens and event
+  fields are literals from declared closed sets, chosen where the
+  code actually classifies, by exception type (recursing into
+  groups), never message text; verify each token has a reachable
+  decision site in the code that exists, not the code as imagined.
+- **Honest seams.** Injectable dependencies compare `is not None`,
+  never truthiness; a seam's default-construction policy (timeout,
+  retries) gets its own pin, since injected-client tests cannot
+  prove it.
+- **Inventories by tooling, not memory.** Site counts, migration
+  lists, and "nothing else touches X" claims are backed by grep or
+  an AST check named in the plan's verification; after any rebase,
+  recorded hashes and counts are refreshed.
+
 ## Step 2: external plan review
 
 Use the `external-review` skill in plan mode. Record the findings
