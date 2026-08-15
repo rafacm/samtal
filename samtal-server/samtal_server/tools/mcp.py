@@ -250,6 +250,29 @@ class McpServerDown(RuntimeError):
     """A call to a server that is not currently connected."""
 
 
+class McpCallFailed(RuntimeError):
+    """A call that went out to a server and did not come back.
+
+    Raised in place of whatever the SDK or the transport raised, and
+    deliberately carrying none of it, neither in its message nor as a
+    cause or a context. This exception is not caught and inspected: the
+    pipeline renders it into the tool result the model is given, so
+    every character of it is text that goes into the conversation, and
+    from there into the transcript the retained logs are. An SDK
+    exception raised near a response body can quote that body, and a
+    server holding a credential of this deployment's can put it in the
+    error it answers with, so what a third party wrote must not be the
+    thing that decides what this assistant says.
+
+    What the failure was is recorded where a diagnosis belongs, in the
+    `mcp_call_dropped` event beside the raise, as the class name this
+    application's own classifier answers with.
+
+    A `RuntimeError` like `McpServerDown`, because to everything above
+    these two mean the same thing: the tool did not run.
+    """
+
+
 class McpToolNotGranted(LookupError):
     """A call to a tool the speaking agent's grants do not name.
 
@@ -1054,7 +1077,15 @@ class McpServerManager:
         it. The name goes back out as the server listed it, since what
         the model saw may have been sanitized. A transport failure marks
         the server down (so the next session revives it) and is raised
-        for the session to turn into an error result."""
+        as `McpCallFailed` for the session to turn into an error result.
+
+        What the far side raised does not travel with it. The failure is
+        classified inside the handler, where the exception is, and the
+        exception this method raises is built after the handler has
+        closed, so it carries no cause, no context and no words but
+        this application's own: the pipeline renders it into a tool
+        result and hands that to the model.
+        """
         session = self._session
         if session is None:
             raise McpServerDown(f'MCP server "{self._name}" is not connected')
@@ -1065,12 +1096,20 @@ class McpServerManager:
             result = await session.call_tool(original, arguments)
         except asyncio.CancelledError:
             raise
-        except Exception:
-            self._mark_down(self._published.position_of(published))
-            raise
-        return _result_text(result), bool(result.isError)
+        except Exception as exc:
+            self._mark_down(self._published.position_of(published), _reason(exc))
+        else:
+            return _result_text(result), bool(result.isError)
+        # Outside the handler, which is what makes it structural rather
+        # than a promise: past this line there is no exception being
+        # handled, so nothing can attach itself as a context, and there
+        # is nothing in scope to quote by accident.
+        raise McpCallFailed(
+            f'MCP server "{self._name}" did not answer this call, and its connection '
+            "has been dropped"
+        )
 
-    def _mark_down(self, position: int | None) -> None:
+    def _mark_down(self, position: int | None, error: str) -> None:
         """Unwind the connection so the next session reconnects it.
 
         Two events rather than one, and the pairing is contract (#138):
@@ -1095,13 +1134,21 @@ class McpServerManager:
         question `samtal-server config status` answers, in a terminal,
         for whoever asked.
         """
+        # And the kind of failure it was, as the class name `_reason`
+        # answers with, which is the same field `provider_failed` has
+        # carried since #137 and the same rule: a type name says what
+        # went wrong, and a message says what a stranger wrote. This is
+        # the only place it is recorded now, since the exception raised
+        # to the session carries nothing.
         events.warning(
-            "mcp server %s: the call to published tool %s failed, so its answer is lost",
+            "mcp server %s: the call to published tool %s failed (%s), so its answer is lost",
             self._name,
             position,
+            error,
             event="mcp_call_dropped",
             entry=self._name,
             position=position,
+            error=error,
         )
         events.warning(
             "mcp server %s: dropping the connection after a failed call",
@@ -1602,6 +1649,20 @@ RELOAD_IN_PROGRESS = (
     "this request; make it again once the first has answered."
 )
 
+# And what it says when the re-read failed in a way the configuration
+# layer has no type for, which is the one refusal whose exception is not
+# already this application's own words. A `StorageError`, because that
+# is exactly what this is (stored state that could not be read, through
+# no fault of the caller) and because its type is what the API turns
+# into a status. The failure itself is named by class in the event
+# beside this, which is where an operator looks; a `read` callable that
+# fails unexpectedly may be holding a connection string, and the reload
+# endpoint's response body is not the place to find out.
+RELOAD_UNREADABLE = (
+    f"{RELOAD_REFUSED} this server's configuration could not be read. The failure is "
+    "recorded in this server's log."
+)
+
 # What one reload did, as the `mcp_reload` event says it. Two outcomes
 # and no third, because the two phases leave no other end: preparation
 # refuses with nothing touched, or the apply runs to its end. An apply
@@ -1938,7 +1999,20 @@ class McpServers:
         A cancellation is not a refusal and is not reported as one: the
         caller went away before the world was even a candidate, and
         nothing happened that anybody has to be told about.
+
+        The two failure branches differ in one thing only: whether the
+        exception is already this application's own words. A
+        `ConfigError` is, by construction, since `_read` and `_prepared`
+        both compose theirs outside their own handlers and their
+        messages name configuration locations rather than values, and
+        the API puts that message straight into a response body.
+        Anything else came from the `read` callable, whose failures
+        nothing bounds, so it is classified here and answered with a
+        fixed sentence built after the handler has closed: the token is
+        the diagnosis, and what a database driver had to say about a
+        connection string is not part of the reload's answer.
         """
+        problem: str | None = None
         try:
             config, secrets = await self._read(read)
             # One slice, composed before preparation and applied after
@@ -1948,9 +2022,13 @@ class McpServers:
             return configured, self._prepared(config, secrets, configured)
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
+        except ConfigError as exc:
             self._refused(_refusal(exc))
             raise
+        except Exception as exc:
+            self._refused(_refusal(exc))
+            problem = RELOAD_UNREADABLE
+        raise StorageError(problem)
 
     @staticmethod
     def _refused(reason: str) -> None:

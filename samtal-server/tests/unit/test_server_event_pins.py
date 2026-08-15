@@ -1841,18 +1841,22 @@ async def test_mcp_call_dropped(
         "logger": "samtal_server.tools.mcp",
         "level": logging.WARNING,
         "template": (
-            "mcp server %s: the call to published tool %s failed, so its answer is lost"
+            "mcp server %s: the call to published tool %s failed (%s), so its answer is lost"
         ),
-        # The position in the far side's listing, never the name.
-        # `secret_word` is the first tool this server lists.
-        "args": ("tools", 1),
+        # The position in the far side's listing, never the name;
+        # `secret_word` is the first tool this server lists. And the
+        # failure by class, which is the only record of it left, since
+        # the exception raised to the session carries nothing.
+        "args": ("tools", 1, "RuntimeError"),
         "sentence": (
-            "mcp server tools: the call to published tool <n> failed, so its answer is lost"
+            "mcp server tools: the call to published tool <n> failed (RuntimeError), so "
+            "its answer is lost"
         ),
         "fields": {
             "event": "mcp_call_dropped",
             "entry": "tools",
             "position": 1,
+            "error": "RuntimeError",
         },
     }
 
