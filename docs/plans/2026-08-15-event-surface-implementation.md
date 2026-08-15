@@ -397,21 +397,23 @@ door.
 
 Six commits, in the order the milestone was built:
 
-1. `df0be70` Pin every server event before migrating it
-2. `37110c1` Emit the HTTP edge's events through ServerEvents
-3. `1397c49` Emit the server's own plumbing through ServerEvents
-4. `7abc5e1` Dissolve _echo_event into the provider's emitter
-5. `f9f0db6` Guard the one emitter with the package's own AST
-6. `0e14070` Pin the templates and the arguments here too
+1. `447c64a` Pin every server event before migrating it
+2. `7be52b0` Emit the HTTP edge's events through ServerEvents
+3. `903ccf3` Emit the server's own plumbing through ServerEvents
+4. `d92d527` Dissolve _echo_event into the provider's emitter
+5. `de8e89a` Guard the one emitter with the package's own AST
+6. `0e66e29` Pin the templates and the arguments here too
 
-The branch is stacked on milestone 1's, which was under review while
-this was built, so these hashes move with every rebase onto it. Their
-order and their titles do not.
+The branch was stacked on milestone 1's while that was under review, so
+these hashes moved with every rebase onto it and were refreshed once
+more when milestone 1 merged as PR #152 and this branch was rebased onto
+`main`. Their order and their titles never moved.
 
 ### The pin suite, first and unchanged
 
-`samtal-server/tests/unit/test_server_event_pins.py` (new, 1201 lines,
-42 tests covering 42 emit paths, one each). A sibling module rather than
+`samtal-server/tests/unit/test_server_event_pins.py` (new, 1742 lines,
+50 tests: 42 emit paths, one each, plus the eight sentinel cases the PR
+#153 review round added below). A sibling module rather than
 an extension of `test_event_surface_pins.py`, because the two scopes
 normalize differently and the session file must not be touched again:
 milestone 1's evidence is that it did not move.
@@ -445,7 +447,7 @@ The suite was committed green against the unmigrated code, and the
 migration commits did not touch it: the only test file any of them
 carries is the new guard.
 
-It was touched once afterwards, deliberately, in `0e14070`. The PR #152
+It was touched once afterwards, deliberately, in `0e66e29`. The PR #152
 review round landed on the session suite while this milestone was being
 built, and its finding 6 applies here word for word: normalizing every
 numeric run in the rendered sentence lets a swapped argument, a changed
@@ -458,7 +460,7 @@ message are not equal to each other).
 Adding pins after a migration would ordinarily weaken the evidence they
 exist to be. It does not here, because the strengthened suite was run
 against the pre-migration tree as well: restoring `samtal_server/` at
-`df0be70`, all forty-two pass, and they pass again with the migrated
+`447c64a`, all forty-two pass, and they pass again with the migrated
 tree back. Both halves of the "before and after" therefore hold for all
 five dimensions, not only for the original four.
 
@@ -542,8 +544,8 @@ fails on a call whose function is an attribute with a logging method's
 name and which carries an `extra=` keyword. One exception is enumerated
 with its reason: `events.py`, where `LogTap` attaches the finished
 payload, which is the concentration the rule exists to produce. Checked
-by hand at the time of writing, `events.py:121` is the only hit in the
-package.
+by hand at the time of writing, `events.py:142` is the only hit in the
+package, which is `LogTap.emit`.
 
 Two tests keep the rule honest rather than merely green. One plants the
 three shapes that evaded the grep this replaces (a one-line `extra={`, a
@@ -628,7 +630,7 @@ carry, verbatim.
 
 ### Verification
 
-From `samtal-server/`, at `0e14070`:
+From `samtal-server/`, at `0e66e29`:
 
 ```
 uv run ruff check .                 All checks passed!
@@ -639,11 +641,11 @@ uv run pytest tests/integration -q  53 passed
 This milestone adds 47 unit tests and no integration test: the 42 of the
 pin suite, all green before any production line moved, and the guard's
 five. The migration commits changed no test file, so the count at
-`df0be70` is this one less the guard's five, and the parent branch's is
-that less 42.
+`447c64a` is this one less the guard's five, and `main`'s is that less
+42. The review round below adds eight more and its own run.
 
-`git diff --stat refactor/event-surface` lists this milestone's files
-and nothing else: the eleven migrated modules, the two new test files,
-the plan and this document. `events.py` is not among them, which is the
-point of the deviation above. Milestone 3 owns `tools/mcp.py`, the
-README table and the CHANGELOG, and none of them moved.
+`git diff --stat main` lists this milestone's files and nothing else:
+the eleven migrated modules, the two new test files, the plan and this
+document. `events.py` is not among them, which is the point of the
+deviation above. Milestone 3 owns `tools/mcp.py`, the README table and
+the CHANGELOG, and none of them moved.
