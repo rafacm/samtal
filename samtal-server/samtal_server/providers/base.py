@@ -22,6 +22,37 @@ class ProviderError(Exception):
     a bad option, or a missing optional dependency."""
 
 
+class ProviderCallError(Exception):
+    """A provider's request failed after the provider was built.
+
+    The other half of the contract, and the later half: `ProviderError`
+    is a configuration that never starts, this is a conversation that
+    does not get its answer. Every provider that reaches a network
+    raises it, so the pipeline can tell a failure the network delivered
+    from a bug in this process, and route it to the provider-failed path
+    with its structured event (#137).
+
+    Deliberately not a `RuntimeError` subclass: the device edge catches
+    `RuntimeError` broadly for a vanished device, and a provider failure
+    must never be mistaken for one.
+
+    Its message carries trusted metadata only: which provider, the SDK
+    exception's class name, and the HTTP status code when there is one.
+    Never the vendor's message text or response body, which can hold
+    request content or a credential a compatible endpoint echoed back;
+    `samtal_server.providers.kit.call_failure` is where that rule is
+    applied."""
+
+
+class ProviderCallTimeout(ProviderCallError, TimeoutError):
+    """The failure was a wait rather than an answer.
+
+    Also a `TimeoutError`, so the pipeline's classification is one
+    `isinstance` covering this, `asyncio.TimeoutError`, and the
+    session's own first-token watchdog, with no substring matching on
+    class names anywhere."""
+
+
 @dataclass(frozen=True)
 class ProviderIdentity:
     """Which configuration entry a provider is, as an operator reading
