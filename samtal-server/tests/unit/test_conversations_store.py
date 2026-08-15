@@ -39,6 +39,7 @@ from samtal_server.conversations.store import (
     ConversationStore,
     _Batch,
     open_conversations,
+    purge,
     read_conversations,
 )
 from samtal_server.db import BUSY_TIMEOUT_MS
@@ -460,30 +461,57 @@ def test_records_for_a_session_it_never_opened_are_refused_once(
     assert rows(tmp_path, "sessions") == []
 
 
-def test_a_session_deleted_mid_stream_is_never_resurrected(tmp_path: Path, stores) -> None:
-    """The purge command is a second writer, so absence of the session
-    row is the tombstone: the writer discards the batch, forgets the
-    session, and nothing still in flight can recreate it as orphan
-    rows."""
+@pytest.mark.parametrize("after_a_turn", [False, True])
+def test_a_purged_session_is_never_resurrected(
+    tmp_path: Path, stores, after_a_turn: bool
+) -> None:
+    """The purge command is a second writer, in a second process, and
+    the session it deletes may be mid conversation.
+
+    Driven through the real `purge()` rather than a hand-written DELETE,
+    because what is under test is the interaction between the two and a
+    hand-written statement is only the half this suite already
+    controls. Two interleavings: the purge landing before the session's
+    first turn marker has committed anything, and landing after a
+    commit with more records already in flight. In both, absence of the
+    session row is the tombstone: the writer discards the batch, forgets
+    the session, and nothing still in flight can recreate it as orphan
+    rows.
+
+    The conversation then finishes normally, exactly as a real one
+    would, since neither the runtime nor the device edge knows a purge
+    happened. What the conversation says after the purge is not
+    recorded, which is the consequence the command's help states.
+    """
     gate = Gate()
-    store = stores(gate=gate)
+    store = stores(gate=gate, retention_days=0)
     store.start()
     store.open_session("alpha", 100.0, MANIFEST)
     gate.wait()
     gate.let_through()
-    store.record_turn("alpha", a_turn())
-    gate.wait()
 
-    # Deleted out from under the live session, exactly as `purge` does.
-    engine = open_conversations(tmp_path)
-    try:
-        with engine.begin() as connection:
-            connection.execute(text("delete from sessions where session = 'alpha'"))
-    finally:
-        engine.dispose()
+    if after_a_turn:
+        store.record_turn("alpha", a_turn())
+        gate.wait()
+        gate.let_through()
+        # Committed, and more already on its way.
+        store.record_event("alpha", "heard", logging.INFO, {"duration_s": 1.0}, 102.0)
+        store.record_turn("alpha", a_turn(t_ms=3000))
+        gate.wait()
+    else:
+        # Nothing of this session but its open row has been committed.
+        store.record_event("alpha", "heard", logging.INFO, {"duration_s": 1.0}, 101.0)
+        store.record_turn("alpha", a_turn())
+        gate.wait()
+
+    # The command, against the live store, while the writer is parked
+    # in front of the marker that would have written the batch.
+    taken = purge(tmp_path, session="alpha")
+    assert taken.sessions == 1
 
     gate.open_forever()
-    store.record_event("alpha", "heard", logging.INFO, {}, 103.0)
+    # And the conversation carries on to its natural end.
+    store.record_event("alpha", "replied", logging.INFO, {"duration_s": 2.0}, 104.0)
     store.record_turn("alpha", a_turn(t_ms=5000))
     store.close_session("alpha", duration_s=8.0, reason="client")
     store.stop()
