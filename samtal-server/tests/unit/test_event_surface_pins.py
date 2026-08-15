@@ -40,7 +40,10 @@ milestone 1) and left untouched through the move, which is what makes it
 evidence rather than a description: the surface it pins is the one that
 existed before the reshape. Strengthened afterwards by the PR #152
 review round, which found the sentence normalization too generous to
-catch what this docstring claimed of it.
+catch what this docstring claimed of it, and which deliberately blunted
+one pinned sentence: the bad-Device-Id rejection no longer renders the
+header a caller submitted. A pin says a sentence is what it is, not
+that it is safe, so that one is guarded by a sentinel case beside it.
 """
 
 import asyncio
@@ -102,6 +105,11 @@ from tests.unit.test_session_watchdog import STALL_S, StallingLlm, watchdog_conf
 # The utterance the direct drivers hand a reply: 20 ms of silence, which
 # the mock ASR answers whatever it holds.
 UTTERANCE = b"\x00\x00" * 320
+
+# Not a real credential, and shaped so a substring check for it cannot
+# match by accident. It stands for whatever a caller puts in a header,
+# or a far side in an error, that nobody wrote for a log line.
+SENTINEL = "sk-test-4f8b2c9e-never-a-real-credential"
 
 # What a value that moves between runs is replaced by, so that the key
 # is pinned and the value deliberately is not.
@@ -222,15 +230,17 @@ async def test_session_rejected_bad_device_id(caplog: pytest.LogCaptureFixture) 
     with caplog.at_level("WARNING"):
         await turned_away(config_with_agent(), "not-a-mac")
 
-    assert pinned(only(caplog, "session_rejected"), dynamic_args=(1,)) == {
+    assert pinned(only(caplog, "session_rejected")) == {
         "logger": "samtal_server.session",
         "level": logging.WARNING,
-        "template": "session %s rejected: Device-Id header: %s",
-        "args": (SESSION, "<ValueError>"),
+        "template": (
+            "session %s rejected: the Device-Id header is not a device MAC "
+            "(six colon-separated hex pairs)"
+        ),
+        "args": (SESSION,),
         "sentence": (
-            "session <session> rejected: Device-Id header: "
-            '"not-a-mac" is not a MAC address; expected six colon-separated hex '
-            "pairs, for example aa:bb:cc:dd:ee:ff"
+            "session <session> rejected: the Device-Id header is not a device MAC "
+            "(six colon-separated hex pairs)"
         ),
         "fields": {
             "event": "session_rejected",
@@ -239,6 +249,24 @@ async def test_session_rejected_bad_device_id(caplog: pytest.LogCaptureFixture) 
             "reason": "bad_device_id",
         },
     }
+
+
+async def test_a_rejected_device_id_reaches_no_record_at_all(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A pin says the sentence is what it is; it does not say the
+    sentence is safe. The header is bytes an unauthenticated caller
+    chose, and these logs are the retained surface, so the value that
+    was turned away must appear in no sentence, no argument, no field,
+    and no record of any level."""
+    with caplog.at_level("DEBUG"):
+        await turned_away(config_with_agent(), SENTINEL)
+
+    rejected = only(caplog, "session_rejected")
+    assert SENTINEL not in rejected.getMessage()
+    assert SENTINEL not in str(rejected.args)
+    assert SENTINEL not in str(payload_of(rejected))
+    assert not any(SENTINEL in record.getMessage() for record in caplog.records)
 
 
 async def test_session_rejected_no_agent(caplog: pytest.LogCaptureFixture) -> None:
