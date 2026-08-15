@@ -302,3 +302,91 @@ this milestone in place:
 Everything outside pytest ran with `PYTHONDONTWRITEBYTECODE=1`, and no
 file was restored mid-run, so the bytecode trap in `AGENTS.md` did not
 apply.
+
+### PR #150 review round
+
+One external review of the PR diff (codex CLI, model gpt-5.6-sol,
+read-only, 2026-08-15). Verdict: mergeable after the fixes. Six
+findings, as received and condensed, each with the commit that
+answered it.
+
+1. **P1: the SDK and transport logs bypass the sanitizer.** The
+   taxonomy sanitizes what a provider raises, but the openai,
+   anthropic, httpx and httpcore libraries log for themselves, and
+   `logs.py` propagates whatever level the operator configured. The
+   reviewer reproduced a sentinel surviving in an SDK traceback record
+   and a response header logged verbatim against the locked openai
+   2.48.0. Hold those libraries' records below a safe level, and prove
+   it with mock-transport tests through the real SDK client.
+   *Resolution*: adopted, `53ae3e8`. `logs.quiet_vendor_libraries`
+   holds the four at INFO, or at the server's own level when that is
+   higher, so it only ever quietens; `configure` calls it. INFO rather
+   than WARNING keeps httpx's one line per request, which carries the
+   method, the URL and the status and no header or body. Reproduced
+   before fixing: at DEBUG the SDK logs `HTTP Response: ... Headers({'x-echo': '<sentinel>', ...})`
+   and an `Encountered an HTTP status error` record with `exc_info`.
+2. **P1: ElevenLabs close failures escape raw.** `response.aclose()`
+   ran in a `finally` outside the catch, and an exception raised in a
+   `finally` replaces the one in flight, so a connection reset while
+   closing replaced the sanitized error and could replace a
+   cancellation.
+   *Resolution*: adopted, `6f41192`. `_released` answers with a
+   taxonomy error rather than raising one; the first failure wins, a
+   release failure with nothing else wrong is reported as the taxonomy,
+   and on the cancellation-or-bug arm the response is still released
+   while a failure there is dropped.
+3. **P1: the relocated credential resolver prints rejected input.**
+   The refusal for an unset `api_key_env` interpolated that field's
+   value into a message `main` prints to stderr and the logs keep.
+   *Resolution*: adopted, `427a593`. Fixed wording, entry name only.
+   Five existing pins moved with it, and a new test plants a
+   variable-shaped sentinel and checks the chain and the stderr line.
+4. **P2: every provider caught every vendor's SDK errors.** One
+   combined tuple would dress a miswired client as an ordinary request
+   failure.
+   *Resolution*: adopted, `545b760`. Three tuples in the kit
+   (`HTTPX_FAILURES` and the two vendor ones built on it), one per
+   client a provider can hold, with a wrong-SDK pass-through test in
+   each direction.
+5. **P2: `client or ...` discards a falsey client double.**
+   *Resolution*: adopted, `f8114b9`. `client if client is not None else
+   ...`, in all five providers rather than only the two the review
+   named, with a test each.
+6. **P3: the plan still claimed the SDK exception rides as
+   `__cause__`,** contradicting its own adopted finding 1.
+   *Resolution*: adopted, `5202066`. The sentence now says the SDK
+   class name survives as message metadata and nothing else does.
+
+Each fix commit carries its own red-to-green: the neutered guard makes
+four of the seven log tests fail, the old `finally` shape fails three of
+the four release tests (the fourth passes either way, because httpx
+closes a body read to completion from inside the iterator, where the
+catch already saw it), the old wording fails three credential tests, a
+combined catch tuple fails both wrong-SDK tests, and `or` fails all five
+falsey-client tests.
+
+Two things the round turned up that were not findings:
+
+- **The config model already refuses a pasted credential in
+  `api_key_env`.** Its field validator rejects anything that does not
+  look like a variable name, which is why finding 3's test has to use a
+  variable-shaped sentinel to reach the resolver at all.
+- **Pydantic's own `ValidationError` renders the offending input.**
+  Hitting that validator with a real credential would print it, which
+  is a different surface from the one this issue owns (config
+  validation, not provider construction) and is left alone here.
+
+### Verification after the review round
+
+From `samtal-server/`, with all six fix commits in place:
+
+- `uv run ruff check .`: **All checks passed!**
+- `uv run pytest tests/unit -q`: **1906 passed, 15 skipped** in 173 s.
+  Eighteen more than before the round: six log tests, four release
+  tests, one credential test, two wrong-SDK tests and five
+  falsey-client tests.
+- `uv run pytest tests/integration -q`: **53 passed** in 150 s.
+- `git diff --stat main -- samtal-server/samtal_server/runtime
+  samtal-server/samtal_server/device`: still empty. The one file
+  touched outside `providers/` is `samtal_server/logs.py`, which
+  finding 1 required.
