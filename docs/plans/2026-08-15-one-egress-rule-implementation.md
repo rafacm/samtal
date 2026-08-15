@@ -44,8 +44,12 @@ drift.
 
 Neither `ProviderError` nor `McpConfigError` is imported; the only
 import is `McpServerConfig` and `ProviderConfig` from
-`samtal_server.config.models`, which imports neither `providers` nor
-`tools`, so no cycle is possible.
+`samtal_server.config.models`. That module does import from the
+`tools` package, but only the leaf `samtal_server.tools.names`
+(naming rules with no imports of its own back into `tools.mcp`),
+and `tools/__init__.py` is deliberately inert, so the path from
+`egress.py` never reaches `tools.mcp` or `providers` and no cycle
+is possible.
 
 **`samtal-server/samtal_server/providers/base.py`.** `egress:
 ClassVar[bool | None]` keeps the annotation and loses `= True`. The
