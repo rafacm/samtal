@@ -23,6 +23,7 @@ import time
 from collections.abc import AsyncIterator, Sequence
 from typing import Any, cast
 
+import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
@@ -214,35 +215,100 @@ def test_frames_that_arrive_before_a_listen_never_reach_the_runtime() -> None:
     assert runtime.heard == b""
 
 
+# Planted in the close reason, which the far end writes and this end
+# has no reason to trust.
+SENTINEL = "sk-test-9b3e5c02-never-a-real-credential"
+
+
+def chain(exc: BaseException) -> str:
+    """Everything a renderer of this exception could reach: the error
+    itself and every cause and context behind it."""
+    parts: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        parts += [repr(current), str(current)]
+        current = current.__cause__ or current.__context__
+    return "\n".join(parts)
+
+
 class VanishedSocket:
     """A device that has already gone away."""
 
+    def __init__(self, error: BaseException | None = None) -> None:
+        self._error = error or WebSocketDisconnect(1006)
+
     async def send_text(self, text: str) -> None:
-        raise WebSocketDisconnect(1006)
+        raise self._error
 
     async def send_bytes(self, data: bytes) -> None:
-        raise WebSocketDisconnect(1006)
+        raise self._error
 
 
-async def test_a_vanished_device_reaches_the_runtime_as_device_gone() -> None:
-    """The transport's disconnect is translated at the boundary, so a
-    runtime never imports starlette to catch one. It subclasses
-    RuntimeError on purpose, which is what lets every site that already
-    swallowed a vanished device keep its catch."""
-    session = device_session(config_with_agent(), DEVICE_MAC, websocket=VanishedSocket())
-    for call in (
+def outgoing(session: Any) -> list[Any]:
+    """Every way the boundary speaks to a device, which is every way one
+    can be found to have vanished."""
+    return [
         session.show_transcript("anything"),
         session.begin_speaking(),
         session.sentence_started("anything"),
         session.send_audio(PlayableAudio([b"packet"])),
         session.finish_speaking(),
-    ):
+    ]
+
+
+async def test_a_vanished_device_reaches_the_runtime_as_device_gone() -> None:
+    """The transport's disconnect is translated at the boundary, so a
+    runtime never imports starlette to catch one. It subclasses
+    RuntimeError on purpose, which is what lets the two sites that still
+    swallow a vanished device broadly keep their catch.
+
+    Translated, not wrapped: neither the cause nor the context leads
+    back to the transport's own exception. A runtime cannot use it (that
+    is the point of the boundary), and it carries a close reason written
+    by the far end, which is not a thing to hand to whatever logs this.
+    """
+    session = device_session(config_with_agent(), DEVICE_MAC, websocket=VanishedSocket())
+    for call in outgoing(session):
         try:
             await call
         except DeviceGone as exc:
-            assert isinstance(exc.__cause__, WebSocketDisconnect)
+            assert exc.__cause__ is None
+            assert exc.__context__ is None
         else:  # pragma: no cover - the assertion below reports it
             raise AssertionError("a vanished device went unreported")
+
+
+async def test_a_disconnect_carries_nothing_of_the_transports_own(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Both shapes a starlette socket produces, each carrying a secret
+    where a close reason or a message goes. What the runtime is handed
+    says "the device disconnected" and nothing else, and nothing on the
+    way there writes the rest down."""
+    for error in (
+        WebSocketDisconnect(1006, f"closing: {SENTINEL}"),
+        RuntimeError(f'Cannot call "send" once a close message has been sent: {SENTINEL}'),
+    ):
+        session = device_session(
+            config_with_agent(), DEVICE_MAC, websocket=VanishedSocket(error)
+        )
+        with caplog.at_level("DEBUG"):
+            for call in outgoing(session):
+                try:
+                    await call
+                except DeviceGone as exc:
+                    assert SENTINEL not in chain(exc)
+                else:  # pragma: no cover - the assertion below reports it
+                    raise AssertionError("a vanished device went unreported")
+
+        # Nothing at the edge logs one today, which is itself the
+        # assertion: a line added later must not reach for the
+        # transport's exception to say what happened.
+        assert SENTINEL not in caplog.text
+        assert all(SENTINEL not in str(record.__dict__) for record in caplog.records)
+        caplog.clear()
 
 
 class FakeDevice:
@@ -494,6 +560,7 @@ async def test_a_device_that_vanishes_mid_tool_call_reports_device_gone() -> Non
     try:
         await session.call_device_tool(tool.name, {"volume": 50})
     except DeviceGone as exc:
-        assert isinstance(exc.__cause__, WebSocketDisconnect)
+        assert exc.__cause__ is None
+        assert exc.__context__ is None
     else:  # pragma: no cover - the assertion below reports it
         raise AssertionError("a vanished device went unreported")

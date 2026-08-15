@@ -919,16 +919,30 @@ class DeviceSession:
         blanket. Untranslated, the second shape reaches a runtime as a
         bare `RuntimeError`, which is indistinguishable from a local
         bug and is why the reply body used to have to catch both."""
+        gone: DeviceGone | None = None
         try:
             await self.websocket.send_text(text)
-        except (WebSocketDisconnect, RuntimeError) as exc:
-            raise DeviceGone("the device disconnected") from exc
+        except (WebSocketDisconnect, RuntimeError):
+            gone = DeviceGone("the device disconnected")
+        # Raised out here rather than in the except arm, the way a
+        # provider raises the taxonomy (providers/kit.py): inside it,
+        # the transport's exception becomes this one's `__context__`
+        # even under `from None`, and a disconnect carries a close
+        # reason the far end wrote. Nothing about which transport
+        # exception it was is diagnosable anyway, since the boundary
+        # exists precisely so no reader of this has to know.
+        if gone is not None:
+            raise gone from None
 
     async def _send_frame(self, data: bytes) -> None:
+        gone: DeviceGone | None = None
         try:
             await self.websocket.send_bytes(data)
-        except (WebSocketDisconnect, RuntimeError) as exc:
-            raise DeviceGone("the device disconnected") from exc
+        except (WebSocketDisconnect, RuntimeError):
+            gone = DeviceGone("the device disconnected")
+        # Outside the arm, for the reason `_send_text` gives.
+        if gone is not None:
+            raise gone from None
 
     async def _close(self, code: int, reason: str) -> None:
         with contextlib.suppress(RuntimeError):
