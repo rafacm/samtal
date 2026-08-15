@@ -163,9 +163,10 @@ No README claim depends on this test's shape.
 - **Scope creep toward a failure-path test here.** The issue's
   criterion 2 could be read as requiring an invoked-arm test in
   this file. Mitigation: the plan resolves the reading explicitly
-  (the invoked arm is covered through the pipeline in
-  test_tts_lookahead.py) and leaves the decision visible for the
-  plan review to challenge.
+  (the invoked arm is observed through the pipeline in
+  test_session_events.py; test_tts_lookahead.py covers the
+  propagation and cleanup around it) and leaves the decision
+  visible for the plan review to challenge.
 
 ## Plan review round
 
