@@ -15,6 +15,8 @@ from typing import Any
 
 import pytest
 
+from samtal_server import logs
+from samtal_server.config.loader import ConfigError
 from samtal_server.conversations import cli
 from samtal_server.conversations.records import ToolInvocation, TurnRecord
 from samtal_server.conversations.store import ConversationStore, conversations_path
@@ -272,3 +274,135 @@ def test_the_command_word_dispatches_to_this_group(
 
     assert left.value.code == 0
     assert capsys.readouterr().out.startswith("# Conversation store schema reference")
+
+
+# What a database failure may say
+
+
+def test_a_locked_store_is_the_retryable_refusal(
+    tmp_path: Path, run, recorded, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A purge takes the write lock before it reads, so another writer
+    holding it is the one failure an operator answers differently: by
+    running the command again. It must be a sentence and an exit code,
+    never a traceback out of SQLAlchemy."""
+    from sqlalchemy import text
+
+    import samtal_server.db as db_module
+    from samtal_server.conversations.store import open_conversations
+
+    # The listener reads this when a connection is made, so shortening
+    # it here is what keeps the test from waiting out the real ten
+    # seconds. The real value is pinned in the store's defaults suite,
+    # where a number and not a wait is what is being asserted.
+    monkeypatch.setattr(db_module, "BUSY_TIMEOUT_MS", 200)
+    recorded(("keep", NOW, "aa:aa:aa:aa:aa:aa"))
+    holder = open_conversations(tmp_path)
+    held = holder.connect()
+    # The write lock, taken and kept: the engine begins immediate, so
+    # this transaction owns it until the connection closes.
+    held.execute(text("select count(*) from sessions"))
+    try:
+        assert run("purge", "--session", "keep") == 1
+    finally:
+        held.close()
+        holder.dispose()
+
+    captured = capsys.readouterr()
+    assert "run the command again" in captured.err
+    assert "Traceback" not in captured.err
+    assert "SQL" not in captured.err
+    assert remaining(tmp_path) == ["keep"]
+
+
+def test_a_driver_failure_says_the_kind_and_not_the_bytes(
+    tmp_path: Path, run, recorded, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A SQLAlchemy error holds the statement it failed on together with
+    the parameters bound to it, and a purge binds the selector it was
+    given. None of that may come back out, and neither may the chain:
+    the refusal is raised outside the handler so the library's exception
+    is not reachable through __context__ from the one that travels."""
+    import samtal_server.conversations.store as store_module
+
+    recorded((SENTINEL, NOW, "aa:aa:aa:aa:aa:aa"))
+
+    def poisoned(*_args: object, **_kwargs: object):
+        raise RuntimeError(f"near {SENTINEL}: disk I/O error")
+
+    monkeypatch.setattr(store_module, "_delete_sessions", poisoned)
+
+    left = None
+    try:
+        with caplog.at_level(logging.DEBUG):
+            assert run("purge", "--session", SENTINEL) == 1
+    except BaseException as exc:  # pragma: no cover, only on a regression
+        left = exc
+    assert left is None
+
+    captured = capsys.readouterr()
+    rendered = caplog.text + "".join(
+        logs.JsonFormatter().format(record) for record in caplog.records
+    )
+    assert SENTINEL not in captured.err
+    assert SENTINEL not in captured.out
+    assert SENTINEL not in rendered
+    assert "server.database.dir" in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_the_refusal_carries_no_exception_chain(tmp_path: Path, recorded) -> None:
+    """Raised after the handler rather than inside it. `raise ... from
+    None` would not do: it sets __suppress_context__ and leaves the
+    reference in place, so anything walking the chain still reaches the
+    driver's message."""
+    import samtal_server.conversations.store as store_module
+    from samtal_server.conversations.store import purge as purge_directly
+
+    recorded(("keep", NOW, "aa:aa:aa:aa:aa:aa"))
+    original = store_module._delete_sessions
+
+    def poisoned(*_args: object, **_kwargs: object):
+        raise RuntimeError(f"near {SENTINEL}: disk I/O error")
+
+    store_module._delete_sessions = poisoned
+    try:
+        with pytest.raises(ConfigError) as caught:
+            purge_directly(tmp_path, session="keep")
+    finally:
+        store_module._delete_sessions = original
+
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+    assert SENTINEL not in str(caught.value)
+
+
+def test_a_store_that_vanishes_after_the_check_is_still_a_sentence(
+    tmp_path: Path, run, recorded, monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The command checks the file is there and then opens it, and a
+    volume can go away in between. The race is not worth locking against
+    and is worth not crashing on."""
+    import samtal_server.conversations.cli as cli_module
+
+    recorded(("keep", NOW, "aa:aa:aa:aa:aa:aa"))
+    real = cli_module.conversations_path
+
+    def vanishing(directory):
+        path = real(directory)
+        # Read once by the existence check, then removed underneath the
+        # open that follows it.
+        if path.is_file():
+            path.unlink()
+        return path
+
+    monkeypatch.setattr(cli_module, "conversations_path", vanishing)
+
+    assert run("purge", "--session", "keep") == 1
+
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.err
+    assert "server.database.dir" in captured.err
