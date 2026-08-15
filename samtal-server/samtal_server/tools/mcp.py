@@ -56,6 +56,7 @@ from samtal_server.config.loader import (
     StorageError,
 )
 from samtal_server.config.secrets import SecretStore, resolve_mcp_values
+from samtal_server.egress import EgressRefusal, check_mcp_server
 from samtal_server.providers import ToolDef
 from samtal_server.runtime.prompt import (
     Guidance,
@@ -1165,7 +1166,13 @@ def _managers_for(
     for name in sorted(config.referenced_mcp_servers()):
         entry = config.mcp_servers[name]
         if config.server.local_only:
-            _check_egress(name, entry)
+            # One module holds the rule for entries and providers alike
+            # (#30, #136); what stays here is this surface's own
+            # exception around the sentence it composed.
+            try:
+                check_mcp_server(name, entry)
+            except EgressRefusal as exc:
+                raise McpConfigError(str(exc)) from exc
         try:
             managers[name] = McpServerManager(
                 name, entry, secrets, configured.allowed_names(name)
@@ -1244,27 +1251,6 @@ def _allowed(grant: McpGrant, tools: list[ToolDef]) -> list[ToolDef]:
         return tools
     allowed = set(grant.tools)
     return [tool for tool in tools if names.unqualified(grant.server, tool.name) in allowed]
-
-
-def _check_egress(name: str, entry: McpServerConfig) -> None:
-    """Enforce server.local_only for one referenced MCP server (#30).
-    Tool arguments carry conversation-derived data, and no transport
-    knows its own egress (a stdio command may proxy anywhere, a url may
-    name localhost), so unlike providers there is nothing class-level to
-    consult: every referenced entry needs the operator's declaration."""
-    if entry.egress is False:
-        return
-    if entry.egress is None:
-        raise McpConfigError(
-            f"mcp_servers.{name}: server.local_only is on, and whether an MCP "
-            f"server sends session data off this network cannot be known from "
-            f'its transport; declare "egress: false" on this entry to assert '
-            f"that whatever its command or URL reaches stays local"
-        )
-    raise McpConfigError(
-        f"mcp_servers.{name}: server.local_only is on, but this entry declares "
-        f"that it sends session data off this network"
-    )
 
 
 def _nothing_shipped(_entry: str) -> tuple[GuidanceBlock, ...]:

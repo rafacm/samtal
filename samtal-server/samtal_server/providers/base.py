@@ -56,9 +56,14 @@ class Provider:
     name localhost or a vendor), which under `server.local_only` demands
     an explicit `egress` declaration on the provider entry (#30).
 
-    The default is True: a type that forgot to declare is treated as
-    sending data away, so the omission fails a local_only boot instead
-    of quietly leaking.
+    There is no default. Every concrete type declares its own marking in
+    its own class body, and one that declared none, or declared
+    something that is not one of the three, is refused when it is built,
+    in any mode (`samtal_server.egress`). Inheriting a parent's marking
+    does not count either: a subclass of a cloud provider says so
+    itself, so the answer is always written where the type is (#136).
+    The abstract stage bases below stay undeclared, since nothing builds
+    them.
 
     `host` is what this entry talks to, set by providers that talk to
     anything, and it is a fact about the built entry rather than about
@@ -69,7 +74,7 @@ class Provider:
     fixture) keeps None, and the events that describe it simply carry
     fewer fields rather than inventing any."""
 
-    egress: ClassVar[bool | None] = True
+    egress: ClassVar[bool | None]
     host: str | None = None
     identity: ProviderIdentity | None = None
 
