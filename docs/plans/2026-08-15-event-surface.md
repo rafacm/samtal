@@ -284,6 +284,91 @@ docs/plans/2026-08-15-event-surface-implementation.md
   #139 and #141 will move again. That is the accepted cost of the
   agreed order; the runbook forbids running them concurrently.
 
+## Plan review round
+
+One external review of the plan as first committed (c6d0f51): codex
+CLI, model gpt-5.6-sol, read-only against this repository with the
+issue #138 body supplied, 2026-08-15. Verdict: ready after the
+P1/P2 amendments. Findings as received, condensed; each carries its
+resolution once the amendment addressing it lands.
+
+1. **P1: the tap signature cannot implement LogTap.** The protocol
+   carried only `(payload, at)` while the text promised taps the
+   level, message and args; and keeping a payload-only `event()`
+   is impossible (dispatching it invokes LogTap, not dispatching
+   bypasses capture). Define one exact envelope carrying payload,
+   monotonic time, numeric level, message template, and args;
+   LogTap consumes it; the payload-only `event()` goes after the
+   atomic migration.
+2. **P1: LogTap first reverses the capture guarantee.** Capture
+   currently records before the log call returns; sequential
+   fan-out with LogTap first can log an event capture never saw if
+   a tap raises. Dispatch capture before logging, define per-tap
+   failure behavior, and test ordering and detach with a
+   capture-shaped spy; the contract must show every logged session
+   event was first offered to the attached capture.
+3. **P1: a mandatory loop-clock timestamp breaks synchronous
+   server events.** `create_app` and `onboarding.log_banner` emit
+   before any loop runs; `asyncio.get_running_loop().time()`
+   raises there. Make the clock an explicit dependency: session
+   emitters bind the session loop clock (capture alignment),
+   server emitters use a synchronous monotonic clock; contract
+   test emits outside a running loop.
+4. **P1: ServerEvents lacks the required debug level.**
+   `device_bindings_snapshot_only` is a structured `logger.debug`
+   event. Include `.debug`, and assert the event stays DEBUG.
+5. **P1: `mcp_tool_shadowed.tool` leaks bytes current code
+   deliberately withholds.** Name sanitization only replaces
+   illegal characters, an alphanumeric credential survives, and
+   the existing code logs the position rather than the name for
+   exactly this reason. Fields become `entry`, `position`, trusted
+   `owner`, no tool name; sentinel test with a credential-shaped
+   shadowed name; `mcp_connected.tools` specified as an integer
+   count.
+6. **P1: the `mcp_down` reason set does not cover the actual down
+   transitions.** `_run` puts transport, initialization and
+   `list_tools()` behind one broad catch, and `_mark_down` gives a
+   connection up after a failed call with no reason token in the
+   proposed set. Give a decision-site mapping for transport,
+   initialization, tool discovery, failed call, timeout, and
+   intentional stop; state whether a failed call emits both
+   `mcp_call_dropped` and `mcp_down` (with a `call_failed` token
+   if so); classify exception groups recursively without reading
+   messages.
+7. **P1: the reload event schema does not describe the reload
+   implementation.** `McpReload` counts `started`, `restarted`,
+   `stopped`, `unchanged`, deliberately has no failure count, and
+   treats an unreachable new manager as applied; refusals raise
+   before `_apply`; a cancelled apply continues behind a shield.
+   Define `outcome` as `applied`/`refused`, keep all four applied
+   counts including `restarted`, use a closed refusal reason
+   instead of a `failed` count, and emit exactly once at apply or
+   refusal completion even when the requesting client
+   disconnected.
+8. **P2: per-instance server tap lists give no global attachment
+   point.** A future exporter would have to discover and mutate
+   every module's private emitter. Define a shared hub (or a
+   common injected tap set) with an attachment lifecycle covering
+   emitters constructed before and after a consumer attaches.
+9. **P2: the migration inventory is stale.** `device/session.py`
+   has eight `extra=self._event(...)` sites (a private `_event`
+   helper), so milestone 1 reshapes 26 sites, not 19; and
+   `test_boundary_contract.py:40` imports the moving module. Count
+   26, remove the helper, and add the test file to milestone 1.
+10. **P2: existing tests do not prove the claimed byte-compatible
+    surface.** The suites pin sentences for two events, loggers
+    for six, and selected fields without exact key sets or levels.
+    Add pre-refactor characterization coverage pinning
+    `record.name`, `levelno`, `getMessage()`, and the exact
+    nonstandard field set per structured emit path (dynamic values
+    normalized), kept unchanged through the reshape.
+11. **P2: the milestone-2 grep cannot detect most missed
+    migrations.** Multiline dicts, `extra={**record, ...}`, and
+    quoting variants all evade it. Add an AST-based test rejecting
+    production logging calls with an `extra=` keyword, deliberate
+    exceptions enumerated, plus absence assertions for
+    `_echo_event` and `device.events`.
+
 ## Milestones
 
 - [ ] **The emitter moves and the tap exists** (PR TBD): as decided
