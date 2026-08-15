@@ -18,6 +18,7 @@ import asyncio
 import logging
 import sys
 import threading
+import time
 import traceback
 from pathlib import Path
 
@@ -1138,4 +1139,34 @@ async def test_a_cancelled_preparation_holds_the_exclusion_until_its_read_ends()
         assert (await servers.reload(reading(config))).unchanged == ("tools",)
     finally:
         gate.set()
+        await servers.stop_all()
+
+
+async def test_the_applied_duration_covers_the_read_as_well_as_the_apply(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """What the number answers is "how long did the reload I asked for
+    take", and a reload spends its time in whichever half is slow. The
+    re-read waits out a busy database's timeout and the starts wait out
+    a connect timeout, so a duration that began when the second phase
+    did would call a reload fast on exactly the days it was not."""
+    config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    servers = await started(config)
+    slow_read_s = 0.3
+
+    def slowly() -> tuple[Config, SecretStore | None]:
+        time.sleep(slow_read_s)
+        return config, None
+
+    try:
+        with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
+            applied = await servers.reload(slowly)
+
+        assert applied.unchanged == ("tools",)
+        # Nothing was stopped or started, so the apply itself is a diff
+        # and two assignments: essentially all of this is the read.
+        assert fields_of(one_event(caplog, "mcp_reload"))["duration_ms"] >= (
+            slow_read_s * 1000
+        )
+    finally:
         await servers.stop_all()

@@ -1992,6 +1992,9 @@ class McpServers:
             self._refused(REFUSED_IN_PROGRESS)
             raise ReloadInProgressError(RELOAD_IN_PROGRESS)
         self._reloading = True
+        # When the request was accepted, which is what the applied
+        # event's duration is measured from: see `_apply`.
+        began = time.monotonic()
         preparing: asyncio.Task[_Preparation] | None = None
         applying: asyncio.Task[McpReload] | None = None
         try:
@@ -2001,7 +2004,7 @@ class McpServers:
             self._preparing = preparing
             configured, candidates = await asyncio.shield(preparing)
             applying = asyncio.create_task(
-                self._apply(configured, candidates), name="mcp-reload"
+                self._apply(configured, candidates, began), name="mcp-reload"
             )
             self._applying = applying
             return await asyncio.shield(applying)
@@ -2157,7 +2160,7 @@ class McpServers:
         raise ConfigError(problem)
 
     async def _apply(
-        self, configured: McpSlice, candidates: dict[str, McpServerManager]
+        self, configured: McpSlice, candidates: dict[str, McpServerManager], began: float
     ) -> McpReload:
         """The second phase: the diff, the lifecycles, and the swap.
 
@@ -2166,8 +2169,16 @@ class McpServers:
         small change rather than a sum over servers. Stops first and
         starts after them, so an entry whose command was edited does not
         have two copies of the same child process alive at once.
+
+        `began` is when the request was accepted, not when this phase
+        started, and it is passed in for that reason. The reported
+        duration is what the caller waited: an operator reading "the
+        reload took nine seconds" is asking about the request they made,
+        and a reload spends its time in whichever half is slow. The
+        re-read waits out a busy database's timeout and the starts wait
+        out a connect timeout, and a number that covered only the second
+        would call a reload fast on exactly the days it was not.
         """
-        began = time.monotonic()
         keep: dict[str, McpServerManager] = {}
         started: list[str] = []
         restarted: list[str] = []
