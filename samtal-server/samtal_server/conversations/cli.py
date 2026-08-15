@@ -38,6 +38,11 @@ Delete whole sessions, with their turns, tool invocations and events.
 At least one selector is required; selectors given together combine
 with AND."""
 
+# The command words, in one place: the parser builds them and the
+# refusal for a word that is not one of them names them, so the two
+# cannot come to disagree.
+COMMANDS = ("purge", "schema")
+
 # What a purge says when a reader kept it from truncating the log. The
 # deletion is committed either way, so this is a report and not a
 # failure, and it names what makes the frames go.
@@ -78,18 +83,39 @@ class _Parser(argparse.ArgumentParser):
     """A parser whose usage errors leave through the same door as every
     other failure, for the reason the config group's parser gives:
     argparse would otherwise write to stderr and exit 2 from inside
-    parse_args, bypassing the ConfigError boundary."""
+    parse_args, bypassing the ConfigError boundary.
+
+    And whose sentences are this module's, never argparse's. Several of
+    argparse's quote what was typed back at the user (`invalid choice:
+    'x'`, `unrecognized arguments: x`), so passing its text through was
+    a value on stderr and in whatever collects it. Each shape this
+    grammar can produce gets a fixed sentence instead, and a shape that
+    is not recognized gets the general one, because a message this code
+    has not seen is a message that may carry a value."""
 
     def error(self, message: str) -> NoReturn:
-        if message.startswith("unrecognized arguments"):
-            # Never the arguments themselves. A session id is not a
-            # secret, but it is a value, and this CLI's rule is that a
-            # refusal names the location and the kind of failure without
-            # repeating what was typed.
-            raise ConfigError(
-                "unrecognized extra arguments; run with --help for the grammar"
-            )
-        raise ConfigError(f"{message}; run with --help for the grammar")
+        raise ConfigError(_usage_problem(message))
+
+
+# The grammar's own words for what argparse says, matched on a marker
+# that carries no value. Ordered, and the first match wins.
+_USAGE_PROBLEMS: tuple[tuple[str, str], ...] = (
+    ("invalid choice", "that is not a command; expected one of: " + ", ".join(COMMANDS)),
+    ("unrecognized arguments", "unrecognized extra arguments"),
+    ("expected one argument", "an option was given without its value"),
+    ("required", "a command is missing"),
+)
+
+# What an unrecognized shape gets. Deliberately vague about the mistake
+# rather than specific with argparse's words in it.
+_USAGE_UNKNOWN = "the command line could not be parsed"
+
+
+def _usage_problem(message: str) -> str:
+    for marker, sentence in _USAGE_PROBLEMS:
+        if marker in message:
+            return f"{sentence}; run with --help for the grammar"
+    return f"{_USAGE_UNKNOWN}; run with --help for the grammar"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -104,7 +130,7 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
 
     purging = commands.add_parser(
-        "purge",
+        COMMANDS[0],
         help="delete sessions from the store",
         description=PURGE_DESCRIPTION,
         epilog=PURGE_NOTES,
@@ -130,7 +156,7 @@ def _parser() -> argparse.ArgumentParser:
     purging.set_defaults(run=_purge)
 
     schema = commands.add_parser(
-        "schema",
+        COMMANDS[1],
         help="print the schema reference",
         description=(
             "Print the generated schema reference to stdout. The committed copy is "
