@@ -246,11 +246,22 @@ class DeviceSession:
 
         try:
             mac = self._mac = normalize_mac(device_id)
-        except ValueError as exc:
+        except ValueError:
+            # One fixed sentence, carrying neither the header nor the
+            # exception's message, which quotes it. What arrived in that
+            # header is bytes an unauthenticated caller chose, and these
+            # logs are the retained surface the observability ADR makes
+            # them: a rejected value written into them is a value the
+            # caller placed in an operator's log store. Nothing
+            # diagnosable is lost, because nothing about the submitted
+            # value was ever actionable: the reason token says which
+            # rejection this is, `device` is null because none was
+            # understood, and the sentence still says what the header
+            # has to hold.
             self._events.warning(
-                "session %s rejected: Device-Id header: %s",
+                "session %s rejected: the Device-Id header is not a device MAC "
+                "(six colon-separated hex pairs)",
                 self.session_id,
-                exc,
                 event="session_rejected",
                 reason="bad_device_id",
             )
