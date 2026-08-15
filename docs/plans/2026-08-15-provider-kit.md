@@ -506,8 +506,9 @@ resolution once the amendment addressing it lands.
   seam; CHANGELOG entry; implementation-doc section in the change
   that ticks this box. Accept: lint and both lanes green; the
   greps above; red-to-green recorded.
-- [ ] **Pipeline classifies by type and stops eating provider
-  failures** (PR TBD): `is_timeout` deleted and `_provider_failed`
+- [x] [**Pipeline classifies by type and stops eating provider
+  failures**](2026-08-15-provider-kit-implementation.md#milestone-2-the-pipeline-classifies-by-type)
+  (PR TBD): `is_timeout` deleted and `_provider_failed`
   classifies with `isinstance(exc, TimeoutError)`; the reply-body
   catch narrows to `DeviceGone` with the two device-edge sites
   commented and `DeviceGone`'s docstring corrected; the reply-path
