@@ -63,6 +63,12 @@ NAMING_CONVENTION = {
 
 metadata = MetaData(naming_convention=NAMING_CONVENTION)
 
+# `none_as_null` so that a column the text switch emptied is SQL NULL
+# rather than the four bytes `null`. One rule for every JSON column
+# here: the reference says these columns are null under their switch,
+# and a reader filtering on `IS NULL` has to find them.
+JSON_OR_NULL = JSON(none_as_null=True)
+
 # Where a tool call was routed, decided once by the classifier the
 # pipeline consults before it executes anything and stored as written.
 # A closed set in the schema rather than only in the code, because the
@@ -119,7 +125,7 @@ sessions = Table(
     ),
     Column(
         "agents",
-        JSON,
+        JSON_OR_NULL,
         nullable=True,
         comment="Every agent the device is bound to, as the binding resolved at open.",
     ),
@@ -181,7 +187,7 @@ sessions = Table(
     ),
     Column(
         "providers",
-        JSON,
+        JSON_OR_NULL,
         nullable=True,
         comment=(
             "The resolved provider entry per pipeline stage, the same structure "
@@ -295,7 +301,7 @@ turns = Table(
     ),
     Column(
         "legs",
-        JSON,
+        JSON_OR_NULL,
         nullable=True,
         comment=(
             "One entry per agent that spoke this turn, `{agent, text, "
@@ -442,7 +448,7 @@ tool_invocations = Table(
     ),
     Column(
         "arguments",
-        JSON,
+        JSON_OR_NULL,
         nullable=True,
         comment="What the model passed. Null under text-off, and null when malformed.",
     ),
@@ -514,7 +520,7 @@ events = Table(
     ),
     Column(
         "fields",
-        JSON,
+        JSON_OR_NULL,
         nullable=False,
         comment=(
             "The event's payload minus `event`, `session` and `device`, which "
