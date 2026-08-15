@@ -6,6 +6,7 @@ import pytest
 from samtal_server.config.models import ProviderConfig
 from samtal_server.providers import ProviderError, Turn, build_provider
 from samtal_server.providers.anthropic_llm import AnthropicLlm
+from samtal_server.providers.kit import DEFAULT_TIMEOUT_S, MAX_RETRIES
 from samtal_server.providers.openai_llm import OpenAiCompatibleLlm, chat_messages
 
 
@@ -47,6 +48,66 @@ def test_openai_compatible_builds_keyless_for_local_endpoints() -> None:
         type="openai_compatible", base_url="http://localhost:11434/v1", model="qwen3:8b"
     )
     assert isinstance(build_provider("llm", "local", config), OpenAiCompatibleLlm)
+
+
+# --- the client each entry builds ------------------------------------
+
+
+def test_the_anthropic_client_carries_the_timeout_and_sends_one_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Injecting a client proves nothing about the one a deployment gets:
+    a constructor that forgot both arguments would pass every test that
+    hands its own client in. Until this issue these clients had no
+    timeout at all and the SDK's two retries, which would make any
+    bound three attempts plus backoff inside one turn."""
+    monkeypatch.setenv("SAMTAL_TEST_KEY", "sk-test")
+    built = build_provider(
+        "llm",
+        "claude",
+        provider_config(type="anthropic", model="claude-sonnet-5", api_key_env="SAMTAL_TEST_KEY"),
+    )
+    assert isinstance(built, AnthropicLlm)
+    assert built._client.timeout == DEFAULT_TIMEOUT_S
+    assert built._client.max_retries == MAX_RETRIES
+
+
+def test_the_openai_compatible_client_carries_the_timeout_and_sends_one_attempt() -> None:
+    built = build_provider(
+        "llm",
+        "local",
+        provider_config(
+            type="openai_compatible", base_url="http://localhost:11434/v1", model="qwen3:8b"
+        ),
+    )
+    assert isinstance(built, OpenAiCompatibleLlm)
+    assert built._client.timeout == DEFAULT_TIMEOUT_S
+    assert built._client.max_retries == MAX_RETRIES
+
+
+def test_an_injected_anthropic_client_is_used_as_given() -> None:
+    """The seam the other three cloud providers already had, and what
+    the tool-calling tests now arrive through."""
+    given = object()
+    llm = AnthropicLlm(
+        model="claude-sonnet-5",
+        max_tokens=64,
+        api_key="sk-test",
+        client=given,  # type: ignore[arg-type]
+    )
+    assert llm._client is given
+
+
+def test_an_injected_openai_compatible_client_is_used_as_given() -> None:
+    given = object()
+    llm = OpenAiCompatibleLlm(
+        base_url="http://localhost:11434/v1",
+        model="qwen3:8b",
+        max_tokens=64,
+        api_key=None,
+        client=given,  # type: ignore[arg-type]
+    )
+    assert llm._client is given
 
 
 def test_chat_messages_prepend_the_system_prompt() -> None:

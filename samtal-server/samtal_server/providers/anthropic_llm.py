@@ -22,7 +22,12 @@ from samtal_server.providers.base import (
     Turn,
     Usage,
 )
-from samtal_server.providers.kit import DEFAULT_MAX_TOKENS, resolve_api_key
+from samtal_server.providers.kit import (
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_TIMEOUT_S,
+    MAX_RETRIES,
+    resolve_api_key,
+)
 from samtal_server.providers.registry import OptionsReader
 
 # The one host this type reaches; it has no base_url to point anywhere
@@ -83,8 +88,33 @@ class AnthropicLlm(LlmProvider):
     egress = True
     host = API_HOST
 
-    def __init__(self, model: str, max_tokens: int, api_key: str | None) -> None:
-        self._client = AsyncAnthropic(api_key=api_key) if api_key else AsyncAnthropic()
+    def __init__(
+        self,
+        model: str,
+        max_tokens: int,
+        api_key: str | None,
+        timeout_s: float = DEFAULT_TIMEOUT_S,
+        client: AsyncAnthropic | None = None,
+    ) -> None:
+        # One client per provider entry, so its connection pool is
+        # reused across turns and sessions, and the seam the other cloud
+        # providers already have: a test hands its own client in through
+        # the front door rather than assigning over this attribute.
+        #
+        # The timeout is a per-operation transport bound with the SDK's
+        # retries off, not a wall-clock deadline for the reply: a stream
+        # that keeps delivering may legitimately run longer, and the
+        # session's first-token watchdog is what bounds a stream that
+        # produces nothing. Not a configuration option, deliberately;
+        # until now these clients had no bound at all, and a deployment
+        # needing a nonstandard one is a change with its own issue.
+        #
+        # A None api_key is the SDK resolving its own (ANTHROPIC_API_KEY
+        # or a logged-in profile), which is what it does with the
+        # argument absent.
+        self._client = client or AsyncAnthropic(
+            api_key=api_key, timeout=timeout_s, max_retries=MAX_RETRIES
+        )
         self._model = model
         self._max_tokens = max_tokens
 
