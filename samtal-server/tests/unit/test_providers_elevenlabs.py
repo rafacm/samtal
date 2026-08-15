@@ -428,3 +428,24 @@ async def test_a_failure_while_releasing_a_cancelled_sentence_keeps_the_cancella
         await collect(provider(handler))
 
     assert SENTINEL not in chain(failure.value)
+
+
+async def test_a_falsey_injected_client_is_still_the_one_used() -> None:
+    """`client or ...` drops a double that answers False to a truth test,
+    which any object defining __bool__ or __len__ does, and builds a real
+    client in its place."""
+
+    class Falsey:
+        def __bool__(self) -> bool:
+            return False
+
+    given = Falsey()
+    tts = ElevenLabsTts(
+        voice_id="voice-1",
+        model="eleven_flash_v2_5",
+        output_format="pcm_24000",
+        sample_rate=24000,
+        api_key="test-key",
+        client=given,  # type: ignore[arg-type]
+    )
+    assert tts._client is given

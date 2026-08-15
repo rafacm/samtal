@@ -100,11 +100,15 @@ class OpenAiTts(TtsProvider):
         # per sentence would show up as latency in the gap the user
         # hears. Providers are built at startup and live as long as the
         # server, which is also this client's lifetime.
-        self._client = client or AsyncOpenAI(
-            api_key=api_key,
-            base_url=base_url,
-            timeout=timeout_s,
-            max_retries=MAX_RETRIES,
+        self._client = (
+            client
+            if client is not None
+            else AsyncOpenAI(
+                api_key=api_key,
+                base_url=base_url,
+                timeout=timeout_s,
+                max_retries=MAX_RETRIES,
+            )
         )
 
     async def synthesize(self, text: str) -> AsyncIterator[bytes]:
