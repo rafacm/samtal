@@ -182,6 +182,31 @@ def test_the_capture_detaches_and_the_events_carry_on(caplog: pytest.LogCaptureF
     assert [record.event for record in caplog.records] == ["one", "two"]
 
 
+def test_a_second_capture_replaces_the_first(caplog: pytest.LogCaptureFixture) -> None:
+    """One session records once. A second attach that only overwrote
+    the handle would leave the first adapter in the tap list, writing to
+    a recording nobody is going to close, while `vad` and `dropped` went
+    to the second: one conversation split down the middle of two
+    files."""
+    events = SessionEvents("s1")
+    first, second = CaptureSpy(caplog), CaptureSpy(caplog)
+
+    with caplog.at_level("INFO"):
+        events.attach_capture(first)
+        events.attach_capture(second)
+        events.info("recorded", event="one")
+        events.vad(120.0, True, False)
+        events.detach_capture()
+        events.info("recorded nowhere", event="two")
+
+    assert [payload["event"] for payload, _, _ in first.seen] == []
+    assert [payload["event"] for payload, _, _ in second.seen] == ["one"]
+    assert first.samples == [] and len(second.samples) == 1
+    # And one detach is enough: the first attach left nothing behind to
+    # keep the events flowing to.
+    assert [record.event for record in caplog.records] == ["one", "two"]
+
+
 # --- a consumer with a bug in it --------------------------------------
 
 
