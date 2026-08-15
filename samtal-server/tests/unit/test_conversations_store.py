@@ -378,7 +378,7 @@ def test_records_for_a_session_it_never_opened_are_refused_once(
     refusals = [
         record
         for record in caplog.records
-        if record.name == store_module.__name__ and "never" in record.getMessage()
+        if record.name == store_module.__name__ and "not recording" in record.getMessage()
     ]
     assert len(refusals) == 1
     assert "ghost" in refusals[0].getMessage()
