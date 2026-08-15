@@ -17,7 +17,7 @@ therefore "not measured", never "zero", which is the distinction a
 latency query has to be able to make.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -96,7 +96,7 @@ class TurnRecord:
     rounds: int | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
-    tools: tuple[ToolInvocation, ...] = field(default=())
+    tools: tuple[ToolInvocation, ...] = ()
 
 
 __all__ = ["ToolInvocation", "TurnLeg", "TurnRecord"]
