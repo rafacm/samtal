@@ -17,6 +17,7 @@ from samtal_server.config.models import ProviderConfig
 from samtal_server.providers.base import (
     LlmEvent,
     LlmProvider,
+    ProviderCallError,
     StreamStarted,
     TextDelta,
     ToolCall,
@@ -29,10 +30,17 @@ from samtal_server.providers.kit import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_TIMEOUT_S,
     MAX_RETRIES,
+    REQUEST_FAILURES,
+    call_failure,
     resolve_api_key,
 )
 from samtal_server.providers.openai_endpoint import OPENAI_HOST, endpoint_host
 from samtal_server.providers.registry import OptionsReader
+
+# How this provider names itself in the message a failed request
+# carries. The entry's own name and host reach the event beside it, so
+# this says which dialect was speaking rather than which entry.
+LABEL = "openai compatible"
 
 
 def chat_messages(system: str, turns: Sequence[Turn]) -> list[dict[str, Any]]:
@@ -173,7 +181,6 @@ class OpenAiCompatibleLlm(LlmProvider):
             request["tool_choice"] = tool_choice
         if self._ask_for_usage:
             request["stream_options"] = {"include_usage": True}
-        stream = await self._client.chat.completions.create(**request)
 
         # Tool calls stream as fragments identified by their position in
         # the call list, so they are accumulated by index and yielded
@@ -184,34 +191,51 @@ class OpenAiCompatibleLlm(LlmProvider):
         pending: dict[int, dict[str, str]] = {}
         usage: Usage | None = None
         started = False
-        async for chunk in stream:
-            if not started:
-                started = True
-                yield StreamStarted()
-            # The usage chunk is the last one and carries no choices,
-            # which is why the guard below would otherwise skip it.
-            if chunk.usage is not None:
-                usage = Usage(
-                    prompt_tokens=chunk.usage.prompt_tokens,
-                    completion_tokens=chunk.usage.completion_tokens,
-                )
-            # Some servers interleave role-only chunks.
-            if not chunk.choices or not chunk.choices[0].delta:
-                continue
-            delta = chunk.choices[0].delta
-            if delta.content:
-                yield TextDelta(delta.content)
-            for fragment in delta.tool_calls or []:
-                slot = pending.setdefault(
-                    fragment.index, {"id": "", "name": "", "arguments": ""}
-                )
-                if fragment.id:
-                    slot["id"] = fragment.id
-                if fragment.function is not None:
-                    if fragment.function.name:
-                        slot["name"] += fragment.function.name
-                    if fragment.function.arguments:
-                        slot["arguments"] += fragment.function.arguments
+        # The request and the chunks after it are both inside: an
+        # endpoint can stop answering at either, and both are a failed
+        # provider call rather than a bug here. Cancellation and genuine
+        # bugs are outside REQUEST_FAILURES and pass through as
+        # themselves.
+        failure: ProviderCallError | None = None
+        try:
+            stream = await self._client.chat.completions.create(**request)
+            async for chunk in stream:
+                if not started:
+                    started = True
+                    yield StreamStarted()
+                # The usage chunk is the last one and carries no
+                # choices, which is why the guard below would otherwise
+                # skip it.
+                if chunk.usage is not None:
+                    usage = Usage(
+                        prompt_tokens=chunk.usage.prompt_tokens,
+                        completion_tokens=chunk.usage.completion_tokens,
+                    )
+                # Some servers interleave role-only chunks.
+                if not chunk.choices or not chunk.choices[0].delta:
+                    continue
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    yield TextDelta(delta.content)
+                for fragment in delta.tool_calls or []:
+                    slot = pending.setdefault(
+                        fragment.index, {"id": "", "name": "", "arguments": ""}
+                    )
+                    if fragment.id:
+                        slot["id"] = fragment.id
+                    if fragment.function is not None:
+                        if fragment.function.name:
+                            slot["name"] += fragment.function.name
+                        if fragment.function.arguments:
+                            slot["arguments"] += fragment.function.arguments
+        except REQUEST_FAILURES as exc:
+            failure = call_failure(LABEL, exc)
+        # Raised out here rather than in the except arm, so the SDK
+        # exception is not even the new error's `__context__`: `from
+        # None` suppresses its rendering but leaves it reachable, and
+        # what it can carry is the reason the message is metadata only.
+        if failure is not None:
+            raise failure from None
         for index in sorted(pending):
             yield tool_call_from_fragments(pending[index], index)
         # Last, so a round's event carries what the round cost. Absent
