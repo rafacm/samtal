@@ -21,7 +21,7 @@ from samtal_server.config.models import ProviderConfig
 from samtal_server.providers.base import ProviderCallError, ProviderError, TtsProvider
 from samtal_server.providers.kit import (
     DEFAULT_TIMEOUT_S,
-    REQUEST_FAILURES,
+    HTTPX_FAILURES,
     aligned_pcm,
     call_failure,
     resolve_api_key,
@@ -140,9 +140,9 @@ class ElevenLabsTts(TtsProvider):
 
         The request, the status it comes back with, and the bytes after
         it are three places the API can fail to deliver a sentence, and
-        all three leave as a failed provider call. Cancellation and
-        genuine bugs are outside REQUEST_FAILURES and pass through as
-        themselves, which the barge-in path depends on."""
+        all three leave as a failed provider call. Cancellation and genuine
+        bugs are outside HTTPX_FAILURES and pass through as themselves,
+        which the barge-in path depends on."""
         request = self._client.build_request(
             "POST",
             f"/v1/text-to-speech/{self._voice_id}/stream",
@@ -152,7 +152,7 @@ class ElevenLabsTts(TtsProvider):
         opening: ProviderCallError | None = None
         try:
             response = await self._client.send(request, stream=True)
-        except REQUEST_FAILURES as exc:
+        except HTTPX_FAILURES as exc:
             opening = call_failure(LABEL, exc)
         # Raised out here rather than in the except arm, so the httpx
         # exception is not even the new error's `__context__`: `from
@@ -167,7 +167,7 @@ class ElevenLabsTts(TtsProvider):
             else:
                 async for chunk in aligned_pcm(LABEL, response.aiter_bytes()):
                     yield chunk
-        except REQUEST_FAILURES as exc:
+        except HTTPX_FAILURES as exc:
             failure = call_failure(LABEL, exc)
         except BaseException:
             # A cancelled reply (barge-in), a consumer walking away, or
@@ -202,7 +202,7 @@ class ElevenLabsTts(TtsProvider):
         path."""
         try:
             await response.aclose()
-        except REQUEST_FAILURES as exc:
+        except HTTPX_FAILURES as exc:
             return call_failure(LABEL, exc)
         return None
 

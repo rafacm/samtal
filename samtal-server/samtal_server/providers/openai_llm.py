@@ -30,7 +30,7 @@ from samtal_server.providers.kit import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_TIMEOUT_S,
     MAX_RETRIES,
-    REQUEST_FAILURES,
+    OPENAI_FAILURES,
     call_failure,
     resolve_api_key,
 )
@@ -194,8 +194,8 @@ class OpenAiCompatibleLlm(LlmProvider):
         # The request and the chunks after it are both inside: an
         # endpoint can stop answering at either, and both are a failed
         # provider call rather than a bug here. Cancellation and genuine
-        # bugs are outside REQUEST_FAILURES and pass through as
-        # themselves.
+        # bugs, and another vendor's SDK error, are outside
+        # OPENAI_FAILURES and pass through as themselves.
         failure: ProviderCallError | None = None
         try:
             stream = await self._client.chat.completions.create(**request)
@@ -228,7 +228,7 @@ class OpenAiCompatibleLlm(LlmProvider):
                             slot["name"] += fragment.function.name
                         if fragment.function.arguments:
                             slot["arguments"] += fragment.function.arguments
-        except REQUEST_FAILURES as exc:
+        except OPENAI_FAILURES as exc:
             failure = call_failure(LABEL, exc)
         # Raised out here rather than in the except arm, so the SDK
         # exception is not even the new error's `__context__`: `from

@@ -59,20 +59,26 @@ DEFAULT_MAX_TOKENS = 1024
 # makes every network provider here behave alike.
 MAX_RETRIES = 0
 
-# What a failed request arrives as. Both SDKs ride httpx and let a raw
-# transport error through from a response iterator once the response has
-# opened, and the ElevenLabs provider speaks httpx directly, so the httpx
-# families belong to every request site rather than to one provider.
-# Deliberately narrow: `CancelledError` is outside them (it is not even
-# an Exception), and so is every genuine bug, because the taxonomy
-# claims request failures rather than all failures.
-REQUEST_FAILURES: tuple[type[Exception], ...] = (
-    anthropic.APIError,
-    openai.APIError,
-    httpx.HTTPError,
-)
+# What a failed request arrives as, one tuple per SDK a provider can be
+# holding. Both SDKs ride httpx and let a raw transport error through
+# from a response iterator once the response has opened, and the
+# ElevenLabs provider speaks httpx directly, so the httpx families are
+# in every one of them; the vendor families are not shared. A provider
+# that also caught the other vendor's errors would dress a miswired
+# client (an Anthropic entry somehow holding an OpenAI one) as an
+# ordinary failed request, and that is a bug this process should show
+# rather than absorb.
+#
+# Deliberately narrow for the same reason: `CancelledError` is outside
+# them (it is not even an Exception), and so is every genuine bug,
+# because the taxonomy claims request failures rather than all failures.
+HTTPX_FAILURES: tuple[type[Exception], ...] = (httpx.HTTPError,)
+ANTHROPIC_FAILURES: tuple[type[Exception], ...] = (anthropic.APIError, *HTTPX_FAILURES)
+OPENAI_FAILURES: tuple[type[Exception], ...] = (openai.APIError, *HTTPX_FAILURES)
 
-# The subset that is a wait rather than an answer. `TimeoutError` covers
+# Which of the caught failures is a wait rather than an answer. One
+# tuple for all of them, since classification only ever sees what a
+# provider's own catch admitted. `TimeoutError` covers
 # `asyncio.TimeoutError`, for the provider that runs a deadline of its
 # own around a request.
 REQUEST_TIMEOUTS: tuple[type[BaseException], ...] = (

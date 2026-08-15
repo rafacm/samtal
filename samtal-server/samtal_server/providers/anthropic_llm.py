@@ -24,10 +24,10 @@ from samtal_server.providers.base import (
     Usage,
 )
 from samtal_server.providers.kit import (
+    ANTHROPIC_FAILURES,
     DEFAULT_MAX_TOKENS,
     DEFAULT_TIMEOUT_S,
     MAX_RETRIES,
-    REQUEST_FAILURES,
     call_failure,
     resolve_api_key,
 )
@@ -146,8 +146,8 @@ class AnthropicLlm(LlmProvider):
         # events after it, and the assembled message at the end are
         # three separate places this API can stop answering, and all
         # three are a failed provider call rather than a bug here.
-        # Cancellation and genuine bugs are outside REQUEST_FAILURES and
-        # pass through as themselves.
+        # Cancellation, a genuine bug, and another vendor's SDK error are
+        # outside ANTHROPIC_FAILURES and pass through as themselves.
         failure: ProviderCallError | None = None
         try:
             async with self._client.messages.stream(**request) as stream:
@@ -171,7 +171,7 @@ class AnthropicLlm(LlmProvider):
                 # and the SDK has already stitched them together by this
                 # point.
                 message = await stream.get_final_message()
-        except REQUEST_FAILURES as exc:
+        except ANTHROPIC_FAILURES as exc:
             failure = call_failure(LABEL, exc)
         # Raised out here rather than in the except arm, so the SDK
         # exception is not even the new error's `__context__`: `from
