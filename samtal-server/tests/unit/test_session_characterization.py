@@ -486,12 +486,19 @@ async def test_a_reply_ends_quietly_when_the_send_path_raises(
     caplog: pytest.LogCaptureFixture, error: BaseException
 ) -> None:
     """A device that vanishes mid-reply ends the reply, not the session,
-    and says nothing about it. The `RuntimeError` half of the pair is
-    caught just as broadly and on purpose: it is what a starlette socket
-    raises once the connection is gone, and it also covers an encoder or
-    a resampler failing while speaking. Both must stay quiet, because
-    "reply failed" with a traceback is what an operator reads as a bug
-    in the pipeline."""
+    and says nothing about it. Both halves of the pair are the socket
+    speaking: starlette raises `WebSocketDisconnect` when it has seen
+    the close and a bare `RuntimeError` for a send that came after one.
+    Both must stay quiet, because "reply failed" is what an operator
+    reads as a bug in the pipeline, and a device switched off is not
+    one.
+
+    What carries the second half changed under #137 and what this test
+    watches did not: the edge now translates that `RuntimeError` into
+    `DeviceGone` instead of letting the reply body catch it broadly. A
+    bug in the encoder or the resampler, which used to go quiet through
+    the same catch, is reported now; that is the point of the change,
+    and it is pinned in `test_session_reply_failures.py`."""
     session = session_for(base_config(), POET_MAC)
     session.websocket = cast(Any, VanishingSocket(error))
     with caplog.at_level("INFO"):

@@ -533,17 +533,6 @@ milestone-1 discovery about `ProviderCallTimeout` being an `OSError`
 stayed harmless for the same reason: none of the seven `except OSError`
 sites is anywhere near a reply.
 
-**One characterization docstring is now half historical, deliberately
-left alone.** `test_a_reply_ends_quietly_when_the_send_path_raises`
-explains its `RuntimeError` parameter as covering "an encoder or a
-resampler failing while speaking" as well as the socket, and that half
-is exactly what stopped being covered. Its assertions still hold, and
-hold for the right reason, because the failure in the test comes from
-the socket; only the sentence about the other case is stale. The file is
-pinned by this milestone's acceptance criteria and was not touched.
-Whoever revisits the characterization suite for #85 should correct the
-sentence then.
-
 ### Verification
 
 From `samtal-server/`, on `refactor/pipeline-provider-errors` with every
