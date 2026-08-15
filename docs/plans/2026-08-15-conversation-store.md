@@ -380,14 +380,25 @@ full, or the writer is dead.
 Queue items are typed: `Open` (session id, opened-at reading, the
 manifest dict), `Event` (session id, `t_ms`, name, level, fields),
 `Turn` (session id, the `TurnRecord`), `Close` (session id,
-duration, close reason, dropped count). `Open`, `Turn` and `Close`
-are commit points; `Event`s ride until the next one. That is
-decision 7's contract: a page opened mid-conversation reads
-everything up to the last completed turn, and the session row is
-visible from the open. The writer refuses records for a session it
-has not opened (drops them with one warning); by construction that
-cannot happen from the real call sites, since `Open` is enqueued
-before the runtime can produce anything, on the same loop.
+duration, close reason, dropped count). The writer drains the
+queue continuously into **per-session in-memory batches** and
+holds no database transaction while it waits: a session's `Open`,
+`Turn` and `Close` are that session's markers, and reaching one
+opens one short `BEGIN IMMEDIATE` transaction that writes exactly
+that session's accumulated batch and commits. One queue, many
+batches, so session A's marker never commits session B's
+half-assembled turn, and no write lock is ever held across an
+inter-turn interval where the purge CLI or a backup could be
+waiting on it. That is decision 7's contract: a page opened
+mid-conversation reads everything up to the last completed turn,
+and the session row is visible from the open. The interleaving is
+tested explicitly: two sessions' records interleaved on the queue,
+session A's turn marker committed, and the database asserted to
+hold none of session B's open turn. The writer refuses records for
+a session it has not opened (drops them with one warning); by
+construction that cannot happen from the real call sites, since
+`Open` is enqueued before the runtime can produce anything, on the
+same loop.
 
 Failure behavior, all of it metadata-only: a full queue drops the
 record, increments the session's drop count, and emits
@@ -830,6 +841,12 @@ carries its resolution once the amendment addressing it lands.
    write transaction across the inter-turn interval. Require
    per-session in-memory batches and one short transaction per
    marker, with an interleaved two-session test.
+   *Resolution*: adopted. The write path now specifies per-session
+   in-memory batches drained from the one queue, a marker opening
+   one short `BEGIN IMMEDIATE` transaction for exactly its
+   session's batch, no transaction held between markers, and the
+   interleaved two-session test asserting a marker exposes nothing
+   of the other session's open turn.
 5. **P1: queue markers can be dropped, invalidating the store's
    completeness claims.** All item types share the bounded
    `put_nowait` queue, so `Open`, `Turn` or `Close` can be
