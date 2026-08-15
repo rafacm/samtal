@@ -332,8 +332,10 @@ asserts the new id exceeds every id ever issued.
   aligned with its `heard` event), `agent`, `heard` (text, null
   under text-off), `heard_duration_s`, `language`,
   `language_confidence`, `reply` (text, null under text-off),
-  `legs` (JSON list of `{agent, text}`, null under text-off; only
-  present when a handover split the reply), `asr_ms` (null where no
+  `legs` (JSON list of `{agent, text, input_tokens,
+  output_tokens}`; the text half null under text-off, the token
+  halves under metrics-off; only present when a handover split the
+  reply), `asr_ms` (null where no
   ASR elapsed was measured this turn), `first_token_ms`, `llm_ms`
   (summed round durations), `tts_first_audio_ms` (the reply's
   first synthesis request to its first audio bytes; null when
@@ -697,16 +699,35 @@ move, which the content-path decision above bought.
   credential-shaped utterance and assert it reaches no sentence,
   argument, field, or record in either shipped format, and no
   attached tap.
-- `llm_round` renames `prompt_tokens` to `input_tokens` and
+- The usage and model vocabulary lands whole, as one adaptation:
+  `llm_round` renames `prompt_tokens` to `input_tokens` and
   `completion_tokens` to `output_tokens` (`pipeline.py:493-514`),
-  the OTel GenAI usage vocabulary adapted to the flat field style,
-  per the ADR. The internal `Usage` dataclass keeps its names: it
-  is not surface, and renaming it is pipeline churn this issue does
-  not need. The `stage`/`provider`/`type`/`host` fields stay as
-  they are: samtal's resolved-entry vocabulary, which OTel has no
-  better names for, and the store's `turns` columns were named
+  and `provider_fields` (`pipeline.py:106-123`) gains `model`, the
+  configured model identifier, where the provider identity carries
+  one, which puts OTel's `gen_ai.request.model` on `llm_round`,
+  `llm_retry` and `provider_failed` as an additive field beside
+  the renames. The identity seam
+  (`providers/base.py`) is extended to expose the configured
+  model, which every real provider already knows from its options.
+  The internal `Usage` dataclass keeps its names: it is not
+  surface, and renaming it is pipeline churn this issue does not
+  need. `stage`, `provider` (the configured entry name, a samtal
+  concept OTel does not have), `type` and `host` keep their names;
+  the schema reference documents the full correspondence
+  (`input_tokens` to `gen_ai.usage.input_tokens`, `model` to
+  `gen_ai.request.model`, `type` to `gen_ai.provider.name`, `host`
+  to `server.address`), so #66/#67 exporters map by reading one
+  table. The store's `turns` columns were named
   `input_tokens`/`output_tokens` from the first migration so the
   two surfaces already agree.
+- Attribution stays honest in the rollup: a turn's token totals
+  blend rounds, and after a handover they blend agents, which may
+  use different models. The `legs` entries therefore carry per-leg
+  `input_tokens` and `output_tokens` beside their text, and the
+  per-round, per-model truth is the `llm_round` events (each names
+  its `agent`, `provider`, `type`, `host` and now `model`), one
+  join away in the same database, which the schema reference says
+  where it documents the totals.
 - `tool_call` stops carrying peer bytes: the event gains `source`
   from the closed set the store's classifier defines, keeps `tool`
   only for `builtin` (the only names this application authors),
@@ -1095,6 +1116,16 @@ carries its resolution once the amendment addressing it lands.
     counts, stores no model identity, and per-round attribution
     can collapse different agents and models into one ambiguous
     total.
+    *Resolution*: adopted. The narrowing milestone ships the
+    vocabulary whole: the two renames plus `model` added to
+    `provider_fields` through an extended identity seam, with the
+    full correspondence table in the schema reference. Rollup
+    totals stay totals, `legs` gain per-leg token counts, and the
+    per-round, per-model truth is the `llm_round` events in the
+    same database. Renaming `provider` was declined: it names the
+    configured entry, a samtal concept with different semantics
+    from OTel's vendor field, and the ADR adopts the vocabulary
+    "where one exists".
 15. **P1: routes registered only by `build_api` will be absent
     from OpenAPI.** `document()` builds `_application()` directly,
     so routes registered in `build_api` never reach the committed
