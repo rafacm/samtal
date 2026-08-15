@@ -134,7 +134,14 @@ def resolve_api_key(label: str, api_key_env: str | None) -> str | None:
     set-secret is the later and more deliberate act, and an unset
     variable left behind it must not fail the boot the stored secret was
     set to fix. The value goes straight into the client here and lands
-    on no model on the way."""
+    on no model on the way.
+
+    The refusal names the entry and not the reference. `api_key_env` is
+    operator input, and the mistake it is easiest to make with a field
+    named for a variable is to put the credential in it; this sentence
+    is printed to stderr by `main` and rendered into the logs, and the
+    entry name is enough to find the line in a configuration file the
+    operator wrote."""
     stored = stored_provider_secret(API_KEY_SLOT)
     if stored is not None:
         return stored
@@ -142,9 +149,7 @@ def resolve_api_key(label: str, api_key_env: str | None) -> str | None:
         return None
     api_key = os.environ.get(api_key_env, "")
     if not api_key:
-        raise ProviderError(
-            f"{label}: api_key_env names {api_key_env}, but it is not set in the environment"
-        )
+        raise ProviderError(f"{label}: api_key_env references an unset environment variable")
     return api_key
 
 

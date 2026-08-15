@@ -79,7 +79,7 @@ def test_a_missing_api_key_env_fails_the_build() -> None:
 
 def test_an_unset_api_key_variable_fails_the_build(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ELEVEN_KEY", raising=False)
-    with pytest.raises(ProviderError, match="not set in the environment"):
+    with pytest.raises(ProviderError, match="references an unset environment variable"):
         build_tts(type="elevenlabs", voice_id="voice-1", api_key_env="ELEVEN_KEY")
 
 

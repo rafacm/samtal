@@ -26,8 +26,12 @@ def test_a_named_but_unset_api_key_env_fails_the_build(
     config = provider_config(
         type="anthropic", model="claude-sonnet-5", api_key_env="SAMTAL_TEST_KEY"
     )
-    with pytest.raises(ProviderError, match="SAMTAL_TEST_KEY"):
+    with pytest.raises(ProviderError, match="references an unset environment variable") as failure:
         build_provider("llm", "claude", config)
+    # The entry, not the reference: what an operator wrote in that field
+    # is not repeated back into a sentence main prints and the logs keep.
+    assert "providers.llm.claude" in str(failure.value)
+    assert "SAMTAL_TEST_KEY" not in str(failure.value)
 
 
 def test_a_set_api_key_env_builds(monkeypatch: pytest.MonkeyPatch) -> None:
