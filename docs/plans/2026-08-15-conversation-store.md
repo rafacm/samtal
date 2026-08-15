@@ -1338,11 +1338,12 @@ its section of the implementation doc when written.
   stored, the switches, retention, deletion semantics, the
   WAL-safe copy note). The switch becomes real and complete in the
   same release. Accept: the milestone 3 test list green;
-  acceptance criteria 1, 2, 3, 4 and 6 hold; lanes green.
+  acceptance criteria 1, 2, 3, 4 and 6 hold, and criterion 5's
+  pruning and purge are now live and documented; lanes green.
 - [ ] **Conversation reads under `/api`**
   (`feature/conversation-store-m4`): the three routes with typed
-  response models and cursor pagination; the read-only per-request
-  engine; 404-without-file naming the key; the regenerated OpenAPI
+  response models and cursor pagination; the parameterized
+  per-request read engine; 404-without-file naming the key; the regenerated OpenAPI
   document; the server README's API section rows. Accept: the
   milestone 4 test list green; criterion 7 holds; both drift checks
   green; lanes green.
@@ -1352,8 +1353,9 @@ its section of the implementation doc when written.
   moved with them; the README event table and transcript paragraph;
   the ADR follow-up note; the CHANGELOG breaking entries; the
   store's suites untouched and green as the structural proof.
-  Accept: the milestone 5 test list green; criteria 5 and 8 hold;
-  lanes green.
+  Accept: the milestone 5 test list green; criterion 8 completes
+  with the ADR note (its schema doc landed in milestone 1, its
+  example blocks in milestone 3); lanes green.
 
 ## Verification
 
