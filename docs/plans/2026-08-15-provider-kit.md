@@ -66,9 +66,11 @@ protocol, which decision 5 permits. The kit is implementation-side
 plumbing only providers consume: `resolve_api_key` (moved verbatim
 from `anthropic_llm`, with `API_KEY_SLOT` and its
 `stored_provider_secret` read), `DEFAULT_TIMEOUT_S = 30.0` declared
-once, the SDK retry policy (retries disabled so `timeout_s` stays
-the bound the operator set, the reason openai_asr.py already
-documents), and the byte-alignment helper. `anthropic_llm`,
+once, `DEFAULT_MAX_TOKENS` (the shared LLM token default
+`openai_llm` currently imports from `anthropic_llm`; the review
+round's finding 6), the SDK retry policy (retries disabled so the
+per-operation timeout stays the bound the operator set, the reason
+openai_asr.py already documents), and the byte-alignment helper. `anthropic_llm`,
 `elevenlabs_tts`, `openai_llm`, `openai_asr`, `openai_tts`, and
 `openai_endpoint` import from the kit; no provider imports another
 provider afterward, which the implementation doc proves by grep.
@@ -171,6 +173,15 @@ at the kit default where today it is unbounded.
 to the constructor seam, which is an interface-strengthening test
 edit, not a weakening: the same fakes arrive through the front
 door.
+
+The policy itself is pinned (the review round's finding 7),
+because injected-client tests pass even if the production
+constructors forget both arguments: one default-client
+construction test per LLM asserts the built client carries the
+kit's timeout and has retries off, following the pattern the
+existing openai_asr and openai_tts tests use for the same
+properties, plus one test per LLM that an injected client is used
+as given.
 
 ### The alignment helper takes the iterator and the label
 
@@ -444,12 +455,17 @@ resolution once the amendment addressing it lands.
    cross-provider imports without assigning the constant a home.
    Move it into the kit (or deliberately localize it) and verify
    both symbols.
+   *Resolution*: adopted, first option. `DEFAULT_MAX_TOKENS` joins
+   the kit's contents, named in the kit decision.
 7. **P2: nothing tests that the LLM clients actually receive the
    timeout and retry policy.** Injected-client tests pass even if
    the production constructors omit both arguments; existing ASR
    and TTS tests pin these properties. Add one default-client
    construction test per LLM checking timeout and retry settings,
    plus a test that an injected client is used unchanged.
+   *Resolution*: adopted. The LLM-seam decision now names the two
+   default-client pins per LLM and the injected-client
+   pass-through test, following the existing ASR/TTS pattern.
 8. **P3: the plan overstates SDK timeouts as whole-request
    bounds.** The SDK/httpx timeout is per phase, not an
    end-to-end deadline; a streaming response may run longer while
