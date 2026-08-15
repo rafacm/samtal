@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-15
+
+### Fixed
+
+- **A session test's synthesis fixtures pass a real failure callback**
+  (#135): `test_only_a_sentence_whose_audio_finished_counts_as_spoken`
+  built its two `_Synthesis` objects with the session id where the
+  constructor takes the callback a failed synthesis is reported
+  through. The test itself was earning its verdicts (it speaks one
+  sentence to the end and cancels another mid-send, and neither path
+  reaches the callback), but the fixture violated the constructor's
+  contract, and under a failing voice that argument turns the provider
+  failure into `TypeError: 'str' object is not callable` on its way
+  out. Both constructions now share a recording callback with the
+  signature spelled out, and the test asserts nothing was reported, so
+  a failure appearing where the mock voice is supposed to work is a
+  failing test rather than an unnoticed one. No production code
+  changed.
+
 ## 2026-08-14
 
 ### Added
