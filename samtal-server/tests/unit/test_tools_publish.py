@@ -108,6 +108,24 @@ def test_a_collision_names_only_what_already_published(
     assert "ha__weather_today" in caplog.text
 
 
+def test_a_published_tool_remembers_where_the_far_side_listed_it() -> None:
+    """The identifier every line about a tool is written in, because it
+    is the only one this side owns.
+
+    It has to survive publication rather than be recovered from the
+    published list afterwards: the published list is the listing with
+    the drops taken out, so counting it answers with a position the far
+    side's listing never had. Here the second of three never publishes,
+    and the third has to still be the third."""
+    result = publish(listing("first", "b" * 70, "third"), prefix="ha")
+
+    assert [tool.name for tool in result.tools] == ["ha__first", "ha__third"]
+    assert result.position_of("ha__first") == 1
+    assert result.position_of("ha__third") == 3
+    # Counting the published list would have said two.
+    assert result.position_of("ha__unknown") is None
+
+
 def test_descriptions_and_schemas_pass_through() -> None:
     (tool,) = publish([("do.it", "the description", SCHEMA)], prefix="ha").tools
     assert tool.description == "the description"

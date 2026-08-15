@@ -372,6 +372,21 @@ class McpServerManager:
         an unreachable server still holds a conversation."""
         return list(self._published.tools)
 
+    def listed_at(self, published: str) -> int | None:
+        """Where this server listed one of its published tools, counted
+        from one, or None for a name this connection does not know.
+
+        The identifier every line about a tool uses, because it is the
+        only one this side owns: a published name is half an operator's
+        entry name and half whatever the far side called its tool, and
+        the second half is bytes nothing bounds. Read off the
+        publication rather than counted from `tools()`, since that list
+        is this one with the unpublishable dropped out of it and
+        counting it would answer with a position the far side's listing
+        never had.
+        """
+        return self._published.position_of(published)
+
     @property
     def shipped_instructions(self) -> str | None:
         """What this server said about itself when it connected, or None
@@ -1724,7 +1739,7 @@ class McpServers:
         if entry not in self._shadowed:
             return manager.tools()
         kept: list[ToolDef] = []
-        for position, tool in enumerate(manager.tools(), start=1):
+        for tool in manager.tools():
             owner = self.owner_of(tool.name)
             if owner == entry:
                 kept.append(tool)
@@ -1737,7 +1752,17 @@ class McpServers:
                 # tool that does not reach the model has no claim on the
                 # log. Once per tool per manager set, since this is read
                 # once a reply.
+                #
+                # The position is the far side's own, read off the
+                # publication rather than counted here. Counting this
+                # loop would count the published list, which is the
+                # listing with the unpublishable dropped out of it, so a
+                # server whose fourth tool was too long to publish would
+                # have every later position reported one too low, and
+                # the number an operator went looking with would find a
+                # different tool.
                 self._reported.add((entry, tool.name))
+                position = manager.listed_at(tool.name)
                 events.warning(
                     "mcp server %s: dropping published tool %d, its name is inside the "
                     "namespace of the entry %s, which owns it",

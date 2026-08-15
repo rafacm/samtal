@@ -46,6 +46,13 @@ STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
 # publishing rule's sanitizing leaves it exactly as it is.
 CREDENTIAL = "AKIAIOSFODNN7EXAMPLE"
 
+# Where the test server lists `inside__secret_word`, which is the tool
+# an entry called `home` publishes into `home__inside`'s namespace. The
+# seventh it registers, and the sixth never publishes (too long once a
+# prefix is on it), so the two ways of counting disagree here, which is
+# the whole reason this number is spelled out rather than assumed.
+SHADOWED_POSITION = 7
+
 # What this module logs under, which is what an operator reads.
 MANAGER_LOGGER = "samtal_server.tools.mcp"
 
@@ -1143,7 +1150,13 @@ async def test_a_shadowed_tool_is_reported_by_position_and_owner(
 ) -> None:
     """No tool name, in the sentence or in the fields: a shadowed tool
     never reached the model-facing list, and half of its name is
-    whatever the far side called it."""
+    whatever the far side called it.
+
+    The position is the far side's own, which is the only thing that
+    makes it worth carrying. This server lists `inside__secret_word`
+    seventh, and the sixth is dropped by the publishing rule for being
+    too long, so a position counted off the published list would say
+    six and send an operator to a tool that published fine."""
     config = config_granting(
         {"home": entry_data(), "home__inside": entry_data()},
         {"assistant": ["home", "home__inside"]},
@@ -1156,13 +1169,16 @@ async def test_a_shadowed_tool_is_reported_by_position_and_owner(
 
         shadowed = one_event(caplog, "mcp_tool_shadowed")
         assert shadowed.levelno == logging.WARNING
-        fields = fields_of(shadowed)
-        assert isinstance(fields.pop("position"), int)
-        assert fields == {
+        assert fields_of(shadowed) == {
             "event": "mcp_tool_shadowed",
             "entry": "home",
+            "position": SHADOWED_POSITION,
             "owner": "home__inside",
         }
+        # And it really is the listing's, not the published list's.
+        assert [tool.name for tool in servers._managers["home"].tools()].index(
+            "home__inside__secret_word"
+        ) + 1 < SHADOWED_POSITION
     finally:
         await servers.stop_all()
 
