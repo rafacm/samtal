@@ -561,3 +561,71 @@ against the code it replaced, and both times by copying a backup back
 and touching it rather than by `git checkout`; every run was pytest,
 which writes no bytecode and clears what it finds, and the caches were
 cleared anyway. The `AGENTS.md` trap did not bite.
+
+### PR #151 review round
+
+One external review of the PR diff (codex CLI, model gpt-5.6-sol,
+read-only, 2026-08-15). Verdict: mergeable after the fixes. Five
+findings, as received and condensed, each with the commit that answered
+it.
+
+1. **P1: the newly exposed failure path leaks exception text and
+   tracebacks.** Narrowing the catch routes every provider failure into
+   the generic arm, and that arm logs with `logger.exception`: the
+   message, the whole chain of causes and the traceback, into the
+   surface the observability ADR makes retained. The reply-path test
+   made it worse by requiring the arbitrary message to be there. Report
+   trusted metadata only, and replace the message assertion with
+   sentinel tests covering both log formats.
+   *Resolution*: adopted, `da10f22`. The arm logs
+   `reply failed: <class name>` with no `exc_info` and no `str(exc)`.
+   The sentinel is planted in a failure's own message and in the failure
+   behind it, and asserted absent from `caplog.text`, from every
+   record's fields, and from both `JsonFormatter` and the text format,
+   which is what `logs.py` offers a deployment. The changelog and this
+   document no longer promise a traceback.
+2. **P1: `DeviceGone` preserves the unsanitized socket exception
+   chain.** The send helpers raised `from exc`, leaving starlette's
+   exception reachable as `__cause__`, and two boundary-contract tests
+   pinned it. A close reason is written by the far end.
+   *Resolution*: adopted, `7432395`. Both helpers build the error in the
+   `except` arm and raise it after the block, the pattern milestone 1
+   uses for the taxonomy and for the same reason, with the same guarding
+   comment. The two pins assert `__cause__` and `__context__` are None;
+   a new test plants a sentinel in a close reason and in a post-close
+   send's message and finds it in neither the raised chain nor the logs.
+3. **P2: the timeout test does not prove classification is
+   type-based.** `ProviderCallTimeout` contains "Timeout", so the
+   deleted substring heuristic agrees with the assertion.
+   *Resolution*: adopted, `03bc7d7`. `ApiTimeoutError`, a plain
+   `Exception` named like `openai.APITimeoutError`, reads "failed";
+   `DeadlineExceeded`, a `TimeoutError` named like nothing in
+   particular, reads "timed out". The first is red against the old
+   expression.
+4. **P2: the recorded unit verification is stale.** 1892 was measured
+   against milestone 1 before its own review round and before the
+   rebase.
+   *Resolution*: adopted, `c820707`. All three lanes rerun on the branch
+   as it stands and the numbers replaced.
+5. **P3: a characterization docstring describes the opposite of the
+   behavior.** It explained the `RuntimeError` parameter as covering an
+   encoder or a resampler failing while speaking, which is the case that
+   stopped being quiet.
+   *Resolution*: adopted, `8f17097`, as the reviewer directs: the
+   docstring only, with the parametrization and the assertions
+   untouched, so the file's pin is still the pin it was. The note here
+   about deliberately leaving the sentence stale went with it.
+
+Red to green, per fix: finding 1's sentinel test fails against
+`logger.exception` with the planted value and the full traceback in the
+captured log, which is the leak reproduced; finding 3's wording test
+fails against the old `isinstance(...) or "Timeout" in ...` expression;
+finding 2's pins fail against `raise ... from exc` by construction, and
+the two they replace passed only because they asserted the cause was
+there.
+
+One thing the round turned up that was not a finding: the same unsafe
+`__cause__` was pinned twice, not once. Besides the boundary-contract
+test the review named, `test_a_device_that_vanishes_mid_tool_call_reports_device_gone`
+asserted it as well, since the device tool transport writes to the same
+socket through the same helper. Both moved together.
