@@ -25,16 +25,17 @@ built in:
 3. `4763e9c` Emit through the moved emitter, everywhere at once
 4. `fd26337` Pin the contract between an emitter and its taps
 
-### The pin suite, first and unchanged
+### The pin suite, first, and unchanged through the migration
 
-`samtal-server/tests/unit/test_event_surface_pins.py` (new, 835 lines,
-25 tests covering 26 emit paths; `agent_said` and `handover` share a
-test because one handover emits both). Per path it pins four things:
-`record.name`, `record.levelno`, `record.getMessage()`, and the exact
-set of nonstandard record attributes with their values. The
-nonstandard set is read through `logs._STANDARD_ATTRIBUTES` rather
-than through a list written in the test, so the suite and the JSON
-formatter cannot come to disagree about what an event field is.
+`samtal-server/tests/unit/test_event_surface_pins.py` (new, 25 tests
+covering 26 emit paths; `agent_said` and `handover` share a test
+because one handover emits both, and two sentinel cases joined them in
+the review round below). Per path it pins the channel, the numeric
+level, the sentence, and the exact set of nonstandard record attributes
+with their values. The nonstandard set is read through
+`logs._STANDARD_ATTRIBUTES` rather than through a list written in the
+test, so the suite and the JSON formatter cannot come to disagree about
+what an event field is.
 
 Two normalizations, both declared in the module docstring:
 
@@ -45,17 +46,20 @@ Two normalizations, both declared in the module docstring:
   The key stays pinned; only that value does not.
 - **In the sentence**, the session id and every numeric run become
   placeholders, because durations are rendered into the sentence too.
-  What stays pinned there is every word, every argument's position,
-  and the type of what was substituted. Numeric literals inside a
-  sentence are therefore not pinned, which is the deliberate limit of
-  this suite: the exact values live in the fields, where they are
-  pinned.
+
+That second one was too generous to catch what this paragraph
+originally claimed of it, which the PR #152 review round found
+(finding 6, below). The suite now pins `record.msg`, the unrendered
+template, and `record.args` by value and by type, declaring the
+argument positions that move rather than blurring every number; the
+rendered sentence is kept as the readable half. What follows describes
+the suite as it stands after that commit.
 
 Every one of the twenty-six paths is driven; none had to be
 approximated. Most reuse the fixtures the existing session suites
 already use (`session_for`, `run_reply`, `masked_session`,
 `realtime_session`, `ScriptedEndpointer`, `GatedAsr`, `ConfirmingAsr`,
-`StallingLlm`, `reply_with`). Two things were built for it:
+`StallingLlm`, `Unreachable`). Two things were built for it:
 
 - The four barge-in gates are driven through `_finish_utterance`
   directly rather than over a websocket, so `speech_ms` is the
@@ -275,3 +279,108 @@ and this document, `samtal_server/events.py` (new),
 `samtal_server/device/{boundary,session}.py`,
 `samtal_server/runtime/pipeline.py`, and the three test files.
 Milestones 2 and 3 own everything else and none of it moved.
+
+### PR #152 review round
+
+One external review of the milestone as first pushed. Six findings,
+four P1 and two P2; verdict mergeable after fixes. All six adopted, one
+commit each, applied in an order the findings themselves imply: the
+pin-suite strengthening first, against unchanged behavior, so that the
+two commits which deliberately change a pinned sentence are read
+against a suite that actually pins one.
+
+1. **P1: a rejected Device-Id is written to the log.** The
+   bad-Device-Id rejection logged the validation exception, whose
+   message quotes the header verbatim, so an unauthenticated caller
+   could put a value of their choosing into the retained log surface,
+   one line per connection attempt. The pin suite had recorded the leak
+   as correct by pinning `"not-a-mac"` in the output.
+   *Resolution*: adopted in `7e4ab42`. The sentence is fixed text
+   carrying neither the header nor the exception; the reason token,
+   the null `device`, and the guidance about what the header must hold
+   all survive. This is a deliberate change to a pinned sentence, so
+   the pin moved with it, and a sentinel case asserts a
+   credential-shaped Device-Id reaches no sentence, no argument, no
+   field, and no record at any level.
+2. **P1: a provider's own words reach the log and every tap.**
+   `_provider_failed` rendered `%s: %s` with the exception itself. The
+   five real providers raise the metadata-only taxonomy after #137, but
+   this method takes a `BaseException` from four call sites, one of them
+   the LLM stream, so an SDK's or a transport's exception still arrives
+   unwrapped and an exception raised near a response body can carry a
+   body fragment in its message.
+   *Resolution*: adopted in `bb96f22`. Only the class name is rendered,
+   which is what the `error` field already carried and what `_reply`'s
+   own catch has printed since #137. The second deliberate sentence
+   change, so the pin moved with it, and its sentinel plants a value in
+   the exception and checks the record and an attached consumer. That
+   last check needed a driver that attaches a tap, so the pin test and
+   the sentinel share one instead of borrowing `reply_with` from the
+   neighbouring suite.
+3. **P1: a mutating tap can corrupt or inject into the retained log.**
+   `Emission` is frozen, which stops a tap rebinding a field and
+   nothing else; the dict behind `payload` was shared with every
+   consumer, so a tap could rewrite a nested value or add a key
+   `logging` reserves before the log tap ran.
+   *Resolution*: adopted in `824e738`. Non-log taps are handed a deep
+   copy and the log the payload the emitter built. Deep rather than
+   shallow because `prompt_assembled` already carries a nested dict;
+   `args` are left alone, because they are rendered by `%` and never
+   written back and copying an arbitrary argument is a copy that can
+   fail. The contract test's vandal edits both levels and the reserved
+   key, and fails without the fix: the record it looks for does not
+   exist, because the logging call raised and the guard turned it into
+   a one-line report.
+4. **P1: `events.py` imports `capture.py`, which the plan forbids.**
+   Three type annotations pointed an arrow back at a module that is
+   about to point one here, since milestone 2 migrates `capture.py`
+   onto `ServerEvents`; the pair would then import each other and the
+   symptom at boot is a partially initialized module.
+   *Resolution*: adopted in `9ac909c`. A local `SessionRecording`
+   protocol describes the three methods this module calls. A capture
+   reaches the emitter as an object, which is the point of the tap, so
+   the shape was all that was ever needed. The contract test's spy now
+   satisfies the protocol outright and dropped its two type ignores.
+5. **P2: reattaching a capture leaves the previous one attached.**
+   `attach_capture` overwrote the handle and appended a second adapter,
+   so the first kept writing a decision track for a recording nobody
+   would close, while `vad` and `dropped` followed the handle to the
+   second.
+   *Resolution*: adopted in `1869c47`. A second attach detaches the
+   first. Replacing rather than refusing, because a capture rolling
+   over at its size limit is a legitimate second attach and a refusal
+   would make the sequencing a caller's problem. Nothing in the tree
+   attaches twice today; the contract test does.
+6. **P2: the pin suite does not pin the sentences it claims to.** Every
+   numeric run in the rendered sentence became a placeholder, so a
+   swapped argument, a changed value, and a `%d` turning into a `%s`
+   all passed.
+   *Resolution*: adopted in `0b9f252`, and first, so the two sentence
+   changes above landed against a suite that pins one. The pin is now
+   `record.msg`, the unrendered template, plus `record.args` by value
+   and by type; a position whose value moves between runs is declared
+   in `dynamic_args=` and keeps its type, so a duration that stopped
+   being a float is a failure. Argument 0 is the session id in all
+   twenty-six sentences and is normalized without being declared. The
+   rendered sentence stays as the readable half, and the docstring now
+   says which of the two is the pin. The claim in this document's
+   pin-suite section is true as of this commit and was not before it.
+
+Two surfaces changed for operators, both narrowing what a log line
+says: `session_rejected`'s bad-Device-Id sentence and
+`provider_failed`'s. Neither event name, level, channel nor field
+changed, so a collector's queries are unaffected; only the human half
+of two lines is shorter, and in both cases the part that went is the
+part nobody wrote.
+
+Verification after the six, from `samtal-server/` at `1869c47`:
+
+```
+uv run ruff check .                 All checks passed!
+uv run pytest tests/unit -q         1954 passed, 15 skipped
+uv run pytest tests/integration -q  53 passed
+```
+
+The unit count grows by four: two sentinel cases in the pin suite, and
+the mutating-tap and reattach cases in the contract test. No file
+outside milestone 1's list moved.
