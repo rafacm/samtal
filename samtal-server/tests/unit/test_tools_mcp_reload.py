@@ -18,6 +18,7 @@ import asyncio
 import logging
 import sys
 import threading
+import traceback
 from pathlib import Path
 
 import pytest
@@ -50,6 +51,7 @@ from samtal_server.tools.mcp import (
     REFUSED_UNEXPECTED,
     REFUSED_UNREADABLE,
     RELOAD_REFUSED,
+    RELOAD_UNREADABLE,
     UNUSED,
     McpServerManager,
     McpServers,
@@ -908,22 +910,31 @@ async def test_an_applied_reload_counts_what_it_moved(
 
 
 @pytest.mark.parametrize(
-    ("raiser", "token"),
+    ("raiser", "escapes", "token"),
     [
-        (ConfigError, REFUSED_INVALID),
-        (DatabaseBusyError, REFUSED_BUSY),
-        (StorageError, REFUSED_UNREADABLE),
-        (RuntimeError, REFUSED_UNEXPECTED),
+        (ConfigError, ConfigError, REFUSED_INVALID),
+        (DatabaseBusyError, DatabaseBusyError, REFUSED_BUSY),
+        (StorageError, StorageError, REFUSED_UNREADABLE),
+        (RuntimeError, StorageError, REFUSED_UNEXPECTED),
     ],
 )
 async def test_a_refused_reload_says_which_kind_of_refusal_it_was(
-    raiser: type[Exception], token: str, caplog: pytest.LogCaptureFixture
+    raiser: type[Exception],
+    escapes: type[Exception],
+    token: str,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """One token per refusal type, chosen where the exception is
     classified. The types are the same ones the API turns into status
     codes, which is what makes the set closed and worth grouping by; the
     fourth is the net under them, for a `read` that fails in a way the
     configuration layer has no type for.
+
+    The first three leave as themselves, because their message is this
+    application's own words and the API puts it in a response body. The
+    fourth does not: it is classified here, and what leaves is a
+    `StorageError` with a fixed sentence, since a `read` that failed
+    unexpectedly may be holding anything at all.
     """
     config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
     servers = await started(config)
@@ -933,7 +944,7 @@ async def test_a_refused_reload_says_which_kind_of_refusal_it_was(
 
     try:
         with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
-            with pytest.raises(raiser):
+            with pytest.raises(escapes) as caught:
                 await servers.reload(refuse)
 
         refused = one_event(caplog, "mcp_reload")
@@ -947,6 +958,47 @@ async def test_a_refused_reload_says_which_kind_of_refusal_it_was(
         # reload, which is where a message belongs; this line is a
         # token and a fact about the servers.
         assert "no business" not in refused.getMessage()
+        # And whatever leaves carries no chain, which is what raising it
+        # outside the handler is for.
+        assert caught.value.__cause__ is None
+        assert caught.value.__context__ is None
+    finally:
+        await servers.stop_all()
+
+
+async def test_an_unexpected_read_failure_leaves_none_of_itself_behind(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The `read` callable opens a database, and the four types the
+    configuration layer models are not everything a database driver can
+    raise. Anything else is somebody's else's exception holding
+    somebody else's words, and one of the things it plausibly holds is
+    a connection string, so it is classified and then dropped."""
+    config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    servers = await started(config)
+
+    def refuse() -> tuple[Config, SecretStore | None]:
+        raise RuntimeError(f"could not connect using {SECRET}")
+
+    try:
+        with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
+            with pytest.raises(StorageError) as caught:
+                await servers.reload(refuse)
+
+        assert str(caught.value) == RELOAD_UNREADABLE
+        assert caught.value.__cause__ is None
+        assert caught.value.__context__ is None
+        # Everything a handler above could render of it.
+        rendered = "".join(
+            traceback.format_exception(
+                type(caught.value), caught.value, caught.value.__traceback__
+            )
+        )
+        assert SECRET not in rendered
+        assert SECRET not in caplog.text
+        # It still refuses rather than half applying, and it says so.
+        assert fields_of(one_event(caplog, "mcp_reload"))["reason"] == REFUSED_UNEXPECTED
+        assert "tools" in servers
     finally:
         await servers.stop_all()
 

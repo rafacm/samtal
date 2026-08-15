@@ -38,9 +38,17 @@ from samtal_server.config.models import MemoryConfig
 from samtal_server.config.secrets import MASTER_KEY_ENV, generate_key
 from samtal_server.config.store import ConfigStore
 from samtal_server.db import open_database
+from samtal_server.logs import JsonFormatter
 from samtal_server.runtime import prompt
 from samtal_server.runtime.prompt import Guidance
-from samtal_server.tools.mcp import CONNECTED, DOWN, UNUSED, McpReload, McpServers
+from samtal_server.tools.mcp import (
+    CONNECTED,
+    DOWN,
+    RELOAD_UNREADABLE,
+    UNUSED,
+    McpReload,
+    McpServers,
+)
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 
@@ -329,6 +337,44 @@ def test_a_refusal_maps_to_its_status_and_carries_its_own_sentence(
 
     assert response.status_code == status
     assert response.json() == {"detail": str(refusal)}
+
+
+def test_a_read_that_fails_unexpectedly_answers_without_quoting_it(
+    directory: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The refusals above are this application's own sentences, composed
+    to be shown. The one below is not: the `read` callable opens a
+    database, and what a driver raises when that goes wrong is nobody's
+    to publish, a connection string being one of the things it
+    plausibly holds. The real `reload` is driven rather than a stub,
+    because the sanitizing is its and this asserts the whole path to the
+    body a client reads."""
+    sentinel = "postgres://user:hunter2@db.internal/samtal"
+    servers = McpServers.build(config_with({"tools": entry_data()}, ["tools"]))
+
+    def read() -> tuple[Config, None]:
+        raise RuntimeError(f"could not connect using {sentinel}")
+
+    async def reload() -> McpReload:
+        return await servers.reload(read)
+
+    with caplog.at_level("INFO"):
+        with serving(directory, servers, reload) as client:
+            response = client.post(RELOAD_PATH)
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": RELOAD_UNREADABLE}
+    assert sentinel not in response.text
+    # And nothing of it in what the server kept about the refusal
+    # either, in either shipped format.
+    written = caplog.text + "".join(
+        JsonFormatter().format(record) for record in caplog.records
+    )
+    assert sentinel not in written
+    # The refusal was still recorded as one.
+    assert [
+        record.reason for record in caplog.records if getattr(record, "event", "") == "mcp_reload"
+    ] == ["unexpected"]
 
 
 def test_a_running_server_hands_its_own_reload_to_the_api(

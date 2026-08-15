@@ -11,6 +11,7 @@ import re
 import socket
 import sys
 import time
+import traceback
 from collections.abc import Iterator
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -33,6 +34,7 @@ from samtal_server.tools.mcp import (
     STOPPED,
     TRANSPORT_FAILED,
     UNUSED,
+    McpCallFailed,
     McpConfigError,
     McpServerDown,
     McpServerManager,
@@ -1172,11 +1174,14 @@ async def test_a_failed_call_drops_the_call_and_then_the_connection(
         assert down.levelno == logging.WARNING
         # The position in this server's listing, never the name: half
         # of a published name is what the far side called its tool, and
-        # `secret_word` is its first.
+        # `secret_word` is its first. The class name beside it is the
+        # only record of what actually failed, since the exception
+        # raised to the session carries nothing.
         assert fields_of(dropped) == {
             "event": "mcp_call_dropped",
             "entry": "tools",
             "position": 1,
+            "error": "RuntimeError",
         }
         assert "secret_word" not in dropped.getMessage()
         assert fields_of(down) == {
@@ -1184,6 +1189,56 @@ async def test_a_failed_call_drops_the_call_and_then_the_connection(
             "entry": "tools",
             "reason": CALL_FAILED,
         }
+    finally:
+        await manager.stop()
+
+
+async def test_a_failed_call_raises_this_servers_own_words_and_nothing_else(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What this raise carries goes further than a log line.
+
+    The pipeline renders the exception into the tool result the model is
+    given, so every character of it lands in the conversation and in the
+    transcript the retained logs are. An SDK exception raised near a
+    response body quotes that body, and a server holding a credential of
+    this deployment's can put it in the error it answers with, so the
+    call path answers with a fixed sentence of its own and the chain
+    behind it is cut: no cause, no context, and nothing of the failure
+    in the traceback a handler above might render.
+    """
+    manager = await running(stdio_entry())
+    try:
+
+        async def refuse(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError(f"the far side said {CREDENTIAL} while answering")
+
+        monkeypatch.setattr(manager._session, "call_tool", refuse)
+        with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
+            with pytest.raises(McpCallFailed) as caught:
+                await manager.call("tools__secret_word", {})
+
+        # A `RuntimeError` still, because the one production caller
+        # catches broadly and both this and `McpServerDown` mean the
+        # same thing to it: the tool did not run.
+        assert isinstance(caught.value, RuntimeError)
+        assert caught.value.__cause__ is None
+        assert caught.value.__context__ is None
+        # The whole of what an unlucky handler above could render.
+        rendered = "".join(
+            traceback.format_exception(
+                type(caught.value), caught.value, caught.value.__traceback__
+            )
+        )
+        assert CREDENTIAL not in rendered
+        assert CREDENTIAL not in str(caught.value)
+        # And the sentence the model is actually handed, which is the
+        # pipeline's wording around this message.
+        assert CREDENTIAL not in f'the tool "tools__secret_word" failed: {caught.value}'
+        # What failed is still recorded, by class, where a diagnosis
+        # belongs.
+        assert fields_of(one_event(caplog, "mcp_call_dropped"))["error"] == "RuntimeError"
+        assert CREDENTIAL not in caplog.text
     finally:
         await manager.stop()
 
