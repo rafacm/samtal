@@ -509,6 +509,6 @@ resolution once the amendment addressing it lands.
   (PR #153): as decided above. Accept: no hand-built structured
   `extra=` in production code; logger names, event names, and fields
   byte-identical; before/after pairs recorded.
-- [ ] **The MCP lifecycle speaks** (PR TBD): as decided above.
-  Accept: five events tested through real managers; sentinel
-  sanitization; README rows exact; CHANGELOG entry.
+- [x] [**The MCP lifecycle speaks**](2026-08-15-event-surface-implementation.md#milestone-3-the-mcp-lifecycle-speaks)
+  (PR TBD): as decided above. Accept: five events tested through real
+  managers; sentinel sanitization; README rows exact; CHANGELOG entry.

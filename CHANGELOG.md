@@ -58,12 +58,17 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   an AST test now fails any production logging call that carries its
   own `extra=`. The capture is offered every event before it is
   logged, as it always was, and a consumer that raises no longer costs
-  the operator a log line. **Operator-visible:** two sentences got
-  shorter, both because they were quoting something they should not.
-  A rejected `Device-Id` is no longer echoed into the line that turns
-  the device away, and `provider_failed` renders the failure's class
-  name rather than a vendor exception's own words; neither event's
-  name, level, channel or fields changed.
+  the operator a log line. **Operator-visible:** writing a pin for every
+  record turned up several that quoted something they should not, and
+  each of those is now narrower. A rejected `Device-Id` is no longer
+  echoed into the line that turns the device away, and a refused
+  handshake names an unidentified client with a null `device` rather
+  than whatever header arrived; the lines that report a failure render
+  its class name rather than a dependency's own sentence; and the
+  onboarding banner and the key-miss line carry no key material at
+  all, with `samtal-server config ota-url` the only route to the URL.
+  No event name, level or channel changed, and the only field that did
+  is the one that held a value nobody had authenticated.
 
 - **The egress guarantee is one rule, and a provider's marking is
   mandatory** (#136): the `server.local_only` enforcement behind the
