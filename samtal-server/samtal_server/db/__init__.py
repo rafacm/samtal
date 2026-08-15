@@ -12,6 +12,16 @@ ciphertext decrypts under the configured keys is a server-startup check
 corrupt token is exactly when the CLI is the recovery tool, and a
 database that refused to open would take the recovery tool away with
 the server.
+
+Since #120 there is a second database beside this one, and the
+machinery below is written once for both: `open_at`, `database_path`,
+`write_engine`, `existing_engine`, `upgrade_to_head` and
+`migration_failure` take the filename and the migrations directory as
+arguments, and the two functions named for `samtal.db` supply this
+database's values. What a caller of the parameterized half gets is what
+this one has always had, including the `ConfigError` sentences: every
+failure a second database can hit is a failure to write inside
+`server.database.dir`, which is the key both of them live under.
 """
 
 import os
@@ -49,21 +59,43 @@ def open_database(directory: str | Path) -> Engine:
     refusal, and a directory the server cannot write is still the
     server's problem and not the request's. The messages are the same
     ones this has always raised."""
-    path = _database_path(Path(directory))
-    engine = _create_engine(path)
+    return open_at(directory, DATABASE_FILENAME, _MIGRATIONS_DIR)
+
+
+def open_at(
+    directory: str | Path,
+    filename: str,
+    migrations: Path,
+    secure_delete: bool = False,
+) -> Engine:
+    """`open_database` for a database named by its caller: create the
+    directory, open the file, run its own migration chain to head.
+
+    The migrations directory is an argument rather than derived from the
+    filename because the two databases keep their chains beside their
+    own packages, and their version tables are separate by virtue of
+    being separate files rather than by any naming trick.
+
+    `secure_delete` is off here and on for the conversations database:
+    it costs a write of zeros over freed pages, which is the price of
+    deletion being physical rather than an entry removed from an index,
+    and the domain configuration has no right-to-delete to honor.
+    """
+    path = database_path(Path(directory), filename)
+    engine = write_engine(path, secure_delete=secure_delete)
     # Built inside the handler and raised outside it: `from exc` (and
     # `from None`) leave the library's exception reachable from the one
     # that travels out, and a SQLAlchemy error holds the statement it
     # failed on together with its bound parameters.
     problem: ConfigError | None = None
     try:
-        _upgrade_to_head(engine)
+        upgrade_to_head(engine, migrations)
     except ConfigError:
         engine.dispose()
         raise
     except Exception as exc:
         engine.dispose()
-        problem = _failure(exc, path)
+        problem = migration_failure(exc, path)
     if problem is not None:
         raise problem
     return engine
@@ -104,10 +136,26 @@ def read_engine(directory: str | Path) -> Engine:
     rather than a check at construction: a volume can go away between
     the two, and the answer must not be a new empty database.
     """
+    return existing_engine(Path(directory) / DATABASE_FILENAME)
+
+
+def existing_engine(
+    path: Path, immediate: bool = False, secure_delete: bool = False
+) -> Engine:
+    """An engine for a database file that has to be there already, which
+    is what `read_engine` is and what deleting from a file the server may
+    also have open needs.
+
+    The two callers differ in one thing, so it is the one argument:
+    reading takes no lock (`BEGIN`), while a purge takes the write lock
+    before it reads (`BEGIN IMMEDIATE`) for the reason `write_engine`
+    gives. Neither creates the file, which is the property both need and
+    the reason the database is named as a URI.
+    """
     # Percent-encoded because this is a URI now: a `?` or a `#` in the
     # path would otherwise end it, and the open would land somewhere
     # else entirely. `quote` leaves the separators alone.
-    name = quote(str(Path(directory) / DATABASE_FILENAME))
+    name = quote(str(path))
     engine = create_engine(
         # Echo off for the reason it is off above: a statement log is a
         # place values end up.
@@ -132,20 +180,23 @@ def read_engine(directory: str | Path) -> Engine:
             # rather than of a connection. Setting it from here would be
             # a write from the read path.
             cursor.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+            if secure_delete:
+                cursor.execute("PRAGMA secure_delete=ON")
         finally:
             cursor.close()
 
     @event.listens_for(engine, "begin")
-    def _begin_deferred(connection: object) -> None:
+    def _begin(connection: object) -> None:
         # Spelled out rather than left to the default, because the
         # default for this project is the immediate one above and the
         # difference is the reason this engine exists.
-        connection.exec_driver_sql("BEGIN")  # type: ignore[attr-defined]
+        statement = "BEGIN IMMEDIATE" if immediate else "BEGIN"
+        connection.exec_driver_sql(statement)  # type: ignore[attr-defined]
 
     return engine
 
 
-def _failure(exc: Exception, path: Path) -> ConfigError:
+def migration_failure(exc: Exception, path: Path) -> ConfigError:
     """The lock that did not arrive inside the busy timeout, told from
     everything else. The distinction is the only one a caller answering
     with a status code needs, and it is made on the driver's own message
@@ -166,7 +217,7 @@ def _failure(exc: Exception, path: Path) -> ConfigError:
     return StorageError(problem)
 
 
-def _database_path(directory: Path) -> Path:
+def database_path(directory: Path, filename: str = DATABASE_FILENAME) -> Path:
     """The database file inside `directory`, with the directory created
     when that is possible. The error names the configuration key rather
     than the path alone: the default is /var/lib/samtal, which a
@@ -192,10 +243,17 @@ def _database_path(directory: Path) -> Path:
             f"server.database.dir (or SAMTAL_SERVER__DATABASE__DIR) to a "
             f"writable path"
         )
-    return directory / DATABASE_FILENAME
+    return directory / filename
 
 
-def _create_engine(path: Path) -> Engine:
+def write_engine(path: Path, secure_delete: bool = False) -> Engine:
+    """The engine a database is created, migrated and written through.
+
+    `secure_delete` overwrites a freed page with zeros instead of
+    leaving its bytes in the freelist. Off by default, because it is
+    paid on every delete and the domain configuration has nothing to
+    erase; on for the conversations database, where a purge that left
+    the words in the file would not be a deletion."""
     # Statement echo off and parameter logging never enabled, so a
     # secret bound into an INSERT cannot ride a debug log line. Echo is
     # off by default; it is named here because turning it on for a
@@ -216,6 +274,8 @@ def _create_engine(path: Path) -> Engine:
         try:
             cursor.execute("PRAGMA journal_mode=WAL")
             cursor.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+            if secure_delete:
+                cursor.execute("PRAGMA secure_delete=ON")
         finally:
             cursor.close()
 
@@ -232,7 +292,7 @@ def _create_engine(path: Path) -> Engine:
     return engine
 
 
-def _upgrade_to_head(engine: Engine) -> None:
+def upgrade_to_head(engine: Engine, migrations: Path = _MIGRATIONS_DIR) -> None:
     with engine.connect() as connection:
         # Take the lock before Alembic looks at the version table: the
         # loser of a race then reads the schema the winner committed and
@@ -241,10 +301,21 @@ def _upgrade_to_head(engine: Engine) -> None:
         # below is what ends it.
         connection.execute(text("SELECT 1"))
         config = AlembicConfig()
-        config.set_main_option("script_location", str(_MIGRATIONS_DIR))
+        config.set_main_option("script_location", str(migrations))
         config.attributes["connection"] = connection
         command.upgrade(config, "head")
         connection.commit()
 
 
-__all__ = ["BUSY_TIMEOUT_MS", "DATABASE_FILENAME", "open_database", "read_engine"]
+__all__ = [
+    "BUSY_TIMEOUT_MS",
+    "DATABASE_FILENAME",
+    "database_path",
+    "existing_engine",
+    "migration_failure",
+    "open_at",
+    "open_database",
+    "read_engine",
+    "upgrade_to_head",
+    "write_engine",
+]
