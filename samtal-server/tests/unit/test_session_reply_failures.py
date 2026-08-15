@@ -125,12 +125,49 @@ async def test_a_provider_call_error_from_the_tts_is_reported_as_one(
 async def test_a_provider_call_timeout_is_worded_as_a_wait(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Classification is by type now, not by class name. The taxonomy's
-    timeout is a `TimeoutError`, which is the whole reason it inherits
-    one, and the sentence says the symptom was a wait."""
+    """The taxonomy's timeout is a `TimeoutError`, which is the whole
+    reason it inherits one, and the sentence says the symptom was a
+    wait."""
     failed = await reply_with("tts", ProviderCallTimeout("elevenlabs timed out"), caplog)
     assert failed.error == "ProviderCallTimeout"
     assert "timed out" in failed.getMessage()
+
+
+class ApiTimeoutError(Exception):
+    """A name that says timeout, on a class that is not one. The shape
+    is real: `openai.APITimeoutError` is an `APIConnectionError`, and
+    `httpx.TimeoutException` inherits from neither `TimeoutError` nor
+    that."""
+
+
+class DeadlineExceeded(TimeoutError):
+    """The other way round: a wait whose name says nothing of the kind.
+    `FirstTokenTimeout` happens to be named for what it is, but nothing
+    makes that a rule."""
+
+
+async def test_the_wording_follows_the_type_and_not_the_class_name(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """What the two tests above cannot show, because both taxonomy
+    classes are named after what they are: the sentence is chosen by
+    `isinstance` and the deleted substring match would disagree with
+    it on both of these.
+
+    A vendor class named for a timeout that is not one now reads
+    "failed". Nothing regresses by it, because no provider hands the
+    pipeline an SDK exception any more: the five wrap their SDKs'
+    timeouts into `ProviderCallTimeout`, which is a `TimeoutError` by
+    inheritance rather than by spelling."""
+    named = await reply_with("tts", ApiTimeoutError("the name says timeout"), caplog)
+    assert named.error == "ApiTimeoutError"
+    assert "failed" in named.getMessage()
+    assert "timed out" not in named.getMessage()
+
+    caplog.clear()
+    typed = await reply_with("tts", DeadlineExceeded("the type says timeout"), caplog)
+    assert typed.error == "DeadlineExceeded"
+    assert "timed out" in typed.getMessage()
 
 
 async def test_a_bug_while_speaking_is_reported_rather_than_swallowed(
