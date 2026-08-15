@@ -166,8 +166,15 @@ option: exposing a new configuration key is a schema change with
 its own documentation ripple (config.example.yaml, the generated
 reference), and the issue's evidence is "no timeout", not "no
 timeout knob". A deployment that needs a nonstandard LLM timeout is
-a follow-up with its own issue; this plan bounds every LLM request
-at the kit default where today it is unbounded.
+a follow-up with its own issue. What the kit supplies is a
+per-operation transport timeout with automatic retries disabled,
+not a wall-clock request deadline (the review round's finding 8):
+a streaming response that keeps delivering may legitimately run
+longer, the way the ASR module already documents for its own
+phases, and the first-token watchdog remains the pipeline's bound
+on a stream that produces nothing. Today the LLM clients have not
+even that; this gives them the transport bound the other cloud
+providers already carry.
 
 `test_providers_llm_tools.py`'s two `_client` assignments migrate
 to the constructor seam, which is an interface-strengthening test
@@ -471,10 +478,17 @@ resolution once the amendment addressing it lands.
    end-to-end deadline; a streaming response may run longer while
    delivering. Say the kit supplies a per-operation transport
    timeout with retries disabled, not a wall-clock deadline.
+   *Resolution*: adopted. The LLM-seam decision now says exactly
+   that, names the watchdog as the bound on a silent stream, and
+   the kit decision's wording matches.
 9. **P3: the filler catch is not device-send-only as asserted.**
    Its `try` also covers resampling, encoding, and encoder
    flushing. Describe the breadth accurately and preserve it
    explicitly as out of scope.
+   *Resolution*: adopted with finding 2's amendment: the catch
+   decision now says the filler catch wraps resampling, encoding
+   and the send together, can still swallow a local bug, and is
+   deliberately left to #141.
 
 ## Milestones
 
