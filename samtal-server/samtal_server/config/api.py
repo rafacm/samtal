@@ -27,7 +27,6 @@ Nothing logs the token, a request body, or an Authorization header.
 """
 
 import hmac
-import logging
 import os
 from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
@@ -85,6 +84,7 @@ from samtal_server.config.writes import (
     wrote_secret,
 )
 from samtal_server.db import open_database
+from samtal_server.events import ServerEvents
 
 if TYPE_CHECKING:
     # For the reader, never at runtime. The pending table is a device
@@ -103,7 +103,7 @@ if TYPE_CHECKING:
     # loading. It arrives as an argument and is read through one method.
     from samtal_server.tools.mcp import McpServers
 
-logger = logging.getLogger(__name__)
+events = ServerEvents(__name__)
 
 # Where the sub-application is mounted on the server's own port. A
 # mounted application renders its internal paths (/config, not
@@ -1932,10 +1932,10 @@ class _SanitizedErrors:
             # front of it, and the path is request-controlled too. The
             # class name is the most that can be said about a failure
             # here that a request could not have written.
-            logger.error(
+            events.error(
                 "the configuration API failed to handle a request (%s)",
                 type(exc).__name__,
-                extra={"event": "api_error"},
+                event="api_error",
             )
             if started:
                 # Half a response is already on the wire, so there is
@@ -1989,10 +1989,10 @@ def _refusal(status: int) -> Callable[[Request, Exception], Any]:
             # its chain to anything that walks it. The sentence goes to
             # the caller, which is the channel that was sanitized for
             # it.
-            logger.error(
+            events.error(
                 "the configuration API met unreadable stored state (%s)",
                 type(exc).__name__,
-                extra={"event": "api_storage_error"},
+                event="api_storage_error",
             )
         return JSONResponse({"detail": str(exc)}, status_code=status)
 

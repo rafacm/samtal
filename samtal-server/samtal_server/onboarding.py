@@ -54,7 +54,6 @@ send an operator to a URL this server does not serve.
 import base64
 import hashlib
 import hmac
-import logging
 import os
 import re
 import secrets
@@ -69,8 +68,9 @@ from fastapi import APIRouter, HTTPException, Request, Response
 
 from samtal_server import ota
 from samtal_server.config.models import ONBOARDING_MOUNT_PATH, ServerConfig
+from samtal_server.events import ServerEvents
 
-logger = logging.getLogger(__name__)
+events = ServerEvents(__name__)
 
 # What the key is derived over. Versioned, so a future scheme can change
 # the derivation without a deployment silently keeping the old key.
@@ -311,32 +311,28 @@ def log_banner(server: ServerConfig) -> None:
     """
     origin = public_origin(server)
     if not server.onboarding.enabled:
-        logger.info(
+        events.info(
             "device onboarding is off: devices are configured at the server.ota_path "
             "path on %s (%s), which is not printed here, since that segment is this "
             "deployment's secret",
             origin.url,
             origin.provenance,
-            extra={
-                "event": "onboarding_banner",
-                "origin": origin.url,
-                "origin_source": origin.source,
-                "onboarding": False,
-            },
+            event="onboarding_banner",
+            origin=origin.url,
+            origin_source=origin.source,
+            onboarding=False,
         )
         return
     key = onboarding_key(server)
     url = f"{origin.url}{onboarding_path(key)}"
-    logger.info(
+    events.info(
         "device onboarding URL: %s (%s)",
         url,
         origin.provenance,
-        extra={
-            "event": "onboarding_banner",
-            "url": url,
-            "origin_source": origin.source,
-            "onboarding": True,
-        },
+        event="onboarding_banner",
+        url=url,
+        origin_source=origin.source,
+        onboarding=True,
     )
 
 
@@ -724,22 +720,21 @@ def _log_mismatch(folded: str, expected: str) -> None:
     line too, so probing cannot turn the log into a broadcast of it.
     """
     if _LOGGABLE_ATTEMPT_RE.match(folded):
-        logger.warning(
+        events.warning(
             "onboarding key %s does not match this server's key %s: check the URL "
             "typed into the device's captive portal, character by character",
             folded,
             expected,
-            extra={
-                "event": "onboarding_key_mismatch",
-                "attempted": folded,
-                "expected": expected,
-            },
+            event="onboarding_key_mismatch",
+            attempted=folded,
+            expected=expected,
         )
         return
-    logger.warning(
+    events.warning(
         "a request reached the onboarding path carrying %d characters that are not "
         "shaped like a key at all, so they are not repeated here; the URL to type is "
         "in the startup line",
         len(folded),
-        extra={"event": "onboarding_key_unshaped", "attempted_length": len(folded)},
+        event="onboarding_key_unshaped",
+        attempted_length=len(folded),
     )
