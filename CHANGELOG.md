@@ -76,6 +76,31 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   and deletion semantics with their limits, the WAL-safe way to take a
   copy, and the OpenTelemetry GenAI correspondence. **Operator-visible:**
   nothing yet, by design.
+- **The conversation store's content record, dormant** (#120): the
+  pipeline now assembles one record per completed turn and hands it to
+  an optional recorder where `replied` is emitted, so a cancelled or
+  failed reply records what its finally saw and an utterance nobody
+  transcribed records nothing. The record carries what was heard with
+  its duration and language, the joined reply and its per-agent legs
+  after a handover (each with its own token counts, because a turn's
+  totals blend agents that may run different models), every call the
+  model issued with the position it issued it at, and the turn's
+  measured numbers. Tool calls are recorded from a closed set of
+  sources (`builtin`, `device`, `mcp`, `unknown`) decided by one
+  classifier consulted before anything runs, so the record covers the
+  paths the routing hides: a malformed call flagged as one, a name
+  nobody publishes with its refusal, and a handover with its refusal or
+  with the switch it made. Two measurements are new: the elapsed of the
+  transcription a turn ran (null when the turn reused a barge-in's,
+  which was measured elsewhere for another decision), and the reply's
+  first synthesis request to its first audio bytes, taken at the
+  synthesis provider and deliberately not at the device. This is a
+  content channel beside the event tap rather than text read back off
+  the events, because tool arguments and results never rode the events
+  at all and the events are about to lose their text.
+  **Operator-visible:** nothing yet, by design: no configuration key
+  exists, nothing injects a recorder, and no event, log line or
+  timing changed.
 
 ### Changed
 
