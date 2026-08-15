@@ -19,8 +19,8 @@ re-reviewed by hand.
 
 The industry pattern, verified against the OpenTelemetry GenAI
 semantic conventions and the self-hosted LLM observability stacks
-(sources collected in the 2026-08-15 research pass, filed with issue
-#120's amendment): message content and telemetry are different data
+(sources collected in the 2026-08-15 research pass, kept in
+[../architecture/observability-surfaces.md](../architecture/observability-surfaces.md)): message content and telemetry are different data
 classes. The OTel GenAI instrumentations emit metadata attributes
 (model, provider, token counts, durations) unconditionally and gate
 content behind an explicit opt-in
@@ -32,6 +32,8 @@ their own masking hooks, deletion APIs, and access control, while
 application logs stay diagnostic. Redaction guidance across the
 sources is unanimous that source-side restriction (closed schemas,
 allowlists) is the guarantee and sink-side scrubbing at most a net.
+The needs map, the tier table, and the sources live in
+[../architecture/observability-surfaces.md](../architecture/observability-surfaces.md).
 
 Meanwhile #138 built the machinery this decision needs: one emitter
 (`samtal_server/events.py`), closed reason-token sets, pin suites over
