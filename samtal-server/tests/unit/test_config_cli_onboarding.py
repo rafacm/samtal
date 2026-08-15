@@ -113,21 +113,37 @@ def test_the_printed_url_is_the_one_the_server_answers_on(
         assert client.get(f"/x/{KEY}/").status_code == 200
 
 
-def test_the_url_equals_the_one_the_startup_banner_prints(
+def test_this_command_is_where_the_url_comes_from_now(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The two readers of one derivation: the operator who runs this
-    before the server exists, and the operator who reads the server's
-    own first log line."""
+    """The banner used to print the same URL, which is what made this
+    command a convenience. Since the PR #153 review it does not: the key
+    stands in front of the endpoint that issues device tokens and a
+    startup line is a retained record, so this command is the operator's
+    route to the URL rather than one of two.
+
+    The banner still names the origin the URL is built on, so the two
+    cannot disagree about which deployment is being talked about, and it
+    names this command."""
     path = _config_file(tmp_path, "server:\n  websocket_url: wss://voice.example/xiaozhi/v1/\n")
 
     assert cli.main(["--config", path, "ota-url"]) == 0
     printed = capsys.readouterr().out.strip()
+    assert printed.endswith(f"/x/{KEY}/")
 
     with caplog.at_level("INFO"):
         onboarding.log_banner(load_file_config(path).server)
-    banner = [record for record in caplog.records if record.__dict__.get("url")]
-    assert [record.__dict__["url"] for record in banner] == [printed]
+    (banner,) = [
+        record
+        for record in caplog.records
+        if record.__dict__.get("event") == "onboarding_banner"
+    ]
+
+    assert KEY not in caplog.text
+    assert printed not in caplog.text
+    assert banner.origin == "https://voice.example"
+    assert printed.startswith(banner.origin)
+    assert "samtal-server config ota-url" in banner.getMessage()
 
 
 def test_it_opens_no_socket_no_database_and_needs_no_token(

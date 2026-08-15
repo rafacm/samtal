@@ -19,20 +19,23 @@ portal saves what it likes, and the firmware treats a redirect on this
 request as an error rather than following it.
 
 A wrong key answers the stock 404, byte for byte what a path that was
-never served answers, and logs the attempted key next to the correct
-one so the operator sees the typo character by character. That log line
-is a deliberate, recorded trade: the key is a deployment-scoped path
-segment, not a per-device token, so the rule that tokens are never
-logged is untouched. The configured `server.ota_path` segment is not
-printed anywhere, and neither is any device token.
+never served answers, and says so in a line that quotes neither key. It
+used to quote both, the attempt beside the correct one, so that an
+operator could read a typo off the log character by character; the PR
+#153 review ended that. The correct key is the segment standing in
+front of the endpoint that issues device tokens, and repeating it
+turned every probe of the path into a request for it; the attempt is
+attacker-controlled text out of a URL, and a near miss of a real key is
+a hint at the real key. Neither the derived key nor the configured
+`server.ota_path` segment is printed anywhere now, and neither is any
+device token.
 
-The attempt itself is attacker-controlled text out of a URL, so what
-may be repeated is bounded: after case folding, one to ten characters
-of the base32 alphabet, and nothing else. That is a mistyped or
-over-typed key, which is what the line is for; anything longer or
-carrying a newline, a control character or any other byte is counted
-rather than quoted, so no request can forge a log entry or choose how
-long one is.
+What a miss reports instead is its shape: how many characters arrived,
+and whether they were the kind a person types at a key (after case
+folding, one to ten characters of the base32 alphabet) or something
+nobody was typing. The URL to check a typo against comes from
+`samtal-server config ota-url`, which prints it to the operator's own
+terminal.
 
 The other half of this module is the activation ceremony the same short
 URL leads to: the table of devices waiting to be claimed, the six-digit
@@ -82,16 +85,19 @@ KEY_LABEL = b"samtal-onboarding-key-v1"
 # short enough to type off a screen without a mistake.
 KEY_LENGTH = 8
 
-# What a mismatch may repeat back into the log, as an exact rule rather
-# than an impression: after case folding, one to ten characters, every
-# one of them in the base32 alphabet. Ten because a key mistyped with a
-# character or two too many is exactly the mistake the log line exists to
-# diagnose, and the upper bound is what keeps an attacker from choosing
-# how long a log entry is. The alphabet excludes everything a forged
-# entry needs, newlines and control characters first among them.
-LOGGABLE_ATTEMPT_LENGTH = KEY_LENGTH + 2
+# What separates a typo from a probe, as an exact rule rather than an
+# impression: after case folding, one to ten characters, every one of
+# them in the base32 alphabet. Ten because a key mistyped with a
+# character or two too many is exactly the mistake the log line exists
+# to diagnose.
+#
+# It used to decide what was repeated back into the log as well, and no
+# longer does: nothing of either key is (see `_log_mismatch`). It now
+# decides only which of the two events a miss is, which is why it lost
+# its "loggable" and neither name is referenced outside this module.
+TYPO_ATTEMPT_LENGTH = KEY_LENGTH + 2
 
-_LOGGABLE_ATTEMPT_RE = re.compile(rf"^[A-Z2-7]{{1,{LOGGABLE_ATTEMPT_LENGTH}}}$")
+_TYPO_ATTEMPT_RE = re.compile(rf"^[A-Z2-7]{{1,{TYPO_ATTEMPT_LENGTH}}}$")
 
 # The activation ceremony's parameters. Constants rather than
 # configuration: nobody has field evidence to tune them by, and a knob
@@ -301,13 +307,24 @@ def portal_url_line(server: ServerConfig, path: str) -> str:
 
 
 def log_banner(server: ServerConfig) -> None:
-    """Say the onboarding URL out loud at startup.
+    """Say where devices are configured at startup, and where to read
+    the URL to type.
 
-    With onboarding on this is the short URL, key and all: the key is a
-    deployment-scoped path segment, deliberately printed so that a typo
-    and a rotated secret both diagnose themselves. With onboarding off
-    the line names `server.ota_path` without quoting it, because that
-    segment is a credential and the logs must not carry it.
+    Not the URL itself, and this is a deliberate narrowing (the PR #153
+    review). The derived key is a path segment standing in front of the
+    token issuer, and a startup line is a retained record like every
+    other: shipped to whatever collects logs, kept as long as they are
+    kept, readable by everyone who can read them. Printing it here to
+    let a typo diagnose itself traded that away for a convenience the
+    operator already has by another route.
+
+    The route is `samtal-server config ota-url`, which derives the same
+    URL from the same file and the same secret, contacts nothing, and
+    prints it to the operator's own terminal rather than to a log. So
+    the banner names the origin, says whether the short path is on and
+    whether a key stands in front of it, and points at that command.
+    With onboarding off it names `server.ota_path` without quoting it,
+    for the reason it always did.
     """
     origin = public_origin(server)
     if not server.onboarding.enabled:
@@ -323,16 +340,22 @@ def log_banner(server: ServerConfig) -> None:
             onboarding=False,
         )
         return
-    key = onboarding_key(server)
-    url = f"{origin.url}{onboarding_path(key)}"
     events.info(
-        "device onboarding URL: %s (%s)",
-        url,
+        "device onboarding is on: devices are configured on %s (%s), at the short "
+        "path samtal-server config ota-url prints. The path is not repeated here, "
+        "since its key stands in front of the endpoint that issues device tokens",
+        origin.url,
         origin.provenance,
         event="onboarding_banner",
-        url=url,
+        origin=origin.url,
         origin_source=origin.source,
         onboarding=True,
+        # Whether anything stands in front of the short route at all.
+        # With device auth off there is no secret to derive a key from
+        # and it mounts keyless, which is a fact about the deployment
+        # rather than about the key, so it is safe to say and worth
+        # saying.
+        keyed=onboarding_key(server) is not None,
     )
 
 
@@ -699,41 +722,45 @@ def _guarded(expected: str, handler: Handler) -> Handler:
         # an ASCII letter, and the folded string is what is rendered).
         folded = str(request.path_params.get("key", "")).upper()
         if not hmac.compare_digest(folded.encode("utf-8"), expected.encode("utf-8")):
-            _log_mismatch(folded, expected)
+            _log_mismatch(folded)
             raise HTTPException(status_code=404)
         return await handler(request)
 
     return guarded
 
 
-def _log_mismatch(folded: str, expected: str) -> None:
-    """The diagnostic for a wrong key, which repeats the attempt only
-    when the attempt is something a person could have typed at a key.
+def _log_mismatch(folded: str) -> None:
+    """The diagnostic for a wrong key, which quotes neither key.
 
-    The correct key beside the attempted one is what makes a typo and a
-    rotated secret diagnose themselves, and it is the recorded trade
-    from issue #40. The attempt, though, is attacker-controlled text
-    arriving in a URL, and a raw one carries a newline into the log as a
-    forged second entry, or a megabyte of anything. So it is repeated
-    only when it matches the shape a mistyped key has; anything else is
-    counted rather than quoted, and the correct key is left out of that
-    line too, so probing cannot turn the log into a broadcast of it.
+    Both halves of what this line used to say were key material (the PR
+    #153 review). The expected one is the segment standing in front of
+    the token issuer, and repeating it turned any probe of the path into
+    a request for it. The attempted one is attacker-controlled text
+    arriving in a URL, and a near miss of a real key is itself a hint at
+    the real key, which is why the shape rule that used to decide
+    whether to quote it now only decides which of the two events this
+    is: a string a person could have typed at a key, or a string nobody
+    was typing.
+
+    What is left is what a reader can act on: how long the attempt was,
+    and which kind it was. The URL to check a typo against comes from
+    `samtal-server config ota-url`, on the operator's own terminal.
     """
-    if _LOGGABLE_ATTEMPT_RE.match(folded):
+    if _TYPO_ATTEMPT_RE.match(folded):
         events.warning(
-            "onboarding key %s does not match this server's key %s: check the URL "
-            "typed into the device's captive portal, character by character",
-            folded,
-            expected,
+            "a request reached the onboarding path carrying %d characters shaped like "
+            "a key, and not this server's; neither is repeated here. Check the URL "
+            "typed into the device's captive portal against the one "
+            "samtal-server config ota-url prints",
+            len(folded),
             event="onboarding_key_mismatch",
-            attempted=folded,
-            expected=expected,
+            attempted_length=len(folded),
         )
         return
     events.warning(
         "a request reached the onboarding path carrying %d characters that are not "
-        "shaped like a key at all, so they are not repeated here; the URL to type is "
-        "in the startup line",
+        "shaped like a key at all, so they are not repeated here; the URL to type "
+        "comes from samtal-server config ota-url",
         len(folded),
         event="onboarding_key_unshaped",
         attempted_length=len(folded),

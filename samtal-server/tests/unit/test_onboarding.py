@@ -148,20 +148,28 @@ def test_a_wrong_key_is_answered_exactly_as_a_path_that_never_existed() -> None:
 def test_a_wrong_key_says_nothing_about_the_right_one(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    """Nor about the wrong one. The line used to carry both, so an
+    operator could read a typo off it character by character; the PR
+    #153 review ended that, because repeating the correct key turned
+    every probe of this path into a request for it and a near miss is a
+    hint at the real one. What is left is the shape of what arrived."""
     client = client_for()
     with caplog.at_level(logging.WARNING):
         response = client.post("/x/2EOWIW3M/", json=SYSTEM_INFO, headers=HEADERS)
         described = client.get("/x/2EOWIW3M/")
 
-    # The log is where the operator reads the typo off, one character at
-    # a time: the attempted key beside the correct one.
-    assert "2EOWIW3M" in caplog.text
-    assert KEY in caplog.text
-    assert any(
-        record.__dict__.get("event") == "onboarding_key_mismatch" for record in caplog.records
-    )
+    ours = [r for r in caplog.records if r.name.startswith("samtal_server")]
+    text, objects = _rendered(ours)
+    assert "2EOWIW3M" not in text
+    assert KEY not in text
+    assert all("2EOWIW3M" not in json.dumps(payload) for payload in objects)
+    assert all(KEY not in json.dumps(payload) for payload in objects)
+    assert any(payload["event"] == "onboarding_key_mismatch" for payload in objects)
+    # And what is left is what a reader can act on.
+    assert objects[0]["attempted_length"] == len(KEY)
 
-    # And the response says none of it, at any status, on either method.
+    # The response says none of it either, at any status, on either
+    # method, as it always did.
     for answered in (response, described):
         assert answered.status_code == 404
         assert KEY not in answered.text
@@ -180,13 +188,21 @@ def _rendered(records: list[logging.LogRecord]) -> tuple[str, list[dict]]:
     ]
 
 
-def test_an_over_typed_key_is_still_quoted_back(caplog: pytest.LogCaptureFixture) -> None:
-    """The rule has to keep the mistake it exists for: a key typed with
-    a character too many is a typo, not an attack."""
+def test_an_over_typed_key_is_still_the_typo_kind_of_miss(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The shape rule has to keep the mistake it exists for: a key typed
+    with a character too many is a typo, not an attack. It no longer
+    decides what is quoted, since nothing is; it decides which of the
+    two events this is, which is the whole of the classification now."""
     with caplog.at_level(logging.WARNING):
         client_for().get(f"/x/{KEY}X/")
-    assert f"{KEY}X" in caplog.text
-    assert KEY in caplog.text
+    ours = [r for r in caplog.records if r.name.startswith("samtal_server")]
+    text, objects = _rendered(ours)
+    assert f"{KEY}X" not in text
+    assert KEY not in text
+    assert [payload["event"] for payload in objects] == ["onboarding_key_mismatch"]
+    assert objects[0]["attempted_length"] == len(KEY) + 1
 
 
 @pytest.mark.parametrize(
@@ -228,9 +244,9 @@ def test_an_unshaped_key_is_counted_rather_than_repeated(
 def test_the_correct_key_is_not_broadcast_at_unshaped_probes(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """The key is deliberately logged for a typo, which is a person who
-    is holding it already. A scanner is not, so its line carries the
-    length and nothing else."""
+    """Which is now true of every miss, typo or scan alike, and stays
+    asserted separately for the scan: this is the shape an attacker
+    chooses, and the one a regression would reach for first."""
     with caplog.at_level(logging.WARNING):
         client_for().get("/x/" + "A" * 500 + "/")
     text, objects = _rendered(caplog.records)

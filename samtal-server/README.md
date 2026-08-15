@@ -2225,8 +2225,13 @@ reads and derives the same key from the same device-auth secret, so it
 answers before the first start and while a board waits on a bench. On
 stderr it says where the origin came from, and an origin nobody
 configured reads as the guess it is: set `server.public_url` to name the
-deployment exactly. The running server prints the same URL at startup,
-and a GET of the endpoint repeats it.
+deployment exactly.
+
+This is the one place the URL is printed. The running server's startup
+line names the origin and points here rather than repeating the URL, and
+a GET of the endpoint repeats it only to whoever already reached it: the
+key stands in front of the endpoint that issues device tokens, and a log
+line is kept, shipped and read by everyone who can read logs.
 
 The two inputs are the file and the secret, so it runs wherever both
 are. Inside the container they already are:
