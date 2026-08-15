@@ -81,6 +81,7 @@ from samtal_server.onboarding import BUDGET_SPENT
 from samtal_server.ota import ACTIVATE_SEGMENT, OTA_PATH
 from samtal_server.providers import build_agent_providers
 from samtal_server.providers.openai_asr import OpenAiAsr
+from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
 from tests.unit.test_capture import MANIFEST, store, tone
 from tests.unit.test_device_bindings import AGENT, STAGES, booted
@@ -108,6 +109,13 @@ from tests.unit.test_ota import client_for as ota_client
 from tests.unit.test_session import config_with_agent, connect, shake_hands
 from tests.unit.test_session_events import only
 from tests.unit.test_session_filler import BrokenTts, masked_config
+from tests.unit.test_tools_mcp import config_granting as mcp_granting
+from tests.unit.test_tools_mcp import entry_data as mcp_entry_data
+from tests.unit.test_tools_mcp import running as mcp_running
+from tests.unit.test_tools_mcp import stdio_entry as mcp_entry
+from tests.unit.test_tools_mcp_reload import config_with as mcp_config
+from tests.unit.test_tools_mcp_reload import reading as mcp_reading
+from tests.unit.test_tools_mcp_reload import started as mcp_started
 from tests.unit.test_tools_memory import _corrupt
 from tests.unit.test_ws_auth import device_headers, handshake
 
@@ -239,6 +247,16 @@ def logged(caplog: pytest.LogCaptureFixture) -> str:
         for record in caplog.records
         if record.name.startswith("samtal_server")
     )
+
+
+# What the MCP test server publishes under the entry `tools`, in the
+# order it lists them, which is what the connect sentence prints. Six of
+# the seven it registers: one is dropped by the publishing rule for
+# being too long once the entry prefix is on it.
+PUBLISHED = (
+    "tools__secret_word, tools__add, tools__slow_answer, tools__always_fails, "
+    "tools__weather_today_v2, tools__inside__secret_word"
+)
 
 
 def payload_of(record: logging.LogRecord) -> dict[str, Any]:
@@ -1738,5 +1756,168 @@ async def test_asr_prompt_echo_recovered(caplog: pytest.LogCaptureFixture) -> No
             "duration_s": 1.0,
             "host": ASR_HOST,
             "retry_ms": DYNAMIC,
+        },
+    }
+
+
+# --- tools/mcp.py: the five lifecycle events --------------------------
+#
+# New surface rather than migrated surface, which makes these a
+# different kind of evidence from the forty-two above: there is no
+# "before" for them to be identical to, so what they hold still is the
+# README's table from the day it was written. The lifecycle suites next
+# door assert what each event means; these assert what each one is.
+#
+# Everything the test server publishes is pinned verbatim, tool count
+# and listing and shadowed position alike. None of it moves between
+# runs: `tests/support/mcp_stdio_server.py` is small on purpose and
+# fixed on purpose, and a tool added to it is exactly the sort of change
+# that should have to look at what this surface says.
+
+
+async def test_mcp_connected(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level("INFO"):
+        manager = await mcp_running(mcp_entry())
+        await manager.stop()
+
+    assert pinned(only(caplog, "mcp_connected"), dynamic=("duration_ms",)) == {
+        "logger": "samtal_server.tools.mcp",
+        "level": logging.INFO,
+        "template": "mcp server %s connected with %d tool(s): %s",
+        "args": ("tools", 6, PUBLISHED),
+        "sentence": f"mcp server tools connected with <n> tool(s): {_NUMBER.sub('<n>', PUBLISHED)}",
+        "fields": {
+            "event": "mcp_connected",
+            "entry": "tools",
+            "transport": "stdio",
+            # A count, never a list. The names are in the sentence.
+            "tools": 6,
+            "duration_ms": DYNAMIC,
+        },
+    }
+
+
+async def test_mcp_down(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level("INFO"):
+        manager = await mcp_running(mcp_entry(command="/nonexistent/mcp-server", args=[]))
+        await manager.stop()
+
+    assert pinned(only(caplog, "mcp_down"), dynamic=("duration_ms",)) == {
+        "logger": "samtal_server.tools.mcp",
+        "level": logging.WARNING,
+        "template": "mcp server %s is unavailable, its tools are absent: %s",
+        # The exception's type name, which is the diagnosis this
+        # sentence has always carried, beside the closed token the field
+        # carries. Never a message: this one would quote a path.
+        "args": ("tools", "FileNotFoundError"),
+        "sentence": "mcp server tools is unavailable, its tools are absent: FileNotFoundError",
+        "fields": {
+            "event": "mcp_down",
+            "entry": "tools",
+            "reason": "transport_failed",
+            "duration_ms": DYNAMIC,
+        },
+    }
+
+
+async def test_mcp_call_dropped(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager = await mcp_running(mcp_entry())
+    try:
+
+        async def refuse(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("a message from nowhere near this line")
+
+        monkeypatch.setattr(manager._session, "call_tool", refuse)
+        with caplog.at_level("INFO"), pytest.raises(RuntimeError):
+            await manager.call("tools__secret_word", {})
+    finally:
+        await manager.stop()
+
+    assert pinned(only(caplog, "mcp_call_dropped")) == {
+        "logger": "samtal_server.tools.mcp",
+        "level": logging.WARNING,
+        "template": "mcp server %s: the call to %s failed, so its answer is lost",
+        # The published name, which this server's own publishing rule
+        # made, rather than whatever the far side listed.
+        "args": ("tools", "tools__secret_word"),
+        "sentence": (
+            "mcp server tools: the call to tools__secret_word failed, so its answer is lost"
+        ),
+        "fields": {
+            "event": "mcp_call_dropped",
+            "entry": "tools",
+            "tool": "tools__secret_word",
+        },
+    }
+
+
+async def test_mcp_reload(caplog: pytest.LogCaptureFixture) -> None:
+    before = mcp_config({"tools": mcp_entry_data()}, {"assistant": ["tools"]})
+    after = mcp_config(
+        {"tools": mcp_entry_data(), "extra": mcp_entry_data()},
+        {"assistant": ["tools", "extra"]},
+    )
+    servers = await mcp_started(before)
+    try:
+        with caplog.at_level("INFO"):
+            await servers.reload(mcp_reading(after))
+    finally:
+        await servers.stop_all()
+
+    assert pinned(only(caplog, "mcp_reload"), dynamic=("duration_ms",)) == {
+        "logger": "samtal_server.tools.mcp",
+        "level": logging.INFO,
+        "template": "mcp servers reloaded: %d started, %d restarted, %d stopped, %d unchanged",
+        "args": (1, 0, 0, 1),
+        "sentence": (
+            "mcp servers reloaded: <n> started, <n> restarted, <n> stopped, <n> unchanged"
+        ),
+        "fields": {
+            "event": "mcp_reload",
+            "outcome": "applied",
+            "started": 1,
+            "restarted": 0,
+            "stopped": 0,
+            "unchanged": 1,
+            "duration_ms": DYNAMIC,
+        },
+    }
+
+
+async def test_mcp_tool_shadowed(caplog: pytest.LogCaptureFixture) -> None:
+    servers = McpServers.build(
+        mcp_granting(
+            {"home": mcp_entry_data(), "home__inside": mcp_entry_data()},
+            {"assistant": ["home", "home__inside"]},
+        )
+    )
+    try:
+        with caplog.at_level("INFO"):
+            await servers.start_all()
+            servers.tools_for_agent("assistant")
+    finally:
+        await servers.stop_all()
+
+    assert pinned(only(caplog, "mcp_tool_shadowed")) == {
+        "logger": "samtal_server.tools.mcp",
+        "level": logging.WARNING,
+        "template": (
+            "mcp server %s: dropping published tool %d, its name is inside the "
+            "namespace of the entry %s, which owns it"
+        ),
+        # No tool name among the arguments, which is what the position
+        # is there instead of.
+        "args": ("home", 6, "home__inside"),
+        "sentence": (
+            "mcp server home: dropping published tool <n>, its name is inside the "
+            "namespace of the entry home__inside, which owns it"
+        ),
+        "fields": {
+            "event": "mcp_tool_shadowed",
+            "entry": "home",
+            "position": 6,
+            "owner": "home__inside",
         },
     }

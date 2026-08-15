@@ -31,6 +31,13 @@ SHIPPED_INSTRUCTIONS = (
 # between them.
 SHIPPED_ENV = "SAMTAL_TEST_SHIPPED"
 
+# And one more tool under a name the entry's `env` chooses, which is how
+# a test plants a name a real third-party server is free to publish and
+# this project would never type into a fixture: a credential somebody
+# pasted where a tool name goes. Absent unless the variable is set, so
+# every other test sees the fixed tool set above.
+SHADOWED_TOOL_ENV = "SAMTAL_TEST_SHADOWED_TOOL"
+
 # One published prompt per shape the client has a rule about: a single
 # message, several messages, and a template that cannot be rendered
 # without an argument.
@@ -95,6 +102,10 @@ server.add_tool(_overlong, name="b" * 60, description="A name only just short en
 server.add_tool(
     _namespaced, name="inside__secret_word", description="A name holding the separator."
 )
+
+_chosen = os.environ.get(SHADOWED_TOOL_ENV)
+if _chosen:
+    server.add_tool(_namespaced, name=_chosen, description="A name the caller chose.")
 
 
 @server.prompt()

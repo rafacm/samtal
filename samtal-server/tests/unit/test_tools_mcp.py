@@ -15,14 +15,21 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
+from mcp import ClientSession
 
+from samtal_server import logs
 from samtal_server.config import Config, McpServerConfig
+from samtal_server.logs import _STANDARD_ATTRIBUTES
 from samtal_server.runtime.prompt import Guidance
 from samtal_server.tools import names
 from samtal_server.tools.mcp import (
+    CALL_FAILED,
     CONNECTED,
+    DISCOVERY_FAILED,
     DOWN,
     DROPPED_AFTER_FAILED_CALL,
+    STOPPED,
+    TRANSPORT_FAILED,
     UNUSED,
     McpConfigError,
     McpServerDown,
@@ -30,8 +37,14 @@ from samtal_server.tools.mcp import (
     McpServers,
     McpToolNotGranted,
 )
+from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
+
+# A secret shaped like something an LLM API would accept as a tool name,
+# for the sentinel below: nothing but letters and digits, so the
+# publishing rule's sanitizing leaves it exactly as it is.
+CREDENTIAL = "AKIAIOSFODNN7EXAMPLE"
 
 # What this module logs under, which is what an operator reads.
 MANAGER_LOGGER = "samtal_server.tools.mcp"
@@ -967,3 +980,233 @@ async def test_guidance_is_carried_verbatim_through_the_slice() -> None:
     servers = McpServers.build(config)
 
     assert servers.guidance_for_agent("house")[0].text == written
+
+
+# The lifecycle, as events
+#
+# The five structured events this subsystem emits (#138), driven through
+# a real manager against the server this file already spawns. They are a
+# compatibility surface from here on: the names, the fields and the
+# closed token sets are in the README's event table, and what these
+# assert is that the table is true.
+#
+# The three helpers are shared with the HTTP and reload suites, which
+# import them, so "what one of these events carries" is read one way in
+# all three.
+
+
+def emitted(caplog: pytest.LogCaptureFixture, name: str) -> list[logging.LogRecord]:
+    """Every record of one event, in the order it was emitted."""
+    return [record for record in caplog.records if getattr(record, "event", None) == name]
+
+
+def one_event(caplog: pytest.LogCaptureFixture, name: str) -> logging.LogRecord:
+    matching = emitted(caplog, name)
+    assert len(matching) == 1, f"expected one {name} record, got {len(matching)}"
+    return matching[0]
+
+
+def fields_of(record: logging.LogRecord) -> dict[str, object]:
+    """The structured half of a record: exactly the attributes the JSON
+    formatter writes as top-level keys, read through `logs.py`'s own
+    standard-attribute set rather than through a list written here, so a
+    field these tests do not know about is a failure rather than a
+    silence."""
+    return {
+        key: value for key, value in vars(record).items() if key not in _STANDARD_ATTRIBUTES
+    }
+
+
+async def test_a_connected_server_says_so_with_a_count_of_its_tools(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
+        manager = await running(stdio_entry())
+        published = len(manager.tools())
+        await manager.stop()
+
+    connected = one_event(caplog, "mcp_connected")
+    assert connected.name == MANAGER_LOGGER
+    assert connected.levelno == logging.INFO
+    # A count, never a list: the names are in the sentence, where an
+    # operator reads them, and a field a collector groups by has to be a
+    # number.
+    fields = fields_of(connected)
+    assert isinstance(fields.pop("duration_ms"), int)
+    assert fields == {
+        "event": "mcp_connected",
+        "entry": "tools",
+        "transport": "stdio",
+        "tools": published,
+    }
+    assert published > 0
+
+
+async def test_a_server_that_will_not_spawn_is_down_for_the_transport(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
+        manager = await running(stdio_entry(command="/nonexistent/mcp-server", args=[]))
+        await manager.stop()
+
+    down = one_event(caplog, "mcp_down")
+    assert down.levelno == logging.WARNING
+    fields = fields_of(down)
+    assert isinstance(fields.pop("duration_ms"), int)
+    assert fields == {"event": "mcp_down", "entry": "tools", "reason": TRANSPORT_FAILED}
+    # And a connection that never happened is not reported as one.
+    assert emitted(caplog, "mcp_connected") == []
+
+
+async def test_a_listing_that_will_not_arrive_is_down_for_the_discovery(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The third phase of the connect envelope, and the reason the phase
+    is tracked at all: the transport came up and the handshake was
+    answered, so calling this a transport failure would send an operator
+    to look at a box that is running."""
+
+    async def refuse(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("a message from nowhere near this token")
+
+    monkeypatch.setattr(ClientSession, "list_tools", refuse)
+
+    with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
+        manager = await running(stdio_entry())
+        await manager.stop()
+
+    assert not manager.up
+    assert fields_of(one_event(caplog, "mcp_down"))["reason"] == DISCOVERY_FAILED
+
+
+async def test_a_server_stopped_on_purpose_is_down_at_info_with_no_duration(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A shutdown and a reload both come through here, and an operator
+    who asked for one is not being told about a problem."""
+    with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
+        manager = await running(stdio_entry())
+        assert manager.up
+        await manager.stop()
+
+    down = one_event(caplog, "mcp_down")
+    assert down.levelno == logging.INFO
+    # No duration: what the field means on every other `mcp_down` is how
+    # long the connect ran before it failed, and how long a working
+    # connection lasted is a different number under the same name.
+    assert fields_of(down) == {"event": "mcp_down", "entry": "tools", "reason": STOPPED}
+
+
+async def test_a_failed_call_drops_the_call_and_then_the_connection(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The pairing is contract rather than accident. One failed call is
+    two stories: the tool's, which a conversation's reader wants, and
+    the connection's, which belongs in the same bucket as a connect
+    failure."""
+    manager = await running(stdio_entry())
+    try:
+
+        async def refuse(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("a message from nowhere near this token")
+
+        monkeypatch.setattr(manager._session, "call_tool", refuse)
+        with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
+            with pytest.raises(RuntimeError):
+                await manager.call("tools__secret_word", {})
+
+        dropped = one_event(caplog, "mcp_call_dropped")
+        down = one_event(caplog, "mcp_down")
+        # The call's story first and the connection's second, which is
+        # the order they happened in.
+        assert caplog.records.index(dropped) < caplog.records.index(down)
+        assert dropped.levelno == logging.WARNING
+        assert down.levelno == logging.WARNING
+        # The published name, which is the one the model was given and
+        # the one this server's own publishing rule made.
+        assert fields_of(dropped) == {
+            "event": "mcp_call_dropped",
+            "entry": "tools",
+            "tool": "tools__secret_word",
+        }
+        assert fields_of(down) == {
+            "event": "mcp_down",
+            "entry": "tools",
+            "reason": CALL_FAILED,
+        }
+    finally:
+        await manager.stop()
+
+
+async def test_a_shadowed_tool_is_reported_by_position_and_owner(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """No tool name, in the sentence or in the fields: a shadowed tool
+    never reached the model-facing list, and half of its name is
+    whatever the far side called it."""
+    config = config_granting(
+        {"home": entry_data(), "home__inside": entry_data()},
+        {"assistant": ["home", "home__inside"]},
+    )
+    servers = McpServers.build(config)
+    try:
+        with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
+            await servers.start_all()
+            servers.tools_for_agent("assistant")
+
+        shadowed = one_event(caplog, "mcp_tool_shadowed")
+        assert shadowed.levelno == logging.WARNING
+        fields = fields_of(shadowed)
+        assert isinstance(fields.pop("position"), int)
+        assert fields == {
+            "event": "mcp_tool_shadowed",
+            "entry": "home",
+            "owner": "home__inside",
+        }
+    finally:
+        await servers.stop_all()
+
+
+async def test_a_credential_shaped_shadowed_name_reaches_nothing_at_all(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The reason the field is a position. Sanitizing a published name
+    only replaces the characters an LLM API refuses, so an alphanumeric
+    secret pasted into a tool name survives it whole, and this line is
+    the one that would otherwise carry a name nothing published."""
+    servers = McpServers.build(
+        config_granting(
+            {
+                "home": entry_data(env={SHADOWED_TOOL_ENV: f"inside__{CREDENTIAL}"}),
+                "home__inside": entry_data(),
+            },
+            {"assistant": ["home", "home__inside"]},
+        )
+    )
+    try:
+        with caplog.at_level(logging.DEBUG):
+            await servers.start_all()
+            offered = [tool.name for tool in servers.tools_for_agent("assistant")]
+
+        # The planted name really was published and really was shadowed,
+        # or this test would be passing by testing nothing.
+        assert f"home__inside__{CREDENTIAL}" not in offered
+        assert emitted(caplog, "mcp_tool_shadowed")
+
+        # Every record rendered the way the container renders it, so a
+        # field is searched as well as a sentence, and then every record
+        # holding the planted name asked what it was.
+        carrying = [
+            getattr(record, "event", None)
+            for record in caplog.records
+            if CREDENTIAL in logs.JsonFormatter().format(record)
+        ]
+        # One line, and it is the connect listing, which prints the
+        # names an entry published because they are what the model was
+        # given and what the status surface answers with. That is the
+        # rule this module's docstring states, and it is exactly the
+        # rule the shadow drop is an exception to: this name was taken
+        # away from the model, so the line saying so may not carry it.
+        assert carrying == ["mcp_connected"]
+    finally:
+        await servers.stop_all()
