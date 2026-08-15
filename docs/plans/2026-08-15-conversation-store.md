@@ -418,10 +418,22 @@ and migration is maintenance of what exists, not recording. A
 missing file is never created on that path, which keeps acceptance
 criterion 1 exactly true (no `conversations.db` is created), and
 the disabled-boot-against-a-prior-revision test pins it. The store
-itself starts one daemon writer thread and is stopped in the
-lifespan's `finally` (`app.py:49-54`): stop accepts no new records,
-drains what is queued under a bound, commits, joins the thread and
-disposes the engine.
+itself owns one daemon writer thread whose lifecycle is the
+lifespan's, not `create_app`'s: `create_app` builds the store cold
+(engine open, thread not started), the lifespan starts the thread
+with the start inside the guarded region so a startup failure in
+anything after it (`app.py:29-54` runs filler synthesis and MCP
+connects before its `try` today) still reaches the stop, and the
+`finally` stops it: no new records accepted, the queue drained
+under a bound, a final commit, the thread joined with a timeout
+above the database's busy timeout so a wedged commit cannot hang
+shutdown past its drain budget, and the engine disposed. `stop()`
+is idempotent (a second call returns having nothing to do), so
+tests that build an app without entering the lifespan leak
+nothing (the thread never started) and teardown paths may call it
+freely. The lifecycle tests: a startup failure after the store
+started still stops it, shutdown under a wedged writer returns
+within its bound, and a double stop is a no-op.
 
 The queue is unbounded and the bound lives on the droppable class:
 producers only ever `put_nowait`, so the session loop never blocks
@@ -1154,6 +1166,11 @@ carries its resolution once the amendment addressing it lands.
     lifespan can leak the thread. Start inside a guarded region,
     make stop idempotent and time-bounded, and test startup
     failure, wedged shutdown, and repeated cleanup.
+    *Resolution*: adopted. `create_app` builds the store cold; the
+    thread starts inside the lifespan's guarded region and stops
+    in its `finally`; `stop()` is idempotent and joins with a
+    timeout above the busy timeout; the three lifecycle tests are
+    named.
 17. **P2: `conversations_disabled` violates disabled-mode
     compatibility.** The acceptance criteria require absent or
     disabled behavior to remain byte-for-byte unchanged; a new
