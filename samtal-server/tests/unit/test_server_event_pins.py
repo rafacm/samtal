@@ -109,6 +109,7 @@ from tests.unit.test_ota import client_for as ota_client
 from tests.unit.test_session import config_with_agent, connect, shake_hands
 from tests.unit.test_session_events import only
 from tests.unit.test_session_filler import BrokenTts, masked_config
+from tests.unit.test_tools_mcp import SHADOWED_POSITION
 from tests.unit.test_tools_mcp import config_granting as mcp_granting
 from tests.unit.test_tools_mcp import entry_data as mcp_entry_data
 from tests.unit.test_tools_mcp import running as mcp_running
@@ -1908,8 +1909,10 @@ async def test_mcp_tool_shadowed(caplog: pytest.LogCaptureFixture) -> None:
             "namespace of the entry %s, which owns it"
         ),
         # No tool name among the arguments, which is what the position
-        # is there instead of.
-        "args": ("home", 6, "home__inside"),
+        # is there instead of. Seven rather than six: it is where the
+        # far side listed the tool, and the sixth of its listing never
+        # published.
+        "args": ("home", SHADOWED_POSITION, "home__inside"),
         "sentence": (
             "mcp server home: dropping published tool <n>, its name is inside the "
             "namespace of the entry home__inside, which owns it"
@@ -1917,7 +1920,7 @@ async def test_mcp_tool_shadowed(caplog: pytest.LogCaptureFixture) -> None:
         "fields": {
             "event": "mcp_tool_shadowed",
             "entry": "home",
-            "position": 6,
+            "position": SHADOWED_POSITION,
             "owner": "home__inside",
         },
     }

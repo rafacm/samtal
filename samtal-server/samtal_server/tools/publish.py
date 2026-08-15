@@ -27,7 +27,7 @@ said.
 
 import logging
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from samtal_server.providers import ToolDef
@@ -44,12 +44,30 @@ class PublishedTools:
     # Published name back to the name the far side listed, which is what
     # a call has to carry.
     originals: dict[str, str]
+    # And published name back to where the far side listed it, counted
+    # from one.
+    #
+    # Kept because a line about one tool that may not repeat that tool's
+    # name needs some way to say which one it means, and the position is
+    # the only identifier in the whole exchange that this side owns: it
+    # is a number this code counted, it cannot carry anything a far side
+    # chose, and it is already the vocabulary the drops below are
+    # reported in. It has to be recorded here rather than recovered
+    # later, because everything downstream sees the published list,
+    # which is this one with the drops taken out: counting that would
+    # answer with a position no listing ever had.
+    positions: dict[str, int] = field(default_factory=dict)
 
     def knows(self, name: str) -> bool:
         return name in self.originals
 
     def original_for(self, name: str) -> str | None:
         return self.originals.get(name)
+
+    def position_of(self, name: str) -> int | None:
+        """Where the far side listed this published tool, or None for a
+        name this publication does not know."""
+        return self.positions.get(name)
 
 
 def publish(
@@ -64,6 +82,7 @@ def publish(
     outside."""
     tools: list[ToolDef] = []
     originals: dict[str, str] = {}
+    positions: dict[str, int] = {}
     for position, (original, description, input_schema) in enumerate(listed, start=1):
         sanitized = names.sanitize(original)
         published = names.qualified(prefix, sanitized) if prefix else sanitized
@@ -102,6 +121,7 @@ def publish(
             )
             continue
         originals[published] = original
+        positions[published] = position
         tools.append(
             ToolDef(
                 name=published,
@@ -109,4 +129,4 @@ def publish(
                 input_schema=input_schema if isinstance(input_schema, dict) else {},
             )
         )
-    return PublishedTools(tools=tools, originals=originals)
+    return PublishedTools(tools=tools, originals=originals, positions=positions)
