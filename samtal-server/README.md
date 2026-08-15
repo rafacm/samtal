@@ -1753,9 +1753,9 @@ and `device`, plus its own:
 | `tool_call`        | a tool returns                  | `agent`, `tool`, `duration_ms`, `is_error` |
 | `mcp_connected`    | an MCP entry's connect finishes and its tools are published (no session or device: one entry serves every conversation, and the rest of this block is the same) | `entry`, `transport` (`stdio` or `streamable_http`), `tools` (a count, never a list), `duration_ms` |
 | `mcp_down`         | an MCP entry fails to come up, or its connection is given up | `entry`, `reason` (`transport_failed`, `initialize_failed`, `discovery_failed`, `connect_timeout`, `call_failed`, `stopped`), plus `duration_ms` on the four that failed on the way up. `stopped` is the intentional one (a shutdown or a reload) and the only one at INFO |
-| `mcp_call_dropped` | a tool call failed and the connection was dropped because of it, always beside an `mcp_down` with `call_failed` | `entry`, `tool` (the published name) |
-| `mcp_reload`       | a reload of the MCP servers finishes, whether or not the caller is still connected | `outcome` (`applied` or `refused`); applied carries `started`, `restarted`, `stopped`, `unchanged` (counts) and `duration_ms`; refused carries `reason` (`in_progress`, `database_busy`, `unreadable`, `invalid`, `unexpected`) |
-| `mcp_tool_shadowed` | a published tool is dropped because a more specific entry owns its name | `entry`, `position` (in the far side's listing), `owner`. Deliberately no tool name: it is half the far side's bytes and the model was never offered it |
+| `mcp_call_dropped` | a tool call failed and the connection was dropped because of it, always beside an `mcp_down` with `call_failed` | `entry`, `position` (the tool's place in the far side's listing), `error` (the failure's class name) |
+| `mcp_reload`       | a reload of the MCP servers finishes, whether or not the caller is still connected | `outcome` (`applied` or `refused`); applied carries `started`, `restarted`, `stopped`, `unchanged` (counts) and `duration_ms`, measured from when the request was accepted so it covers the re-read as well as the apply; refused carries `reason` (`in_progress`, `database_busy`, `unreadable`, `invalid`, `unexpected`) |
+| `mcp_tool_shadowed` | a published tool is dropped because a more specific entry owns its name | `entry`, `position` (the tool's place in the far side's listing), `owner` |
 | `session_limit`    | the duration cap fires          | `duration_s`                       |
 | `session_idle`     | the idle timeout hangs up on a realtime session | `idle_s`, `duration_s`     |
 | `session_closed`   | a conversation ends             | `duration_s`                       |
@@ -1764,6 +1764,15 @@ and `device`, plus its own:
 | `drain_started`    | a shutdown begins draining      | `sessions`, `timeout_s`            |
 | `drain_finished`   | every reply finished speaking   | `sessions`                         |
 | `drain_incomplete` | a reply was cut, or a session hung | `cut_mid_reply`, `unfinished`   |
+
+No MCP event names a tool, and none of them can. Half of a published
+tool name is whatever the far side called it, sanitizing replaces only
+the characters both LLM APIs refuse, and an alphanumeric credential goes
+through that untouched, so a server handed one of your own could put it
+in the logs you keep by listing a tool under it. Every line about a
+single tool therefore says which one by its position in that server's
+listing. `samtal-server config status` prints the names themselves, to a
+terminal, when you ask it.
 
 Retained JSON logs are the conversation store until v3 brings a real one:
 filter on `event` in `heard`, `replied`, `agent_said` and group by
