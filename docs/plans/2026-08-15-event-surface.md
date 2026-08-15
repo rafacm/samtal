@@ -183,9 +183,16 @@ its emitter on its existing module logger name, so the `logger`
 field of every retained record is unchanged, and every existing
 event name and field moves byte-identically; the diff at each site
 is mechanical (`logger.info(msg, extra={...})` becomes
-`events.info(msg, event=..., ...)`). `ServerEvents` carries the
-same tap list (`attach`/`detach`) so #66/#67 exporters can consume
-server events later; nothing attaches to it in this issue.
+`events.info(msg, event=..., ...)`). Server-scope consumers need one attachment point, not a hunt
+through module privates (the review round's finding 8): every
+`ServerEvents` registers itself with a module-level hub in
+`events.py` at construction, and `attach_server_tap(tap)` /
+`detach_server_tap(tap)` on the hub reach every emitter, including
+ones constructed after the attach (the hub holds the tap set;
+emitters read it at emit time rather than copying it). Nothing
+attaches in this issue; the hub, its lifecycle, and a contract
+case (attach, emit from an emitter created later, detach) land so
+#66/#67 attach without touching emitters.
 
 The migrated sites are every structured-event `extra={` in
 production code: ota.py, onboarding.py, capture.py, ws.py, app.py,
@@ -269,20 +276,33 @@ shape but the pipeline is otherwise untouched (#141's territory).
 
 ### Three milestones, three PRs, stacked
 
-1. **The emitter moves and the tap exists.** `events.py` lands
-   with `EventTap`, `LogTap`, `CaptureTap`, and the moved
-   `SessionEvents`; pipeline.py, device/session.py, and
-   device/boundary.py move their imports; emit sites take the new
-   shape; `device/events.py` is deleted; the contract test lands.
-   Accept: every existing event-assertion test passes unmodified;
-   `grep -rn "device.events" samtal_server` is empty.
-2. **The server scope emits through it.** `ServerEvents` plus the
-   mechanical migration of every hand-built structured `extra=`
-   site; `_echo_event` dissolves. Accept: no hand-built
-   `extra={"event"` remains in production code; every migrated
-   event byte-identical (existing tests for those events pass
-   unmodified; where no test pinned a site, the implementation doc
-   shows before/after records for one example per subsystem).
+1. **The emitter moves and the tap exists.** The milestone's FIRST
+   commit is the pin suite (the review round's finding 10): a
+   characterization module driving every structured session emit
+   path and pinning `record.name`, `levelno`, `getMessage()`, and
+   the exact nonstandard field key set and values (dynamic
+   identifiers and durations normalized), committed green against
+   the unrefactored code and unchanged thereafter. Then
+   `events.py` lands with `Emission`, `EventTap`, `LogTap`,
+   `CaptureTap`, the server hub, and the moved `SessionEvents`;
+   pipeline.py (17 sites), device/session.py (8 sites, its private
+   `_event` helper deleted), device/boundary.py, and
+   `test_boundary_contract.py`'s import move (finding 9: 26
+   production sites total, one test import); `device/events.py` is
+   deleted; the contract test lands. Accept: the pin suite and
+   every existing event-assertion test pass unmodified;
+   `grep -rn "device.events" samtal_server tests` is empty.
+2. **The server scope emits through it.** The pin suite first
+   extends to every structured server emit path (same fields, same
+   normalization, green pre-migration); then `ServerEvents` plus
+   the mechanical migration of every hand-built structured
+   `extra=` site; `_echo_event` dissolves. Accept: the extended
+   pin suite passes unmodified through the migration; the AST
+   guard (finding 11) passes: a test walking the production tree's
+   AST rejects any `logging` call carrying an `extra=` keyword
+   outside `events.py` itself (deliberate exceptions, if any
+   survive, enumerated in the test with reasons), and asserts
+   `_echo_event` and `device.events` appear nowhere.
 3. **The MCP lifecycle speaks.** The five events at their call
    sites, the README table rows, the sanitization extension, the
    CHANGELOG entry for the whole issue. Accept: each event covered
@@ -321,15 +341,17 @@ docs/plans/2026-08-15-event-surface-implementation.md
 
 - Per milestone: `uv run ruff check .`, `uv run pytest tests/unit
   -q`, `uv run pytest tests/integration -q` from `samtal-server/`.
-- Milestone 1: the event-assertion suites (`test_session_events.py`,
-  `test_session_filler.py`, `test_session_barge_in.py`,
-  `test_capture_session.py`, and every other test asserting on
-  `caplog` records from the session channel) pass with no diff;
+- Milestone 1: the pin suite, committed green before the reshape
+  and unchanged after it, plus the event-assertion suites
+  (`test_session_events.py`, `test_session_filler.py`,
+  `test_session_barge_in.py`, `test_capture_session.py`, and every
+  other test asserting on `caplog` records from the session
+  channel) pass with no diff;
   `grep -rn "from samtal_server.device.events" samtal_server tests`
   empty.
-- Milestone 2: `grep -rn 'extra={"event"' samtal_server` empty
-  (production code); the per-subsystem before/after record pairs in
-  the implementation doc.
+- Milestone 2: the extended pin suite unchanged and green; the AST
+  guard test green (no production logging call carries `extra=`
+  outside `events.py`; `_echo_event` and `device.events` absent).
 - Milestone 3: each lifecycle event asserted through a real manager
   run; the sentinel sanitization test; the README table rows match
   the emitted fields exactly.
@@ -446,11 +468,17 @@ resolution once the amendment addressing it lands.
    every module's private emitter. Define a shared hub (or a
    common injected tap set) with an attachment lifecycle covering
    emitters constructed before and after a consumer attaches.
+   *Resolution*: adopted. A module-level hub in `events.py` holds
+   the server tap set; emitters register at construction and read
+   the set at emit time, so attach order does not matter; the
+   contract test covers the created-later case.
 9. **P2: the migration inventory is stale.** `device/session.py`
    has eight `extra=self._event(...)` sites (a private `_event`
    helper), so milestone 1 reshapes 26 sites, not 19; and
    `test_boundary_contract.py:40` imports the moving module. Count
    26, remove the helper, and add the test file to milestone 1.
+   *Resolution*: adopted. Milestone 1 counts 17+8+1 sites, deletes
+   the `_event` helper, and carries `test_boundary_contract.py`.
 10. **P2: existing tests do not prove the claimed byte-compatible
     surface.** The suites pin sentences for two events, loggers
     for six, and selected fields without exact key sets or levels.
@@ -458,12 +486,18 @@ resolution once the amendment addressing it lands.
     `record.name`, `levelno`, `getMessage()`, and the exact
     nonstandard field set per structured emit path (dynamic values
     normalized), kept unchanged through the reshape.
+    *Resolution*: adopted. The pin suite is milestone 1's first
+    commit for the session scope and milestone 2's first for the
+    server scope, green pre-refactor and unchanged after.
 11. **P2: the milestone-2 grep cannot detect most missed
     migrations.** Multiline dicts, `extra={**record, ...}`, and
     quoting variants all evade it. Add an AST-based test rejecting
     production logging calls with an `extra=` keyword, deliberate
     exceptions enumerated, plus absence assertions for
     `_echo_event` and `device.events`.
+    *Resolution*: adopted. Milestone 2's acceptance replaces the
+    grep with the AST guard test, exceptions enumerated in the
+    test with reasons.
 
 ## Milestones
 
