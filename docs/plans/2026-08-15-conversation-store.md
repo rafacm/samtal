@@ -592,6 +592,22 @@ the CLI already speaks. Purging does not touch capture files, and
 says so in its help text; the session id is the correlation key for
 whoever needs to remove the matching triplet.
 
+Deletion is physical at the database layer, not only query-level,
+because a right-to-delete honored in the query planner and broken
+in the file bytes is not honored: the conversations write engine
+sets `PRAGMA secure_delete=ON` (deleted content is overwritten
+with zeros instead of lingering in freelist pages; cheap for this
+append-mostly profile), and purge and retention finish with
+`PRAGMA wal_checkpoint(TRUNCATE)` so deleted frames do not survive
+in the write-ahead log. The limits are stated instead of implied:
+a checkpoint blocked by a concurrent long reader truncates on the
+next quiet moment rather than failing the purge; and copies that
+already left the file (backups, filesystem snapshots) are the
+operator's to manage, which the documentation says next to the
+backup procedure. The sentinel test plants a credential-shaped
+utterance, purges its session, and asserts the sentinel absent
+from the bytes of the database and its sidecar files.
+
 API delete endpoints are deliberately not in this issue: deletion
 over HTTP arrives with the admin UI's controls, where it will reuse
 the same deletion helper pruning and purge share. Nothing here
@@ -917,6 +933,12 @@ carries its resolution once the amendment addressing it lands.
    physical; for physical, specify `secure_delete`, checkpoint and
    truncation behavior, and sentinel checks over the database and
    sidecar files.
+   *Resolution*: adopted. Deletion is physical at the database
+   layer: `secure_delete=ON` on the conversations write engine,
+   `wal_checkpoint(TRUNCATE)` after purge and retention, the
+   blocked-checkpoint and out-of-file-copy limits stated beside
+   the backup procedure, and the sentinel-after-purge test over
+   the database and sidecar bytes named in milestone 1.
 8. **P1: the cursor DDL does not guarantee monotonic, never-reused
    identifiers.** A plain `INTEGER PRIMARY KEY` reuses the deleted
    maximum rowid, especially after retention. Require SQLite
