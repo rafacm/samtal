@@ -293,6 +293,16 @@ from a single-producer claim that is not true. All timestamps are UTC ISO-8601 t
 integer milliseconds aligned with the capture's `t_ms` (both derive
 from the session loop clock reading taken at session open).
 
+Every cursor-bearing table (`sessions`, `turns`, `events`) is
+created with SQLite's `AUTOINCREMENT` (SQLAlchemy's
+`sqlite_autoincrement=True` table option), because a plain
+`INTEGER PRIMARY KEY` reuses the deleted maximum rowid, and
+retention deletes from exactly the end a cursor points past: a
+reused id would hand a paginating or reconciling client someone
+else's row under a cursor it already consumed. The unit test
+deletes the current maximum, reopens the database, inserts, and
+asserts the new id exceeds every id ever issued.
+
 - `sessions`: `id` (integer autoincrement primary key: the list
   cursor), `session` (text, unique: the uuid hex, the join key and
   the correlation key to capture files), `device` (MAC), `client`,
@@ -944,6 +954,10 @@ carries its resolution once the amendment addressing it lands.
    maximum rowid, especially after retention. Require SQLite
    `AUTOINCREMENT` (the SQLAlchemy table option) and test
    delete-maximum, reopen, insert.
+   *Resolution*: adopted. The schema section requires
+   `sqlite_autoincrement=True` on the three cursor tables, states
+   why retention makes reuse a live hazard rather than a
+   theoretical one, and names the delete-maximum test.
 9. **P1: the proposed read mode contradicts the repository's WAL
    implementation.** `db/__init__.py` uses URI `mode=rw` because a
    WAL reader may create or extend `-shm`; `mode=ro` cannot serve
