@@ -172,7 +172,7 @@ carries the per-leg counts, and the per-round, per-model truth is the
 | `language` | `TEXT` | yes | The language the transcript was recognized as. Neither a measured number nor conversation text, so it survives both switches. |
 | `language_confidence` | `FLOAT` | yes | How sure the recognizer was of that language. Null under metrics-off. |
 | `reply` | `TEXT` | yes | What the assistant said, the legs joined. Null under text-off, and null when the reply spoke nothing. |
-| `legs` | `JSON` | yes | One entry per agent that spoke this turn, `{agent, text, input_tokens, output_tokens}`, present only when a handover split the reply. The text half is null under text-off and the token halves under metrics-off, because a turn's totals blend agents that may use different models. |
+| `legs` | `JSON` | yes | One entry per agent that took part in this turn, `{agent, text, input_tokens, output_tokens}`, present only when a handover split the reply. The text half is null under text-off and the token halves under metrics-off, because a turn's totals blend agents that may use different models. |
 | `asr_ms` | `INTEGER` | yes | Transcription elapsed, in milliseconds. Null where no elapsed was measured this turn, and under metrics-off. |
 | `first_token_ms` | `INTEGER` | yes | Request to first token of the reply, in milliseconds. Null under metrics-off. |
 | `llm_ms` | `INTEGER` | yes | The reply's LLM round durations summed, in milliseconds. Null under metrics-off. |

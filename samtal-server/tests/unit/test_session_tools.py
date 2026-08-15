@@ -118,6 +118,7 @@ def session_for(
     fillers: dict[str, Any] | None = None,
     websocket: Any = None,
     mcp_servers: McpServers | None = None,
+    conversations: Any = None,
 ) -> DeviceSession:
     """A device session with a real bespoke runtime behind it, built the
     way `run` builds one, with the named agents' LLMs replaced by
@@ -134,7 +135,9 @@ def session_for(
             tts=providers[agent].tts,
             vad=providers[agent].vad,
         )
-    return device_session(config, mac, providers, memory, fillers, websocket, mcp_servers)
+    return device_session(
+        config, mac, providers, memory, fillers, websocket, mcp_servers, conversations
+    )
 
 
 async def run_reply(session: DeviceSession, said: str) -> list[str]:

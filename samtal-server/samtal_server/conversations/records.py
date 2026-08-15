@@ -59,7 +59,10 @@ class TurnLeg:
     keeps the attribution honest without a join.
     """
 
-    agent: str
+    # Nullable for the same reason the turn's own agent is: a session
+    # that has not activated one has none to name, and naming it with an
+    # empty string would put a lie in a row.
+    agent: str | None
     text: str | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None

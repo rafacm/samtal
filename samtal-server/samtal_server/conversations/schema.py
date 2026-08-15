@@ -304,7 +304,7 @@ turns = Table(
         JSON_OR_NULL,
         nullable=True,
         comment=(
-            "One entry per agent that spoke this turn, `{agent, text, "
+            "One entry per agent that took part in this turn, `{agent, text, "
             "input_tokens, output_tokens}`, present only when a handover split "
             "the reply. The text half is null under text-off and the token "
             "halves under metrics-off, because a turn's totals blend agents "
