@@ -18,8 +18,14 @@ from collections.abc import AsyncIterator
 import httpx
 
 from samtal_server.config.models import ProviderConfig
-from samtal_server.providers.base import ProviderError, TtsProvider
-from samtal_server.providers.kit import DEFAULT_TIMEOUT_S, aligned_pcm, resolve_api_key
+from samtal_server.providers.base import ProviderCallError, ProviderError, TtsProvider
+from samtal_server.providers.kit import (
+    DEFAULT_TIMEOUT_S,
+    REQUEST_FAILURES,
+    aligned_pcm,
+    call_failure,
+    resolve_api_key,
+)
 from samtal_server.providers.registry import OptionsReader
 
 # How this provider names itself where the kit speaks on its behalf: the
@@ -130,32 +136,57 @@ class ElevenLabsTts(TtsProvider):
 
     async def synthesize(self, text: str) -> AsyncIterator[bytes]:
         """Stream one sentence, yielding PCM as it arrives, sample-aligned
-        by the kit's helper."""
+        by the kit's helper.
+
+        The request, the status it comes back with, and the bytes after
+        it are three places the API can fail to deliver a sentence, and
+        all three leave as a failed provider call. Cancellation and
+        genuine bugs are outside REQUEST_FAILURES and pass through as
+        themselves, which the barge-in path depends on."""
         request = self._client.build_request(
             "POST",
             f"/v1/text-to-speech/{self._voice_id}/stream",
             params={"output_format": self._output_format},
             json=self._body(text),
         )
-        response = await self._client.send(request, stream=True)
+        opening: ProviderCallError | None = None
+        try:
+            response = await self._client.send(request, stream=True)
+        except REQUEST_FAILURES as exc:
+            opening = call_failure(LABEL, exc)
+        # Raised out here rather than in the except arm, so the httpx
+        # exception is not even the new error's `__context__`: `from
+        # None` suppresses its rendering but leaves it reachable, and
+        # what it can carry is the reason the message is metadata only.
+        if opening is not None:
+            raise opening from None
+        failure: ProviderCallError | None = None
         try:
             if response.status_code != httpx.codes.OK:
-                raise await _api_error(response)
+                raise _api_error(response.status_code)
             async for chunk in aligned_pcm(LABEL, response.aiter_bytes()):
                 yield chunk
+        except REQUEST_FAILURES as exc:
+            failure = call_failure(LABEL, exc)
         finally:
             await response.aclose()
+        if failure is not None:
+            raise failure from None
 
 
-async def _api_error(response: httpx.Response) -> RuntimeError:
-    """A failed request as an exception the session's reply handler can
-    log. The body carries the reason (an unknown voice, an exhausted
-    quota, a tier that does not allow the format), so it is worth more
-    than the status alone; it is truncated because a stray HTML error
-    page would otherwise fill the log."""
-    body = (await response.aread()).decode("utf-8", "replace").strip()
-    detail = f": {body[:500]}" if body else ""
-    return RuntimeError(f"elevenlabs returned HTTP {response.status_code}{detail}")
+def _api_error(status_code: int) -> ProviderCallError:
+    """A failed request as the taxonomy error the session's reply
+    handler can log, carrying the status and nothing else.
+
+    The body used to be quoted into the message, truncated, because it
+    carries the reason (an unknown voice, an exhausted quota, a tier
+    that does not allow the format). It no longer is: the API decides
+    what goes in that body, the request that produced it carried the
+    reply text, and the session renders this message into the log line
+    the observability ADR keeps (#137). The status names which class of
+    failure it was, and re-running the request by hand is what recovers
+    the prose."""
+    return ProviderCallError(f"{LABEL}: the request failed with HTTP {status_code}")
 
 
 def build(label: str, config: ProviderConfig) -> ElevenLabsTts:

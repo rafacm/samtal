@@ -27,8 +27,14 @@ from collections.abc import AsyncIterator
 from openai import AsyncOpenAI, Omit
 
 from samtal_server.config.models import ProviderConfig
-from samtal_server.providers.base import ProviderError, TtsProvider
-from samtal_server.providers.kit import DEFAULT_TIMEOUT_S, MAX_RETRIES, aligned_pcm
+from samtal_server.providers.base import ProviderCallError, ProviderError, TtsProvider
+from samtal_server.providers.kit import (
+    DEFAULT_TIMEOUT_S,
+    MAX_RETRIES,
+    REQUEST_FAILURES,
+    aligned_pcm,
+    call_failure,
+)
 from samtal_server.providers.openai_endpoint import (
     DEFAULT_BASE_URL,
     endpoint_api_key,
@@ -103,17 +109,33 @@ class OpenAiTts(TtsProvider):
 
     async def synthesize(self, text: str) -> AsyncIterator[bytes]:
         """Stream one sentence, yielding PCM as it arrives, sample-aligned
-        by the kit's helper."""
-        async with self._client.audio.speech.with_streaming_response.create(
-            model=self._model,
-            voice=self._voice,
-            input=text,
-            response_format="pcm",
-            instructions=self._instructions if self._instructions else Omit(),
-            speed=self._speed if self._speed is not None else Omit(),
-        ) as response:
-            async for chunk in aligned_pcm(LABEL, response.iter_bytes()):
-                yield chunk
+        by the kit's helper.
+
+        The request and the bytes after it are both a place the endpoint
+        can stop answering, and both are a failed provider call rather
+        than a bug here. Cancellation and genuine bugs are outside
+        REQUEST_FAILURES and pass through as themselves, which the
+        barge-in path depends on."""
+        failure: ProviderCallError | None = None
+        try:
+            async with self._client.audio.speech.with_streaming_response.create(
+                model=self._model,
+                voice=self._voice,
+                input=text,
+                response_format="pcm",
+                instructions=self._instructions if self._instructions else Omit(),
+                speed=self._speed if self._speed is not None else Omit(),
+            ) as response:
+                async for chunk in aligned_pcm(LABEL, response.iter_bytes()):
+                    yield chunk
+        except REQUEST_FAILURES as exc:
+            failure = call_failure(LABEL, exc)
+        # Raised out here rather than in the except arm, so the SDK
+        # exception is not even the new error's `__context__`: `from
+        # None` suppresses its rendering but leaves it reachable, and
+        # what it can carry is the reason the message is metadata only.
+        if failure is not None:
+            raise failure from None
 
 
 def check_steering(
