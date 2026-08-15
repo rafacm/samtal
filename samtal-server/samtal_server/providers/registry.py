@@ -18,6 +18,7 @@ from samtal_server.config.secrets import (
     SecretStore,
     provider_secrets_in_force,
 )
+from samtal_server.egress import EgressRefusal, check_provider
 from samtal_server.providers.base import (
     AsrProvider,
     LlmProvider,
@@ -218,9 +219,9 @@ def build_provider(
 ) -> object:
     """Build the provider behind `providers.<stage>.<name>`, raising
     ProviderError for unknown types, bad options, missing extras, an
-    egress-marked provider under `local_only`, or anything the provider
-    itself raises while constructing. Every one of them names the
-    entry.
+    egress-marked provider under `local_only`, a class carrying no
+    egress marking of its own, or anything the provider itself raises
+    while constructing. Every one of them names the entry.
 
     `secrets` is the store a snapshot was loaded with, or None for a
     deployment whose credentials are all environment references. This is
@@ -260,7 +261,14 @@ def build_provider(
         raise
     except Exception as exc:
         raise ProviderError(f"{label}: could not build {config.type} provider: {exc}") from exc
-    _check_egress(label, config, provider, local_only)
+    # The egress rule itself lives in one module that this registry and
+    # the MCP build path both call (#30, #136); what stays here is the
+    # exception type, which is this surface's contract, wrapped around
+    # the module's own sentence.
+    try:
+        check_provider(label, config, provider, local_only)
+    except EgressRefusal as exc:
+        raise ProviderError(str(exc)) from exc
     # Stamped here rather than in each factory: this is the one place
     # that knows the stage, the entry name and the type at once, and a
     # provider that failed to describe itself in an event would be a
@@ -270,37 +278,6 @@ def build_provider(
             stage=stage, name=name, type=config.type, host=provider.host
         )
     return provider
-
-
-def _check_egress(
-    label: str, config: ProviderConfig, provider: object, local_only: bool
-) -> None:
-    """Enforce the egress rules for one built provider (#30). The
-    class-level marking is authoritative; the configuration's `egress`
-    key exists only for types that cannot know their own (an
-    openai_compatible base_url decides). An unmarked type counts as
-    egress, so forgetting the marking fails a local_only boot instead
-    of quietly leaking."""
-    marked = getattr(type(provider), "egress", True)
-    if marked is not None and config.egress is not None:
-        raise ProviderError(
-            f'{label}: "egress" is decided by type "{config.type}" and cannot '
-            f"be declared in the configuration; remove the key"
-        )
-    if not local_only:
-        return
-    egress = marked if marked is not None else config.egress
-    if egress is None:
-        raise ProviderError(
-            f'{label}: server.local_only is on, and whether type "{config.type}" '
-            f"sends session data off this host depends on its base_url; declare "
-            f'"egress: false" on this entry to assert the endpoint stays local'
-        )
-    if egress:
-        raise ProviderError(
-            f'{label}: server.local_only is on, but type "{config.type}" sends '
-            f"session data off this host"
-        )
 
 
 @dataclass(frozen=True)
