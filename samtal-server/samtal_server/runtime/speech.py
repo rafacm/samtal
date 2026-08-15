@@ -46,6 +46,12 @@ class _Synthesis:
     from `chunks()` at the point the sentence would have been spoken.
     That keeps the order of what a caller sees: the sentences before a
     failing one are spoken, and the reply fails where it would have.
+
+    The first chunk is reported the same way a failure is, and for the
+    same reason: this is where the request is made and where the answer
+    arrives, so it is the only place the wait between them exists. What
+    the caller does with it is the caller's; nothing here is timed for
+    the device, which has its own `speaking_started` for that.
     """
 
     def __init__(
@@ -53,6 +59,7 @@ class _Synthesis:
         sentence: str,
         tts: TtsProvider,
         report_failure: Callable[[BaseException, float], None],
+        report_first_audio: Callable[[int], None],
     ) -> None:
         self.sentence = sentence
         self._buffer: asyncio.Queue[bytes | None] = asyncio.Queue()
@@ -66,12 +73,19 @@ class _Synthesis:
         self._room = asyncio.Semaphore(1)
         self._failure: BaseException | None = None
         self._report_failure = report_failure
+        self._report_first_audio = report_first_audio
         self._task = asyncio.create_task(self._drain(tts))
 
     async def _drain(self, tts: TtsProvider) -> None:
         started = asyncio.get_running_loop().time()
+        first = True
         try:
             async for chunk in tts.synthesize(self.sentence):
+                if first:
+                    first = False
+                    self._report_first_audio(
+                        round((asyncio.get_running_loop().time() - started) * 1000)
+                    )
                 await self._room.acquire()
                 self._buffer.put_nowait(chunk)
         except asyncio.CancelledError:
@@ -114,6 +128,7 @@ async def speak_after(
     sentence: str,
     tts: TtsProvider,
     report_failure: Callable[[BaseException, float], None],
+    report_first_audio: Callable[[int], None],
     speak: Callable[[_Synthesis], Awaitable[None]],
 ) -> asyncio.Task[None]:
     """Start `sentence` synthesizing, wait for the sentence already being
@@ -131,7 +146,7 @@ async def speak_after(
     model's thinking time in front of the first word of every reply and
     make a one-sentence reply wait for the stream to end.
     """
-    started = _Synthesis(sentence, tts, report_failure)
+    started = _Synthesis(sentence, tts, report_failure, report_first_audio)
     try:
         if speaking is not None:
             await speaking
