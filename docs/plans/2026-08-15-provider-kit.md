@@ -492,7 +492,7 @@ resolution once the amendment addressing it lands.
 
 ## Milestones
 
-- [ ] **Kit, taxonomy, and the five providers** (PR TBD):
+- [x] [**Kit, taxonomy, and the five providers**](2026-08-15-provider-kit-implementation.md#milestone-1-the-kit-the-taxonomy-and-the-five-providers) (PR TBD):
   `providers/kit.py` lands with `resolve_api_key`,
   `DEFAULT_TIMEOUT_S`, the retries-off policy and `aligned_pcm`;
   `ProviderCallError`/`ProviderCallTimeout` land in base.py; the
