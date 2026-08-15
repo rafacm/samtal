@@ -6,12 +6,20 @@ What a unit test cannot judge is how the real voice sounds and what the
 round trip costs, which is the PR's real-API verification step.
 """
 
+import asyncio
+
 import httpx
 import pytest
 
 from samtal_server.config.models import ProviderConfig
-from samtal_server.providers import ProviderError, build_provider
+from samtal_server.providers import ProviderCallError, ProviderCallTimeout, build_provider
+from samtal_server.providers.base import ProviderError
 from samtal_server.providers.elevenlabs_tts import ElevenLabsTts
+
+# Not a real credential, and shaped so a substring check for it cannot
+# match by accident. It stands in for what the API can echo back into
+# an error body.
+SENTINEL = "sk-test-4f8b2c9e-never-a-real-credential"
 
 
 def provider(
@@ -41,6 +49,19 @@ async def collect(tts: ElevenLabsTts, text: str = "Hej") -> bytes:
 
 def build_tts(**options: object) -> object:
     return build_provider("tts", "voice", ProviderConfig.model_validate(options))
+
+
+def chain(exc: BaseException) -> str:
+    """Everything a renderer of this exception could reach: the error
+    itself and every cause and context behind it."""
+    parts: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        parts += [repr(current), str(current)]
+        current = current.__cause__ or current.__context__
+    return "\n".join(parts)
 
 
 # --- options ---------------------------------------------------------
@@ -218,18 +239,112 @@ async def test_a_trailing_odd_byte_is_dropped_rather_than_shifting_the_stream(
 # --- failures --------------------------------------------------------
 
 
-async def test_an_api_error_raises_with_the_reason() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(401, json={"detail": {"message": "invalid api key"}})
+async def test_an_api_error_raises_the_taxonomy_with_the_status_and_no_body() -> None:
+    """The status is trusted metadata; the body is not, and it used to
+    be quoted into the message. The API is free to echo whatever was
+    sent to produce the failure, and the session renders this message
+    into the log line that is kept (#137)."""
 
-    with pytest.raises(RuntimeError, match="HTTP 401.*invalid api key"):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"detail": {"message": f"invalid api key {SENTINEL}"}})
+
+    with pytest.raises(ProviderCallError) as failure:
+        await collect(provider(handler))
+
+    assert not isinstance(failure.value, ProviderCallTimeout)
+    assert "HTTP 401" in str(failure.value)
+    assert SENTINEL not in chain(failure.value)
+
+
+async def test_an_error_body_reaches_neither_the_message_nor_the_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A body no longer has to be truncated to keep a stray HTML error
+    page out of the log, because none of it is quoted at all."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, content=f"<html>{SENTINEL}</html>".encode() + b"x" * 5000)
+
+    with caplog.at_level("DEBUG"), pytest.raises(ProviderCallError) as failure:
+        await collect(provider(handler))
+
+    assert len(str(failure.value)) < 100
+    assert SENTINEL not in chain(failure.value)
+    assert SENTINEL not in caplog.text
+    assert all(SENTINEL not in str(record.__dict__) for record in caplog.records)
+
+
+async def test_a_request_that_timed_out_raises_the_timeout_half() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectTimeout("the API never answered", request=request)
+
+    with pytest.raises(ProviderCallTimeout, match="ConnectTimeout"):
         await collect(provider(handler))
 
 
-async def test_a_long_error_body_is_truncated() -> None:
+async def test_a_transport_failure_raises_the_error_half() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(500, content=b"x" * 5000)
+        raise httpx.ConnectError("no route to the API", request=request)
 
-    with pytest.raises(RuntimeError) as failure:
+    with pytest.raises(ProviderCallError, match="ConnectError") as failure:
         await collect(provider(handler))
-    assert len(str(failure.value)) < 600
+    assert not isinstance(failure.value, ProviderCallTimeout)
+
+
+async def test_a_failure_after_the_first_chunk_is_wrapped_too() -> None:
+    """A response that opened is not a response that arrived: this
+    provider streams the audio out of the body, and the connection can
+    drop halfway through a sentence."""
+
+    async def stream() -> object:
+        yield b"\x01\x02"
+        raise httpx.ReadError("the connection dropped")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=stream())  # type: ignore[arg-type]
+
+    chunks: list[bytes] = []
+    with pytest.raises(ProviderCallError) as failure:
+        async for chunk in provider(handler).synthesize("Hej"):
+            chunks.append(chunk)
+
+    assert chunks == [b"\x01\x02"]
+    assert "ReadError" in str(failure.value)
+
+
+async def test_a_timeout_after_the_first_chunk_is_still_a_timeout() -> None:
+    async def stream() -> object:
+        yield b"\x01\x02"
+        raise httpx.ReadTimeout("the rest never came")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=stream())  # type: ignore[arg-type]
+
+    with pytest.raises(ProviderCallTimeout):
+        await collect(provider(handler))
+
+
+async def test_a_non_sdk_failure_passes_through_unwrapped() -> None:
+    """The taxonomy claims request failures, not all failures: a bug in
+    this process must reach logger.exception as itself."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise ValueError("a local bug")
+
+    with pytest.raises(ValueError, match="a local bug"):
+        await collect(provider(handler))
+
+
+async def test_a_cancelled_synthesis_is_not_a_provider_failure() -> None:
+    """Barge-in cancels a sentence mid-send, and a cancellation dressed
+    as a provider failure would be reported as one."""
+
+    async def stream() -> object:
+        yield b"\x01\x02"
+        raise asyncio.CancelledError()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=stream())  # type: ignore[arg-type]
+
+    with pytest.raises(asyncio.CancelledError):
+        await collect(provider(handler))

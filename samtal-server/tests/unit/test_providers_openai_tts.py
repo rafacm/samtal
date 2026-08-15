@@ -8,22 +8,33 @@ sounds and what the round trip costs, which is the PR's real-API
 verification step.
 """
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 
 import httpx
 import pytest
-from openai import APIStatusError, AsyncOpenAI
+from openai import AsyncOpenAI
 
 from samtal_server.config.models import ProviderConfig
-from samtal_server.providers import ProviderError, build_provider
+from samtal_server.providers import ProviderCallError, ProviderCallTimeout, build_provider
+from samtal_server.providers.base import ProviderError
 from samtal_server.providers.openai_tts import OpenAiTts
+
+# Not a real credential, and shaped so a substring check for it cannot
+# match by accident. It stands in for what an endpoint can echo back
+# into an error body.
+SENTINEL = "sk-test-4f8b2c9e-never-a-real-credential"
 
 
 def provider(handler: object, **overrides: object) -> OpenAiTts:
     """A provider wired to a mock transport, so nothing leaves the test."""
     client = AsyncOpenAI(
         api_key="test-key",
+        # As the provider constructs its own: without this the SDK's
+        # default of two retries would triple a deliberately failing
+        # request, with its backoff, inside a unit test.
+        max_retries=0,
         http_client=httpx.AsyncClient(
             transport=httpx.MockTransport(handler),  # type: ignore[arg-type]
         ),
@@ -44,6 +55,19 @@ async def collect(tts: OpenAiTts, text: str = "Hej") -> bytes:
 
 def build_tts(**options: object) -> object:
     return build_provider("tts", "voice", ProviderConfig.model_validate(options))
+
+
+def chain(exc: BaseException) -> str:
+    """Everything a renderer of this exception could reach: the error
+    itself and every cause and context behind it."""
+    parts: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        parts += [repr(current), str(current)]
+        current = current.__cause__ or current.__context__
+    return "\n".join(parts)
 
 
 # --- options ---------------------------------------------------------
@@ -315,12 +339,115 @@ async def test_a_trailing_odd_byte_is_dropped_rather_than_shifting_the_stream(
 # --- failures --------------------------------------------------------
 
 
-async def test_an_api_error_raises_with_the_reason() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(401, json={"error": {"message": "invalid api key"}})
+async def test_an_api_error_raises_the_taxonomy_with_the_status_and_no_body() -> None:
+    """The status and the SDK class are trusted metadata; the vendor's
+    own sentence is not, because the SDK embeds the response body in it
+    and a compatible endpoint decides what that body says (#137)."""
 
-    with pytest.raises(APIStatusError, match="invalid api key"):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"error": {"message": f"invalid api key {SENTINEL}"}})
+
+    with pytest.raises(ProviderCallError) as failure:
         await collect(provider(handler))
+
+    assert not isinstance(failure.value, ProviderCallTimeout)
+    assert "HTTP 401" in str(failure.value)
+    # The SDK's own class for a 401, which is the half of the message
+    # that says what kind of failure it was.
+    assert "AuthenticationError" in str(failure.value)
+    assert SENTINEL not in chain(failure.value)
+
+
+async def test_a_request_that_timed_out_raises_the_timeout_half() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("the endpoint never answered", request=request)
+
+    with pytest.raises(ProviderCallTimeout, match="APITimeoutError"):
+        await collect(provider(handler))
+
+
+async def test_a_failure_after_the_first_chunk_is_wrapped_too() -> None:
+    """A response that opened is not a response that arrived: the SDK
+    rides httpx, and a transport error escapes the byte iterator wearing
+    no SDK class at all."""
+
+    async def stream() -> AsyncIterator[bytes]:
+        yield b"\x01\x02"
+        raise httpx.ReadError("the connection dropped")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=stream())
+
+    tts = provider(handler)
+    chunks: list[bytes] = []
+    with pytest.raises(ProviderCallError) as failure:
+        async for chunk in tts.synthesize("Hej"):
+            chunks.append(chunk)
+
+    assert chunks == [b"\x01\x02"]
+    assert not isinstance(failure.value, ProviderCallTimeout)
+    assert "ReadError" in str(failure.value)
+
+
+async def test_a_timeout_after_the_first_chunk_is_still_a_timeout() -> None:
+    async def stream() -> AsyncIterator[bytes]:
+        yield b"\x01\x02"
+        raise httpx.ReadTimeout("the rest never came")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=stream())
+
+    with pytest.raises(ProviderCallTimeout):
+        await collect(provider(handler))
+
+
+async def test_a_non_sdk_failure_passes_through_unwrapped() -> None:
+    """The taxonomy claims request failures, not all failures: a bug in
+    this process must reach logger.exception as itself.
+
+    Raised from the open stream rather than from the request, because
+    the SDK converts everything the transport raises into an
+    APIConnectionError of its own before this provider sees it; past
+    that point an exception arrives as itself."""
+
+    async def stream() -> AsyncIterator[bytes]:
+        yield b"\x01\x02"
+        raise ValueError("a local bug")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=stream())
+
+    with pytest.raises(ValueError, match="a local bug"):
+        await collect(provider(handler))
+
+
+async def test_a_cancelled_synthesis_is_not_a_provider_failure() -> None:
+    """Barge-in cancels a sentence mid-send, and a cancellation dressed
+    as a provider failure would be reported as one."""
+
+    async def stream() -> AsyncIterator[bytes]:
+        yield b"\x01\x02"
+        raise asyncio.CancelledError()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=stream())
+
+    with pytest.raises(asyncio.CancelledError):
+        await collect(provider(handler))
+
+
+async def test_a_failed_request_leaks_nothing_into_the_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": {"message": f"upstream said {SENTINEL}"}})
+
+    with caplog.at_level("DEBUG"), pytest.raises(ProviderCallError) as failure:
+        await collect(provider(handler))
+
+    assert SENTINEL not in chain(failure.value)
+    assert SENTINEL not in caplog.text
+    assert all(SENTINEL not in str(record.__dict__) for record in caplog.records)
 
 
 async def test_a_failing_sentence_is_attempted_once(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -341,7 +468,7 @@ async def test_a_failing_sentence_is_attempted_once(monkeypatch: pytest.MonkeyPa
     # where it is constructed, so a hand-made client would not prove it.
     built._client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))  # type: ignore[attr-defined]
 
-    with pytest.raises(APIStatusError):
+    with pytest.raises(ProviderCallError):
         await collect(built)
     assert attempts == 1
 

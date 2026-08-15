@@ -14,14 +14,25 @@ import wave
 
 import httpx
 import pytest
-from openai import APIStatusError, AsyncOpenAI
+from openai import AsyncOpenAI
 
 from samtal_server.config.models import ProviderConfig
-from samtal_server.providers import ProviderError, build_provider, openai_asr
+from samtal_server.providers import (
+    ProviderCallError,
+    ProviderCallTimeout,
+    build_provider,
+    openai_asr,
+)
+from samtal_server.providers.base import ProviderError
 from samtal_server.providers.openai_asr import OpenAiAsr
 
 # One 16 kHz second of s16le silence, comfortably over the API minimum.
 ONE_SECOND = b"\x00\x00" * 16000
+
+# Not a real credential, and shaped so a substring check for it cannot
+# match by accident. It stands in for what an endpoint can echo back
+# into an error body.
+SENTINEL = "sk-test-4f8b2c9e-never-a-real-credential"
 
 
 def provider(handler: object, **overrides: object) -> OpenAiAsr:
@@ -54,6 +65,19 @@ def transcript_handler(text: str = "Hej hej") -> object:
 
 def build_asr(**options: object) -> object:
     return build_provider("asr", "ears", ProviderConfig.model_validate(options))
+
+
+def chain(exc: BaseException) -> str:
+    """Everything a renderer of this exception could reach: the error
+    itself and every cause and context behind it."""
+    parts: list[str] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        parts += [repr(current), str(current)]
+        current = current.__cause__ or current.__context__
+    return "\n".join(parts)
 
 
 def uploaded_audio(request: httpx.Request) -> bytes:
@@ -679,12 +703,74 @@ async def test_the_minimum_follows_the_sample_rate() -> None:
 # --- failures --------------------------------------------------------
 
 
-async def test_an_api_error_raises_with_the_reason() -> None:
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(401, json={"error": {"message": "invalid api key"}})
+async def test_an_api_error_raises_the_taxonomy_with_the_status_and_no_body() -> None:
+    """The taxonomy applies to the failure of transcribe as a whole. The
+    status and the SDK class are trusted metadata; the vendor's own
+    sentence is not, because the SDK embeds the response body in it and
+    a compatible endpoint decides what that body says (#137)."""
 
-    with pytest.raises(APIStatusError, match="invalid api key"):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"error": {"message": f"invalid api key {SENTINEL}"}})
+
+    with pytest.raises(ProviderCallError) as failure:
         await provider(handler).transcribe(ONE_SECOND, 16000)
+
+    assert not isinstance(failure.value, ProviderCallTimeout)
+    assert "HTTP 401" in str(failure.value)
+    # The SDK's own class for a 401, which is the half of the message
+    # that says what kind of failure it was.
+    assert "AuthenticationError" in str(failure.value)
+    assert SENTINEL not in chain(failure.value)
+
+
+async def test_a_first_request_that_timed_out_surfaces_as_a_timeout() -> None:
+    """The other half of the split the echo retry forces: a timeout on
+    the request that opens the call is a failure the session hears
+    about, while a timeout inside the echo retry stays the discarding
+    outcome the test below pins."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("the endpoint never answered", request=request)
+
+    with pytest.raises(ProviderCallTimeout, match="APITimeoutError"):
+        await provider(handler).transcribe(ONE_SECOND, 16000)
+
+
+async def test_a_non_sdk_failure_passes_through_unwrapped() -> None:
+    """The taxonomy claims request failures, not all failures: a bug in
+    this process must reach logger.exception as itself.
+
+    Raised by a client double rather than by the mock transport, because
+    this provider reads the whole response inside the SDK's request
+    path, and the SDK converts everything raised down there into an
+    APIConnectionError of its own before this provider sees it. A bug in
+    the calling code above it is what remains, and this is it."""
+
+    class Transcriptions:
+        async def create(self, **_options: object) -> object:
+            raise ValueError("a local bug")
+
+    client = type(
+        "Client", (), {"audio": type("Audio", (), {"transcriptions": Transcriptions()})()}
+    )()
+    asr = OpenAiAsr(model="gpt-4o-mini-transcribe", api_key="test-key", client=client)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="a local bug"):
+        await asr.transcribe(ONE_SECOND, 16000)
+
+
+async def test_a_failed_request_leaks_nothing_into_the_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, json={"error": {"message": f"upstream said {SENTINEL}"}})
+
+    with caplog.at_level("DEBUG"), pytest.raises(ProviderCallError) as failure:
+        await provider(handler).transcribe(ONE_SECOND, 16000)
+
+    assert SENTINEL not in chain(failure.value)
+    assert SENTINEL not in caplog.text
+    assert all(SENTINEL not in str(record.__dict__) for record in caplog.records)
 
 
 async def test_a_failing_utterance_is_attempted_once(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -705,7 +791,7 @@ async def test_a_failing_utterance_is_attempted_once(monkeypatch: pytest.MonkeyP
     # where it is constructed, so a hand-made client would not prove it.
     built._client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))  # type: ignore[attr-defined]
 
-    with pytest.raises(APIStatusError):
+    with pytest.raises(ProviderCallError):
         await built.transcribe(ONE_SECOND, 16000)
     assert attempts == 1
 

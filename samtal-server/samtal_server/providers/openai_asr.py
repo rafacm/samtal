@@ -47,8 +47,18 @@ import wave
 from openai import NOT_GIVEN, APITimeoutError, AsyncOpenAI, Omit
 
 from samtal_server.config.models import ProviderConfig
-from samtal_server.providers.base import AsrProvider, AsrResult, ProviderError
-from samtal_server.providers.kit import DEFAULT_TIMEOUT_S, MAX_RETRIES
+from samtal_server.providers.base import (
+    AsrProvider,
+    AsrResult,
+    ProviderCallError,
+    ProviderError,
+)
+from samtal_server.providers.kit import (
+    DEFAULT_TIMEOUT_S,
+    MAX_RETRIES,
+    REQUEST_FAILURES,
+    call_failure,
+)
 from samtal_server.providers.openai_endpoint import (
     DEFAULT_BASE_URL,
     endpoint_api_key,
@@ -58,6 +68,10 @@ from samtal_server.providers.openai_endpoint import (
 from samtal_server.providers.registry import OptionsReader
 
 logger = logging.getLogger(__name__)
+
+# How this provider names itself in the message a failed request
+# carries.
+LABEL = "openai asr"
 
 # The current transcription family, and the reason to reach for this
 # type at all: both gpt-4o models transcribe more accurately than
@@ -196,9 +210,27 @@ class OpenAiAsr(AsrProvider):
         # a retry with a fresh timeout of its own would quietly double
         # that bound.
         deadline = asyncio.get_running_loop().time() + self._timeout_s
-        text = await self._request(pcm, sample_rate, pinned, self._prompt)
-        if self._is_echoed_prompt(text):
-            text = await self._retry_without_prompt(pcm, sample_rate, pinned, deadline)
+        # The taxonomy applies to the failure of this call as a whole,
+        # not to every request inside it: the echo retry below
+        # deliberately converts its own timeout into an empty transcript
+        # and an asr_prompt_echo event, and that discard is a decision
+        # rather than a failure. What is left here is a call that could
+        # not answer at all, which is a failed provider call.
+        # Cancellation and genuine bugs are outside REQUEST_FAILURES and
+        # pass through as themselves.
+        failure: ProviderCallError | None = None
+        try:
+            text = await self._request(pcm, sample_rate, pinned, self._prompt)
+            if self._is_echoed_prompt(text):
+                text = await self._retry_without_prompt(pcm, sample_rate, pinned, deadline)
+        except REQUEST_FAILURES as exc:
+            failure = call_failure(LABEL, exc)
+        # Raised out here rather than in the except arm, so the SDK
+        # exception is not even the new error's `__context__`: `from
+        # None` suppresses its rendering but leaves it reachable, and
+        # what it can carry is the reason the message is metadata only.
+        if failure is not None:
+            raise failure from None
         # Language fields stay empty: this provider does not detect.
         return AsrResult(text=text)
 
