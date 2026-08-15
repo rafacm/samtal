@@ -160,11 +160,25 @@ suite (below) proves by passing unmodified through the reshape.
 ### The server scope gets `ServerEvents`, one per subsystem channel
 
 `ServerEvents(channel: str)` wraps `logging.getLogger(channel)` and
-offers the same `.info/.warning/.error(msg, *args, event=...,
-**fields)` shape, building `{"event": ..., **fields}` with no
-session or device defaults: a server-scoped event names what it is
-about explicitly (`device=`, `entry=`, `host=`, `path=`), which is
-what every hand-built site already does. Each subsystem constructs
+offers `.debug/.info/.warning/.error(msg, *args, event=...,
+**fields)`, building `{"event": ..., **fields}` with no session or
+device defaults: a server-scoped event names what it is about
+explicitly (`device=`, `entry=`, `host=`, `path=`), which is what
+every hand-built site already does. `.debug` is required, not a
+nicety: `device_bindings_snapshot_only` is a structured
+`logger.debug` event today, and its level is part of the retained
+surface, which its migration test asserts (the review round's
+finding 4).
+
+The clock is an explicit dependency, not an assumption (finding 3):
+`SessionEvents` binds the session loop's clock at construction
+(the capture's tracks are aligned by it, and a session only exists
+inside the loop), while `ServerEvents` uses `time.monotonic`,
+because server events fire before any loop runs (`create_app`'s
+capture events, the onboarding banner `main()` logs before serving)
+and `asyncio.get_running_loop()` would raise there. The contract
+test emits a server event outside any running loop and a session
+event inside one. Each subsystem constructs
 its emitter on its existing module logger name, so the `logger`
 field of every retained record is unchanged, and every existing
 event name and field moves byte-identically; the diff at each site
@@ -349,9 +363,14 @@ resolution once the amendment addressing it lands.
    emitters bind the session loop clock (capture alignment),
    server emitters use a synchronous monotonic clock; contract
    test emits outside a running loop.
+   *Resolution*: adopted. The ServerEvents decision binds the loop
+   clock to `SessionEvents` at construction and `time.monotonic`
+   to `ServerEvents`, with the outside-a-loop contract case named.
 4. **P1: ServerEvents lacks the required debug level.**
    `device_bindings_snapshot_only` is a structured `logger.debug`
    event. Include `.debug`, and assert the event stays DEBUG.
+   *Resolution*: adopted. `.debug` joins the API and the bindings
+   event's level is asserted by its migration test.
 5. **P1: `mcp_tool_shadowed.tool` leaks bytes current code
    deliberately withholds.** Name sanitization only replaces
    illegal characters, an alphanumeric credential survives, and
