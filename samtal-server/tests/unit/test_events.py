@@ -1,0 +1,337 @@
+"""The contract between an emitter and the consumers of what it emits.
+
+The suites next door prove the events themselves: their channel, their
+sentences, their fields. This one proves the machinery under them, which
+is what #120's conversation store and the #66/#67 exporters will attach
+to without touching a single emit site.
+
+Four promises, and each one is a decision rather than an accident:
+
+- a tap sees every event while it is attached, and none after it
+  detaches, while the log carries on either way;
+- the log is told **last**, so "an event that is logged is an event that
+  is recorded" survives literally: the capture is offered the payload
+  before the record exists;
+- a tap that raises costs its own event and nothing else, and says so in
+  a plain sentence rather than in an event that would come back through
+  the taps;
+- a server-scope consumer attaches once, to the hub, and reaches
+  emitters built before and after it attached.
+
+Plus the clocks, which are the reason there are two emitters at all: a
+session event is stamped by the session loop, because the capture's
+audio is; a server event is stamped by `time.monotonic`, because
+`create_app` emits before any loop is running.
+"""
+
+import asyncio
+import logging
+
+import pytest
+
+from samtal_server.events import (
+    SESSION_LOGGER,
+    Emission,
+    ServerEvents,
+    SessionEvents,
+    attach_server_tap,
+    detach_server_tap,
+    server_emitters,
+    session_clock,
+)
+
+CHANNEL = "samtal_server.test_events"
+
+
+class Recorder:
+    """A tap that keeps what it was told, in the order it was told."""
+
+    def __init__(self) -> None:
+        self.seen: list[Emission] = []
+
+    def emit(self, emission: Emission) -> None:
+        self.seen.append(emission)
+
+
+class Broken:
+    """A consumer with a bug in it, which is the only kind the guards
+    exist for."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def emit(self, emission: Emission) -> None:
+        self.calls += 1
+        raise RuntimeError("this consumer is broken")
+
+
+class CaptureSpy:
+    """The capture's own surface and nothing else, which is all
+    `CaptureTap` uses: it also reads the log as it is being told, which
+    is what turns "before the record exists" into an assertion rather
+    than a claim about source order."""
+
+    def __init__(self, caplog: pytest.LogCaptureFixture) -> None:
+        self._caplog = caplog
+        self.seen: list[tuple[dict, float, int]] = []
+
+    def event(self, payload: dict, at: float) -> None:
+        self.seen.append((payload, at, len(self._caplog.records)))
+
+
+def payload_of(record: logging.LogRecord) -> dict:
+    standard = vars(logging.LogRecord("", logging.INFO, "", 0, "", None, None))
+    return {
+        key: value
+        for key, value in vars(record).items()
+        if key not in standard and key not in ("taskName", "message", "asctime")
+    }
+
+
+# --- the tap, attached, fanned out to, and detached -------------------
+
+
+def test_a_tap_sees_every_event_until_it_detaches(caplog: pytest.LogCaptureFixture) -> None:
+    events = SessionEvents("s1")
+    events.device = "aa:bb:cc:dd:ee:ff"
+    tap = Recorder()
+
+    with caplog.at_level("INFO"):
+        events.info("before %s", "attaching", event="one")
+        events.attach(tap)
+        events.info("while %s", "attached", event="two", extra_field=7)
+        events.detach(tap)
+        events.info("after %s", "detaching", event="three")
+
+    assert [emission.payload["event"] for emission in tap.seen] == ["two"]
+    # The log never stopped, which is the half a detach must not touch.
+    assert [record.event for record in caplog.records] == ["one", "two", "three"]
+    # The tap gets the finished payload: what every event carries, then
+    # this event's own fields, in that order.
+    assert list(tap.seen[0].payload.items()) == [
+        ("event", "two"),
+        ("session", "s1"),
+        ("device", "aa:bb:cc:dd:ee:ff"),
+        ("extra_field", 7),
+    ]
+    # And the sentence unrendered, so a consumer can render it the way
+    # the log does or ignore it.
+    assert tap.seen[0].message == "while %s"
+    assert tap.seen[0].args == ("attached",)
+    assert tap.seen[0].level == logging.INFO
+
+
+def test_detaching_a_tap_that_was_never_attached_is_not_an_error() -> None:
+    """A caller unwinding does not have to remember how far it got."""
+    events = SessionEvents("s1")
+    events.detach(Recorder())
+
+
+def test_the_log_is_the_last_consumer_told(caplog: pytest.LogCaptureFixture) -> None:
+    """The invariant the capture was written inside the payload builder
+    for: every logged event was first offered to the capture."""
+    events = SessionEvents("s1")
+    spy = CaptureSpy(caplog)
+
+    with caplog.at_level("INFO"):
+        events.attach_capture(spy)  # type: ignore[arg-type]
+        events.info("something %s", "happened", event="heard", text="hello")
+
+    (payload, _, records_at_the_time) = spy.seen[0]
+    assert records_at_the_time == 0, "the capture was told after the record existed"
+    assert len(caplog.records) == 1
+    # And it is the same payload, not a copy that could drift.
+    assert payload == payload_of(caplog.records[0])
+
+
+def test_the_capture_detaches_and_the_events_carry_on(caplog: pytest.LogCaptureFixture) -> None:
+    events = SessionEvents("s1")
+    spy = CaptureSpy(caplog)
+
+    with caplog.at_level("INFO"):
+        events.attach_capture(spy)  # type: ignore[arg-type]
+        events.info("recorded", event="one")
+        events.detach_capture()
+        events.info("not recorded", event="two")
+
+    assert [payload["event"] for payload, _, _ in spy.seen] == ["one"]
+    assert [record.event for record in caplog.records] == ["one", "two"]
+
+
+# --- a consumer with a bug in it --------------------------------------
+
+
+def test_a_tap_that_raises_starves_neither_the_log_nor_the_taps_after_it(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    events = SessionEvents("s1")
+    broken, after = Broken(), Recorder()
+
+    with caplog.at_level("INFO"):
+        events.attach(broken)
+        events.attach(after)
+        events.info("still %s", "said", event="one")
+        events.info("still %s", "said", event="two")
+
+    # It was not detached by its own failure: a consumer that fails once
+    # is not a consumer that is gone.
+    assert broken.calls == 2
+    assert [emission.payload["event"] for emission in after.seen] == ["one", "two"]
+    assert [record.event for record in caplog.records if hasattr(record, "event")] == [
+        "one",
+        "two",
+    ]
+
+
+def test_the_tap_failure_is_a_plain_sentence_and_not_an_event(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Not an event, deliberately: an event would go back through the
+    taps, and a broken tap would then recurse into itself."""
+    events = SessionEvents("s1")
+
+    with caplog.at_level("INFO"):
+        events.attach(Broken())
+        events.info("something", event="one")
+
+    (report,) = [record for record in caplog.records if not hasattr(record, "event")]
+    assert report.name == SESSION_LOGGER
+    assert report.levelno == logging.WARNING
+    assert "Broken" in report.getMessage() and "RuntimeError" in report.getMessage()
+    assert payload_of(report) == {}
+
+
+# --- the server scope, and its one attachment point -------------------
+
+
+def test_a_server_tap_reaches_an_emitter_built_after_it_attached(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The hub exists so a future exporter attaches once instead of
+    hunting through every module's private emitter, including the
+    modules imported after it attached."""
+    tap = Recorder()
+    attach_server_tap(tap)
+    try:
+        with caplog.at_level("INFO"):
+            later = ServerEvents(CHANNEL)
+            later.info("checked in %s", "device", event="ota_check", device="aa:bb")
+    finally:
+        detach_server_tap(tap)
+
+    assert [emission.payload["event"] for emission in tap.seen] == ["ota_check"]
+    # No session and no device default: a server event names what it is
+    # about explicitly.
+    assert tap.seen[0].payload == {"event": "ota_check", "device": "aa:bb"}
+    assert caplog.records[0].name == CHANNEL
+    assert later in server_emitters()
+
+    # And nothing after the detach.
+    with caplog.at_level("INFO"):
+        later.info("checked in again", event="ota_check")
+    assert len(tap.seen) == 1
+
+
+def test_a_server_emitter_carries_every_level(caplog: pytest.LogCaptureFixture) -> None:
+    """`.debug` is not a nicety: `device_bindings_snapshot_only` is a
+    structured debug event today, and its level is part of the retained
+    surface."""
+    events = ServerEvents(CHANNEL)
+    with caplog.at_level("DEBUG"):
+        events.debug("a", event="one")
+        events.info("b", event="two")
+        events.warning("c", event="three")
+        events.error("d", event="four")
+
+    assert [record.levelno for record in caplog.records] == [
+        logging.DEBUG,
+        logging.INFO,
+        logging.WARNING,
+        logging.ERROR,
+    ]
+
+
+def test_a_broken_server_tap_reports_on_the_emitters_own_channel(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    attach_server_tap(Broken())
+    try:
+        with caplog.at_level("INFO"):
+            ServerEvents(CHANNEL).info("something", event="one")
+    finally:
+        detach_server_tap(_only_broken_tap())
+
+    (report,) = [record for record in caplog.records if not hasattr(record, "event")]
+    assert report.name == CHANNEL
+    assert report.levelno == logging.WARNING
+
+
+def _only_broken_tap():
+    """The tap the test above attached, found again so the hub is left
+    the way it was found; the hub is module state and every other test
+    shares it."""
+    from samtal_server.events import _hub
+
+    return next(tap for tap in _hub.taps if isinstance(tap, Broken))
+
+
+# --- the two clocks ---------------------------------------------------
+
+
+def test_a_server_event_is_emitted_where_no_loop_is_running(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`create_app` reports its capture directory before the server
+    serves anything, and `onboarding` logs its banner before that, so a
+    mandatory loop clock would raise at both."""
+    with pytest.raises(RuntimeError):
+        asyncio.get_running_loop()
+
+    tap = Recorder()
+    attach_server_tap(tap)
+    try:
+        with caplog.at_level("INFO"):
+            ServerEvents(CHANNEL).info("capture is on", event="capture_enabled")
+    finally:
+        detach_server_tap(tap)
+
+    assert tap.seen[0].at > 0
+
+
+async def test_a_session_event_is_stamped_with_the_session_loop(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The capture's tracks are aligned by the loop's clock, so an
+    event's offset into the recorded audio is only meaningful against
+    that one."""
+    loop = asyncio.get_running_loop()
+    assert session_clock() == pytest.approx(loop.time(), abs=0.05)
+
+    events = SessionEvents("s1")
+    tap = Recorder()
+    events.attach(tap)
+    with caplog.at_level("INFO"):
+        events.info("something", event="one")
+
+    assert tap.seen[0].at == pytest.approx(loop.time(), abs=0.05)
+
+
+def test_the_clock_is_a_dependency_rather_than_an_assumption(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Stated at construction and swappable, which is what keeps the
+    two scopes' clocks a decision instead of a surprise."""
+    session = SessionEvents("s1", clock=lambda: 12.5)
+    server = ServerEvents(CHANNEL, clock=lambda: 99.5)
+    taps = (Recorder(), Recorder())
+    session.attach(taps[0])
+    attach_server_tap(taps[1])
+    try:
+        with caplog.at_level("INFO"):
+            session.info("a", event="one")
+            server.info("b", event="two")
+    finally:
+        detach_server_tap(taps[1])
+
+    assert taps[0].seen[0].at == 12.5
+    assert taps[1].seen[0].at == 99.5
