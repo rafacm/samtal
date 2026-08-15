@@ -42,19 +42,28 @@ issue describes.
 
 ## What the wrong argument actually does, for reference
 
-Verified against `runtime/speech.py` at main@3ff58e7. The callback
-is invoked in exactly one place: `_drain`'s `except Exception`
-handler (speech.py:86), after `self._failure` has been recorded and
-before the `finally` enqueues the end-of-audio sentinel. With a
-string there, a TTS failure would raise `TypeError: 'str' object is
-not callable` inside the handler; the `finally` still delivers the
-sentinel, `chunks()` still re-raises the original failure, but the
-drain task dies with an unobserved `TypeError` and the failure
-event an operator would correlate is never reported. So the test's
-happy path and barge-in path work today by luck: the affected test
-uses a working fake TTS, and the callback is dead code in it unless
-synthesis fails, which is precisely the situation the parameter
-exists for.
+Verified against `runtime/speech.py` and `runtime/pipeline.py` at
+main@3ff58e7. The callback is invoked in exactly one place:
+`_drain`'s `except Exception` handler (speech.py:86), after
+`self._failure` has been recorded and before the `finally` enqueues
+the end-of-audio sentinel. With a string there, a TTS failure
+raises `TypeError: 'str' object is not callable` inside the
+handler; the `finally` still delivers the sentinel and `chunks()`
+still raises the stored provider failure, but the `TypeError` does
+not stay unobserved: `_speak`'s own `finally`
+(pipeline.py:1098-1105) cancels the synthesis and awaits the drain
+task through `wait_cancelled()`, which suppresses only
+`CancelledError`, so the drain task's `TypeError` propagates there
+and REPLACES the original provider exception on its way out of
+`_speak`. The failure event an operator would correlate is never
+reported, and the caller sees the wrong exception type.
+
+What that means for the affected test: its spoken-count assertions
+are not false positives. The test exercises a successful synthesis
+and a cancelled one, neither of which invokes the callback, so its
+verdicts are earned; the fixture simply violates the constructor
+contract, and the violation would detonate only under the TTS
+failure the parameter exists for.
 
 ## Decisions this plan makes
 
@@ -84,16 +93,17 @@ question, not an implementation one.
 ### Why the test was passing, answered in the implementation doc
 
 The check the issue asks for is a reading plus a demonstration: run
-the affected test with a TTS that fails, once with the old string
-argument and once with the fix, and record what each does. The
-expected answer, from the reference section above: with the string,
-the failure is still re-raised by `chunks()` (so `_speak` fails)
-but the drain task dies on an unobserved `TypeError` and no failure
-is reported; with the callback, the same failure is recorded by the
-callback. The demonstration is throwaway evidence for the
-implementation doc, not a committed test, for the reason above: the
-committed suite keeps covering the failing path through the
-pipeline, where the real callback lives.
+the affected test's `_speak` path with a TTS that fails, once with
+the old string argument and once with the fix, and record what each
+does. The expected answer, from the reference section above: the
+committed assertions were not passing falsely (the test never
+reaches the callback), but under a failing TTS the string makes
+`_speak` surface `TypeError` and mask the provider exception, where
+the recording callback records the failure and lets the original
+provider exception propagate. The demonstration is throwaway
+evidence for the implementation doc, not a committed test, for the
+reason above: the committed suite keeps covering the failing path
+through the pipeline, where the real callback lives.
 
 ### No production code changes
 
@@ -171,6 +181,12 @@ resolution once the amendment addressing it lands.
    assertions are not false positives; the fixture violates the
    constructor contract without changing those verdicts. Say both
    correctly.
+   *Resolution*: adopted. The reference section now traces the
+   `TypeError` through `_speak`'s `finally` and `wait_cancelled()`
+   to where it replaces the provider exception, and states that
+   the affected test's assertions are earned (successful and
+   cancelled synthesis never reach the callback); the wrong-reason
+   check's expected answer is corrected to match.
 2. **P2: the cited lookahead test does not verify callback
    invocation.** `test_a_failing_sentence_still_lets_the_earlier_ones_be_heard`
    asserts propagation, spoken sentences, audio and cancellation,
