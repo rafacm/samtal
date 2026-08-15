@@ -412,7 +412,23 @@ hello, where `_start_capture` runs (`device/session.py:318`), it
 opens the store session with the same manifest dict the capture
 gets (one shape, two consumers, which is what "manifest-shaped"
 means concretely) and attaches the sink after the capture, so the
-dispatch order stays capture first, store second, log last. In the
+dispatch order stays capture first, store second, log last.
+
+The record's boundary is stated, not accidental: the runtime is
+constructed at `device/session.py:310`, and its agent activation
+emits `prompt_assembled` before the hello completes and therefore
+before any consumer can attach; the capture's decision track
+already begins at `session_open` for exactly this reason
+(`events.py:233-236`). The store draws the same line: its events
+record is the decision track, `session_open` through
+`session_closed` inclusive, and the pre-attach `prompt_assembled`
+of the initial activation is outside it, as it is outside the
+capture. Mid-session activations (a handover's `prompt_assembled`)
+are inside it. The issue's "one row per structured event" contract
+is scoped accordingly, and the milestone test compares the stored
+rows against the tap sequence the sink was offered (a spy attached
+at the same position), not against an assumption that attachment
+predates the session. In the
 close path (`device/session.py:367-385`) it closes the store
 session after `session_closed` is emitted, so that event is the
 last row of the session's record as it is the last line of the
@@ -797,6 +813,17 @@ carries its resolution once the amendment addressing it lands.
    proposed attach at `:318`; the capture-based comparison cannot
    catch this because the capture is attached after that emission
    too. Attach or buffer earlier, or scope the claim.
+   *Resolution*: adopted in its third form. The write-path section
+   now states the record's boundary: the store's events record is
+   the decision track, `session_open` through `session_closed`,
+   the same line the capture draws and for the same structural
+   reason; the initial activation's `prompt_assembled` is outside
+   both, mid-session activations are inside. Buffering from
+   construction was declined because it would make the store's
+   record start earlier than the decision track it mirrors, and
+   the sessions row cannot exist before the hello supplies the
+   manifest anyway. The milestone test compares stored rows
+   against a spy at the same tap position, not the capture track.
 4. **P1: a global "next marker" cannot provide per-session turn
    commits.** With one queue, session A's marker commits session
    B's incomplete work, or inserting as records arrive holds a
