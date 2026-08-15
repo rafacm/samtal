@@ -6,7 +6,7 @@ retained JSON records are the observability surface (ADR 2026-08-04), so
 a server event's channel, level, sentence and fields are output rather
 than an implementation detail, and the suites next door assert what an
 event is about while this one asserts what it *is*. Per emit path it
-pins the same four things:
+pins the same five things:
 
 - `record.name`, the channel, which is the `logger` field of the JSON
   line, and which milestone 2 must not move: each subsystem's emitter is
@@ -14,20 +14,30 @@ pins the same four things:
 - `record.levelno`, because a level is part of the surface, and because
   two of these events are structured `logger.debug` calls whose level a
   migration could quietly promote;
-- `record.getMessage()`, the rendered human sentence, which is what
-  proves no `%` argument was lost or reordered;
+- `record.msg`, the unrendered template, which is what catches a
+  reworded sentence, a lost `%` argument, and a `%d` quietly becoming a
+  `%s`;
+- `record.args`, the substituted values themselves, by value and by
+  type, which is what catches two arguments swapping places even where
+  the rendering happens to read the same;
 - the exact set of nonstandard record attributes and their values, read
   through `logs.py`'s own standard-attribute set so this suite and the
   JSON formatter cannot come to disagree about what an event field is.
 
-Two normalizations, and no others. Values that move between runs are
-declared per path in `dynamic=` and replaced by a placeholder, so the
-key is still pinned and only its value is not; the same values are
-declared in `scrub=` where they are rendered into the sentence too
-(paths under `tmp_path`, an activation code, a session id). Then every
-numeric run in the sentence becomes `<n>`, because durations and
-megabytes are rendered into sentences. What stays pinned there is every
-word, every argument's position, and the type of what was substituted.
+The template and the arguments are the pin. `sentence` is carried
+alongside as the rendering a person reads in a review diff, and it is
+deliberately the weaker of the two: `scrub=` replaces the strings that
+move between runs (a `tmp_path`, an activation code), and then every
+numeric run becomes `<n>`, so numeric literals inside it are not pinned
+at all.
+
+Values that move between runs are named rather than guessed. `dynamic=`
+names the payload fields whose value is not pinned (the key still is),
+and `dynamic_args=` the argument positions, which keep their type as
+`<float>` or `<PosixPath>` so a duration that turned into a string is
+still a failure. An exception rendered into a sentence is always a
+declared position: two exceptions carrying the same message are not
+equal to each other, so only their class can be pinned.
 
 Unlike the session scope, `session` is pinned rather than normalized:
 these paths are driven directly enough to name the session themselves,
@@ -35,7 +45,10 @@ and a server event carries no session identity of its own.
 
 Written before the hand-built `extra={...}` dicts moved onto
 `ServerEvents` (#138, milestone 2) and left untouched through the move,
-which is what makes it evidence rather than a description.
+which is what makes it evidence rather than a description. The template
+and argument pins arrived after the move, following the PR #152 review
+round that added them to the session suite next door, and were checked
+against the pre-migration tree as well as this one.
 """
 
 import logging
@@ -115,16 +128,30 @@ def payload_of(record: logging.LogRecord) -> dict[str, Any]:
     return {key: value for key, value in vars(record).items() if key not in _STANDARD_ATTRIBUTES}
 
 
+def args_of(record: logging.LogRecord, dynamic_args: tuple[int, ...]) -> tuple[Any, ...]:
+    """The values substituted into the template, in order.
+
+    A declared-dynamic position keeps its type rather than its value, so
+    an argument that stopped being a float is still a failure."""
+    return tuple(
+        f"<{type(value).__name__}>" if index in dynamic_args else value
+        for index, value in enumerate(record.args or ())
+    )
+
+
 def pinned(
     record: logging.LogRecord,
     *,
     dynamic: tuple[str, ...] = (),
+    dynamic_args: tuple[int, ...] = (),
     scrub: tuple[str, ...] = (),
 ) -> dict[str, Any]:
-    """What one emit path produces, in the four dimensions a consumer
-    sees. `dynamic` names the fields whose value is not pinned; `scrub`
-    names the strings that are replaced wherever they appear in the
-    sentence, before the numbers in it are normalized."""
+    """What one emit path produces, in the dimensions a consumer sees.
+
+    `dynamic` names the payload fields whose value is not pinned (the key
+    still is), `dynamic_args` the argument positions, and `scrub` the
+    strings replaced wherever they appear in the rendered sentence,
+    before the numbers in it are normalized."""
     fields = {
         key: DYNAMIC if key in dynamic else value for key, value in payload_of(record).items()
     }
@@ -134,6 +161,8 @@ def pinned(
     return {
         "logger": record.name,
         "level": record.levelno,
+        "template": record.msg,
+        "args": args_of(record, dynamic_args),
         "sentence": _NUMBER.sub("<n>", sentence),
         "fields": fields,
     }
@@ -161,9 +190,22 @@ def test_ota_check_offering_an_activation_code(caplog: pytest.LogCaptureFixture)
     with caplog.at_level("WARNING"):
         code = check_in(client)["activation"]["code"]
 
-    assert pinned(only(caplog, "ota_check"), dynamic=("code",), scrub=(code,)) == {
+    assert pinned(
+        only(caplog, "ota_check"), dynamic_args=(3, 4), dynamic=("code",), scrub=(code,)
+    ) == {
         "logger": "samtal_server.ota",
         "level": logging.WARNING,
+        "template": (
+            "device %s (%s, firmware %s) has no agent and is showing activation code %s; bind it "
+            "with: samtal-server config add-device %s <agent>"
+        ),
+        "args": (
+            REPORTED,
+            SYSTEM_INFO["board"]["type"],
+            SYSTEM_INFO["application"]["version"],
+            "<str>",
+            "<str>",
+        ),
         "sentence": (
             f"device {REPORTED} ({BOARD}, firmware {FIRMWARE}) has no agent and is "
             f"showing activation code {DYNAMIC}; bind it with: samtal-server config "
@@ -195,6 +237,16 @@ def test_ota_check_naming_an_agent_this_server_never_loaded(
     assert pinned(only(caplog, "ota_check")) == {
         "logger": "samtal_server.ota",
         "level": logging.WARNING,
+        "template": (
+            "device %s (%s, firmware %s) is bound to agent %s, which this server has not loaded; "
+            "restart to load it"
+        ),
+        "args": (
+            REPORTED,
+            SYSTEM_INFO["board"]["type"],
+            SYSTEM_INFO["application"]["version"],
+            "written-since-boot",
+        ),
         "sentence": (
             f"device {REPORTED} ({BOARD}, firmware {FIRMWARE}) is bound to agent "
             "written-since-boot, which this server has not loaded; restart to load it"
@@ -220,6 +272,10 @@ def test_ota_check_with_no_agent_at_all(caplog: pytest.LogCaptureFixture) -> Non
     assert pinned(only(caplog, "ota_check")) == {
         "logger": "samtal_server.ota",
         "level": logging.WARNING,
+        "template": (
+            "device %s (%s, firmware %s) has no agent: bind it under devices or set default_agent"
+        ),
+        "args": (REPORTED, SYSTEM_INFO["board"]["type"], SYSTEM_INFO["application"]["version"]),
         "sentence": (
             f"device {REPORTED} ({BOARD}, firmware {FIRMWARE}) has no agent: bind it "
             "under devices or set default_agent"
@@ -247,6 +303,14 @@ def test_ota_check_resolving_to_an_agent(caplog: pytest.LogCaptureFixture) -> No
     assert pinned(only(caplog, "ota_check")) == {
         "logger": "samtal_server.ota",
         "level": logging.INFO,
+        "template": "device %s (%s, firmware %s) resolved to agent %s%s",
+        "args": (
+            REPORTED,
+            SYSTEM_INFO["board"]["type"],
+            SYSTEM_INFO["application"]["version"],
+            "assistant",
+            "",
+        ),
         "sentence": (
             f"device {REPORTED} ({BOARD}, firmware {FIRMWARE}) resolved to agent assistant"
         ),
@@ -278,6 +342,12 @@ def test_activation_not_offered_because_the_database_could_not_be_read(
     assert pinned(only(caplog, "activation_not_offered")) == {
         "logger": "samtal_server.ota",
         "level": logging.WARNING,
+        "template": (
+            "device %s is unbound in the configuration this server started with, but the "
+            "database could not be read, so no activation code was issued: this device may "
+            "already be bound. Fix the database and it is offered one at its next check"
+        ),
+        "args": (DB_DEVICE_MAC,),
         "sentence": (
             f"device {DB_DEVICE_MAC} is unbound in the configuration this server "
             "started with, but the database could not be read, so no activation code "
@@ -307,6 +377,12 @@ def test_activation_not_offered_because_the_mint_budget_is_spent(
     assert pinned(only(caplog, "activation_not_offered")) == {
         "logger": "samtal_server.ota",
         "level": logging.WARNING,
+        "template": (
+            "device %s is unbound but was offered no activation code: %s. It is answered "
+            "exactly as it was before onboarding existed, with no token; bind it by its MAC "
+            "with: samtal-server config bind-device %s <agent>"
+        ),
+        "args": (RESOLVED, BUDGET_SPENT, RESOLVED),
         "sentence": (
             f"device {RESOLVED} is unbound but was offered no activation code: "
             f"{_NUMBER.sub('<n>', BUDGET_SPENT)}. It is answered exactly as it was "
@@ -330,6 +406,8 @@ def test_activation_complete(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "activation_complete")) == {
         "logger": "samtal_server.ota",
         "level": logging.INFO,
+        "template": "device %s is activated: its next configuration check hands it a token",
+        "args": (BOUND_MAC,),
         "sentence": (
             f"device {_NUMBER.sub('<n>', BOUND_MAC)} is activated: its next "
             "configuration check hands it a token"
@@ -354,6 +432,8 @@ def test_activation_pending(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "activation_pending"), dynamic=("code",)) == {
         "logger": "samtal_server.ota",
         "level": logging.DEBUG,
+        "template": "device %s is still waiting to be claimed",
+        "args": (RESOLVED,),
         "sentence": f"device {RESOLVED} is still waiting to be claimed",
         "fields": {
             "event": "activation_pending",
@@ -379,6 +459,11 @@ def test_activation_refused_by_an_unreadable_body(caplog: pytest.LogCaptureFixtu
     assert pinned(only(caplog, "activation_refused"), dynamic=("code",)) == {
         "logger": "samtal_server.ota",
         "level": logging.WARNING,
+        "template": (
+            "device %s sent a version-2 activation body that is not a JSON object; it is answered "
+            "as still waiting. Nothing of the body is quoted here"
+        ),
+        "args": (RESOLVED,),
         "sentence": (
             f"device {RESOLVED} sent a version-<n> activation body that is not a JSON "
             "object; it is answered as still waiting. Nothing of the body is quoted here"
@@ -406,6 +491,12 @@ def test_activation_refused_by_an_unknown_algorithm(caplog: pytest.LogCaptureFix
     assert pinned(only(caplog, "activation_refused"), dynamic=("code",)) == {
         "logger": "samtal_server.ota",
         "level": logging.WARNING,
+        "template": (
+            "device %s sent a version-2 activation body naming an algorithm this server does not "
+            "know; it is answered as still waiting. The value is not quoted here, since it is "
+            "whatever the request carried"
+        ),
+        "args": (RESOLVED,),
         "sentence": (
             f"device {RESOLVED} sent a version-<n> activation body naming an algorithm "
             "this server does not know; it is answered as still waiting. The value is "
@@ -434,6 +525,11 @@ def test_activation_refused_by_a_challenge_mismatch(caplog: pytest.LogCaptureFix
     assert pinned(only(caplog, "activation_refused"), dynamic=("code",)) == {
         "logger": "samtal_server.ota",
         "level": logging.WARNING,
+        "template": (
+            "device %s sent a version-2 activation body answering a challenge this server did not "
+            "issue for it; it is answered as still waiting"
+        ),
+        "args": (RESOLVED,),
         "sentence": (
             f"device {RESOLVED} sent a version-<n> activation body answering a "
             "challenge this server did not issue for it; it is answered as still waiting"
@@ -454,6 +550,8 @@ def test_ota_request_rejected(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "ota_request_rejected")) == {
         "logger": "samtal_server.ota",
         "level": logging.WARNING,
+        "template": "rejected OTA request: %s",
+        "args": ("the Device-Id header is required and holds the device MAC",),
         "sentence": (
             "rejected OTA request: the Device-Id header is required and holds the "
             "device MAC"
@@ -487,6 +585,8 @@ def test_onboarding_banner_with_onboarding_on(caplog: pytest.LogCaptureFixture) 
     assert pinned(only(caplog, "onboarding_banner")) == {
         "logger": "samtal_server.onboarding",
         "level": logging.INFO,
+        "template": "device onboarding URL: %s (%s)",
+        "args": (f"https://voice.example/x/{PINNED_KEY}/", "from server.public_url"),
         "sentence": (
             f"device onboarding URL: https://voice.example/x/{PINNED_KEY}/ "
             "(from server.public_url)"
@@ -507,6 +607,11 @@ def test_onboarding_banner_with_onboarding_off(caplog: pytest.LogCaptureFixture)
     assert pinned(only(caplog, "onboarding_banner")) == {
         "logger": "samtal_server.onboarding",
         "level": logging.INFO,
+        "template": (
+            "device onboarding is off: devices are configured at the server.ota_path path on %s "
+            "(%s), which is not printed here, since that segment is this deployment's secret"
+        ),
+        "args": ("https://voice.example", "from server.public_url"),
         "sentence": (
             "device onboarding is off: devices are configured at the server.ota_path "
             "path on https://voice.example (from server.public_url), which is not "
@@ -532,6 +637,11 @@ def test_onboarding_key_mismatch(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "onboarding_key_mismatch")) == {
         "logger": "samtal_server.onboarding",
         "level": logging.WARNING,
+        "template": (
+            "onboarding key %s does not match this server's key %s: check the URL typed into the "
+            "device's captive portal, character by character"
+        ),
+        "args": (f"{PINNED_KEY[:-1]}X", PINNED_KEY),
         "sentence": (
             f"onboarding key {PINNED_KEY[:-1]}X does not match this server's key "
             f"{PINNED_KEY}: check the URL typed into the device's captive portal, "
@@ -557,6 +667,11 @@ def test_onboarding_key_unshaped(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "onboarding_key_unshaped")) == {
         "logger": "samtal_server.onboarding",
         "level": logging.WARNING,
+        "template": (
+            "a request reached the onboarding path carrying %d characters that are not shaped like "
+            "a key at all, so they are not repeated here; the URL to type is in the startup line"
+        ),
+        "args": (500,),
         "sentence": (
             "a request reached the onboarding path carrying <n> characters that are "
             "not shaped like a key at all, so they are not repeated here; the URL to "
@@ -577,9 +692,11 @@ def test_capture_started(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> No
 
     assert capture is not None
     record = only(caplog, "capture_started")
-    assert pinned(record, dynamic=("path",), scrub=(str(capture.wav_path),)) == {
+    assert pinned(record, dynamic_args=(1,), dynamic=("path",), scrub=(str(capture.wav_path),)) == {
         "logger": "samtal_server.capture",
         "level": logging.INFO,
+        "template": "session %s: capturing to %s",
+        "args": ("s1", "<PosixPath>"),
         "sentence": f"session s<n>: capturing to {DYNAMIC}",
         "fields": {"event": "capture_started", "session": "s1", "path": DYNAMIC},
     }
@@ -601,9 +718,15 @@ def test_capture_declined_because_the_directory_is_unusable(
     with caplog.at_level("WARNING"):
         assert keeper.open("s1", time.monotonic(), MANIFEST) is None
 
-    assert pinned(only(caplog, "capture_declined"), scrub=(str(keeper.directory),)) == {
+    assert pinned(
+        only(caplog, "capture_declined"),
+        dynamic_args=(1, 2),
+        scrub=(str(keeper.directory),),
+    ) == {
         "logger": "samtal_server.capture",
         "level": logging.WARNING,
+        "template": "session %s: not capturing, %s is unusable: %s",
+        "args": ("s1", "<PosixPath>", "<OSError>"),
         "sentence": f"session s<n>: not capturing, {DYNAMIC} is unusable: the volume said no",
         "fields": {"event": "capture_declined", "session": "s1", "reason": "unusable"},
     }
@@ -617,9 +740,11 @@ def test_capture_declined_because_the_volume_is_nearly_full(
     with caplog.at_level("WARNING"):
         assert keeper.open("s1", time.monotonic(), MANIFEST) is None
 
-    assert pinned(only(caplog, "capture_declined"), dynamic=("free_mb",)) == {
+    assert pinned(only(caplog, "capture_declined"), dynamic_args=(1,), dynamic=("free_mb",)) == {
         "logger": "samtal_server.capture",
         "level": logging.WARNING,
+        "template": "session %s: not capturing, %.0f MB free is below the %.0f MB floor",
+        "args": ("s1", "<float>", 10_000_000.0),
         "sentence": "session s<n>: not capturing, <n> MB free is below the <n> MB floor",
         "fields": {
             "event": "capture_declined",
@@ -643,9 +768,11 @@ def test_capture_declined_because_the_files_would_not_open(
     with caplog.at_level("WARNING"):
         assert keeper.open("s1", time.monotonic(), MANIFEST) is None
 
-    assert pinned(only(caplog, "capture_declined")) == {
+    assert pinned(only(caplog, "capture_declined"), dynamic_args=(1,)) == {
         "logger": "samtal_server.capture",
         "level": logging.WARNING,
+        "template": "session %s: not capturing, could not open the files: %s",
+        "args": ("s1", "<OSError>"),
         "sentence": "session s<n>: not capturing, could not open the files: no room for the files",
         "fields": {"event": "capture_declined", "session": "s1", "reason": "open"},
     }
@@ -662,6 +789,8 @@ def test_capture_limit(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None
     assert pinned(only(caplog, "capture_limit")) == {
         "logger": "samtal_server.capture",
         "level": logging.INFO,
+        "template": "session %s: capture reached its %.0f s limit",
+        "args": ("s1", 1.0),
         "sentence": "session s<n>: capture reached its <n> s limit",
         "fields": {"event": "capture_limit", "session": "s1"},
     }
@@ -679,9 +808,11 @@ def test_capture_failed(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> Non
         capture.microphone(tone(100, 1000), opened)
         capture.microphone(tone(100, 1000), opened + 3.0)
 
-    assert pinned(only(caplog, "capture_failed")) == {
+    assert pinned(only(caplog, "capture_failed"), dynamic_args=(2,)) == {
         "logger": "samtal_server.capture",
         "level": logging.WARNING,
+        "template": "session %s: capture stopped after failing to %s: %s",
+        "args": ("s1", "write audio", "<ValueError>"),
         "sentence": (
             "session s<n>: capture stopped after failing to write audio: "
             "write to closed file"
@@ -720,6 +851,8 @@ def test_capture_pruned(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> Non
     assert pinned(only(caplog, "capture_pruned")) == {
         "logger": "samtal_server.capture",
         "level": logging.INFO,
+        "template": "capture: pruned %d session(s) to stay under %.0f MB: %s",
+        "args": (1, 0.3, "s0"),
         "sentence": "capture: pruned <n> session(s) to stay under <n> MB: s<n>",
         "fields": {"event": "capture_pruned", "sessions": ["s0"]},
     }
@@ -735,9 +868,16 @@ def test_capture_over_budget(tmp_path: Path, caplog: pytest.LogCaptureFixture) -
     with caplog.at_level("WARNING"):
         assert keeper.prune() == []
 
-    assert pinned(only(caplog, "capture_over_budget"), dynamic=("total_mb",)) == {
+    assert pinned(
+        only(caplog, "capture_over_budget"), dynamic_args=(0,), dynamic=("total_mb",)
+    ) == {
         "logger": "samtal_server.capture",
         "level": logging.WARNING,
+        "template": (
+            "capture: %.0f MB on disk is over the %.0f MB budget and nothing more can be pruned; "
+            "raise max_total_mb or lower max_session_s"
+        ),
+        "args": ("<float>", 0.01),
         "sentence": (
             "capture: <n> MB on disk is over the <n> MB budget and nothing more can "
             "be pruned; raise max_total_mb or lower max_session_s"
@@ -762,6 +902,8 @@ def test_capture_enabled(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "capture_enabled")) == {
         "logger": "samtal_server.app",
         "level": logging.WARNING,
+        "template": "session capture is on: room audio and transcripts are being written to %s",
+        "args": (Path(CAPTURE_DIR),),
         "sentence": (
             "session capture is on: room audio and transcripts are being written to "
             f"{CAPTURE_DIR}"
@@ -779,6 +921,10 @@ def test_capture_disabled(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "capture_disabled")) == {
         "logger": "samtal_server.app",
         "level": logging.INFO,
+        "template": (
+            "session capture is configured but off; set server.capture.enabled to record to %s"
+        ),
+        "args": (Path(CAPTURE_DIR),),
         "sentence": (
             "session capture is configured but off; set server.capture.enabled to "
             f"record to {CAPTURE_DIR}"
@@ -800,6 +946,8 @@ def test_auth_rejected(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "auth_rejected")) == {
         "logger": "samtal_server.ws",
         "level": logging.WARNING,
+        "template": "refused a websocket handshake from %s: %s",
+        "args": (RESOLVED, "no_token"),
         "sentence": f"refused a websocket handshake from {RESOLVED}: no_token",
         "fields": {"event": "auth_rejected", "device": RESOLVED, "reason": "no_token"},
     }
@@ -823,6 +971,8 @@ def test_session_rejected_at_capacity(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "session_rejected"), dynamic=("session",)) == {
         "logger": "samtal_server.ws",
         "level": logging.WARNING,
+        "template": "refused a websocket handshake from %s: the server is at capacity",
+        "args": (RESOLVED,),
         "sentence": f"refused a websocket handshake from {RESOLVED}: the server is at capacity",
         "fields": {
             "event": "session_rejected",
@@ -843,6 +993,8 @@ async def test_drain_started(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "drain_started")) == {
         "logger": "samtal_server.registry",
         "level": logging.INFO,
+        "template": "draining %d session(s), up to %.0f s",
+        "args": (2, 5),
         "sentence": "draining <n> session(s), up to <n> s",
         "fields": {"event": "drain_started", "sessions": 2, "timeout_s": 5},
     }
@@ -855,6 +1007,8 @@ async def test_drain_finished(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "drain_finished")) == {
         "logger": "samtal_server.registry",
         "level": logging.INFO,
+        "template": "every session drained",
+        "args": (),
         "sentence": "every session drained",
         "fields": {"event": "drain_finished", "sessions": 1},
     }
@@ -867,6 +1021,8 @@ async def test_drain_incomplete(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "drain_incomplete")) == {
         "logger": "samtal_server.registry",
         "level": logging.WARNING,
+        "template": "drained with %d session(s) cut mid-reply and %d that did not finish",
+        "args": (1, 0),
         "sentence": "drained with <n> session(s) cut mid-reply and <n> that did not finish",
         "fields": {
             "event": "drain_incomplete",
@@ -889,9 +1045,13 @@ async def test_filler_disabled(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level("WARNING"):
         await build_agent_fillers(config, providers)
 
-    assert pinned(only(caplog, "filler_disabled")) == {
+    assert pinned(only(caplog, "filler_disabled"), dynamic_args=(2,)) == {
         "logger": "samtal_server.filler",
         "level": logging.WARNING,
+        "template": (
+            "agent %s: filler synthesis failed, latency masking is off for this agent: %s: %s"
+        ),
+        "args": ("poet", "RuntimeError", "<RuntimeError>"),
         "sentence": (
             "agent poet: filler synthesis failed, latency masking is off for this "
             "agent: RuntimeError: no voice today"
@@ -922,11 +1082,16 @@ def test_device_bindings_snapshot_only(
 
     assert pinned(
         only(caplog, "device_bindings_snapshot_only"),
-        dynamic=("path",),
+        dynamic_args=(0,), dynamic=("path",),
         scrub=(str(directory / "samtal.db"),),
     ) == {
         "logger": "samtal_server.device.bindings",
         "level": logging.DEBUG,
+        "template": (
+            "no configuration database at %s: device bindings resolve from the configuration this "
+            "server was built with"
+        ),
+        "args": ("<PosixPath>",),
         "sentence": (
             f"no configuration database at {DYNAMIC}: device bindings resolve from "
             "the configuration this server was built with"
@@ -951,6 +1116,12 @@ def test_device_bindings_unreadable(
     assert pinned(only(caplog, "device_bindings_unreadable"), dynamic=("failure",)) == {
         "logger": "samtal_server.device.bindings",
         "level": logging.WARNING,
+        "template": (
+            "cannot read the device bindings for %s; answering from the configuration this server "
+            "started with, which may be older than the database. The failure's kind is recorded "
+            "beside this line"
+        ),
+        "args": (DB_DEVICE_MAC,),
         "sentence": (
             f"cannot read the device bindings for {DB_DEVICE_MAC}; answering from the "
             "configuration this server started with, which may be older than the "
@@ -977,6 +1148,8 @@ def test_memory_unreadable(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> 
     assert pinned(only(caplog, "memory_unreadable")) == {
         "logger": "samtal_server.tools.memory",
         "level": logging.WARNING,
+        "template": "could not read memory for agent %s (%s); it remembers nothing this round",
+        "args": ("poet", "UnicodeDecodeError"),
         "sentence": (
             "could not read memory for agent poet (UnicodeDecodeError); it remembers "
             "nothing this round"
@@ -1016,6 +1189,8 @@ def test_api_error(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "api_error")) == {
         "logger": "samtal_server.config.api",
         "level": logging.ERROR,
+        "template": "the configuration API failed to handle a request (%s)",
+        "args": ("RuntimeError",),
         "sentence": "the configuration API failed to handle a request (RuntimeError)",
         "fields": {"event": "api_error"},
     }
@@ -1033,6 +1208,8 @@ def test_api_storage_error(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> 
     assert pinned(only(caplog, "api_storage_error")) == {
         "logger": "samtal_server.config.api",
         "level": logging.ERROR,
+        "template": "the configuration API met unreadable stored state (%s)",
+        "args": ("StorageError",),
         "sentence": "the configuration API met unreadable stored state (StorageError)",
         "fields": {"event": "api_storage_error"},
     }
@@ -1083,9 +1260,14 @@ async def test_asr_prompt_echo_skipped(caplog: pytest.LogCaptureFixture) -> None
     with caplog.at_level("INFO"):
         assert (await asr.transcribe(ONE_SECOND, 16000)).text == ""
 
-    assert pinned(only(caplog, "asr_prompt_echo")) == {
+    assert pinned(only(caplog, "asr_prompt_echo"), dynamic_args=(0,)) == {
         "logger": "samtal_server.providers.openai_asr",
         "level": logging.WARNING,
+        "template": (
+            "openai asr: the transcript came back as the configured prompt with %.1f s of the "
+            "timeout left, too little to retry, treating %.2f s of audio as nothing said"
+        ),
+        "args": ("<float>", 1.0),
         "sentence": (
             "openai asr: the transcript came back as the configured prompt with <n> s "
             "of the timeout left, too little to retry, treating <n> s of audio as "
@@ -1113,9 +1295,14 @@ async def test_asr_prompt_echo_timed_out(caplog: pytest.LogCaptureFixture) -> No
     with caplog.at_level("INFO"):
         assert (await asr.transcribe(ONE_SECOND, 16000)).text == ""
 
-    assert pinned(only(caplog, "asr_prompt_echo"), dynamic=("retry_ms",)) == {
+    assert pinned(only(caplog, "asr_prompt_echo"), dynamic_args=(0,), dynamic=("retry_ms",)) == {
         "logger": "samtal_server.providers.openai_asr",
         "level": logging.WARNING,
+        "template": (
+            "openai asr: the retry outran the timeout's remaining %.1f s, treating %.2f s of audio "
+            "as nothing said"
+        ),
+        "args": ("<float>", 1.0),
         "sentence": (
             "openai asr: the retry outran the timeout's remaining <n> s, treating <n> "
             "s of audio as nothing said"
@@ -1139,6 +1326,11 @@ async def test_asr_prompt_echo_confirmed_echo(caplog: pytest.LogCaptureFixture) 
     assert pinned(only(caplog, "asr_prompt_echo"), dynamic=("retry_ms",)) == {
         "logger": "samtal_server.providers.openai_asr",
         "level": logging.WARNING,
+        "template": (
+            "openai asr: the retry came back as the prompt again, treating %.2f s of audio as "
+            "nothing said"
+        ),
+        "args": (1.0,),
         "sentence": (
             "openai asr: the retry came back as the prompt again, treating <n> s of "
             "audio as nothing said"
@@ -1162,6 +1354,10 @@ async def test_asr_prompt_echo_confirmed_empty(caplog: pytest.LogCaptureFixture)
     assert pinned(only(caplog, "asr_prompt_echo"), dynamic=("retry_ms",)) == {
         "logger": "samtal_server.providers.openai_asr",
         "level": logging.WARNING,
+        "template": (
+            "openai asr: the retry came back empty, treating %.2f s of audio as nothing said"
+        ),
+        "args": (1.0,),
         "sentence": (
             "openai asr: the retry came back empty, treating <n> s of audio as "
             "nothing said"
@@ -1187,6 +1383,11 @@ async def test_asr_prompt_echo_recovered(caplog: pytest.LogCaptureFixture) -> No
     assert pinned(only(caplog, "asr_prompt_echo"), dynamic=("retry_ms",)) == {
         "logger": "samtal_server.providers.openai_asr",
         "level": logging.INFO,
+        "template": (
+            'openai asr: the retry recovered "%s" from %.2f s of audio the echo guard would have '
+            "discarded"
+        ),
+        "args": ("Yes, please.", 1.0),
         "sentence": (
             'openai asr: the retry recovered "Yes, please." from <n> s of audio the '
             "echo guard would have discarded"
