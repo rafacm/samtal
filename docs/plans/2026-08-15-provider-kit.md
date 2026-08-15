@@ -508,7 +508,7 @@ resolution once the amendment addressing it lands.
   greps above; red-to-green recorded.
 - [x] [**Pipeline classifies by type and stops eating provider
   failures**](2026-08-15-provider-kit-implementation.md#milestone-2-the-pipeline-classifies-by-type)
-  (PR TBD): `is_timeout` deleted and `_provider_failed`
+  (PR #151): `is_timeout` deleted and `_provider_failed`
   classifies with `isinstance(exc, TimeoutError)`; the reply-body
   catch narrows to `DeviceGone` with the two device-edge sites
   commented and `DeviceGone`'s docstring corrected; the reply-path
