@@ -18,8 +18,8 @@ samtal-server/samtal_server/app.py` is empty, no configuration key
 exists, and a server that is not asked for a store neither creates nor
 opens one.
 
-Eight commits, in the order the milestone was built in, plus the one
-that lands this section and ticks the milestone:
+Ten commits, in the order the milestone was built in. The one that
+lands this section and ticks the milestone is the eleventh:
 
 1. `c75b9a7` Parameterize the database helpers by file
 2. `3f8d176` Give the conversation store its schema and chain
@@ -29,6 +29,8 @@ that lands this section and ticks the milestone:
 6. `22ca88c` Prove the conversation store ships in the wheel
 7. `86b01c8` Say why a refused record was refused
 8. `7411735` Wrap the purge help where it is written
+9. `3abfe67` Say what the deferred BEGIN buys, where it is chosen
+10. `2cfed4f` Spell the empty tuple default like its neighbour
 
 ### The db/ extraction
 
@@ -218,7 +220,7 @@ milestone 1 list and the write-path specifics its review round added.
 
 ### Verification
 
-From `samtal-server/`, at `7411735` plus this documentation commit:
+From `samtal-server/`, at `2cfed4f`:
 
 ```
 $ uv run ruff check .
@@ -227,12 +229,12 @@ All checks passed!
 
 ```
 $ uv run pytest tests/unit -q
-2103 passed, 15 skipped in 260.44s (0:04:20)
+2103 passed, 15 skipped in 261.13s (0:04:21)
 ```
 
 ```
 $ uv run pytest tests/integration -q
-53 passed in 157.83s (0:02:37)
+53 passed in 155.24s (0:02:35)
 ```
 
 The acceptance criterion that nothing is wired:
@@ -242,6 +244,16 @@ $ git grep conversations samtal-server/samtal_server/app.py
 $ echo $?
 1
 ```
+
+One integration flake, seen once and not since: an earlier run of the
+same lane failed
+`test_smoke_seeds.py::test_an_interrupted_seeding_fails_and_leaves_no_server_behind`,
+which boots a real server on a free port and interrupts it. It passes
+alone, passes three times in a row alone, and passed in every other run
+of the whole lane including the one above. Nothing in this milestone
+touches that path, and the plan behind that suite already names booting
+a server in a test as a thing that can flake. Recorded rather than
+smoothed over.
 
 The wheel step cannot be run by CI from this session, so it was run by
 hand exactly as the workflow runs it: `uv build --wheel`, a fresh venv,
