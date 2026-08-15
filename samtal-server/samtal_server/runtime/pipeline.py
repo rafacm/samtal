@@ -527,12 +527,26 @@ class PipelineRuntime:
         the lot (#137). It used to be decided by looking for "Timeout"
         in the class name, because the SDKs' own classes agreed on
         nothing: `openai.APITimeoutError` is an `APIConnectionError` and
-        `httpx.TimeoutException` inherits from neither."""
+        `httpx.TimeoutException` inherits from neither.
+
+        The class name is reported and the exception's message is not.
+        The five real providers raise the request-time taxonomy, whose
+        messages carry trusted metadata only (`providers/kit.py`), but
+        this takes a `BaseException` from four call sites and one of
+        them is the LLM stream, so anything an SDK or a transport
+        raises can arrive here unwrapped, and an exception raised near
+        a response body can embed one in its message. That would land
+        in the sentence, in the record's arguments, and from there in
+        front of every consumer attached to the session, which is the
+        same reason `_reply`'s catch prints a class name and nothing
+        else. What the class does not say, the fields do: the stage,
+        the entry, its type, and the host.
+        """
         fields = provider_fields(stage, provider)
         named = f' "{fields["provider"]}"' if "provider" in fields else ""
         where = f" reaching {fields['host']}" if "host" in fields else ""
         self._events.warning(
-            "session %s: %s provider%s %s after %.2f s%s: %s: %s",
+            "session %s: %s provider%s %s after %.2f s%s: %s",
             self.session_id,
             stage,
             named,
@@ -540,7 +554,6 @@ class PipelineRuntime:
             elapsed,
             where,
             type(exc).__name__,
-            exc,
             event="provider_failed",
             agent=self._agent,
             error=type(exc).__name__,
