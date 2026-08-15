@@ -681,9 +681,9 @@ class PipelineRuntime:
             # The device went away mid-reply. Only this type: the edge
             # translates both of the transport's disconnect shapes into
             # it, so a bare `RuntimeError` arriving here is a bug in
-            # this process (#137) and belongs under "reply failed" with
-            # its traceback rather than being read as a disconnect and
-            # returned on in silence.
+            # this process (#137) and belongs on the record below rather
+            # than being read as a disconnect and returned on in
+            # silence.
             return
         except asyncio.CancelledError:
             # A barge-in or an abort is cancelling this reply, and the
@@ -693,8 +693,22 @@ class PipelineRuntime:
             if self._filler_task is not None:
                 self._filler_task.cancel()
             raise
-        except Exception:
-            logger.exception("session %s: reply failed", self.session_id)
+        except Exception as exc:
+            # The class name, and nothing else. No `exc_info`, and no
+            # `str(exc)`: since the catch above narrowed, this arm
+            # catches every provider failure too, and what a failure
+            # from the wire carries is untrusted. `providers/kit.py`
+            # sanitizes the taxonomy's own message, but a traceback
+            # rendered here would print the whole chain behind it, and
+            # an exception raised anywhere near a response body can
+            # embed one in its message. The logs the observability ADR
+            # makes the retained surface are not the place to find that
+            # out. What stays diagnosable: `provider_failed` names the
+            # stage, the provider and the host for anything that failed
+            # on the wire, and this line names the class for the rest.
+            logger.error(
+                "session %s: reply failed: %s", self.session_id, type(exc).__name__
+            )
         finally:
             # Before the closing tts stop: an unfired timer is stood
             # down, and a clip already sounding finishes rather than

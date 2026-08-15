@@ -2,23 +2,30 @@
 
 The reply body's outer catch reads the same moment in one of two ways: the
 device went away, which is ordinary and stays silent, or something here is
-broken, which is a bug and belongs in the log with its traceback. Issue #137
-separated them. The device edge translates both of the transport's
-vanished-device shapes into `DeviceGone`, so the body can catch that type
-alone, and everything else, a provider's request failure included, reaches the
-reporting arm instead of being read as a disconnect.
+broken, which is a bug and belongs on the record. Issue #137 separated them.
+The device edge translates both of the transport's vanished-device shapes into
+`DeviceGone`, so the body can catch that type alone, and everything else, a
+provider's request failure included, reaches the reporting arm instead of being
+read as a disconnect.
 
 Two halves, per the plan. The first pins that a provider call failing mid-reply
 is reported as a provider failure and never swallowed. The second is the half
 that changed: a bare `RuntimeError` raised while speaking is now a bug on the
 record, while a `DeviceGone` raised in the same place is still nothing at all.
+
+What that record may say is the third thing pinned here. The arm that reports
+now catches everything a provider raises, so it names the exception's class and
+stops there: no traceback and no message text, neither of which is ours to
+trust once it has been anywhere near a response body.
 """
 
+import logging
 from typing import Any, cast
 
 import pytest
 
 from samtal_server.device.boundary import DeviceGone
+from samtal_server.logs import TEXT_FORMAT, JsonFormatter
 from samtal_server.providers import ProviderCallError, ProviderCallTimeout
 from tests.unit.test_session_events import reply_with
 from tests.unit.test_session_tools import (
@@ -31,6 +38,36 @@ from tests.unit.test_session_tools import (
 # One frame of silence, which the mock ASR answers with "hello" whatever it
 # holds: these tests are about how the reply ends, not what was said.
 UTTERANCE = b"\x00\x00" * 320
+
+# Planted where a real secret plausibly ends up: in the message of a failure
+# that came back from a network, and in the message of the failure behind it.
+SENTINEL = "sk-test-1d0c7a6b-never-a-real-credential"
+
+
+def reply_failure(caplog: pytest.LogCaptureFixture) -> logging.LogRecord:
+    """The one record the generic arm emitted."""
+    matching = [record for record in caplog.records if "reply failed" in record.getMessage()]
+    assert len(matching) == 1, f"expected one reply failure, got {len(matching)}"
+    return matching[0]
+
+
+def rendered(record: logging.LogRecord) -> str:
+    """One record through both formats a deployment can be running, since
+    what a secret must stay out of is whatever is written down. The JSON
+    one is the container default and the retained surface; the text one
+    is what a terminal shows."""
+    return JsonFormatter().format(record) + logging.Formatter(TEXT_FORMAT).format(record)
+
+
+def a_bug_carrying_a_secret() -> RuntimeError:
+    """A local failure with the sentinel in its own message and another
+    copy in the failure behind it, which is the shape a wrapped vendor
+    error has: `raise` inside an `except` leaves the first reachable
+    from the second."""
+    behind = ValueError(f"the endpoint answered {SENTINEL}")
+    bug = RuntimeError(f"the encoder is wedged on {SENTINEL}")
+    bug.__cause__ = behind
+    return bug
 
 
 class QuietSocket:
@@ -101,11 +138,29 @@ async def test_a_bug_while_speaking_is_reported_rather_than_swallowed(
 ) -> None:
     """The catch half, and the one that changed. A bare `RuntimeError`
     reaching the reply body can only be a local bug now that the edge
-    translates a vanished device, so it lands under "reply failed" with
-    its traceback instead of returning silently."""
+    translates a vanished device, so it lands under "reply failed"
+    instead of returning silently."""
     await reply_broken_while_speaking(RuntimeError("the encoder is wedged"), caplog)
-    assert "reply failed" in caplog.text
-    assert "the encoder is wedged" in caplog.text
+    assert reply_failure(caplog).getMessage().endswith("reply failed: RuntimeError")
+
+
+async def test_a_reported_failure_says_the_class_and_nothing_else(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The report is the class name. Everything else a failure carries
+    reached this arm from somewhere, and since the catch narrowed, that
+    somewhere includes every provider on the far side of a network: a
+    message that quotes a response body, and a chain of causes behind
+    it that a traceback would print in full. Neither is written down,
+    in either format."""
+    await reply_broken_while_speaking(a_bug_carrying_a_secret(), caplog)
+
+    failed = reply_failure(caplog)
+    assert failed.getMessage().endswith("reply failed: RuntimeError")
+    assert failed.exc_info is None
+    assert SENTINEL not in caplog.text
+    assert all(SENTINEL not in str(record.__dict__) for record in caplog.records)
+    assert all(SENTINEL not in rendered(record) for record in caplog.records)
 
 
 async def test_a_vanished_device_while_speaking_still_says_nothing(
