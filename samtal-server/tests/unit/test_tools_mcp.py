@@ -11,6 +11,7 @@ import re
 import socket
 import sys
 import time
+from collections.abc import Iterator
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from mcp import ClientSession
 
 from samtal_server import logs
 from samtal_server.config import Config, McpServerConfig
+from samtal_server.events import Emission, attach_server_tap, detach_server_tap
 from samtal_server.logs import _STANDARD_ATTRIBUTES
 from samtal_server.runtime.prompt import Guidance
 from samtal_server.tools import names
@@ -1024,6 +1026,43 @@ def fields_of(record: logging.LogRecord) -> dict[str, object]:
     }
 
 
+class Consumer:
+    """A server-scope tap that keeps what it was handed.
+
+    The same shape the server pin suite uses, and here for the same
+    reason: a record is not the only thing an event reaches. A tap is
+    handed the payload as a copy but the `%` arguments as the objects
+    themselves, so a claim that some value reaches nobody has to be
+    asserted where a consumer stands as well as at the log."""
+
+    def __init__(self) -> None:
+        self.seen: list[Emission] = []
+
+    def emit(self, emission: Emission) -> None:
+        self.seen.append(emission)
+
+    def rendered(self) -> str:
+        """Everything a consumer could read off what it was handed."""
+        parts: list[str] = []
+        for emission in self.seen:
+            parts.append(str(emission.payload))
+            for argument in emission.args:
+                parts += [str(argument), repr(argument)]
+        return "\n".join(parts)
+
+
+@pytest.fixture
+def tap() -> Iterator[Consumer]:
+    """A consumer attached to the server hub for one test, which is what
+    a #66/#67 exporter will be."""
+    consumer = Consumer()
+    attach_server_tap(consumer)
+    try:
+        yield consumer
+    finally:
+        detach_server_tap(consumer)
+
+
 async def test_a_connected_server_says_so_with_a_count_of_its_tools(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -1035,9 +1074,10 @@ async def test_a_connected_server_says_so_with_a_count_of_its_tools(
     connected = one_event(caplog, "mcp_connected")
     assert connected.name == MANAGER_LOGGER
     assert connected.levelno == logging.INFO
-    # A count, never a list: the names are in the sentence, where an
-    # operator reads them, and a field a collector groups by has to be a
-    # number.
+    # A count, and no names in the line at all: half of a published name
+    # is what the far side called its tool, and which names an entry
+    # published is answered by `samtal-server config status` rather than
+    # by the retained logs.
     fields = fields_of(connected)
     assert isinstance(fields.pop("duration_ms"), int)
     assert fields == {
@@ -1047,6 +1087,7 @@ async def test_a_connected_server_says_so_with_a_count_of_its_tools(
         "tools": published,
     }
     assert published > 0
+    assert "secret_word" not in connected.getMessage()
 
 
 async def test_a_server_that_will_not_spawn_is_down_for_the_transport(
@@ -1129,13 +1170,15 @@ async def test_a_failed_call_drops_the_call_and_then_the_connection(
         assert caplog.records.index(dropped) < caplog.records.index(down)
         assert dropped.levelno == logging.WARNING
         assert down.levelno == logging.WARNING
-        # The published name, which is the one the model was given and
-        # the one this server's own publishing rule made.
+        # The position in this server's listing, never the name: half
+        # of a published name is what the far side called its tool, and
+        # `secret_word` is its first.
         assert fields_of(dropped) == {
             "event": "mcp_call_dropped",
             "entry": "tools",
-            "tool": "tools__secret_word",
+            "position": 1,
         }
+        assert "secret_word" not in dropped.getMessage()
         assert fields_of(down) == {
             "event": "mcp_down",
             "entry": "tools",
@@ -1183,13 +1226,22 @@ async def test_a_shadowed_tool_is_reported_by_position_and_owner(
         await servers.stop_all()
 
 
-async def test_a_credential_shaped_shadowed_name_reaches_nothing_at_all(
-    caplog: pytest.LogCaptureFixture,
+async def test_a_credential_shaped_tool_name_reaches_nothing_at_all(
+    caplog: pytest.LogCaptureFixture, tap: Consumer
 ) -> None:
-    """The reason the field is a position. Sanitizing a published name
-    only replaces the characters an LLM API refuses, so an alphanumeric
-    secret pasted into a tool name survives it whole, and this line is
-    the one that would otherwise carry a name nothing published."""
+    """The reason every line about a tool is written in positions.
+
+    Sanitizing a published name only replaces the characters an LLM API
+    refuses, so an alphanumeric secret pasted into a tool name goes
+    through it untouched, and a server that was handed one of this
+    deployment's own credentials can hand it back by listing a tool
+    under it. It is planted where it publishes *and* is then shadowed,
+    so the connect line, the shadow drop and the publication's own
+    warnings are all driven at once, and hunted in every place a value
+    can reach: a record's arguments, its fields, both shipped formats,
+    and a consumer attached to the hub, which is handed the arguments
+    themselves rather than a copy.
+    """
     servers = McpServers.build(
         config_granting(
             {
@@ -1208,21 +1260,17 @@ async def test_a_credential_shaped_shadowed_name_reaches_nothing_at_all(
         # or this test would be passing by testing nothing.
         assert f"home__inside__{CREDENTIAL}" not in offered
         assert emitted(caplog, "mcp_tool_shadowed")
+        assert emitted(caplog, "mcp_connected")
 
-        # Every record rendered the way the container renders it, so a
-        # field is searched as well as a sentence, and then every record
-        # holding the planted name asked what it was.
-        carrying = [
-            getattr(record, "event", None)
+        # Every record in both shipped formats, plus the arguments
+        # behind them, which is where a value that is rendered into a
+        # sentence still sits as an object.
+        formatter = logs.JsonFormatter()
+        written = "\n".join(
+            f"{record.getMessage()}\n{record.args!r}\n{formatter.format(record)}"
             for record in caplog.records
-            if CREDENTIAL in logs.JsonFormatter().format(record)
-        ]
-        # One line, and it is the connect listing, which prints the
-        # names an entry published because they are what the model was
-        # given and what the status surface answers with. That is the
-        # rule this module's docstring states, and it is exactly the
-        # rule the shadow drop is an exception to: this name was taken
-        # away from the model, so the line saying so may not carry it.
-        assert carrying == ["mcp_connected"]
+        )
+        assert CREDENTIAL not in written
+        assert CREDENTIAL not in tap.rendered()
     finally:
         await servers.stop_all()

@@ -584,17 +584,20 @@ class McpServerManager:
                 )
                 self._session = session
                 self._became(CONNECTED, None)
-                # The names go in the sentence, as they always have, and
-                # the field is their count: a published name has been
-                # through the publishing rule and is this server's to
-                # print, but a list of them is not a value anything can
-                # aggregate, and the field half of this surface is read
-                # by machines.
+                # A count, and no names anywhere in the line. Half of a
+                # published name is whatever the far side called its
+                # tool, sanitizing replaces only the characters an LLM
+                # API refuses, and a credential is alphanumeric and
+                # survives that whole, so a server holding one of this
+                # deployment's own could put it into the retained logs
+                # by listing a tool under it. Which names an entry
+                # published is a question with an answer that is not a
+                # log line: `samtal-server config status` prints them,
+                # to a terminal, for whoever asked.
                 events.info(
-                    "mcp server %s connected with %d tool(s): %s",
+                    "mcp server %s connected with %d tool(s)",
                     self._name,
                     len(self._published.tools),
-                    ", ".join(tool.name for tool in self._published.tools) or "none",
                     event="mcp_connected",
                     entry=self._name,
                     transport=self._config.transport,
@@ -1063,11 +1066,11 @@ class McpServerManager:
         except asyncio.CancelledError:
             raise
         except Exception:
-            self._mark_down(published)
+            self._mark_down(self._published.position_of(published))
             raise
         return _result_text(result), bool(result.isError)
 
-    def _mark_down(self, tool: str) -> None:
+    def _mark_down(self, position: int | None) -> None:
         """Unwind the connection so the next session reconnects it.
 
         Two events rather than one, and the pairing is contract (#138):
@@ -1081,17 +1084,24 @@ class McpServerManager:
         entry going away inside a line about a tool; only the second
         would lose which call took it away.
 
-        The tool is named under the published name, the one the model
-        was given and the one this server's own publishing rule made.
-        What the far side called it stays where it is.
+        The tool is said by its position in this server's listing and
+        never by its name. A published name is half an operator's entry
+        name and half what the far side called its tool, sanitizing
+        only replaces the characters an LLM API refuses, and an
+        alphanumeric credential goes through that untouched, so a
+        server that lists a tool under one of this deployment's own
+        secrets could put it in the retained logs by failing a call.
+        The position is a number this code counted; the name is a
+        question `samtal-server config status` answers, in a terminal,
+        for whoever asked.
         """
         events.warning(
-            "mcp server %s: the call to %s failed, so its answer is lost",
+            "mcp server %s: the call to published tool %s failed, so its answer is lost",
             self._name,
-            tool,
+            position,
             event="mcp_call_dropped",
             entry=self._name,
-            tool=tool,
+            position=position,
         )
         events.warning(
             "mcp server %s: dropping the connection after a failed call",
