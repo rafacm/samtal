@@ -208,24 +208,55 @@ identifier) and never carrying far-side bytes:
 
 | event | when | fields |
 | --- | --- | --- |
-| `mcp_connected` | an entry's connect envelope completes and its tools are published | `entry`, `transport`, `tools`, `duration_ms` |
-| `mcp_down` | an entry fails to connect or its connection is given up | `entry`, `reason` (a token from our own classification: `connect_failed`, `connect_timeout`, `handshake_invalid`, `stopped`), `duration_ms` where a duration exists |
-| `mcp_call_dropped` | the connection is dropped after a failed call | `entry`, `tool` |
-| `mcp_reloaded` | a reload finishes | `started`, `stopped`, `unchanged`, `failed` (counts), `duration_ms` |
-| `mcp_tool_shadowed` | a published tool is dropped because another entry shadows it | `entry`, `tool` |
+| `mcp_connected` | an entry's connect envelope completes and its tools are published | `entry`, `transport`, `tools` (an integer count, never a list), `duration_ms` |
+| `mcp_down` | an entry fails to come up or its connection is given up | `entry`, `reason` (closed token set below), `duration_ms` where a duration exists |
+| `mcp_call_dropped` | a call failed and the connection is dropped because of it | `entry`, `tool` |
+| `mcp_reload` | a reload request completes | `outcome` (`applied` or `refused`); applied carries the counts `started`, `restarted`, `stopped`, `unchanged` and `duration_ms`; refused carries `reason` from a closed set |
+| `mcp_tool_shadowed` | a published tool is dropped because another entry shadows it | `entry`, `position` (the tool's position in the far side's listing), `owner` (the shadowing entry, a trusted configured name). Deliberately NO tool name: a shadowed tool never reached the publishing rule, its name is far-side bytes, and the existing code already logs the position instead of the name for exactly this reason |
 
-Reason tokens are chosen where the failure is classified, from the
-exception's type and our own state, never from far-side text; the
-existing sanitization tests (the MCP suites' no-leak assertions)
-are extended to plant a sentinel in a connect failure and assert
-its absence from the event fields and the log. The exact call
-sites are the 13 `logger.*` calls plus the reload path; the
-milestone maps each to an event or deliberately leaves it a plain
-sentence (a line that narrates progress rather than records an
-outcome stays prose; the implementation doc lists both columns).
-`tool` names published tool identifiers, which are already
-sanitized by the publishing rule (#121's `names` module), so the
-fields stay value-free.
+The `mcp_down` reason tokens map one-to-one onto the decision
+sites, which requires the manager to know which phase of `_run`'s
+envelope it is in (the review round's finding 6: transport,
+initialization, and `list_tools()` currently sit behind one broad
+catch, so the milestone adds explicit phase tracking, a local
+marker advanced between the stack entries, before classification
+can be honest):
+
+- `transport_failed`: the stdio spawn or HTTP connection raised
+- `initialize_failed`: the MCP initialize exchange raised
+- `discovery_failed`: `list_tools()` or publication raised
+- `connect_timeout`: the connect envelope's own bound expired
+- `call_failed`: `_mark_down` gave the connection up after a
+  failed call; this down emits BOTH `mcp_call_dropped` (the call's
+  story) and `mcp_down` with this token (the connection's story),
+  stated here so the pairing is contract rather than accident
+- `stopped`: an intentional stop (shutdown or reload)
+
+Classification is by exception type, recursing into
+`ExceptionGroup`s, never by message text.
+
+`mcp_reload` matches the reload that exists rather than one that
+does not (finding 7): `McpReload` counts `started`, `restarted`,
+`stopped`, `unchanged`, deliberately has no failure count (an
+unreachable new manager is an applied reload that will report
+`mcp_down` on its own), preparation refusals raise before `_apply`
+(outcome `refused`, reason from the refusal classification, a
+closed set fixed at implementation from the refusal types that
+exist), and a caller-cancelled apply continues behind its shield,
+so the event is emitted exactly once at apply or refusal
+completion, whether or not the requesting client is still
+connected.
+
+Reason tokens are literals chosen where the failure is classified;
+the existing sanitization tests (the MCP suites' no-leak
+assertions) are extended to plant a sentinel in a connect failure
+and assert its absence from event fields and the log, and the
+shadowed-tool test plants a valid, credential-shaped tool name and
+asserts it appears nowhere. The exact call sites are the 13
+`logger.*` calls plus the reload path; the milestone maps each to
+an event or deliberately leaves it a plain sentence (a line that
+narrates progress rather than records an outcome stays prose; the
+implementation doc lists both columns).
 
 ### What this issue does not do
 
@@ -379,6 +410,9 @@ resolution once the amendment addressing it lands.
    `owner`, no tool name; sentinel test with a credential-shaped
    shadowed name; `mcp_connected.tools` specified as an integer
    count.
+   *Resolution*: adopted. The table row carries `entry`,
+   `position`, `owner` and states the no-name reason; the count is
+   an integer; the credential-shaped sentinel test is named.
 6. **P1: the `mcp_down` reason set does not cover the actual down
    transitions.** `_run` puts transport, initialization and
    `list_tools()` behind one broad catch, and `_mark_down` gives a
@@ -389,6 +423,10 @@ resolution once the amendment addressing it lands.
    `mcp_call_dropped` and `mcp_down` (with a `call_failed` token
    if so); classify exception groups recursively without reading
    messages.
+   *Resolution*: adopted. The section now maps six tokens to their
+   decision sites, adds the phase tracking `_run` needs before the
+   classification can be honest, states the call-failure pairing
+   as contract, and pins recursive type-only classification.
 7. **P1: the reload event schema does not describe the reload
    implementation.** `McpReload` counts `started`, `restarted`,
    `stopped`, `unchanged`, deliberately has no failure count, and
@@ -399,6 +437,10 @@ resolution once the amendment addressing it lands.
    instead of a `failed` count, and emit exactly once at apply or
    refusal completion even when the requesting client
    disconnected.
+   *Resolution*: adopted. The event is now `mcp_reload` with
+   `outcome` applied/refused, the four applied counts including
+   `restarted`, a closed refusal reason instead of a failure
+   count, and exactly-once emission through the shield.
 8. **P2: per-instance server tap lists give no global attachment
    point.** A future exporter would have to discover and mutate
    every module's private emitter. Define a shared hub (or a
