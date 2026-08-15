@@ -79,22 +79,31 @@ def refusal_reason(device_auth: DeviceAuth | None, websocket: WebSocket) -> str 
 async def conversation(websocket: WebSocket) -> None:
     state = websocket.app.state
 
-    device_id = websocket.headers.get("device-id", "").strip().lower()
-
     refusal = refusal_reason(state.device_auth, websocket)
     if refusal is not None:
+        # A fixed sentence and a null device, deliberately (the PR #153
+        # review). Nothing is authenticated at this point: the Device-Id
+        # header is a string whoever opened the socket chose, and naming
+        # it here let an unauthenticated caller write a value of their
+        # choosing into the retained log surface, one record per attempt
+        # and as fast as they could connect. The reason token is what a
+        # reader can act on, and it is this server's own word.
         events.warning(
-            "refused a websocket handshake from %s: %s",
-            device_id or "an unidentified device",
+            "refused a websocket handshake from an unidentified client: %s",
             refusal,
             event="auth_rejected",
-            device=device_id or None,
+            device=None,
             reason=refusal,
         )
         # Closed before the accept, so the upgrade is answered 403 and no
         # websocket is ever established.
         await websocket.close()
         return
+
+    # Read only now. Past the refusal above the token verified against
+    # this header, so from here it is a device this server established
+    # rather than a name a stranger sent.
+    device_id = websocket.headers.get("device-id", "").strip().lower()
 
     session = DeviceSession(
         websocket,
