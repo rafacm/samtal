@@ -1,0 +1,325 @@
+# Give providers a shared kit and a request-time error taxonomy
+
+## Goal
+
+Implement issue #137: concrete providers re-implement shared plumbing
+(credential resolution imported from `anthropic_llm` by three other
+modules, the PCM byte-alignment loop duplicated verbatim with its
+docstring, `DEFAULT_TIMEOUT_S` declared three times) and raise
+unclassifiable errors at request time, so the pipeline classifies
+timeouts by class-name substring (`is_timeout`,
+runtime/pipeline.py:125) and the reply body's broad
+`except (DeviceGone, RuntimeError)` (pipeline.py:683) can mistake an
+ElevenLabs HTTP failure raised as bare `RuntimeError` for a vanished
+device. Give the plumbing one home, give request failures a taxonomy
+the pipeline classifies by type, and route provider failures to the
+provider-failed path, never the vanished-device path.
+
+The companion implementation doc,
+[`2026-08-15-provider-kit-implementation.md`](2026-08-15-provider-kit-implementation.md),
+records what each milestone actually did, deviations from this plan,
+and discoveries; a milestone with no deviations says so explicitly.
+
+## The issue's decisions, restated
+
+Settled by issue #137 and not re-litigated here:
+
+1. **A shared provider-kit module owns credential resolution,
+   timeout defaults, retry policy, and the byte-alignment stream
+   helper; providers consume it.**
+2. **A request-time exception taxonomy** (a provider-call error
+   carrying at least a timeout distinction) raised by every provider
+   on request failure; the pipeline classifies by type and
+   `is_timeout` substring matching is deleted.
+3. **The broad reply-body catch narrows** so provider failures take
+   the provider-failed path (with its structured event), never the
+   vanished-device path.
+4. **Both LLM providers gain the injectable `client=` seam** the
+   other three cloud providers already have.
+5. **Provider protocols in `providers/base.py` do not widen**; this
+   touches implementations and the error contract only.
+
+Evidence re-verified at main@08e07c6: `resolve_api_key` at
+anthropic_llm.py:150-175, imported by `elevenlabs_tts.py:22`,
+`openai_endpoint.py:21`, and `openai_llm.py:17` (which also imports
+`DEFAULT_MAX_TOKENS`); the alignment loop duplicated between
+openai_tts.py:117-136 and elevenlabs_tts.py:148-163;
+`DEFAULT_TIMEOUT_S = 30.0` in elevenlabs_tts.py:44,
+openai_asr.py:74, and openai_tts.py:55; `AnthropicLlm.__init__`
+(anthropic_llm.py:97-98) and `OpenAiCompatibleLlm.__init__`
+(openai_llm.py:114-115) build SDK clients with no timeout, the
+SDK's default retries, and no `client=` parameter, and
+`test_providers_llm_tools.py:176,362` assigns over `_client`;
+`is_timeout` at pipeline.py:125-134; the reply-body catch at
+pipeline.py:683 and the elevenlabs bare `RuntimeError` at
+elevenlabs_tts.py:168-176.
+
+## Decisions this plan makes
+
+### The kit is `providers/kit.py`; the taxonomy lives in `providers/base.py`
+
+Two homes because they are two different things. The taxonomy is
+contract: the pipeline imports it to classify, providers raise it,
+and `base.py` is where the provider contract (`ProviderError`, the
+protocols) already lives; adding exception classes widens no
+protocol, which decision 5 permits. The kit is implementation-side
+plumbing only providers consume: `resolve_api_key` (moved verbatim
+from `anthropic_llm`, with `API_KEY_SLOT` and its
+`stored_provider_secret` read), `DEFAULT_TIMEOUT_S = 30.0` declared
+once, the SDK retry policy (retries disabled so `timeout_s` stays
+the bound the operator set, the reason openai_asr.py already
+documents), and the byte-alignment helper. `anthropic_llm`,
+`elevenlabs_tts`, `openai_llm`, `openai_asr`, `openai_tts`, and
+`openai_endpoint` import from the kit; no provider imports another
+provider afterward, which the implementation doc proves by grep.
+
+### The taxonomy is two classes, and the timeout one is also a `TimeoutError`
+
+```python
+class ProviderCallError(Exception):
+    """A provider's request failed after the provider was built."""
+
+class ProviderCallTimeout(ProviderCallError, TimeoutError):
+    """The failure was a wait rather than an answer."""
+```
+
+Deliberately not `RuntimeError` subclasses: not matching the
+device-edge catches is the whole point of decision 3. The timeout
+class inherits `TimeoutError` as well, so the pipeline's
+classification becomes plain `isinstance(exc, TimeoutError)`: it
+covers `asyncio.TimeoutError`, the watchdog's own
+`FirstTokenTimeout` (already a `TimeoutError` subclass), and every
+wrapped SDK timeout, with no substring anywhere. The exception
+message carries the SDK exception's class name and message
+(value-free: SDK messages for these APIs name models and status
+codes, not credentials, and the wrapped exception rides as
+`__cause__` for the traceback), so the `provider_failed` event's
+`error` field, which reports `type(exc).__name__`, now reads
+`ProviderCallTimeout`/`ProviderCallError` with the SDK's own class
+preserved in the logged traceback and message.
+
+### Who raises it: the five request-making providers
+
+`AnthropicLlm`, `OpenAiCompatibleLlm`, `OpenAiAsr`, `OpenAiTts`,
+and `ElevenLabsTts` wrap request-time failures: each catches its
+own SDK's exceptions at its request sites (including failures
+raised mid-stream by the response iterator) and raises
+`ProviderCallTimeout` for the SDK's timeout classes
+(`anthropic.APITimeoutError`, `openai.APITimeoutError`,
+`httpx.TimeoutException`, `asyncio.TimeoutError` where the provider
+runs its own `asyncio.timeout`, as openai_asr does) and
+`ProviderCallError` for the rest of the SDK's request-failure
+surface (`anthropic.APIError`, `openai.APIError`,
+`httpx.HTTPError`), from the original. `_api_error` in
+elevenlabs_tts returns `ProviderCallError` instead of
+`RuntimeError`. Exceptions outside the SDK families
+(`CancelledError` above all, and genuine bugs) pass through
+untouched: the taxonomy claims request failures, not all failures.
+
+The local engines (`SileroVad`, `FasterWhisperAsr`, `PiperTts`) and
+the mocks stay outside the taxonomy: they make no requests, their
+failures are bugs in this process rather than answers a network did
+not deliver, and dressing a bug as a provider-call error would hide
+it from `logger.exception`. The issue's per-provider test criterion
+names the `client=` seam, which only the request-making five have,
+so this scoping reads the criterion as written.
+
+### Both LLM providers get `timeout_s`, retries off, and `client=`, with no new config surface
+
+`AnthropicLlm.__init__` and `OpenAiCompatibleLlm.__init__` gain
+`timeout_s: float = DEFAULT_TIMEOUT_S` and
+`client: ... | None = None` parameters, mirroring the shape
+openai_asr.py:148-182 already has: the default client is built with
+the kit's timeout and retries-off policy, and a passed client is
+used as given. The `build` functions do NOT grow a `timeout_s`
+option: exposing a new configuration key is a schema change with
+its own documentation ripple (config.example.yaml, the generated
+reference), and the issue's evidence is "no timeout", not "no
+timeout knob". A deployment that needs a nonstandard LLM timeout is
+a follow-up with its own issue; this plan bounds every LLM request
+at the kit default where today it is unbounded.
+
+`test_providers_llm_tools.py`'s two `_client` assignments migrate
+to the constructor seam, which is an interface-strengthening test
+edit, not a weakening: the same fakes arrive through the front
+door.
+
+### The alignment helper takes the iterator and the label
+
+```python
+async def aligned_pcm(label: str, chunks: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+```
+
+It carries the odd byte exactly as the two duplicated loops do,
+logs the dropped trailing byte with the caller's label, and keeps
+the existing docstring's reasoning (HTTP chunk boundaries fall
+wherever the network puts them). Both TTS providers wrap their
+byte iterators with it; the behavior is pinned by the existing
+sample-alignment tests, which pass unmodified.
+
+### The pipeline classifies by type, and the reply body stops eating provider failures
+
+`is_timeout` is deleted; `_provider_failed`'s wording check becomes
+`isinstance(exc, TimeoutError)`. The events behave identically:
+`error` still carries `type(exc).__name__`, the fields do not
+change, and the existing event assertions (test_session_events and
+friends drive failures through fakes whose exceptions reach the
+pipeline unwrapped) pass unmodified.
+
+The reply-body catch at pipeline.py:683 narrows from
+`(DeviceGone, RuntimeError)` to `DeviceGone`. The edge raises
+`DeviceGone` in place of the transport's own disconnect (its
+docstring, boundary.py:41-51), so the extra `RuntimeError` there
+was defensive; after this change a bare `RuntimeError` that does
+slip through lands in the existing `except Exception` arm and is
+logged as "reply failed" instead of being silently swallowed as a
+vanished device, which is strictly more honest. The two
+device-edge-only sites keep their breadth with a comment saying
+why: the `contextlib.suppress(DeviceGone, RuntimeError)` around
+`finish_speaking()` (pipeline.py:714) and the filler playback catch
+(pipeline.py:1446) wrap only device sends, where the ADR's accepted
+broad catch is about the transport, not about providers.
+`DeviceGone`'s docstring is updated where it cites "every site":
+the reply body no longer catches `RuntimeError` broadly, and the
+docstring should not claim it does.
+
+### Tests
+
+Per provider, request-failure coverage through the constructor
+seam, no `_client` assignment and no monkeypatching internals: a
+fake client whose request raises the SDK's timeout class must
+surface `ProviderCallTimeout`, and one raising the SDK's error
+class must surface `ProviderCallError` with the SDK class named in
+the message. The elevenlabs failure tests that pin `RuntimeError`
+(test_providers_elevenlabs.py:225,233) move to the taxonomy type
+with their message assertions kept; that is the error-contract
+change the issue orders, not a weakening.
+
+The reply-path test the issue requires: a session whose TTS raises
+`ProviderCallError` mid-reply produces a `provider_failed` event
+and does not take the vanished-device return, asserted through the
+event stream the way test_session_events already asserts provider
+failures, plus the negative half: the reply body's swallow arm is
+reached only by `DeviceGone`.
+
+Red-to-green: the reply-path test fails against the old catch (the
+failure must be raised as a `RuntimeError`-shaped error to
+demonstrate the old swallowing, which is exactly what the old
+elevenlabs `RuntimeError` did; the demonstration uses the old
+exception shape against the old catch and the taxonomy against the
+new), recorded in the implementation doc.
+
+### Two milestones, two PRs, second stacked on the first
+
+- Milestone 1 touches `providers/` only: the kit, the taxonomy
+  classes in base.py, the five providers adopting both, the seam
+  migration in the LLM tests, and the per-provider failure tests.
+  `main` stays releasable at its merge: the pipeline's substring
+  check classifies `ProviderCallTimeout` correctly by its very
+  name, and provider failures already stop matching the
+  `RuntimeError` catch, so behavior only improves.
+- Milestone 2 touches the pipeline's classification and catch
+  sites: `is_timeout` deleted, `_provider_failed` on
+  `isinstance(exc, TimeoutError)`, the reply-body catch narrowed,
+  the `DeviceGone` docstring updated, and the reply-path test.
+
+The split keeps the provider-facing diff and the pipeline-facing
+diff separately reviewable, and the issue's own coordination note
+(never concurrent with the pipeline extraction) applies to
+milestone 2's files.
+
+## Files touched
+
+```
+samtal-server/samtal_server/providers/kit.py       new: resolve_api_key, DEFAULT_TIMEOUT_S, retry policy, aligned_pcm
+samtal-server/samtal_server/providers/base.py      ProviderCallError, ProviderCallTimeout (no protocol widens)
+samtal-server/samtal_server/providers/anthropic_llm.py   consumes kit; timeout, retries off, client=; raises taxonomy
+samtal-server/samtal_server/providers/openai_llm.py      same
+samtal-server/samtal_server/providers/openai_asr.py      consumes kit; raises taxonomy
+samtal-server/samtal_server/providers/openai_tts.py      consumes kit; raises taxonomy; aligned_pcm
+samtal-server/samtal_server/providers/elevenlabs_tts.py  consumes kit; raises taxonomy; aligned_pcm
+samtal-server/samtal_server/providers/openai_endpoint.py imports kit, not anthropic_llm
+samtal-server/samtal_server/runtime/pipeline.py    milestone 2: is_timeout gone, catch narrowed
+samtal-server/samtal_server/device/boundary.py     milestone 2: DeviceGone docstring claim corrected
+samtal-server/tests/unit/test_providers_llm_tools.py   _client assignments become the seam
+samtal-server/tests/unit/test_providers_elevenlabs.py  RuntimeError pins become the taxonomy
+samtal-server/tests/unit/... (per-provider failure tests, new; reply-path test, milestone 2)
+CHANGELOG.md                                       one entry per milestone under 2026-08-15
+docs/plans/2026-08-15-provider-kit.md
+docs/plans/2026-08-15-provider-kit-implementation.md
+```
+
+`config.example.yaml` is untouched by decision (no new
+configuration surface). `providers/base.py`'s protocols are
+untouched; only module-level exception classes are added.
+
+## Verification
+
+- `uv run ruff check .`, `uv run pytest tests/unit -q`,
+  `uv run pytest tests/integration -q`, from `samtal-server/`, per
+  milestone.
+- Milestone 1: `grep -rn "from samtal_server.providers.anthropic_llm import"`
+  finds no cross-provider import; `DEFAULT_TIMEOUT_S` defined once;
+  the alignment loop exists once; the per-provider failure tests
+  red against the pre-kit providers and green after.
+- Milestone 2: `grep -n "is_timeout" samtal_server` finds nothing;
+  the reply-path test red against the broad catch (with the old
+  RuntimeError shape) and green after; existing event assertions
+  pass unmodified (`git diff --stat` over the event test files is
+  empty).
+
+## Risks and mitigations
+
+- **Wrapping catches too much.** A careless `except Exception`
+  around a request site would dress cancellation or a genuine bug
+  as a provider-call error, and the pipeline treats those
+  differently (`CancelledError` must propagate for barge-in).
+  Mitigation: each provider catches only its SDK's exception
+  families, `CancelledError` is explicitly outside them
+  (`asyncio.CancelledError` is not an `Exception` subclass in
+  modern Python, and the plan states it anyway), and the
+  per-provider tests include a pass-through case asserting a
+  non-SDK exception surfaces unwrapped.
+- **The event `error` field changes for real deployments.** Wrapped
+  SDK failures now report the taxonomy class where they reported
+  `APITimeoutError` before. This is the issue's stated intent
+  (classify by type), the SDK class stays in the message and
+  `__cause__`, and no committed assertion pins the old names for
+  wrapped paths; the CHANGELOG entry says it out loud for anyone
+  querying retained logs.
+- **Narrowing the catch surfaces latent bare RuntimeErrors.** If
+  some device-edge path raises bare `RuntimeError` where the edge
+  should raise `DeviceGone`, it now logs "reply failed" with a
+  traceback instead of returning silently. That is detection, not
+  breakage; the integration lane and the existing device tests
+  would show it before merge, and the implementation doc records
+  any such site found.
+- **The stacked second milestone races other pipeline work.** The
+  runbook forbids running this issue concurrently with #141;
+  milestone 2 is the reason. Mitigation: sequencing, not code.
+
+## Milestones
+
+- [ ] **Kit, taxonomy, and the five providers** (PR TBD):
+  `providers/kit.py` lands with `resolve_api_key`,
+  `DEFAULT_TIMEOUT_S`, the retries-off policy and `aligned_pcm`;
+  `ProviderCallError`/`ProviderCallTimeout` land in base.py; the
+  five request-making providers consume the kit, gain the missing
+  `timeout_s`/`client=` seams (LLMs), and raise the taxonomy at
+  request time; cross-provider imports are gone; the `_client`
+  assignments in test_providers_llm_tools.py move to the seam; the
+  elevenlabs RuntimeError pins move to the taxonomy; per-provider
+  failure tests (timeout, error, and pass-through) run through the
+  seam; CHANGELOG entry; implementation-doc section in the change
+  that ticks this box. Accept: lint and both lanes green; the
+  greps above; red-to-green recorded.
+- [ ] **Pipeline classifies by type and stops eating provider
+  failures** (PR TBD): `is_timeout` deleted and `_provider_failed`
+  classifies with `isinstance(exc, TimeoutError)`; the reply-body
+  catch narrows to `DeviceGone` with the two device-edge sites
+  commented and `DeviceGone`'s docstring corrected; the reply-path
+  test proves a TTS `ProviderCallError` produces `provider_failed`
+  and no silent swallow; CHANGELOG entry; implementation-doc
+  section in the change that ticks this box. Accept: lint and both
+  lanes green; no `is_timeout` anywhere; existing event assertions
+  untouched by diff.
