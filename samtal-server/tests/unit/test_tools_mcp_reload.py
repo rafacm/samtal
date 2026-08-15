@@ -1093,3 +1093,49 @@ async def test_an_apply_whose_caller_went_away_is_still_reported_once(
     fields = fields_of(one_event(caplog, "mcp_reload"))
     assert fields["outcome"] == APPLIED
     assert (fields["started"], fields["stopped"]) == (1, 1)
+
+
+async def test_a_cancelled_preparation_holds_the_exclusion_until_its_read_ends() -> None:
+    """The other half of the same promise, and the one a shield does not
+    obviously cover.
+
+    Nothing the preparation does can leave a half-changed world, so
+    there is no world to protect here. What has to be waited for is the
+    re-read: it runs in a worker thread, taking the database's write
+    lock and waiting out its busy timeout, and a thread cannot be
+    cancelled. Releasing the exclusion when the caller went away would
+    let the next reload start a read against a lock the last one is
+    still holding, and answer a caller who did nothing wrong that the
+    database is busy.
+    """
+    config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    servers = await started(config)
+    gate = threading.Event()
+
+    def held() -> tuple[Config, SecretStore | None]:
+        # Blocking the worker thread, which is exactly where a slow read
+        # blocks and exactly what a cancellation cannot reach.
+        gate.wait(30)
+        return config, None
+
+    try:
+        asked = asyncio.create_task(servers.reload(held))
+        await asyncio.sleep(0.05)
+        asked.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asked
+
+        # The read is still running, so the exclusion is still held, and
+        # the answer is the one that says to ask again rather than a
+        # busy database or a second read of the same rows.
+        with pytest.raises(ReloadInProgressError):
+            await servers.reload(reading(config))
+
+        gate.set()
+        await settled(servers)
+
+        # And once it really has ended, the next one is answered.
+        assert (await servers.reload(reading(config))).unchanged == ("tools",)
+    finally:
+        gate.set()
+        await servers.stop_all()
