@@ -204,6 +204,19 @@ async def test_the_reused_transcription_carries_its_language_and_no_asr_elapsed(
     assert record.asr_ms is None
 
 
+async def test_the_turn_is_stamped_off_the_sessions_own_clock() -> None:
+    """The store measures a turn's offset and its events' against one
+    origin, so the reading has to come from the clock the events are
+    stamped with rather than from one beside it. A session whose clock is
+    not the loop's is what tells the two apart."""
+    session, spy, _ = recording_session(scripts={"poet": ScriptedLlm(["Noted."])})
+    session._events._clock = lambda: 4242.0
+
+    await drive_reply(session, UTTERANCE)
+
+    assert only_record(spy).at == 4242.0
+
+
 async def test_the_transcription_this_turn_ran_is_timed() -> None:
     session, spy, _ = recording_session(scripts={"poet": ScriptedLlm(["Understood."])})
     await drive_reply(session, UTTERANCE)

@@ -308,6 +308,15 @@ class SessionEvents:
         self._capture_tap = None
         self._capture = None
 
+    def now(self) -> float:
+        """The reading this session's events are stamped with.
+
+        For a record that has to land on the same timeline as an event
+        without being one: #120's turn record is stamped where `heard`
+        is emitted, and reading the clock through here is what makes
+        them the same clock rather than two that happen to agree."""
+        return self._clock()
+
     # --- what a call site says ----------------------------------------
 
     def debug(self, message: str, *args: Any, event: str, **fields: Any) -> None:
