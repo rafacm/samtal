@@ -65,6 +65,20 @@ class Broken:
         raise RuntimeError("this consumer is broken")
 
 
+class Vandal:
+    """A consumer that writes to what it was handed. Not malice
+    necessarily: a consumer that normalizes a payload before shipping it
+    is one edit away from this."""
+
+    def emit(self, emission: Emission) -> None:
+        emission.payload["event"] = "rewritten"
+        emission.payload["sources"]["persona"] = 999
+        # `message` is a name `logging` puts on every record itself, so
+        # a payload carrying it makes the logging call raise rather than
+        # write the line at all.
+        emission.payload["message"] = "not what was said"
+
+
 class CaptureSpy:
     """The capture's own surface and nothing else, which is all
     `CaptureTap` uses: it also reads the log as it is being told, which
@@ -140,7 +154,8 @@ def test_the_log_is_the_last_consumer_told(caplog: pytest.LogCaptureFixture) -> 
     (payload, _, records_at_the_time) = spy.seen[0]
     assert records_at_the_time == 0, "the capture was told after the record existed"
     assert len(caplog.records) == 1
-    # And it is the same payload, not a copy that could drift.
+    # And it is the same event: a tap's copy is isolated from the log
+    # (see below), never different from it.
     assert payload == payload_of(caplog.records[0])
 
 
@@ -199,6 +214,32 @@ def test_the_tap_failure_is_a_plain_sentence_and_not_an_event(
     assert report.levelno == logging.WARNING
     assert "Broken" in report.getMessage() and "RuntimeError" in report.getMessage()
     assert payload_of(report) == {}
+
+
+def test_a_tap_cannot_rewrite_what_the_log_keeps(caplog: pytest.LogCaptureFixture) -> None:
+    """The dataclass is frozen; the dict behind `payload` is not. Every
+    non-log tap therefore gets its own deep copy, so an edit reaches
+    neither the retained line nor the tap after it."""
+    events = SessionEvents("s1")
+    after = Recorder()
+    events.attach(Vandal())
+    events.attach(after)
+
+    with caplog.at_level("INFO"):
+        events.info("something happened", event="one", sources={"persona": 4})
+
+    (record,) = caplog.records
+    assert payload_of(record) == {
+        "event": "one",
+        "session": "s1",
+        "device": None,
+        "sources": {"persona": 4},
+    }
+    assert record.getMessage() == "something happened"
+    # Nested as well as top level, and the tap after it is shown the
+    # event rather than the edit.
+    assert after.seen[0].payload["event"] == "one"
+    assert after.seen[0].payload["sources"] == {"persona": 4}
 
 
 # --- the server scope, and its one attachment point -------------------

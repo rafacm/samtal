@@ -22,7 +22,7 @@ the capture's decision track is the second; #120's conversation store and
 the #66/#67 exporters attach as more, without touching a single emit site.
 That is what the interface exists for.
 
-Two invariants shape the dispatch, and neither is incidental:
+Three invariants shape the dispatch, and none of them is incidental:
 
 - **An event that is logged is an event that is recorded.** The capture
   used to be written inside the payload builder, before the logging call
@@ -34,6 +34,10 @@ Two invariants shape the dispatch, and neither is incidental:
   above all. The failure is reported once as a plain sentence on the
   emitter's own channel: not an event, because an event would go back
   through the taps and a broken tap would recurse into itself.
+- **No consumer can rewrite what is kept.** Every non-log tap is handed
+  its own deep copy of the payload, so a tap that edits a nested value,
+  or adds a key `logging` reserves, changes only its own copy. The
+  retained log is not reachable from code this module does not own.
 
 The tap contract is events only. `SessionEvents.vad()` and `.dropped()`
 stay capture-specific side channels: they feed the capture's VAD and drop
@@ -54,7 +58,8 @@ import contextlib
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
 from samtal_server.capture import SessionCapture
@@ -150,28 +155,51 @@ def session_clock() -> float:
         return time.monotonic()
 
 
-def _dispatch(
-    taps: tuple[EventTap, ...], emission: Emission, channel: logging.Logger
-) -> None:
-    """Offer one emission to every tap, each under its own guard.
+def _offer(tap: EventTap, emission: Emission, channel: logging.Logger) -> None:
+    """Hand one emission to one tap, under that tap's own guard.
 
-    The order is the caller's, and the caller puts the log last. A tap
-    that raises is reported once on `channel` as a plain sentence and
-    the remaining taps still run: a consumer nobody has met yet must not
-    be able to cost the operator a log line."""
+    A tap that raises is reported once on `channel` as a plain sentence,
+    and the taps after it still run: a consumer nobody has met yet must
+    not be able to cost the operator a log line."""
+    try:
+        tap.emit(emission)
+    except Exception as exc:  # noqa: BLE001 - a consumer never breaks the surface
+        # The class names and nothing else, and no `event` field: a
+        # report that went back through the taps would let a broken
+        # tap recurse into itself, and a tap may be an exporter
+        # holding whatever a far side answered it with.
+        channel.warning(
+            "an event tap (%s) failed and was skipped: %s",
+            type(tap).__name__,
+            type(exc).__name__,
+        )
+
+
+def _dispatch(
+    taps: tuple[EventTap, ...], log: LogTap, emission: Emission, channel: logging.Logger
+) -> None:
+    """Offer one emission to every consumer, the log last.
+
+    Each non-log tap is handed its own deep copy of the payload, and the
+    log is handed the payload the emitter built. The frozen dataclass
+    only stops a tap rebinding a field; the dict behind `payload` is
+    ordinary and shared, so without this a tap could rewrite a nested
+    value, or add a key `logging` reserves, and the line the operator
+    keeps would be the one that tap chose. A consumer is by definition
+    code this module does not own, and the retained log must not be
+    reachable from it.
+
+    Deep rather than shallow: the top level is where a reserved key
+    would land, but `prompt_assembled` already carries a nested dict and
+    a shallow copy would share it. The cost is one copy of a small dict
+    per non-log tap, and none at all in the common case of no tap
+    attached. `args` are deliberately not copied: they are rendered by
+    `%` into a string and never written back, and copying an arbitrary
+    argument is a copy that can fail.
+    """
     for tap in taps:
-        try:
-            tap.emit(emission)
-        except Exception as exc:  # noqa: BLE001 - a consumer never breaks the surface
-            # The class names and nothing else, and no `event` field: a
-            # report that went back through the taps would let a broken
-            # tap recurse into itself, and a tap may be an exporter
-            # holding whatever a far side answered it with.
-            channel.warning(
-                "an event tap (%s) failed and was skipped: %s",
-                type(tap).__name__,
-                type(exc).__name__,
-            )
+        _offer(tap, replace(emission, payload=deepcopy(emission.payload)), channel)
+    _offer(log, emission, channel)
 
 
 class SessionEvents:
@@ -280,7 +308,7 @@ class SessionEvents:
         emission = Emission(
             payload=payload, at=self._clock(), level=level, message=message, args=args
         )
-        _dispatch((*self._taps, self._log), emission, logger)
+        _dispatch(tuple(self._taps), self._log, emission, logger)
 
     # --- the capture's own tracks, which are not events ---------------
 
@@ -359,7 +387,7 @@ class ServerEvents:
             message=message,
             args=args,
         )
-        _dispatch((*_hub.taps, self._log), emission, self._logger)
+        _dispatch(tuple(_hub.taps), self._log, emission, self._logger)
 
 
 class _ServerHub:
