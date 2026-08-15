@@ -723,7 +723,17 @@ the domain models. The committed copy regenerates byte-identically
 under the existing CI pattern, and the workflow's
 `docs/reference/**` path filter already covers it. The document
 states the compatibility promise it inherits: table, column and
-event field names change only as breaking changes.
+event field names change only as breaking changes. It is honest
+about what a column renderer can and cannot document:
+`events.name` and `events.fields` carry the event vocabulary, and
+the vocabulary's authority is the README event table, which the
+reference links as the definition of what lands in those columns
+rather than restating thirty rows that would drift. The store adds
+no drift of its own by construction (field names are copied
+verbatim from the payloads, which the milestone test cross-checks
+against a tap spy); making the vocabulary itself machine-declared
+and drift-checked is the schema-declared-events follow-up the ADR
+already names as its own issue, deliberately not built here.
 
 ### The narrowing, precisely
 
@@ -1215,6 +1225,13 @@ carries its resolution once the amendment addressing it lands.
     fields. Provide a declared event-vocabulary input, or a
     checked inventory tied to emit sites, or name where that
     authority lives.
+    *Resolution*: adopted in its third form. The reference names
+    the README event table as the vocabulary's authority and links
+    it instead of restating it; the store copies field names
+    verbatim (cross-checked against a tap spy), so it introduces
+    no drift; and the machine-declared registry is the ADR's named
+    schema-declared-events follow-up, deliberately out of scope
+    here.
 20. **P2: the wheel verification omits the new migration chain.**
     The installed-wheel CI step proves only the primary database's
     migrations ship. Extend it to open `conversations.db` from the
