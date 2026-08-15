@@ -486,7 +486,8 @@ E       assert 'reply failed' in 'INFO ... heard "hello"\nINFO ... poet round 1 
 The captured log is the evidence rather than the assertion: the reply
 ended with `heard` and one LLM round on the record and nothing else, so
 the `RuntimeError` really was swallowed as a vanished device. After the
-catch narrowed, the same command reports `4 passed`.
+catch narrowed, the same command reported `4 passed`; with the two
+tests the review round below added it reports `6 passed`.
 
 The other three are green under both implementations, which is the
 plan's finding 4 exactly: a `ProviderCallError` is not a `RuntimeError`
@@ -539,12 +540,24 @@ From `samtal-server/`, on `refactor/pipeline-provider-errors` with every
 commit of this milestone in place:
 
 - `uv run ruff check .`: **All checks passed!**
-- `uv run pytest tests/unit -q`: **1892 passed, 15 skipped** in 175 s.
-  Four more than milestone 1's 1888, which is the four tests added here.
-- `uv run pytest tests/integration -q`: **53 passed** in 154 s.
-- `git diff refactor/provider-kit` over the two pinned test files:
-  empty.
+- `uv run pytest tests/unit -q`: **1913 passed, 15 skipped** in 175 s.
+  Seven more than the 1906 milestone 1 left on `main` after its own
+  review round: the six in `test_session_reply_failures.py` and the one
+  the review round below added to `test_boundary_contract.py`.
+- `uv run pytest tests/integration -q`: **53 passed** in 153 s.
+- The two test files this milestone had to leave alone, compared
+  against the milestone-1 branch before the rebase: no diff. The
+  characterization file's docstring was corrected afterwards, on the
+  reviewer's instruction and with its parametrization and its
+  assertions untouched (the review round's finding 5).
 
-Nothing was restored mid-run, so the bytecode trap in `AGENTS.md` did
-not apply; the red run and the green run of the catch-half test are both
-pytest, which writes no bytecode.
+The numbers above were taken after the review round, on the branch as
+it stands. They replace the ones first recorded here (1892 passed),
+which were measured against milestone 1 before its own review round
+added tests, and were stale by the time the rebase landed.
+
+Restoring a file mid-run happened twice, both times to prove a fix red
+against the code it replaced, and both times by copying a backup back
+and touching it rather than by `git checkout`; every run was pytest,
+which writes no bytecode and clears what it finds, and the caches were
+cleared anyway. The `AGENTS.md` trap did not bite.
