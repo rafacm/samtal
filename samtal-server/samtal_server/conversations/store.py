@@ -49,7 +49,9 @@ from pathlib import Path
 from typing import Any
 
 from sqlalchemy import ColumnElement, Engine, delete, select
+from sqlalchemy.exc import OperationalError
 
+from samtal_server.config.loader import ConfigError, DatabaseBusyError, StorageError
 from samtal_server.conversations.records import ToolInvocation, TurnLeg, TurnRecord
 from samtal_server.conversations.schema import events as events_table
 from samtal_server.conversations.schema import sessions, tool_invocations, turns
@@ -779,13 +781,53 @@ def purge(
         raise ValueError("a purge needs at least one selector")
     engine = existing_engine(conversations_path(directory), immediate=True, secure_delete=True)
     truncated = False
+    # Built inside the handler and raised outside it, the shape
+    # `db.open_database` uses: raising in the arm would leave the
+    # library's exception reachable through __context__ from the one
+    # that travels out, and `from None` sets __suppress_context__
+    # without clearing the reference.
+    problem: ConfigError | None = None
+    counts: dict[str, int] = {}
     try:
         with engine.begin() as connection:
             counts = _delete_sessions(connection, criteria)
+    except Exception as exc:  # noqa: BLE001 - classified, never re-raised
+        problem = _refusal(exc)
+    else:
         truncated = _checkpoint(engine, PURGE_CHECKPOINT_WAIT_MS)
     finally:
         engine.dispose()
+    if problem is not None:
+        raise problem
     return Deletion(**counts, truncated=truncated)
+
+
+def _refusal(exc: BaseException) -> ConfigError:
+    """A failed deletion, as the sentence the CLI prints.
+
+    The lock that did not clear inside the busy timeout is told from
+    everything else on the driver's own message, the same distinction
+    `db.migration_failure` makes and for the same reason: it is the only
+    one a caller can answer differently.
+
+    Unlike that one, neither sentence carries the driver's line. A purge
+    is given a session, a device or a date on its command line, and a
+    SQLAlchemy error holds the statement it failed on together with the
+    parameters bound to it, so an interpolated detail is a selector
+    printed back to a terminal and into whatever collects its output.
+    The kind of failure and where to look are what the operator needs;
+    the value they just typed is not.
+    """
+    detail = str(getattr(exc, "orig", ""))
+    if isinstance(exc, OperationalError) and ("locked" in detail or "busy" in detail):
+        return DatabaseBusyError(
+            "the conversation store is busy and the purge was not applied; "
+            "nothing was deleted, so run the command again"
+        )
+    return StorageError(
+        "cannot delete from the conversation store; server.database.dir names "
+        "the directory it lives in, and the file has to be readable and writable"
+    )
 
 
 def _delete_sessions(
