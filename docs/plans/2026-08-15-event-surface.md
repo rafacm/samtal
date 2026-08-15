@@ -79,38 +79,73 @@ to end.
 ### The tap is the consumer interface, and the log is its first implementation
 
 ```python
-class EventTap(Protocol):
-    """One consumer of the structured events. `payload` is the
-    finished event dict; `at` is the loop clock, which is what the
-    capture's tracks are aligned by."""
+@dataclass(frozen=True)
+class Emission:
+    """One event, complete: everything any consumer needs.
 
-    def event(self, payload: dict[str, Any], at: float) -> None: ...
+    `payload` is the finished structured dict; `at` is monotonic
+    time (whose clock is the emitter's, below); `level` is the
+    numeric logging level; `message` and `args` are the human
+    sentence exactly as a logging call would receive them."""
+
+    payload: dict[str, Any]
+    at: float
+    level: int
+    message: str
+    args: tuple[Any, ...]
+
+
+class EventTap(Protocol):
+    """One consumer of the structured events."""
+
+    def emit(self, emission: Emission) -> None: ...
 ```
 
-`SessionEvents` stops being a payload factory the call sites log
-around and becomes the thing that emits: sites call
+One envelope, not a payload-only signature (the review round's
+finding 1): `LogTap` needs the level, the template and the args to
+produce today's records, so the protocol carries them for every
+consumer, and a consumer that only wants the payload reads one
+field. `SessionEvents` stops being a payload factory the call
+sites log around and becomes the thing that emits: sites call
 `events.info("heard %r", text, event="heard", agent=..., ...)`
-(and `.warning`, `.error`), the emitter builds the payload exactly
-as `event()` builds it today (`event`, `session`, `device`, then
-the fields), and hands it to every attached tap along with the
-level, message and args. Two implementations ship:
+(plus `.debug`, `.warning`, `.error`), the emitter builds the
+payload exactly as `event()` builds it today (`event`, `session`,
+`device`, then the fields), wraps it in an `Emission`, and hands
+it to every attached tap. The payload-only
+`SessionEvents.event()` does NOT survive: dispatching it would
+invoke `LogTap` (a double log), not dispatching it would bypass
+the capture, so the call-site migration is atomic and the method
+is deleted with it, `SessionEvents.log` with it if nothing is left
+using the handle. Two implementations ship:
 
 - `LogTap`: logs on the pinned `samtal_server.session` channel with
-  the payload as `extra=`, which is byte-for-byte what the call
-  sites do today: same logger name, same human sentence, same JSON
-  fields. Attached at construction, always.
-- `CaptureTap`: the existing `SessionCapture.event(payload, at)`
-  call, attached when the capture opens and detached before it
+  `emission.message`, `emission.args`, `emission.level`, and the
+  payload as `extra=`, which is byte-for-byte what the call sites
+  do today: same logger name, same human sentence, same level, same
+  JSON fields. Attached at construction, always.
+- `CaptureTap`: wraps the attached `SessionCapture`, calling its
+  existing `event(payload, at)` with the emission's payload and
+  time; attached when the capture opens and detached before it
   closes, exactly where `attach_capture`/`detach_capture` sit
   today (the methods keep their names; they wrap the generic
   `attach`/`detach` the store and exporters will use).
 
-The invariant is now structural instead of positional: every tap
-sees every emit, so an event that is logged is an event that is
-recorded because both are taps on the same call. The contract test
-covers it: a fake tap attached alongside the log receives exactly
-the payloads the log emitted, with the same dicts, and detaching
-stops the flow without stopping the log.
+Dispatch order and failure behavior are fixed, not incidental (the
+review round's finding 2). Today the capture records inside
+`event()` before the log call returns, so the guarantee runs
+capture-first; the emitter therefore dispatches non-log taps in
+attachment order FIRST and `LogTap` LAST, preserving "every logged
+event was first offered to the attached capture" exactly. A tap
+that raises does not starve the taps after it: the emitter runs
+each tap under its own guard, and a tap failure is reported once
+on the emitter's own channel (a plain sentence, not an event, so a
+broken tap cannot recurse into itself) while the remaining taps,
+the log above all, still see the emission. The contract test
+covers all of it with a capture-shaped spy (same `event(payload,
+at)` surface as `SessionCapture`): the spy receives exactly the
+payload dicts the log emitted, receives them before the log record
+is created, keeps receiving when another tap raises, and stops on
+detach while the log continues.
 
 The tap contract is events only. `vad()` and `dropped()` remain
 capture-specific side channels on `SessionEvents` (they feed the
@@ -118,16 +153,9 @@ capture's VAD and drop tracks, which no other consumer has a
 meaning for), delegating to the attached capture as today; the
 docstring says they are outside the tap contract and why.
 
-Emit sites change shape (18 in pipeline.py, 1 in
-device/session.py), and nothing else changes: the channel, the
-sentences, the levels, the payloads are identical, which the
-existing event-assertion suites prove by passing unmodified.
-`SessionEvents.event()` itself remains, unchanged in behavior, for
-the two sites that need a payload without a log line (none known;
-if the migration finds one, the implementation doc records it), and
-`SessionEvents.log` remains the channel handle while migration
-proceeds; if nothing uses either at the end of milestone 1, they
-go.
+Emit sites change shape and nothing else changes: the channel, the
+sentences, the levels, the payloads are identical, which the pin
+suite (below) proves by passing unmodified through the reshape.
 
 ### The server scope gets `ServerEvents`, one per subsystem channel
 
@@ -269,11 +297,10 @@ docs/plans/2026-08-15-event-surface-implementation.md
   event-assertion suites are the contract and pass unmodified;
   milestone 1 is reviewed as a rename-shaped diff.
 - **The tap changes event timing for the capture.** Today the
-  capture records inside `event()` before the log call; with taps
-  the order log-then-capture or capture-then-log must be fixed and
-  stated. Mitigation: the tap list preserves attachment order with
-  `LogTap` first, and the contract test pins the order; the
-  capture's decision track carries its own clock reading as today.
+  capture records inside `event()` before the log call; the order
+  is now fixed as non-log taps first, `LogTap` last, per-tap
+  guards, and the contract test pins it; the capture's decision
+  track carries its own clock reading as today.
 - **MCP reason tokens leak by future edit.** A reason token built
   from an exception message would carry far-side bytes. Mitigation:
   tokens are literals chosen at classification sites, the
@@ -300,6 +327,10 @@ resolution once the amendment addressing it lands.
    monotonic time, numeric level, message template, and args;
    LogTap consumes it; the payload-only `event()` goes after the
    atomic migration.
+   *Resolution*: adopted. The tap decision now defines the
+   `Emission` envelope (payload, at, level, message, args),
+   `LogTap` consumes it, and `SessionEvents.event()` and `.log`
+   are deleted with the atomic migration rather than retained.
 2. **P1: LogTap first reverses the capture guarantee.** Capture
    currently records before the log call returns; sequential
    fan-out with LogTap first can log an event capture never saw if
@@ -307,6 +338,10 @@ resolution once the amendment addressing it lands.
    failure behavior, and test ordering and detach with a
    capture-shaped spy; the contract must show every logged session
    event was first offered to the attached capture.
+   *Resolution*: adopted. Non-log taps dispatch first and `LogTap`
+   last, each tap under its own guard with a one-line non-event
+   report on tap failure, and the contract test uses a
+   capture-shaped spy pinning order, isolation, and detach.
 3. **P1: a mandatory loop-clock timestamp breaks synchronous
    server events.** `create_app` and `onboarding.log_banner` emit
    before any loop runs; `asyncio.get_running_loop().time()`
