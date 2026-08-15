@@ -502,7 +502,7 @@ resolution once the amendment addressing it lands.
 ## Milestones
 
 - [x] [**The emitter moves and the tap exists**](2026-08-15-event-surface-implementation.md#milestone-1-the-emitter-moves-and-the-tap-exists)
-  (PR TBD): as decided above. Accept: event-assertion suites
+  (PR #152): as decided above. Accept: event-assertion suites
   unmodified and green; no `device.events` import anywhere; the
   contract test covers attach, fan-out, detach, and ordering.
 - [ ] **The server scope emits through it** (PR TBD): as decided
