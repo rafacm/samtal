@@ -21,6 +21,7 @@ from sqlalchemy import update
 
 from samtal_server.config import views
 from samtal_server.config.loader import ConfigError, UnknownEntityError
+from samtal_server.config.models import ProviderConfig
 from samtal_server.config.secrets import MASK, SecretLocation, generate_key
 from samtal_server.config.store import ConfigStore
 from samtal_server.db import open_database, schema
@@ -167,6 +168,59 @@ def test_an_entity_is_shown_as_an_envelope(store: ConfigStore) -> None:
         "entity": {"type": "anthropic", "api_key_env": "ANTHROPIC_API_KEY", "model": "m"},
         "secrets": {"api_key": {"shadows": "api_key_env"}},
     }
+
+
+def test_a_recorded_provider_keeps_what_it_ran_on(store: ConfigStore) -> None:
+    """A record is not a display: the exact model string is the only
+    handle on a hosted model that changed underneath, which is why a
+    manifest keeps the entries at all."""
+    _populate(store)
+
+    assert views.provider_record(store.read_provider("llm", "claude").entry) == {
+        "type": "anthropic",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "model": "m",
+    }
+
+
+def test_a_recorded_provider_carries_no_credential(store: ConfigStore) -> None:
+    """The other half of the write-time URL rule, and the half that does
+    not depend on every row having passed through it: a capture manifest
+    and a conversation's session row outlive the session, so what is
+    built for them strips a credential a URL carries whatever the row
+    holds. Written straight to the database here, which is what a row
+    that predates the rule looks like."""
+    _populate(store)
+    with store._engine.begin() as connection:  # noqa: SLF001 - a row from before the rule
+        connection.execute(
+            update(schema.providers)
+            .where(schema.providers.c.name == "claude")
+            .values(
+                options={
+                    "base_url": f"https://user:{SECRET}@host/v1?api_key={OTHER_SECRET}",
+                    "connection": {"endpoint": f"https://{SECRET}@host"},
+                }
+            )
+        )
+
+    recorded = views.provider_record(store.read_provider("llm", "claude").entry)
+
+    assert recorded["base_url"] == "https://host/v1"
+    assert recorded["connection"] == {"endpoint": "https://host"}
+    rendered = repr(recorded)
+    assert SECRET not in rendered
+    assert OTHER_SECRET not in rendered
+
+
+def test_a_recorded_secret_shaped_option_fails_closed() -> None:
+    """The same fail-closed rule the display path has, and unreachable
+    for the same reason: the models refuse such a key on every path that
+    validates. Built here without validation, which is what "a value
+    that got in another way" means concretely."""
+    entry = ProviderConfig.model_construct(type="mock", api_key_env=None, egress=None)
+    object.__setattr__(entry, "__pydantic_extra__", {"session_token": PASTED})
+
+    assert views.provider_record(entry)["session_token"] == MASK
 
 
 def test_a_kind_that_holds_no_secret_is_shown_with_an_empty_mapping(

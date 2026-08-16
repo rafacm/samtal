@@ -45,6 +45,28 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **A provider's address may not carry a credential, and no record
+  keeps one that does** (#120): `base_url:
+  https://user:password@host/v1` names nothing secret-shaped, so every
+  rule this project had about inline secrets passed it, and it was
+  stored as written, shown on every read, and copied verbatim into the
+  manifest of every session held against that provider. Two halves fix
+  it. Writing such a URL is refused where a provider is written (both
+  write paths, since the rule is the repository's), for a user and
+  password before the host and for a credential-shaped query parameter
+  alike, with a refusal that names the option and the rule and never the
+  value; the rule is write-time only, exactly like the addressability
+  rule, so a deployment that already has such a row still boots, still
+  reads it and can still edit it out. And a record is built through an
+  explicit representation instead of a model dump, masking secret-shaped
+  keys at every depth and taking the credential out of any URL-shaped
+  value, so a row written before the rule cannot leak either.
+  **Operator-visible, and a deliberate narrowing of an existing
+  surface:** the same builder feeds the **capture manifest**, so a
+  capture taken from now on records such an address without its
+  credential where it used to record it whole. The entry name, the type
+  and the exact model string are untouched, which is what a manifest is
+  kept for.
 - **`session_closed` says why a conversation ended** (#120): the event
   carried only `duration_s`, so the reason was inferable from whichever
   line happened to precede it and from nothing else. It gains `reason`,

@@ -717,6 +717,63 @@ def test_a_name_that_cannot_be_a_path_segment_is_refused(store: ConfigStore) -> 
         assert "a/b" not in message and "a\nb" not in message
 
 
+def test_a_provider_url_carrying_a_credential_is_refused(store: ConfigStore) -> None:
+    """The one shape that gets past the secret-shaped-key rules: an
+    innocent key holding a URL with the credential inside it. Stored, it
+    is read back on every display path and copied into the manifest of
+    every capture and conversation record made against the provider, so
+    it is refused where it is chosen."""
+    refused = [
+        {"type": "openai_compatible", "base_url": f"https://user:{SECRET}@host/v1"},
+        {"type": "openai_compatible", "base_url": f"https://{SECRET}@host/v1"},
+        {"type": "openai_compatible", "base_url": f"https://host/v1?api_key={SECRET}"},
+        # An option can be a structure, so the rule looks at every depth.
+        {"type": "mock", "connection": {"endpoint": f"https://user:{SECRET}@host"}},
+        {"type": "mock", "endpoints": [f"https://user:{SECRET}@host"]},
+    ]
+    for fragment in refused:
+        with pytest.raises(ConfigError) as caught:
+            store.set_provider("llm", "vendor", fragment)
+        message = str(caught.value)
+        assert "not allowed" in message
+        assert "api_key_env" in message, "the refusal does not say what to do instead"
+        # The rule and the option, never the value: what fails this
+        # check is a credential.
+        assert SECRET not in message
+        assert SECRET not in _chain(caught.value)
+    assert store.load().domain.providers.llm == {}
+
+
+def test_an_ordinary_provider_url_is_accepted(store: ConfigStore) -> None:
+    for base_url in (
+        "https://api.vendor.example/v1",
+        "http://127.0.0.1:8080/v1?model=small",
+        "ws://[2001:db8::1]:9000/stream",
+    ):
+        store.set_provider("llm", "vendor", {"type": "openai_compatible", "base_url": base_url})
+        assert store.read_provider("llm", "vendor").entry.options["base_url"] == base_url
+
+
+def test_the_url_rule_is_write_time_only() -> None:
+    """The addressability rule's precedent: a row written before this
+    rule still boots, still reads and is still deletable. A deployment
+    does not get a server that refuses to start over a value it can no
+    longer edit; the record is defended on its own side instead."""
+    from samtal_server.config import Config
+
+    config = Config(
+        providers={
+            "llm": {
+                "vendor": {
+                    "type": "openai_compatible",
+                    "base_url": f"https://user:{SECRET}@host/v1",
+                }
+            }
+        }
+    )
+    assert config.providers.llm["vendor"].options["base_url"].endswith("@host/v1")
+
+
 def test_a_name_that_only_needs_encoding_is_accepted(store: ConfigStore) -> None:
     """Spaces, percent signs and characters outside ASCII percent-encode
     and decode losslessly, so nothing about them is a problem to

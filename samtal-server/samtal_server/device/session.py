@@ -61,6 +61,7 @@ from samtal_server.capture import (
 )
 from samtal_server.config import Config
 from samtal_server.config.models import normalize_mac
+from samtal_server.config.views import provider_record
 from samtal_server.conversations import ConversationStore, SessionSink
 from samtal_server.device.bindings import DeviceBindings
 from samtal_server.device.boundary import (
@@ -629,6 +630,16 @@ class DeviceSession:
         }
 
     def _provider_manifest(self) -> dict[str, Any]:
+        """The resolved provider entries, as a record may keep them.
+
+        Through `provider_record` rather than a model dump: what lands
+        here is written into a capture's manifest and into a
+        conversation's session row, both of which outlive the session,
+        so it is built key by key with the secret-shaped values masked
+        and any credential a URL carries taken out. The write path
+        refuses such a URL, and this is the half of that rule that does
+        not depend on every row having passed through it.
+        """
         if self._agent is None:
             return {}
         described: dict[str, Any] = {}
@@ -639,7 +650,7 @@ class DeviceSession:
             entry = getattr(self.config.providers, stage).get(name)
             if entry is None:
                 continue
-            described[stage] = {"name": name, **entry.model_dump(exclude_none=True)}
+            described[stage] = {"name": name, **provider_record(entry)}
         return described
 
     def _start_idle_watchdog(self) -> None:

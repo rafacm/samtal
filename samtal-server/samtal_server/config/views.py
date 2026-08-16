@@ -37,6 +37,7 @@ from samtal_server.config.models import (
     is_mcp_secret_key,
     is_secret_option,
     mcp_entry_fragment,
+    without_url_credential,
 )
 from samtal_server.config.secrets import mask
 from samtal_server.config.store import Entity, Snapshot, StoredSecret, stored_secrets
@@ -179,6 +180,58 @@ def provider_body(entry: ProviderConfig) -> dict[str, object]:
         }
     )
     return data
+
+
+def provider_record(entry: ProviderConfig) -> dict[str, object]:
+    """One provider as it may be *recorded*: written into a capture's
+    manifest and into a conversation's session row, kept for as long as
+    either is kept.
+
+    A record is not a display, so the values stay as written: the exact
+    model string is the only handle on a hosted model whose behaviour
+    changed without a version bump, which is why the manifest carries
+    the entries verbatim in the first place. What it is not allowed to
+    carry is a credential, and there are two ways one reaches an entry.
+    A secret-shaped key is masked, at every depth, the same rule the
+    display path applies and for the same fail-closed reason. And a URL
+    holding a user and password, or a credential in a query parameter,
+    is recorded without it: the write path refuses such a URL now, but a
+    row written before that rule, or an environment override that never
+    passed through a write at all, must not be able to put one in a file
+    that outlives the conversation.
+
+    Built key by key rather than by dumping the model, so a field added
+    to `ProviderConfig` later is absent from every record until somebody
+    decides it belongs there.
+    """
+    data: dict[str, object] = {"type": entry.type}
+    if entry.api_key_env is not None:
+        data["api_key_env"] = mask(entry.api_key_env)
+    if entry.egress is not None:
+        data["egress"] = entry.egress
+    data.update(
+        {
+            key: mask(value) if is_secret_option(key) else recorded_option(value)
+            for key, value in entry.options.items()
+        }
+    )
+    return data
+
+
+def recorded_option(value: object) -> object:
+    """One provider option as it may be recorded, at every depth: what
+    was configured, minus anything a URL carries in front of its host or
+    in a credential-shaped parameter."""
+    if isinstance(value, Mapping):
+        return {
+            key: mask(nested) if is_secret_option(key) else recorded_option(nested)
+            for key, nested in value.items()
+        }
+    if isinstance(value, list):
+        return [recorded_option(item) for item in value]
+    if isinstance(value, str):
+        return without_url_credential(value)
+    return value
 
 
 def masked_option(value: object) -> object:

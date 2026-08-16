@@ -20,7 +20,7 @@ from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Annotated, Literal, Protocol
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import (
     AfterValidator,
@@ -687,6 +687,66 @@ def is_secret_option(name: str) -> bool:
     the value of."""
     lowered = name.lower()
     return any(fragment in lowered for fragment in _SECRET_KEY_FRAGMENTS)
+
+
+def url_credential(value: object) -> str | None:
+    """Which credential a URL-shaped value carries, or None.
+
+    The one shape that holds a secret without a secret-shaped name to
+    give it away: `base_url: https://user:password@host/v1` names nothing
+    suspicious, passes every rule above, and is stored, displayed and
+    recorded verbatim. So the value is examined rather than its key, at
+    every depth, and only a value that really is a URL (a scheme and a
+    host) is examined at all, which keeps ordinary prose holding an
+    address out of it.
+
+    Two answers, because they are two different mistakes: `userinfo` is
+    the credential written before the host, and `query` is a credential
+    passed as a parameter, which is the other place vendors accept one.
+    """
+    if not isinstance(value, str) or "://" not in value:
+        return None
+    try:
+        parts = urlsplit(value)
+    except ValueError:
+        # Unreadable as a URL, so it is not one of these; whatever else
+        # is wrong with it is not this rule's business.
+        return None
+    if not parts.scheme or not parts.netloc:
+        return None
+    if "@" in parts.netloc:
+        return "userinfo"
+    if any(is_secret_option(key) for key, _ in parse_qsl(parts.query, keep_blank_values=True)):
+        return "query"
+    return None
+
+
+def without_url_credential(value: str) -> str:
+    """The same URL with what `url_credential` finds taken out.
+
+    Defence in depth rather than the rule: the write path refuses such a
+    URL, and this is what keeps a value that arrived before that rule, or
+    through an environment override, out of a record made from it. The
+    host is kept exactly as written (brackets, port and all) by cutting
+    at the last `@` rather than by reassembling it from parts.
+    """
+    if url_credential(value) is None:
+        return value
+    parts = urlsplit(value)
+    kept = [
+        (key, held)
+        for key, held in parse_qsl(parts.query, keep_blank_values=True)
+        if not is_secret_option(key)
+    ]
+    return urlunsplit(
+        (
+            parts.scheme,
+            parts.netloc.rpartition("@")[2],
+            parts.path,
+            urlencode(kept),
+            parts.fragment,
+        )
+    )
 
 
 def is_env_name(value: object) -> bool:
