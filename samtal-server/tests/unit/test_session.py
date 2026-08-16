@@ -51,6 +51,7 @@ from tests.support.configs import (
     TUTOR_TONE,
     config_with_agent,
 )
+from tests.support.sockets import RecordingSocket
 
 # The mock TTS formula, for computing expected reply durations.
 TTS_MS_PER_CHAR = 40
@@ -544,20 +545,6 @@ def device_session(
     session._agents = config.agents_for_device(mac)
     session.runtime = factory(session, session._events, session._agents)
     return session
-
-
-class RecordingSocket:
-    """Just enough websocket for `_speak`: it counts what went out."""
-
-    def __init__(self) -> None:
-        self.texts: list[str] = []
-        self.frames = 0
-
-    async def send_text(self, text: str) -> None:
-        self.texts.append(text)
-
-    async def send_bytes(self, data: bytes) -> None:
-        self.frames += 1
 
 
 async def test_a_barge_in_keeps_the_sentences_the_user_heard() -> None:

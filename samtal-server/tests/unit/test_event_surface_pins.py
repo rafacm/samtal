@@ -95,8 +95,8 @@ from tests.support.providers import (
     StallingLlm,
     Unreachable,
 )
+from tests.support.sockets import RecordingSocket
 from tests.unit.test_session import (
-    RecordingSocket,
     connect,
     device_session,
     say_something,

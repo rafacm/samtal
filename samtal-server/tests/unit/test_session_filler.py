@@ -35,7 +35,7 @@ from tests.support.configs import (
 )
 from tests.support.events import events, only
 from tests.support.providers import BrokenTts, ScriptedLlm, StallingLlm
-from tests.unit.test_session import RecordingSocket
+from tests.support.sockets import RecordingSocket
 from tests.unit.test_session_tools import call, session_for
 
 STALL_S = 0.5

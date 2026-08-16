@@ -15,7 +15,6 @@ the session ending.
 """
 
 import asyncio
-import json
 from typing import Any, cast
 
 import pytest
@@ -30,13 +29,11 @@ from samtal_server.registry import SessionRegistry
 from samtal_server.runtime.pipeline import bespoke_runtime_factory
 from samtal_server.tools.mcp import McpServers
 from tests.support.configs import (
-    DEVICE_HELLO,
-    DEVICE_MAC,
-    DEVICE_UUID,
     capped_config,
     config_with_agent,
     idle_config,
 )
+from tests.support.sockets import LoopingSocket
 from tests.unit.test_session import connect, say_something, shake_hands
 from tests.unit.test_session_limits import listen_realtime, wait_for_close
 
@@ -44,40 +41,6 @@ from tests.unit.test_session_limits import listen_realtime, wait_for_close
 def closed(caplog: pytest.LogCaptureFixture) -> Any:
     (record,) = [r for r in caplog.records if getattr(r, "event", None) == "session_closed"]
     return record
-
-
-class LoopingSocket:
-    """Enough websocket for `run`: the hello, then a receive that waits
-    until something closes the session.
-
-    The tests below that drive `run` directly are the ones about what
-    ends a session from the server side, where a test client's own close
-    would be a sixth cause racing the one under test.
-    """
-
-    def __init__(self) -> None:
-        self.headers = {"device-id": DEVICE_MAC, "client-id": DEVICE_UUID}
-        self.closed: tuple[int, str] | None = None
-        self.inbox: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-        self.inbox.put_nowait(
-            {"type": "websocket.receive", "text": json.dumps(DEVICE_HELLO)}
-        )
-
-    async def accept(self) -> None:
-        return None
-
-    async def receive(self) -> dict[str, Any]:
-        return await self.inbox.get()
-
-    async def send_text(self, text: str) -> None:
-        return None
-
-    async def send_bytes(self, data: bytes) -> None:
-        return None
-
-    async def close(self, code: int = 1000, reason: str = "") -> None:
-        self.closed = (code, reason)
-        self.inbox.put_nowait({"type": "websocket.disconnect"})
 
 
 def served(

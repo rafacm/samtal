@@ -28,6 +28,7 @@ from samtal_server.device.boundary import DeviceGone
 from samtal_server.logs import TEXT_FORMAT, JsonFormatter
 from samtal_server.providers import ProviderCallError, ProviderCallTimeout
 from tests.support.configs import POET_MAC, base_config
+from tests.support.sockets import QuietSocket
 from tests.unit.test_session_events import reply_with
 from tests.unit.test_session_tools import drive_reply, session_for
 
@@ -64,21 +65,6 @@ def a_bug_carrying_a_secret() -> RuntimeError:
     bug = RuntimeError(f"the encoder is wedged on {SENTINEL}")
     bug.__cause__ = behind
     return bug
-
-
-class QuietSocket:
-    """Enough websocket for a whole reply to run against. Everything sent
-    goes nowhere and nothing fails, so the only failure in the run is the
-    one the test raises."""
-
-    async def send_text(self, text: str) -> None:
-        return None
-
-    async def send_bytes(self, data: bytes) -> None:
-        return None
-
-    async def close(self, code: int, reason: str) -> None:
-        return None
 
 
 async def reply_broken_while_speaking(

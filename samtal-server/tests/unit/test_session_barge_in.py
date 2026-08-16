@@ -31,8 +31,8 @@ from samtal_server.providers import (
 from tests.support.configs import DEVICE_MAC, LONG_REPLY, config_with_agent
 from tests.support.events import events, only
 from tests.support.providers import ConfirmingAsr, GatedAsr, ScriptedEndpointer
+from tests.support.sockets import RecordingSocket
 from tests.unit.test_session import (
-    RecordingSocket,
     assert_endpointed_speech,
     collect_reply,
     collect_until,
