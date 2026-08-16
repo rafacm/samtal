@@ -36,6 +36,7 @@ from samtal_server.providers import (
 from samtal_server.tools.builtin import switch_agent_tool
 from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
+from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 from tests.unit.test_session import (
     DEVICE_HELLO,
     POET_TONE,
@@ -464,6 +465,83 @@ async def test_a_malformed_call_under_a_name_a_peer_chose_names_nothing(
         assert ARGUMENT_SENTINEL not in str(record.args)
 
 
+def shadowing_config(*, inner: bool) -> Config:
+    """The entry `home`, publishing one tool under a name that the entry
+    `home__inside` would own; `inner` adds that second entry.
+
+    The test server lists whatever `SAMTAL_TEST_SHADOWED_TOOL` names, so
+    under `home` the tool `inside__secret_word` publishes as
+    `home__inside__secret_word`, which is exactly what `home__inside`
+    publishes its own `secret_word` as. Reloading from one of these to
+    the other moves a published name between entries without changing
+    anything the model sees."""
+    entry = {
+        "transport": "stdio",
+        "command": sys.executable,
+        "args": [str(STDIO_SERVER)],
+    }
+    shadowed = {"env": {SHADOWED_TOOL_ENV: "inside__secret_word"}}
+    entries: dict[str, object] = {"home": entry | shadowed}
+    granted = ["home"]
+    if inner:
+        entries["home__inside"] = entry
+        granted.append("home__inside")
+    return base_config(
+        mcp_servers=entries,
+        agents={
+            "poet": {"prompt": "POET", "tts": "tenor", "mcp": granted},
+            "tutor": {"prompt": "TUTOR", "tts": "alto"},
+        },
+    )
+
+
+async def test_a_name_that_changes_owner_between_calls_is_refused_not_rerouted(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A reload can land between a call being resolved and being run,
+    and a published name can move to a more specific entry when it does.
+
+    Following the move would run one server's tool under another
+    server's timeout and then record and log the entry that did not run
+    it, which is the one thing the reservation exists to prevent. So the
+    call is refused: the registry is told which entry the caller meant
+    and answers that the name is no longer served by it. The window is
+    driven directly, because it is the window and nothing about the
+    surrounding loop is under test."""
+    name = "home__inside__secret_word"
+    servers = McpServers.build(shadowing_config(inner=False))
+    await servers.start_all()
+    session = session_for(base_config(), POET_MAC, mcp_servers=servers)
+    try:
+        assert servers.owner_of(name) == "home"
+        (slot,) = session.runtime._reserve_tools([call(name)])
+        assert session.runtime._turn.reserved(slot).entry == "home"
+
+        await servers.reload(lambda: (shadowing_config(inner=True), None))
+        # The move really happened, or this test proves nothing: the
+        # name is the inner entry's now, and its tool answers
+        # differently, so a reroute would be visible in the result.
+        assert servers.owner_of(name) == "home__inside"
+
+        with caplog.at_level("INFO"):
+            result = await session.runtime._run_one(call(name), slot)
+    finally:
+        await servers.stop_all()
+
+    assert result.is_error
+    assert "rhubarb" not in result.content, "the call was rerouted to the new owner"
+    assert 'no longer served by MCP server "home"' in result.content
+    # The event and the row both still say the entry the call was
+    # reserved against, and both say it failed.
+    (logged,) = [
+        record for record in caplog.records if getattr(record, "event", None) == "tool_call"
+    ]
+    assert (logged.source, logged.entry, logged.is_error) == ("mcp", "home", True)
+    executed = session.runtime._turn.reserved(slot)
+    assert (executed.source, executed.entry, executed.is_error) == ("mcp", "home", True)
+    assert executed.duration_ms is not None
+
+
 def test_the_switch_agent_schema_is_json_serializable() -> None:
     # It goes over the wire to two different APIs; anything exotic in it
     # would fail there rather than here.
@@ -570,7 +648,8 @@ async def test_a_tool_of_an_entry_whose_name_holds_the_separator_is_dispatched()
     splitting at the first separator looked for a server called `home`,
     so the tool was offered in the snapshot and answered "there is no
     tool called" when the model asked for it. Both the dispatch and the
-    per-entry timeout ask the registry which entry owns the name."""
+    per-entry timeout read the entry off the call's reservation, which
+    is the registry's one answer about who owns the name."""
     config = base_config(
         mcp_servers={
             "home__inside": {
@@ -601,6 +680,7 @@ async def test_a_tool_of_an_entry_whose_name_holds_the_separator_is_dispatched()
     ]
     assert not result.is_error
     assert result.content == "rhubarb"
-    # The entry's own timeout, found through the same resolution the
-    # dispatch used rather than by reading the name here.
-    assert session.runtime._timeout_for("home__inside__secret_word") == 7.5
+    # The entry's own timeout, taken from the same reservation the
+    # dispatch routes by rather than from a second reading of the name.
+    reserved = session.runtime._classified(call("home__inside__secret_word"), 0)
+    assert session.runtime._timeout_for(reserved) == 7.5

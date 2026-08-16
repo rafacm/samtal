@@ -247,7 +247,15 @@ class McpConfigError(ValueError):
 
 
 class McpServerDown(RuntimeError):
-    """A call to a server that is not currently connected."""
+    """A call to a server that is not currently connected, or to one
+    that no longer owns the name it was asked for.
+
+    The second is a reload landing between a call being resolved and
+    being executed: the entry that published the name may have gone, or
+    a more specific entry may have taken the name over. Both are the
+    same answer to the caller, which is that the tool it meant did not
+    run, and both are refusals rather than reroutes: a call is executed
+    by the entry it was resolved against or by nobody."""
 
 
 class McpCallFailed(RuntimeError):
@@ -2292,12 +2300,23 @@ class McpServers:
         return None if manager is None else manager.tool_timeout_s
 
     async def call(
-        self, published: str, arguments: dict[str, Any], agent: str
+        self, published: str, arguments: dict[str, Any], agent: str, expected: str
     ) -> tuple[str, bool]:
         """Run a tool under the qualified name the model was given, for
-        the agent that is speaking. The entry prefix says which server
-        owns it, and the server maps the rest back to whatever it
-        actually listed.
+        the agent that is speaking, against the entry the caller
+        resolved it to. The entry prefix says which server owns it, and
+        the server maps the rest back to whatever it actually listed.
+
+        `expected` is that caller's answer, and this method will not
+        substitute its own. A reload can land between a name being
+        resolved and being called: an entry can go, and a more specific
+        entry can take a published name over from a less specific one
+        (`home__inside` claiming what `home` published as
+        `home__inside__x`). Rerouting to whoever owns the name now would
+        execute one server's tool under another server's timeout, and
+        record and log an entry that never ran it, so a name that has
+        moved is refused instead. The caller reserved a decision; this
+        either carries it out or says it could not.
 
         The grant is checked here as well as when the snapshot was
         taken, so "this agent cannot reach that tool" does not rest on
@@ -2308,6 +2327,10 @@ class McpServers:
         entry = self.owner_of(published)
         if entry is None:
             raise McpServerDown(f'no MCP server owns a tool called "{published}"')
+        if entry != expected:
+            raise McpServerDown(
+                f'the tool "{published}" is no longer served by MCP server "{expected}"'
+            )
         if not self._configured.allows(agent, entry, published):
             raise McpToolNotGranted(
                 f'this assistant is not allowed to use the tool "{published}"'

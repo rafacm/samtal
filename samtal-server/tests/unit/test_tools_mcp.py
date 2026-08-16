@@ -352,7 +352,7 @@ async def test_the_registry_starts_lists_and_stops() -> None:
         assert "tools__secret_word" in offered
         # An entry nobody manages contributes nothing rather than raising.
         assert servers.tools_for(["ghost"]) == []
-        assert await servers.call("tools__secret_word", {}, "assistant") == (
+        assert await servers.call("tools__secret_word", {}, "assistant", "tools") == (
             "rhubarb",
             False,
         )
@@ -559,14 +559,14 @@ async def test_the_registry_routes_by_the_qualified_name() -> None:
     servers = McpServers.build(config)
     await servers.start_all()
     try:
-        assert await servers.call("tools__secret_word", {}, "assistant") == (
+        assert await servers.call("tools__secret_word", {}, "assistant", "tools") == (
             "rhubarb",
             False,
         )
         with pytest.raises(McpServerDown):
-            await servers.call("ghost__secret_word", {}, "assistant")
+            await servers.call("ghost__secret_word", {}, "assistant", "ghost")
         with pytest.raises(McpServerDown):
-            await servers.call("unqualified", {}, "assistant")
+            await servers.call("unqualified", {}, "assistant", "tools")
     finally:
         await servers.stop_all()
 
@@ -669,12 +669,12 @@ async def test_a_call_to_a_granted_away_tool_is_refused() -> None:
     servers = McpServers.build(config)
     await servers.start_all()
     try:
-        assert await servers.call("tools__secret_word", {}, "kids") == ("rhubarb", False)
+        assert await servers.call("tools__secret_word", {}, "kids", "tools") == ("rhubarb", False)
 
         with pytest.raises(McpToolNotGranted, match="tools__add"):
-            await servers.call("tools__add", {"first": 2, "second": 3}, "kids")
+            await servers.call("tools__add", {"first": 2, "second": 3}, "kids", "tools")
         # The same call from an agent granted the whole server runs.
-        assert await servers.call("tools__add", {"first": 2, "second": 3}, "house") == (
+        assert await servers.call("tools__add", {"first": 2, "second": 3}, "house", "tools") == (
             "5",
             False,
         )
@@ -690,7 +690,7 @@ async def test_a_call_from_an_agent_with_no_grant_at_all_is_refused() -> None:
     await servers.start_all()
     try:
         with pytest.raises(McpToolNotGranted):
-            await servers.call("tools__secret_word", {}, "stranger")
+            await servers.call("tools__secret_word", {}, "stranger", "tools")
     finally:
         await servers.stop_all()
 
@@ -821,14 +821,16 @@ async def test_an_entry_name_holding_the_separator_is_reachable_end_to_end() -> 
         entry = servers.owner_of("home__inside__secret_word")
         assert entry == "home__inside"
         assert servers.timeout_for(entry) == 15.0
-        assert await servers.call("home__inside__secret_word", {}, "assistant") == (
+        assert await servers.call("home__inside__secret_word", {}, "assistant", "home__inside") == (
             "rhubarb",
             False,
         )
         # And the gate is the one the grant names, not a server called
         # `home` that does not exist.
         with pytest.raises(McpToolNotGranted):
-            await servers.call("home__inside__add", {"first": 1, "second": 2}, "assistant")
+            await servers.call(
+                "home__inside__add", {"first": 1, "second": 2}, "assistant", "home__inside"
+            )
     finally:
         await servers.stop_all()
 
@@ -860,7 +862,7 @@ async def test_the_more_specific_entry_owns_a_name_both_servers_publish(
         ]
         # The call reaches the owner's tool, and this server answers
         # differently through each of the two, so the answer says which.
-        assert await servers.call("home__inside__secret_word", {}, "assistant") == (
+        assert await servers.call("home__inside__secret_word", {}, "assistant", "home__inside") == (
             "rhubarb",
             False,
         )
