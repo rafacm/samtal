@@ -1560,3 +1560,67 @@ bearer gate by construction, and the document carries them with real
 schemas. The events endpoint the plan leaves open is still open and
 still deferred to the admin UI issue; API deletion is deliberately not
 here.
+
+### Rebase onto the merged milestone 3
+
+The branch was cut at the milestone 3 tip before that milestone's PR
+#158 review round, so its eight fixes were not underneath it. After #158
+rebase-merged, the milestone was replayed with `git rebase --onto
+origin/main`. The hashes listed above are the ones it was built at, as
+the milestones before it record theirs; replayed they are `9a5d36f`,
+`0000ee4`, `cfbee32`, `54b1f96` and `06fc851`.
+
+One conflict, in this file, and the same shape milestone 3's rebase met:
+the round appends its own section exactly where this milestone appends
+its section. Resolved by keeping both, the round's first, with each
+verification block left as the run that produced it reported it.
+
+Nothing else conflicted, and that is structural rather than lucky. The
+round's fixes are in `config/models.py`, `config/store.py`,
+`config/views.py`, `device/session.py`, `app.py` and the store's
+docstrings; this milestone is `conversations/api.py`, the registration
+in `config/api.py`, the document and two suites, and it moved nothing it
+serves.
+
+Two of the round's changes reach this milestone, and neither cost it
+anything:
+
+- **A session row's `providers` is now a record rather than a model
+  dump**: secret-shaped keys masked at every depth and any credential a
+  URL carried taken out. These routes serve that column as stored, so
+  the narrowing arrives here for free and is the right way round: what
+  a read cannot answer is what was never written. The round-trip case
+  asserts the entry name and the type, which the representation keeps
+  deliberately.
+- **The session open path moved inside the guard, and `client` is
+  latched where the device hangs up.** The round trip reads a session
+  through the API rather than out of the file, and it polls until the
+  close has landed, so it depends on the row and its `close_reason`
+  rather than on where either is written from. It asserts `client` and
+  passes unchanged.
+
+Re-run from `samtal-server/` at `06fc851`, on `origin/main` at
+`7771c66`:
+
+```
+$ uv run ruff check .
+All checks passed!
+```
+
+```
+$ uv run pytest tests/unit -q
+2228 passed, 15 skipped in 298.16s (0:04:58)
+```
+
+```
+$ uv run pytest tests/integration -q
+55 passed in 163.06s (0:02:43)
+```
+
+The arithmetic holds against the new parent rather than the old one:
+`origin/main` is 2192 unit tests and 55 integration ones, and this
+milestone's 34 new cases plus the two added to the OpenAPI suite make
+2228, with the integration lane untouched. Both committed artifacts
+still regenerate byte-identically against the merged parent, the
+OpenAPI document included, which is what says the round moved nothing
+the contract carries.
