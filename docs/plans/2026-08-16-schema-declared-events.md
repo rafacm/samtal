@@ -195,11 +195,24 @@ The registry declares the tap-contract surface only. `vad` and
 
 ### Enforcement lives in `_emit`, and the mode is an env switch
 
-Both emitters validate the finished payload in `_emit` before
-dispatch: the event is declared for this scope, the level is in the
-declared set, no declared-required field is missing, no undeclared
-field is present, every field matches its kind, every `TOKEN` value
-is in its set. Violations become one `EventSchemaViolation` value
+Both emitters validate in `_emit` before dispatch: the event is
+declared for the emitting channel, the level is in the declared
+set, no declared-required field is missing, no undeclared field is
+present, every field matches its kind, every `TOKEN` value is in
+its set. The message arguments are inside the machinery, not
+beside it: `Emission.args` reaches every tap and the formatter
+renders them, so each spec also declares its argument tuple (arity
+and per-position kind, drawn from the same taxonomy), transcribed
+in M1 while reading each site, and validation covers the tuple the
+way it covers fields. One argument on the surface today cannot
+satisfy the taxonomy: `asr_prompt_echo`'s recovered branch renders
+the recovered transcript into its sentence, and its pin preserves
+the text. That argument is declared as an explicit, single-entry
+grandfather (`GRANDFATHERED_ARGS`, carrying the site and the
+tracking-issue number), because removing it is a surface narrowing
+this issue's no-behavior-change contract forbids; M1 files the
+follow-up issue for the narrowing and the registry entry cites it,
+so the exception is visible machinery rather than a quiet hole. Violations become one `EventSchemaViolation` value
 listing the offending field names (names only: a field's value at a
 violating site is exactly the bytes the registry exists to keep off
 the surface, so neither the strict exception text nor the forgiving
@@ -210,12 +223,16 @@ message, the complaint line, and both log formats).
 - **Strict** (the default): `_emit` raises `EventSchemaError`. This
   is what the test lanes and a source checkout run.
 - **Forgiving**: the offending fields are dropped from the payload
-  (an undeclared event keeps only its base fields), the emit
-  proceeds so the operator still gets the line and the taps still
+  (an undeclared event keeps only its base fields), and an invalid
+  emission's human sentence is replaced wholesale by a fixed safe
+  message with no caller-supplied arguments, because dropping a
+  payload field cannot un-render the same value from `args`; a
+  valid emission keeps its own sentence untouched. The emit
+  proceeds so the operator still gets a line and the taps still
   get the event, and one plain WARNING sentence on the emitter's
-  own channel names the event and the dropped field names. Not an
-  event itself, for the same reason a tap failure's report is not
-  one: a complaint that went back through validation could recurse.
+  own channel reports the violation. Not an event itself, for the
+  same reason a tap failure's report is not one: a complaint that
+  went back through validation could recurse.
 - The switch is `SAMTAL_EVENTS_ENFORCEMENT` (`strict` or
   `forgiving`), read once at import time into a module flag with a
   setter for tests. The container image sets
@@ -480,6 +497,19 @@ Findings as received, condensed but faithful:
    value from args; forgiving mode must not re-render the original
    message for an invalid emission; sentinels must inspect args
    and attached taps.
+
+   *Resolution*: accepted, with the narrowing routed through the
+   contract rather than around it. Each spec now declares its
+   argument tuple (arity and per-position kind) and validation
+   covers it; an invalid emission's sentence is replaced wholesale
+   by a fixed safe message in forgiving mode; the sentinel tests
+   inspect exception text, complaint, both formats,
+   `Emission.args` and an attached tap. The one argument the
+   taxonomy cannot admit, the recovered transcript in
+   `asr_prompt_echo`, is a visible single-entry grandfather citing
+   a follow-up narrowing issue M1 files, because deleting it
+   inside #155 would break the pin suites the issue declares
+   unmodifiable. Amended in the enforcement section.
 
 5. **P1: validating after base-field merging permits session
    identity spoofing.** `**fields` can overwrite `session` and
