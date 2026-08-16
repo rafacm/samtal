@@ -41,6 +41,7 @@ from samtal_server.conversations.store import (
     ConversationStore,
     SessionSink,
     conversations_path,
+    purge,
     read_conversations,
 )
 from samtal_server.device import session as session_module
@@ -667,6 +668,51 @@ async def test_a_cancelled_cleanup_step_still_finishes_the_record(
     assert session._events._taps == []
     manifest = _capture_manifest(tmp_path)
     assert manifest is not None and manifest["capture"]["complete"] is True
+
+
+async def test_a_purge_before_the_open_commits_deletes_nothing_and_says_so(
+    tmp_path: Path,
+) -> None:
+    """A purge deletes what is recorded, and a session whose open has not
+    committed yet is not recorded.
+
+    The window is queue latency (the open is enqueued as the conversation
+    starts and committed by the writer moments later), and inside it the
+    purge honestly reports zero rather than pretending. What the session
+    then records is ordinary rows, so the same command run again deletes
+    them; a durable tombstone for this window would be machinery whose
+    only reader is this race.
+    """
+    gate = Gate()
+    store = ConversationStore(tmp_path, gate=gate)
+    store.start()
+    session, websocket, task = await open_session(recording_config(tmp_path), store)
+    gate.wait()
+
+    # The id an operator reads off the open line, purged before the
+    # writer has committed anything for it.
+    deleted = purge(tmp_path, session=session.session_id)
+    assert deleted.counts() == {
+        "sessions": 0,
+        "turns": 0,
+        "tool_invocations": 0,
+        "events": 0,
+    }
+
+    gate.open_forever()
+    await drive_reply(session, UTTERANCE)
+    await websocket.close(1000, "goodbye")
+    await asyncio.wait_for(task, timeout=TIMEOUT_S)
+    store.stop()
+
+    # The record landed behind the purge, and is deletable by the same
+    # command.
+    assert len(read(tmp_path, "select * from sessions")) == 1
+    assert len(read(tmp_path, "select * from turns")) == 1
+    again = purge(tmp_path, session=session.session_id)
+    assert again.sessions == 1
+    assert read(tmp_path, "select * from sessions") == []
+    assert read(tmp_path, "select * from turns") == []
 
 
 # A wedged writer, in three deterministic parts
