@@ -19,19 +19,45 @@ Two rules, both read from the syntax rather than from a grep:
   something the suites sit on rather than something they are tangled
   with.
 
+What makes something a test module is resolved against this repository,
+not guessed from the spelling of an import. `from pkg import name` may
+be importing a submodule or may be importing a symbol, and the two are
+the same syntax: `from tests.unit import test_capture` reaches a module,
+while `from tests.support.configs import test_data as data` reaches a
+name inside one. So every candidate path is looked up on disk, and only
+a candidate that is really a `test_*.py` file, or a `test_*` package
+directory, counts. A `test_`-prefixed symbol out of a module that is not
+itself a test module is a name, and names are not this rule's business.
+
 A `conftest` is deliberately not a test module here. The integration and
 smoke lanes import their own, which is the other half of decision 2's
 "support or a conftest", and a fixture cannot be imported and used as a
 fixture, so a conftest is the only home some shared things can have.
+
+Two deliberate limits, stated rather than discovered later:
+
+- An import naming a module this repository does not hold is not
+  reported. It cannot be a test-module import, and it already fails
+  louder than this file would: collection raises `ImportError` on it.
+- Only static imports are seen. A module reached through `importlib` or
+  `__import__` would pass, and nothing in the lane does that.
 """
 
 import ast
 from pathlib import Path
 
-# The lane under the rule, and the half of it that everything else sits
-# on.
+# The lane under the rule, the half of it that everything else sits on,
+# and the directory dotted import paths are resolved from: `tests.unit`
+# is a package because `samtal-server/tests/unit` is a directory under
+# this one, which is what puts the two spellings on the same footing.
 TESTS = Path(__file__).parents[1]
 SUPPORT = TESTS / "support"
+ROOT = TESTS.parent
+
+# Where a planted source is treated as living, for the tests below. Only
+# its directory is read, and only to anchor a relative import, so the
+# file itself does not have to exist.
+PLANTED = TESTS / "unit" / "planted.py"
 
 
 def sources() -> list[Path]:
@@ -43,42 +69,60 @@ def relative(path: Path) -> str:
 
 
 def is_test_module(path: Path) -> bool:
+    """Whether a resolved file or directory is tests rather than
+    something tests are built from."""
     return path.name.startswith("test_")
 
 
-def imported_paths(tree: ast.AST) -> list[tuple[str, int]]:
-    """Every module path an import statement in `tree` names, with the
-    line it is on.
+def resolved(base: Path) -> Path | None:
+    """The module file or the package directory a candidate path names,
+    if this repository holds one."""
+    module = base.with_suffix(".py")
+    if module.is_file():
+        return module
+    if base.is_dir():
+        return base
+    return None
 
-    `from pkg import name` contributes `pkg` and `pkg.name`, because the
-    name may itself be a module: both spellings of reaching into a test
-    module have to be caught.
+
+def candidates(node: ast.Import | ast.ImportFrom, origin: Path) -> list[Path]:
+    """Every path in the tree an import statement could be naming.
+
+    `from pkg import name` names `pkg`, and may also name `pkg.name`
+    when that is a module of its own, so both are offered here and the
+    filesystem decides which of them exists. A relative import is
+    anchored at the importing file's own directory, one level further up
+    per extra dot.
     """
-    found: list[tuple[str, int]] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            found += [(alias.name, node.lineno) for alias in node.names]
-        elif isinstance(node, ast.ImportFrom):
-            module = "." * node.level + (node.module or "")
-            found.append((module, node.lineno))
-            found += [(f"{module}.{alias.name}", node.lineno) for alias in node.names]
-    return found
+    if isinstance(node, ast.Import):
+        return [ROOT.joinpath(*alias.name.split(".")) for alias in node.names]
+    anchor = ROOT
+    if node.level:
+        anchor = origin.parent
+        for _ in range(node.level - 1):
+            anchor = anchor.parent
+    base = anchor.joinpath(*node.module.split(".")) if node.module else anchor
+    return [base, *(base / alias.name for alias in node.names)]
 
 
-def names_a_test_module(path: str) -> bool:
-    """Whether a dotted import path reaches a test module. A `conftest`
-    does not count: decision 2 allows one."""
-    return any(part.startswith("test_") for part in path.split("."))
-
-
-def reaches_into_tests(tree: ast.AST) -> list[int]:
+def reaches_into_tests(tree: ast.AST, origin: Path = PLANTED) -> list[int]:
     """The line of every import in `tree` that names a test module."""
-    return sorted({line for path, line in imported_paths(tree) if names_a_test_module(path)})
+    lines: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Import | ast.ImportFrom):
+            continue
+        for base in candidates(node, origin):
+            found = resolved(base)
+            if found is not None and is_test_module(found):
+                lines.add(node.lineno)
+    return sorted(lines)
 
 
 def offenders(paths: list[Path]) -> dict[str, list[int]]:
     found = {
-        relative(path): reaches_into_tests(ast.parse(path.read_text(encoding="utf-8")))
+        relative(path): reaches_into_tests(
+            ast.parse(path.read_text(encoding="utf-8")), path
+        )
         for path in paths
     }
     return {name: lines for name, lines in found.items() if lines}
@@ -129,3 +173,32 @@ def test_the_rule_leaves_support_and_conftest_imports_alone() -> None:
     )
 
     assert reaches_into_tests(planted) == []
+
+
+def test_the_rule_leaves_a_test_shaped_name_alone() -> None:
+    """A name is not a module. `from pkg import test_thing` is the same
+    syntax whether `test_thing` is a submodule or a symbol, and reading
+    the spelling alone would refuse a support helper, or a dependency's
+    export, for being called something that starts with `test_`."""
+    planted = ast.parse(
+        "from tests.support.configs import test_data as data\n"
+        "from tests.support.stores import corrupt as test_corrupt\n"
+        "from vendor import test_helper as helper\n"
+        "from samtal_server.config import test_only_flag\n"
+    )
+
+    assert reaches_into_tests(planted) == []
+
+
+def test_the_rule_follows_a_relative_import_to_the_file_it_names() -> None:
+    """A relative import is the obvious way around a rule written about
+    dotted spellings, so it is resolved from the importing file's own
+    directory: the first and third lines below reach a test module in
+    `tests/unit`, and the second reaches support one level up."""
+    planted = ast.parse(
+        "from .test_ota import SYSTEM_INFO\n"
+        "from ..support.configs import base_config\n"
+        "from . import test_capture\n"
+    )
+
+    assert reaches_into_tests(planted) == [1, 3]
