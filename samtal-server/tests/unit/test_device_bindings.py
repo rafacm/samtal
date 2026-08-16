@@ -12,7 +12,6 @@ import asyncio
 import contextlib
 import json
 import logging
-from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -23,25 +22,18 @@ from starlette.websockets import WebSocketDisconnect
 
 from samtal_server import logs
 from samtal_server.app import create_app
-from samtal_server.config import Config, FileConfig, compose_config
-from samtal_server.config.models import domain_fields
-from samtal_server.config.store import ConfigStore
+from samtal_server.config import Config
 from samtal_server.db import open_database, read_engine, schema
 from samtal_server.device.bindings import DeviceBindings
-from samtal_server.ota import OTA_PATH
 from samtal_server.ws import WEBSOCKET_PATH
-from tests.support.configs import BOUND_MAC
-
-DEVICE_MAC = "aa:bb:cc:dd:ee:ff"
-DEVICE_UUID = "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
+from tests.support.configs import BOUND_MAC, DEVICE_UUID
+from tests.support.registry import AGENT, STAGES, booted, check_in, store_at
+from tests.support.registry import BINDINGS_DEVICE_MAC as DEVICE_MAC
 
 # Not a real credential, and shaped so a substring check for it cannot
 # match by accident. It stands for whatever a database error carries
 # that nobody wrote for a log line.
 SENTINEL = "sk-test-4f8b2c9e-never-a-real-credential"
-
-STAGES = ("llm", "asr", "tts", "vad")
-AGENT = dict.fromkeys(STAGES, "mock")
 
 DEVICE_HELLO = {
     "type": "hello",
@@ -55,64 +47,6 @@ DEVICE_HELLO = {
         "frame_duration": 60,
     },
 }
-
-
-@contextlib.contextmanager
-def store_at(directory: Path) -> Iterator[ConfigStore]:
-    """The repository over the database in `directory`, the way the CLI
-    and the API reach it: opened, used, disposed. This is the write side
-    of every test here, and it is deliberately a different connection
-    from the one the running app reads through."""
-    engine = open_database(directory)
-    try:
-        yield ConfigStore(engine)
-    finally:
-        engine.dispose()
-
-
-def booted(
-    directory: Path,
-    *,
-    agents: tuple[str, ...] = ("assistant",),
-    devices: dict[str, list[str]] | None = None,
-    default_agent: str | None = None,
-) -> Config:
-    """The configuration a server booting on a database in `directory`
-    would hold: the domain half written through the repository, read
-    back, and composed onto a file half that names the same directory.
-
-    The directory is what makes this different from the rest of the unit
-    lane, where a `Config` is composed in memory and there is no database
-    to write to afterwards.
-    """
-    if devices is None:
-        devices = {BOUND_MAC: [agents[0]]}
-    with store_at(directory) as store:
-        for stage in STAGES:
-            store.set_provider(stage, "mock", {"type": "mock"})
-        for name in agents:
-            store.set_agent(name, dict(AGENT))
-        for mac, bound in devices.items():
-            store.bind_device(mac, bound)
-        if default_agent is not None:
-            store.set_default_agent(default_agent)
-        snapshot = store.load()
-    return compose_config(
-        FileConfig(server={"database": {"dir": str(directory)}}),
-        domain_fields(snapshot.domain),
-        "the test's database",
-    )
-
-
-def check_in(client: TestClient, device_id: str = DEVICE_MAC) -> dict:
-    """One OTA check-in, the way the firmware makes it."""
-    response = client.post(
-        OTA_PATH,
-        json={"application": {"version": "2.4.0"}, "board": {"type": "test-board"}},
-        headers={"Device-Id": device_id, "Client-Id": DEVICE_UUID},
-    )
-    assert response.status_code == 200
-    return response.json()
 
 
 def token_of(client: TestClient, device_id: str = DEVICE_MAC) -> str:
