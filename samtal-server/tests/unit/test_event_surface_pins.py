@@ -61,7 +61,7 @@ from samtal_server.app import create_app
 from samtal_server.config import Config
 from samtal_server.device.bindings import DeviceAgents
 from samtal_server.device.session import DeviceSession
-from samtal_server.logs import _STANDARD_ATTRIBUTES
+from samtal_server.logs import _STANDARD_ATTRIBUTES, TEXT_FORMAT, JsonFormatter
 from samtal_server.providers import AsrResult, build_agent_providers
 from samtal_server.runtime.pipeline import bespoke_runtime_factory
 from samtal_server.tools.mcp import McpServers
@@ -71,6 +71,7 @@ from tests.unit.test_session import (
     RecordingSocket,
     config_with_agent,
     connect,
+    device_session,
     say_something,
     shake_hands,
     speech_pcm,
@@ -142,6 +143,20 @@ def payload_of(record: logging.LogRecord) -> dict[str, Any]:
     through a list written here, so this suite and the formatter cannot
     come to disagree about what an event field is."""
     return {key: value for key, value in vars(record).items() if key not in _STANDARD_ATTRIBUTES}
+
+
+def shipped(record: logging.LogRecord) -> tuple[str, str]:
+    """One record as each shipped format writes it: the JSON object a
+    collector keeps, and the line a terminal prints.
+
+    What a sentinel case hunts through, beside the payload and the
+    arguments. Reading only the payload would miss a value that reached
+    the rendering, and reading only the sentence would miss one that
+    reached a field, so both formats are asked."""
+    return (
+        JsonFormatter().format(record),
+        logging.Formatter(TEXT_FORMAT).format(record),
+    )
 
 
 def sentence_of(record: logging.LogRecord) -> str:
@@ -465,6 +480,17 @@ def speaking_session(scripts: dict[str, Any] | None = None, mac: str = POET_MAC)
     return session
 
 
+def uttering(text: str):
+    """A session whose ASR answers with `text`, driven the same way.
+
+    What the sentinel cases below plant an utterance with: the mock LLM
+    quotes what it was given, so one string reaches the transcription,
+    the reply and every field either of them ever carried."""
+    session = device_session(config_with_agent(asr_text=text), DEVICE_MAC)
+    session.websocket = cast(Any, RecordingSocket())
+    return session
+
+
 async def test_prompt_assembled(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level("INFO"):
         session_for(base_config(), POET_MAC)
@@ -494,18 +520,47 @@ async def test_heard(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "heard")) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
-        "template": 'session %s: heard "%s"',
-        "args": (SESSION, "hello"),
-        "sentence": 'session <session>: heard "hello"',
+        "template": "session %s: heard %.2f s of speech",
+        "args": (SESSION, 0.02),
+        "sentence": "session <session>: heard <n> s of speech",
         "fields": {
             "event": "heard",
             "session": DYNAMIC,
             "device": None,
             "agent": "poet",
-            "text": "hello",
             "duration_s": 0.02,
         },
     }
+
+
+async def test_an_utterance_reaches_no_part_of_the_heard_record(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The event says how long somebody spoke and in what language, and
+    nothing about what they said (#120). A transcript is whatever was
+    spoken in the room, which is the one thing on this surface nobody
+    chose to publish, so the check is the shape the two #152 sentinels
+    have: not in the sentence, not in an argument, not in a field, not
+    in either format an operator can be running, and not at a tap."""
+    session = uttering(SENTINEL)
+    consumer = Consumer()
+    session._events.attach(consumer)
+    with caplog.at_level("DEBUG"):
+        await session.runtime._reply(UTTERANCE)
+
+    heard = only(caplog, "heard")
+    assert SENTINEL not in heard.getMessage()
+    assert SENTINEL not in str(heard.args)
+    assert SENTINEL not in str(payload_of(heard))
+    assert not any(SENTINEL in rendered for rendered in shipped(heard))
+    emissions = [emission for emission in consumer.seen if emission.payload["event"] == "heard"]
+    assert emissions, "it reached no tap at all, so this proves nothing"
+    assert not any(
+        SENTINEL in str(emission.payload) or SENTINEL in str(emission.args)
+        for emission in emissions
+    )
+    # And what the event exists for survives it.
+    assert heard.duration_s == 0.02
 
 
 async def test_replied(caplog: pytest.LogCaptureFixture) -> None:
