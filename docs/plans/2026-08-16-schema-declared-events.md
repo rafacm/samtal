@@ -132,11 +132,28 @@ dataclasses and the declarations:
     sanitizes it (bounded in length, stripped of unprintables) and
     declared with an explicit per-field maximum length and
     character constraint that validation enforces again at emit.
-    The fields in this class today are `ota_check`'s `client`,
-    `board` and `firmware` and their kin on the activation events,
-    which the onboarding work bounded at their sites on purpose;
-    the kind exists so the registry says which fields carry
-    far-side bytes rather than laundering them as identifiers.
+    The kind is narrow by construction: M1's provenance inventory
+    assigns it ONLY where the site's normalization cannot be
+    tightened to an `ID` syntax without changing what the surface
+    deliberately retains (`board` is the known case: the README
+    documents that device-reported board strings are kept, bounded
+    and stripped, a decision the onboarding work's review rounds
+    hardened on purpose); a field whose lawful values already fit
+    a syntactic form (`client` when it is a UUID, `firmware` when
+    it is a version) is declared `ID` with that form IF its
+    decision site normalizes to it, and otherwise stays
+    `DESCRIPTOR` with the site's real bounds, because a registry
+    that claims a tighter form than the site guarantees would turn
+    lawful production traffic into violations. Retaining these
+    fields at all is a recorded product decision this issue cannot
+    re-decide; what the registry adds is honesty about which
+    fields carry far-side bytes rather than laundering them as
+    identifiers, plus a sentinel proof of the boundary: M2 plants
+    a credential-shaped but syntactically admissible value in each
+    `DESCRIPTOR` field and asserts it appears in exactly its own
+    declared field of its own event's record and NOWHERE else (no
+    other field, no complaint, no exception text, no other tap
+    surface).
     M1 inventories every string field by provenance (operator
     configuration, server-minted, far-side sanitized) and assigns
     the kind from the inventory; a far-side string whose decision
@@ -863,6 +880,23 @@ eleven findings. As received, condensed but faithful:
    sentinel matrix never plants a valid descriptor. Remove the
    kind; make each value a normalized `ID` or closed token, or
    remove it in a separately accepted narrowing.
+
+   *Resolution*: partially adopted. Adopted: `ID`-with-syntax
+   wherever the decision site normalizes to a form (decided
+   per field by M1's provenance inventory), and the strengthened
+   sentinel planting a syntactically admissible credential shape
+   in every remaining `DESCRIPTOR` field, asserting containment to
+   exactly its own declared field. Rejected with reasons: removing
+   the kind or the fields. Retaining bounded device-reported
+   descriptors (`board` above all) is a recorded, reviewed
+   decision of the onboarding work, documented in the README, and
+   re-deciding it is a product narrowing outside a refactoring
+   issue whose contract pins the surface; a registry that cannot
+   say "this field deliberately carries sanitized far-side bytes"
+   would be less honest than one that can. The ADR's rule is what
+   the follow-up narrowing issues enforce surface change by
+   surface change; the registry's job here is to describe and
+   bound the surface that exists.
 
 2. **P1: the `asr_prompt_echo` grandfather preserves an
    acknowledged far-side leak.** The recovered transcript is user
