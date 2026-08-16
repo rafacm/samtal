@@ -271,7 +271,23 @@ key, each asserted absent from all the surfaces above.
   get the event, and one plain WARNING sentence on the emitter's
   own channel reports the violation. Not an event itself, for the
   same reason a tap failure's report is not one: a complaint that
-  went back through validation could recurse.
+  went back through validation could recurse. The recovery is a
+  MATRIX, defined per violation class rather than implied by
+  "drop": an undeclared field, wrong kind, or unlisted token drops
+  that field; an undeclared event re-labels to `schema_violation`
+  with base fields only; a missing required field emits what was
+  given (nothing to drop, the complaint says which class fired); a
+  wrong level emits at the level the caller chose (a level is not
+  droppable and rewriting it would falsify the record); a wrong
+  channel emits on the channel the emitter owns (it has no other);
+  and every one of these carries the fixed safe sentence and the
+  one-line complaint. Behind the matrix sits a LAST-RESORT GUARD:
+  in forgiving mode the whole validation runs under its own
+  `try/except`, so a bug inside the validator itself produces the
+  fixed safe complaint and a degraded base-fields emission instead
+  of an exception on a reply path. M2 tests the guard by injecting
+  a validator that raises an exception carrying a sentinel and
+  asserting the reply survives and the sentinel appears nowhere.
 - The switch is `SAMTAL_EVENTS_ENFORCEMENT` (`strict` or
   `forgiving`), held in a module flag with a setter, and it is the
   SERVER ENTRYPOINT that resolves it: `main()` reads the variable
@@ -751,6 +767,15 @@ Findings as received, condensed but faithful:
     through a reply path. Provide a recovery matrix per violation
     class and a final forgiving-mode guard around validation,
     tested with an injected validator raising a sentinel.
+
+    *Resolution*: accepted. The forgiving path is now a recovery
+    matrix defined per violation class (drop the field, re-label
+    the event, emit-what-was-given for a missing required field,
+    keep the caller's level and the emitter's channel), and a
+    last-resort guard wraps the whole validation in forgiving mode
+    so a validator bug degrades the emission instead of raising on
+    a reply path, tested with an injected raising validator
+    carrying a sentinel. Amended in the enforcement section.
 
 13. **P2: type enforcement lacks optimized-mode and edge
     semantics.** Booleans are `int` subclasses, nonfinite floats
