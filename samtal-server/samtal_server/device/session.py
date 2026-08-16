@@ -32,8 +32,8 @@ before the decode, so the capture still records the evidence.
 What happens in a conversation is logged twice over: as a human
 sentence, and as structured fields (`event`, `session`, `device`, and
 whatever the event carries) that the JSON log format emits as top-level
-keys. Retained JSON logs are therefore the transcript store until v3
-brings a real one. Both sides emit through the session's
+keys. Both are metadata: what was said is recorded in the conversation
+store instead, under the same session id (#120). Both sides emit through the session's
 `SessionEvents` ([events](../events.py)), so which module a line came
 from is not visible in the record, and every consumer attached to the
 session sees the same events.

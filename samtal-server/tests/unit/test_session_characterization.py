@@ -68,9 +68,9 @@ from tests.unit.test_session_tools import (
 from tests.unit.test_session_watchdog import StallingLlm
 
 # The session log channel, by name. `logs.py` emits `record.name` as the
-# `logger` field of every JSON record, and retained JSON logs are the
-# transcript store, so this string is part of the observable output and
-# not an implementation detail of where the code lives.
+# `logger` field of every JSON record, and a collector filters on it, so
+# this string is part of the observable output and not an implementation
+# detail of where the code lives.
 SESSION_LOGGER = "samtal_server.session"
 
 # A voice whose every chunk is 20 ms, which at the 24 kHz output rate is

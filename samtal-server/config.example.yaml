@@ -81,9 +81,9 @@ server:
   #
   # How the server logs. "text" is the human format (the default); "json"
   # is one object per line, which is what the container image defaults to
-  # and what makes retained logs readable back as conversation
-  # transcripts (filter on event: heard/replied/agent_said, group by
-  # session).
+  # and what a collector groups by session to measure the pipeline. The
+  # records carry metadata only; what was said is in the conversation
+  # store, under server.conversations below.
   # log_format: text
   # log_level: INFO
 

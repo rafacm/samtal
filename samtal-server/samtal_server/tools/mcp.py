@@ -211,7 +211,7 @@ def _emit_nothing(_record: logging.LogRecord) -> bool:
 # and, through logger.exception, a traceback whose validation message
 # quotes the bytes that failed. The stdio client does the same for a
 # child that writes malformed JSON at it. JSON log events are this
-# server's observability surface and its transcript store
+# server's observability surface
 # (docs/adr/2026-08-04-json-logs-are-the-observability-surface.md), and
 # nothing a third-party server writes was ever part of it, which is the
 # reason uvicorn's access log stays off in main.py as well. So those
@@ -258,7 +258,7 @@ class McpCallFailed(RuntimeError):
     cause or a context. This exception is not caught and inspected: the
     pipeline renders it into the tool result the model is given, so
     every character of it is text that goes into the conversation, and
-    from there into the transcript the retained logs are. An SDK
+    from there into the record the conversation store keeps. An SDK
     exception raised near a response body can quote that body, and a
     server holding a credential of this deployment's can put it in the
     error it answers with, so what a third party wrote must not be the
@@ -1017,8 +1017,8 @@ class McpServerManager:
         """Say that a block was past the cap, in sizes and positions.
 
         The entry, the channel and the size. Never the block: it is a
-        third party's bytes, and this line is read by an operator from a
-        log store that holds the transcripts.
+        third party's bytes, and this line goes to the retained logs,
+        which keep metadata and nothing a far side wrote.
         """
         logger.warning(
             "mcp server %s: the %s block it shipped%s is %d characters, past the "

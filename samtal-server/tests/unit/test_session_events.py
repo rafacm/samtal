@@ -1,9 +1,10 @@
 """The structured events a conversation emits.
 
-Retained JSON logs are what a transcript is read back out of until v3
-brings a real conversation store, so the shape of these records is a
-contract: `event`, `session`, and `device` on every one, plus the
-per-event fields the server README documents. The assertions run against
+Retained JSON logs are what a deployment measures itself from, so the
+shape of these records is a contract: `event`, `session`, and `device`
+on every one, plus the per-event fields the server README documents.
+They are metadata; the record of what was said is the conversation
+store's (#120). The assertions run against
 `caplog.records`, because the fields ride `extra=` and never appear in
 the message text, which is also what these tests pin: the human sentence
 did not change when the fields arrived.

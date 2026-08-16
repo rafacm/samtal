@@ -1,8 +1,8 @@
 """The two log formats, and what the vendor libraries are allowed to say.
 
-The JSON format is what the container ships with and what makes retained
-logs readable back as conversation transcripts, so what a record carries
-is asserted field by field. The text format is the one the server has
+The JSON format is what the container ships with and what a collector
+groups a deployment's own measurements by, so what a record carries is
+asserted field by field. The text format is the one the server has
 always printed, and the assertion here is that it did not change.
 
 The last section is about records this project does not write: the

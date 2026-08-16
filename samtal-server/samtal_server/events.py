@@ -3,8 +3,12 @@
 The structured JSON records are the observability surface
 ([ADR](../../docs/adr/2026-08-04-json-logs-are-the-observability-surface.md)),
 which makes them output rather than a debugging aid: their channel, their
-sentences, their levels and their field names are a compatibility surface,
-and the retained logs are the transcript store until v3 brings a real one.
+sentences, their levels and their field names are a compatibility surface.
+They are metadata and nothing else: the record of what was said is the
+conversation store (#120, and the [content and telemetry
+ADR](../../docs/adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)),
+and these events are the operator's live view of the same conversation,
+correlated with it by session id.
 Yet the machinery serving them used to belong to one subsystem, sitting in
 `device/events.py` and used by the device edge and the pipeline while every
 other module hand-built an `extra={...}` dict of its own (#138).
@@ -65,8 +69,8 @@ from typing import Any, Protocol
 # The session log channel, by name rather than by `__name__`.
 #
 # `logs.py` emits `record.name` as the `logger` field of every JSON
-# record, and retained JSON logs are the transcript store until v3
-# brings a real one, so that field is output. Every conversation record
+# record, and the retained records are a compatibility surface, so that
+# field is output: a collector filters on it. Every conversation record
 # has carried `samtal_server.session` since the whole session was one
 # module, and splitting the code across `device/` and `runtime/` must
 # not silently rename it. Naming the channel here says what it is
