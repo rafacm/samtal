@@ -264,9 +264,10 @@ async def test_a_barge_in_during_transcription_merges_the_sentence(
         await session.runtime._reply_task
 
     assert asr.pcms == [head, head + tail]
-    heard = only(caplog, "heard")
-    assert heard.text == "800 ms"
-    assert heard.duration_s == 0.8
+    # The event says how long the merged utterance was; what was heard
+    # in it is the turn below, since the events carry no transcript
+    # (#120).
+    assert only(caplog, "heard").duration_s == 0.8
     merged = only(caplog, "barge_in_merged")
     assert merged.speech_ms == 600
     assert session.runtime._turns == [Turn("user", "800 ms"), Turn("assistant", "You said 800 ms.")]
@@ -375,8 +376,9 @@ async def test_a_confirmed_barge_in_reuses_the_transcript_and_the_lock(
     # Gate 4, non-empty transcript: the confirmation is the cancel
     # decision and the new reply's ASR in one. It runs once (two calls
     # total: the first reply's own, then the confirmation), `heard`
-    # fires once for the interruption with the confirmed text and its
-    # language fields, and the language lock takes effect.
+    # fires once for the interruption with its language fields, and the
+    # language lock takes effect. What was actually heard is the history
+    # at the end: the events carry no transcript (#120).
     config = config_with_agent(
         llm_reply="Answering {text}.", server={"barge_in_refractory_ms": 0}
     )
@@ -404,8 +406,7 @@ async def test_a_confirmed_barge_in_reuses_the_transcript_and_the_lock(
     assert asr.calls == 2
     assert session.runtime._asr_language == "es"
     first, second = events(caplog, "heard")
-    assert first.text == "the question"
-    assert second.text == "stop and listen"
+    assert first.duration_s > 0
     assert second.language == "es"
     assert second.language_confidence == 0.9
     barged = only(caplog, "barge_in")

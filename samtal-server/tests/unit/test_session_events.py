@@ -73,14 +73,16 @@ def test_a_conversation_logs_heard_and_replied(caplog: pytest.LogCaptureFixture)
         hold_a_conversation(config_with_agent(asr_text="what time is it"))
 
     heard = only(caplog, "heard")
-    assert heard.text == "what time is it"
     assert heard.agent == "assistant"
     assert heard.duration_s > 0
     replied = only(caplog, "replied")
     assert replied.text == "You said what time is it."
     assert replied.agent == "assistant"
-    # Both halves of the exchange carry the same session and device, which
-    # is what makes a transcript groupable.
+    # What was heard is not on the event: the utterance is content, and
+    # content is the conversation store's (#120).
+    assert not hasattr(heard, "text")
+    # Both halves carry the same session and device, which is what makes
+    # the exchange groupable.
     assert heard.session == replied.session
     assert heard.device == replied.device == DEVICE_MAC.lower()
 
@@ -90,7 +92,7 @@ def test_the_human_message_is_unchanged_by_the_extra_fields(
 ) -> None:
     with caplog.at_level("INFO"):
         hold_a_conversation(config_with_agent(asr_text="hello"))
-    assert 'heard "hello"' in caplog.text
+    assert "heard 0.30 s of speech" in caplog.text
     assert 'replied "You said hello."' in caplog.text
 
 
@@ -553,7 +555,7 @@ def test_the_fields_survive_the_json_formatter(caplog: pytest.LogCaptureFixture)
 
     line = json.loads(JsonFormatter().format(only(caplog, "heard")))
     assert line["event"] == "heard"
-    assert line["text"] == "good morning"
+    assert line["duration_s"] > 0
     assert line["device"] == DEVICE_MAC.lower()
     assert line["session"]
     # A record is one line, whatever is in the text.

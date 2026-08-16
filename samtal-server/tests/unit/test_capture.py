@@ -126,7 +126,7 @@ def test_an_events_offset_indexes_into_the_audio(tmp_path: Path) -> None:
     capture = store(tmp_path).open("s1", opened, MANIFEST)
     assert capture is not None
     capture.microphone(tone(2000, 1000), opened)
-    capture.event({"event": "heard", "text": "hello"}, opened + 1.25)
+    capture.event({"event": "heard", "duration_s": 1.0}, opened + 1.25)
     capture.close()
 
     lines = [json.loads(line) for line in capture.jsonl_path.read_text().splitlines()]

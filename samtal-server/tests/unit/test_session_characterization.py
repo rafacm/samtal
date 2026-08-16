@@ -505,7 +505,8 @@ async def test_a_reply_ends_quietly_when_the_send_path_raises(
         await drive_reply(session, UTTERANCE)
 
     assert "reply failed" not in caplog.text
-    assert only(caplog, "heard").text == "hello"
+    # The reply got as far as transcribing before the socket vanished.
+    assert only(caplog, "heard").duration_s > 0
 
 
 @pytest.mark.parametrize(

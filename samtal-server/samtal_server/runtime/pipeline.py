@@ -708,13 +708,19 @@ class PipelineRuntime:
                     language_fields["language_confidence"] = round(
                         result.language_confidence, 2
                     )
+                # What was heard, never the words: the utterance is
+                # content and the conversation store is where content
+                # lives (#120, the content-and-telemetry ADR). What the
+                # event keeps is what an operator measures with, which
+                # is how long the user spoke and what language the
+                # engine heard it in; the sentence renders exactly that,
+                # so the two halves of this record say the same thing.
                 heard_at = self._events.info(
-                    'session %s: heard "%s"',
+                    "session %s: heard %.2f s of speech",
                     self.session_id,
-                    transcript,
+                    heard_s,
                     event="heard",
                     agent=self._agent,
-                    text=transcript,
                     duration_s=heard_s,
                     **language_fields,
                 )
