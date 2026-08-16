@@ -530,8 +530,8 @@ From `samtal-server/`, per milestone:
       module imports any `test_session*`, `test_tools_device`, or
       `test_boundary_contract` module; both lanes green, count
       non-decreasing.
-- [ ] M3: the feature suites decouple and the guard lands: the
-      remaining four support modules exist, the unit-lane
+- [x] [**M3: the feature suites decouple and the guard lands**](2026-08-16-test-fakes-and-drift-pins-implementation.md#milestone-3-the-feature-suites-decouple-and-the-guard-lands)
+      (PR TBD): the remaining four support modules exist, the unit-lane
       cross-import count is zero, `test_support_boundaries.py`
       enforces it; both lanes green, count non-decreasing.
 - [ ] M4: the drift pins land with recorded mutation proofs:

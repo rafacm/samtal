@@ -450,3 +450,252 @@ itself. One finding:
    elsewhere could not stand in for an origin.
 
 Verdict as posted: mergeable after the listed fix.
+
+## Milestone 3: the feature suites decouple and the guard lands
+
+Four new support modules, four existing ones extended, and the unit
+lane's cross-import count is zero. The inventory grep listed 33
+statements at the milestone's start and lists **0** at its end, in the
+unit lane and everywhere else. `tests/unit/test_support_boundaries.py`
+is what keeps it there.
+
+Nine commits, in the order the milestone was built in:
+
+1. `639b1fb` Move the shared config builders into tests/support
+2. `0862c38` Move the check-in scaffolding into tests/support
+3. `7d44de4` Read one event one way across every suite
+4. `9c02f1d` Move the MCP entry builders into tests/support
+5. `ddd4ee8` Move the store scaffolding into tests/support
+6. `7fcca26` Move the writer waits into tests/support
+7. `44fa61c` Move the handshake halves into tests/support
+8. `76e23d5` Move the device registers into tests/support
+9. `4bfa103` Make the one-way import rule a test
+
+The order is the layering: `configs.py` first, since `checkin.py` and
+`registry.py` read the device identity from it, then the modules that
+sit beside each other, then the guard.
+
+### What went where
+
+- **`configs.py`** (+101 lines): `config_with` (the minimal valid
+  configuration, from `test_config_tools.py`), `load_config_from_data`
+  (a mapping through the whole boot composition, from `test_config.py`),
+  `recording_config` (a server that records, from
+  `test_conversations_session.py`) and `BOUND_MAC`. It now imports
+  `yaml`, which the loader itself uses; the docstring says so.
+- **`checkin.py`** (new, 130 lines): what a board says about itself
+  (`MOCK_PROVIDERS`, `MOCK_AGENT`, `SYSTEM_INFO`, `HEADERS`,
+  `NORMALIZED`), the two servers it checks in against (`ota_client`,
+  `unbound_config`, `activation_client`), the requests it makes
+  (`post_system_info`, `check_in`, `activate`) and `Clock`, the clock the
+  pending table is aged against.
+- **`events.py`** (+22 lines): `fields_of`, and the consolidation
+  described below.
+- **`tools_mcp.py`** (new, 194 lines): `SHADOWED_POSITION`,
+  `MANAGER_LOGGER`, the entry builders (`stdio_entry`, `entry_data`),
+  the two configurations that grant an entry (`config_granting`,
+  `reload_config`), the starters (`running`, `started`, `reading`), and
+  `serving` with its `LIFECYCLE_TIMEOUT_S`.
+- **`stores.py`** (new, 93 lines): the capture directory
+  (`CAPTURE_MANIFEST`, `tone`, `store`), the conversations database
+  (`CONVERSATIONS_MANIFEST`, `rows`) and the corrupted memory file
+  (`STORED`, `CORRUPT`, `corrupt`).
+- **`sessions.py`** (+59 lines): `WRITER_TIMEOUT_S`, `Gate` and `until`,
+  under a fourth heading, "waiting on the writer behind it".
+- **`wire.py`** (+16 lines): `handshake` and `device_headers`, the two
+  halves of the handshake `connect` already made whole.
+- **`registry.py`** (new, 136 lines): the sessions a drain walks
+  (`FakeSession`, `registry_with`) and the bindings an operator writes
+  (`BINDINGS_DEVICE_MAC`, `STAGES`, `AGENT`, `store_at`, `booted`,
+  `check_in`).
+
+### Dependency closure, per moved root
+
+Computed by walking each definition's free names with `ast` and
+subtracting what it binds itself, then resolving each remainder against
+the origin module's bindings. A root with nothing listed reads only
+`samtal_server`, third-party packages, the standard library and
+builtins.
+
+- `SYSTEM_INFO` → `DEVICE_MAC`, `DEVICE_UUID` (already in `configs.py`,
+  same values, imported rather than copied).
+- `post_system_info` → `SYSTEM_INFO` (moved), `DEVICE_MAC`,
+  `DEVICE_UUID`.
+- `unbound_config` → `BOUND_MAC` (moved to `configs.py`),
+  `MOCK_PROVIDERS`, `MOCK_AGENT` (moved with it).
+- `activation_client` → `unbound_config` → the same.
+- `check_in` (activation) → `HEADERS` (moved), `SYSTEM_INFO`,
+  `DEVICE_MAC`.
+- `activate`, `NORMALIZED`, `HEADERS` → `DEVICE_MAC`.
+- `one_event` → `emitted`, which is `events` in support; `fields_of` →
+  nothing local (it reads `logs._STANDARD_ATTRIBUTES`, a production
+  name, imported rather than copied).
+- `stdio_entry` and `entry_data` → `STDIO_SERVER`, already in
+  `configs.py` with an identical definition, imported rather than
+  copied.
+- `serving` → `LIFECYCLE_TIMEOUT_S` (moved with it).
+- `Gate` → `TIMEOUT_S`, `until` → `TIMEOUT_S`: the same 30 seconds
+  written out in both origin modules, one `WRITER_TIMEOUT_S` in support.
+- `corrupt` → `CORRUPT` → `STORED`, both moved byte-identical: `STORED`
+  is the sentinel the no-leak tests hunt for.
+- `booted` → `store_at`, `STAGES`, `AGENT` (moved with it), `BOUND_MAC`
+  (`configs.py`).
+- `AGENT` → `STAGES`. `check_in` (bindings) → `BINDINGS_DEVICE_MAC`
+  (moved, renamed below), `DEVICE_UUID` (`configs.py`, same value).
+- `registry_with` → `FakeSession` (moved with it).
+- Everything else: nothing. `MOCK_PROVIDERS`, `MOCK_AGENT`,
+  `ota_client`, `Clock`, `SHADOWED_POSITION`, `MANAGER_LOGGER`,
+  `running`, `config_granting`, `reload_config`, `reading`, `started`,
+  `LIFECYCLE_TIMEOUT_S`, `CAPTURE_MANIFEST`, `tone`, `store`,
+  `CONVERSATIONS_MANIFEST`, `rows`, `STORED`, `handshake`,
+  `device_headers`, `FakeSession`, `STAGES`, `BINDINGS_DEVICE_MAC`,
+  `store_at`, `config_with`, `load_config_from_data`,
+  `recording_config`, `BOUND_MAC`.
+
+### The collisions, and how each was settled
+
+Six, all resolved the way the plan's collision rule asks: one support
+definition per distinct value, named for the seam it serves, with every
+importing site keeping its own spelling through an import alias.
+
+- **`DEVICE_MAC` and `DEVICE_UUID` in `test_ota.py` are not a
+  collision.** The plan expected different values from the session
+  family's; they are character-for-character the same strings
+  `configs.py` already holds. So nothing was redefined: `checkin.py` and
+  the OTA suite read them from `configs.py`.
+- **`BOUND_MAC`** was defined twice, in `test_onboarding_activation.py`
+  and `test_device_bindings.py`, with the same value and the same
+  reason. One definition, in `configs.py`, with the reason stated once.
+- **`client_for`** was two different functions: one defaults to a plain
+  `Config()`, the other to a configuration whose device under test is
+  unbound. They are `ota_client` and `activation_client`, the names
+  `test_server_event_pins.py` had already given them.
+- **`config_with`** was two different builders. The configuration one
+  keeps the name in `configs.py`; the reload one is `reload_config` in
+  `tools_mcp.py`.
+- **`MANIFEST`** was two different mappings: `CAPTURE_MANIFEST` and
+  `CONVERSATIONS_MANIFEST`.
+- **`DEVICE_MAC` in `test_device_bindings.py`** is the normalized
+  lowercase form the bindings table stores, a different value from
+  `configs.DEVICE_MAC`. It is `BINDINGS_DEVICE_MAC` in `registry.py`.
+- **`TIMEOUT_S`** would have been 30 seconds in `sessions.py` beside
+  `configs.TIMEOUT_S`'s 50 milliseconds, two opposite meanings under one
+  name across the package. It is `WRITER_TIMEOUT_S`.
+
+### The caplog consolidation
+
+`test_tools_mcp.py`'s `emitted` and `one_event` were the same two
+functions as `events.py`'s `events` and `only`, which M2 had already
+moved: same body, same message, differing only in a return annotation
+and a docstring. The plan's category 3 (literal duplicates, strongest
+definition kept) applies, so support keeps one pair, with the MCP
+copy's record-typed annotations and its docstring, and the three MCP
+modules import them under their own spelling. The alternative would
+have been four functions in one 44-line module, two of them
+indistinguishable from the other two.
+
+### The guard
+
+`tests/unit/test_support_boundaries.py` (new, 131 lines, four tests).
+`imported_paths` collects every dotted path an import names anywhere in
+a file's AST, including inside a function or a class body, and
+contributes `pkg.name` as well as `pkg` for a `from pkg import name`, so
+both spellings of reaching into a test module are caught. A path names a
+test module when any of its dotted parts starts with `test_`, which
+leaves `conftest` out by construction: the docstring cites the issue's
+decision 2, "support or a conftest", and names the integration and smoke
+lanes as the reason.
+
+Two of the four tests are the rules; the other two are planted sources,
+following `test_event_surface_guard.py`, which keeps the mutation proof
+in the suite rather than in a session's memory.
+
+**Mutation proof.** Both branches, applied together, observed, reverted:
+
+- `from tests.unit.test_capture import MANIFEST` added inside
+  `test_drain.py`'s first test function, and
+- `from tests.unit.test_capture import CAPTURE_RATE_ECHO` added to
+  `tests/support/stores.py`.
+
+Both tests failed, each naming the file and the line:
+
+```
+E       AssertionError: assert {'unit/test_drain.py': [31]} == {}
+E       AssertionError: assert {'support/stores.py': [29]} == {}
+```
+
+Restored from copies taken beforehand (not `git checkout`, per
+AGENTS.md), `touch`ed, and the four tests pass again.
+
+### Verification
+
+Run from `samtal-server/`, with `PYTHONDONTWRITEBYTECODE=1` exported for
+everything outside pytest.
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/unit -q`:
+  `2260 passed, 16 skipped in 299.67s (0:04:59)`
+- `uv run pytest tests/integration -q`: `55 passed in 184.79s (0:03:04)`
+- `uv run pytest tests/unit -q --collect-only | tail -1`: **2272
+  before**, **2276 after**. The rise is exactly the guard's four tests.
+- The inventory grep
+  (`grep -rn "from tests\.unit\.test_\|import tests\.unit\.test_" tests/
+  --include="*.py" | wc -l`): **33 before, 3 after**, and all three are
+  inside `test_support_boundaries.py` itself: one in its docstring and
+  two in the string it plants and parses. **Zero are import statements**,
+  which is what the guard measures, since it reads the AST and a string
+  literal is not an import. Excluding the guard file, the grep is 0.
+- Normalized AST comparison of every relocated definition against its
+  origin at `d17e864`, by `ast.dump` with `include_attributes=False`,
+  with the origin's own nodes renamed first where a rename was decided:
+  **all 53 pass.**
+- `git diff d17e864` inspected for edits inside test functions: the only
+  changed line inside any function body in the whole milestone is
+  `test_capture_session.py`'s function-level import, rewritten from
+  `tests.unit.test_ota` to `tests.support.checkin`. Everything else is
+  an import line, a module-level definition removed, or a module-level
+  comment.
+
+### Deviations from the plan
+
+Eight, none of them to the move rule, the no-cross-import end state or
+an assertion.
+
+1. **The support module is `tools_mcp.py`, not the plan's `mcp.py`.**
+   This is not a preference. `mcp_stdio_server.py` sits in the same
+   directory and is run as a script, which puts `tests/support` first on
+   the subprocess's `sys.path`; a module named `mcp.py` there is what
+   the server's `from mcp.server.fastmcp import FastMCP` finds instead
+   of the SDK. With the plan's name, every stdio test failed with the
+   manager unable to start, and running the server by hand reported
+   `ModuleNotFoundError: No module named 'mcp.server'; 'mcp' is not a
+   package`. The module docstring records the reason so the name is not
+   "tidied" back later.
+2. **`test_ota.py`'s `DEVICE_MAC` and `DEVICE_UUID` were not a
+   collision.** The plan names them as one, with different values from
+   the session family's. They are identical strings, so support gained
+   no second definition and the OTA suite reads them from `configs.py`.
+3. **`recording_config` went to `configs.py`, not `sessions.py`.** The
+   plan's own layout section lists it under `configs.py`, and it is a
+   `Config` builder that touches nothing else; the milestone brief
+   allowed the choice and this is it.
+4. **`emitted` and `one_event` were consolidated with `events` and
+   `only` rather than added beside them**, per the plan's duplicate rule
+   rather than its module list. Described above.
+5. **`LIFECYCLE_TIMEOUT_S` moved out of `test_tools_mcp_http.py` even
+   though nothing imported it**, because `serving`'s closure reads it
+   and that suite's own bodies read it too: it is one definition in
+   support, imported back, rather than a second copy.
+6. **`serving`'s docstring says "Separate from the fixture above"** and
+   now sits in `tools_mcp.py`, where the fixture is not above it. Left
+   byte-identical, for M2's reason: a docstring is part of the AST the
+   comparison checks.
+7. **`AGENT`/`STAGES` in `registry.py` duplicate `MOCK_AGENT`'s value in
+   `checkin.py`.** Same mapping, different names, different seams, and
+   neither collides with the other, so the collision rule does not fire
+   and neither module imports the other. Recorded because it is visible
+   duplication that was left deliberately: merging them would have made
+   the binding suite's configuration depend on the onboarding suite's.
+8. **No fixture turned up**, again. Every moved name is a plain
+   callable, class or constant, so no `tests/unit/conftest.py` was
+   needed, which is what the plan expected.
