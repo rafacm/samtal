@@ -224,13 +224,26 @@ grandfather (`GRANDFATHERED_ARGS`, carrying the site and the
 tracking-issue number), because removing it is a surface narrowing
 this issue's no-behavior-change contract forbids; M1 files the
 follow-up issue for the narrowing and the registry entry cites it,
-so the exception is visible machinery rather than a quiet hole. Violations become one `EventSchemaViolation` value
-listing the offending field names (names only: a field's value at a
-violating site is exactly the bytes the registry exists to keep off
-the surface, so neither the strict exception text nor the forgiving
-complaint ever renders one; M2 plants a credential-shaped value in
-a wrong-kind field and asserts its absence from the exception
-message, the complaint line, and both log formats).
+so the exception is visible machinery rather than a quiet hole.
+
+Violations become one `EventSchemaViolation` value, and its
+diagnostics render REGISTRY-OWNED identifiers only. A declared
+event or field name may be named, because the registry owns it; an
+undeclared event name or an undeclared spread key is itself a
+caller-supplied string (a dict built from far-side data puts
+far-side bytes in its keys), so unknowns are reported as fixed
+violation codes plus counts (an undeclared-event code, an
+undeclared-field count), never by the rejected name. Neither a
+field's value nor an unknown name reaches the strict exception's
+`str`, `repr`, or `args`, the forgiving complaint, either log
+format, or any attached tap. In forgiving mode an undeclared event
+does not retain its raw name either: the payload's `event` becomes
+the fixed token `schema_violation` beside the base fields, so the
+line survives without laundering the rejected name into the
+retained log. M2's sentinel proofs cover three shapes, a
+credential-shaped value in a wrong-kind field, a credential-shaped
+undeclared event name, and a credential-shaped undeclared spread
+key, each asserted absent from all the surfaces above.
 
 - **Strict** (the default): `_emit` raises `EventSchemaError`. This
   is what the test lanes and a source checkout run.
@@ -543,6 +556,13 @@ Findings as received, condensed but faithful:
    undeclared event name, an undeclared spread key, and a
    wrong-kind value, asserted absent from exception str, repr and
    args, complaint records, both formats, and attached taps.
+
+   *Resolution*: accepted. Diagnostics render registry-owned
+   identifiers only; unknown names become fixed codes and counts;
+   a forgiving undeclared event is re-labeled with the fixed
+   `schema_violation` token instead of keeping its raw name; and
+   the sentinel matrix covers the three shapes across all six
+   surfaces the finding lists. Amended in the enforcement section.
 
 7. **P1: the enforcement-mode seam initializes too early and does
    not classify production safely.** `main()` loads `.env` after
