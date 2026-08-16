@@ -5,6 +5,59 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-16
+
+### Added
+
+- **The conversation store is real: `server.conversations` records what
+  was said** (#120): the machinery and the content record landed
+  dormant; this is the release in which an operator can switch them on,
+  and in which switching them on does everything the documentation
+  says. The section is optional and off by default, with `enabled`, two
+  independent storage switches (`metrics` for the events and every
+  measured number, `text` for conversation text and tool names,
+  arguments and results) and `retention_days`, which defaults to 90 and
+  takes `0` as the deliberate keep-forever. Enabled, the server opens
+  and migrates `conversations.db` beside `samtal.db` in
+  `server.database.dir` at boot, warns that it is recording and names
+  the file, and writes one session row per conversation, one turn row
+  per utterance-and-reply with its text and its ASR, LLM and TTS
+  numbers, one row per tool call under it, and one row per structured
+  event, which is the same decision track a capture writes beside its
+  audio. Nothing of it is on the conversation's path: a background
+  thread does every database call behind a queue no producer waits on,
+  commits at turn boundaries and at session close, and drops events
+  with one warning per session when the database is wedged rather than
+  ever delaying a reply. Retention prunes whole sessions older than the
+  window at startup and at each close. The server README now carries
+  the store's own section: what is kept, what each switch takes away in
+  all four combinations, the shared-device limit stated out loud
+  (deployment-wide switches are the only privacy control this release
+  has), purge and its physical-deletion semantics, and the WAL-safe way
+  to read a live file. **Operator-visible:** a server with no
+  `conversations` section behaves exactly as before and creates no
+  file; one that has recorded before has its file migrated at every
+  start even with recording off, so history stays readable. Four new
+  events on the store's own channel: `conversations_enabled` (a warning
+  at startup, like capture's, because the server is keeping what is
+  said to it), `conversations_dropped`, `conversations_failed` and
+  `conversations_pruned`.
+
+### Changed
+
+- **`session_closed` says why a conversation ended** (#120): the event
+  carried only `duration_s`, so the reason was inferable from whichever
+  line happened to precede it and from nothing else. It gains `reason`,
+  one of `limit`, `idle`, `drain`, `client` or `error`, decided at the
+  site that decides and latched by the first cause to fire, so a drain
+  closing a session an idle timer was about to hang up on reads
+  `drain`. The conversation store copies the token onto the session
+  row. Additive: no field was renamed or removed, and the README's
+  event table and the pin suite moved with it. Alongside it, the three
+  cleanup steps ahead of the event are now guarded individually, so one
+  that fails is reported by class and the close still completes rather
+  than the session ending with no record of having ended.
+
 ## 2026-08-15
 
 ### Added
