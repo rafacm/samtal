@@ -33,10 +33,7 @@ from samtal_server.providers import (
 from tests.support.configs import POET_MAC, TIMEOUT_S, watchdog_config
 from tests.support.events import events, only
 from tests.support.providers import STALL_S, StallingLlm
-from tests.support.sessions import (
-    run_reply,
-    session_for,
-)
+from tests.support.sessions import run_reply, session_for
 from tests.support.sockets import RecordingSocket
 
 

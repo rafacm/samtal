@@ -55,12 +55,7 @@ from tests.support.configs import (
 from tests.support.device_tools import STATUS, FakeDevice
 from tests.support.providers import BrokenStreamingTts as BrokenTts
 from tests.support.providers import ScriptedLlm
-from tests.support.sessions import (
-    call,
-    drive_reply,
-    session_for,
-    start_reply,
-)
+from tests.support.sessions import call, drive_reply, session_for, start_reply
 from tests.support.sockets import QuietSocket
 from tests.unit.test_conversations_store import MANIFEST, rows
 

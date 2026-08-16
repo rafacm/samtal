@@ -21,17 +21,11 @@ from fastapi.testclient import TestClient
 
 from samtal_server.app import create_app
 from samtal_server.audio.opus import OpusEncoder
-from samtal_server.providers import (
-    AsrResult,
-    ProviderIdentity,
-    Turn,
-)
+from samtal_server.providers import AsrResult, ProviderIdentity, Turn
 from tests.support.configs import LONG_REPLY, config_with_agent
 from tests.support.events import events, only
 from tests.support.providers import ConfirmingAsr, GatedAsr, ScriptedEndpointer
-from tests.support.sessions import (
-    realtime_session,
-)
+from tests.support.sessions import realtime_session
 from tests.support.wire import (
     assert_endpointed_speech,
     collect_reply,

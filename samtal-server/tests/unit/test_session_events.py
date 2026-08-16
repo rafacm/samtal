@@ -25,12 +25,7 @@ from samtal_server.config import Config
 from samtal_server.device.boundary import PlayableAudio
 from samtal_server.logs import JsonFormatter
 from samtal_server.ota import OTA_PATH
-from samtal_server.providers import (
-    AsrProvider,
-    AsrResult,
-    TextDelta,
-    Usage,
-)
+from samtal_server.providers import AsrProvider, AsrResult, TextDelta, Usage
 from tests.support.configs import (
     BOTH_MAC,
     DEVICE_MAC,
@@ -41,13 +36,7 @@ from tests.support.configs import (
 )
 from tests.support.events import events, only
 from tests.support.providers import ScriptedLlm
-from tests.support.sessions import (
-    _nothing,
-    call,
-    reply_with,
-    run_reply,
-    session_for,
-)
+from tests.support.sessions import _nothing, call, reply_with, run_reply, session_for
 from tests.support.wire import connect, say_something, shake_hands
 
 

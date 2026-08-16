@@ -43,9 +43,7 @@ from tests.support.configs import (
     TUTOR_TONE,
     config_with_agent,
 )
-from tests.support.sessions import (
-    device_session,
-)
+from tests.support.sessions import device_session
 from tests.support.sockets import RecordingSocket
 from tests.support.wire import (
     assert_endpointed_speech,

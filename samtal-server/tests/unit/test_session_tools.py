@@ -19,10 +19,7 @@ from fastapi.testclient import TestClient
 import samtal_server.runtime.pipeline as pipeline_module
 from samtal_server.app import create_app
 from samtal_server.config import Config
-from samtal_server.providers import (
-    ToolCall,
-    Turn,
-)
+from samtal_server.providers import ToolCall, Turn
 from samtal_server.tools.builtin import switch_agent_tool
 from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
@@ -38,18 +35,8 @@ from tests.support.configs import (
 )
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 from tests.support.providers import ScriptedLlm
-from tests.support.sessions import (
-    call,
-    run_reply,
-    session_for,
-)
-from tests.support.wire import (
-    connect,
-    say_something,
-    sentences,
-    shake_hands,
-    tone_strength,
-)
+from tests.support.sessions import call, run_reply, session_for
+from tests.support.wire import connect, say_something, sentences, shake_hands, tone_strength
 
 
 async def test_a_reply_with_no_tool_calls_is_one_round() -> None:
