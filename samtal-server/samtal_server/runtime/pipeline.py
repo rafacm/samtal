@@ -1216,11 +1216,17 @@ class PipelineRuntime:
         the device's tools are the ones it listed, and everything else
         carries its MCP server entry as a prefix."""
         if call.malformed_arguments is not None:
+            # The size, not the bytes. What a model streamed instead of a
+            # JSON object is its own output, which is content and belongs
+            # to the store (#120); the length is what tells a truncated
+            # object from a model that answered in prose, and it is the
+            # half of this line anybody diagnosing ever used. The record
+            # carries the same fact as its `malformed` flag.
             logger.warning(
-                "session %s: tool %s got unparseable arguments: %s",
+                "session %s: tool %s got %d characters of unparseable arguments",
                 self.session_id,
                 call.name,
-                call.malformed_arguments,
+                len(call.malformed_arguments),
             )
             return "the arguments were not a JSON object; call again with valid ones", True
         if call.name == names.REMEMBER and self._memory is not None:

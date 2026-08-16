@@ -402,6 +402,28 @@ async def test_malformed_arguments_come_back_as_an_error_result() -> None:
     assert "not a JSON object" in result.content
 
 
+async def test_malformed_arguments_are_logged_by_length_and_never_by_value(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """What a model streamed instead of a JSON object is its own output,
+    and the retained logs keep no content (#120). The line that reports
+    the refusal says how much of it there was, which is what tells a
+    truncated object from an answer in prose, and the bytes reach no
+    record at any level."""
+    sentinel = "sk-test-4f8b2c9e-never-a-real-credential"
+    arguments = f'{{"text": "{sentinel}"'
+    broken = ToolCall(id="c1", name="remember", malformed_arguments=arguments)
+    script = ScriptedLlm([[broken], "Let me try that again."])
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=None)
+    with caplog.at_level("DEBUG"):
+        await run_reply(session, "remember this")
+
+    (line,) = [record for record in caplog.records if "unparseable" in record.getMessage()]
+    assert f"{len(arguments)} characters" in line.getMessage()
+    assert not any(sentinel in record.getMessage() for record in caplog.records)
+    assert not any(sentinel in str(record.args) for record in caplog.records)
+
+
 def test_the_switch_agent_schema_is_json_serializable() -> None:
     # It goes over the wire to two different APIs; anything exotic in it
     # would fail there rather than here.
