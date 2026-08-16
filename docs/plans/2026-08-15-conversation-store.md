@@ -1316,7 +1316,7 @@ its section of the implementation doc when written.
   both lanes and lint green; `git grep conversations
   samtal_server/app.py` empty.
 - [x] **[The content record](2026-08-15-conversation-store-implementation.md#milestone-2-the-content-record)**
-  (PR TBD, branch `feature/conversation-store-m2`):
+  (PR #157, branch `feature/conversation-store-m2`):
   `records.py` with `TurnRecord` and `ToolInvocation`; the
   `TurnRecord` assembly in the pipeline (text, legs, tool
   invocations with the centralized source classification and their
