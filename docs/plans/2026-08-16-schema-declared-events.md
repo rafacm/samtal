@@ -360,20 +360,30 @@ absent from all the surfaces above, in both modes.
   hostile value, a hostile message, and hostile args, asserting
   the reply survives and no sentinel appears on any surface.
 - The switch is `SAMTAL_EVENTS_ENFORCEMENT` (`strict` or
-  `forgiving`), held in a module flag with a setter, and it is the
-  SERVER ENTRYPOINT that resolves it: `main()` reads the variable
-  after it has loaded `.env`, so the documented dotenv layer works
-  for this variable like any other, which an import-time read
-  could never honor (`main.py` imports `app` and therefore
-  `events` before `main()` runs). Resolution in `main()`:
+  `forgiving`), held in a module flag with a setter, and it is
+  APPLICATION CONSTRUCTION that resolves it: `create_app` invokes
+  the resolver before building anything that emits, because a
+  production process may import `create_app` and serve it under an
+  ASGI runner without ever running `main()`, and the plan's own
+  rule is that any running server is a deployment. `main()` ALSO
+  resolves, after it has loaded `.env` and after the `config` and
+  `conversations` subcommand early exits (so an invalid value of a
+  server-only variable cannot block a recovery command), which is
+  what lets the documented dotenv layer set the variable; an
+  import-time read could honor neither (`main.py` imports `app`
+  and therefore `events` before `main()` runs). The lanes set
+  strict in the environment before any app construction, so a
+  test-built app stays strict. Resolution, in both resolvers:
   - `strict` or `forgiving`: as written;
   - unset: `forgiving`, because a running server is a deployment
-    whatever artifact it runs from, and a wheel or source
-    deployment must not be one telemetry bug away from losing a
-    reply just because it is not the container;
-  - anything else: the server refuses to start, naming the
-    variable and the two values. A misspelled relaxation must fail
-    at boot, not at the first live violation.
+    whatever artifact it runs from and however it was launched,
+    and a wheel, source, or ASGI-runner deployment must not be one
+    telemetry bug away from losing a reply just because it is not
+    the container;
+  - anything else: construction refuses (a raise from `create_app`
+    or a startup refusal from `main()`), naming the variable and
+    the two values. A misspelled relaxation must fail at boot, not
+    at the first live violation.
   The container image still sets
   `SAMTAL_EVENTS_ENFORCEMENT=forgiving` in its `ENV` block beside
   `SAMTAL_SERVER__LOG_FORMAT=json`: redundant with the entrypoint
@@ -997,6 +1007,14 @@ eleven findings. As received, condensed but faithful:
    reply. Resolve at application construction (unset forgiving),
    keep `main()` resolving after dotenv, and sequence resolution
    after the `config`/`conversations` early exits.
+
+   *Resolution*: accepted. `create_app` invokes the resolver
+   before building anything that emits, unset means forgiving
+   there too, the lanes set strict in the environment before app
+   construction, `main()` still resolves after dotenv and after
+   the `config`/`conversations` early exits, and an unknown value
+   refuses at whichever resolver meets it first. Amended in the
+   enforcement section.
 
 7. **P1: the README conformance design is impossible for
    `session_rejected` and incomplete.** One-row-per-event cannot
