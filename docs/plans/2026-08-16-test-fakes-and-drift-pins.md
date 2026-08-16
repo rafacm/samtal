@@ -57,11 +57,11 @@ files), the coupling has grown, which is the point of doing this now:
   statements), `test_session_tools.py` (12), `test_tools_mcp.py`
   (7), `test_session_events.py` (7), `test_ota.py` (6),
   `test_device_bindings.py` (4), and twenty more with one to three.
-- The 13-class SDK fake block sits at
-  `test_providers_llm_tools.py:118-386`: seven classes fake the
-  anthropic streaming dialect (`FakeBlock` through `FakeMessages`),
-  six fake the openai one (`FakeFunction` through
-  `FakeCompletions`).
+- The SDK fake block sits at `test_providers_llm_tools.py:118-390`
+  and is 14 classes at c410af8 (the issue's 13 was its 8dd1a5f
+  pin): seven fake the anthropic streaming dialect (`FakeBlock`
+  through `FakeMessages`), seven the openai one (`FakeFunction`
+  through `FakeCompletions`).
 - Literal duplicates the grep for `^class` finds: a `Falsey`
   truthiness-probe client is hand-rolled four times
   (`test_providers_llm.py:117`, `test_providers_elevenlabs.py:438`,
@@ -394,7 +394,10 @@ milestone cut is about review focus, not release safety:
 
 1. **M1, the fakes package is born**: `llm_sdk.py` with both SDK
    dialect fake families and the consolidated `Falsey` probe;
-   the four provider test modules import from it. Small, and it
+   the five provider test modules it touches
+   (`test_providers_llm_tools.py`, `test_providers_llm.py`,
+   `test_providers_elevenlabs.py`, `test_providers_openai_tts.py`,
+   `test_providers_openai_asr.py`) import from it. Small, and it
    establishes the package conventions the bigger moves follow.
 2. **M2, the session family decouples**: `providers.py`,
    `sockets.py`, `boundary.py`, `device_tools.py`, `configs.py`,
@@ -428,7 +431,10 @@ New: `tests/support/llm_sdk.py`, `providers.py`, `sockets.py`,
 `tests/unit/test_config_cli_shapes.py`, this plan's implementation
 doc.
 
-Modified: the 32 importing test files from the inventory grep, the
+Modified: the five M1 provider test modules named in the milestone
+list (none of which are in the cross-import web, which is why the
+inventory grep does not list them), the 32 importing test files
+from the inventory grep, the
 26 hub modules they import from (definitions removed, imports
 added), `tests/unit/test_config_examples.py`,
 `tests/unit/test_config_docgen.py`, `CHANGELOG.md`.
@@ -650,5 +656,10 @@ prior plans. Findings as received, condensed but faithful:
    M1 touches five provider test modules (the block's owner plus
    the four falsey-client modules), and those five are absent from
    the files-touched list.
+
+   *Resolution*: accepted. The evidence section now records 14
+   classes (seven per dialect) at c410af8, noting the issue's 13
+   was its 8dd1a5f pin; M1 names its five provider modules
+   explicitly, and the files-touched list carries them.
 
 Verdict: ready after the P1/P2 amendments.
