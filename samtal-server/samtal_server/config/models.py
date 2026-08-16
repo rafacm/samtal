@@ -342,6 +342,51 @@ class DatabaseConfig(BaseModel):
     dir: Path = Path("/var/lib/samtal")
 
 
+class ConversationsConfig(BaseModel):
+    """Recording what was said into a database that can be queried.
+
+    Off by default and off unless said otherwise, the same shape as
+    `capture.enabled` and for the same kind of reason: this keeps
+    conversation text on disk, so nothing here can turn it on by
+    accident. The section has to exist and the flag has to say so.
+
+    No directory of its own. `conversations.db` lands beside samtal.db in
+    `database.dir` above, because it is the same data volume, the same
+    backup and the same access control, and a second path key would be a
+    second thing to point somewhere writable.
+
+    The two storage switches under the flag are independent, and every
+    combination is a supported configuration: metrics without text is the
+    stricter setting, and text without metrics keeps the conversation
+    record without the behavioural telemetry. They are deployment-wide,
+    which is the only policy layer this release has; per-user and
+    per-agent controls are a stricter filter above this one when they
+    arrive, never a replacement for it (#120).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # The switch. Off by default, so a section left in a config file
+    # records nothing until somebody says it should.
+    enabled: bool = False
+
+    # Store the structured events and every measured number (durations,
+    # token counts, timings). With this off, no events rows land and the
+    # numeric columns on turns and tool invocations are null.
+    metrics: bool = True
+
+    # Store conversation text, and tool names, arguments and results.
+    # With this off, rows still land with the content columns null, so
+    # timing analysis survives the stricter setting.
+    text: bool = True
+
+    # Prune sessions older than this many days, whole sessions at a time.
+    # 0 keeps everything, which is a deliberate choice rather than a
+    # default: a store with no policy retains forever. The same number
+    # the store itself defaults to, which its own tests pin.
+    retention_days: int = Field(default=90, ge=0)
+
+
 def url_problem(url: str, schemes: tuple[str, ...]) -> str | None:
     """What makes this URL unusable as an address a device is given, or
     None when nothing does.
@@ -444,6 +489,13 @@ class ServerConfig(BaseModel):
     # Absent, or present with enabled off, means no session is ever
     # recorded. Absent is the default.
     capture: CaptureConfig | None = None
+
+    # Absent, or present with enabled off, means nothing is written to
+    # the conversation store and no conversations.db is created. Absent
+    # is the default. An existing file is still migrated at boot, because
+    # a deployment that recorded last month and records nothing today
+    # still has to be able to read what it kept.
+    conversations: ConversationsConfig | None = None
 
     # Refuse to boot any provider that sends session data off this host.
     # Running without a cloud dependency is otherwise a documentation

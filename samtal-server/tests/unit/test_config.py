@@ -6,6 +6,7 @@ import yaml
 
 from samtal_server.config import Config, ConfigError, compose_config, load_file_config
 from samtal_server.config.models import DOMAIN_KEYS, normalize_mac
+from samtal_server.conversations.store import RETENTION_DAYS_DEFAULT
 
 # Not a real credential, and shaped so a substring check for it cannot
 # match by accident. Written into the input a parser chokes on, since a
@@ -124,6 +125,62 @@ def test_capture_needs_somewhere_to_write_even_when_disabled() -> None:
     # where it writes.
     with pytest.raises(ConfigError):
         load_config_from_data({"server": {"capture": {"enabled": False}}})
+
+
+def test_the_conversation_store_is_absent_by_default() -> None:
+    # Absent, not present-and-off: an absent section is what makes a
+    # server that was never asked for a store behave exactly as it did.
+    assert Config().server.conversations is None
+
+
+def test_the_conversation_store_is_off_until_it_is_enabled() -> None:
+    # A section on its own records nothing, the same shape capture has,
+    # so the switches and the window survive turning recording off.
+    conversations = load_config_from_data(
+        {"server": {"conversations": {}}}
+    ).server.conversations
+    assert conversations is not None
+    assert conversations.enabled is False
+
+
+def test_the_conversation_store_defaults_are_the_stated_ones() -> None:
+    # Enabling the store alone gives the documented defaults: both
+    # storage switches on, and the retention window the store itself
+    # defaults to, which is where the number is documented.
+    conversations = load_config_from_data(
+        {"server": {"conversations": {"enabled": True}}}
+    ).server.conversations
+    assert conversations is not None
+    assert (conversations.metrics, conversations.text) == (True, True)
+    assert conversations.retention_days == RETENTION_DAYS_DEFAULT == 90
+
+
+def test_keeping_conversations_forever_is_expressible() -> None:
+    # 0 is the documented opt-out from retention, not a rejected value.
+    conversations = load_config_from_data(
+        {"server": {"conversations": {"enabled": True, "retention_days": 0}}}
+    ).server.conversations
+    assert conversations is not None
+    assert conversations.retention_days == 0
+
+
+def test_a_negative_retention_window_is_refused() -> None:
+    with pytest.raises(ConfigError):
+        load_config_from_data({"server": {"conversations": {"retention_days": -1}}})
+
+
+def test_an_unknown_conversations_key_is_refused() -> None:
+    # extra="forbid", like every server section: a misspelled switch
+    # that silently defaulted on would be a privacy setting nobody set.
+    with pytest.raises(ConfigError):
+        load_config_from_data({"server": {"conversations": {"txt": False}}})
+
+
+def test_the_example_config_leaves_the_conversation_store_off() -> None:
+    # Commented out in the example, so a copied file records nothing
+    # until an operator uncomments the block and says enabled.
+    assert load_file_config(EXAMPLE_CONFIG).server.conversations is None
+    assert load_file_config(DEPLOY_EXAMPLE_CONFIG).server.conversations is None
 
 
 def test_ota_path_defaults_to_the_documented_one() -> None:

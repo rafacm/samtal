@@ -247,6 +247,38 @@ server:
     # and capture must not be what fills it.
     min_free_mb: 1000
 
+  # RECORDS WHAT WAS SAID to a database when enabled. Absent here, and
+  # off by default: with no section, or with `enabled: false`, nothing is
+  # written and no conversations.db is created.
+  #
+  # When it is on, the server writes conversations.db beside samtal.db in
+  # server.database.dir above: sessions, turns, the tool calls a turn
+  # made, and the structured events underneath them, as the queryable
+  # record of what was said. A warning at startup says so, and names the
+  # file. Audio never enters it; the session capture above is the
+  # recording, and this is the record.
+  #
+  # Under the flag, two independent storage switches decide what a row
+  # keeps, and every combination is supported. Read it with SQL over a
+  # WAL-safe copy, delete from it with `samtal-server conversations
+  # purge`, and see docs/reference/conversations-schema.md for the
+  # columns.
+  # conversations:
+  #   enabled: false
+  #   # Store the structured events and every measured number (durations,
+  #   # token counts, timings). With this off, no events rows land and
+  #   # the numeric columns on turns and tool invocations are null.
+  #   metrics: true
+  #   # Store conversation text, and tool names, arguments and results.
+  #   # With this off, rows still land with the content columns null, so
+  #   # timing analysis survives the stricter setting.
+  #   text: true
+  #   # Prune sessions older than this many days, whole sessions at a
+  #   # time, at startup and at each session close. 0 keeps everything
+  #   # and must be chosen deliberately: a store with no policy retains
+  #   # forever.
+  #   retention_days: 90
+
   # Whether speech that arrives while a reply is playing interrupts it.
   # On by default: a device only keeps streaming its microphone through
   # playback when its echo cancellation is on, so what arrives then is
