@@ -124,15 +124,25 @@ dataclasses and the declarations:
     escape hatch.
   `nullable` exists because the session scope's base `device` is
   `None` until the MAC is normalized, and only for fields like it.
-- `EventSpec(name, scope, levels, fields)`. `scope` says which
-  emitter may say it: `SESSION`, `SERVER`, or both (only
-  `session_rejected` is both). `levels` is the frozenset of logging
-  levels the event is emitted at today, because the levels are part
-  of the compatibility surface. `fields` covers the full payload
-  the log tap receives, base fields included (`event`, and for the
-  session scope `session` and `device`), so one validation reads
-  the finished payload and scope differences fall out of the specs
-  rather than special cases.
+- `EventSpec(name, channels, levels, fields)`. `channels` is the
+  frozenset of logger channels the event may be emitted on, which
+  is the issue's "channel" made concrete and is also what encodes
+  scope: `samtal_server.session` is the session scope, a module
+  `__name__` is a server scope, and `session_rejected` declares
+  both `samtal_server.session` and `samtal_server.ws`. Validation
+  compares the emitting object's actual channel (`SessionEvents`
+  emits on the session channel; a `ServerEvents` carries its
+  channel by construction) against the declaration, and the
+  conformance test ties each module's `ServerEvents(__name__)` to
+  the events declared on that channel, so an event emitted from
+  the wrong module is a violation even when its fields are right.
+  `levels` is the frozenset of logging levels the event is emitted
+  at today, because the levels are part of the compatibility
+  surface. `fields` covers the full payload the log tap receives,
+  base fields included (`event`, and on the session channel
+  `session` and `device`), so one validation reads the finished
+  payload and channel differences fall out of the specs rather
+  than special cases.
 - `REGISTRY: dict[str, EventSpec]` with all 57 events, grouped and
   commented by subsystem in the order of the README table, each
   declaration citing nothing: the fields and tokens are the
@@ -333,12 +343,12 @@ recorded in the PR body with observed failure output per branch.
   reads backticked names only, never prose; a wording edit that
   keeps the names passes, and one that drops a name should fail,
   because that is the drift the check exists to catch.
-- **`session_rejected` on two scopes.** Declared once with both
-  scopes and the union payload validated per emit; the scope only
+- **`session_rejected` on two channels.** Declared once with both
+  channels and the union payload validated per emit; the channel
   gates which emitter may say it, and the base-field difference is
-  encoded in the spec's required set per scope. If encoding one
-  spec for two scopes turns out muddier than two scoped specs, the
-  milestone may split the declaration and record the deviation.
+  encoded per channel. If encoding one spec for two channels turns
+  out muddier than two, the milestone may split the declaration
+  and record the deviation.
 
 ## Milestones
 
@@ -373,6 +383,14 @@ Findings as received, condensed but faithful:
    `ServerEvents(__name__)` to its events. `session_rejected`
    needs `samtal_server.session` and `samtal_server.ws` on their
    respective scopes.
+
+   *Resolution*: accepted. `EventSpec` now declares `channels`, the
+   frozenset of logger channels the event may ride, which is both
+   the issue's channel requirement and the scope encoding;
+   validation compares the emitter's actual channel, the
+   conformance test ties each `ServerEvents(__name__)` module to
+   its declared events, and `session_rejected` declares both its
+   channels. Amended in the registry section.
 
 2. **P1: the field-kind taxonomy cannot encode the current
    payloads.** No list kind, and `agents` is not a count:
