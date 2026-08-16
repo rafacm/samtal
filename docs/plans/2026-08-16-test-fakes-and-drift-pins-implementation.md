@@ -941,7 +941,8 @@ round added:
 | `STATUS_FIELDS` drops `grants` | `AssertionError: ... Extra items in the right set: 'grants'` |
 | `STATUS_STATES` drops `unused` | `AssertionError: ... Extra items in the right set: 'unused'` |
 | `PROMPT_BLOCK_FIELDS` drops `text` | `AssertionError: ... Extra items in the right set: 'text'` |
-| `RELOAD_OUTCOMES` repeats `stopped` | the equality test passes, `test_no_reload_outcome_is_named_twice` fails: `AssertionError: assert 5 == 4` |
+| `RELOAD_OUTCOMES` drops `stopped` | `AssertionError: ... Extra items in the right set: 'stopped'` (the equality test; the no-duplicates one passes) |
+| `RELOAD_OUTCOMES` repeats `stopped` | `AssertionError: assert 5 == 4` (`test_no_reload_outcome_is_named_twice`; the equality test passes) |
 | `PromptBlock.name` flipped to required (its `default=None` removed) | `AssertionError: ... Extra items in the right set: 'name'` |
 
 The one row that does not fail is the milestone brief's "drop a member
@@ -952,6 +953,12 @@ model does not carry, which is the drift the pin exists to catch (a CLI
 demanding a field the API never answers). Both rows are recorded rather
 than only the failing one, because the passing row is a fact about the
 relation and not a gap in the pin.
+
+The two reload rows are one relation each, which the PR review round
+asked for: the duplicated entry leaves the equality passing by
+construction, so it proves the ordering clause and nothing about the
+equality, and the dropped outcome is what proves the equality. Each
+fails the test the other leaves passing.
 
 The last row is the required-versus-optional distinction the plan's
 review round settled as finding 1. Flipping `name` to required on the
