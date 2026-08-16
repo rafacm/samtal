@@ -817,3 +817,90 @@ Findings as received, condensed but faithful:
     in the registry and enforcement sections.
 
 Verdict: not ready.
+
+## Plan review round 2
+
+Second external review, of the branch at 0e64ce8 (the thirteen
+round-1 amendments included), codex 0.147.0 (model gpt-5.6-sol),
+2026-08-16. The round confirmed round-1 resolutions 1, 5, 8, 11 and
+13, confirmed the 81/57/13 inventory independently, and returned
+eleven findings. As received, condensed but faithful:
+
+1. **P1: `DESCRIPTOR` defeats the no-leak guarantee.** Length and
+   printability still admit a credential-shaped value unchanged,
+   contradicting the ADR's no-far-side-bytes rule, and the
+   sentinel matrix never plants a valid descriptor. Remove the
+   kind; make each value a normalized `ID` or closed token, or
+   remove it in a separately accepted narrowing.
+
+2. **P1: the `asr_prompt_echo` grandfather preserves an
+   acknowledged far-side leak.** The recovered transcript is user
+   speech reaching the rendered log and taps; a grandfather is a
+   permanent bypass. Require the narrowing before enforcement and
+   resolve the pin-contract conflict explicitly.
+
+3. **P1: message templates remain an unchecked leak path.** The
+   registry declares fields and argument tuples but not the
+   `message` string; `events.info(secret, event="heard", ...)`
+   passes validation. Declare each legal emission's exact
+   registry-owned template and compare before dispatch, with
+   direct-message sentinels in both modes.
+
+4. **P1: one spec and one argument tuple cannot describe the
+   surface.** `session_rejected` has arities 1 to 3 across four
+   templates, `ota_check` 3 to 5, `mcp_reload` mutually exclusive
+   applied and refused shapes; onboarding provenance and
+   comma-joined class-name arguments also fall outside the
+   taxonomy. The registry needs per-variant declarations keyed by
+   channel, level, template, argument tuple, and field shape, and
+   M1 must inventory every argument position.
+
+5. **P1: last-resort recovery can retain a hostile event name, and
+   `schema_violation` is outside the declared registry.** Recovery
+   must build a fresh payload with the fixed event, trusted bases,
+   fixed message, empty args; the recovery event must itself be
+   declared and covered, or demoted to a non-event complaint; test
+   a throwing validator combined with hostile name, key, value,
+   message and args.
+
+6. **P1: entrypoint resolution leaves programmatic servers
+   strict.** A production process importing `create_app` under an
+   ASGI runner never runs `main()`, so a mismatch can still kill a
+   reply. Resolve at application construction (unset forgiving),
+   keep `main()` resolving after dotenv, and sequence resolution
+   after the `config`/`conversations` early exits.
+
+7. **P1: the README conformance design is impossible for
+   `session_rejected` and incomplete.** One-row-per-event cannot
+   inhabit two channel tables; level, kind, requiredness and
+   nullability can drift while CI stays green. Key rows by event
+   and channel or add a parsed channel column; compare every
+   property the table claims, or generate a complete schema
+   appendix.
+
+8. **P2: the `SOURCES` grammar admits `memory`, which
+   `prompt_assembled` explicitly excludes.** Derive the forms from
+   the know-how builders; add negative tests for `memory` and
+   unknown prefixes.
+
+9. **P2: token conformance by module-wide literal occurrence is
+   too weak.** A docstring satisfies it, and
+   `activation_not_offered`'s reasons are produced in
+   `onboarding.py`, a different module. Require per-event,
+   per-field decision-site inventories naming the producing
+   function or constant, following cross-module producers.
+
+10. **P2: a WARNING complaint disappears at supported log
+    levels.** `log_level` admits ERROR and CRITICAL, and such
+    deployments retain no complaint. Emit at a level that
+    survives, or a dedicated path, and test under ERROR and
+    CRITICAL roots.
+
+11. **P2: the sanitization allowance contradicts the
+    identical-behavior and untouched-files claims, and sanitizing
+    `reported_version` would change the OTA response.** List the
+    conditionally modified decision-site files, drop the
+    identical-by-construction claim, normalize event-only copies,
+    and prove the OTA response unchanged under adversarial input.
+
+Verdict: not ready.
