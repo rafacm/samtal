@@ -86,6 +86,15 @@ from tests.support.configs import (
 )
 from tests.support.events import only
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
+from tests.support.providers import (
+    STALL_S,
+    ConfirmingAsr,
+    GatedAsr,
+    ScriptedEndpointer,
+    ScriptedLlm,
+    StallingLlm,
+    Unreachable,
+)
 from tests.unit.test_session import (
     RecordingSocket,
     connect,
@@ -94,17 +103,10 @@ from tests.unit.test_session import (
     shake_hands,
     speech_pcm,
 )
-from tests.unit.test_session_barge_in import (
-    ConfirmingAsr,
-    GatedAsr,
-    ScriptedEndpointer,
-    realtime_session,
-)
-from tests.unit.test_session_events import Unreachable
+from tests.unit.test_session_barge_in import realtime_session
 from tests.unit.test_session_filler import masked_session
 from tests.unit.test_session_limits import listen_realtime, wait_for_close
-from tests.unit.test_session_tools import ScriptedLlm, _nothing, call, run_reply, session_for
-from tests.unit.test_session_watchdog import STALL_S, StallingLlm
+from tests.unit.test_session_tools import _nothing, call, run_reply, session_for
 from tests.unit.test_tools_device import FakeDevice
 
 # The utterance the direct drivers hand a reply: 20 ms of silence, which

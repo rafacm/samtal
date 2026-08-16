@@ -28,9 +28,9 @@ from samtal_server.providers import (
     ProviderIdentity,
     Turn,
 )
-from samtal_server.providers.mock import MockAsr
 from tests.support.configs import DEVICE_MAC, LONG_REPLY, config_with_agent
 from tests.support.events import events, only
+from tests.support.providers import ConfirmingAsr, GatedAsr, ScriptedEndpointer
 from tests.unit.test_session import (
     RecordingSocket,
     assert_endpointed_speech,
@@ -55,65 +55,6 @@ SLOW_REPLY = (
     "This reply runs on for roughly four seconds, which leaves an "
     "interruption plenty of stream left to land in."
 )
-
-
-class ScriptedEndpointer:
-    """An endpointer whose answers the test writes down. The session
-    reads speech_ms before resetting and these tests call
-    _finish_utterance directly, so feeding is never exercised."""
-
-    def __init__(self, speech_ms: float) -> None:
-        self._speech_ms = speech_ms
-
-    def feed(self, pcm: bytes) -> bool:
-        return False
-
-    def reset(self) -> None:
-        return None
-
-    def speech_start(self) -> int | None:
-        return None
-
-    def speech_ms(self) -> float:
-        return self._speech_ms
-
-
-class GatedAsr(MockAsr):
-    """The mock ASR with a hand-operated gate: every call records the
-    PCM it was handed and waits for release, so a test can hold a reply
-    inside transcription while a barge-in lands."""
-
-    def __init__(self) -> None:
-        super().__init__(text="{ms} ms")
-        self.pcms: list[bytes] = []
-        self.release = asyncio.Event()
-
-    async def transcribe(
-        self, pcm: bytes, sample_rate: int, language_hint: str | None = None
-    ) -> AsrResult:
-        self.pcms.append(pcm)
-        await self.release.wait()
-        return await super().transcribe(pcm, sample_rate, language_hint)
-
-
-class ConfirmingAsr:
-    """First call is the reply's own ASR; every later call is a
-    barge-in confirmation, gated on release, answering the scripted
-    result."""
-
-    def __init__(self, confirmation: AsrResult) -> None:
-        self._confirmation = confirmation
-        self.calls = 0
-        self.release = asyncio.Event()
-
-    async def transcribe(
-        self, pcm: bytes, sample_rate: int, language_hint: str | None = None
-    ) -> AsrResult:
-        self.calls += 1
-        if self.calls == 1:
-            return AsrResult(text="the question")
-        await self.release.wait()
-        return self._confirmation
 
 
 def realtime_session(config, asr) -> tuple[session_module.DeviceSession, RecordingSocket]:

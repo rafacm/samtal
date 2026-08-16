@@ -199,11 +199,8 @@ async def test_a_reply_happens_over_an_unreadable_memory_file(
     """The whole point of containing it: the prompt is built without the
     memory block and the conversation carries on, rather than the read
     ending the reply from inside a worker thread."""
-    from tests.unit.test_session_prompt import (
-        CountingServers,
-        RecordingLlm,
-        session_with,
-    )
+    from tests.support.providers import CountingServers, RecordingLlm
+    from tests.unit.test_session_prompt import session_with
     from tests.unit.test_session_tools import run_reply
 
     store = MemoryStore(tmp_path)

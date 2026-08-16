@@ -52,9 +52,11 @@ from tests.support.configs import (
     base_config,
     registry_config,
 )
+from tests.support.providers import BrokenStreamingTts as BrokenTts
+from tests.support.providers import ScriptedLlm
 from tests.unit.test_conversations_store import MANIFEST, rows
 from tests.unit.test_session_reply_failures import QuietSocket
-from tests.unit.test_session_tools import ScriptedLlm, call, drive_reply, session_for, start_reply
+from tests.unit.test_session_tools import call, drive_reply, session_for, start_reply
 from tests.unit.test_tools_device import STATUS, FakeDevice
 
 # One frame of silence, which the mock ASR answers with the configured
@@ -568,20 +570,6 @@ async def test_a_call_cancelled_while_it_ran_is_recorded_unexecuted() -> None:
     assert invocation.arguments == {"text": "a fact"}
     assert (invocation.result, invocation.duration_ms) == (None, None)
     assert not invocation.is_error
-
-
-class BrokenTts(TtsProvider):
-    """A voice that refuses, so a reply ends between the round that
-    asked for a tool and the dispatch that would have run it."""
-
-    egress = False
-
-    def __init__(self) -> None:
-        self.sample_rate = 24000
-
-    async def synthesize(self, text: str) -> AsyncIterator[bytes]:
-        raise RuntimeError("the voice service refused")
-        yield b""
 
 
 async def test_a_call_is_recorded_when_speech_fails_before_the_dispatch() -> None:

@@ -11,24 +11,14 @@ per round, and moves off the event loop rather than moving in time.
 
 import asyncio
 import threading
-from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from samtal_server.config import Config
-from samtal_server.providers import (
-    LlmEvent,
-    LlmProvider,
-    TextDelta,
-    ToolChoice,
-    ToolDef,
-    Turn,
-)
 from samtal_server.runtime.prompt import (
     Guidance,
-    GuidanceBlock,
     ServerInstructions,
     ServerPrompt,
     guidance_heading,
@@ -38,47 +28,12 @@ from samtal_server.runtime.prompt import (
 from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
 from tests.support.configs import BOTH_MAC, POET_MAC, base_config
-from tests.unit.test_session_tools import ScriptedLlm, call, run_reply, session_for
+from tests.support.providers import CountingServers, RecordingLlm, ScriptedLlm
+from tests.unit.test_session_tools import call, run_reply, session_for
 
 GUIDANCE = "Ask before unlocking the door."
 
 FRAGMENT = "The bins go out on Tuesday."
-
-
-class CountingServers(McpServers):
-    """A registry that answers a fixed set of guidance blocks and counts
-    who asked. What it is for is the cache: every visible property of an
-    assembled half looks the same whether it was assembled once or ten
-    times, so the question has to be asked of the source."""
-
-    def __init__(self, guidance: tuple[GuidanceBlock, ...] = ()) -> None:
-        super().__init__({})
-        self._guidance = guidance
-        self.asked: list[str] = []
-
-    def guidance_for_agent(self, agent: str) -> tuple[GuidanceBlock, ...]:
-        self.asked.append(agent)
-        return self._guidance
-
-
-class RecordingLlm(LlmProvider):
-    """A model that keeps the system prompt of every round it was asked
-    for, which is the only place from outside a session that what the
-    model received is visible."""
-
-    def __init__(self, replies: Sequence[str] = ("Said.",)) -> None:
-        self._replies = list(replies)
-        self.systems: list[str] = []
-
-    async def stream(
-        self,
-        system: str,
-        turns: Sequence[Turn],
-        tools: Sequence[ToolDef] = (),
-        tool_choice: ToolChoice = "auto",
-    ) -> AsyncIterator[LlmEvent]:
-        self.systems.append(system)
-        yield TextDelta(self._replies[min(len(self.systems) - 1, len(self._replies) - 1)])
 
 
 def session_with(

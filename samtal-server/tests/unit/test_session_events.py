@@ -28,7 +28,6 @@ from samtal_server.ota import OTA_PATH
 from samtal_server.providers import (
     AsrProvider,
     AsrResult,
-    ProviderIdentity,
     TextDelta,
     Usage,
 )
@@ -41,8 +40,9 @@ from tests.support.configs import (
     config_with_agent,
 )
 from tests.support.events import events, only
+from tests.support.providers import ScriptedLlm, Unreachable
 from tests.unit.test_session import connect, say_something, shake_hands
-from tests.unit.test_session_tools import ScriptedLlm, _nothing, call, run_reply, session_for
+from tests.unit.test_session_tools import _nothing, call, run_reply, session_for
 
 
 def hold_a_conversation(config: Config) -> None:
@@ -419,34 +419,6 @@ async def test_the_device_is_told_speech_starts_only_when_it_does() -> None:
     # The transcript still goes out first: that is what tells the user
     # they were heard while the model is thinking.
     assert order[0] == "stt"
-
-
-class Unreachable:
-    """A provider entry whose host cannot be reached, for all three
-    stages. Stamped with an identity the way the registry stamps a real
-    one, since that is what the events are supposed to carry."""
-
-    def __init__(self, stage: str, exc: BaseException) -> None:
-        self._exc = exc
-        self.identity = ProviderIdentity(
-            stage=stage,
-            name="cloud",
-            type="openai",
-            host="api.example.com",
-            model="gpt-4o-mini",
-        )
-        self.sample_rate = 16000
-
-    async def transcribe(self, *args: object, **kwargs: object) -> AsrResult:
-        raise self._exc
-
-    async def stream(self, *args: object, **kwargs: object) -> Any:
-        raise self._exc
-        yield  # pragma: no cover - never reached, makes this a generator
-
-    async def synthesize(self, text: str) -> Any:
-        raise self._exc
-        yield  # pragma: no cover - never reached, makes this a generator
 
 
 async def reply_with(

@@ -48,9 +48,9 @@ from samtal_server.providers import (
 )
 from tests.support.configs import BOTH_MAC, POET_MAC, POET_TONE, base_config, config_with_agent
 from tests.support.events import events, only
+from tests.support.providers import ScriptedLlm, StallingLlm
 from tests.unit.test_session import connect, send_pcm, shake_hands, speech_pcm
-from tests.unit.test_session_tools import ScriptedLlm, call, drive_reply, session_for, start_reply
-from tests.unit.test_session_watchdog import StallingLlm
+from tests.unit.test_session_tools import call, drive_reply, session_for, start_reply
 
 # The session log channel, by name. `logs.py` emits `record.name` as the
 # `logger` field of every JSON record, and a collector filters on it, so
