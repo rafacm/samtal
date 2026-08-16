@@ -448,16 +448,18 @@ per turn.
 
 Where each half is filled:
 
-- `_reply` stamps `at` and the utterance's fields beside the `heard`
-  emission, reading `SessionEvents.now()` so the two are on one clock by
-  construction, and times its own `transcribe` call into `asr_ms`.
+- `_reply` stamps the turn with the reading its `heard` emission
+  answers with, and times its own `transcribe` call into `asr_ms` off
+  the same clock.
 - `_llm_round_done` folds the round into `rounds`, `llm_ms`,
   `first_token_ms` and the token sums, so all four describe the rounds
   that finished.
 - `_speak_reply` closes a leg at each handover.
 - `_speak_after` numbers the reply's syntheses and binds the index into
   the first-audio callback.
-- `_run_one` and `_run_tools` record every call the model issued.
+- `_tool_loop` reserves a place on the record for every call the round
+  issued, the moment those calls exist; `_run_one` and `_run_tools` fill
+  in what became of each.
 - `_reply`'s `finally` builds the record and hands it over, beside
   `replied` and under the same guard an event tap gets.
 
@@ -531,15 +533,16 @@ Nine, each with its reason.
    the round the loop is resolving, which is what a second one is refused
    for. Recording positions beside it would have made two different
    numbers share a name at one call site.
-9. **`SessionEvents` gained `now()`.** The plan says the turn's `t_ms` is
-   aligned with its `heard` event, and the store derives both from the
-   reading the session opened at, so the two have to come from one clock.
-   The pipeline first read the module-level `session_clock`, which is the
-   emitter's default and therefore agrees with it in every deployment and
-   not in a session constructed with a clock of its own, which is what a
-   test wanting deterministic offsets does. A read-only accessor makes it
-   the same clock rather than two that happen to agree; no event, field,
-   level or channel moves.
+9. **The turn's stamp comes out of the emitter, which grew for it.**
+   The plan says a turn's `t_ms` is aligned with its `heard` event, and
+   the store derives both from the reading the session opened at, so the
+   two have to be one reading rather than two that agree. A session's
+   emit therefore answers the reading it stamped, and the reply takes
+   the turn's from there; `now()` reads the same clock for the one
+   interval the record measures outside an event. No event, field, level
+   or channel moves. The seam is the deviation; that the first pass
+   sampled beside the emit instead of taking its answer is finding 2 of
+   the review round below.
 
 One thing the plan left to the implementation, recorded rather than
 deviated from: `rounds` is the count of rounds that produced an
@@ -550,21 +553,23 @@ rows against event rows exact.
 
 ### The suite
 
-`tests/unit/test_session_record.py`, 20 tests, driven through
+`tests/unit/test_session_record.py`, 23 tests, driven through
 `session_for` and `drive_reply`/`start_reply` against a spy standing
 where the store will stand. `device_session` and `session_for` gained one
 optional `conversations` parameter, and every other suite calls them
 exactly as before. The only other change to an existing suite is
 `test_session.py`'s two direct `_Synthesis(...)` constructions, which
-now pass the first-audio callback beside the failure one; the suites
+now pass the first-audio callback beside the failure one, and the tool
+stub in `test_tts_lookahead.py`, which took the reserved slots with its
+calls; the suites
 that pin the event surface and the ones that assert events are untouched
 and green, which is what says this milestone changed no behavior.
 
 - The single turn: text, agent, the utterance's duration, the token sums
   and their absence, no transcript recording nothing, the reused
-  transcription's language fields with a null `asr_ms`, a timed one where
-  the turn ran its own, and the stamp taken off a session whose clock is
-  not the loop's.
+  transcription's language fields with a null `asr_ms`, a timed one
+  whose interval is asserted exactly, and a stamp that has to equal its
+  `heard` event's instant against a clock moving on every read.
 - The legs: a handover's per-agent text and per-agent tokens summing to
   the turn's totals, and a silent leg recorded with its tokens and no
   text.
@@ -575,10 +580,14 @@ and green, which is what says this milestone changed no behavior.
   one round keeping the model's positions while the second is refused for
   being the second resolved.
 - The finally: a reply cancelled mid-second-round recording the sentence
-  the user heard, the round that finished and the tool that ran.
-- The synthesizer: a voice with a real time to first byte measured into
-  `tts_first_audio_ms`, and a reply that only ever asked for tools timing
-  nothing.
+  the user heard, the round that finished and the tool that ran; a call
+  cancelled while it was running and a call whose round's speech failed
+  before the dispatch, both on the record with their positions and
+  honest about never having answered.
+- The synthesizer: a voice whose latency depends on the sentence, run in
+  both completion orders so that neither taking whichever synthesis
+  answered first nor overwriting with a later one passes, and a reply
+  that only ever asked for tools timing nothing.
 - The classifier: the closed set asserted equal to `schema.TOOL_SOURCES`,
   each branch at its one site, and a builtin name staying a builtin
   whatever else claims it.
@@ -724,3 +733,119 @@ The unit lane's twenty-test difference from `origin/main` is this
 milestone's own module, unchanged by the rebase. The dormancy checks and
 the untouched-suite checks above were re-run against `origin/main` and
 answer the same way.
+
+### PR #157 review round
+
+One external review of the milestone as first pushed. Three findings,
+one P1 and two P2; verdict mergeable after fixes. All three adopted, one
+commit each, in the order the findings imply: the calls that went
+missing first, because the tests for the other two run through the same
+reply path, then the stamp, then the two measurements that were not
+being pinned.
+
+1. **P1: a round that was cancelled or that failed lost every call the
+   model issued.** The calls arrive with the round that spoke them, but
+   the round's last sentence is awaited before anything is dispatched,
+   so a synthesis failing there ended the reply with the whole round's
+   calls unrecorded; and inside the execution the cancellation re-raised
+   before the invocation was appended, so a call a barge-in landed on
+   disappeared too. The settled rule is that every call the model issues
+   becomes an invocation.
+   *Resolution*: adopted in `736cb97`, in the form the direction gave.
+   The record's place is taken the moment the calls exist, which is when
+   the stream ends: both adapters assemble tool calls after their stream
+   has ended, so that is the earliest point they can be reserved, and it
+   is before anything between there and the dispatch can fail. The
+   reservation carries what is already true then (the position, the
+   classified source, the name, the arguments) and the execution
+   replaces that entry with what became of it. An entry that was never
+   executed keeps the nulls it was reserved with, which is what the
+   record shapes already meant by no result and no duration. Two tests,
+   both confirmed failing against the code before the change: a
+   cancellation arriving while a tool was running, and a synthesis
+   failing before the dispatch.
+2. **P2: the turn's timestamp was sampled beside the emit rather than
+   taken from it.** The store measures a turn's offset and its events'
+   offsets from one origin, so two readings a microsecond apart put the
+   turn and its `heard` in different milliseconds whenever they straddle
+   a boundary.
+   *Resolution*: adopted in `90e1173`. A session's emit answers the
+   reading it stamped, and the reply takes the turn's from there.
+   Nearly every call site ignores the answer, which costs nothing. The
+   alternative considered was passing one reading into the emit, which
+   was declined because an `at` keyword would sit in the same namespace
+   as the event's own fields. `now()` stays for measuring an interval on
+   that clock, which is what the ASR elapsed does, and its docstring
+   says out loud that it is not how a record lands on an event's
+   instant. The test drives a clock that moves on every read, asserts
+   the record's reading equals the `heard` emission's, and then puts
+   both through a real store and asserts the two rows' `t_ms` are equal.
+3. **P2: neither timing test pinned its measurement.** The ASR case
+   asserted a nonnegative value, which a hard-coded zero satisfies, and
+   the TTS case gave both syntheses the same latency inside a range four
+   times as wide as it, so it would have passed on either of the two
+   ways of picking the wrong synthesis.
+   *Resolution*: adopted in `12e551b`. The ASR case runs a scripted
+   transcription that moves the session's clock rather than sleeping, so
+   the interval is asserted exactly with nothing timing-dependent about
+   it. The TTS case gives each sentence its own latency and runs both
+   completion orders: the two syntheses of a reply overlap, so
+   slow-then-quick catches taking whichever answered first and
+   quick-then-slow catches letting a later one overwrite the first. Both
+   were confirmed by making each mistake in turn and watching its own
+   case fail while the other passed.
+
+One commit that is not a finding: `09a650c` gives `test_tts_lookahead`'s
+stub of `_run_tools` the argument the reservation added. It belongs with
+`736cb97` and is separate only because this branch is not being
+rewritten.
+
+Three consequences worth naming rather than leaving to be found:
+
+- **Every call the model issues now reaches the record, including ones
+  that never ran.** That is the settled rule, and it means a cancelled
+  or failed round contributes `tool_invocations` rows with null results
+  and null durations, and counts in `turns.tool_calls`. Nothing is
+  wired yet, so no deployment sees it; a reader of those columns should
+  know that a row is a call that was issued, and that the duration is
+  what says whether it ran.
+- **A session's emit answers a float where it used to answer None.**
+  Additive: no event, field, level, channel or sentence moves, and every
+  existing call site ignores it.
+- **Classification happens at the end of the round instead of just
+  before the dispatch.** It reads the device's tool list and the MCP
+  registry's ownership a moment earlier than it did. Both are stable
+  across a reply by construction (the tool snapshot is taken once per
+  reply, from the same two sources), so this changes no answer; it is
+  named because the classification's whole point is that it agrees with
+  the routing.
+
+Re-run from `samtal-server/` at `09a650c`:
+
+```
+$ uv run ruff check .
+All checks passed!
+```
+
+```
+$ uv run pytest tests/unit -q
+2137 passed, 15 skipped in 262.56s (0:04:22)
+```
+
+```
+$ uv run pytest tests/integration -q
+53 passed in 155.89s (0:02:35)
+```
+
+One integration failure, seen once and not on the re-run of the same
+lane at the same commit:
+`test_smoke_seeds.py::test_a_seeding_script_reports_a_server_that_will_not_start`,
+which boots a real server on a port it picked itself and waits for it to
+exit. It passes alone and passed in the re-run quoted above. It is the
+same booted-server family as the flake milestone 1 recorded, one test
+along, and nothing in this round goes near a boot. Recorded rather than
+smoothed over.
+
+The pin suites and the event-assertion suites are still untouched
+relative to `origin/main`, which the same `git diff --stat` over the six
+of them answers with nothing.
