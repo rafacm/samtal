@@ -1160,6 +1160,12 @@ class PipelineRuntime:
         it is filled in below only once there is something to say about
         it. A cancellation on the way through leaves it as reserved,
         which is what a call the user talked over looks like."""
+        # The classification the reservation already holds, read back
+        # rather than taken again: the `tool_call` event below says
+        # where the name came from, the row at this slot says the same,
+        # and asking twice could answer twice (an MCP reload between the
+        # reservation and now is enough to move a name's owner).
+        classified = self._turn.reserved(slot)
         loop = asyncio.get_running_loop()
         started = loop.time()
         try:

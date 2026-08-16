@@ -194,6 +194,16 @@ class TurnUnderway:
         self._tools.append(invocation)
         return len(self._tools) - 1
 
+    def reserved(self, slot: int) -> ToolInvocation:
+        """The classification kept at `slot`.
+
+        For the `tool_call` event, which describes the same call the row
+        does and must not classify it a second time: one answer read
+        twice cannot disagree with itself, and between the reservation
+        and the execution an MCP reload can move which entry owns a
+        name."""
+        return self._tools[slot]
+
     def executed(
         self, slot: int, result: str | None, is_error: bool, duration_ms: int | None
     ) -> None:
