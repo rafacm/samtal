@@ -117,11 +117,27 @@ dataclasses and the declarations:
   - `INT`, `FLOAT` (an `INT` value satisfies `FLOAT`, since sites
     pass round numbers where a measure is integral), `BOOL`;
   - `COUNT`: an `int >= 0`, for the fields whose meaning is "how
-    many" (`sentences`, `tools`, `agents`, `sessions`);
-  - one bespoke structured kind for `prompt_assembled`'s `sources`
-    (the only nested field on the surface), declared with its own
-    fixed sub-shape read from the emit site, not a generic "dict"
-    escape hatch.
+    many" (`sentences`, `tools`, and kin; `agents` is NOT one of
+    these, see the list kinds);
+  - `IDENTIFIER_LIST` and `ID_LIST`: a list whose every element
+    satisfies the element kind, with the same per-field bounds.
+    The surface carries them today: `ota_check` and
+    `activation_complete` carry `agents` (configured agent names)
+    and `ota_check` carries `unloaded` (the same), `session_open`
+    carries `agents`, and `capture_pruned` and
+    `conversations_pruned` carry `sessions`. Which `sessions` and
+    `agents` fields are lists and which are counts is read from
+    each site in M1 rather than assumed; the declaration follows
+    the site;
+  - `SOURCES`: the one structured kind, for `prompt_assembled`'s
+    `sources`: a mapping whose keys follow the closed provenance
+    grammar (`persona`, `memory`, `fragment:<name>`,
+    `instructions:<entry>`, `server_instructions:<entry>`,
+    `server_prompt:<entry>:<position>`, with `<name>` and
+    `<entry>` configured identifiers and `<position>` a positive
+    integer) and whose values are counts. A key matching no
+    provenance form is a violation; M2's tests cover an empty
+    mapping, a populated one, and every provenance form.
   `nullable` exists because the session scope's base `device` is
   `None` until the MAC is normalized, and only for fields like it.
 - `EventSpec(name, channels, levels, fields)`. `channels` is the
@@ -399,6 +415,14 @@ Findings as received, condensed but faithful:
    `capture_pruned` a session-id list; `prompt_assembled.sources`
    is a mapping keyed by dynamic provenance strings
    (`fragment:<name>` and kin), not a fixed sub-shape.
+
+   *Resolution*: accepted. The taxonomy gains `IDENTIFIER_LIST`
+   and `ID_LIST` kinds with per-element validation, the wrongly
+   cited count examples are corrected with the list-or-count
+   choice read from each site in M1, and `sources` is declared as
+   a mapping validated against the closed provenance grammar with
+   count values, tested empty, populated, and per form. Amended in
+   the registry section.
 
 3. **P1: the proposed string kinds bless unbounded far-side values
    as trusted metadata.** `ota_check.client`, `board`, `firmware`
