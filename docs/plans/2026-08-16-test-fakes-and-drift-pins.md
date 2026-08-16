@@ -263,8 +263,12 @@ fail, restore it) and the mutation is recorded in the milestone PR.
    - `set(cli.RELOAD_OUTCOMES)` equals the `list[str]` outcome
      fields of `api.McpReloadResult` (every field except
      `servers`), and the tuple carries no duplicates.
-   - `cli.PROMPT_BLOCK_FIELDS` equals
-     `api.PromptBlock.model_fields` as sets.
+   - `cli.PROMPT_BLOCK_FIELDS` equals the required fields of
+     `api.PromptBlock` (`{name for name, field in
+     PromptBlock.model_fields.items() if field.is_required()}`):
+     the model also carries an optional `name` the CLI does not
+     require to read a block, and the pin records that `name` stays
+     optional, type-checked only when present.
    `cli.PENDING_COLUMNS` is not pinned: it is a rendering choice
    (`code`, `device`, `expires` are presentation names, not field
    names), and pinning presentation to field names would invent an
@@ -448,6 +452,11 @@ prior plans. Findings as received, condensed but faithful:
    `name` (`api.py:715-755`). M4 as written fails immediately. Pin
    equality against the required fields of `PromptBlock`, and
    record that `name` stays optional.
+
+   *Resolution*: accepted. The pin now reads equality against the
+   required fields of `PromptBlock` via `field.is_required()`, with
+   the optional `name` recorded as such. Amended in the drift-pins
+   section.
 
 2. **P1: the three-category move rule cannot produce working
    support modules.** Moved roots have module-local dependencies
