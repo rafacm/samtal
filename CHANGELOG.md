@@ -104,6 +104,62 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   credential where it used to record it whole. The entry name, the type
   and the exact model string are untouched, which is what a manifest is
   kept for.
+- **Breaking: the conversation events carry no conversation text**
+  (#120): `heard`, `replied` and `agent_said` lose their `text` field,
+  and their sentences stop rendering it. `heard` says how long the user
+  spoke and, where the engine detected it, in what language; `replied`
+  and `agent_said` say which agent spoke and how many sentences of the
+  reply the user actually heard, which is a number no event carried
+  before and which reports what went out rather than what was
+  generated. The retained logs are now metadata only, which is what
+  makes the no-leak contract on them a property of the schema instead
+  of a review finding, and it is the supersession the 2026-08-04
+  observability ADR anticipated: its follow-up note records that it has
+  happened. **Migration:** transcripts come from the conversation store
+  instead, keyed by the same session id
+  (`select heard, reply from turns where session = ?`, with
+  `server.conversations.enabled` and `text: true`); every duration,
+  count and identifier a latency brief reads is unchanged.
+- **Breaking: `llm_round`'s token counts are named as the GenAI
+  conventions name them** (#120): `prompt_tokens` becomes
+  `input_tokens` and `completion_tokens` becomes `output_tokens`, which
+  is the vocabulary the observability ADR adopts where one exists and
+  the names the store's `turns` and `turns.legs` columns have carried
+  since their first migration, so a dashboard and a SQL query no longer
+  need a translation between them. **Migration:** a token-count
+  dashboard renames two fields.
+- **Breaking: `tool_call` names only what this server authored** (#120):
+  the event drops `tool` for every call whose name a peer chose and
+  gains `source`, one of `builtin`, `device`, `mcp` or `unknown`, from
+  the same classifier the store's `tool_invocations` rows are written
+  with. A builtin still carries `tool`, because those names are this
+  application's own; an MCP call carries `entry`, the name an operator
+  wrote in their configuration, and never the far side's tool name; a
+  device tool and a name nobody publishes are named by their `source`
+  and nothing else. A published tool name is half whatever the far side
+  called it and an alphanumeric credential survives sanitizing intact,
+  which is the exposure #154 closed on the MCP lifecycle events and
+  this closes on the one event that still carried a name.
+  **Migration:** a tool dashboard groups by `source`, and by `entry`
+  for MCP calls; the full name, its arguments and its result are on the
+  store's `tool_invocations` rows. Alongside it, the warning about a
+  model's unparseable tool arguments reports how many characters they
+  were instead of printing them.
+- **The provider-bearing events say which model answered** (#120):
+  `llm_round`, `llm_retry` and `provider_failed` gain `model`, the
+  configured model identifier, wherever the entry names one, which is
+  OTel's `gen_ai.request.model`. Two entries of one type can run
+  different models, and a turn's token totals blend the rounds that
+  answered it, so the per-round, per-model truth needed somewhere to
+  be. Additive: an entry with no model to name (the bundled VAD, a
+  Piper voice, the mocks) carries no field rather than an invented one.
+- **The session capture's decision track inherits the narrowing**
+  (#120): the capture is a consumer of the same events, so its
+  `<session>.jsonl` keeps every event minus the text, minus the tool
+  name, and with the renamed token fields. Nothing else about a capture
+  changes: the WAV beside it still records everything said in the room,
+  which is the division of labour the capture was built on, and the
+  session id correlates all three records.
 - **`session_closed` says why a conversation ended** (#120): the event
   carried only `duration_s`, so the reason was inferable from whichever
   line happened to precede it and from nothing else. It gains `reason`,
