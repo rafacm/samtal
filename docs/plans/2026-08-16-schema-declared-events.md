@@ -112,8 +112,32 @@ dataclasses and the declarations:
     server chose;
   - `TOKEN`: a `str` from the field's declared `tokens` frozenset;
   - `CLASS_NAME`: an exception or type name, `str`, no spaces;
-  - `ID`: a bounded machine form (session id, MAC, client UUID,
-    revision string, language code);
+  - `ID`: a bounded machine form the server minted or normalized
+    (session id, MAC, revision string, language code), each with a
+    per-field syntax constraint (a MAC matches the canonical MAC
+    form, a language code the code form), not a generic
+    "bounded string";
+  - `DESCRIPTOR`: a far-side-supplied string retained
+    deliberately, lawful only where its decision site already
+    sanitizes it (bounded in length, stripped of unprintables) and
+    declared with an explicit per-field maximum length and
+    character constraint that validation enforces again at emit.
+    The fields in this class today are `ota_check`'s `client`,
+    `board` and `firmware` and their kin on the activation events,
+    which the onboarding work bounded at their sites on purpose;
+    the kind exists so the registry says which fields carry
+    far-side bytes rather than laundering them as identifiers.
+    M1 inventories every string field by provenance (operator
+    configuration, server-minted, far-side sanitized) and assigns
+    the kind from the inventory; a far-side string whose decision
+    site does NOT sanitize it is a real finding, fixed at that
+    decision site in M1 (a bounds-and-strip on adversarial input
+    changes nothing for the lawful values the pin suites plant, so
+    the pins stay untouched), and each such fix is its own commit
+    named in the implementation doc. This is the one deliberate
+    narrowing of the "no emit site changes" rule, and it is
+    confined to sanitization of values the taxonomy cannot
+    otherwise admit;
   - `INT`, `FLOAT` (an `INT` value satisfies `FLOAT`, since sites
     pass round numbers where a measure is integral), `BOOL`;
   - `COUNT`: an `int >= 0`, for the fields whose meaning is "how
@@ -257,11 +281,14 @@ recorded in the implementation doc, not behavior changes.
 
 ### What is deliberately out of scope
 
-- No emit site changes its fields, levels, sentences, or names:
-  the pin suites pass unmodified, and any real mismatch the
-  registry work uncovers between the README and reality is fixed
-  in the README or recorded as a follow-up issue, never by
-  reshaping the surface under this issue.
+- No emit site changes its fields, levels, sentences, or names,
+  with the one narrow exception finding 3's resolution defines
+  (sanitizing a far-side string at its decision site where the
+  taxonomy cannot otherwise admit it, invisible to the pins'
+  lawful planted values): the pin suites pass unmodified, and any
+  real mismatch the registry work uncovers between the README and
+  reality is fixed in the README or recorded as a follow-up
+  issue, never by reshaping the surface under this issue.
 - The conversation store, capture, and audit surfaces are other
   surfaces; the registry covers the structured events only.
 - Exporters (#66/#67) consume the registry later; nothing here
@@ -433,6 +460,17 @@ Findings as received, condensed but faithful:
    and normalize untrusted values at their decision sites, which
    requires relaxing the plan's blanket no-emit-site-change rule
    where the surface cannot satisfy the settled taxonomy.
+
+   *Resolution*: accepted. The taxonomy gains `DESCRIPTOR` for
+   far-side strings retained deliberately, lawful only where the
+   decision site sanitizes them and enforced again at emit with
+   per-field length and character constraints; `ID` gains
+   per-field syntax constraints; M1 inventories every string field
+   by provenance; and the no-emit-site-change rule is narrowed
+   exactly once: a far-side string whose site does not sanitize it
+   is fixed at that site, which leaves the pin suites' lawful
+   planted values untouched. Amended in the registry section and
+   the out-of-scope section.
 
 4. **P1: payload-only validation leaves message and args outside
    the no-leak machinery.** `Emission.args` reaches taps and the
