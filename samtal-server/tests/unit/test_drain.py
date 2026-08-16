@@ -34,14 +34,17 @@ class FakeSession:
         self.speaking_for = speaking_for
         self.shutdown: tuple[int, str] | None = None
         self.granted_s: float | None = None
+        self.close_reason: str | None = None
 
     async def request_shutdown(
         self,
         code: int = 1001,
         reason: str = "server shutting down",
         grace_s: float = 10.0,
+        close_reason: str | None = None,
     ) -> bool:
         self.granted_s = grace_s
+        self.close_reason = close_reason
         finished = self.speaking_for <= grace_s
         await asyncio.sleep(min(self.speaking_for, grace_s))
         self.shutdown = (code, reason)
@@ -60,6 +63,9 @@ async def test_draining_asks_every_session_to_stop() -> None:
     await registry_with(first, second).drain(timeout_s=5)
     assert first.shutdown == (1001, "server shutting down")
     assert second.shutdown == (1001, "server shutting down")
+    # And says why, so the record of each conversation names the drain
+    # rather than whatever arrived behind it.
+    assert first.close_reason == second.close_reason == "drain"
 
 
 async def test_a_reply_in_flight_finishes_before_its_socket_closes() -> None:
@@ -104,7 +110,9 @@ async def test_a_session_stuck_in_its_own_shutdown_is_left_to_uvicorn(
     1012 fail-close."""
 
     class StuckSession(FakeSession):
-        async def request_shutdown(self, code=1001, reason="", grace_s=10.0) -> bool:
+        async def request_shutdown(
+            self, code=1001, reason="", grace_s=10.0, close_reason=None
+        ) -> bool:
             await asyncio.sleep(60)
             return True
 

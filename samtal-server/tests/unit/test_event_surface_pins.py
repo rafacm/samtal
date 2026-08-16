@@ -379,6 +379,12 @@ def test_session_closed(caplog: pytest.LogCaptureFixture) -> None:
             "session": DYNAMIC,
             "device": DEVICE_MAC.lower(),
             "duration_s": DYNAMIC,
+            # Added deliberately with the field itself (#120): the reason
+            # was only ever inferable from whichever line came before
+            # this one, and the conversation store's session row needs it
+            # as a token. `client` is what an ordinary end looks like:
+            # the device closed the socket.
+            "reason": "client",
         },
     }
 

@@ -91,7 +91,14 @@ class SessionRegistry:
         reply_grace_s = timeout_s - min(CLOSE_MARGIN_S, timeout_s * CLOSE_MARGIN_FRACTION)
         done, pending = await asyncio.wait(
             [
-                asyncio.create_task(session.request_shutdown(grace_s=reply_grace_s))
+                asyncio.create_task(
+                    # The token goes with the request, so the record says
+                    # a drain ended these conversations even where an
+                    # idle timer or a disconnect arrives behind it.
+                    session.request_shutdown(
+                        grace_s=reply_grace_s, close_reason="drain"
+                    )
+                )
                 for session in sessions
             ],
             timeout=timeout_s,
