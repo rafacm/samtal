@@ -228,6 +228,9 @@ class DeviceSession:
         # fire and never overwritten. None until something decides, which
         # is what the ordinary end looks like from here.
         self._close_reason: str | None = None
+        # A cancellation that arrived while the close was running, held
+        # until the record has landed and re-raised then.
+        self._cancelled: BaseException | None = None
 
     @property
     def output_sample_rate(self) -> int:
@@ -464,6 +467,12 @@ class DeviceSession:
                 self._events.detach_capture()
                 self._capture.close()
                 self._capture = None
+            if self._cancelled is not None:
+                # A cleanup step was cancelled, and now that the record
+                # is complete the cancellation goes on its way: the
+                # caller's task ends cancelled, as it asked, and nothing
+                # of the close was lost to it.
+                raise self._cancelled
 
     async def request_shutdown(
         self,
@@ -540,6 +549,14 @@ class DeviceSession:
         """
         try:
             await work
+        except asyncio.CancelledError as cancelled:
+            # Not a failure of the step, and not something to swallow:
+            # the task really is being cancelled and its caller is
+            # entitled to see that. Held instead of either, so the steps
+            # after it, the event, the store's close and the capture's
+            # close all still run, and re-raised once they have. A
+            # cancellation arriving here used to skip every one of them.
+            self._cancelled = cancelled
         except Exception as exc:  # noqa: BLE001 - a close always completes
             self._latch_close("error")
             logger.warning(
