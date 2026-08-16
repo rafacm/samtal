@@ -33,10 +33,10 @@ What happens in a conversation is logged twice over: as a human
 sentence, and as structured fields (`event`, `session`, `device`, and
 whatever the event carries) that the JSON log format emits as top-level
 keys. Both are metadata: what was said is recorded in the conversation
-store instead, under the same session id (#120). Both sides emit through the session's
-`SessionEvents` ([events](../events.py)), so which module a line came
-from is not visible in the record, and every consumer attached to the
-session sees the same events.
+store instead, under the same session id (#120). Both sides emit
+through the session's `SessionEvents` ([events](../events.py)), so which
+module a line came from is not visible in the record, and every consumer
+attached to the session sees the same events.
 """
 
 import asyncio
