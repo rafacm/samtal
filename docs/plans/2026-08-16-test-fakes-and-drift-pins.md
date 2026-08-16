@@ -520,11 +520,11 @@ From `samtal-server/`, per milestone:
 
 ## Milestones
 
-- [ ] M1: the fakes package is born: `tests/support/llm_sdk.py`
-      holds both SDK dialect fake families and the consolidated
-      `Falsey` probe; the provider test modules import from it;
-      `test_support_fakes.py` pins the probe's falsiness; both
-      lanes green, count non-decreasing.
+- [x] [**M1: the fakes package is born**](2026-08-16-test-fakes-and-drift-pins-implementation.md#milestone-1-the-fakes-package-is-born)
+      (PR TBD): `tests/support/llm_sdk.py` holds both SDK dialect fake
+      families and the consolidated `Falsey` probe; the provider test
+      modules import from it; `test_support_fakes.py` pins the probe's
+      falsiness; both lanes green, count non-decreasing.
 - [ ] M2: the session family decouples: the eight session-side
       support modules exist, no test module imports any
       `test_session*`, `test_tools_device`, or

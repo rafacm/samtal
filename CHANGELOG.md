@@ -191,6 +191,21 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   cleanup steps ahead of the event are now guarded individually, so one
   that fails is reported by class and the close still completes rather
   than the session ending with no record of having ended.
+- **The test suite gets a shared fakes package, starting with the LLM
+  SDK shapes** (#144): `tests/support` held four real MCP subprocess
+  servers and nothing else, so a double for a vendor SDK object had to
+  live in whichever suite happened to need it first, and the next suite
+  copied it. `tests/support/llm_sdk.py` now holds the fourteen classes
+  that fake the two streaming dialects a provider talks (the anthropic
+  messages stream and the openai chat completions one), moved
+  byte-identical out of the tool-calling suite, plus the one probe that
+  answers False to a truth test, which four provider suites had each
+  hand-rolled. Test-only: no source file changes, no assertion changes,
+  and the moved classes are compared against their origin by normalized
+  AST rather than by eye. A contract test pins the probe's falsiness
+  where the probe lives, because the suites that inject it assert only
+  that the provider kept the object it was handed, which a truthy probe
+  would satisfy while testing nothing.
 
 ## 2026-08-15
 
