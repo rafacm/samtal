@@ -341,12 +341,18 @@ with the failure output recorded in the M4 PR body:
   existing file from a second entity. Each must fail with a
   message naming the file.
 - CLI/API shapes, one mutation per relation: drop a member from
-  each CLI frozenset in turn (`PENDING_FIELDS`, `STATUS_FIELDS`,
-  `STATUS_STATES`, `PROMPT_BLOCK_FIELDS`); duplicate an entry in
-  `RELOAD_OUTCOMES` (the no-duplicates clause); and for the
-  required-versus-optional distinction, flip `PromptBlock.name` to
-  required in a scratch copy of the check and watch the equality
-  break, since that distinction is exactly what the pin encodes.
+  each CLI frozenset whose relation is an equality
+  (`STATUS_FIELDS`, `STATUS_STATES`, `PROMPT_BLOCK_FIELDS`); add a
+  member the model does not carry to `PENDING_FIELDS`, whose
+  relation is a subset (dropping one from it is a passing control
+  rather than a proof: a smaller subset is still a subset, and the
+  drift this pin exists to catch is a CLI requiring a field the API
+  never answers, so the control is worth running and recording as a
+  pass); duplicate an entry in `RELOAD_OUTCOMES` (the no-duplicates
+  clause); and for the required-versus-optional distinction, flip
+  `PromptBlock.name` to required in a scratch copy of the check and
+  watch the equality break, since that distinction is exactly what
+  the pin encodes.
 
 ### The `test_config_cli.py` split, decided here for #139
 

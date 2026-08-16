@@ -274,10 +274,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   read off the model's annotations with the tuple's no-duplicates
   clause pinned separately, and the prompt-block fields against what
   `PromptBlock` requires rather than everything it has, since `name` is
-  optional there. Every branch of every pin was proven by mutation:
-  applied, watched fail with its message, reverted. Test-only: no
-  source file changes, no assertion changes, and no existing test
-  touched. The bridge file says in its docstring that it exists to be
+  optional there. Every branch of every pin was exercised by mutation,
+  applied and reverted: each proof watched failing with its message,
+  and the one control that must pass (deleting a member of the pending
+  predicate, whose relation is a subset rather than an equality)
+  watched passing. Test-only: no source file changes, no assertion
+  changes, and no existing test touched. The bridge file says in its docstring that it exists to be
   deleted whole by #139, which deletes the predicates it pins.
 
 ## 2026-08-15

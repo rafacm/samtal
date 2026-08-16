@@ -784,9 +784,12 @@ Verdict as posted: mergeable after the listed fix.
 ## Milestone 4: the drift pins
 
 Nine tests across three files, each stating the relation two encodings
-actually hold, and each branch of each relation proven by mutation. No
-existing test function or assertion was touched: the two existing files
-gained module-level constants, helpers and new test functions only.
+actually hold. Every branch of every relation was exercised by
+mutation: each proof observed failing, and the one control (a deletion
+from the pending predicate, whose relation is a subset) observed
+passing, as the matrix below records. No existing test function or
+assertion was touched: the two existing files gained module-level
+constants, helpers and new test functions only.
 
 Three commits, in the order the milestone was built in:
 
@@ -903,8 +906,11 @@ The relations, one per test, all reading the real objects:
 
 ### The mutation matrix
 
-Every branch, applied, observed failing, reverted. Each file was copied
-aside first and copied back afterwards, never restored with
+Every branch of every relation, applied, observed, reverted. All but
+one are proofs: the mutation was observed failing, with the message
+below. The exception is one control, marked as such, which is expected
+to pass and would say the pin was wrong if it failed. Each file was
+copied aside first and copied back afterwards, never restored with
 `git checkout`, and `touch`ed after the restore, per AGENTS.md; every
 mutation run was a pytest run, which writes no bytecode. `git status`
 was clean of source and asset changes after each.
@@ -932,11 +938,10 @@ round added:
 | Claim it from the prompt-fragment entity under the alias `./vad-silero.yaml`, which both tests passed before the review round's fix | `AssertionError: not a bare filename in docgen.ENTITIES: ./vad-silero.yaml` |
 
 **CLI/API shapes**, one mutation per relation, each a temporary edit to
-`cli.py` or `api.py`, reverted:
+`cli.py` or `api.py`, reverted. The proofs:
 
 | Mutation | Observed |
 | --- | --- |
-| `PENDING_FIELDS` drops `board` | **passes, by design** (see below) |
 | `PENDING_FIELDS` gains `ghost` | `AssertionError: ... Extra items in the left set: 'ghost'` |
 | `STATUS_FIELDS` drops `grants` | `AssertionError: ... Extra items in the right set: 'grants'` |
 | `STATUS_STATES` drops `unused` | `AssertionError: ... Extra items in the right set: 'unused'` |
@@ -945,14 +950,21 @@ round added:
 | `RELOAD_OUTCOMES` repeats `stopped` | `AssertionError: assert 5 == 4` (`test_no_reload_outcome_is_named_twice`; the equality test passes) |
 | `PromptBlock.name` flipped to required (its `default=None` removed) | `AssertionError: ... Extra items in the right set: 'name'` |
 
-The one row that does not fail is the milestone brief's "drop a member
-from `PENDING_FIELDS`", and it cannot fail: the relation the plan
-settles for that pair is a subset, and a smaller subset is still one.
-The mutation that exercises it is the opposite one, adding a name the
-model does not carry, which is the drift the pin exists to catch (a CLI
-demanding a field the API never answers). Both rows are recorded rather
-than only the failing one, because the passing row is a fact about the
-relation and not a gap in the pin.
+And the control, which passes:
+
+| Control | Observed |
+| --- | --- |
+| `PENDING_FIELDS` drops `board` | **passes**, and must: a smaller subset is still a subset |
+
+Dropping a member cannot fail that pin, because the relation the plan
+settles for the pair is a subset rather than an equality. So the drop
+is run as a control (a failure there would mean the pin was asserting
+something else) and the proof is the opposite mutation, adding a name
+the model does not carry, which is the drift the pin exists to catch: a
+CLI demanding a field the API never answers. The plan's mutation-matrix
+bullet said "drop a member from each CLI frozenset in turn", and it was
+amended in this review round to say so per relation, since for this one
+pair the drop is a control and not a proof.
 
 The two reload rows are one relation each, which the PR review round
 asked for: the duplicated entry leaves the equality passing by
@@ -998,7 +1010,9 @@ Two, both recorded above and neither weakening a pin.
    `enabled:` under `capture` cover `conversations.enabled`, since the
    word appears four times in the file). It passes as committed, and the
    nested-comment mutation is what exercises the difference.
-2. **`PENDING_FIELDS` is mutated by addition, not by deletion.**
-   Explained in the matrix above: deletion cannot fail a subset
-   relation, so the deletion is recorded as an observed pass and the
-   addition is the branch that proves the pin.
+2. **`PENDING_FIELDS` is mutated by addition, not by deletion.** It
+   was a deviation as the plan was written, and the PR review round
+   amended the plan rather than leaving the two disagreeing: deletion
+   cannot fail a subset relation, so the deletion is recorded as a
+   control that passes and the addition is the branch that proves the
+   pin. The plan's mutation-matrix bullet now says that per relation.
