@@ -17,10 +17,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from samtal_server.app import create_app
+from samtal_server.audio.opus import OpusEncoder
 from samtal_server.capture import CAPTURE_RATE
 from tests.support.configs import DEVICE_MAC, DEVICE_UUID, FRAME_BYTES, FRAME_MS, config_with_agent
-from tests.unit.test_session import (
-    OpusEncoder,
+from tests.support.wire import (
     collect_reply,
     connect,
     endpoint_silence,

@@ -52,8 +52,7 @@ from samtal_server.runtime.pipeline import bespoke_runtime_factory
 from samtal_server.tools.mcp import McpServers
 from tests.support.configs import DEVICE_MAC, DEVICE_UUID
 from tests.support.sockets import LoopingSocket
-from tests.unit.test_conversations_store import Gate
-from tests.unit.test_session import (
+from tests.support.wire import (
     connect,
     say_something,
     send_pcm,
@@ -61,6 +60,7 @@ from tests.unit.test_session import (
     shake_hands,
     speech_pcm,
 )
+from tests.unit.test_conversations_store import Gate
 from tests.unit.test_session_close_reason import open_session
 from tests.unit.test_session_tools import drive_reply
 

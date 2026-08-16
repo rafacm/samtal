@@ -15,12 +15,10 @@ to it.
 """
 
 import asyncio
-import json
 import time
 
 import pytest
 from fastapi.testclient import TestClient
-from starlette.websockets import WebSocketDisconnect
 
 import samtal_server.device.session as session_module
 from samtal_server.app import create_app
@@ -32,32 +30,19 @@ from tests.support.configs import (
     config_with_agent,
     idle_config,
 )
-from tests.unit.test_session import (
+from tests.support.wire import (
     collect_reply,
     connect,
     endpoint_silence,
+    listen_realtime,
     say_something,
     send_pcm,
     sentences,
     shake_hands,
     speech_pcm,
+    wait_for_close,
 )
 from tests.unit.test_session_tools import session_for
-
-
-def listen_realtime(websocket) -> None:
-    """What a realtime device sends once and never again. It is what
-    makes the idle timeout apply at all."""
-    websocket.send_text(json.dumps({"type": "listen", "state": "start", "mode": "realtime"}))
-
-
-def wait_for_close(websocket) -> WebSocketDisconnect:
-    """Read past whatever the server has to say (the MCP handshake a
-    device that advertised tools gets) until the socket closes."""
-    with pytest.raises(WebSocketDisconnect) as excinfo:
-        while True:
-            websocket.receive_text()
-    return excinfo.value
 
 
 def test_an_idle_session_is_closed_when_it_runs_out_of_time() -> None:
