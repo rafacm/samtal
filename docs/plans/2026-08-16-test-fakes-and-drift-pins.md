@@ -146,7 +146,14 @@ are named for the seam they serve, not the file they came from:
   client is still used, never replaced by truthiness).
 - `providers.py`: the scripted pipeline-stage providers that cross
   module boundaries: `ScriptedLlm`, `StallingLlm` (with `STALL_S`),
-  `BrokenTts`, `LockingAsr`, `Unreachable`.
+  `LockingAsr`, `Unreachable`, and the two broken-TTS fakes, which
+  are not duplicates and stay two classes: `BrokenTts` (the filler
+  one, raising synchronously when `synthesize()` is called, with
+  its class-level sample rate) and `BrokenStreamingTts` (the record
+  one, an async generator declaring `egress = False`, initializing
+  its rate, raising during iteration). The record module imports it
+  as `from tests.support.providers import BrokenStreamingTts as
+  BrokenTts`, so its test bodies stay byte-identical.
 - `sockets.py`: the scripted device-socket fakes: `RecordingSocket`,
   `LoopingSocket`, `QuietSocket`.
 - `boundary.py`: the promoted seam-testing template: `StubRuntime`
@@ -433,9 +440,11 @@ From `samtal-server/`, per milestone:
   nor too tight.
 - **Two definitions consolidated as duplicates turn out to
   differ.** The consolidation rule keeps behavioral differences as
-  two named classes; the mutation-sensitive case (`BrokenTts`
-  variants raising at different points) is decided by reading both
-  definitions and recorded in the implementation doc.
+  two named classes; the one known case, the two `BrokenTts`
+  variants, is decided above (two classes, `BrokenTts` and
+  `BrokenStreamingTts`, an import alias preserving the record
+  module's local name). Any further case found mid-move follows the
+  same rule and is recorded in the implementation doc.
 - **Conflict with #155/#139 work.** The batch runs one issue at a
   time (tracking issue #146), so no concurrent edits; #139 inherits
   the split scheme and the `test_config_cli_shapes.py` deletion
@@ -510,6 +519,14 @@ prior plans. Findings as received, condensed but faithful:
    Decide now: two separately named fakes, behavior unchanged,
    import aliases keeping the local name so test bodies stay
    untouched.
+
+   *Resolution*: accepted. Decided in the layout section: the
+   filler variant keeps the name `BrokenTts`, the record variant
+   becomes `BrokenStreamingTts` with its exception timing,
+   `egress = False`, and initialization unchanged, and
+   `test_session_record.py` imports it under its old local name via
+   an alias so no test body changes. The risks section's deferral
+   now points at this decision instead of postponing it.
 
 4. **P2: green lanes and unchanged assertions do not prove the
    fake premises survived the move.** Three `Falsey` definitions
