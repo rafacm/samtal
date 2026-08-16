@@ -349,16 +349,20 @@ class ConversationStore:
         drain that matters happens in `stop()`, which runs first."""
         if self._thread is not None or self._stopped:
             return
+        thread = threading.Thread(target=self._run, name="conversation-store", daemon=True)
+        # Kept only once it is really running, and announced only then.
+        # A `Thread.start()` that raises (a process out of threads) would
+        # otherwise leave a thread nobody can join behind a `stop()` that
+        # has to stay harmless, and an event saying this server is
+        # recording when it is not.
+        thread.start()
+        self._thread = thread
         events.warning(
             "recording conversations to %s",
             self.path,
             event="conversations_enabled",
             path=str(self.path),
         )
-        self._thread = threading.Thread(
-            target=self._run, name="conversation-store", daemon=True
-        )
-        self._thread.start()
 
     def stop(self) -> None:
         """Accept nothing more, drain what is queued, and let go of the

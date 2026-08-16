@@ -51,9 +51,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     thing on a running server that still holds the configuration
     database open."""
     conversations = app.state.conversations
-    if conversations is not None:
-        conversations.start()
     try:
+        # Inside the guard rather than in front of it: a writer whose
+        # thread will not start is exactly the case where the stop below
+        # has to run anyway, and it is one line to let the same `finally`
+        # cover it as covers everything after it.
+        if conversations is not None:
+            conversations.start()
         app.state.agent_fillers.update(
             await build_agent_fillers(app.state.config, app.state.agent_providers)
         )
