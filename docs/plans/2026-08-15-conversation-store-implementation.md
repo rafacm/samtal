@@ -1159,3 +1159,146 @@ milestone's 39 and 2 make 2176 and 55. The only moved pin is still
 event-assertion suites, over `events.py` and over `runtime/` answers
 with nothing, which is what says this milestone layers on the round
 rather than over it.
+
+### PR #158 review round
+
+One external review of the milestone as first pushed. Eight findings,
+two P1, five P2 and one P3; verdict not mergeable until fixed. All eight
+adopted, one commit each, in the order the findings imply: the
+credential that reaches a file outliving everything first, then the two
+structural holes in the close path, then the two smaller lifecycle ones,
+then the three that are about saying what is true.
+
+1. **P1: a credential in a provider URL reached the session row.**
+   `base_url: https://user:password@host/v1` names nothing
+   secret-shaped, so every inline-secret rule passed it, and
+   `_provider_manifest` serialized the entry verbatim into a record that
+   outlives the conversation.
+   *Resolution*: adopted in `7c57e42`, both halves as the direction gave
+   them. Writing such a URL is refused in the repository, so both write
+   paths inherit it, for a user and password before the host and for a
+   credential-shaped query parameter alike; the value is examined rather
+   than its key, at every depth, since the whole point is that the key
+   looks innocent. Write time only, the addressability rule's precedent
+   and its wording: a row written before the rule still boots, still
+   reads and can still be edited out. And the record is built through
+   `views.provider_record` rather than `model_dump`, masking
+   secret-shaped keys at every depth and taking the credential out of
+   any URL-shaped value, which is the half that does not depend on every
+   row having passed through the rule. Five tests: the refusals at write
+   time with the sentinel hunted through the message and the exception
+   chain, an ordinary URL still accepted, the load path proven untouched,
+   the recorded representation, and an end-to-end case that holds a
+   handshake against a real entry and finds the credential in neither
+   the database's bytes, the capture manifest, the logs nor stdout.
+2. **P1: the record was opened four steps before the guard that closes
+   it.** A device vanishing while the server hello went out, or anything
+   failing in the `session_open` emit, the discovery start or the
+   watchdog start, left a capture nobody closed, a row nobody ended and
+   a sink still attached.
+   *Resolution*: adopted in `da4db30`, in the second of the two forms
+   offered. The hello send moves above the opening and is now the last
+   step outside the guard, so both invariants hold at once: nothing is
+   open when a step can still fail, and `session_open` is still the
+   first line of the decision track because both consumers attach before
+   it is emitted. Three tests, all failing against the code before it,
+   one of them by leaking an unclosed WAV.
+3. **P2: a client disconnect could lose the first-cause race.** `client`
+   was rendered at the end rather than latched at its site, so a drain
+   arriving into a close already under way took a cause that had been
+   decided before the drain existed.
+   *Resolution*: adopted in `a942615`. The serve loop's return and the
+   disconnect branch each latch it; the render in the `finally` stays as
+   the backstop for a path that latches nothing. The test holds the
+   cleanup open so the drain lands inside the window that used to lose.
+4. **P2: a cancellation during cleanup skipped the rest of the close.**
+   `_cleanly` caught `Exception`, and a cancellation is not one.
+   *Resolution*: adopted in `93c521a`. It is caught and held rather than
+   swallowed or obeyed on the spot: the remaining steps run, the record
+   is finished, and the cancellation is re-raised after the close has
+   landed, so the caller's task still ends cancelled. The test cancels
+   the runtime's close and asserts the event, the closed row, the
+   finished capture and a cancelled task.
+5. **P2: the writer's start sat in front of the lifespan's guard.** The
+   shape the plan's own review round rejected for everything else in
+   there.
+   *Resolution*: adopted in `6e63c30`. The start moved inside, and the
+   store was made safe for the case that matters: the thread is kept on
+   the store only once it is really running, so a `Thread.start()` that
+   raises leaves nothing for `stop()` to join, and the event announcing
+   that this server is recording is emitted after the thread is up
+   rather than before.
+6. **P2: a purge racing a queued open.** A purge arriving before the
+   writer commits a session's open deletes nothing, and nothing said so.
+   *Resolution*: adopted in `8805706`, in the second form the review
+   offered: narrowed and documented rather than engineered away. A purge
+   deletes what is recorded, and a session whose open has not committed
+   is not yet a record; the window is queue latency, what the session
+   then records is ordinary rows the same command deletes, and a durable
+   tombstone for it would be machinery whose only reader is this race.
+   Said in the purge help text and in the README's deletion section, and
+   driven deterministically through the writer's gate: parked before the
+   open the purge reports zero, released the record lands, and run again
+   it deletes it.
+7. **P2: the never-drops-a-close claim overstated the contract.** The
+   README said the writer never drops a session's close and the
+   changelog echoed it.
+   *Resolution*: adopted in `b1fdb68`. Both now say what the plan
+   settled: a close is never refused at the queue, and a close whose own
+   transaction fails leaves the session row open-shaped, which is the
+   same incomplete state a process killed mid-session leaves, readable,
+   listed and pruned on `started_at` like any other. The milestone 1
+   changelog entry is corrected in place, since it is the same
+   unreleased entry making the same claim.
+8. **P3: the package docstring still called itself dormant.**
+   *Resolution*: adopted in `0285926`. It describes the lifecycle that
+   now exists: off unless the section says otherwise, built cold at
+   `create_app`, the writer thread owned by the lifespan from its
+   guarded start to its drained stop, and the session opening its row
+   with the capture's manifest and closing it after `session_closed`.
+
+Three consequences worth naming rather than leaving to be found:
+
+- **Finding 1 narrows an existing surface deliberately.** The same
+  builder feeds the capture manifest, so a capture taken from here on
+  records a provider address without its credential where it used to
+  record it whole. The entry name, the type and the exact model string
+  are untouched, which is what a manifest is kept for. It has its own
+  changelog line for that reason.
+- **A cleanup failure no longer rewrites the close reason.** With
+  `client` latched where the device hangs up, a cleanup step that raises
+  afterwards is reported by class and changes nothing about why the
+  conversation ended, which is the honest reading: what ended it was
+  decided before the cleanup ran. The case that used to assert `error`
+  there now asserts `client` and keeps its no-leak assertions, and the
+  backstop it used to cover has a case of its own at the one site where
+  a cleanup failure is still the first cause.
+- **The PR description carries the corrected claim too.** Finding 7's
+  wording ("never drops a session's close") is in the pull request's own
+  Verification prose as well as in the two files fixed here, and the
+  description needs the same correction.
+
+### Verification after the round
+
+From `samtal-server/`, at `0285926`:
+
+```
+$ uv run ruff check .
+All checks passed!
+```
+
+```
+$ uv run pytest tests/unit -q
+2192 passed, 15 skipped in 292.93s (0:04:52)
+```
+
+```
+$ uv run pytest tests/integration -q
+55 passed in 162.41s (0:02:42)
+```
+
+The unit lane is sixteen cases larger than it was before the round:
+three write-time URL refusals and their neighbours, two on the recorded
+representation, one end-to-end credential sentinel, three on the close
+path's new boundary, one on a cancelled cleanup, two on the writer's
+start, one on the purge window, and two on the close reason.
