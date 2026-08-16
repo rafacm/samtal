@@ -25,14 +25,16 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
+from starlette.websockets import WebSocketDisconnect
 
 from samtal_server.app import create_app
 from samtal_server.audio.opus import OpusEncoder
+from samtal_server.capture import CaptureStore
 from samtal_server.config import Config
 from samtal_server.conversations import store as store_module
 from samtal_server.conversations.store import (
@@ -42,7 +44,11 @@ from samtal_server.conversations.store import (
     read_conversations,
 )
 from samtal_server.device import session as session_module
+from samtal_server.device.session import DeviceSession
 from samtal_server.events import Emission
+from samtal_server.providers import build_agent_providers
+from samtal_server.runtime.pipeline import bespoke_runtime_factory
+from samtal_server.tools.mcp import McpServers
 from tests.unit.test_conversations_store import Gate
 from tests.unit.test_session import (
     DEVICE_MAC,
@@ -54,7 +60,7 @@ from tests.unit.test_session import (
     shake_hands,
     speech_pcm,
 )
-from tests.unit.test_session_close_reason import open_session
+from tests.unit.test_session_close_reason import LoopingSocket, open_session
 from tests.unit.test_session_tools import drive_reply
 
 README = Path(__file__).resolve().parents[2] / "README.md"
@@ -522,6 +528,97 @@ def _bytes_of(directory: Path) -> bytes:
         if candidate.exists():
             found += candidate.read_bytes()
     return found
+
+
+# The close path, from the first attachment on
+
+
+def _guarded(tmp_path: Path, store: ConversationStore) -> tuple[Any, Any]:
+    """A session with both consumers configured, driven through `run`.
+
+    Through `run` rather than through a test client because what is
+    under test is where its guard begins: which steps can fail with a
+    capture open and a session row started, and whether the close still
+    lands when one of them does.
+    """
+    config = recording_config(tmp_path)
+    captures = CaptureStore(tmp_path / "captures", 900.0, 2000.0, 0.0)
+    factory = bespoke_runtime_factory(
+        config, build_agent_providers(config), McpServers({}), None, {}, store
+    )
+    websocket = LoopingSocket()
+    session = DeviceSession(
+        cast(Any, websocket), config, factory, captures, conversations=store
+    )
+    return session, websocket
+
+
+def _capture_manifest(tmp_path: Path) -> dict[str, Any] | None:
+    found = list((tmp_path / "captures").glob("*.json"))
+    return json.loads(found[0].read_text()) if found else None
+
+
+async def test_a_device_that_vanishes_at_the_hello_opens_no_record(
+    tmp_path: Path,
+) -> None:
+    """The hello send is the last step outside the guard, and nothing is
+    open when it runs. A device that goes away there recorded nothing,
+    rather than leaving a capture nobody closes and a row nobody ends."""
+    store = ConversationStore(tmp_path)
+    store.start()
+    session, websocket = _guarded(tmp_path, store)
+
+    async def refuse(text: str) -> None:
+        raise WebSocketDisconnect(code=1006)
+
+    websocket.send_text = refuse  # type: ignore[method-assign]
+    try:
+        with pytest.raises(WebSocketDisconnect):
+            await session.run()
+    finally:
+        store.stop()
+
+    assert read(tmp_path, "select * from sessions") == []
+    assert _capture_manifest(tmp_path) is None
+    assert session._events._taps == [], "a consumer was left attached"
+
+
+@pytest.mark.parametrize("step", ["_start_device_discovery", "_start_idle_watchdog"])
+async def test_a_failure_after_the_open_still_finishes_the_record(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, step: str
+) -> None:
+    """Every step from the first attachment on is inside the guard, so a
+    failure at any of them still reaches `session_closed`, the store's
+    close, the sink's detach and the capture's close. Before, the guard
+    began at the serve loop and these steps sat in front of it."""
+    store = ConversationStore(tmp_path)
+    store.start()
+    session, _ = _guarded(tmp_path, store)
+
+    def boom(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("the step nobody expected to fail")
+
+    setattr(session, step, boom)
+    with caplog.at_level("INFO"):
+        try:
+            with pytest.raises(RuntimeError):
+                await session.run()
+        finally:
+            store.stop()
+
+    (closed,) = [r for r in caplog.records if getattr(r, "event", None) == "session_closed"]
+    assert closed.reason == "error"
+    (row,) = read(tmp_path, "select * from sessions")
+    assert row["closed_at"] is not None
+    assert row["close_reason"] == "error"
+    assert session._record is None
+    assert session._events._taps == [], "a consumer was left attached"
+    assert session._capture is None
+    manifest = _capture_manifest(tmp_path)
+    # The manifest's capture block is rewritten by the close, so its
+    # `complete` is what says the capture was finished rather than left
+    # behind by a process that went away.
+    assert manifest is not None and manifest["capture"]["complete"] is True
 
 
 # A wedged writer, in three deterministic parts
