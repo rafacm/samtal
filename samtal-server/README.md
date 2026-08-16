@@ -1761,6 +1761,10 @@ and `device`, plus its own:
 | `session_closed`   | a conversation ends             | `duration_s`, `reason` (`limit`, `idle`, `drain`, `client`, `error`; the first cause to fire, so a drain closing a session an idle timer was about to hang up on reads `drain`) |
 | `session_rejected` | a device is turned away         | `reason`                           |
 | `auth_rejected`    | a handshake is refused          | `reason`; no device, since nothing is authenticated yet and the Device-Id header is whatever the caller sent |
+| `conversations_enabled` | the conversation store opens at startup, which means this server is recording what is said to it (no session or device: it is said once, before anything connects) | `path` |
+| `conversations_dropped` | the store is behind and events for one session are being dropped, said once per session at its first drop; the total lands on that session's row | `session` |
+| `conversations_failed`  | a write to the store failed and its batch was dropped, or a prune could not run | `failure` (the exception's class name, never its message) |
+| `conversations_pruned`  | retention deleted sessions older than the window (at INFO: a policy doing its job) | `sessions` (a count) |
 | `drain_started`    | a shutdown begins draining      | `sessions`, `timeout_s`            |
 | `drain_finished`   | every reply finished speaking   | `sessions`                         |
 | `drain_incomplete` | a reply was cut, or a session hung | `cut_mid_reply`, `unfinished`   |
@@ -1859,6 +1863,121 @@ break things, and say a marker phrase aloud when something goes wrong.
 It lands in a `heard` transcript and points at the interesting twenty
 seconds instead of ten minutes of scrubbing. Copy the three files off
 after each session; a field recording is not repeatable.
+
+## The conversation store
+
+**This keeps what was said in a database.** It is off by default and off
+until `enabled` says otherwise, and a warning at startup says when it is
+on and names the file.
+
+```yaml
+server:
+  conversations:
+    enabled: false
+    # store the structured events and every measured number
+    metrics: true
+    # store conversation text, and tool names, arguments and results
+    text: true
+    # prune whole sessions older than this; 0 keeps everything
+    retention_days: 90
+```
+
+What lands is `conversations.db`, beside `samtal.db` in
+`server.database.dir`: one row per session (device, agents, protocol,
+the resolved providers, when it opened, when and why it closed), one row
+per turn (what was heard and what was replied, the ASR, LLM and TTS
+timings, the rounds and the token counts), one row per tool call a turn
+made (its source, its arguments and its result), and one row per
+structured event, which is the same decision track the capture writes
+beside its audio. Audio never enters it: the capture is the recording,
+this is the queryable record. The columns are documented in
+[`../docs/reference/conversations-schema.md`](../docs/reference/conversations-schema.md),
+generated from the schema itself, and `samtal-server conversations
+schema` prints the same document.
+
+The section's absence, and `enabled: false`, both mean the same thing:
+nothing is recorded and no file is created. An existing file is still
+brought up to the current schema at every start, because switching
+recording off does not make what was already recorded unreadable.
+
+The two switches under the flag are independent, and all four
+combinations are supported configurations:
+
+| `metrics` | `text` | What a session keeps |
+| --- | --- | --- |
+| on | on | everything: the events, every measured number, and what was said |
+| on | off | the events and the numbers; the text columns, tool names, arguments and results are null |
+| off | on | what was said, with no events rows and the numbers null: the transparency-first setting |
+| off | off | the session spine and the shape of each turn, and nothing else |
+
+Session rows land in every enabled configuration, because retention,
+purging and every read key on them, and their timestamps survive both
+switches for the same reason. Each session row also records which way
+the switches were set for it, so a null column is distinguishable from
+a column that was never stored.
+
+**The switches are deployment-wide, and they are the only privacy
+control this release has.** Until per-user controls exist, enabling text
+storage on a device a household shares stores what guests say to it,
+which is the same statement the capture section makes about audio.
+Attributing a session on a shared device to one member needs voiceprint
+identification, which does not exist here yet, so the deletion unit that
+is enforceable today is the session, and the session id is surfaced
+everywhere: on the events, on the capture triplet's filenames, and as
+the purge command's selector.
+
+Retention is 90 days by default: whole sessions older than the window
+are deleted, row and children together, at startup and at each session
+close, and a line says how many went. `retention_days: 0` keeps
+everything, which is a deliberate choice rather than a default, because
+a store with no policy retains forever.
+
+Deletion on demand is one command, and it works with no server running,
+because deletion has to work exactly when the server is broken or gone:
+
+```console
+$ samtal-server conversations purge --session 3ab9e1a12f584dd8a6cae5c1f8e618b2
+$ samtal-server conversations purge --device aa:bb:cc:dd:ee:ff --before 2026-08-01
+```
+
+Selectors combine with AND, and at least one is required. Purging a
+session that is still running ends its recording: the writer finds the
+row gone and stops writing for that session, so what is said afterwards
+is not recorded. Capture files are a separate instrument and are never
+touched; the session id is the correlation key for whoever needs to
+remove the matching triplet.
+
+Deletion is physical rather than query-level. The database runs with
+`PRAGMA secure_delete=ON`, so a freed page is overwritten with zeros
+instead of lingering in the freelist, and both retention and purge
+finish with `PRAGMA wal_checkpoint(TRUNCATE)` so the deleted frames do
+not survive in the write-ahead log. Two limits, stated rather than
+implied: a checkpoint a reader is blocking does not fail the deletion,
+which is committed either way, and the truncation is retried at the next
+quiet moment (the purge command says so when it leaves one owed); and
+copies that have already left the file are yours to manage.
+
+**Read it with SQL over a WAL-safe copy, never a plain `cp` of a live
+file.** The database runs in WAL mode, where a copy on its own can miss
+committed data still sitting in the `-wal` file, exactly as for
+`samtal.db`:
+
+```bash
+sqlite3 /var/lib/samtal/conversations.db ".backup '/tmp/conversations.db'"
+sqlite3 /tmp/conversations.db 'select * from turns order by id desc limit 20'
+```
+
+There is deliberately no analysis command: the store is SQL, and the ids
+on `sessions`, `turns` and `events` are monotonic and never reused, so a
+client that has read up to one can ask for what came after it.
+
+Writing never happens on the conversation's path. One background thread
+does every database call behind a queue nothing on the session loop ever
+waits on, and it commits at turn boundaries and at session close, so a
+page opened mid conversation reads everything up to the last completed
+turn. A database that is wedged or locked drops events, says so once per
+session, and records the count on the session row; it never delays a
+reply and never drops a session's close.
 
 ## Which build is running
 
