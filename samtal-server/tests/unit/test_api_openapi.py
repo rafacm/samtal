@@ -151,6 +151,14 @@ def test_the_document_describes_every_route_the_api_serves() -> None:
         "/runtime/agents/{name}/prompt": ["get"],
         "/runtime/mcp-servers": ["get"],
         "/runtime/mcp-servers/reload": ["post"],
+        # The conversation store's reads. Their route functions live in
+        # samtal_server/conversations/api.py and are registered on the
+        # same application, which is what puts them here: a route
+        # registered by `build_api` instead would be served without ever
+        # reaching this document.
+        "/conversations": ["get"],
+        "/conversations/{session}": ["get"],
+        "/conversations/{session}/turns": ["get"],
     }
 
 
@@ -278,6 +286,40 @@ def test_every_field_a_read_always_answers_with_is_required() -> None:
         "tools",
         "grants",
     }
+
+
+def test_every_field_the_conversation_reads_answer_with_is_required() -> None:
+    """The same rule, over the store's shapes, where nearly every column
+    is nullable: a null is what the storage switches leave behind, and a
+    client that cannot tell it from a field the server omitted cannot
+    read the switches off the answer either."""
+    schemas = json.loads(docgen.openapi())["components"]["schemas"]
+
+    for name in (
+        "ConversationList",
+        "ConversationSummary",
+        "ConversationDetail",
+        "ConversationTurns",
+        "ConversationTurn",
+        "ToolInvocation",
+    ):
+        schema = schemas[name]
+        assert set(schema["required"]) == set(schema["properties"]), name
+
+
+def test_the_conversation_reads_describe_their_pagination() -> None:
+    """The three query arguments are parsed by the routes rather than by
+    FastAPI, so what a client is told about them is what these
+    descriptions say and nothing is derived from a type."""
+    listing = json.loads(docgen.openapi())["paths"]["/conversations"]["get"]
+    described = {
+        parameter["name"]: parameter["description"] for parameter in listing["parameters"]
+    }
+
+    assert set(described) == {"device", "limit", "cursor"}
+    assert "1 to 200" in described["limit"]
+    assert "50" in described["limit"]
+    assert "row id" in described["cursor"]
 
 
 def test_the_entity_schemas_are_registered_with_their_definitions() -> None:

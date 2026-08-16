@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "samtal-server configuration API",
-    "description": "The domain half of one samtal-server deployment's configuration: providers, MCP servers, agents, devices, and the credentials they use. Every request carries a bearer token, whose value is the environment variable `server.api.secret_env` names.\n\nConfiguration is a boot-time snapshot, so a successful write applies at the next server start rather than immediately. Device bindings are the one exception: a running server reads them, and the default agent, as a device asks for them, so binding or unbinding a device applies at that device's next OTA check or connection. The exception ends where the agent does, since a server builds an agent's providers at boot: a binding naming an agent this server has not loaded waits for the restart that loads it. Every write says which of the two happened, in its `notice`.\n\nA device with no binding and no default agent to cover it is answered at its configuration check with a six-digit activation code, which it shows on its screen and speaks. `/devices/pending` lists the devices showing one, keyed by the code, and posting to `/devices/pending/{code}` binds the device showing it. That listing is the running server's own state rather than stored configuration: a restart forgets it, and the devices come back with fresh codes.\n\nThe `/runtime` namespace is the running server's own state as well, and is kept apart from the entity namespaces because an entity may legally be named after any word a route might want. `/runtime/mcp-servers` says what each configured MCP server is doing right now: connected or down, since when, what it published, and which agents may reach it. Nothing there is read from the database, so it cannot disagree with what is running.\n\n`GET /runtime/agents/{name}/prompt` is the other read there: the system prompt a session opening now as that agent would be sent, block by block, with the provenance and the character count of each and the total. It is assembled from the loaded agents, the running MCP slice and the memory store rather than from the database, so it cannot disagree with what a session would get, and it is a preview of a new session rather than a readback of a running one: a conversation already in progress holds the half it assembled at its own activation.\n\n`POST /runtime/mcp-servers/reload` is the second exception to the boot-time snapshot, and unlike device bindings it is asked for rather than noticed. It re-reads the `mcp_servers` entries, the secrets stored on them and the agents' `mcp` grant lists, and applies them to the running server: entries are started, restarted, stopped or left alone, and no conversation is dropped. When a live conversation meets the result depends on which half of an entry moved. The tools it may reach are snapshotted per reply, so a started, restarted or stopped entry is picked up on its next utterance. An entry's `instructions` is prompt text, and prompt text is assembled at an activation and cached for it, so a rewrite reaches a conversation at its next activation, a new session or an agent switch, and never a reply of one already running; `GET /runtime/agents/{name}/prompt` previews what a session opening now would be sent. Everything else about an agent still waits for a restart, which is why writes to those keep saying so.\n\nA provider entry carries whatever options its `type` takes, and those are passed through rather than declared, so no schema can list them. Until typed option models land (#88) they are documented in the example fragments under `samtal-server/examples/`, which is also where the measured numbers behind each default are kept.",
+    "description": "The domain half of one samtal-server deployment's configuration: providers, MCP servers, agents, devices, and the credentials they use. Every request carries a bearer token, whose value is the environment variable `server.api.secret_env` names.\n\nConfiguration is a boot-time snapshot, so a successful write applies at the next server start rather than immediately. Device bindings are the one exception: a running server reads them, and the default agent, as a device asks for them, so binding or unbinding a device applies at that device's next OTA check or connection. The exception ends where the agent does, since a server builds an agent's providers at boot: a binding naming an agent this server has not loaded waits for the restart that loads it. Every write says which of the two happened, in its `notice`.\n\nA device with no binding and no default agent to cover it is answered at its configuration check with a six-digit activation code, which it shows on its screen and speaks. `/devices/pending` lists the devices showing one, keyed by the code, and posting to `/devices/pending/{code}` binds the device showing it. That listing is the running server's own state rather than stored configuration: a restart forgets it, and the devices come back with fresh codes.\n\nThe `/runtime` namespace is the running server's own state as well, and is kept apart from the entity namespaces because an entity may legally be named after any word a route might want. `/runtime/mcp-servers` says what each configured MCP server is doing right now: connected or down, since when, what it published, and which agents may reach it. Nothing there is read from the database, so it cannot disagree with what is running.\n\n`GET /runtime/agents/{name}/prompt` is the other read there: the system prompt a session opening now as that agent would be sent, block by block, with the provenance and the character count of each and the total. It is assembled from the loaded agents, the running MCP slice and the memory store rather than from the database, so it cannot disagree with what a session would get, and it is a preview of a new session rather than a readback of a running one: a conversation already in progress holds the half it assembled at its own activation.\n\n`POST /runtime/mcp-servers/reload` is the second exception to the boot-time snapshot, and unlike device bindings it is asked for rather than noticed. It re-reads the `mcp_servers` entries, the secrets stored on them and the agents' `mcp` grant lists, and applies them to the running server: entries are started, restarted, stopped or left alone, and no conversation is dropped. When a live conversation meets the result depends on which half of an entry moved. The tools it may reach are snapshotted per reply, so a started, restarted or stopped entry is picked up on its next utterance. An entry's `instructions` is prompt text, and prompt text is assembled at an activation and cached for it, so a rewrite reaches a conversation at its next activation, a new session or an agent switch, and never a reply of one already running; `GET /runtime/agents/{name}/prompt` previews what a session opening now would be sent. Everything else about an agent still waits for a restart, which is why writes to those keep saying so.\n\nThe `/conversations` namespace is not stored configuration either: it reads the conversation store, the record of what was said, which `server.conversations.enabled` switches on. Three reads, cursor-paginated on monotonic row ids that are never reused: the session list newest first, one session whole, and one session's turns oldest first with the calls each turn made nested under it. A deployment that never recorded answers 404; one that recorded and has since switched recording off still serves what it recorded, because switching recording off stops the writer and not the reader. Content columns come back as they were stored, which is null where text storage was off, and every session says which way its switches were set.\n\nA provider entry carries whatever options its `type` takes, and those are passed through rather than declared, so no schema can list them. Until typed option models land (#88) they are documented in the example fragments under `samtal-server/examples/`, which is also where the measured numbers behind each default are kept.",
     "version": "1"
   },
   "servers": [
@@ -2498,6 +2498,297 @@
           }
         }
       }
+    },
+    "/conversations": {
+      "get": {
+        "summary": "Read Conversations",
+        "description": "The sessions this deployment recorded, newest first.\n\nFiltered by `device` when given, and paginated with `cursor`,\nwhich holds the sessions below it, so a client walks back through\nthe record one page at a time.",
+        "operationId": "read_conversations_conversations_get",
+        "parameters": [
+          {
+            "name": "device",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only the sessions of this device, by MAC. Colons or dashes, upper or lower case; it is normalized before it is matched. Anything that is not a MAC address is refused.",
+              "title": "Device"
+            },
+            "description": "Only the sessions of this device, by MAC. Colons or dashes, upper or lower case; it is normalized before it is matched. Anything that is not a MAC address is refused."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "How many rows this page may hold: a whole number from 1 to 200, defaulting to 50. Anything else is refused.",
+              "title": "Limit"
+            },
+            "description": "How many rows this page may hold: a whole number from 1 to 200, defaulting to 50. Anything else is refused."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Where to carry on from: a row id this API answered with, as a whole number. Absent means the first page. Anything else is refused.",
+              "title": "Cursor"
+            },
+            "description": "Where to carry on from: a row id this API answered with, as a whole number. Absent means the first page. Anything else is refused."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationList"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "There is no conversation store to read, or no session of that id in it. The body says which.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "One of the query arguments could not be read: the limit, the cursor or the device filter. Nothing sent is quoted back.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The conversation store cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/conversations/{session}": {
+      "get": {
+        "summary": "Read Conversation",
+        "description": "One session, whole: every column of its row, with how many\nturns and events hang off it.\n\nThe two counts are read in the same transaction as the row, so\nthey describe one snapshot rather than three moments of a\nsession that may still be running.",
+        "operationId": "read_conversation_conversations__session__get",
+        "parameters": [
+          {
+            "name": "session",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "There is no conversation store to read, or no session of that id in it. The body says which.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "One of the query arguments could not be read: the limit, the cursor or the device filter. Nothing sent is quoted back.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The conversation store cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/conversations/{session}/turns": {
+      "get": {
+        "summary": "Read Conversation Turns",
+        "description": "One session's timeline, oldest first, each turn carrying the\ncalls it made.\n\n`cursor` holds the turns strictly after it, which is the\ndirection a client reconciling what it has already read asks in:\nthe ids are monotonic and never reused, so what came after one is\na stable question.",
+        "operationId": "read_conversation_turns_conversations__session__turns_get",
+        "parameters": [
+          {
+            "name": "session",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "How many rows this page may hold: a whole number from 1 to 200, defaulting to 50. Anything else is refused.",
+              "title": "Limit"
+            },
+            "description": "How many rows this page may hold: a whole number from 1 to 200, defaulting to 50. Anything else is refused."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Where to carry on from: a row id this API answered with, as a whole number. Absent means the first page. Anything else is refused.",
+              "title": "Cursor"
+            },
+            "description": "Where to carry on from: a row id this API answered with, as a whole number. Absent means the first page. Anything else is refused."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationTurns"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The request carried no bearer token, or not the one this server was given.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "There is no conversation store to read, or no session of that id in it. The body says which.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "One of the query arguments could not be read: the limit, the cursor or the device filter. Nothing sent is quoted back.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The conversation store cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2574,6 +2865,595 @@
         ],
         "title": "ConfigDocument",
         "description": "The whole domain configuration of one deployment, masked."
+      },
+      "ConversationDetail": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "The session's monotonic row id, the listing's cursor."
+          },
+          "session": {
+            "type": "string",
+            "title": "Session",
+            "description": "The session's uuid hex."
+          },
+          "device": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device",
+            "description": "The device's MAC in canonical form, or null when none was understood."
+          },
+          "client": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client",
+            "description": "The client identifier the device announced, when it announced one."
+          },
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent",
+            "description": "The agent the session opened with, before any handover."
+          },
+          "agents": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agents",
+            "description": "Every agent the device is bound to, as the binding resolved at open."
+          },
+          "protocol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Protocol",
+            "description": "The device protocol version this session negotiated."
+          },
+          "started_at": {
+            "type": "string",
+            "title": "Started At",
+            "description": "When the session opened, as an ISO-8601 instant in UTC."
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At",
+            "description": "When it closed, in the same form, or null."
+          },
+          "duration_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration S",
+            "description": "How long it lasted, in seconds. Null under metrics-off."
+          },
+          "close_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close Reason",
+            "description": "What ended it, or null until it closes."
+          },
+          "server_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Version",
+            "description": "The server version that recorded this session."
+          },
+          "revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revision",
+            "description": "The build revision that recorded it."
+          },
+          "providers": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providers",
+            "description": "The resolved provider entry per pipeline stage, the same structure the capture manifest carries. It holds environment variable names, never credentials."
+          },
+          "metrics": {
+            "type": "boolean",
+            "title": "Metrics",
+            "description": "Whether metrics storage was on for this session, so a null number is distinguishable from a number that was never stored."
+          },
+          "text": {
+            "type": "boolean",
+            "title": "Text",
+            "description": "Whether text storage was on for this session, so a null utterance is distinguishable from an utterance that was never stored."
+          },
+          "dropped": {
+            "type": "integer",
+            "title": "Dropped",
+            "description": "Records this session lost: events refused at the writer's in-flight bound, and anything a failed transaction rolled back. The store recording its own incompleteness, the way the capture manifest records `complete`."
+          },
+          "turns": {
+            "type": "integer",
+            "title": "Turns",
+            "description": "How many turns this session holds."
+          },
+          "events": {
+            "type": "integer",
+            "title": "Events",
+            "description": "How many events rows it holds: the decision track, `session_open` through `session_closed`. Zero under metrics-off, where no events row lands. They are deliberately not served over REST; the database is that surface."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "session",
+          "device",
+          "client",
+          "agent",
+          "agents",
+          "protocol",
+          "started_at",
+          "closed_at",
+          "duration_s",
+          "close_reason",
+          "server_version",
+          "revision",
+          "providers",
+          "metrics",
+          "text",
+          "dropped",
+          "turns",
+          "events"
+        ],
+        "title": "ConversationDetail",
+        "description": "One session, whole: its row and what hangs off it."
+      },
+      "ConversationList": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationSummary"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "The sessions on this page, newest first."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "What to send as `cursor` for the page after this one, and null when this was the last: it is the id of the last item here, and the next page holds the sessions below it. Null means there is nothing further right now, not that there never will be; a listing re-read later starts from the top."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "ConversationList",
+        "description": "One page of the session listing, newest first."
+      },
+      "ConversationSummary": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "The session's monotonic row id, never reused. It is this listing's cursor: a page asked for with it holds the sessions before it."
+          },
+          "session": {
+            "type": "string",
+            "title": "Session",
+            "description": "The session's uuid hex, which addresses the two reads below and names the capture triplet of the same conversation."
+          },
+          "device": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device",
+            "description": "The device's MAC in canonical form, and null when the session was rejected before one was understood."
+          },
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent",
+            "description": "The agent the session opened with, before any handover."
+          },
+          "started_at": {
+            "type": "string",
+            "title": "Started At",
+            "description": "When the session opened, as an ISO-8601 instant in UTC."
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At",
+            "description": "When it closed, in the same form. Null in a session that is still running and in one whose close was never persisted, which a crash leaves behind."
+          },
+          "duration_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration S",
+            "description": "How long it lasted, in seconds. A measured number: null under metrics-off."
+          },
+          "close_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close Reason",
+            "description": "What ended it, one of `limit`, `idle`, `drain`, `client` or `error`, the first cause to fire winning. Null until it closes."
+          },
+          "turns": {
+            "type": "integer",
+            "title": "Turns",
+            "description": "How many turns this session holds."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "session",
+          "device",
+          "agent",
+          "started_at",
+          "closed_at",
+          "duration_s",
+          "close_reason",
+          "turns"
+        ],
+        "title": "ConversationSummary",
+        "description": "One session as the listing shows it."
+      },
+      "ConversationTurn": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id",
+            "description": "The turn's monotonic row id, never reused. It is this timeline's cursor: a page asked for with it holds the turns after it."
+          },
+          "t_ms": {
+            "type": "integer",
+            "title": "T Ms",
+            "description": "The utterance's offset from session open, in milliseconds, aligned with its `heard` event and with the capture's audio for the same session."
+          },
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent",
+            "description": "The agent that answered, which a handover makes different from the session's."
+          },
+          "heard": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heard",
+            "description": "What was said to the device, as transcribed. Null under text-off."
+          },
+          "heard_duration_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heard Duration S",
+            "description": "How long the utterance lasted, in seconds. Null under metrics-off."
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language",
+            "description": "The language the transcript was recognized as. Neither a measured number nor conversation text, so it survives both switches."
+          },
+          "language_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language Confidence",
+            "description": "How sure the recognizer was of that language. Null under metrics-off."
+          },
+          "reply": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reply",
+            "description": "What the assistant said, the legs joined. Null under text-off, and null when the reply spoke nothing."
+          },
+          "legs": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legs",
+            "description": "One entry per agent that took part, `{agent, text, input_tokens, output_tokens}`, and present only when a handover split the reply. The text half is null under text-off and the token halves under metrics-off, because a turn's totals blend agents that may use different models."
+          },
+          "asr_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asr Ms",
+            "description": "Transcription elapsed, in milliseconds. Null where none was measured this turn, and under metrics-off."
+          },
+          "first_token_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Token Ms",
+            "description": "Request to the reply's first token, in milliseconds. Null under metrics-off."
+          },
+          "llm_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Ms",
+            "description": "The reply's LLM round durations summed, in milliseconds. Null under metrics-off."
+          },
+          "tts_first_audio_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tts First Audio Ms",
+            "description": "The reply's first synthesis request to its first audio bytes, in milliseconds, measured at the provider boundary and deliberately not at the device. Null when the reply spoke nothing, and under metrics-off."
+          },
+          "rounds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rounds",
+            "description": "How many LLM rounds the reply took. Null under metrics-off."
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens",
+            "description": "Input tokens summed across the turn's rounds; OTel's `gen_ai.usage.input_tokens`. Null when the provider reported no usage, and under metrics-off."
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens",
+            "description": "Output tokens summed across the turn's rounds; OTel's `gen_ai.usage.output_tokens`. Null when the provider reported no usage, and under metrics-off."
+          },
+          "tool_calls": {
+            "type": "integer",
+            "title": "Tool Calls",
+            "description": "How many calls this turn issued, which is how many entries the list below holds. Structural rather than telemetry: it survives both switches."
+          },
+          "tool_invocations": {
+            "items": {
+              "$ref": "#/components/schemas/ToolInvocation"
+            },
+            "type": "array",
+            "title": "Tool Invocations",
+            "description": "The calls the reply made, in the order the model issued them."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "t_ms",
+          "agent",
+          "heard",
+          "heard_duration_s",
+          "language",
+          "language_confidence",
+          "reply",
+          "legs",
+          "asr_ms",
+          "first_token_ms",
+          "llm_ms",
+          "tts_first_audio_ms",
+          "rounds",
+          "input_tokens",
+          "output_tokens",
+          "tool_calls",
+          "tool_invocations"
+        ],
+        "title": "ConversationTurn",
+        "description": "One utterance and the reply it got, with the calls the reply made."
+      },
+      "ConversationTurns": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationTurn"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "The turns on this page, ascending by id, which is chronological."
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor",
+            "description": "What to send as `cursor` for the page after this one, and null when this was the last. The next page holds the turns after it, which is also how a client that read up to a turn asks for what has happened since."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "ConversationTurns",
+        "description": "One page of a session's timeline, oldest first."
       },
       "DefaultAgent": {
         "properties": {
@@ -2918,6 +3798,106 @@
         ],
         "title": "StoredSecretLocation",
         "description": "Where one stored secret is, in the whole-configuration read."
+      },
+      "ToolInvocation": {
+        "properties": {
+          "position": {
+            "type": "integer",
+            "title": "Position",
+            "description": "Where this call sat in the round's call list, as the model issued it, counted from zero and with handovers included. The rows are nested in this order; it is the model's order and not the order they finished in."
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Where the call was routed: `builtin` for one this application authors, `device` for one the device published, `mcp` for one an MCP entry owns, `unknown` for a name nothing answered to. Classified before the call ran."
+          },
+          "entry": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry",
+            "description": "The owning MCP entry's configured name for an `mcp` call, and null otherwise. A name this deployment chose, so it survives text-off."
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name",
+            "description": "The called tool's name, and null when text storage was off for the session: a tool's name originates off this server, a device's self-description or an MCP far side, exactly as its result does."
+          },
+          "malformed": {
+            "type": "boolean",
+            "title": "Malformed",
+            "description": "Whether the model's arguments were not a JSON object."
+          },
+          "arguments": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arguments",
+            "description": "What the model passed, null under text-off and null when the call was malformed, which is what `malformed` above tells them apart by."
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result",
+            "description": "What the call answered, a refusal included. Null under text-off."
+          },
+          "is_error": {
+            "type": "boolean",
+            "title": "Is Error",
+            "description": "Whether the call answered as an error."
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms",
+            "description": "How long the call took, in milliseconds. Null where nothing ran, as for a refused or a successful handover, and null under metrics-off."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "position",
+          "source",
+          "entry",
+          "name",
+          "malformed",
+          "arguments",
+          "result",
+          "is_error",
+          "duration_ms"
+        ],
+        "title": "ToolInvocation",
+        "description": "One call a turn issued, as the timeline nests it.\n\nThe transport shape of a `tool_invocations` row, not the record the\npipeline hands the writer, which is the dataclass of the same name\nin `records.py`."
       },
       "ProviderConfig": {
         "additionalProperties": true,
