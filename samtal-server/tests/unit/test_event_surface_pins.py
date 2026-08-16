@@ -571,17 +571,51 @@ async def test_replied(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "replied")) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
-        "template": 'session %s: replied "%s"',
-        "args": (SESSION, "Two words."),
-        "sentence": 'session <session>: replied "Two words."',
+        "template": "session %s: %s replied in %d sentences",
+        "args": (SESSION, "poet", 1),
+        "sentence": "session <session>: poet replied in <n> sentences",
         "fields": {
             "event": "replied",
             "session": DYNAMIC,
             "device": None,
             "agent": "poet",
-            "text": "Two words.",
+            "sentences": 1,
         },
     }
+
+
+async def test_a_whole_exchange_reaches_no_record_of_itself(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The utterance and the reply that answers it, hunted across every
+    record a conversation produces rather than across one.
+
+    The mock LLM quotes what it was given, so one planted string is the
+    transcription, the history and every spoken sentence at once. With
+    the text off `heard` and off `replied`, nothing a session says about
+    itself carries a word of what was said in the room, at any level and
+    in either format an operator can be running."""
+    session = uttering(SENTINEL)
+    consumer = Consumer()
+    session._events.attach(consumer)
+    with caplog.at_level("DEBUG"):
+        await session.runtime._reply(UTTERANCE)
+
+    assert only(caplog, "replied").sentences == 1
+    assert caplog.records, "nothing was logged at all, so this proves nothing"
+    for record in caplog.records:
+        assert SENTINEL not in record.getMessage()
+        assert SENTINEL not in str(record.args)
+        assert SENTINEL not in str(payload_of(record))
+        assert not any(SENTINEL in rendered for rendered in shipped(record))
+    assert consumer.seen, "it reached no tap at all, so this proves nothing"
+    assert not any(
+        SENTINEL in str(emission.payload) or SENTINEL in str(emission.args)
+        for emission in consumer.seen
+    )
+    # And the reply really was spoken: the history holds it, which is
+    # where what was said is true.
+    assert SENTINEL in session.runtime._turns[-1].content
 
 
 async def test_llm_round(caplog: pytest.LogCaptureFixture) -> None:
@@ -627,15 +661,15 @@ async def test_agent_said_and_handover(caplog: pytest.LogCaptureFixture) -> None
     assert pinned(only(caplog, "agent_said")) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
-        "template": 'session %s: %s said "%s"',
-        "args": (SESSION, "poet", "Handing you over."),
-        "sentence": 'session <session>: poet said "Handing you over."',
+        "template": "session %s: %s said %d sentences",
+        "args": (SESSION, "poet", 1),
+        "sentence": "session <session>: poet said <n> sentences",
         "fields": {
             "event": "agent_said",
             "session": DYNAMIC,
             "device": None,
             "agent": "poet",
-            "text": "Handing you over.",
+            "sentences": 1,
         },
     }
     assert pinned(only(caplog, "handover")) == {
@@ -652,6 +686,36 @@ async def test_agent_said_and_handover(caplog: pytest.LogCaptureFixture) -> None
             "to_agent": "tutor",
         },
     }
+
+
+async def test_what_one_agent_said_before_a_handover_reaches_no_record(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The same hunt on the leg-shaped half of a reply. A handover is
+    where the second sentence above fires, and it is the one event whose
+    only reason to exist was to say what an agent said, so it is worth
+    planting through both agents."""
+    scripts = {
+        "poet": ScriptedLlm([[SENTINEL, call("switch_agent", agent="tutor")]]),
+        "tutor": ScriptedLlm([SENTINEL]),
+    }
+    session = session_for(base_config(), BOTH_MAC, scripts)
+    consumer = Consumer()
+    session._events.attach(consumer)
+    with caplog.at_level("DEBUG"):
+        spoken = await run_reply(session, "get me the tutor")
+
+    assert only(caplog, "agent_said").sentences == 1
+    assert spoken == [SENTINEL], "the agents never spoke it, so this proves nothing"
+    for record in caplog.records:
+        assert SENTINEL not in record.getMessage()
+        assert SENTINEL not in str(record.args)
+        assert SENTINEL not in str(payload_of(record))
+        assert not any(SENTINEL in rendered for rendered in shipped(record))
+    assert not any(
+        SENTINEL in str(emission.payload) or SENTINEL in str(emission.args)
+        for emission in consumer.seen
+    )
 
 
 async def test_tool_call(caplog: pytest.LogCaptureFixture) -> None:

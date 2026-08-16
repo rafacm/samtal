@@ -76,11 +76,13 @@ def test_a_conversation_logs_heard_and_replied(caplog: pytest.LogCaptureFixture)
     assert heard.agent == "assistant"
     assert heard.duration_s > 0
     replied = only(caplog, "replied")
-    assert replied.text == "You said what time is it."
     assert replied.agent == "assistant"
-    # What was heard is not on the event: the utterance is content, and
-    # content is the conversation store's (#120).
+    assert replied.sentences == 1
+    # Neither half carries a word of it: what was said is content, and
+    # content is the conversation store's (#120). These two are the
+    # metadata view of the same exchange.
     assert not hasattr(heard, "text")
+    assert not hasattr(replied, "text")
     # Both halves carry the same session and device, which is what makes
     # the exchange groupable.
     assert heard.session == replied.session
@@ -93,7 +95,7 @@ def test_the_human_message_is_unchanged_by_the_extra_fields(
     with caplog.at_level("INFO"):
         hold_a_conversation(config_with_agent(asr_text="hello"))
     assert "heard 0.30 s of speech" in caplog.text
-    assert 'replied "You said hello."' in caplog.text
+    assert "assistant replied in 1 sentences" in caplog.text
 
 
 def test_session_open_and_closed_bracket_the_conversation(
@@ -272,7 +274,7 @@ async def test_the_session_hands_a_locked_language_back_as_a_hint(
     assert not hasattr(second, "language_confidence")
 
 
-async def test_a_handover_logs_what_each_agent_said(
+async def test_a_handover_logs_how_much_each_agent_said(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     scripts = {
@@ -281,11 +283,15 @@ async def test_a_handover_logs_what_each_agent_said(
     }
     session = session_for(base_config(), BOTH_MAC, scripts)
     with caplog.at_level("INFO"):
-        await run_reply(session, "get me the tutor")
+        spoken = await run_reply(session, "get me the tutor")
 
     said = only(caplog, "agent_said")
     assert said.agent == "poet"
-    assert said.text == "Handing you over."
+    # Which agent spoke and how much of the reply was its share. What it
+    # said is the store's, and here it is what the reply returned.
+    assert said.sentences == 1
+    assert not hasattr(said, "text")
+    assert spoken == ["Hello, I am the tutor."]
     handover = only(caplog, "handover")
     assert handover.from_agent == "poet"
     assert handover.to_agent == "tutor"

@@ -1763,12 +1763,12 @@ and `device`, plus its own:
 | ------------------ | ------------------------------- | ---------------------------------- |
 | `ota_check`        | a device checks in (no session) | `client`, `board`, `firmware`, `agents` |
 | `session_open`     | a conversation starts           | `client`, `agent`, `agents`, `protocol`, `revision` |
-| `heard`            | an utterance is transcribed     | `agent`, `text`, `duration_s`, plus `language` and `language_confidence` when the engine detected |
+| `heard`            | an utterance is transcribed     | `agent`, `duration_s`, plus `language` and `language_confidence` when the engine detected. No transcript: what was said is the conversation store's |
 | `filler_played`    | the reply was slow, so a pre-synthesized filler clip masked the wait (its first frame is the turn's `speaking_started`) | `agent`, `delay_ms` (measured, from the transcription to the fire), `phrase_index` |
 | `filler_skipped`   | the timer fired but the user was there first, so no clip played | `agent`, `reason` (`user_speaking`, `barge_in_pending`), plus `speech_ms` when the endpointer held speech |
 | `speaking_started` | the reply's first audio frame goes out | `agent`                     |
-| `replied`          | a reply finishes                | `agent`, `text`                    |
-| `agent_said`       | one agent's part of a reply     | `agent`, `text`                    |
+| `replied`          | a reply finishes                | `agent`, `sentences` (how many of them the user heard, so a reply a barge-in cut short reports what went out) |
+| `agent_said`       | one agent's part of a reply     | `agent`, `sentences`               |
 | `handover`         | `switch_agent` succeeds         | `from_agent`, `to_agent`           |
 | `barge_in`         | speech cuts a reply short       | `speech_ms`, plus `speaking_ms` when the reply had started speaking |
 | `barge_in_suppressed` | an interruption is dropped and the reply lives | `reason` (`min_speech`, `refractory`, `no_transcript`), `speech_ms` |

@@ -787,13 +787,20 @@ class PipelineRuntime:
             if spoken:
                 said = " ".join(spoken)
                 self._turns.append(Turn("assistant", said))
+                # What the reply was, not what it said (#120). The count
+                # is the sentences whose audio actually went out, so a
+                # reply cut short by a barge-in reports what the user
+                # heard rather than what was generated, and it is the
+                # one size on this event that is measured rather than
+                # inferred.
                 self._events.info(
-                    'session %s: replied "%s"',
+                    "session %s: %s replied in %d sentences",
                     self.session_id,
-                    said,
+                    self._agent,
+                    len(spoken),
                     event="replied",
                     agent=self._agent,
-                    text=said,
+                    sentences=len(spoken),
                 )
             # Beside `replied` and for the same reason: this is where a
             # reply ends however it ended, so a cancelled or a failed one
@@ -855,14 +862,18 @@ class PipelineRuntime:
             said = " ".join(spoken) if spoken else None
             if said is not None:
                 self._turns.append(Turn("assistant", said))
+                # This leg's share of the reply, in the same terms
+                # `replied` reports the whole of it: which agent, and how
+                # many sentences of it the user heard. Never the words,
+                # which are the store's (#120).
                 self._events.info(
-                    'session %s: %s said "%s"',
+                    "session %s: %s said %d sentences",
                     self.session_id,
                     self._agent,
-                    said,
+                    len(spoken),
                     event="agent_said",
                     agent=self._agent,
-                    text=said,
+                    sentences=len(spoken),
                 )
                 spoken.clear()
             previous = self._agent
