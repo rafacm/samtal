@@ -1758,7 +1758,7 @@ and `device`, plus its own:
 | `mcp_tool_shadowed` | a published tool is dropped because a more specific entry owns its name | `entry`, `position` (the tool's place in the far side's listing), `owner` |
 | `session_limit`    | the duration cap fires          | `duration_s`                       |
 | `session_idle`     | the idle timeout hangs up on a realtime session | `idle_s`, `duration_s`     |
-| `session_closed`   | a conversation ends             | `duration_s`                       |
+| `session_closed`   | a conversation ends             | `duration_s`, `reason` (`limit`, `idle`, `drain`, `client`, `error`; the first cause to fire, so a drain closing a session an idle timer was about to hang up on reads `drain`) |
 | `session_rejected` | a device is turned away         | `reason`                           |
 | `auth_rejected`    | a handshake is refused          | `reason`; no device, since nothing is authenticated yet and the Device-Id header is whatever the caller sent |
 | `drain_started`    | a shutdown begins draining      | `sessions`, `timeout_s`            |

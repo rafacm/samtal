@@ -100,6 +100,23 @@ NORMAL_CLOSURE = 1000
 # stricter in practice.
 SHUTDOWN_REPLY_GRACE_S = 10.0
 
+# What ended a session: the token `session_closed` carries, and the one
+# the conversation store copies to `sessions.close_reason`. A closed set,
+# decided where the code already decides (the duration cap, the idle
+# watchdog, the shutdown drain, the ordinary end, and anything else on
+# its way out through the close path), never derived from a message.
+#
+# First cause wins. The token is latched exactly once, by whichever
+# termination fires first, so a cause arriving into a close already under
+# way (an idle timeout coming due while a drain closes the same session,
+# a client disconnect surfacing behind either) leaves the recorded reason
+# the one that initiated it.
+CLOSE_REASONS = ("limit", "idle", "drain", "client", "error")
+
+# What a session that nothing decided to end is closed for: the device
+# closed the socket, or the serve loop simply returned.
+DEFAULT_CLOSE_REASON = "client"
+
 class DeviceSession:
     """The server side of one device connection: everything that would
     still exist if the backend were a telephone call to a human.
@@ -194,6 +211,10 @@ class DeviceSession:
         # comparison: both just write the current time.
         self._last_activity: float | None = None
         self._idle_watchdog: asyncio.Task[None] | None = None
+        # What ended this session, latched by the first termination to
+        # fire and never overwritten. None until something decides, which
+        # is what the ordinary end looks like from here.
+        self._close_reason: str | None = None
 
     @property
     def output_sample_rate(self) -> int:
@@ -361,20 +382,36 @@ class DeviceSession:
             # The firmware reads a close as the end of a conversation and
             # reconnects on the next wake word, so this is invisible in
             # normal use.
-            await self.request_shutdown(NORMAL_CLOSURE, "session time limit reached")
+            await self.request_shutdown(
+                NORMAL_CLOSURE, "session time limit reached", close_reason="limit"
+            )
         except WebSocketDisconnect:
             pass
+        except BaseException:
+            # Anything else is leaving through this frame, so the record
+            # says the session ended in a failure rather than in a
+            # conversation. Latched here and re-raised untouched: what
+            # happened is the caller's to handle, and a cancellation on
+            # the way out is as much "not an ordinary end" as an
+            # exception is.
+            self._latch_close("error")
+            raise
         finally:
-            await self._stop_idle_watchdog()
+            # Each step guarded on its own, so an exception in one cannot
+            # swallow the event, the store's close or the capture's
+            # behind it. This is the close path's contract: it always
+            # reaches the end.
+            await self._cleanly("the idle watchdog", self._stop_idle_watchdog())
             if self.runtime is not None:
-                await self.runtime.close()
-            await self._stop_device_discovery()
+                await self._cleanly("the conversation", self.runtime.close())
+            await self._cleanly("device tool discovery", self._stop_device_discovery())
             self._events.info(
                 "session %s closed (device %s)",
                 self.session_id,
                 mac,
                 event="session_closed",
                 duration_s=self._open_duration_s(),
+                reason=self._closed_reason(),
             )
             # After session_closed, so it is the last line of the
             # decision track and the WAV header is patched with a length
@@ -389,6 +426,7 @@ class DeviceSession:
         code: int = GOING_AWAY,
         reason: str = "server shutting down",
         grace_s: float = SHUTDOWN_REPLY_GRACE_S,
+        close_reason: str | None = None,
     ) -> bool:
         """End this session cleanly: let a reply that is already speaking
         finish its sentence, then close. Answers whether it did finish.
@@ -405,10 +443,67 @@ class DeviceSession:
         duration cap. A reply that outlasts the grace is abandoned rather
         than waited on, and the False that comes back is what lets the
         caller say so instead of reporting a clean drain.
+
+        `close_reason` is the caller's token from `CLOSE_REASONS`,
+        latched here rather than at each call site, so it is recorded
+        before anything begins closing and cannot be raced by a cause
+        that arrives while the reply finishes. None is for a caller with
+        no cause to name, which in production is nobody: the three that
+        end a session this way (the cap, the idle watchdog, the drain)
+        each name their own.
         """
+        if close_reason is not None:
+            self._latch_close(close_reason)
         finished = True if self.runtime is None else await self.runtime.drain(grace_s)
         await self._close(code, reason)
         return finished
+
+    def _latch_close(self, reason: str) -> None:
+        """Record what is ending this session, once.
+
+        First cause wins, which is what makes the recorded reason
+        deterministic rather than whichever site happened to run last: a
+        drain that closes a session an idle timer was about to hang up on
+        is a drain, and the idle timer coming due behind it says nothing
+        about why the conversation ended.
+        """
+        if self._close_reason is None:
+            self._close_reason = reason
+
+    def _closed_reason(self) -> str:
+        """The token `session_closed` carries. Nothing latched means
+        nothing decided to end this session, which is the device closing
+        the socket or the serve loop simply returning."""
+        if self._close_reason is None:
+            return DEFAULT_CLOSE_REASON
+        return self._close_reason
+
+    async def _cleanly(self, step: str, work: Any) -> None:
+        """One cleanup step, guarded on its own.
+
+        The close path has to reach `session_closed`, the conversation
+        store's close and the capture's close whatever happened before
+        it, so a step that raises is reported here and the next one runs.
+        A failure also latches `error` if nothing else was latched: a
+        session whose runtime would not close did not end in a
+        conversation.
+
+        Reported by class, and with the step named in this module's own
+        words. An exception's message on the way out of a session is one
+        of the places a provider's or a device's bytes could reach the
+        retained surface, and which exception it was is not actionable
+        anyway: what is actionable is that this step did not finish.
+        """
+        try:
+            await work
+        except Exception as exc:  # noqa: BLE001 - a close always completes
+            self._latch_close("error")
+            logger.warning(
+                "session %s: %s did not stop cleanly (%s)",
+                self.session_id,
+                step,
+                type(exc).__name__,
+            )
 
     def _open_duration_s(self) -> float:
         """How long this session has been open, to one hundredth of a
@@ -562,7 +657,7 @@ class DeviceSession:
             # A normal closure rather than going away: the server is
             # fine, this conversation is simply over. The firmware reads
             # it as the end of one and reconnects on the next wake word.
-            await self.request_shutdown(NORMAL_CLOSURE, "idle timeout")
+            await self.request_shutdown(NORMAL_CLOSURE, "idle timeout", close_reason="idle")
             return
 
     def _start_device_discovery(self, hello: messages.DeviceHello) -> None:
