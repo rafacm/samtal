@@ -284,6 +284,13 @@ tracking-issue number), because removing it is a surface narrowing
 this issue's no-behavior-change contract forbids; M1 files the
 follow-up issue for the narrowing and the registry entry cites it,
 so the exception is visible machinery rather than a quiet hole.
+The grandfather is bounded machinery, not a bypass: the
+conformance test asserts the entry set is exactly this one site
+and argument position (a second entry fails the suite), the
+variant it sits in still declares its template and every other
+position, and the follow-up issue's job is to delete the constant,
+at which point the assertion that the set is empty replaces the
+assertion that it is one.
 
 Violations become one `EventSchemaViolation` value, and its
 diagnostics render REGISTRY-OWNED identifiers only. A declared
@@ -903,6 +910,24 @@ eleven findings. As received, condensed but faithful:
    speech reaching the rendered log and taps; a grandfather is a
    permanent bypass. Require the narrowing before enforcement and
    resolve the pin-contract conflict explicitly.
+
+   *Resolution*: rejected with reasons, and the conflict resolved
+   explicitly as demanded. Narrowing the sentence inside #155
+   would edit `test_server_event_pins.py`, one of the two files
+   the issue's decision 5 declares unmodified and the batch's
+   standing rule says a refactoring PR may not touch by
+   definition; between an external recommendation and the
+   repository's settled contract, the contract wins. The leak is
+   real and is treated as such: M1 files the narrowing issue
+   (remove the recovered text from the sentence, a breaking
+   surface change with its own changelog entry and pin update,
+   under the ADR's authority), and until it lands the registry
+   carries the one-entry grandfather the enforcement section now
+   bounds by conformance (exactly one site and position, a second
+   entry fails, deletion asserted when the issue closes). The
+   bypass is neither permanent nor arbitrary; it is the honest
+   encoding of a surface fact this issue is contractually barred
+   from changing.
 
 3. **P1: message templates remain an unchecked leak path.** The
    registry declares fields and argument tuples but not the
