@@ -467,44 +467,45 @@ it, every declaration is evidenced); "provably complete" belongs
 to M2, when strict enforcement runs every production emission the
 lanes exercise through the validator.
 
-### The README table is checked, not generated
+### The schema reference is generated; the README table is a
+### name-checked overview
 
-The table's `when` cells carry prose worth keeping (they explain,
-per event, what moment of the system the event marks), so
-generating the whole table would trade away its best content. But
-free backticked prose is not a machine representation of a field
-set, the table holds 34 event rows against 57 declared events, and
-its lead sentence's base-field claim is only true for the session
-channel. M3 therefore restructures the table without discarding the
-prose:
+Round 2 settled the mechanism: parsing prose cells for field-level
+exactness is both impossible for `session_rejected` (one row cannot
+inhabit two channel tables, two rows fail a duplicate rule) and
+incomplete (levels, kinds, requiredness, nullability and tokens
+could drift while the parse stayed green). The repository already
+owns the right machinery, so M3 uses it:
 
-- The table splits into a session-channel table and a
-  server-channel table (matching how the payloads actually differ),
-  each section's lead sentence stating its own base fields
-  truthfully; the 23 missing events get rows, budgeted as M3's
-  main writing task.
-- The fields cell adopts a mechanically delimited grammar the
-  checker parses exactly: the cell is a comma-separated list of
-  `field` names, each optionally followed by one parenthesized
-  annotation; a token-set field's annotation lists every token in
-  backticks; prose lives inside the parentheses. The `when` cell
-  stays free prose.
-- `tests/unit/test_event_docs.py` then checks real agreement, both
-  directions at every layer: every registry event has exactly one
-  row and every row names a declared event (duplicates fail); each
-  row's parsed field list equals the declared non-base field set
-  exactly, so an extra documented field fails like a missing one;
-  each token-set field's parenthesized tokens equal the declared
-  set exactly, bogus tokens included; the two sections' event sets
-  match the channel split.
+- **A generated reference document**, the issue's own first
+  option: `samtal-server events reference` prints the complete
+  schema from the registry, one section per event, every variant
+  with its channel, level, template, argument kinds, and field
+  table (kind, required, nullable, tokens), exactly as
+  `config reference` and `conversations schema` already do for
+  their domains. It is committed as `docs/reference/events.md`,
+  and the CI workflow gains a drift step diffing the committed
+  file against a fresh generation, byte-identical or the build
+  fails, alongside the three existing drift checks. Every registry
+  property the documentation claims is therefore checked by
+  construction: the document IS the registry, rendered.
+- **The README prose table stays as the human overview**, `when`
+  cells and all, and gains the 23 missing events as name-and-prose
+  rows plus a pointer to the generated reference for the exact
+  schemas. `tests/unit/test_event_docs.py` checks it at NAME
+  level: every registry event appears in exactly one row, every
+  row names a declared event, no duplicates; `session_rejected` is
+  one row whose prose names both channels, which a name-level
+  check handles without a channel-table split. Field-level and
+  token-level prose in the table is illustrative, answered by the
+  generated reference rather than parsed; the lead sentence is
+  corrected to scope its base-field claim to the session channel.
 
-The check reads the table from the README at test time, so a table
-edit that breaks agreement fails the unit lane, which is what the
-acceptance criterion's "diff-checked in CI" means here. The
-mutation matrix covers every branch: a dropped row, a bogus row, a
-duplicate row, a dropped field mention, an EXTRA bogus field
-mention, a dropped token, and an extra bogus token, each observed
-failing and reverted.
+The mutation matrix follows the mechanism: a registry mutation
+(field added, token dropped, level changed) must make the CI drift
+step fail against the committed reference; a dropped, bogus, or
+duplicate README row must fail the name-level test; each observed
+and reverted.
 
 ### What is deliberately out of scope
 
@@ -1023,6 +1024,17 @@ eleven findings. As received, condensed but faithful:
    and channel or add a parsed channel column; compare every
    property the table claims, or generate a complete schema
    appendix.
+
+   *Resolution*: accepted, via the issue's first option. M3 now
+   generates `docs/reference/events.md` from the registry through
+   a `samtal-server events reference` command with a CI drift
+   step, exactly the machinery `config reference` and
+   `conversations schema` already use, so every declared property
+   is covered byte-for-byte; the README prose table remains the
+   human overview, gains the missing rows, and is checked at name
+   level only, which handles `session_rejected` as one row naming
+   both channels. The round-1 delimited-grammar design is
+   superseded. Amended in the M3 section.
 
 8. **P2: the `SOURCES` grammar admits `memory`, which
    `prompt_assembled` explicitly excludes.** Derive the forms from
