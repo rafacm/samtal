@@ -315,7 +315,9 @@ async def test_lookahead_stops_at_the_end_of_a_round() -> None:
 
     ran_at: list[float] = []
 
-    async def run_tools(calls: Any, switches_left: int) -> tuple[list[Any], None]:
+    async def run_tools(
+        calls: Any, slots: Any, switches_left: int
+    ) -> tuple[list[Any], None]:
         ran_at.append(asyncio.get_running_loop().time())
         return [], None
 
