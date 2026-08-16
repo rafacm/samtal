@@ -23,8 +23,10 @@ from sqlalchemy import inspect, text
 
 from samtal_server.app import create_app
 from samtal_server.config import Config
+from samtal_server.conversations import store as store_module
 from samtal_server.conversations.store import (
     DATABASE_FILENAME,
+    ConversationStore,
     conversations_path,
     open_conversations,
 )
@@ -167,6 +169,60 @@ def test_a_store_that_is_already_there_migrates_on_a_boot_that_records_nothing(
     version, tables = _stamped(path)
     assert version == head_revision(tmp_path)
     assert EXPECTED_TABLES <= tables
+
+
+def test_a_writer_that_cannot_start_leaves_stop_harmless(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A process out of threads is the case the lifespan's guard exists
+    for, so what it calls next has to survive it: the thread is kept only
+    once it is running, so `stop()` finds none to join and does what is
+    left, which is letting go of the file."""
+
+    class Refusing:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        def start(self) -> None:
+            raise RuntimeError("no threads left")
+
+    store = ConversationStore(tmp_path)
+    monkeypatch.setattr(store_module.threading, "Thread", Refusing)
+    with pytest.raises(RuntimeError):
+        store.start()
+
+    assert store._thread is None
+    # Harmless, and still idempotent.
+    store.stop()
+    store.stop()
+
+
+def test_a_start_failure_in_the_lifespan_still_stops_the_store(tmp_path: Path) -> None:
+    """The start is inside the lifespan's guarded region, so the writer
+    that failed to start is stopped by the same `finally` that stops one
+    that did."""
+    app = create_app(recording_config(tmp_path))
+    built = app.state.conversations
+    assert built is not None
+
+    class Failing:
+        stopped = False
+
+        def start(self) -> None:
+            raise RuntimeError("the writer would not start")
+
+        def stop(self) -> None:
+            Failing.stopped = True
+
+    app.state.conversations = Failing()
+    try:
+        with pytest.raises(RuntimeError):
+            with TestClient(app):
+                pass
+    finally:
+        built.stop()
+
+    assert Failing.stopped, "a start that failed was never stopped"
 
 
 def test_a_startup_failure_after_the_writer_started_still_stops_it(
