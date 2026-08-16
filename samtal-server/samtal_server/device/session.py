@@ -343,45 +343,57 @@ class DeviceSession:
         if hello is None:
             return
         self.protocol_version = hello.version
-        # Before the session_open event below, so that event is the first
-        # line of the decision track rather than missing from it, for the
-        # capture and for the store alike.
+        # The server hello goes out before either consumer opens, and it
+        # is the last thing that happens outside the guard below.
         #
-        # One manifest, two consumers: the capture writes it beside the
-        # audio and the store's session row is built from it, which is
-        # what "manifest-shaped" means concretely. The store attaches
-        # after the capture, so the dispatch order stays capture first,
-        # store second, log last.
-        manifest = self._manifest(client_id)
-        self._start_capture(manifest)
-        self._start_recording(manifest)
+        # Both halves of that matter. A device that vanishes here is a
+        # connection that recorded nothing, rather than a capture nobody
+        # closes and a session row nobody ends: the only way to promise
+        # that a record which was started is always finished is for
+        # nothing between the start and the `finally` to be able to fail
+        # first. And the hello is the one step that has to precede the
+        # opening, because everything after it is inside the guard.
         await self.websocket.send_text(messages.server_hello(self.session_id, OUTPUT_AUDIO))
-        self._events.info(
-            "session %s open: device %s (client %s) agent %s%s, protocol v%d, "
-            "%d Hz %d ms frames in",
-            self.session_id,
-            mac,
-            client_id or "unknown",
-            self._agent,
-            f" (also bound to {', '.join(self._agents[1:])})" if len(self._agents) > 1 else "",
-            self.protocol_version,
-            hello.audio_params.sample_rate,
-            hello.audio_params.frame_duration,
-            event="session_open",
-            client=client_id or None,
-            agent=self._agent,
-            agents=list(self._agents),
-            protocol=self.protocol_version,
-            # The widest payoff for one field: the JSON logs already
-            # ship to a collector, so every session from here on is
-            # attributable to a build, not only the ones somebody
-            # thought to investigate.
-            revision=revision(),
-        )
-        self._start_device_discovery(hello)
-        self._start_idle_watchdog()
 
         try:
+            # Before the session_open event below, so that event is the
+            # first line of the decision track rather than missing from
+            # it, for the capture and for the store alike.
+            #
+            # One manifest, two consumers: the capture writes it beside
+            # the audio and the store's session row is built from it,
+            # which is what "manifest-shaped" means concretely. The
+            # store attaches after the capture, so the dispatch order
+            # stays capture first, store second, log last.
+            manifest = self._manifest(client_id)
+            self._start_capture(manifest)
+            self._start_recording(manifest)
+            self._events.info(
+                "session %s open: device %s (client %s) agent %s%s, protocol v%d, "
+                "%d Hz %d ms frames in",
+                self.session_id,
+                mac,
+                client_id or "unknown",
+                self._agent,
+                f" (also bound to {', '.join(self._agents[1:])})"
+                if len(self._agents) > 1
+                else "",
+                self.protocol_version,
+                hello.audio_params.sample_rate,
+                hello.audio_params.frame_duration,
+                event="session_open",
+                client=client_id or None,
+                agent=self._agent,
+                agents=list(self._agents),
+                protocol=self.protocol_version,
+                # The widest payoff for one field: the JSON logs already
+                # ship to a collector, so every session from here on is
+                # attributable to a build, not only the ones somebody
+                # thought to investigate.
+                revision=revision(),
+            )
+            self._start_device_discovery(hello)
+            self._start_idle_watchdog()
             # The cap on a session's total life. The idle watchdog is
             # what ends an abandoned realtime conversation long before
             # this; what is left for the cap is the session that keeps
