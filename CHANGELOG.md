@@ -206,6 +206,27 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   where the probe lives, because the suites that inject it assert only
   that the provider kept the object it was handed, which a truthy probe
   would satisfy while testing nothing.
+- **The session suites stop importing each other** (#144): the session
+  family was a web of test modules borrowing helpers from each other,
+  with `test_session.py` alone imported by thirteen, so a suite about
+  capture or about the conversation store could not be read without
+  first reading the session suite it borrowed its handshake from. Seven
+  more modules under `tests/support` now hold what was shared, each
+  named for the seam it serves: `configs.py` (the configurations and
+  their constants), `providers.py` (the scripted models, ears, voices
+  and endpointer), `sockets.py` (the three device-socket stand-ins),
+  `wire.py` (driving a session over a real websocket and reading the
+  reply back), `sessions.py` (building one in process and driving a
+  reply through it), `events.py` (reading the structured log), and
+  `device_tools.py` (the board's half of the device tool channel). The
+  boundary pair (`StubRuntime` and its `FakeDevice`) is promoted to
+  `boundary.py` as the package's stated seam-testing template: name the
+  far side after the side it replaces, and give it only the calls the
+  near side makes. No test module imports `test_session*`,
+  `test_tools_device` or `test_boundary_contract` any more. Test-only:
+  no source file changes, no assertion changes, the collected count
+  unchanged, and every relocated definition compared against its origin
+  by normalized AST rather than by eye.
 
 ## 2026-08-15
 
