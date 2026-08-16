@@ -15,6 +15,7 @@ from samtal_server.config.models import ProviderConfig
 from samtal_server.providers import ProviderCallError, ProviderCallTimeout, build_provider
 from samtal_server.providers.base import ProviderError
 from samtal_server.providers.elevenlabs_tts import ElevenLabsTts
+from tests.support.llm_sdk import Falsey
 
 # Not a real credential, and shaped so a substring check for it cannot
 # match by accident. It stands in for what the API can echo back into
@@ -434,11 +435,6 @@ async def test_a_falsey_injected_client_is_still_the_one_used() -> None:
     """`client or ...` drops a double that answers False to a truth test,
     which any object defining __bool__ or __len__ does, and builds a real
     client in its place."""
-
-    class Falsey:
-        def __bool__(self) -> bool:
-            return False
-
     given = Falsey()
     tts = ElevenLabsTts(
         voice_id="voice-1",
