@@ -227,6 +227,31 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   no source file changes, no assertion changes, the collected count
   unchanged, and every relocated definition compared against its origin
   by normalized AST rather than by eye.
+- **No test module imports another, and a test says so** (#144): the
+  feature suites were the other half of the web, thirty-three imports
+  reaching into the OTA, onboarding, MCP, capture, conversations,
+  bindings, drain, memory and ws-auth suites. Four more modules under
+  `tests/support` hold what was shared: `checkin.py` (what a board says
+  at its configuration check and the ceremony that binds it),
+  `tools_mcp.py` (the MCP entries, the configurations that grant them,
+  and one real server hosted for the length of a block), `stores.py`
+  (the capture directory, the conversations database and the corrupted
+  memory file) and `registry.py` (the sessions a drain walks and the
+  bindings an operator writes). `configs.py`, `events.py`, `wire.py`
+  and `sessions.py` gained the rest. Collisions were settled by naming
+  rather than by merging: two manifests, two client builders, two
+  MAC constants and two configuration builders that were not the same
+  thing keep separate definitions with names that say which seam they
+  serve, and every importing site keeps its own spelling through an
+  import alias, so no assertion moved. The new
+  `tests/unit/test_support_boundaries.py` walks the whole lane with
+  `ast` and fails on a test module that imports another, at the top of
+  a file or inside a function, and on anything under `tests/support`
+  that imports a test module, so the criterion is enforced rather than
+  remembered; a conftest stays allowed. Test-only: no source file
+  changes, no assertion changes, the collected count up by exactly the
+  guard's four tests, and every relocated definition compared against
+  its origin by normalized AST rather than by eye.
 
 ## 2026-08-15
 
