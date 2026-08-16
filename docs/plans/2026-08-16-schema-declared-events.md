@@ -186,13 +186,19 @@ dataclasses and the declarations:
     the site;
   - `SOURCES`: the one structured kind, for `prompt_assembled`'s
     `sources`: a mapping whose keys follow the closed provenance
-    grammar (`persona`, `memory`, `fragment:<name>`,
-    `instructions:<entry>`, `server_instructions:<entry>`,
+    grammar of the KNOW-HOW half only (`persona`,
+    `fragment:<name>`, `instructions:<entry>`,
+    `server_instructions:<entry>`,
     `server_prompt:<entry>:<position>`, with `<name>` and
     `<entry>` configured identifiers and `<position>` a positive
-    integer) and whose values are counts. A key matching no
-    provenance form is a violation; M2's tests cover an empty
-    mapping, a populated one, and every provenance form.
+    integer) and whose values are counts. `memory` is NOT in the
+    grammar: `prompt_assembled` deliberately reports the cached
+    know-how half and excludes the per-round memory read, so a
+    `memory` key is a violation like any unknown prefix. M1
+    derives the allowed forms from the know-how builders rather
+    than from the provenance vocabulary at large, and M2's tests
+    cover an empty mapping, a populated one, every allowed form,
+    and the negative cases `memory` and an unknown prefix.
   `nullable` exists because the session scope's base `device` is
   `None` until the MAC is normalized, and only for fields like it.
 - `EventSpec(name, variants)`, where each `EventVariant` declares
@@ -1040,6 +1046,11 @@ eleven findings. As received, condensed but faithful:
    `prompt_assembled` explicitly excludes.** Derive the forms from
    the know-how builders; add negative tests for `memory` and
    unknown prefixes.
+
+   *Resolution*: accepted. `memory` is out of the grammar with the
+   exclusion stated, the forms derive from the know-how builders,
+   and the negative tests cover `memory` and an unknown prefix.
+   Amended in the registry section.
 
 9. **P2: token conformance by module-wide literal occurrence is
    too weak.** A docstring satisfies it, and
