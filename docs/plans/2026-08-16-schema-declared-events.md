@@ -58,8 +58,18 @@ main@f35001a, after #120's M5 narrowing and #144, the surface is:
   `samtal_server/` (the scan is this plan's tooling-backed
   inventory; it becomes a committed conformance test in M1 rather
   than a one-off). The count moved from the issue's 68 because #120
-  added the `conversations_*` events and M5 reshaped several fields;
-  the pin suites moved with them, so the contract files are current.
+  added the `conversations_*` events and M5 reshaped several fields.
+  The two contract pin files pin the surface as it stood at their
+  #138 baseline; the `conversations_*` events postdate it, appear
+  in NEITHER pin file, and their existing tests assert selected
+  attributes rather than the exact channel, sentence, arguments and
+  payload. M1 therefore adds a pre-enforcement characterization pin
+  file (`tests/unit/test_conversations_event_pins.py`, in the exact
+  style of the two contract files) covering the five store paths
+  and any other post-baseline path a diff of pinned event names
+  against the inventory turns up, committed green BEFORE any
+  enforcement exists, so M2's strict lanes stand on pins for the
+  whole surface. The two existing files stay byte-unchanged.
 - **One session channel and 13 server channels**: `SessionEvents`
   emits on `samtal_server.session`; `ServerEvents` is constructed
   with `__name__` in `registry`, `onboarding`, `ws`, `capture`,
@@ -435,6 +445,8 @@ failing and reverted.
 
 New: `samtal_server/events_schema.py`,
 `tests/unit/test_event_schema_conformance.py`,
+`tests/unit/test_conversations_event_pins.py` (M1, the
+post-baseline characterization pins),
 `tests/unit/test_event_docs.py`, this plan's implementation doc.
 
 Modified: `samtal_server/events.py` (M2, validation in the two
@@ -520,8 +532,12 @@ recorded in the PR body with observed failure output per branch.
       `samtal_server/events_schema.py` declares all 57 events with
       fields, kinds, levels, scopes, and token sets;
       `test_event_schema_conformance.py` ties every static emit
-      site to it and proves its own walk on planted source; no
-      enforcement wired; both lanes green, pin suites untouched.
+      site to it two ways and proves its own walk on planted
+      source; `test_conversations_event_pins.py` pins the
+      post-baseline paths exactly; the string-field provenance
+      inventory is recorded and the narrowing follow-up issue
+      filed; no enforcement wired; both lanes green, pin suites
+      untouched.
 - [ ] M2: the emitters enforce at emit time: strict raises
       `EventSchemaError`, forgiving drops offending fields and
       complains in one plain sentence, `SAMTAL_EVENTS_ENFORCEMENT`
@@ -720,6 +736,14 @@ Findings as received, condensed but faithful:
     loosely asserted. Add exact pre-enforcement characterization
     coverage for paths added since the pin files' baseline,
     without modifying those two files.
+
+    *Resolution*: accepted. The evidence section now states the
+    pin files' real baseline instead of claiming currency, and M1
+    adds `test_conversations_event_pins.py` in the contract files'
+    exact style, covering the five store paths plus whatever a
+    diff of pinned names against the inventory turns up, committed
+    green before enforcement. Amended in the evidence section, the
+    files list, and the M1 milestone.
 
 12. **P2: forgiving recovery is undefined where no field can be
     dropped.** Missing required field, wrong level, wrong scope
