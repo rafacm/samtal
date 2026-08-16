@@ -849,3 +849,252 @@ smoothed over.
 The pin suites and the event-assertion suites are still untouched
 relative to `origin/main`, which the same `git diff --stat` over the six
 of them answers with nothing.
+
+## Milestone 3: sessions, turns and events on the record
+
+The switch exists, and it does everything its documentation says.
+`server.conversations` turns recording on; `create_app` opens and
+migrates `conversations.db` and hands the store to the runtime factory;
+`DeviceSession` opens a session's row with the manifest the capture
+gets, attaches a per-session sink after the capture's tap, and closes
+the row after `session_closed`; and `session_closed` now says why a
+conversation ended. A server with no section behaves exactly as it did,
+which the rest of the unit lane passing unmodified beside this is the
+evidence for.
+
+Six commits. The one that lands this section and ticks the milestone is
+the seventh:
+
+1. `0d2a79a` Give the conversation store a configuration key
+2. `3f45eb1` Open the store when the server is asked for one
+3. `5f1e9e8` Say what ended a session, in a token
+4. `1868617` Record one session's events, turns and close
+5. `47ab588` Record a whole conversation against a real server
+6. `000a130` Say what the conversation store keeps, and how to read it
+7. `cccad2c` Record the store going live in the changelog
+
+### The key
+
+`ConversationsConfig` sits beside `DatabaseConfig` in
+`config/models.py`, with the four keys the plan specifies and comments
+in the `CaptureConfig` style (on their own line, above the key they
+describe). `retention_days` is `ge=0`, and a test pins its default equal
+to the store's own `RETENTION_DAYS_DEFAULT` rather than to the literal
+90, so the two places that carry the number cannot drift; importing the
+constant into the config models would have been a cycle
+(`conversations.store` imports `config.loader`).
+
+Both example files carry the block commented out. `config.example.yaml`
+gets the full one with the per-key comments and the 0-keeps-forever
+caveat; `config.deploy.example.yaml` gets the compact one its own
+conventions use for a key whose reasoning lives in the reference file,
+which is what it already does for `llm_first_token_timeout_s`.
+
+### The boot
+
+`create_app` builds the store cold before the runtime factory, because
+that closure is how a turn's record reaches it. Disabled or absent, it
+builds nothing and calls `migrate_existing`, a new helper in `store.py`
+that brings an existing file to head and creates none, so an upgraded
+deployment that records nothing today still serves what it recorded last
+month, and criterion 1 stays exactly true.
+
+The lifespan starts the writer first and stops it last. `stop()` is
+idempotent, so an app built and never entered leaks nothing, and the
+boot test asserts the thread is unstarted at `create_app` and stopped
+after a startup failure.
+
+### The session
+
+`DeviceSession` gained one optional collaborator, shaped exactly like
+`self._captures`. The manifest is now built once in `run` and handed to
+both consumers, which is what "manifest-shaped" means concretely: the
+session row and the capture's manifest file are compared to each other
+in the test rather than to a hand-written expectation.
+
+`SessionSink` (in `store.py`) is the per-session `EventTap`. It pops
+`event`, `session` and `device`, which live on the row and on the
+session, and hands the store the rest with the reading the emission was
+stamped at; the offset is the store's to compute, since only it knows
+what its session was opened at. Attached after the capture, so dispatch
+stays capture first, store second, log last, and the record is the
+decision track: `session_open` through `session_closed`.
+
+### The reason
+
+`session_closed` gained `reason`, latched once by the first termination
+to fire. The three cleanup steps ahead of the event are each guarded by
+`_cleanly`, which reports a failure by class on the session channel and
+latches `error` if nothing else was latched, so the event, the store's
+close and the capture's close always happen.
+
+### Deviations from the plan
+
+Five, each with its reason.
+
+1. **The sink wears one hat rather than two.** The plan describes "one
+   object wearing both hats", an `EventTap` that is also the runtime's
+   recorder. Milestone 2 built the recorder binder (`SessionTurns`) in
+   the composition root, where a runtime is constructed and where the
+   session id is first known; the device edge never sees a `TurnRecord`
+   and has nothing to hand one to. A `record_turn` on the sink would
+   therefore be surface with no reader. Both binders name the same store
+   and the same session id, which is the property the plan's single
+   object was for.
+2. **`request_shutdown` takes the token rather than each caller latching
+   before it calls.** The plan says callers latch before they begin
+   closing, and a parameter is that, implemented once: the latch is
+   ahead of the reply drain and the close by construction rather than by
+   three call sites remembering an order. The cost is one keyword on the
+   three callers and on `test_drain.py`'s two fake sessions, which now
+   also assert that a drain names itself.
+3. **The error latch catches `BaseException`, not `Exception`.** The
+   plan's wording is "the `finally` ran with anything else propagating",
+   and a cancellation is as much not-an-ordinary-end as an exception is:
+   uvicorn's fail-close after the drain bound cancels sessions, and a
+   session that ended that way did not end in a conversation. It is
+   re-raised untouched, and first-cause-wins means a drain that already
+   latched keeps `drain`.
+4. **The lifespan nests a region rather than moving the existing startup
+   work into one.** The plan's finding 16 asks for the store's start to
+   sit inside a guarded region so a later startup failure still reaches
+   its stop. Putting the filler synthesis and the MCP connects inside
+   that same region would also change what happens to *them* when
+   startup fails (today a failure there bypasses `stop_all`), which is a
+   behaviour change this milestone does not need and no test asks for.
+   So the store's `try` wraps the existing shape unchanged.
+5. **`_start_capture` takes the manifest instead of the client id.** The
+   plan asks for the store to be opened with the same manifest dict the
+   capture gets; that requires the dict to exist before either call, so
+   `run` builds it and both helpers receive it.
+
+### Discoveries
+
+- **A mock provider's options are part of the session row, so a sentinel
+  planted as the transcript is in the file whatever the text switch
+  says.** The manifest records the resolved provider entries verbatim
+  (deliberately: the exact model string is the only handle on a hosted
+  model that changed underneath), and in the unit lane the mock ASR's
+  configured `text` *is* the transcript. That is configuration, not
+  conversation, and it is not under either switch. The switch test
+  therefore plants the sentinel as the agent's prompt and has the mock
+  speak it back through `{system}`, so the only thing carrying it into
+  the record is conversation text, and text-off is then provably absent
+  from the file's bytes and its sidecars.
+- **`sessions.protocol` is TEXT, so the manifest's integer reads back as
+  `'1'`.** This milestone is the last that may amend the baseline in
+  place, so it was considered and declined: the column is an identifier
+  of a wire format rather than a number a query ranges over, the
+  committed reference already documents the type, and changing it would
+  move that reference and four suites' fixtures for no query anybody
+  would write. Recorded here so the next reader does not take it for a
+  defect.
+- **A websocket conversation with a real tool call needs no scripting
+  below the wire.** The mock LLM's `tool_when`/`tool_name` options plus
+  a configured memory directory give the unit lane a turn that calls the
+  `remember` builtin and speaks its result, which is what makes the
+  turn-and-invocation assertions run through `create_app` rather than
+  through a hand-built runtime.
+- **The sdk listens in realtime mode**, so two utterances on one
+  connection are one session with two turns. `conftest.converse` holds
+  one turn and hangs up, which would have been two sessions; the
+  integration test drives the client itself for that reason.
+
+### The suites
+
+Four modules, 39 new tests.
+
+- `tests/unit/test_config.py` (7 added): absent by default, off until
+  enabled, the stated defaults with the retention number pinned against
+  the store's own constant, `retention_days: 0`, a negative window and
+  an unknown key refused, and both example files leaving it off.
+- `tests/unit/test_conversations_boot.py` (8): an enabled boot creating
+  and migrating the file and saying so with the path; the file open and
+  the thread unstarted at `create_app`; three shapes of recording-off
+  creating nothing and saying nothing (there is deliberately no
+  disabled-mode event); an existing file behind head migrating on a boot
+  that records nothing; and a startup failure after the writer started
+  still stopping it.
+- `tests/unit/test_session_close_reason.py` (10): the five tokens at
+  their five sites, driven through a test client for the three a device
+  can produce and through `run` itself for the drain and the failure;
+  the competing-causes race; a runtime whose `close()` raises, reported
+  by class with its message hunted for; the latch and the default at
+  their one site; and the token set asserted equal to the schema's.
+- `tests/unit/test_conversations_session.py` (14): the session row
+  compared field by field against the capture's manifest for the same
+  session; the events rows compared against a spy standing *at* the sink
+  position (a subclass of it, so there is no second dispatch between
+  them), names and values verbatim, with every stored field name checked
+  against the README event table parsed out of the file; the turns and
+  their invocations with the measured numbers; the turn rows and the
+  event rows cross-checked; the session row readable from the open and a
+  mid-session read stopping at the last completed turn; the four switch
+  combinations with the sentinel on the file's bytes; and the
+  wedged-writer acceptance in its three parts (a queue whose blocking
+  `put` raises, a parked writer under an event-loop heartbeat with a
+  fixed bound, and the queue-full and failed-marker paths through the
+  bound and the engine seams).
+- `tests/integration/test_conversations.py` (2): a real server, the sdk
+  as the device, two utterances on one connection and a tool the device
+  itself serves, landing one session, two turns, a device-sourced
+  invocation under each and a decision track that agrees with them; and
+  the same deployment with no section leaving no file.
+
+### Verification
+
+From `samtal-server/`, at `cccad2c`:
+
+```
+$ uv run ruff check .
+All checks passed!
+```
+
+```
+$ uv run pytest tests/unit -q
+2173 passed, 15 skipped in 292.74s (0:04:52)
+```
+
+```
+$ uv run pytest tests/integration -q
+55 passed in 164.40s (0:02:44)
+```
+
+The unit lane was 2134 at milestone 2 and is 2173 here, which is exactly
+the 39 tests listed above, and the integration lane was 53 and is 55,
+which is the two; no other suite changed count. One pin moved,
+deliberately and in the same commit as the field it pins:
+`test_event_surface_pins.py::test_session_closed` now expects
+`reason: "client"`, which is what an ordinary end is.
+
+The plan's inventory pointers, re-run:
+
+```
+$ grep -c "text=" samtal_server/runtime/pipeline.py
+3
+$ grep -rn "request_shutdown(" samtal_server
+samtal_server/registry.py:98:                    session.request_shutdown(
+samtal_server/device/session.py:402:            await self.request_shutdown(
+samtal_server/device/session.py:442:    async def request_shutdown(
+samtal_server/device/session.py:718:            await self.request_shutdown(NORMAL_CLOSURE, "idle timeout", close_reason="idle")
+$ grep -n "RuntimeFactory =" samtal_server/device/boundary.py
+236:RuntimeFactory = Callable[[DeviceOutput, SessionEvents, Sequence[str]], SessionInput]
+```
+
+Three call sites and the definition: the duration cap and the idle
+watchdog name their tokens inline, the registry names `drain` in the
+call that spans lines 98 to 102, and the boundary type is byte-identical
+to the one milestone 2 left.
+
+`docs/reference/conversations-schema.md` is untouched, because no column
+and no comment moved; its drift test is green inside the lane above.
+
+The acceptance criteria this milestone names: 1 holds (an absent or
+disabled section creates no file, changes no event and leaves the lanes
+unmodified, asserted in both lanes); 2, 3 and 4 hold through the session
+and integration suites (the record is written off the audio path, audio
+never enters it, and the switches decide what a row keeps); 6 holds
+through the schema reference, which was generated in milestone 1 and
+still regenerates byte-identically. Criterion 5's pruning and purge were
+built in milestone 1 and are live from this release, and the README
+section is where an operator reads about them.
