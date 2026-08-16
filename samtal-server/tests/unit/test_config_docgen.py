@@ -1,9 +1,11 @@
 """The generated documentation, and the commands that print it.
 
-Two things are worth pinning here. That every domain field really is
+Three things are worth pinning here. That every domain field really is
 described, since an undescribed field is invisible in all three
-renderings at once; and that the reference is deterministic and the
-committed copy matches it, which is what CI diffs byte for byte.
+renderings at once; that the reference is deterministic and the
+committed copy matches it, which is what CI diffs byte for byte; and
+that the example files each entity points a reader at are the files
+that are actually there, in both directions.
 """
 
 import json
@@ -15,6 +17,7 @@ from samtal_server.config import cli, docgen
 from samtal_server.config.secrets import MASTER_KEY_ENV
 
 COMMITTED = Path(__file__).resolve().parents[3] / "docs" / "reference" / "domain-config.md"
+EXAMPLES = Path(__file__).resolve().parents[2] / "examples"
 
 
 @pytest.fixture
@@ -128,3 +131,41 @@ def test_a_nested_shape_has_no_fragment_command() -> None:
     """A filler section is written inside an agent, so the reference
     documents it without a command that would not exist."""
     assert docgen.entity("filler").command is None
+
+
+def _claims() -> dict[str, list[str]]:
+    """Which entity claims which example file, by filename."""
+    claimed: dict[str, list[str]] = {}
+    for entity in docgen.ENTITIES:
+        for filename in entity.examples:
+            claimed.setdefault(filename, []).append(entity.name)
+    return claimed
+
+
+def test_every_example_an_entity_names_is_a_file_that_exists() -> None:
+    """The reference links these by name, so a renamed or deleted
+    example turns into a link to nothing in the generated document and
+    in the fragment help at once."""
+    claimed = _claims()
+    assert claimed, "no entity names any example, so what follows is vacuous"
+
+    missing = sorted(name for name in claimed if not (EXAMPLES / name).is_file())
+    assert not missing, f"named in docgen.ENTITIES but not under examples/: {', '.join(missing)}"
+
+
+def test_every_example_file_is_claimed_by_exactly_one_entity() -> None:
+    """The other direction, which is what keeps a new example from
+    being added to one side only: a file no entity claims is a file no
+    reader is sent to, and a file two entities claim is one of them
+    documenting the wrong command for it."""
+    claimed = _claims()
+    present = sorted(path.name for path in EXAMPLES.glob("*.yaml"))
+    assert present, "no example files, so what follows is vacuous"
+
+    unclaimed = [name for name in present if name not in claimed]
+    assert not unclaimed, (
+        f"under examples/ but named by no entity in docgen.ENTITIES: {', '.join(unclaimed)}"
+    )
+
+    doubled = [f"{name} ({', '.join(claimed[name])})" for name in present if len(claimed[name]) > 1]
+    assert not doubled, f"named by more than one entity: {', '.join(doubled)}"
