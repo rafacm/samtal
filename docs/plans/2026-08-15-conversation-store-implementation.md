@@ -1750,8 +1750,9 @@ proof is mechanical and stated in the verification below: `git diff`
 against the milestone 4 tip is empty for every one of the store's own
 suites, and they pass.
 
-Eight commits. The one that lands this section and ticks the milestone is
-the ninth:
+Ten commits. The one that lands this section and ticks the milestone is
+the eleventh; the last two closed what a first pass had left open, which
+is recorded below rather than folded away:
 
 1. `8647aa2` Take the transcript off the heard event
 2. `12d5ad1` Take the reply off replied and agent_said
@@ -1761,6 +1762,8 @@ the ninth:
 6. `0da460f` Say which model answered, on the events that name a provider
 7. `b1f4637` Say the store is the record, everywhere it was the logs
 8. `970eae9` Record the narrowing in the changelog
+9. `e0e9c0d` Name nothing a peer chose on the refusal line either
+10. `9a9094d` Say what a capture writes, now that it writes no text
 
 ### The four events, and what their sentences say instead
 
@@ -1791,6 +1794,20 @@ argument. `_tool_named` is where the rule lives, a module function taking
 the `ToolInvocation` the classifier already produced, so the event and
 the `tool_invocations` row cannot disagree about what a call was: they
 are the same answer read twice.
+
+The refusal `_dispatch` writes about unparseable arguments reads the
+same function, and `_run_one` passes its classification down rather than
+letting the dispatch recompute one. It is a plain prose line and stays
+one: nothing about a refused call is worth a second name in a vocabulary
+that is a compatibility surface, and the `tool_call` event for the same
+call follows it a moment later. What it says is the source token, the
+name only where this server authored one, and the character count that
+replaced the model's bytes:
+
+```
+session <id>: builtin tool "remember" got 27 characters of unparseable arguments
+session <id>: unknown tool got 62 characters of unparseable arguments
+```
 
 ### The identity seam
 
@@ -1841,7 +1858,7 @@ disposition:
 | `docs/adr/2026-08-04-...md` (title, status, two consequences) | left as recorded and annotated: an ADR is a record of a decision, so the follow-up note says what changed rather than editing the decision under it |
 | `docs/adr/2026-08-15-...md` (context, decision, consequence) | the forward-looking tenses moved to the past; the recorded context is untouched |
 | `docs/plans/*`, `docs/features/*`, `CHANGELOG.md` history | left alone: dated records of what was true when they were written, and the changelog's new entries are where the change is announced |
-| `app.py:288` and `test_server_event_pins.py:1191` (the capture warning: "room audio and transcripts are being written to %s") | left alone, deliberately: it is a privacy warning about what a capture puts on disk, and the WAV still records everything said in the room. The decision track's inheritance of the narrowing is stated in the CHANGELOG. Rewording it would move a fifth pinned event sentence for a warning that would then understate what is being kept |
+| `app.py:288` and `test_server_event_pins.py:1191` (the capture warning: "room audio and transcripts are being written to %s") | rewritten in `9a9094d`, pin moved with it: the sentence now names room audio and a track of the session's events, which is what the two files hold. A first pass left it alone on the grounds that the WAV still records everything said in the room, which is true and is not the point: half the sentence described nothing on the disk, and a warning about a recording has to be exact in both directions |
 
 ### Deviations from the plan
 
@@ -1874,13 +1891,18 @@ Five, each with its reason.
    saying the narrowing "takes effect when #120 lands" would have left
    the two ADRs disagreeing about which side of the change the reader is
    on.
-5. **The malformed-arguments warning still names the tool it refused.**
-   The plan scopes this line to replacing the arguments with their
-   length, which is what landed. The name is a peer's bytes on every
-   branch but the builtin one, so this plain warning is now the only line
-   on the reply path that renders one; it is the published-name exposure
-   #154 recorded as a wider question, and it is left where #154 left it
-   rather than widened here. Stated as an open item below.
+5. **Two lines beyond the plan's list moved, both to the rule the plan
+   set.** The plan scopes the refusal line to replacing the arguments
+   with their length, and names four events. Landing exactly that left
+   the refusal line rendering a peer's tool name on three branches of
+   the classification this milestone had just taught `tool_call` to
+   respect, and left the capture warning announcing transcripts that the
+   decision track no longer holds. Both were corrected in `e0e9c0d` and
+   `9a9094d`, the second moving a fifth pinned sentence with it. What is
+   deliberately not widened here is the question underneath the first:
+   whether a published tool name may appear on any retained surface at
+   all is #154's, and this milestone answers it only where the narrowing
+   already reaches.
 
 ### Discoveries
 
@@ -1926,7 +1948,12 @@ surfaces, which is what makes them regressions rather than descriptions:
   because a payload check alone would miss a value that reached only the
   rendering.
 - `tests/unit/test_session_tools.py`: the malformed-arguments line is
-  asserted to report a length and to keep the bytes out of every record.
+  asserted to report a length, to name a builtin and nothing else, and
+  to keep both sentinels out of every record: the credential planted in
+  the arguments, and the credential-shaped name the second case makes
+  the call under.
+- `tests/unit/test_server_event_pins.py`: the capture warning's pin moves
+  with its sentence.
 - `tests/unit/test_providers.py`: every keyed provider type reports the
   model it was configured with on its identity, and the mocks report
   none. `tests/unit/test_providers_faster_whisper.py` covers the sixth
@@ -1938,7 +1965,7 @@ surfaces, which is what makes them regressions rather than descriptions:
 
 ### Verification
 
-From `samtal-server/`, at `970eae9`:
+From `samtal-server/`, at `9a9094d`:
 
 ```
 $ uv run ruff check .
@@ -1947,20 +1974,21 @@ All checks passed!
 
 ```
 $ uv run pytest tests/unit -q
-2222 passed, 16 skipped in 300.60s (0:05:00)
+2223 passed, 16 skipped in 300.64s (0:05:00)
 ```
 
 ```
 $ uv run pytest tests/integration -q
-55 passed in 164.82s (0:02:44)
+55 passed in 163.37s (0:02:43)
 ```
 
-The unit lane was 2209 passed and 15 skipped at milestone 4 and is 2222
-and 16 here: thirteen new tests (three utterance and reply sentinels,
-three extra `tool_call` branches, the malformed-arguments case, five
+The unit lane was 2209 passed and 15 skipped at milestone 4 and is 2223
+and 16 here: fourteen new tests (three utterance and reply sentinels,
+three extra `tool_call` branches, two malformed-arguments cases, five
 parameterized provider-model cases and the no-model case) and one more
 skip, the faster-whisper case, which skips wherever that extra is not
-installed.
+installed. The lanes were green at `970eae9` as well, before the two
+commits that closed the open items; these are the numbers at the tip.
 
 The committed artifacts regenerate byte-identically:
 
@@ -2021,13 +2049,20 @@ milestone 3; what this milestone adds is the narrowing itself, the
 renames, the model field, the documentation sweep and the follow-up note
 dated the day it happened.
 
-### Left open
+### Resolved after the first pass
 
-- The malformed-arguments warning still renders `call.name`, which is a
-  peer's bytes on the device, MCP and unknown branches. Deliberate, and
-  the same published-name question #154 recorded on this event's
-  neighbour; the `tool_call` event itself names nothing there.
-- The `capture_enabled` warning still says "room audio and transcripts".
-  True of the WAV, no longer of the decision track beside it. Left for a
-  round that is about the capture's own wording rather than about this
-  surface.
+Two items this section listed as open, closed in the two commits above
+rather than left for a review round to find:
+
+- **The refusal line named what a peer chose.** `_dispatch`'s warning
+  rendered `call.name` on every branch, which is the board's vocabulary
+  on a device tool and the model's own invention on an unknown one. It
+  now reads the same `_tool_named` the event does, so the plain line and
+  the structured one describe a call identically. The wider
+  published-name question stays #154's: what changed here is that this
+  milestone's own rule is applied consistently, not that the rule itself
+  was extended.
+- **The capture warning announced transcripts.** The decision track
+  inherits the narrowing, so it holds none; the sentence now names room
+  audio and a track of the session's events, its pin moved with it, and
+  the CHANGELOG's capture entry says it in the same words.
