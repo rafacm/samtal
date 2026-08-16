@@ -83,18 +83,17 @@ from samtal_server.providers import build_agent_providers
 from samtal_server.providers.openai_asr import OpenAiAsr
 from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
-from tests.support.configs import config_with_agent, masked_config
+from tests.support.configs import BOUND_MAC, config_with_agent, masked_config
+from tests.support.configs import BOUND_MAC as DB_BOUND_MAC
 from tests.support.events import only
 from tests.support.providers import BrokenTts
 from tests.support.wire import connect, shake_hands
 from tests.unit.test_capture import MANIFEST, store, tone
 from tests.unit.test_device_bindings import AGENT, STAGES, booted
-from tests.unit.test_device_bindings import BOUND_MAC as DB_BOUND_MAC
 from tests.unit.test_device_bindings import DEVICE_MAC as DB_DEVICE_MAC
 from tests.unit.test_device_bindings import check_in as db_check_in
 from tests.unit.test_drain import FakeSession, registry_with
 from tests.unit.test_onboarding_activation import (
-    BOUND_MAC,
     NORMALIZED,
     activate,
     check_in,

@@ -8,23 +8,7 @@ from pydantic import ValidationError
 
 from samtal_server.config import Config, McpServerConfig, resolve_env_references
 from samtal_server.config.models import AgentConfig, mcp_entry_fragment
-
-
-def config_with(**overrides: object) -> Config:
-    """A minimal valid configuration, plus whatever the test is about."""
-    base: dict[str, object] = {
-        "providers": {
-            "llm": {"mock": {"type": "mock"}},
-            "asr": {"mock": {"type": "mock"}},
-            "tts": {"mock": {"type": "mock"}},
-            "vad": {"mock": {"type": "mock"}},
-        },
-        "agent_defaults": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
-        "agents": {"assistant": {"prompt": "A"}},
-        "default_agent": "assistant",
-    }
-    return Config(**(base | overrides))
-
+from tests.support.configs import config_with
 
 STDIO = {"transport": "stdio", "command": "mcp-proxy", "args": ["http://ha/sse"]}
 HTTP = {"transport": "streamable_http", "url": "http://localhost:8000/mcp"}

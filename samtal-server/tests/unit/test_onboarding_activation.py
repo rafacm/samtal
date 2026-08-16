@@ -30,6 +30,7 @@ from samtal_server.onboarding import (
     onboarding_path,
 )
 from samtal_server.ota import ACTIVATE_SEGMENT, OTA_PATH
+from tests.support.configs import BOUND_MAC
 from tests.unit.test_ota import DEVICE_MAC, DEVICE_UUID, MOCK_AGENT, MOCK_PROVIDERS, SYSTEM_INFO
 
 AUTH_SECRET_ENV = "SAMTAL_AUTH_SECRET"
@@ -39,12 +40,6 @@ HEADERS = {"Device-Id": DEVICE_MAC, "Client-Id": DEVICE_UUID}
 # The canonical form of the MAC above, which is what the challenge, the
 # pending entry and the bound row all carry.
 NORMALIZED = DEVICE_MAC.lower()
-
-# A board this deployment already had. The completeness rule refuses a
-# configuration with an agent nothing reaches, so a configuration whose
-# device under test is unbound needs a second, bound one, which is also
-# the ordinary shape of onboarding a second board.
-BOUND_MAC = "11:22:33:44:55:01"
 
 
 def nth_mac(index: int) -> str:

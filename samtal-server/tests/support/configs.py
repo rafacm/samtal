@@ -5,8 +5,9 @@ session builder, and the constants such a configuration names: the
 device identity a handshake presents, the audio shapes the wire is
 agreed on, the two personas' MAC addresses and tones. Nothing here
 constructs a session or touches a socket, so this module imports only
-`samtal_server` and the standard library, which is what keeps the rest
-of the package free to import it.
+`samtal_server`, the standard library and the YAML parser the loader
+itself uses, which is what keeps the rest of the package free to import
+it.
 
 A builder here takes overrides rather than being copied and edited: a
 suite that needs one field different asks for that field, so a change to
@@ -14,16 +15,28 @@ the shared shape reaches every suite at once.
 """
 
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
-from samtal_server.config import Config
+import yaml
+
+from samtal_server.config import Config, compose_config, load_file_config
+from samtal_server.config.models import DOMAIN_KEYS
 
 # --- the device the handshake presents -------------------------------
 
 
 DEVICE_MAC = "AA:BB:CC:DD:EE:FF"
 DEVICE_UUID = "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
+
+
+# A board this deployment already onboarded, which is what makes a
+# configuration bootable while the device under test is unbound: the
+# completeness rule refuses a configuration with an agent that no device
+# and no default agent reaches. Onboarding a second board is therefore
+# the ordinary shape of an onboarding or binding test, not a contrivance.
+BOUND_MAC = "11:22:33:44:55:01"
 
 
 DEVICE_HELLO = {
@@ -234,3 +247,85 @@ def idle_config(seconds: float, **kwargs: Any):
     config.server.limits.idle_timeout_s = seconds
     config.server.limits.max_session_s = BACKSTOP_S
     return config
+
+
+def config_with(**overrides: object) -> Config:
+    """A minimal valid configuration, plus whatever the test is about."""
+    base: dict[str, object] = {
+        "providers": {
+            "llm": {"mock": {"type": "mock"}},
+            "asr": {"mock": {"type": "mock"}},
+            "tts": {"mock": {"type": "mock"}},
+            "vad": {"mock": {"type": "mock"}},
+        },
+        "agent_defaults": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
+        "agents": {"assistant": {"prompt": "A"}},
+        "default_agent": "assistant",
+    }
+    return Config(**(base | overrides))
+
+
+def recording_config(
+    tmp_path: Path,
+    asr_text: str = "remember that I like tea",
+    llm: dict[str, object] | None = None,
+    capture: bool = False,
+    prompt: str | None = None,
+    **conversations: object,
+) -> Config:
+    """A server that records, with its databases where a test can read
+    them.
+
+    The mock LLM asks for the `remember` builtin on the first round of a
+    turn whose transcript carries the trigger and speaks the result on
+    the second, so an ordinary websocket conversation lands a turn with a
+    tool invocation under it without anything scripted below the wire.
+    """
+    section: dict[str, object] = {"enabled": True}
+    section.update(conversations)
+    server: dict[str, object] = {
+        "database": {"dir": str(tmp_path)},
+        "conversations": section,
+    }
+    if capture:
+        server["capture"] = {"enabled": True, "dir": str(tmp_path / "captures")}
+    return Config(
+        server=server,
+        memory={"dir": str(tmp_path / "memory")},
+        providers={
+            "llm": {
+                "mock": llm
+                or {
+                    "type": "mock",
+                    "reply": "Noted: {tool_result}.",
+                    "tool_when": "remember",
+                    "tool_name": "remember",
+                    "tool_arguments": {"text": "the user likes tea"},
+                }
+            },
+            "asr": {"mock": {"type": "mock", "text": asr_text}},
+            "tts": {"mock": {"type": "mock"}},
+            "vad": {"mock": {"type": "mock"}},
+        },
+        agents={
+            "assistant": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
+            | ({} if prompt is None else {"prompt": prompt})
+        },
+        default_agent="assistant",
+    )
+
+
+def load_config_from_data(data: dict) -> Config:
+    """One mapping through the whole boot composition: the server half
+    written to a temporary YAML file and read by the real loader, the
+    domain half composed onto it the way the database's snapshot is.
+
+    Two halves, one call, because these tests are about what a
+    configuration means rather than about where each half was kept, and
+    they said the same thing when one file held both."""
+    file_data = {key: value for key, value in data.items() if key not in DOMAIN_KEYS}
+    domain_data = {key: value for key, value in data.items() if key in DOMAIN_KEYS}
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "config.yaml"
+        path.write_text(yaml.safe_dump(file_data), encoding="utf-8")
+        return compose_config(load_file_config(path), domain_data, str(path))

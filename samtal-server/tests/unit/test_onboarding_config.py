@@ -22,7 +22,7 @@ import pytest
 from samtal_server.config import Config, ConfigError
 from samtal_server.config.cli import main
 from samtal_server.config.models import ONBOARDING_MOUNT_PATH
-from tests.unit.test_config import load_config_from_data
+from tests.support.configs import load_config_from_data
 
 # Not a real credential, and shaped so a substring check for it cannot
 # match by accident.

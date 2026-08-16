@@ -30,16 +30,10 @@ from samtal_server.db import open_database, read_engine, schema
 from samtal_server.device.bindings import DeviceBindings
 from samtal_server.ota import OTA_PATH
 from samtal_server.ws import WEBSOCKET_PATH
+from tests.support.configs import BOUND_MAC
 
 DEVICE_MAC = "aa:bb:cc:dd:ee:ff"
 DEVICE_UUID = "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
-
-# A board this deployment already onboarded, which is what makes the
-# database a bootable one while the device under test is unbound: boot
-# refuses a configuration with agents that no device and no default
-# agent reaches. Onboarding a second board is therefore the ordinary
-# shape of these tests, not a contrivance.
-BOUND_MAC = "11:22:33:44:55:01"
 
 # Not a real credential, and shaped so a substring check for it cannot
 # match by accident. It stands for whatever a database error carries
