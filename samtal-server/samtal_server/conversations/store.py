@@ -69,7 +69,7 @@ from samtal_server.conversations.records import ToolInvocation, TurnLeg, TurnRec
 from samtal_server.conversations.schema import events as events_table
 from samtal_server.conversations.schema import sessions, tool_invocations, turns
 from samtal_server.db import BUSY_TIMEOUT_MS, existing_engine, open_at
-from samtal_server.events import ServerEvents
+from samtal_server.events import Emission, ServerEvents
 
 events = ServerEvents(__name__)
 
@@ -814,6 +814,40 @@ class ConversationStore:
             )
 
 
+@dataclass(frozen=True)
+class SessionSink:
+    """One session's tap into the store, attached where the capture's is.
+
+    An `EventTap` and nothing more: it takes the emission every other
+    consumer is offered and hands the store the three things a row keeps
+    that the payload does not already carry as columns. `event`,
+    `session` and `device` are popped because they live on the row and on
+    the session; what is left is the event's own fields, whose names are
+    the vocabulary's, which is the contract.
+
+    The reading rides along rather than the offset. Only the store knows
+    what its session was opened at, which is the same rule the turn
+    records follow, so both halves of a session's timeline are measured
+    from one origin.
+
+    Never blocking and never raising is the contract, as it is for every
+    tap: this runs on the session loop, and the whole write path exists
+    so that a database cannot make a reply wait.
+    """
+
+    store: "ConversationStore"
+    session_id: str
+
+    def emit(self, emission: Emission) -> None:
+        fields = dict(emission.payload)
+        name = str(fields.pop("event", ""))
+        fields.pop("session", None)
+        fields.pop("device", None)
+        self.store.record_event(
+            self.session_id, name, emission.level, fields, emission.at
+        )
+
+
 def purge(
     directory: str | Path,
     session: str | None = None,
@@ -990,6 +1024,7 @@ __all__ = [
     "Deletion",
     "Event",
     "Open",
+    "SessionSink",
     "Turn",
     "conversations_path",
     "migrate_existing",

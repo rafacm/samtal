@@ -1,0 +1,629 @@
+"""What a real conversation leaves in the store.
+
+The store's own suites drive its seams with hand-built records. This one
+holds conversations over a websocket against a booted server and reads
+the file afterwards, which is the only place three claims can be checked
+at once: that the session row is the same shape as the capture's
+manifest, that the events rows are the decision track verbatim, and that
+the turn rows and the event rows agree about what happened.
+
+The last of those is the "two sources of one truth" risk the plan names.
+A turn is assembled by the reply path while the events flow through the
+tap, so the two could drift; the cross-check below makes that a test
+failure rather than a discovery during an investigation.
+
+Everything about a wedged database is deterministic rather than timed:
+the writer parks on the injected gate, the producer's bound is moved to
+zero, and a raising engine is swapped in at a marker. A wall clock is
+used for the one thing it has to be, the assertion that a reply does not
+wait for any of it.
+"""
+
+import asyncio
+import json
+import re
+import threading
+import time
+from pathlib import Path
+from typing import Any
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import text
+
+from samtal_server.app import create_app
+from samtal_server.audio.opus import OpusEncoder
+from samtal_server.config import Config
+from samtal_server.conversations import store as store_module
+from samtal_server.conversations.store import (
+    ConversationStore,
+    SessionSink,
+    conversations_path,
+    read_conversations,
+)
+from samtal_server.device import session as session_module
+from samtal_server.events import Emission
+from tests.unit.test_conversations_store import Gate
+from tests.unit.test_session import (
+    DEVICE_MAC,
+    DEVICE_UUID,
+    connect,
+    say_something,
+    send_pcm,
+    sentences,
+    shake_hands,
+    speech_pcm,
+)
+from tests.unit.test_session_close_reason import open_session
+from tests.unit.test_session_tools import drive_reply
+
+README = Path(__file__).resolve().parents[2] / "README.md"
+
+# A value that has no business anywhere in the file when text storage is
+# off, shaped like something an operator would be horrified to find.
+SENTINEL = "hunter2-not-a-real-credential-9f31c7"
+
+# The same, for an exception message, since a failure report must carry
+# a class name and nothing else.
+POISON = "sk-poison-4b1e-never-a-real-credential"
+
+# Long enough that a wedged writer fails an assertion rather than the
+# suite's own scheduling, and never reached when the code is correct.
+TIMEOUT_S = 30.0
+
+# One frame of silence, which the mock ASR answers with the configured
+# transcript.
+UTTERANCE = b"\x00\x00" * 320
+
+
+def recording_config(
+    tmp_path: Path,
+    asr_text: str = "remember that I like tea",
+    llm: dict[str, object] | None = None,
+    capture: bool = False,
+    prompt: str | None = None,
+    **conversations: object,
+) -> Config:
+    """A server that records, with its databases where a test can read
+    them.
+
+    The mock LLM asks for the `remember` builtin on the first round of a
+    turn whose transcript carries the trigger and speaks the result on
+    the second, so an ordinary websocket conversation lands a turn with a
+    tool invocation under it without anything scripted below the wire.
+    """
+    section: dict[str, object] = {"enabled": True}
+    section.update(conversations)
+    server: dict[str, object] = {
+        "database": {"dir": str(tmp_path)},
+        "conversations": section,
+    }
+    if capture:
+        server["capture"] = {"enabled": True, "dir": str(tmp_path / "captures")}
+    return Config(
+        server=server,
+        memory={"dir": str(tmp_path / "memory")},
+        providers={
+            "llm": {
+                "mock": llm
+                or {
+                    "type": "mock",
+                    "reply": "Noted: {tool_result}.",
+                    "tool_when": "remember",
+                    "tool_name": "remember",
+                    "tool_arguments": {"text": "the user likes tea"},
+                }
+            },
+            "asr": {"mock": {"type": "mock", "text": asr_text}},
+            "tts": {"mock": {"type": "mock"}},
+            "vad": {"mock": {"type": "mock"}},
+        },
+        agents={
+            "assistant": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
+            | ({} if prompt is None else {"prompt": prompt})
+        },
+        default_agent="assistant",
+    )
+
+
+def read(directory: Path, statement: str) -> list[dict[str, Any]]:
+    """Whatever is committed right now, read the way anything else reads
+    a live store: a second connection, no migration, no lock."""
+    engine = read_conversations(directory)
+    try:
+        with engine.connect() as connection:
+            return [dict(row) for row in connection.execute(text(statement)).mappings()]
+    finally:
+        engine.dispose()
+
+
+def until(ready: Any, complaint: str) -> Any:
+    """Wait for what a test is about, on a running writer. A wait that
+    never ends is the test failing with its own sentence."""
+    deadline = time.monotonic() + TIMEOUT_S
+    while time.monotonic() < deadline:
+        answer = ready()
+        if answer:
+            return answer
+        time.sleep(0.005)
+    raise AssertionError(complaint)
+
+
+def documented_fields() -> dict[str, set[str]]:
+    """The README's event table, as event name to the field names its row
+    names.
+
+    The vocabulary's authority is that table (the schema reference points
+    at it rather than restating thirty rows), so it is what the stored
+    field names are checked against. Only the Logging section is read,
+    since a three-column table elsewhere in the README is about something
+    else entirely.
+    """
+    table: dict[str, set[str]] = {}
+    inside = False
+    for line in README.read_text(encoding="utf-8").splitlines():
+        if line.startswith("## "):
+            inside = line.strip() == "## Logging"
+            continue
+        if not inside:
+            continue
+        found = re.match(r"^\| `(\w+)`\s*\|(.*)\|(.*)\|\s*$", line)
+        if found:
+            table[found.group(1)] = set(re.findall(r"`(\w+)`", found.group(3)))
+    return table
+
+
+class SpyingSink(SessionSink):
+    """The sink itself, keeping what it was offered on the way through.
+
+    A spy at the same tap position rather than beside it: attached
+    separately it would be one dispatch away from what the store sees,
+    and the claim under test is precisely that the rows are what this
+    position was handed.
+    """
+
+    seen: list[Emission] = []
+
+    def emit(self, emission: Emission) -> None:
+        SpyingSink.seen.append(emission)
+        super().emit(emission)
+
+
+@pytest.fixture
+def spy(monkeypatch: pytest.MonkeyPatch) -> list[Emission]:
+    SpyingSink.seen = []
+    monkeypatch.setattr(session_module, "SessionSink", SpyingSink)
+    return SpyingSink.seen
+
+
+# The record one conversation leaves
+
+
+def test_a_conversation_lands_a_session_row_shaped_like_the_manifest(
+    tmp_path: Path,
+) -> None:
+    """One manifest, two consumers. The capture is switched on here so
+    that the two records of the same session are compared against each
+    other rather than against a hand-written expectation."""
+    with TestClient(create_app(recording_config(tmp_path, capture=True))) as client:
+        with connect(client) as websocket:
+            session_id = shake_hands(websocket)["session_id"]
+            say_something(websocket)
+
+    (row,) = read(tmp_path, "select * from sessions")
+    (manifest_file,) = (tmp_path / "captures").glob("*.json")
+    manifest = json.loads(manifest_file.read_text())
+
+    assert row["session"] == session_id == manifest["session"]
+    assert row["device"] == manifest["device"]["mac"] == DEVICE_MAC.lower()
+    assert row["client"] == manifest["device"]["client"] == DEVICE_UUID
+    assert row["agent"] == manifest["agent"] == "assistant"
+    assert json.loads(row["agents"]) == manifest["agents"] == ["assistant"]
+    # The column is TEXT, so the negotiated version reads back as the
+    # text of the number the manifest carries.
+    assert row["protocol"] == str(manifest["protocol"]) == "1"
+    assert row["started_at"] == manifest["started_at"]
+    assert row["server_version"] == manifest["server"]["version"]
+    assert row["revision"] == manifest["server"]["revision"]
+    assert json.loads(row["providers"]) == manifest["providers"]
+    # Which way the switches were set for this session, so a null column
+    # elsewhere is distinguishable from a column never stored.
+    assert (row["metrics"], row["text"]) == (1, 1)
+    # And the close, which only this record has: the capture's manifest
+    # says whether it completed, this says why it ended.
+    assert row["closed_at"] is not None
+    assert row["duration_s"] >= 0
+    assert row["close_reason"] == "client"
+    assert row["dropped"] == 0
+
+
+def test_the_events_rows_are_the_decision_track_verbatim(
+    tmp_path: Path, spy: list[Emission]
+) -> None:
+    with TestClient(create_app(recording_config(tmp_path))) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            say_something(websocket)
+
+    rows = read(tmp_path, "select * from events order by id")
+    documented = documented_fields()
+
+    # One row per event this tap position was offered, in the order it
+    # was offered them: the decision track, session_open through
+    # session_closed.
+    assert [row["name"] for row in rows] == [e.payload["event"] for e in spy]
+    assert rows[0]["name"] == "session_open"
+    assert rows[-1]["name"] == "session_closed"
+
+    for row, emission in zip(rows, spy, strict=True):
+        fields = json.loads(row["fields"])
+        expected = {
+            key: value
+            for key, value in emission.payload.items()
+            if key not in {"event", "session", "device"}
+            and key not in store_module.EVENT_CONTENT.get(row["name"], ())
+        }
+        # Copied verbatim, names and values alike: the store adds no
+        # drift of its own, which is what lets the schema reference point
+        # at the README table instead of restating it.
+        assert fields == expected, row["name"]
+        assert row["level"] == emission.level
+        assert row["t_ms"] >= 0
+        # And every name it copied is one that table names.
+        assert row["name"] in documented, row["name"]
+        assert set(fields) <= documented[row["name"]], row["name"]
+
+
+def test_the_turns_and_their_tool_calls_land_with_their_numbers(
+    tmp_path: Path,
+) -> None:
+    with TestClient(create_app(recording_config(tmp_path))) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            first_reply, _ = say_something(websocket)
+            second_reply, _ = say_something(websocket)
+
+    turns = read(tmp_path, "select * from turns order by id")
+    calls = read(tmp_path, "select * from tool_invocations order by id")
+
+    assert len(turns) == 2
+    first, second = turns
+    assert first["t_ms"] <= second["t_ms"]
+    for turn, spoken in zip(turns, (first_reply, second_reply), strict=True):
+        assert turn["agent"] == "assistant"
+        assert turn["heard"] == "remember that I like tea"
+        # What was stored is what the device was told, sentence for
+        # sentence.
+        assert turn["reply"] == " ".join(sentences(spoken))
+        assert turn["legs"] is None, "a single-agent turn has no legs to record"
+        # Two rounds: the one that asked for the tool, and the one that
+        # spoke the result.
+        assert turn["rounds"] == 2
+        assert turn["tool_calls"] == 1
+        assert turn["heard_duration_s"] > 0
+        assert turn["asr_ms"] is not None
+        assert turn["llm_ms"] is not None
+        assert turn["first_token_ms"] is not None
+        assert turn["tts_first_audio_ms"] is not None
+
+    assert [call["turn"] for call in calls] == [first["id"], second["id"]]
+    for call in calls:
+        assert call["position"] == 0
+        assert call["source"] == "builtin"
+        assert call["entry"] is None
+        assert call["name"] == "remember"
+        assert json.loads(call["arguments"]) == {"text": "the user likes tea"}
+        assert call["malformed"] == 0
+        assert call["is_error"] == 0
+        assert call["duration_ms"] is not None
+
+
+def test_the_turn_rows_and_the_event_rows_agree(tmp_path: Path) -> None:
+    """The two halves are assembled by different code from different
+    sources, so drift between them is the risk. One utterance is one
+    `heard`, one turn's rounds are its `llm_round` events, and one turn's
+    calls are its `tool_call` events."""
+    with TestClient(create_app(recording_config(tmp_path))) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            say_something(websocket)
+            say_something(websocket)
+
+    turns = read(tmp_path, "select * from turns")
+    events = read(tmp_path, "select name, fields from events")
+    named = [row["name"] for row in events]
+
+    assert len(turns) == named.count("heard") == 2
+    assert sum(turn["rounds"] for turn in turns) == named.count("llm_round")
+    assert sum(turn["tool_calls"] for turn in turns) == named.count("tool_call")
+    agents = {
+        json.loads(row["fields"]).get("agent")
+        for row in events
+        if row["name"] == "heard"
+    }
+    assert agents == {turn["agent"] for turn in turns} == {"assistant"}
+
+
+# What a reader sees while the conversation is still going
+
+
+def test_the_session_row_is_there_from_the_open(tmp_path: Path) -> None:
+    # The open is its own marker, so a page opened mid conversation finds
+    # the session rather than nothing until it ends.
+    with TestClient(create_app(recording_config(tmp_path))) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            (row,) = until(
+                lambda: read(tmp_path, "select * from sessions"),
+                "the session row never appeared while the session was open",
+            )
+            assert row["closed_at"] is None
+            assert row["close_reason"] is None
+            assert row["duration_s"] is None
+
+
+def test_a_mid_session_read_stops_at_the_last_completed_turn(
+    tmp_path: Path, spy: list[Emission]
+) -> None:
+    """The marker policy, from outside: a turn commits everything up to
+    itself, and the utterance being answered right now is still in
+    memory. So a reader sees whole turns and never half of one.
+
+    The second utterance is taken as far as its `heard`, which the spy
+    reports having been offered; the reply it starts then runs for the
+    length of a spoken answer, which is the window this reads in."""
+    with TestClient(create_app(recording_config(tmp_path))) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            say_something(websocket)
+            until(
+                lambda: read(tmp_path, "select * from turns"),
+                "the first turn never committed",
+            )
+            websocket.send_text(
+                json.dumps({"type": "listen", "state": "start", "mode": "manual"})
+            )
+            send_pcm(websocket, speech_pcm(300), OpusEncoder())
+            websocket.send_text(json.dumps({"type": "listen", "state": "stop"}))
+            until(
+                lambda: sum(1 for e in spy if e.payload["event"] == "heard") == 2,
+                "the second utterance was never heard",
+            )
+
+            assert len(read(tmp_path, "select * from turns")) == 1
+            heard = read(tmp_path, "select * from events where name = 'heard'")
+            assert len(heard) == 1, "the open turn's utterance was already visible"
+
+
+# The switches, on the file
+
+
+@pytest.mark.parametrize("metrics", [True, False])
+@pytest.mark.parametrize("text_storage", [True, False])
+def test_the_switch_combinations_decide_what_a_row_keeps(
+    tmp_path: Path, metrics: bool, text_storage: bool
+) -> None:
+    # The sentinel is planted as the agent's prompt and spoken back by
+    # the mock, so what carries it into the record is conversation text
+    # and only that. Planting it as the transcript would put it in the
+    # provider entries the session row records verbatim, which is
+    # configuration rather than conversation and is deliberately not
+    # under either switch.
+    config = recording_config(
+        tmp_path,
+        asr_text="hello",
+        llm={"type": "mock", "reply": "You said {system}."},
+        prompt=SENTINEL,
+        metrics=metrics,
+        text=text_storage,
+    )
+    with TestClient(create_app(config)) as client:
+        with connect(client) as websocket:
+            shake_hands(websocket)
+            say_something(websocket)
+
+    (session,) = read(tmp_path, "select * from sessions")
+    (turn,) = read(tmp_path, "select * from turns")
+    events = read(tmp_path, "select * from events")
+
+    # The spine lands in every enabled configuration: retention, purging
+    # and every read key on it.
+    assert session["session"] and session["started_at"] and session["closed_at"]
+    assert (session["metrics"], session["text"]) == (int(metrics), int(text_storage))
+    # The structural half of a turn survives both switches, being neither
+    # a measured number nor conversation text.
+    assert turn["agent"] == "assistant"
+    assert turn["tool_calls"] == 0
+
+    assert (turn["heard"] is not None) is text_storage
+    assert (turn["reply"] is not None) is text_storage
+    assert (turn["rounds"] is not None) is metrics
+    assert (turn["llm_ms"] is not None) is metrics
+    assert (session["duration_s"] is not None) is metrics
+    assert bool(events) is metrics
+
+    # The switch on the file rather than in the query planner: what was
+    # said reaches no byte of the database when text storage is off.
+    assert (SENTINEL.encode() in _bytes_of(tmp_path)) is text_storage
+
+
+def _bytes_of(directory: Path) -> bytes:
+    """The database and its sidecars, which is where a switch saying text
+    is not stored has to hold."""
+    path = conversations_path(directory)
+    found = b""
+    for suffix in ("", "-wal", "-shm"):
+        candidate = path.with_name(path.name + suffix)
+        if candidate.exists():
+            found += candidate.read_bytes()
+    return found
+
+
+# A wedged writer, in three deterministic parts
+
+
+async def test_no_producer_on_the_session_loop_can_wait(tmp_path: Path) -> None:
+    """Structural rather than timed: a queue whose blocking `put` raises
+    proves that no path from a live session reaches one, whatever the
+    writer is doing. The whole session goes through it, open, events,
+    turn and close."""
+
+    class Refusing:
+        def __init__(self) -> None:
+            self.items: list[Any] = []
+
+        def put(self, item: Any) -> None:
+            raise AssertionError("a producer blocked on the store")
+
+        def put_nowait(self, item: Any) -> None:
+            self.items.append(item)
+
+        def get(self) -> Any:
+            raise AssertionError("the writer is not running in this test")
+
+    queue = Refusing()
+    store = ConversationStore(tmp_path, queue=queue)
+    try:
+        session, websocket, task = await open_session(recording_config(tmp_path), store)
+        await drive_reply(session, UTTERANCE)
+        await websocket.close(1000, "goodbye")
+        await asyncio.wait_for(task, timeout=TIMEOUT_S)
+    finally:
+        # The thread never started, so this disposes the engine and puts
+        # nothing on the queue that would raise.
+        store.stop()
+
+    kinds = [type(item).__name__ for item in queue.items]
+    assert kinds[0] == "Open"
+    assert kinds[-1] == "Close"
+    assert "Turn" in kinds
+    assert "Event" in kinds
+
+
+async def test_a_parked_writer_never_delays_a_reply(tmp_path: Path) -> None:
+    """The behavioural half, with the writer stopped in front of its very
+    first transaction, on the same seam a locked database exercises. A
+    heartbeat on the session's own loop says the loop was never blocked,
+    and the reply finishes inside a fixed bound rather than inside a
+    comparison with another run."""
+    released = threading.Event()
+    parked = threading.Event()
+
+    def gate() -> None:
+        parked.set()
+        released.wait(timeout=TIMEOUT_S)
+
+    store = ConversationStore(tmp_path, gate=gate)
+    store.start()
+    gaps: list[float] = []
+
+    async def heartbeat() -> None:
+        loop = asyncio.get_running_loop()
+        last = loop.time()
+        while True:
+            await asyncio.sleep(0.01)
+            now = loop.time()
+            gaps.append(now - last)
+            last = now
+
+    ticking = asyncio.create_task(heartbeat())
+    try:
+        session, websocket, task = await open_session(recording_config(tmp_path), store)
+        assert parked.wait(timeout=TIMEOUT_S), "the writer never reached a marker"
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        await drive_reply(session, UTTERANCE)
+        assert loop.time() - started < 5.0, "the reply waited on the store"
+        await websocket.close(1000, "goodbye")
+        await asyncio.wait_for(task, timeout=TIMEOUT_S)
+        # The loop kept its own appointments throughout: no tick is
+        # anywhere near what a blocked database call would cost.
+        assert max(gaps) < 0.5
+    finally:
+        ticking.cancel()
+        released.set()
+        store.stop()
+
+
+async def test_events_beyond_the_bound_go_and_the_conversation_does_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The queue-full path, driven by moving the bound to zero rather
+    than by producing a thousand events: every event is refused, said
+    once, and counted onto the session row, while the turn and the close
+    land because control records are never dropped."""
+    monkeypatch.setattr(store_module, "MAX_EVENTS_IN_FLIGHT", 0)
+    store = ConversationStore(tmp_path)
+    store.start()
+    with caplog.at_level("INFO"):
+        try:
+            session, websocket, task = await open_session(
+                recording_config(tmp_path), store
+            )
+            await drive_reply(session, UTTERANCE)
+            await websocket.close(1000, "goodbye")
+            await asyncio.wait_for(task, timeout=TIMEOUT_S)
+        finally:
+            store.stop()
+
+    (row,) = read(tmp_path, "select * from sessions")
+    assert row["dropped"] > 0
+    assert row["close_reason"] == "client"
+    assert len(read(tmp_path, "select * from turns")) == 1
+    assert read(tmp_path, "select * from events") == []
+    dropped = [
+        r for r in caplog.records if getattr(r, "event", None) == "conversations_dropped"
+    ]
+    assert len(dropped) == 1, "the store said it was behind more than once"
+    assert dropped[0].session == session.session_id
+
+
+async def test_a_failed_write_costs_the_batch_and_not_the_conversation(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The failed-marker path, through the engine seam: the writer is
+    parked at the turn's marker, the engine is broken under it, and the
+    conversation carries on to a normal close. What leaves the store is
+    the exception's class name and nothing else, which is why the
+    exception carries a credential-shaped message."""
+
+    class Broken:
+        def begin(self) -> Any:
+            raise RuntimeError(f"the disk went away holding {POISON}")
+
+        def dispose(self) -> None:
+            return None
+
+    gate = Gate()
+    store = ConversationStore(tmp_path, gate=gate)
+    store.start()
+    with caplog.at_level("INFO"):
+        try:
+            session, websocket, task = await open_session(
+                recording_config(tmp_path), store
+            )
+            # The open's own marker, let through so there is a session
+            # row for the close to find.
+            gate.wait()
+            gate.let_through()
+            await drive_reply(session, UTTERANCE)
+            gate.wait()
+            store._engine = Broken()  # type: ignore[assignment]
+            gate.open_forever()
+            await websocket.close(1000, "goodbye")
+            await asyncio.wait_for(task, timeout=TIMEOUT_S)
+        finally:
+            gate.open_forever()
+            store.stop()
+
+    failed = [
+        r for r in caplog.records if getattr(r, "event", None) == "conversations_failed"
+    ]
+    assert failed, "a failed write said nothing"
+    assert failed[0].failure == "RuntimeError"
+    assert POISON not in caplog.text
+    # The session row is what survived, open-shaped, which is the
+    # documented incomplete state and the same shape a crash leaves.
+    (row,) = read(tmp_path, "select * from sessions")
+    assert row["session"] == session.session_id
+    assert row["closed_at"] is None
