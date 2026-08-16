@@ -47,7 +47,7 @@ from samtal_server.conversations.api import (
     NO_STORE,
     UNKNOWN_SESSION,
 )
-from samtal_server.conversations.records import ToolInvocation, TurnRecord
+from samtal_server.conversations.records import ToolInvocation, TurnLeg, TurnRecord
 from samtal_server.conversations.store import ConversationStore, conversations_path
 from tests.unit.test_conversations_session import recording_config, until
 from tests.unit.test_session import (
@@ -439,6 +439,43 @@ def test_a_turn_carries_its_calls_in_the_order_the_model_issued_them(
         assert calls[1]["arguments"] == {"room": "kitchen"}
         assert calls[0]["is_error"] is False
         assert calls[0]["malformed"] is False
+
+
+def test_a_handover_turn_carries_a_leg_per_agent(
+    tmp_path: Path, client: TestClient
+) -> None:
+    """The one place a turn's totals come apart again: they blend agents
+    that may use different models, and the legs are where each agent's
+    share is. A turn one agent answered whole has null legs, which is
+    not an empty list and never becomes one."""
+    recorded(
+        tmp_path,
+        sessions=1,
+        turn=a_turn(
+            legs=(
+                TurnLeg(agent="sam", text="Let me ask.", input_tokens=100, output_tokens=8),
+                TurnLeg(agent="ada", text="Done.", input_tokens=412, output_tokens=16),
+            )
+        ),
+    )
+    recorded(tmp_path / "solo", sessions=1)
+
+    (handover,) = _get(client, "/conversations/session-00/turns")["items"]
+    solo = _get(
+        TestClient(
+            build_api(TOKEN, tmp_path / "solo"),
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        ),
+        "/conversations/session-00/turns",
+    )["items"][0]
+
+    assert handover["legs"] == [
+        {"agent": "sam", "text": "Let me ask.", "input_tokens": 100, "output_tokens": 8},
+        {"agent": "ada", "text": "Done.", "input_tokens": 412, "output_tokens": 16},
+    ]
+    # The turn's totals are the totals, and the legs are what they blend.
+    assert handover["input_tokens"] == 512
+    assert solo["legs"] is None
 
 
 def test_a_turn_page_holds_the_turns_after_its_cursor(

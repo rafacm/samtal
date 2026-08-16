@@ -302,9 +302,59 @@ def test_every_field_the_conversation_reads_answer_with_is_required() -> None:
         "ConversationTurns",
         "ConversationTurn",
         "ToolInvocation",
+        "TurnLeg",
     ):
         schema = schemas[name]
         assert set(schema["required"]) == set(schema["properties"]), name
+
+
+def test_the_conversation_reads_type_what_the_store_types() -> None:
+    """A structure the store knows the shape of is that shape in the
+    document, not a bare string or an open object: the two closed sets
+    come from the tuples `conversations/schema.py` declares, so a token
+    added there reaches the contract by being added once, and a handover
+    leg is a schema of its own rather than four keys named in prose."""
+    from samtal_server.conversations.schema import CLOSE_REASONS, TOOL_SOURCES
+
+    schemas = json.loads(docgen.openapi())["components"]["schemas"]
+
+    assert schemas["ToolInvocation"]["properties"]["source"]["enum"] == list(TOOL_SOURCES)
+    for model in ("ConversationSummary", "ConversationDetail"):
+        branches = schemas[model]["properties"]["close_reason"]["anyOf"]
+        tokens = [branch for branch in branches if "enum" in branch]
+        assert [branch["enum"] for branch in tokens] == [list(CLOSE_REASONS)], model
+        # And a token a later release latches is still served: the column
+        # is deliberately unconstrained, and a read that refused one
+        # would drop a whole page over one row.
+        assert {"type": "string"} in branches, model
+        assert {"type": "null"} in branches, model
+
+    legs = schemas["ConversationTurn"]["properties"]["legs"]["anyOf"]
+    array = next(branch for branch in legs if "items" in branch)
+    assert array["items"] == {"$ref": "#/components/schemas/TurnLeg"}
+    assert set(schemas["TurnLeg"]["required"]) == {
+        "agent",
+        "text",
+        "input_tokens",
+        "output_tokens",
+    }
+    assert schemas["TurnLeg"]["additionalProperties"] is False
+
+    agents = schemas["ConversationDetail"]["properties"]["agents"]["anyOf"]
+    names = next(branch for branch in agents if "items" in branch)
+    assert names["items"] == {"type": "string"}
+
+
+def test_the_leg_schema_is_the_leg_the_pipeline_records() -> None:
+    """The transport shape and the record it is serialized from, held
+    equal: the writer copies a leg key for key, so a field added to one
+    and not the other would be a leg the document does not describe."""
+    from dataclasses import fields
+
+    from samtal_server.conversations.api import TurnLeg
+    from samtal_server.conversations.records import TurnLeg as RecordedLeg
+
+    assert set(TurnLeg.model_fields) == {field.name for field in fields(RecordedLeg)}
 
 
 def test_the_conversation_reads_describe_their_pagination() -> None:

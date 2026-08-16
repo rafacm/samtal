@@ -38,7 +38,7 @@ lock, and nothing created when the file is not there.
 
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -47,7 +47,22 @@ from sqlalchemy import ColumnElement, Connection, Table, func, select
 from samtal_server.config.loader import ConfigError, UnknownEntityError
 from samtal_server.config.models import normalize_mac
 from samtal_server.conversations import store
-from samtal_server.conversations.schema import events, sessions, tool_invocations, turns
+from samtal_server.conversations.schema import (
+    CLOSE_REASONS,
+    TOOL_SOURCES,
+    events,
+    sessions,
+    tool_invocations,
+    turns,
+)
+
+# The two closed sets, in the document, built from the tuples the schema
+# already declares rather than written out again here. A token added to
+# either one reaches the contract by being added once; a document that
+# spelled them out could disagree with the rows it describes, which is
+# the whole failure mode a closed set exists to prevent.
+ToolSource = Literal[*TOOL_SOURCES]
+CloseReason = Literal[*CLOSE_REASONS]
 
 # How many rows a page holds when the caller says nothing, and the most
 # it may ask for. The maximum is the contract rather than a courtesy: a
@@ -171,11 +186,13 @@ class ToolInvocation(BaseModel):
             "this order; it is the model's order and not the order they finished in."
         )
     )
-    source: str = Field(
+    source: ToolSource = Field(
         description=(
             "Where the call was routed: `builtin` for one this application authors, "
             "`device` for one the device published, `mcp` for one an MCP entry owns, "
-            "`unknown` for a name nothing answered to. Classified before the call ran."
+            "`unknown` for a name nothing answered to. Classified before the call ran. "
+            "A closed set here because it is a closed set in the database, which holds "
+            "the same four tokens under a check constraint."
         )
     )
     entry: str | None = Field(
@@ -208,6 +225,46 @@ class ToolInvocation(BaseModel):
         description=(
             "How long the call took, in milliseconds. Null where nothing ran, as for a "
             "refused or a successful handover, and null under metrics-off."
+        )
+    )
+
+
+class TurnLeg(BaseModel):
+    """One agent's share of a turn a handover split.
+
+    The transport shape of one entry of `turns.legs`, whose halves
+    follow different storage switches: the text is content and the token
+    counts are measurements, which is why a leg exists at all rather
+    than the turn's totals being the whole story. The totals blend
+    agents that may use different models; this is where they come apart
+    again.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    agent: str | None = Field(
+        description=(
+            "The agent whose leg this is, and null for a session that never activated "
+            "one."
+        )
+    )
+    text: str | None = Field(
+        description=(
+            "What this agent said, null under text-off, and null for an agent that "
+            "took part without speaking: one that asked for the handover said nothing "
+            "and spent tokens all the same."
+        )
+    )
+    input_tokens: int | None = Field(
+        description=(
+            "Input tokens this agent spent on the turn. Null when the provider "
+            "reported no usage, and under metrics-off."
+        )
+    )
+    output_tokens: int | None = Field(
+        description=(
+            "Output tokens this agent spent on the turn. Null when the provider "
+            "reported no usage, and under metrics-off."
         )
     )
 
@@ -253,12 +310,11 @@ class ConversationTurn(BaseModel):
             "when the reply spoke nothing."
         )
     )
-    legs: list[dict[str, Any]] | None = Field(
+    legs: list[TurnLeg] | None = Field(
         description=(
-            "One entry per agent that took part, `{agent, text, input_tokens, "
-            "output_tokens}`, and present only when a handover split the reply. The "
-            "text half is null under text-off and the token halves under metrics-off, "
-            "because a turn's totals blend agents that may use different models."
+            "One entry per agent that took part, and present only when a handover "
+            "split the reply. Null is a turn one agent answered whole, which is not "
+            "the same as an empty list and never becomes one."
         )
     )
     asr_ms: int | None = Field(
@@ -347,10 +403,14 @@ class ConversationSummary(BaseModel):
     duration_s: float | None = Field(
         description="How long it lasted, in seconds. A measured number: null under metrics-off."
     )
-    close_reason: str | None = Field(
+    close_reason: CloseReason | str | None = Field(
         description=(
             "What ended it, one of `limit`, `idle`, `drain`, `client` or `error`, the "
-            "first cause to fire winning. Null until it closes."
+            "first cause to fire winning. Null until it closes. The five tokens are "
+            "the set a server latches, and the column that holds them is deliberately "
+            "unconstrained, so a token a later release adds is served as it was "
+            "stored: a read that refused one would drop a whole page over one row, "
+            "the same reason the database refuses none."
         )
     )
     turns: int = Field(description="How many turns this session holds.")
@@ -390,8 +450,11 @@ class ConversationDetail(BaseModel):
     agent: str | None = Field(
         description="The agent the session opened with, before any handover."
     )
-    agents: list[Any] | None = Field(
-        description="Every agent the device is bound to, as the binding resolved at open."
+    agents: list[str] | None = Field(
+        description=(
+            "Every agent the device is bound to, by name, as the binding resolved at "
+            "open. The first is the agent the session started on."
+        )
     )
     protocol: str | None = Field(
         description="The device protocol version this session negotiated."
@@ -401,8 +464,11 @@ class ConversationDetail(BaseModel):
     duration_s: float | None = Field(
         description="How long it lasted, in seconds. Null under metrics-off."
     )
-    close_reason: str | None = Field(
-        description="What ended it, or null until it closes."
+    close_reason: CloseReason | str | None = Field(
+        description=(
+            "What ended it, one of the five tokens the listing describes, or null "
+            "until it closes."
+        )
     )
     server_version: str | None = Field(
         description="The server version that recorded this session."
@@ -773,12 +839,15 @@ __all__ = [
     "LIMIT_MAX",
     "NO_STORE",
     "UNKNOWN_SESSION",
+    "CloseReason",
     "ConversationDetail",
     "ConversationList",
     "ConversationSummary",
     "ConversationTurn",
     "ConversationTurns",
     "ToolInvocation",
+    "ToolSource",
+    "TurnLeg",
     "reader",
     "routes",
 ]
