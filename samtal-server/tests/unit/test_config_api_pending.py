@@ -35,7 +35,7 @@ from samtal_server.config.store import ConfigStore
 from samtal_server.config.writes import BINDING_NOTICE, RESTART_NOTICE
 from samtal_server.db import open_database
 from samtal_server.onboarding import CODE_TTL_S, PendingDevices
-from tests.unit.test_onboarding_pending import Clock
+from tests.support.checkin import Clock
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 

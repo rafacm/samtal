@@ -83,7 +83,25 @@ from samtal_server.providers import build_agent_providers
 from samtal_server.providers.openai_asr import OpenAiAsr
 from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
-from tests.support.configs import BOUND_MAC, config_with_agent, masked_config
+from tests.support.checkin import (
+    MOCK_AGENT,
+    MOCK_PROVIDERS,
+    NORMALIZED,
+    SYSTEM_INFO,
+    activate,
+    activation_client,
+    check_in,
+    ota_client,
+    post_system_info,
+    unbound_config,
+)
+from tests.support.configs import (
+    BOUND_MAC,
+    DEVICE_MAC,
+    DEVICE_UUID,
+    config_with_agent,
+    masked_config,
+)
 from tests.support.configs import BOUND_MAC as DB_BOUND_MAC
 from tests.support.events import only
 from tests.support.providers import BrokenTts
@@ -93,22 +111,6 @@ from tests.unit.test_device_bindings import AGENT, STAGES, booted
 from tests.unit.test_device_bindings import DEVICE_MAC as DB_DEVICE_MAC
 from tests.unit.test_device_bindings import check_in as db_check_in
 from tests.unit.test_drain import FakeSession, registry_with
-from tests.unit.test_onboarding_activation import (
-    NORMALIZED,
-    activate,
-    check_in,
-    unbound_config,
-)
-from tests.unit.test_onboarding_activation import client_for as activation_client
-from tests.unit.test_ota import (
-    DEVICE_MAC,
-    DEVICE_UUID,
-    MOCK_AGENT,
-    MOCK_PROVIDERS,
-    SYSTEM_INFO,
-    post_system_info,
-)
-from tests.unit.test_ota import client_for as ota_client
 from tests.unit.test_tools_mcp import SHADOWED_POSITION
 from tests.unit.test_tools_mcp import config_granting as mcp_granting
 from tests.unit.test_tools_mcp import entry_data as mcp_entry_data

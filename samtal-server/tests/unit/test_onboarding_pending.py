@@ -28,6 +28,7 @@ from samtal_server.onboarding import (
     RELEASED_GRACE_S,
     PendingDevices,
 )
+from tests.support.checkin import Clock
 
 MAC = "aa:bb:cc:dd:ee:ff"
 OTHER_MAC = "11:22:33:44:55:66"
@@ -41,19 +42,6 @@ def nth_mac(index: int) -> str:
     table. Real ones, since the callers of this table hand it MACs that
     have already been normalized."""
     return f"11:22:33:44:{index // 256:02x}:{index % 256:02x}"
-
-
-class Clock:
-    """A clock a test moves by hand."""
-
-    def __init__(self, now: float = 1_700_000_000.0) -> None:
-        self.now = now
-
-    def __call__(self) -> float:
-        return self.now
-
-    def advance(self, seconds: float) -> None:
-        self.now += seconds
 
 
 @pytest.fixture
