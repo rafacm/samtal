@@ -241,10 +241,15 @@ spread carrying `session=` would silently replace the emitter's
 own identity and still typecheck, which is spoofing the machinery
 must refuse rather than validate. Only then is the payload built
 (base fields from the emitter, never from the caller) and
-validated whole: the event is declared for the emitting channel,
-the level is in the declared set, no declared-required field is
-missing, no undeclared field is present, every field matches its
-kind, every `TOKEN` value is in its set. On server channels
+validated whole against the event's variants: channel, level, the
+`message` string compared byte-for-byte against the variant's
+registry-owned template (the template is the retained sentence's
+skeleton, so an emit whose message is not a declared template
+fails even when every field is lawful: without this,
+`events.info(secret, event="heard", ...)` would pass), the
+argument tuple against the variant's per-position kinds, no
+declared-required field missing, no undeclared field present,
+every field matching its kind, every `TOKEN` value in its set. On server channels
 `session` and `device` remain ordinary declarable event fields,
 since a server emitter has no base identity to protect. M2's
 tests include collision cases planting sentinel-shaped replacement
@@ -277,10 +282,13 @@ format, or any attached tap. In forgiving mode an undeclared event
 does not retain its raw name either: the payload's `event` becomes
 the fixed token `schema_violation` beside the base fields, so the
 line survives without laundering the rejected name into the
-retained log. M2's sentinel proofs cover three shapes, a
+retained log. M2's sentinel proofs cover five shapes, a
 credential-shaped value in a wrong-kind field, a credential-shaped
-undeclared event name, and a credential-shaped undeclared spread
-key, each asserted absent from all the surfaces above.
+undeclared event name, a credential-shaped undeclared spread key,
+a credential-shaped MESSAGE (an undeclared template carrying the
+sentinel as the sentence itself), and a credential-shaped argument
+in a declared template's slot of the wrong kind, each asserted
+absent from all the surfaces above, in both modes.
 
 - **Strict** (the module default): `_emit` raises
   `EventSchemaError`. This is what every context that never runs
@@ -868,6 +876,12 @@ eleven findings. As received, condensed but faithful:
    passes validation. Declare each legal emission's exact
    registry-owned template and compare before dispatch, with
    direct-message sentinels in both modes.
+
+   *Resolution*: accepted. Each variant declares its exact
+   template, validation compares the message byte-for-byte before
+   dispatch, and the sentinel matrix grows to five shapes
+   including a sentinel-as-message and a sentinel argument, both
+   modes. Amended in the enforcement section.
 
 4. **P1: one spec and one argument tuple cannot describe the
    surface.** `session_rejected` has arities 1 to 3 across four
