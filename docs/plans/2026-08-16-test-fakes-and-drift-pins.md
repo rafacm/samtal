@@ -434,3 +434,75 @@ From `samtal-server/`, per milestone:
       against `examples/` both ways, the CLI/API shape bridge in
       `test_config_cli_shapes.py`; CHANGELOG entry; both lanes
       green.
+
+## Plan review round
+
+External review of commit df813ed by codex 0.147.0 (model
+gpt-5.6-sol), 2026-08-16, prompted with this plan, the issue body,
+the hub and importer test files, the drift-pin substrate, and the
+prior plans. Findings as received, condensed but faithful:
+
+1. **P1: the `PROMPT_BLOCK_FIELDS` equality is false.** The CLI
+   deliberately requires only `provenance`, `characters`, `text`
+   (`cli.py:178-179`), while `PromptBlock` also has an optional
+   `name` (`api.py:715-755`). M4 as written fails immediately. Pin
+   equality against the required fields of `PromptBlock`, and
+   record that `name` stays optional.
+
+2. **P1: the three-category move rule cannot produce working
+   support modules.** Moved roots have module-local dependencies
+   the rule excludes: `Gate` needs `TIMEOUT_S`
+   (`test_conversations_store.py:52`), `_corrupt` needs `CORRUPT`
+   with its no-leak `STORED` sentinel (`test_tools_memory.py:132`),
+   `StubRuntime`/`FakeDevice` need `OUTPUT_RATE`, `FRAME_BYTES`,
+   `REPLY_PCM` (`test_boundary_contract.py:63-68`); `OpusEncoder`
+   crossing the boundary is a production re-export, not a helper.
+   Moving only grep-named symbols yields NameErrors, support
+   importing test modules, or silently edited helper bodies. Define
+   the move set as every shared root plus its minimal module-local
+   dependency closure (AST-generated), keep sentinel constants
+   verbatim, and redirect production re-exports to their owners.
+
+3. **P2: the two `BrokenTts` classes are not duplicates.** The
+   filler one raises synchronously in `synthesize()` with a
+   class-level rate; the record one is an async generator, declares
+   `egress = False`, initializes its rate, raises during iteration.
+   Decide now: two separately named fakes, behavior unchanged,
+   import aliases keeping the local name so test bodies stay
+   untouched.
+
+4. **P2: green lanes and unchanged assertions do not prove the
+   fake premises survived the move.** Three `Falsey` definitions
+   are nested inside test functions, so consolidating them is
+   already a test-function edit the plan forbids; and if the
+   centralized fake accidentally became truthy, the identity
+   assertions would still pass while no longer testing the
+   falsey-client seam. Add a support-level contract test asserting
+   the consolidated client is falsey, enumerate the three permitted
+   nested-class deletions, compare relocated definitions by
+   normalized AST, and use import aliases for collision renames so
+   call sites stay byte-identical.
+
+5. **P2: the mutation plan does not exercise every relation the
+   pins claim.** Only the commented `websocket_url` deletion is
+   named. Enumerate mutations per branch: a live top-level key and
+   a commented nested key for the example config; an unclaimed
+   file, a missing claimed file, and a doubly claimed file for
+   docgen; each CLI predicate relation separately, including
+   duplicate `RELOAD_OUTCOMES` and the required-versus-optional
+   `PromptBlock` distinction.
+
+6. **P2: the proposed `test_config_cli.py` split is not anchored
+   to #139's production boundaries.** Six behavioral buckets are
+   named but not mapped to #139's production concerns, so the
+   scheme cannot demonstrate compliance with the coordination
+   rule. Map each bucket to a #139 concern, or defer exact
+   filenames to #139 instead of claiming them decided.
+
+7. **P3: the SDK and M1 inventories are numerically wrong.** The
+   block is seven anthropic plus seven openai classes, 14 not 13;
+   M1 touches five provider test modules (the block's owner plus
+   the four falsey-client modules), and those five are absent from
+   the files-touched list.
+
+Verdict: ready after the P1/P2 amendments.
