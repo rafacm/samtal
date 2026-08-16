@@ -793,9 +793,13 @@ constants, helpers and new test functions only.
 
 Three commits, in the order the milestone was built in:
 
-1. `4aca5fe` Pin the example configuration to ServerConfig
-2. `751587b` Pin the documented examples to the files there are
-3. `c71466d` Bridge the CLI's shape predicates to the API's models
+1. `c8289d3` Pin the example configuration to ServerConfig
+2. `ca3c702` Pin the documented examples to the files there are
+3. `ecaec17` Bridge the CLI's shape predicates to the API's models
+
+The PR review round added one more to the tests, `b5bf32a` Read the
+claimed examples as the filenames they are, recorded with the finding
+it answers below.
 
 No pin caught real drift. `config.example.yaml` mentions all 35 leaf
 fields of `ServerConfig`, and the 13 files under `examples/` are
@@ -980,15 +984,23 @@ encodes the distinction rather than merely surviving it.
 ### Verification
 
 Run from `samtal-server/`, with `PYTHONDONTWRITEBYTECODE=1` exported
-for everything outside pytest.
+for everything outside pytest. Every number here is from the final
+branch: the milestone was first verified before the branch was rebased
+onto merged `main`, and that run's counts described a tree that no
+longer exists, so it was rerun whole rather than adjusted.
 
 - `uv run ruff check .`: `All checks passed!`
 - `uv run pytest tests/unit -q`:
-  `2269 passed, 16 skipped in 300.36s (0:05:00)`
-- `uv run pytest tests/integration -q`: `55 passed in 159.87s (0:02:39)`
-- `uv run pytest tests/unit -q --collect-only | tail -1`: **2276
-  before**, **2285 after**. The rise is exactly the nine new tests: one
-  example-config pin, two docgen pins, six CLI/API ones.
+  `2271 passed, 16 skipped in 295.60s (0:04:55)`
+- `uv run pytest tests/integration -q`: `55 passed in 156.44s (0:02:36)`
+- `uv run pytest tests/unit -q --collect-only | tail -1`: **2278
+  before**, **2287 after**. The rise is exactly the nine new tests, and
+  it is checked from both ends. Per file: `test_config_examples.py`
+  collects 4 where 3 were there before, `test_config_docgen.py` 12
+  where 10 were, and `test_config_cli_shapes.py` is 6 new ones, so 9.
+  And the baseline: the M3 tip collected 2276, #163's guard fix (merged
+  into `main` and picked up in the rebase) took that guard from four
+  tests to six, which is the 2278 this milestone starts from.
 - `git diff` inspected: no existing test function or assertion changed.
   The two existing files gained a docstring paragraph each, module-level
   constants and helpers, and new test functions; nothing else moved.

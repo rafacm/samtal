@@ -279,8 +279,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   and the one control that must pass (deleting a member of the pending
   predicate, whose relation is a subset rather than an equality)
   watched passing. Test-only: no source file changes, no assertion
-  changes, and no existing test touched. The bridge file says in its docstring that it exists to be
-  deleted whole by #139, which deletes the predicates it pins.
+  changes, and no existing test touched. The bridge file says in its
+  docstring that it exists to be deleted whole by #139, which deletes
+  the predicates it pins.
 
 ## 2026-08-15
 
