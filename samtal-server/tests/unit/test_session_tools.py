@@ -36,11 +36,18 @@ from samtal_server.providers import (
 from samtal_server.tools.builtin import switch_agent_tool
 from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
+from tests.support.configs import (
+    BOTH_MAC,
+    DEVICE_HELLO,
+    POET_MAC,
+    POET_TONE,
+    STDIO_SERVER,
+    TUTOR_TONE,
+    base_config,
+    registry_config,
+)
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 from tests.unit.test_session import (
-    DEVICE_HELLO,
-    POET_TONE,
-    TUTOR_TONE,
     connect,
     device_session,
     say_something,
@@ -48,12 +55,6 @@ from tests.unit.test_session import (
     shake_hands,
     tone_strength,
 )
-
-POET_MAC = "aa:bb:cc:dd:ee:01"
-BOTH_MAC = "aa:bb:cc:dd:ee:03"
-
-STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
-
 
 Step = str | list[str | ToolCall | Usage]
 
@@ -83,33 +84,6 @@ class ScriptedLlm(LlmProvider):
 
 def call(name: str, **arguments: Any) -> ToolCall:
     return ToolCall(id=f"c-{name}", name=name, arguments=arguments)
-
-
-def base_config(**overrides: object) -> Config:
-    """Two agents that differ in prompt and voice, on mock providers."""
-    return Config(
-        **(
-            {
-                "providers": {
-                    "llm": {"mock": {"type": "mock", "reply": "{system} heard {text}."}},
-                    "asr": {"mock": {"type": "mock", "text": "hello"}},
-                    "tts": {
-                        "tenor": {"type": "mock", "tone_hz": POET_TONE},
-                        "alto": {"type": "mock", "tone_hz": TUTOR_TONE},
-                    },
-                    "vad": {"mock": {"type": "mock"}},
-                },
-                "agent_defaults": {"llm": "mock", "asr": "mock", "vad": "mock"},
-                "agents": {
-                    "poet": {"prompt": "POET", "tts": "tenor"},
-                    "tutor": {"prompt": "TUTOR", "tts": "alto"},
-                },
-                "devices": {POET_MAC: ["poet"], BOTH_MAC: ["poet", "tutor"]},
-                "default_agent": "poet",
-            }
-            | overrides
-        )
-    )
 
 
 def session_for(
@@ -586,26 +560,6 @@ async def test_a_device_bound_to_two_agents_is_answered_in_the_new_voice() -> No
 
 
 # What a reload changes for a conversation that is already running
-
-
-def registry_config(granted: bool) -> Config:
-    """The configuration the MCP registry is built from, which is not
-    the one the session was built from: the session's carries no MCP
-    entries at all, so a tool that turns up in its snapshot can only
-    have come from the registry."""
-    return base_config(
-        mcp_servers={
-            "tools": {
-                "transport": "stdio",
-                "command": sys.executable,
-                "args": [str(STDIO_SERVER)],
-            }
-        },
-        agents={
-            "poet": {"prompt": "POET", "tts": "tenor", "mcp": ["tools"] if granted else []},
-            "tutor": {"prompt": "TUTOR", "tts": "alto"},
-        },
-    )
 
 
 async def test_a_reload_between_replies_changes_what_the_next_one_may_reach() -> None:

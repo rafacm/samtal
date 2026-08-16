@@ -30,7 +30,7 @@ from samtal_server.conversations.store import (
     conversations_path,
     open_conversations,
 )
-from tests.unit.test_session import config_with_agent
+from tests.support.configs import config_with_agent
 
 EXPECTED_TABLES = {"sessions", "turns", "tool_invocations", "events"}
 

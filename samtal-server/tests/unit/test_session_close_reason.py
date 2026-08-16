@@ -29,21 +29,16 @@ from samtal_server.providers import build_agent_providers
 from samtal_server.registry import SessionRegistry
 from samtal_server.runtime.pipeline import bespoke_runtime_factory
 from samtal_server.tools.mcp import McpServers
-from tests.unit.test_session import (
+from tests.support.configs import (
     DEVICE_HELLO,
     DEVICE_MAC,
     DEVICE_UUID,
-    config_with_agent,
-    connect,
-    say_something,
-    shake_hands,
-)
-from tests.unit.test_session_limits import (
     capped_config,
+    config_with_agent,
     idle_config,
-    listen_realtime,
-    wait_for_close,
 )
+from tests.unit.test_session import connect, say_something, shake_hands
+from tests.unit.test_session_limits import listen_realtime, wait_for_close
 
 
 def closed(caplog: pytest.LogCaptureFixture) -> Any:

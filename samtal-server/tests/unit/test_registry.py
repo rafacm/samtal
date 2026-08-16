@@ -14,7 +14,8 @@ from starlette.websockets import WebSocketDisconnect
 
 from samtal_server.app import create_app
 from samtal_server.registry import SessionRegistry
-from tests.unit.test_session import config_with_agent, connect, shake_hands
+from tests.support.configs import config_with_agent
+from tests.unit.test_session import connect, shake_hands
 
 
 def fake_session() -> Any:

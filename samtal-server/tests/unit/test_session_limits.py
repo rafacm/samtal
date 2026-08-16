@@ -17,7 +17,6 @@ to it.
 import asyncio
 import json
 import time
-from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -27,10 +26,14 @@ import samtal_server.device.session as session_module
 from samtal_server.app import create_app
 from samtal_server.audio.opus import OpusEncoder
 from samtal_server.device.session import GOING_AWAY, NORMAL_CLOSURE, DeviceSession
-from tests.unit.test_session import (
+from tests.support.configs import (
     DEVICE_MAC,
-    collect_reply,
+    capped_config,
     config_with_agent,
+    idle_config,
+)
+from tests.unit.test_session import (
+    collect_reply,
     connect,
     endpoint_silence,
     say_something,
@@ -40,28 +43,6 @@ from tests.unit.test_session import (
     speech_pcm,
 )
 from tests.unit.test_session_tools import session_for
-
-
-def capped_config(seconds: float):
-    config = config_with_agent()
-    config.server.limits.max_session_s = seconds
-    return config
-
-
-# Far enough above any idle timeout used here that it never fires
-# first, near enough that a broken idle timeout ends the test in
-# seconds. wait_for_close blocks until something closes the socket, so
-# without a second bound a regression would hang the lane rather than
-# fail it, and the close reason is what tells the two apart.
-BACKSTOP_S = 10.0
-
-
-def idle_config(seconds: float, **kwargs: Any):
-    """A config whose idle timeout is the bound under test."""
-    config = config_with_agent(**kwargs)
-    config.server.limits.idle_timeout_s = seconds
-    config.server.limits.max_session_s = BACKSTOP_S
-    return config
 
 
 def listen_realtime(websocket) -> None:

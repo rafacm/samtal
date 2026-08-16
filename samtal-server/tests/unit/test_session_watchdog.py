@@ -30,15 +30,14 @@ from samtal_server.providers import (
     ToolDef,
     Turn,
 )
+from tests.support.configs import POET_MAC, TIMEOUT_S, watchdog_config
 from tests.unit.test_session import RecordingSocket
 from tests.unit.test_session_events import events, only
-from tests.unit.test_session_tools import POET_MAC, base_config, run_reply, session_for
+from tests.unit.test_session_tools import run_reply, session_for
 
 # Well past the test-scale timeout below, never actually waited out:
 # the watchdog cancels the sleep.
 STALL_S = 30.0
-
-TIMEOUT_S = 0.05
 
 
 class StallingLlm(LlmProvider):
@@ -88,10 +87,6 @@ class DribblingLlm(LlmProvider):
         for word in self._words[1:]:
             await asyncio.sleep(self._gap_s)
             yield TextDelta(" " + word)
-
-
-def watchdog_config(timeout_s: float = TIMEOUT_S):
-    return base_config(server={"llm_first_token_timeout_s": timeout_s})
 
 
 async def test_a_stalled_first_token_is_retried_and_the_retry_answers(
