@@ -326,17 +326,32 @@ itself the conformance proof running continuously.
 
 - An AST walk over `samtal_server/` collects every emitter call
   with an `event=` literal and asserts the name is declared and
-  every statically-named keyword field is declared for it (the
-  guard's two stated-limits convention applies: `**spread` keys are
-  not statically visible, and the strict lane at runtime is what
-  validates them, which the existing pin suites exercise for all
-  nine spread events).
+  every statically-named keyword field is declared for it.
+- Coverage is TWO-WAY, because containment alone would let a
+  surplus declared field sit unused as a permanent enlargement of
+  the allowlist: every declared non-base field must be evidenced,
+  either by a static keyword at some emit site or by an explicit
+  spread-inventory entry naming the builder (`_echo_fields`,
+  `language_fields`, `provider_fields`, and the rest of the nine)
+  whose AST the test parses to extract the keys it can produce and
+  asserts they match the entry; and every declared token must
+  appear as a literal in the emitting module (the decision site),
+  found by the same walk. A declared field or token nothing
+  evidences fails the test.
 - The registry's own coherence is asserted: every `TOKEN` field
   carries a non-empty token set, no other kind carries one, every
-  event has at least one level, scope-base fields are declared
-  exactly where the scope requires them.
+  event has at least one level and one channel, base fields are
+  declared exactly where the channel requires them, every
+  `DESCRIPTOR` carries explicit bounds, every spec declares its
+  argument tuple.
 - A planted-source test proves the walk sees the shapes it claims
   to see, as the guard's planted tests do.
+
+M1's claim is calibrated to what this proves: the registry is
+DECLARED AND STATICALLY CONFORMANT after M1 (every site maps into
+it, every declaration is evidenced); "provably complete" belongs
+to M2, when strict enforcement runs every production emission the
+lanes exercise through the validator.
 
 ### The README table is checked, not generated
 
@@ -396,7 +411,7 @@ failing and reverted.
 
 ### Three milestones, three PRs, stacked
 
-1. **M1, the registry exists and is provably complete**:
+1. **M1, the registry exists and is statically conformant**:
    `events_schema.py` with all 57 declarations (the nine spread
    builders read, their key sets and token sets transcribed), the
    conformance test, the registry-coherence tests. No enforcement
@@ -501,7 +516,7 @@ recorded in the PR body with observed failure output per branch.
 
 ## Milestones
 
-- [ ] M1: the registry exists and is provably complete:
+- [ ] M1: the registry exists and is statically conformant:
       `samtal_server/events_schema.py` declares all 57 events with
       fields, kinds, levels, scopes, and token sets;
       `test_event_schema_conformance.py` ties every static emit
@@ -690,6 +705,15 @@ Findings as received, condensed but faithful:
     (declared fields evidenced statically or by inventoried
     spread-builder branches, tokens mapped to decision-site
     literals) or stop calling M1 provably complete.
+
+    *Resolution*: accepted, both halves. The conformance test is
+    now two-way (declared fields evidenced by a static keyword or
+    a parsed spread-builder inventory entry; declared tokens found
+    as decision-site literals; anything unevidenced fails), and
+    M1's milestone line is recalibrated to "declared and
+    statically conformant", with "provably complete" reserved for
+    M2's strict lanes. Amended in the conformance section and the
+    milestone list.
 
 11. **P2: the stated pin evidence is stale.** The `conversations_*`
     events appear in neither pin file; their five paths are only
