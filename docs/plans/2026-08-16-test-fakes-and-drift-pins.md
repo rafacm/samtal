@@ -326,6 +326,28 @@ fail, restore it) and the mutation is recorded in the milestone PR.
    `test_config_cli.py:2119-2237`). Nothing to add; recorded here
    so the issue's list is answered item by item.
 
+The mutation proofs cover every relation each pin claims, one
+mutation per branch, each applied, observed failing, and reverted,
+with the failure output recorded in the M4 PR body:
+
+- Example-config coverage: delete one live top-level key (`port`),
+  and separately one commented key inside a nested section (picked
+  from the file at implementation time, so the proof exercises the
+  comment scan at depth, not only at the top level where
+  `# websocket_url:` sits). Each deletion must fail the pin,
+  proving the live-key walk and the comment scan separately.
+- Docgen examples, all three branches: add an unclaimed `*.yaml`
+  under `examples/`; remove a file an entity claims; claim one
+  existing file from a second entity. Each must fail with a
+  message naming the file.
+- CLI/API shapes, one mutation per relation: drop a member from
+  each CLI frozenset in turn (`PENDING_FIELDS`, `STATUS_FIELDS`,
+  `STATUS_STATES`, `PROMPT_BLOCK_FIELDS`); duplicate an entry in
+  `RELOAD_OUTCOMES` (the no-duplicates clause); and for the
+  required-versus-optional distinction, flip `PromptBlock.name` to
+  required in a scratch copy of the check and watch the equality
+  break, since that distinction is exactly what the pin encodes.
+
 ### The `test_config_cli.py` split, decided here for #139
 
 `test_config_cli.py` (2,305 lines, 101 tests) mirrors the source
@@ -461,9 +483,9 @@ From `samtal-server/`, per milestone:
   layering mistake to fix, not to shim.
 - **The comment-scan half of the example-config pin passes on
   prose.** The scan requires the literal `key:` form in a comment
-  line; the mutation proof (delete the `# websocket_url:` line,
-  watch it fail) is the check that the scan is neither too loose
-  nor too tight.
+  line; the mutation matrix in the drift-pins section (a live key
+  and a nested commented key, deleted separately) is the check
+  that the scan is neither too loose nor too tight.
 - **Two definitions consolidated as duplicates turn out to
   differ.** The consolidation rule keeps behavioral differences as
   two named classes; the one known case, the two `BrokenTts`
@@ -584,6 +606,14 @@ prior plans. Findings as received, condensed but faithful:
    docgen; each CLI predicate relation separately, including
    duplicate `RELOAD_OUTCOMES` and the required-versus-optional
    `PromptBlock` distinction.
+
+   *Resolution*: accepted. The drift-pins section now carries the
+   full mutation matrix: live key and nested commented key for the
+   example config, all three docgen branches, one mutation per CLI
+   relation including the duplicated outcome and the
+   required-versus-optional flip, each applied, observed failing,
+   reverted, and recorded in the M4 PR body. The risks section's
+   single-example mention stands corrected by that matrix.
 
 6. **P2: the proposed `test_config_cli.py` split is not anchored
    to #139's production boundaries.** Six behavioral buckets are
