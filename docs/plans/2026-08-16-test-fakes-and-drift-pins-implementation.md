@@ -427,3 +427,26 @@ an assertion.
 9. **No fixture turned up.** Every moved name is a plain callable,
    class or constant, so no `tests/unit/conftest.py` was needed, which
    is what the plan expected.
+
+### PR review round
+
+External review of PR #162 (diff main...d17e864) by codex 0.147.0
+(model gpt-5.6-sol), 2026-08-16, posted to the PR by the review run
+itself. One finding:
+
+1. **P2: M2 verification starts after the configuration move.** The
+   recorded inventory (82 before) and the 54-root AST comparison
+   both took the configuration commit as their baseline, but that
+   commit is itself the first M2 commit, so `configs.py`'s 25
+   relocated definitions were never recorded as verified against
+   their origin; the true M1-tip inventory is 84.
+
+   *Resolution*: accepted, fixed in cf25dc9. The whole comparison
+   was rerun from the M1-family tip (`74f0fba`): 79 top-level moved
+   nodes, 81 comparisons (the twice-defined `POET_MAC` and
+   `BOTH_MAC` compared against both origins), 79 pass, 0 fail; the
+   inventory reads 84 to 33; origin modules were determined from
+   the commit's own before/after node sets so same-named constants
+   elsewhere could not stand in for an origin.
+
+Verdict as posted: mergeable after the listed fix.
