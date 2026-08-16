@@ -6,51 +6,22 @@ The request shapes here mirror `Board::GetSystemInfoJson` and the headers
 
 import logging
 from datetime import datetime
-from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
 from samtal_server import __version__, logs
-from samtal_server.app import create_app
 from samtal_server.build_info import REVISION_ENV, revision
 from samtal_server.config import Config
 from samtal_server.ota import DEVICE_ID_PROBLEM, OTA_PATH
-
-MOCK_PROVIDERS = {stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")}
-MOCK_AGENT = dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
-
-DEVICE_MAC = "AA:BB:CC:DD:EE:FF"
-DEVICE_UUID = "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
-
-SYSTEM_INFO: dict[str, Any] = {
-    "version": 2,
-    "language": "en-US",
-    "flash_size": 16777216,
-    "mac_address": DEVICE_MAC.lower(),
-    "uuid": DEVICE_UUID,
-    "chip_model_name": "esp32s3",
-    "application": {"name": "xiaozhi", "version": "2.4.0"},
-    "board": {"type": "waveshare-esp32-s3-touch-lcd-1.54"},
-}
-
-
-def client_for(config: Config | None = None) -> TestClient:
-    return TestClient(create_app(config if config is not None else Config()))
-
-
-def post_system_info(
-    client: TestClient,
-    payload: Any = SYSTEM_INFO,
-    device_id: str | None = DEVICE_MAC,
-    client_id: str | None = DEVICE_UUID,
-):
-    headers = {}
-    if device_id is not None:
-        headers["Device-Id"] = device_id
-    if client_id is not None:
-        headers["Client-Id"] = client_id
-    return client.post(OTA_PATH, json=payload, headers=headers)
+from tests.support.checkin import (
+    MOCK_AGENT,
+    MOCK_PROVIDERS,
+    SYSTEM_INFO,
+    post_system_info,
+)
+from tests.support.checkin import ota_client as client_for
+from tests.support.configs import DEVICE_MAC, DEVICE_UUID
 
 
 def test_reply_carries_the_websocket_url_the_device_needs() -> None:

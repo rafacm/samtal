@@ -225,7 +225,7 @@ def test_the_manifest_carries_the_firmware_the_device_reported(tmp_path: Path) -
     # manifest, because echo cancellation is firmware-side, and the OTA
     # check-in is the only place a device ever states it.
     from samtal_server.ota import OTA_PATH
-    from tests.unit.test_ota import SYSTEM_INFO
+    from tests.support.checkin import SYSTEM_INFO
 
     with TestClient(create_app(capturing_config(tmp_path))) as client:
         client.post(

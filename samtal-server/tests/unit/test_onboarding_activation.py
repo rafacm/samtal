@@ -30,16 +30,19 @@ from samtal_server.onboarding import (
     onboarding_path,
 )
 from samtal_server.ota import ACTIVATE_SEGMENT, OTA_PATH
-from tests.support.configs import BOUND_MAC
-from tests.unit.test_ota import DEVICE_MAC, DEVICE_UUID, MOCK_AGENT, MOCK_PROVIDERS, SYSTEM_INFO
+from tests.support.checkin import (
+    HEADERS,
+    MOCK_AGENT,
+    MOCK_PROVIDERS,
+    NORMALIZED,
+    activate,
+    check_in,
+    unbound_config,
+)
+from tests.support.checkin import activation_client as client_for
+from tests.support.configs import BOUND_MAC, DEVICE_MAC
 
 AUTH_SECRET_ENV = "SAMTAL_AUTH_SECRET"
-
-HEADERS = {"Device-Id": DEVICE_MAC, "Client-Id": DEVICE_UUID}
-
-# The canonical form of the MAC above, which is what the challenge, the
-# pending entry and the bound row all carry.
-NORMALIZED = DEVICE_MAC.lower()
 
 
 def nth_mac(index: int) -> str:
@@ -51,42 +54,6 @@ def nth_mac(index: int) -> str:
 @pytest.fixture(autouse=True)
 def _secret(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(AUTH_SECRET_ENV, "a-fixed-secret-for-the-vector")
-
-
-def unbound_config(**server) -> Config:
-    return Config(
-        providers=MOCK_PROVIDERS,
-        agents={"assistant": MOCK_AGENT},
-        devices={BOUND_MAC: "assistant"},
-        server=server,
-    )
-
-
-def client_for(config: Config | None = None) -> TestClient:
-    return TestClient(create_app(config if config is not None else unbound_config()))
-
-
-def check_in(client: TestClient, path: str = OTA_PATH, mac: str = DEVICE_MAC) -> dict:
-    response = client.post(
-        path, json=SYSTEM_INFO, headers={**HEADERS, "Device-Id": mac}
-    )
-    assert response.status_code == 200, response.text
-    return response.json()
-
-
-def activate(
-    client: TestClient,
-    path: str = OTA_PATH,
-    mac: str = DEVICE_MAC,
-    body: object = None,
-    version: str | None = None,
-):
-    headers = {"Device-Id": mac}
-    if version is not None:
-        headers["Activation-Version"] = version
-    return client.post(
-        f"{path}{ACTIVATE_SEGMENT}", json={} if body is None else body, headers=headers
-    )
 
 
 def short_path(client: TestClient) -> str:

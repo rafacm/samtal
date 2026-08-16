@@ -19,7 +19,8 @@ from samtal_server.app import create_app
 from samtal_server.config import Config
 from samtal_server.onboarding import KEY_LENGTH, derive_key, onboarding_key
 from samtal_server.ota import OTA_PATH
-from tests.unit.test_ota import DEVICE_MAC, DEVICE_UUID, SYSTEM_INFO
+from tests.support.checkin import SYSTEM_INFO
+from tests.support.configs import DEVICE_MAC, DEVICE_UUID
 
 AUTH_SECRET_ENV = "SAMTAL_AUTH_SECRET"
 

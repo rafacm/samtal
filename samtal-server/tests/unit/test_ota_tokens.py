@@ -14,13 +14,8 @@ from samtal_server.app import create_app
 from samtal_server.auth import DeviceAuth, build_device_auth
 from samtal_server.config import Config
 from samtal_server.ota import OTA_PATH
-from tests.unit.test_ota import (
-    DEVICE_MAC,
-    DEVICE_UUID,
-    MOCK_AGENT,
-    MOCK_PROVIDERS,
-    SYSTEM_INFO,
-)
+from tests.support.checkin import MOCK_AGENT, MOCK_PROVIDERS, SYSTEM_INFO
+from tests.support.configs import DEVICE_MAC, DEVICE_UUID
 
 
 def bound_config(**overrides: object) -> Config:
