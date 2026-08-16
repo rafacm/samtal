@@ -13,9 +13,16 @@ The drivers are the second half. A reply has three useful shapes to a
 test: run it and answer what was spoken, run it whole with the audio,
 or start it and leave it in flight the way an utterance leaves one, so
 that everything asking whether this session is replying sees it.
+
+The last section is the waiting a conversation suite does on the writer
+running behind the session. Its bound is `WRITER_TIMEOUT_S` rather than
+`TIMEOUT_S`, which `configs.py` already uses for a test-scale watchdog
+of 50 ms: the two mean opposite things, so they do not share a name.
 """
 
 import asyncio
+import threading
+import time
 from dataclasses import replace
 from typing import Any, cast
 
@@ -246,3 +253,55 @@ async def reply_with(
     with caplog.at_level("INFO"):
         await session.runtime._reply(b"\x00\x00" * 320)
     return only(caplog, "provider_failed")
+
+
+# --- waiting on the writer behind it ----------------------------------
+
+
+# Long enough that a wedged writer fails the assertion rather than the
+# suite's own scheduling, and never reached when the code is correct.
+WRITER_TIMEOUT_S = 30.0
+
+
+class Gate:
+    """The writer's parking seam, driven from the test's thread.
+
+    Called once before each marker transaction. `wait()` returns when
+    the writer has arrived and is stopped; `let_through()` releases it
+    for exactly one more transaction; `open_forever()` stops gating.
+    """
+
+    def __init__(self) -> None:
+        self._arrived = threading.Semaphore(0)
+        self._release = threading.Semaphore(0)
+        self._passthrough = False
+
+    def __call__(self) -> None:
+        if self._passthrough:
+            return
+        self._arrived.release()
+        assert self._release.acquire(timeout=WRITER_TIMEOUT_S), "the writer was never released"
+
+    def wait(self) -> None:
+        assert self._arrived.acquire(timeout=WRITER_TIMEOUT_S), (
+            "the writer never reached the gate"
+        )
+
+    def let_through(self, count: int = 1) -> None:
+        self._release.release(count)
+
+    def open_forever(self) -> None:
+        self._release.release(1024)
+        self._passthrough = True
+
+
+def until(ready: Any, complaint: str) -> Any:
+    """Wait for what a test is about, on a running writer. A wait that
+    never ends is the test failing with its own sentence."""
+    deadline = time.monotonic() + WRITER_TIMEOUT_S
+    while time.monotonic() < deadline:
+        answer = ready()
+        if answer:
+            return answer
+        time.sleep(0.005)
+    raise AssertionError(complaint)
