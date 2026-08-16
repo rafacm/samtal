@@ -621,6 +621,54 @@ async def test_a_failure_after_the_open_still_finishes_the_record(
     assert manifest is not None and manifest["capture"]["complete"] is True
 
 
+async def _opened(session: Any, websocket: Any) -> None:
+    """Wait on the loop the session is running on, which `until` cannot
+    do: it sleeps the thread, and this session is a task beside it."""
+    for _ in range(500):
+        await asyncio.sleep(0.01)
+        if session._opened_at is not None and websocket.inbox.empty():
+            return
+    raise AssertionError("the session never opened")
+
+
+async def test_a_cancelled_cleanup_step_still_finishes_the_record(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A cancellation arriving into the close is the one exception a
+    guard must neither swallow nor obey immediately: the task really is
+    being cancelled, and the record still has to be finished. It is held
+    until the event, the store's close and the capture's close have run,
+    and re-raised then, so the caller's task still ends cancelled."""
+    store = ConversationStore(tmp_path)
+    store.start()
+    session, websocket = _guarded(tmp_path, store)
+    task = asyncio.create_task(session.run())
+    await _opened(session, websocket)
+
+    async def cancelled() -> None:
+        raise asyncio.CancelledError
+
+    assert session.runtime is not None
+    session.runtime.close = cancelled  # type: ignore[method-assign]
+
+    with caplog.at_level("INFO"):
+        try:
+            await websocket.close(1000, "goodbye")
+            await asyncio.wait([task])
+        finally:
+            store.stop()
+
+    assert task.cancelled(), "the cancellation did not reach the caller"
+    (closed,) = [r for r in caplog.records if getattr(r, "event", None) == "session_closed"]
+    assert closed.reason == "client"
+    (row,) = read(tmp_path, "select * from sessions")
+    assert row["closed_at"] is not None
+    assert session._record is None
+    assert session._events._taps == []
+    manifest = _capture_manifest(tmp_path)
+    assert manifest is not None and manifest["capture"]["complete"] is True
+
+
 # A wedged writer, in three deterministic parts
 
 
