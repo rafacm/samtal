@@ -756,3 +756,27 @@ an assertion.
 8. **No fixture turned up**, again. Every moved name is a plain
    callable, class or constant, so no `tests/unit/conftest.py` was
    needed, which is what the plan expected.
+
+### PR review round
+
+External review of PR #163 (diff main...ca39cbc) by codex 0.147.0
+(model gpt-5.6-sol), 2026-08-16, posted to the PR by the review run
+itself. One finding:
+
+1. **P2: the import guard misclassifies symbols as test modules.**
+   `from pkg import name` was unconditionally offered as `pkg.name`
+   and any `test_` component classified as a module, so a
+   `test_`-prefixed symbol imported from a non-test module
+   (`from tests.support.fixtures import test_data`) would trip the
+   guard falsely.
+
+   *Resolution*: accepted, fixed in 07831a1. The guard now resolves
+   every candidate against the repository tree and counts an import
+   only when the candidate really is a `test_*.py` file or `test_*`
+   package, relative imports included; the reviewer's two examples
+   are acceptance cases (old rule: flagged; new rule: clean), the
+   guard grew from four tests to six, and both planted true
+   positives still fail naming file and line. Details in the
+   guard subsection above.
+
+Verdict as posted: mergeable after the listed fix.
