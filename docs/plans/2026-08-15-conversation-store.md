@@ -1350,7 +1350,7 @@ its section of the implementation doc when written.
   milestone 4 test list green; criterion 7 holds; both drift checks
   green; lanes green.
 - [x] **[The narrowing: content off the events](2026-08-15-conversation-store-implementation.md#milestone-5-the-narrowing-content-off-the-events)**
-  (PR TBD, branch `feature/conversation-store-m5`): the four event changes and the
+  (PR #160, branch `feature/conversation-store-m5`): the four event changes and the
   malformed-arguments line as specified above, pins and sentinels
   moved with them; the README event table and transcript paragraph;
   the ADR follow-up note; the CHANGELOG breaking entries; the
