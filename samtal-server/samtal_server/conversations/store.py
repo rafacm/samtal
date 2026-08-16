@@ -45,12 +45,18 @@ class name.
 One thing is not policy and does not follow a switch. The `events`
 table is metadata-only by construction, so `EVENT_CONTENT` is stripped
 from every event's fields whatever the switches say: content has its own
-tables, and an events row is the wrong place for it at any setting. The
-narrowing has since landed and the events carry none of those keys, so
-the strip is defense in depth rather than a live guard: it was written
-to be correct either way, which is what let the store behave identically
-on both sides of that change and what keeps it correct for a database
-written by an older server.
+tables, and an events row is the wrong place for it at any setting.
+
+Half of that strip is now defense in depth and half of it is still live,
+which is worth saying precisely. The narrowing took `text` off `heard`,
+`replied` and `agent_said`, so those three keys never arrive; the strip
+was written to be correct either way, which is what let the store behave
+identically on both sides of that change and what keeps it correct for a
+database written by an older server. `tool` still arrives, on the one
+branch the narrowing kept it for: a builtin's name is this application's
+own. The strip removes it from the row anyway, so that every name a call
+carries lives in `tool_invocations` under the text switch rather than in
+two tables under two different rules.
 """
 
 import datetime as dt
@@ -103,24 +109,29 @@ RETENTION_DAYS_DEFAULT = 90
 # cannot hold shutdown past this.
 STOP_TIMEOUT_S = BUSY_TIMEOUT_MS / 1000 + 5.0
 
-# The content these events used to carry in their fields, stripped
-# before the row lands. One table, consulted in one place, because a
-# content key that is scrubbed at some call sites and not others is a
-# leak waiting for the next event to be added.
+# What is taken off an event's fields before the row lands. One table,
+# consulted in one place, because a content key that is scrubbed at some
+# call sites and not others is a leak waiting for the next event to be
+# added.
 #
 # Unconditional, and deliberately not under the text switch: the events
-# table is metadata-only by construction, from its first row. `text` was
-# the transcript half of three events. `tool` was the called tool's
-# name, which is content for the same reason its result is, a device's
-# self-description or an MCP far side's vocabulary rather than anything
-# this application authored; the name lives on `tool_invocations`, where
-# the text switch decides whether it is kept.
+# table is metadata-only by construction, from its first row.
 #
-# The narrowing (#120) has since taken all four off the events, so this
-# is defense in depth rather than a live guard. It stays for two
-# reasons: a payload that regains a content key meets it here rather
-# than in a review, and the same rule reads a database written by a
-# server from before the narrowing.
+# `text` was the transcript half of three events and the narrowing
+# (#120) has taken it off all three, so those entries are defense in
+# depth: a payload that regains the key meets it here rather than in a
+# review, and the same rule reads a database written by a server from
+# before the narrowing.
+#
+# `tool` is different, and still live. The narrowing took the called
+# tool's name off every branch but one, because a device's name is its
+# self-description and an MCP name is a far side's vocabulary, while a
+# builtin's is this application's own; that branch still emits `tool`,
+# and this strip still removes it from the row. The name is not lost: it
+# is on `tool_invocations`, where the text switch decides whether it is
+# kept, which is the point. Every name a call carries then lives in one
+# table under one rule rather than in two under two, and the decision
+# track stays a track of decisions.
 EVENT_CONTENT: dict[str, tuple[str, ...]] = {
     "heard": ("text",),
     "replied": ("text",),
