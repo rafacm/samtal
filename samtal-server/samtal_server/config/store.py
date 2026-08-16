@@ -66,6 +66,7 @@ from samtal_server.config.models import (
     mcp_entry_fragment,
     normalize_device_bindings,
     normalize_mac,
+    url_credential,
 )
 from samtal_server.config.secrets import EntityKind, SecretLocation, SecretStore, encrypt
 from samtal_server.db import schema
@@ -379,6 +380,7 @@ class ConfigStore:
         stage = _stage(stage)
         name = _identifier(f"providers.{stage}", name)
         entry = _parse(ProviderConfig, f"providers.{stage}.{name}", fragment)
+        _check_no_url_credentials(f"providers.{stage}.{name}", entry)
         with self._transaction() as connection:
             domain = _read_domain(connection)
             getattr(domain.providers, stage)[name] = entry
@@ -1241,6 +1243,63 @@ def _identifier(location: str, name: str) -> str:
         raise ConfigError(f"{location}: the name is empty")
     _check_addressable(location, "name", cleaned)
     return cleaned
+
+
+def _check_no_url_credentials(location: str, entry: ProviderConfig) -> None:
+    """A provider's address holds no credential.
+
+    The secret-shaped-key rules above stop a secret written under a name
+    that admits to being one. A URL is the shape that gets past them:
+    `base_url: https://user:password@host/v1` has an innocent key, and
+    what it holds is stored in the configuration, read back on every
+    display path, and copied verbatim into the manifest of every capture
+    and every conversation record made against it. So it is refused
+    where it is chosen.
+
+    Write time only, exactly like the addressability rule below and for
+    the same reason: a row written before this rule still boots, still
+    reads and is still deletable, and a deployment does not get a server
+    that refuses to start over a value it can no longer edit. The record
+    is defended on its own side as well, by building a manifest that
+    strips this rather than by trusting that no row has it.
+
+    The refusal names the option and the rule and never the value: what
+    fails this check is a credential.
+    """
+    for key, value in entry.options.items():
+        _refuse_url_credentials(f"{location}.{key}", value)
+
+
+def _refuse_url_credentials(path: str, value: object) -> None:
+    """The same question at every depth, since an option can be a
+    structure and `connection: {url: ...}` is as ordinary to write as
+    `url: ...` is."""
+    carried = url_credential(value)
+    if carried == "userinfo":
+        raise ConfigError(
+            f'"{path}" is a URL carrying a user and password before its host, which '
+            f"is not allowed: this value is stored as written, shown on every read, "
+            f"and copied into the manifest of every capture and conversation record "
+            f"made against this provider. Write the address on its own and name the "
+            f"variable holding the credential, for example api_key_env: "
+            f"MY_PROVIDER_KEY. The value is not quoted back"
+        )
+    if carried == "query":
+        raise ConfigError(
+            f'"{path}" is a URL carrying a credential as a query parameter, which is '
+            f"not allowed, for the reason a user and password before the host is "
+            f"not: this value is stored as written, shown on every read, and copied "
+            f"into the manifest of every capture and conversation record made "
+            f"against this provider. Name the variable holding the credential "
+            f"instead, for example api_key_env: MY_PROVIDER_KEY. The value is not "
+            f"quoted back"
+        )
+    if isinstance(value, Mapping):
+        for key, nested in value.items():
+            _refuse_url_credentials(f"{path}.{key}", nested)
+    elif isinstance(value, (list, tuple)):
+        for position, item in enumerate(value):
+            _refuse_url_credentials(f"{path}.{position}", item)
 
 
 def _check_addressable(location: str, what: str, value: str) -> None:

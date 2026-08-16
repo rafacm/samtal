@@ -447,6 +447,71 @@ def test_the_switch_combinations_decide_what_a_row_keeps(
     assert (SENTINEL.encode() in _bytes_of(tmp_path)) is text_storage
 
 
+def test_a_credential_in_a_provider_url_reaches_no_record(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The one credential shape no secret-shaped key gives away: written
+    into a provider's address, where it used to be copied verbatim into
+    both records of every session held against it.
+
+    A real entry with a real `base_url` here rather than a mock option,
+    because that is the key an operator actually writes it in. The
+    session is a handshake and nothing else: the session row and the
+    capture's manifest are both written at the open, which is where the
+    provider entries land, and no round ever runs against the address.
+    """
+    monkeypatch.setenv("SAMTAL_TEST_PROVIDER_KEY", "not-a-real-credential")
+    config = Config(
+        server={
+            "database": {"dir": str(tmp_path)},
+            "conversations": {"enabled": True},
+            "capture": {"enabled": True, "dir": str(tmp_path / "captures")},
+        },
+        providers={
+            "llm": {
+                "vendor": {
+                    "type": "openai_compatible",
+                    "base_url": f"https://user:{SENTINEL}@host/v1",
+                    "model": "a-model",
+                    "api_key_env": "SAMTAL_TEST_PROVIDER_KEY",
+                    "egress": True,
+                }
+            },
+            "asr": {"mock": {"type": "mock", "text": "hello"}},
+            "tts": {"mock": {"type": "mock"}},
+            "vad": {"mock": {"type": "mock"}},
+        },
+        agents={
+            "assistant": {"llm": "vendor", "asr": "mock", "tts": "mock", "vad": "mock"}
+        },
+        default_agent="assistant",
+    )
+
+    with caplog.at_level("DEBUG"):
+        with TestClient(create_app(config)) as client:
+            with connect(client) as websocket:
+                shake_hands(websocket)
+
+    (row,) = read(tmp_path, "select * from sessions")
+    (manifest_file,) = (tmp_path / "captures").glob("*.json")
+    manifest = json.loads(manifest_file.read_text())
+
+    # What the record is for survives: the entry, its type and the exact
+    # model string, and the address without what was in front of it.
+    assert json.loads(row["providers"])["llm"]["base_url"] == "https://host/v1"
+    assert json.loads(row["providers"])["llm"]["model"] == "a-model"
+    assert manifest["providers"]["llm"]["base_url"] == "https://host/v1"
+    # And the credential reaches nothing that outlives the session.
+    assert SENTINEL.encode() not in _bytes_of(tmp_path)
+    assert SENTINEL not in manifest_file.read_text()
+    assert SENTINEL not in caplog.text
+    printed = capsys.readouterr()
+    assert SENTINEL not in printed.out + printed.err
+
+
 def _bytes_of(directory: Path) -> bytes:
     """The database and its sidecars, which is where a switch saying text
     is not stored has to hold."""
