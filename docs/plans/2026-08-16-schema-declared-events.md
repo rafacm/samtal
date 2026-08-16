@@ -342,11 +342,23 @@ absent from all the surfaces above, in both modes.
   and every one of these carries the fixed safe sentence and the
   one-line complaint. Behind the matrix sits a LAST-RESORT GUARD:
   in forgiving mode the whole validation runs under its own
-  `try/except`, so a bug inside the validator itself produces the
-  fixed safe complaint and a degraded base-fields emission instead
-  of an exception on a reply path. M2 tests the guard by injecting
-  a validator that raises an exception carrying a sentinel and
-  asserting the reply survives and the sentinel appears nowhere.
+  `try/except`, so a bug inside the validator itself cannot raise
+  on a reply path. The guard does not degrade the caller's
+  payload, because the caller's payload is exactly what could not
+  be judged: it constructs a FRESH emission from whole cloth, the
+  fixed event token `schema_violation`, the emitter's own trusted
+  base identity (`session` and `device` on the session channel,
+  nothing else), the fixed safe sentence, and an empty argument
+  tuple, so a hostile event name, key, value, message or argument
+  in the original call reaches nothing. `schema_violation` is
+  itself a declared registry event with exactly that fixed shape,
+  covered by the conformance test and the generated reference like
+  any other, so the recovery path is inside the machinery rather
+  than a second undeclared surface. M2 tests the guard with a
+  matrix, an injected validator raising a sentinel-bearing
+  exception combined with a hostile event name, a hostile key, a
+  hostile value, a hostile message, and hostile args, asserting
+  the reply survives and no sentinel appears on any surface.
 - The switch is `SAMTAL_EVENTS_ENFORCEMENT` (`strict` or
   `forgiving`), held in a module flag with a setter, and it is the
   SERVER ENTRYPOINT that resolves it: `main()` reads the variable
@@ -970,6 +982,14 @@ eleven findings. As received, condensed but faithful:
    declared and covered, or demoted to a non-event complaint; test
    a throwing validator combined with hostile name, key, value,
    message and args.
+
+   *Resolution*: accepted. The guard now constructs a fresh
+   emission (fixed `schema_violation` event, trusted bases only,
+   fixed sentence, empty args) instead of degrading the caller's
+   payload; `schema_violation` is declared in the registry with
+   that fixed shape and covered by conformance and the generated
+   reference; and the guard test is the full hostile matrix.
+   Amended in the enforcement section.
 
 6. **P1: entrypoint resolution leaves programmatic servers
    strict.** A production process importing `create_app` under an
