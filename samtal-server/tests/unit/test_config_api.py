@@ -119,6 +119,28 @@ def test_the_right_token_reaches_routing(client: TestClient) -> None:
     assert response.status_code == 404
 
 
+@pytest.mark.parametrize(
+    "path", ["/config/", f"/agents/{SENTINEL}/", f"/providers/llm/{SENTINEL}/"]
+)
+def test_no_route_redirects_a_stray_trailing_slash(api: FastAPI, path: str) -> None:
+    """The router's default answers `/config/` with a 307 whose Location
+    is the request's own path, which for an entity route is the name the
+    caller sent: a value quoted back in a response header, where a proxy
+    and a browser both keep it. This namespace redirects nothing, so a
+    stray slash is an unmatched path like any other.
+
+    Nothing relied on the redirect. `/api` and `/api/` resolve through
+    the mount, which is a different mechanism and is asserted below.
+    """
+    client = TestClient(api, follow_redirects=False)
+
+    response = client.get(path, headers=_bearer(TOKEN))
+
+    assert response.status_code == 404
+    assert "location" not in response.headers
+    assert SENTINEL not in response.text
+
+
 def test_the_token_reaches_no_log_record(
     api: FastAPI, caplog: pytest.LogCaptureFixture
 ) -> None:
