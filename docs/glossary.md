@@ -286,9 +286,10 @@ input side.
 ### Premature endpoint
 
 The endpointer declaring an utterance over at a pause that was
-thinking rather than turn-yielding. Visible in the logs as `heard`
-transcripts that trail off ("I'm here with my..."): the ASR itself
-marks the trail-off with an ellipsis. Each one starts a reply to a
+thinking rather than turn-yielding. Visible in the conversation
+store as turns whose transcript trails off ("I'm here with my..."),
+which the ASR itself marks with an ellipsis; on the events it shows
+as a short `heard` whose continuation arrives as a barge-in. Each one starts a reply to a
 fragment and turns the user's continuation into a barge-in attempt
 against it. Dictation-style speech (telling an agent things to
 remember) pauses longer between clauses than question-answer

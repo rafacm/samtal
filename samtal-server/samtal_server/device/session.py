@@ -289,7 +289,7 @@ class DeviceSession:
             # header is bytes an unauthenticated caller chose, and these
             # logs are the retained surface the observability ADR makes
             # them: a rejected value written into them is a value the
-            # caller placed in an operator's log store. Nothing
+            # caller placed in an operator's retained logs. Nothing
             # diagnosable is lost, because nothing about the submitted
             # value was ever actionable: the reason token says which
             # rejection this is, `device` is null because none was

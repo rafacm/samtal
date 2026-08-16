@@ -1831,10 +1831,13 @@ carries no field rather than an invented one, which is the same rule
 
 `rg -in "transcript" samtal-server docs` returns 318 matched lines across
 80 files. All but the ones listed below are the word in its ASR sense (a
-transcription, the `heard` transcript of an utterance, `show_transcript`,
+transcription, the transcript of an utterance, `show_transcript`,
 `no_transcript` as a barge-in reason), which the narrowing does not
 touch. The claims that the logs are the transcript store, each with its
-disposition:
+disposition. Four more, found by the PR #160 review round and by the
+re-run inventory it prompted, are at the end of the table: the first
+sweep read for the phrase "transcript store" and missed sentences that
+said the same thing in other words.
 
 | hit | disposition |
 | --- | --- |
@@ -1858,6 +1861,11 @@ disposition:
 | `docs/adr/2026-08-04-...md` (title, status, two consequences) | left as recorded and annotated: an ADR is a record of a decision, so the follow-up note says what changed rather than editing the decision under it |
 | `docs/adr/2026-08-15-...md` (context, decision, consequence) | the forward-looking tenses moved to the past; the recorded context is untouched |
 | `docs/plans/*`, `docs/features/*`, `CHANGELOG.md` history | left alone: dated records of what was true when they were written, and the changelog's new entries are where the change is announced |
+| `docs/conversational-quality-regression-suite.md:43` ("`heard` carries the transcript and the utterance duration") | rewritten by the #160 round's third finding: the event carries the duration and the language, and the transcript is on the store's turn. Found by the round; the first sweep did not read it because the sentence never says "store" |
+| `tests/unit/test_tools_mcp.py:1204` ("in the transcript the retained logs are") | rewritten by the #160 round's third finding to name the store's record, the same wording the module's own docstring already got |
+| `events.py:20` (the docstring's emit example, `events.info("heard %r", text, ...)`) | rewritten by the #160 round's third finding: the example now emits a duration, since an example that renders an utterance is a contradiction of the paragraph above it |
+| `docs/glossary.md:289` ("visible in the logs as `heard` transcripts that trail off") | rewritten by the #160 round's third finding: a premature endpoint is visible as a stored turn whose transcript trails off, and on the events as a short `heard` whose continuation arrives as a barge-in |
+| `device/session.py:284` ("a value the caller placed in an operator's log store") | reworded by the same finding to "retained logs": not a transcript claim, but the phrase is the one this round found ambiguous everywhere else |
 | `app.py:288` and `test_server_event_pins.py:1191` (the capture warning: "room audio and transcripts are being written to %s") | rewritten in `9a9094d`, pin moved with it: the sentence now names room audio and a track of the session's events, which is what the two files hold. A first pass left it alone on the grounds that the WAV still records everything said in the room, which is true and is not the point: half the sentence described nothing on the disk, and a warning about a recording has to be exact in both directions |
 
 ### Deviations from the plan
