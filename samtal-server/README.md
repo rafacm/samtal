@@ -1805,9 +1805,15 @@ single tool therefore says which one by its position in that server's
 listing. `samtal-server config status` prints the names themselves, to a
 terminal, when you ask it.
 
-Retained JSON logs are the conversation store until v3 brings a real one:
-filter on `event` in `heard`, `replied`, `agent_said` and group by
-`session`, and you have the transcript. Tokens are never logged, at any
+These events are metadata, and metadata only. What was said is in the
+conversation store, keyed by the same `session`: query `turns` there for
+the transcript and the reply, and `tool_invocations` for what a tool was
+asked and what it answered. Filtering the logs for it no longer works,
+and that is the point (see the [content and telemetry
+ADR](../docs/adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)):
+a surface with no free-text field cannot leak one. What the events keep
+is what a latency brief reads, which is every duration, every count and
+every identifier they ever carried. Tokens are never logged, at any
 level.
 
 ## Capturing a session
@@ -1887,8 +1893,10 @@ so what is lost is at most the last fraction of a second.
 
 In the field: turn it on, hold sessions in the conditions that actually
 break things, and say a marker phrase aloud when something goes wrong.
-It lands in a `heard` transcript and points at the interesting twenty
-seconds instead of ten minutes of scrubbing. Copy the three files off
+It is on the WAV, and the `heard` event beside it in the decision track
+points at the interesting twenty seconds instead of ten minutes of
+scrubbing; with the conversation store on and `text: true`, the phrase
+itself is one query away, since both records carry the same session id. Copy the three files off
 after each session; a field recording is not repeatable.
 
 ## The conversation store

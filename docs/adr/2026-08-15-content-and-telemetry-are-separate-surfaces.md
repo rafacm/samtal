@@ -1,8 +1,8 @@
 # Conversation content and telemetry are separate surfaces
 
 **Status:** Accepted (recorded 2026-08-15; the log-surface narrowing
-takes effect when the conversation store of
-[#120](https://github.com/rafacm/samtal/issues/120) lands)
+took effect on 2026-08-16, when the conversation store of
+[#120](https://github.com/rafacm/samtal/issues/120) landed with it)
 
 ## Context
 
@@ -63,9 +63,9 @@ retention, and access model:
    invocations; narrow content, long retention, append-only
    expectations.
 
-The transcript-store role of the JSON logs ends when #120's store
-lands; until then the 2026-08-04 record's transcript clause remains
-in force. Events remain a compatibility surface exactly as before;
+The transcript-store role of the JSON logs ended when #120's store
+landed, which is what the 2026-08-04 record's follow-up note records.
+Events remain a compatibility surface exactly as before;
 this record changes what may ride on them, not how they are
 versioned. Live views (the admin UI's "what is happening now") are
 fed from the event tap, not from a store.
@@ -76,8 +76,8 @@ fed from the event tap, not from a store.
   construction: with no free-text fields, a leak is a schema
   violation rather than a review finding. A follow-up issue
   (schema-declared events) turns the convention into machinery.
-- `heard`, `replied`, and `agent_said` lose their text fields when
-  the store lands; that is a breaking change to the event surface,
+- `heard`, `replied`, and `agent_said` lost their text fields when
+  the store landed; that is a breaking change to the event surface,
   belongs in the changelog like any other, and is the point.
 - The store inherits the obligations the logs carried implicitly:
   retention tiers, right-to-delete, per-user scoping, and the

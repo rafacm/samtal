@@ -1,8 +1,9 @@
 """Every structured session event, pinned exactly as it is emitted.
 
-The retained JSON logs are the observability surface (ADR 2026-08-04)
-and the transcript store until v3, so the records a session emits are
-output rather than an implementation detail. The suites next door assert
+The retained JSON logs are the observability surface (ADR 2026-08-04),
+so the records a session emits are output rather than an implementation
+detail. They carry metadata only: what was said is the conversation
+store's, and the sentinel cases below are what says so. The suites next door assert
 what an event is about: this one asserts what it *is*. Per emit path it
 pins five things, which together are the whole of what a consumer sees:
 

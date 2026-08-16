@@ -2,8 +2,26 @@
 
 **Status:** Accepted (recorded 2026-08-04, backfilling a decision made
 in M7); the transcript-store role is superseded by
-[2026-08-15-content-and-telemetry-are-separate-surfaces.md](2026-08-15-content-and-telemetry-are-separate-surfaces.md)
-when the conversation store of #120 lands
+[2026-08-15-content-and-telemetry-are-separate-surfaces.md](2026-08-15-content-and-telemetry-are-separate-surfaces.md),
+which has now happened (see the follow-up below)
+
+## Follow-up, 2026-08-16
+
+The supersession this status anticipated has happened. The conversation
+store of [#120](https://github.com/rafacm/samtal/issues/120) landed, and
+with it the narrowing: `heard`, `replied` and `agent_said` no longer
+carry `text`, `tool_call` no longer carries a name any peer chose, and
+the token counts are named as the GenAI conventions name them. The
+transcript-store half of the decision below is therefore historical, and
+the rest of it stands unchanged. The events are still a public,
+versioned surface; a gap in them is still an observability gap; semantic
+drift in a field is still a bug. What changed is what may ride on them:
+metadata only, with the record of what was said in the store.
+
+Everything the decision was proven with survives the change. The #22
+operator brief measured the pipeline from the logs alone (per-stage
+latency, language-detection confidence, before-and-after validation of
+configuration changes), and every number it read is still emitted.
 
 ## Context
 

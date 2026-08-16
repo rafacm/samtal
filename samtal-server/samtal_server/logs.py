@@ -3,10 +3,10 @@
 Two formats, one handler on the root logger. `text` is what a terminal
 wants and what the server has always printed. `json` is one object per
 line, which is what a log collector wants, and it is the container
-default: with retention, the conversation events (`heard`, `replied`,
-`agent_said`) filtered by session are the transcript of a conversation,
-which is what stands in for a conversation store until v3 brings a real
-one.
+default: the conversation events carry structured fields a collector
+can group by session, so a deployment measures its own pipeline from
+what it retains. They carry metadata only; the record of what was said
+is the conversation store (#120).
 
 One thing is filtered rather than formatted: the vendor libraries that
 talk to providers are held at INFO whatever the server's level, because

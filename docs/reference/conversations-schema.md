@@ -106,10 +106,12 @@ and on the session.
 Some fields never arrive. The writer strips `text` from `heard`, `replied` and
 `agent_said`, and `tool` from `tool_call`, before the row lands, and does so
 whatever the storage switches say: the `events` table is metadata-only from
-its first row. A called tool's name is content for the same reason its result
-is, since it is a device's self-description or an MCP server's vocabulary
-rather than anything this server authored, and it is kept on
-`tool_invocations` where the text switch decides its fate.
+its first row. Those events no longer carry either key, so the strip is
+defense in depth and the rule that reads a database written before the
+narrowing. A called tool's name is content for the same reason its result is,
+since it is a device's self-description or an MCP server's vocabulary rather
+than anything this server authored, and it is kept on `tool_invocations` where
+the text switch decides its fate.
 
 ## The OpenTelemetry GenAI correspondence
 

@@ -469,8 +469,9 @@ class ServerConfig(BaseModel):
     timezone_offset_minutes: int | None = Field(default=None, ge=-1440, le=1440)
 
     # How the server logs. "text" is the human format; "json" is one object
-    # per line, which is what the container image defaults to, and what
-    # makes retained logs readable back as conversation transcripts.
+    # per line, which is what the container image defaults to, and what a
+    # collector groups by session to measure the pipeline. The records are
+    # metadata; what was said is in the conversation store.
     log_format: Literal["text", "json"] = "text"
     log_level: str = "INFO"
 

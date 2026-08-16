@@ -45,11 +45,12 @@ class name.
 One thing is not policy and does not follow a switch. The `events`
 table is metadata-only by construction, so `EVENT_CONTENT` is stripped
 from every event's fields whatever the switches say: content has its own
-tables, and an events row is the wrong place for it at any setting.
-Milestone 5 narrows the events themselves, at which point the strip
-stops being a live guard and becomes defense in depth; it is written to
-be correct either way, which is what lets the store behave identically
-on both sides of that change.
+tables, and an events row is the wrong place for it at any setting. The
+narrowing has since landed and the events carry none of those keys, so
+the strip is defense in depth rather than a live guard: it was written
+to be correct either way, which is what let the store behave identically
+on both sides of that change and what keeps it correct for a database
+written by an older server.
 """
 
 import datetime as dt
@@ -102,22 +103,24 @@ RETENTION_DAYS_DEFAULT = 90
 # cannot hold shutdown past this.
 STOP_TIMEOUT_S = BUSY_TIMEOUT_MS / 1000 + 5.0
 
-# The content each event carries in its fields today, stripped before
-# the row lands. One table, consulted in one place, because a content
-# key that is scrubbed at some call sites and not others is a leak
-# waiting for the next event to be added.
+# The content these events used to carry in their fields, stripped
+# before the row lands. One table, consulted in one place, because a
+# content key that is scrubbed at some call sites and not others is a
+# leak waiting for the next event to be added.
 #
 # Unconditional, and deliberately not under the text switch: the events
-# table is metadata-only by construction, from its first row. `text` is
-# the transcript half of three events. `tool` is the called tool's name,
-# which is content for the same reason its result is, a device's
+# table is metadata-only by construction, from its first row. `text` was
+# the transcript half of three events. `tool` was the called tool's
+# name, which is content for the same reason its result is, a device's
 # self-description or an MCP far side's vocabulary rather than anything
 # this application authored; the name lives on `tool_invocations`, where
 # the text switch decides whether it is kept.
 #
-# A live guard until the narrowing milestone removes these fields from
-# the events themselves, and defense in depth after it, which is what
-# makes the store behave identically on both sides of that change.
+# The narrowing (#120) has since taken all four off the events, so this
+# is defense in depth rather than a live guard. It stays for two
+# reasons: a payload that regains a content key meets it here rather
+# than in a review, and the same rule reads a database written by a
+# server from before the narrowing.
 EVENT_CONTENT: dict[str, tuple[str, ...]] = {
     "heard": ("text",),
     "replied": ("text",),
