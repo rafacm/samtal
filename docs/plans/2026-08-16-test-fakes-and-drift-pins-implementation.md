@@ -1028,3 +1028,36 @@ Two, both recorded above and neither weakening a pin.
    cannot fail a subset relation, so the deletion is recorded as a
    control that passes and the addition is the branch that proves the
    pin. The plan's mutation-matrix bullet now says that per relation.
+
+### PR review round
+
+External review of PR #164 (diff main...5107aa2) by codex 0.147.0
+(model gpt-5.6-sol), 2026-08-16, posted to the PR by the review run
+itself. Four findings, each fixed with its own commit:
+
+1. **P2: duplicate example claims can evade the exact-one check.**
+   Claims were tallied by raw string but existence checked through
+   `Path`, so `./vad-silero.yaml` on a second entity passed both
+   tests. *Resolution*: fixed in b5bf32a; claimed names must be
+   bare filenames, refused by name before any path resolves, and
+   the alias mutation is a recorded matrix row.
+2. **P2: the matrix never exercises reload-outcome equality.** The
+   duplicate mutation fails only the no-duplicates test.
+   *Resolution*: fixed in bed0318; dropping `stopped` fails the
+   equality test while the no-duplicates test passes, the exact
+   complement, both rows recorded.
+3. **P2: the recorded pending-field proof contradicts the plan and
+   the completion claims.** The plan asked for a drop that the
+   subset relation makes a pass by design, and the doc and
+   CHANGELOG claimed every branch failed. *Resolution*: fixed in
+   8563528; the plan's matrix bullet is amended post-review to ask
+   the mutation that fits each relation, the doc separates proofs
+   from the one passing control, and the CHANGELOG says so.
+4. **P2: final-branch verification recorded from the pre-rebase
+   branch.** Stale hashes and 2276-to-2285 counts. *Resolution*:
+   fixed in 3949066; everything rerun on the final head (ruff
+   clean, 2271 passed and 16 skipped, 55 integration, 2287
+   collected) and the counts corrected to 2278 to 2287, checked
+   from both ends.
+
+Verdict as posted: mergeable after the listed fixes.
