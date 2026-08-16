@@ -162,6 +162,22 @@ def open_conversations(directory: str | Path) -> Engine:
     return open_at(directory, DATABASE_FILENAME, _MIGRATIONS_DIR, secure_delete=True)
 
 
+def migrate_existing(directory: str | Path) -> bool:
+    """Bring a store that is already there up to the current schema, and
+    create nothing. Answers whether there was one.
+
+    What a boot with recording switched off does. A deployment that
+    recorded last month and records nothing today still has to serve its
+    history against the schema this server reads with, and migrating what
+    exists is maintenance rather than recording: a missing file stays
+    missing, which is what keeps an absent or disabled section a server
+    that leaves no database behind."""
+    if not conversations_path(directory).exists():
+        return False
+    open_conversations(directory).dispose()
+    return True
+
+
 def read_conversations(directory: str | Path) -> Engine:
     """An engine for reading a store somebody else migrated.
 
@@ -976,6 +992,7 @@ __all__ = [
     "Open",
     "Turn",
     "conversations_path",
+    "migrate_existing",
     "open_conversations",
     "purge",
     "read_conversations",
