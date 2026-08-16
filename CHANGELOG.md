@@ -153,6 +153,18 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   answered it, so the per-round, per-model truth needed somewhere to
   be. Additive: an entry with no model to name (the bundled VAD, a
   Piper voice, the mocks) carries no field rather than an invented one.
+- **An MCP tool call is executed by the entry it was resolved against,
+  or by nobody** (#120): a reload can move a published name between
+  entries (`home__inside` coming up takes `home__inside__x` over from
+  `home`), and a call resolved just before one landed could be executed
+  by the new owner, under that owner's timeout, while being recorded
+  and logged as the entry that had not run it. The entry a call was
+  classified against now decides its routing and its timeout, and the
+  registry refuses a name that has moved instead of following it. The
+  model is told the tool did not run and answers in its own words, the
+  same as for any tool that fails. **Operator-visible:** only in that
+  window, and only as a tool call that failed where it used to
+  succeed against a server the caller did not mean.
 - **The session capture's decision track inherits the narrowing**
   (#120): the capture is a consumer of the same events, so its
   `<session>.jsonl` keeps every event minus the text, minus every tool
