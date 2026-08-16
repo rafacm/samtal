@@ -85,11 +85,14 @@ files), the coupling has grown, which is the point of doing this now:
 
 ### What moves is decided by a rule, not a taste
 
-Three categories move to `tests/support`, and nothing else:
+Four categories move to `tests/support`, and nothing else:
 
 1. **Every name imported across a test-module boundary today**, as
    listed by the inventory grep. This is the minimum that makes the
-   no-cross-import criterion true.
+   no-cross-import criterion true. The boundary-contract pair
+   (`StubRuntime` and the boundary `FakeDevice`), promoted by the
+   issue's decision 1, moves under this category even though it is
+   single-module today.
 2. **The SDK fake block**, named by the issue even though it is
    single-module today: it is the template duplication the next
    provider suite would copy.
@@ -99,10 +102,30 @@ Three categories move to `tests/support`, and nothing else:
    definitions kept. Consolidation replaces definitions, never
    assertions; if two duplicates genuinely differ in behavior the
    difference is preserved as two named classes rather than merged.
+4. **The minimal module-local dependency closure of every moved
+   root.** A moved helper's body is not edited, so whatever
+   module-level names its body reads move with it (or already live
+   in support): `Gate` brings `TIMEOUT_S`
+   (`test_conversations_store.py:52`), `corrupt` brings `CORRUPT`
+   with its no-leak `STORED` sentinel verbatim
+   (`test_tools_memory.py:132-140`), `StubRuntime` and the boundary
+   `FakeDevice` bring `OUTPUT_RATE`, `FRAME_BYTES`, and `REPLY_PCM`
+   (`test_boundary_contract.py:63-68`). The closure is computed per
+   milestone by AST inspection of each moved definition's free
+   names, not by memory, and the closure list goes in the PR body.
+   Sentinel constants move byte-identical: they are load-bearing
+   for the no-leak tests that plant them.
 
-A fake defined and used in one module stays in that module. Locality
-is a feature; the support package is for what is already shared, not
-a museum for everything fake-shaped.
+Two boundaries of the rule:
+
+- A fake defined and used in one module stays in that module.
+  Locality is a feature; the support package is for what is already
+  shared, not a museum for everything fake-shaped.
+- A name that crosses the boundary but is defined in
+  `samtal_server` (a production re-export, like `OpusEncoder`
+  imported via `test_session.py`) is not a helper: the importing
+  site's import is redirected to the production module, and nothing
+  is copied into support.
 
 ### The support package layout
 
@@ -471,6 +494,14 @@ prior plans. Findings as received, condensed but faithful:
    the move set as every shared root plus its minimal module-local
    dependency closure (AST-generated), keep sentinel constants
    verbatim, and redirect production re-exports to their owners.
+
+   *Resolution*: accepted. The move rule gains a fourth category,
+   the AST-computed module-local dependency closure of every moved
+   root, with the reviewer's three examples named, sentinel
+   constants moving byte-identical, and production re-exports
+   redirected to their owning module instead of copied. The
+   boundary-fake pair is now explicitly inside category 1. Amended
+   in "What moves is decided by a rule, not a taste".
 
 3. **P2: the two `BrokenTts` classes are not duplicates.** The
    filler one raises synchronously in `synthesize()` with a
