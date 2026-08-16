@@ -12,7 +12,6 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,11 +19,9 @@ from fastapi.testclient import TestClient
 import samtal_server.runtime.pipeline as pipeline_module
 from samtal_server.app import create_app
 from samtal_server.config import Config
-from samtal_server.device.session import DeviceSession
 from samtal_server.providers import (
     ToolCall,
     Turn,
-    build_agent_providers,
 )
 from samtal_server.tools.builtin import switch_agent_tool
 from samtal_server.tools.mcp import McpServers
@@ -41,6 +38,11 @@ from tests.support.configs import (
 )
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 from tests.support.providers import ScriptedLlm
+from tests.support.sessions import (
+    call,
+    run_reply,
+    session_for,
+)
 from tests.support.wire import (
     connect,
     say_something,
@@ -48,84 +50,6 @@ from tests.support.wire import (
     shake_hands,
     tone_strength,
 )
-from tests.unit.test_session import device_session
-
-
-def call(name: str, **arguments: Any) -> ToolCall:
-    return ToolCall(id=f"c-{name}", name=name, arguments=arguments)
-
-
-def session_for(
-    config: Config,
-    mac: str,
-    scripts: dict[str, ScriptedLlm] | None = None,
-    memory: MemoryStore | None = None,
-    fillers: dict[str, Any] | None = None,
-    websocket: Any = None,
-    mcp_servers: McpServers | None = None,
-    conversations: Any = None,
-) -> DeviceSession:
-    """A device session with a real bespoke runtime behind it, built the
-    way `run` builds one, with the named agents' LLMs replaced by
-    scripts. No websocket by default: these tests drive the loop
-    directly and never speak."""
-    providers = build_agent_providers(config)
-    for agent, script in (scripts or {}).items():
-        # The entry the script stands in for, so the events a session
-        # emits about its LLM carry what a real one's would.
-        script.identity = providers[agent].llm.identity
-        providers[agent] = type(providers[agent])(
-            llm=script,
-            asr=providers[agent].asr,
-            tts=providers[agent].tts,
-            vad=providers[agent].vad,
-        )
-    return device_session(
-        config, mac, providers, memory, fillers, websocket, mcp_servers, conversations
-    )
-
-
-async def run_reply(session: DeviceSession, said: str) -> list[str]:
-    """One reply, with speaking stubbed out: what the loop decides is
-    what these tests are about, not the audio."""
-    spoken: list[str] = []
-
-    async def speak(synthesis: Any, resampler: Any, into: list[str]) -> None:
-        # Sentences reach _speak as a synthesis in flight now (#37), so
-        # the stub takes the text off it and skips the audio entirely.
-        synthesis.cancel()
-        into.append(synthesis.sentence)
-
-    session.runtime._speak = speak  # type: ignore[method-assign]
-    session.send_audio = _nothing  # type: ignore[method-assign]
-    session.runtime._turns.append(Turn("user", said))
-    await session.runtime._speak_reply(said, spoken)
-    if spoken:
-        session.runtime._turns.append(Turn("assistant", " ".join(spoken)))
-    return spoken
-
-
-async def drive_reply(session: DeviceSession, pcm: bytes) -> None:
-    """One whole reply, audio and all, run to completion.
-
-    The two helpers below exist so that the characterization suite,
-    which pins today's behavior from outside, names the reply entry
-    point in one place instead of thirty. When the reply moves behind
-    the device-facing boundary, these lines move with it and the tests
-    that use them do not change."""
-    await session.runtime._reply(pcm)
-
-
-def start_reply(session: DeviceSession, pcm: bytes) -> asyncio.Task[None]:
-    """A reply in flight, registered the way an utterance registers one,
-    so that everything asking whether this session is replying (the idle
-    watchdog, the shutdown, the barge-in gates) sees it."""
-    session.runtime._reply_task = asyncio.create_task(session.runtime._reply(pcm))
-    return session.runtime._reply_task
-
-
-async def _nothing(*args: object, **kwargs: object) -> None:
-    return None
 
 
 async def test_a_reply_with_no_tool_calls_is_one_round() -> None:

@@ -15,23 +15,23 @@ the session ending.
 """
 
 import asyncio
-from typing import Any, cast
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
 from samtal_server.app import create_app
-from samtal_server.config import Config
 from samtal_server.conversations.schema import CLOSE_REASONS as STORED_REASONS
-from samtal_server.device.session import CLOSE_REASONS, DeviceSession
-from samtal_server.providers import build_agent_providers
+from samtal_server.device.session import CLOSE_REASONS
 from samtal_server.registry import SessionRegistry
-from samtal_server.runtime.pipeline import bespoke_runtime_factory
-from samtal_server.tools.mcp import McpServers
 from tests.support.configs import (
     capped_config,
     config_with_agent,
     idle_config,
+)
+from tests.support.sessions import (
+    open_session,
+    served,
 )
 from tests.support.sockets import LoopingSocket
 from tests.support.wire import (
@@ -46,37 +46,6 @@ from tests.support.wire import (
 def closed(caplog: pytest.LogCaptureFixture) -> Any:
     (record,) = [r for r in caplog.records if getattr(r, "event", None) == "session_closed"]
     return record
-
-
-def served(
-    config: Config, websocket: LoopingSocket, conversations: Any = None
-) -> DeviceSession:
-    """A session built the way `ws.py` builds one, so `run` is what the
-    test drives rather than a hand-assembled close path. `conversations`
-    is the store, which reaches a session twice over: through the factory
-    that binds its turn recorder, and as the collaborator the session
-    opens and closes."""
-    factory = bespoke_runtime_factory(
-        config, build_agent_providers(config), McpServers({}), None, {}, conversations
-    )
-    return DeviceSession(
-        cast(Any, websocket), config, factory, conversations=conversations
-    )
-
-
-async def open_session(
-    config: Config, conversations: Any = None
-) -> tuple[DeviceSession, LoopingSocket, Any]:
-    """A live session with its hello exchanged, its `run` in flight."""
-    websocket = LoopingSocket()
-    session = served(config, websocket, conversations)
-    task = asyncio.create_task(session.run())
-    for _ in range(200):
-        await asyncio.sleep(0.01)
-        if session.runtime is not None and session._opened_at is not None:
-            if websocket.inbox.empty():
-                return session, websocket, task
-    raise AssertionError("the session never opened")
 
 
 def test_the_tokens_are_the_ones_the_store_records() -> None:

@@ -15,12 +15,10 @@ windows a real socket cannot time.
 
 import asyncio
 import json
-from dataclasses import replace
 
 import pytest
 from fastapi.testclient import TestClient
 
-import samtal_server.device.session as session_module
 from samtal_server.app import create_app
 from samtal_server.audio.opus import OpusEncoder
 from samtal_server.providers import (
@@ -28,10 +26,12 @@ from samtal_server.providers import (
     ProviderIdentity,
     Turn,
 )
-from tests.support.configs import DEVICE_MAC, LONG_REPLY, config_with_agent
+from tests.support.configs import LONG_REPLY, config_with_agent
 from tests.support.events import events, only
 from tests.support.providers import ConfirmingAsr, GatedAsr, ScriptedEndpointer
-from tests.support.sockets import RecordingSocket
+from tests.support.sessions import (
+    realtime_session,
+)
 from tests.support.wire import (
     assert_endpointed_speech,
     collect_reply,
@@ -46,7 +46,6 @@ from tests.support.wire import (
     shake_hands,
     speech_pcm,
 )
-from tests.unit.test_session import device_session
 
 # A reply of about four seconds: long enough that an interruption sent
 # right after the first sentence starts lands mid-stream, short enough
@@ -55,18 +54,6 @@ SLOW_REPLY = (
     "This reply runs on for roughly four seconds, which leaves an "
     "interruption plenty of stream left to land in."
 )
-
-
-def realtime_session(config, asr) -> tuple[session_module.DeviceSession, RecordingSocket]:
-    """A session mid-conversation on a realtime device, its ASR swapped
-    for the test's."""
-    socket = RecordingSocket()
-    session = device_session(config, DEVICE_MAC, websocket=socket)
-    session._listen_mode = "realtime"
-    session.listening = True
-    assert session.runtime._providers is not None
-    session.runtime._providers = replace(session.runtime._providers, asr=asr)
-    return session, socket
 
 
 def test_a_short_blip_does_not_interrupt_the_reply(

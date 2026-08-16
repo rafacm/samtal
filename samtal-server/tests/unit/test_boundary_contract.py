@@ -52,8 +52,10 @@ from samtal_server.tools.device import DeviceToolClient
 from samtal_server.tools.mcp import McpServers
 from tests.support.boundary import FakeDevice, StubRuntime
 from tests.support.configs import DEVICE_MAC, config_with_agent
+from tests.support.sessions import (
+    device_session,
+)
 from tests.support.wire import connect, send_pcm, shake_hands, speech_pcm
-from tests.unit.test_session import device_session
 
 
 def app_with_a_stub(built: list[StubRuntime], config: Config | None = None) -> Any:

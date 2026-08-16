@@ -35,24 +35,16 @@ from tests.support.configs import (
 )
 from tests.support.events import events, only
 from tests.support.providers import BrokenTts, ScriptedLlm, StallingLlm
+from tests.support.sessions import (
+    call,
+    masked_session,
+    session_for,
+)
 from tests.support.sockets import RecordingSocket
-from tests.unit.test_session_tools import call, session_for
 
 STALL_S = 0.5
 
 UTTERANCE = b"\x00\x00" * 320
-
-
-async def masked_session(config: Config, mac: str, scripts: dict[str, Any] | None = None):
-    """A session with its filler cache built the way boot builds it, on
-    a recording socket, listening in realtime so the after-reply state
-    is assertable."""
-    fillers = await build_agent_fillers(config, build_agent_providers(config))
-    session = session_for(config, mac, scripts, fillers=fillers)
-    session.websocket = cast(Any, RecordingSocket())
-    session._listen_mode = "realtime"
-    session.listening = True
-    return session
 
 
 async def test_a_slow_reply_is_masked_at_the_threshold(

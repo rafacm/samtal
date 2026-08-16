@@ -40,9 +40,15 @@ from tests.support.configs import (
     config_with_agent,
 )
 from tests.support.events import events, only
-from tests.support.providers import ScriptedLlm, Unreachable
-from tests.unit.test_session import connect, say_something, shake_hands
-from tests.unit.test_session_tools import _nothing, call, run_reply, session_for
+from tests.support.providers import ScriptedLlm
+from tests.support.sessions import (
+    _nothing,
+    call,
+    reply_with,
+    run_reply,
+    session_for,
+)
+from tests.support.wire import connect, say_something, shake_hands
 
 
 def hold_a_conversation(config: Config) -> None:
@@ -419,30 +425,6 @@ async def test_the_device_is_told_speech_starts_only_when_it_does() -> None:
     # The transcript still goes out first: that is what tells the user
     # they were heard while the model is thinking.
     assert order[0] == "stt"
-
-
-async def reply_with(
-    provider_stage: str, exc: BaseException, caplog: pytest.LogCaptureFixture
-) -> Any:
-    """One reply against a provider that fails, answering the event it
-    produced. The reply ends where it always did; what is new is that
-    the failure is on the record as more than a traceback."""
-
-    class TextSink:
-        async def send_text(self, text: str) -> None:
-            return None
-
-    session = session_for(base_config(), POET_MAC, {"poet": ScriptedLlm(["One sentence."])})
-    assert session.runtime._providers is not None
-    session.runtime._providers = replace(
-        session.runtime._providers, **{provider_stage: cast(Any, Unreachable(provider_stage, exc))}
-    )
-    session.websocket = cast(Any, TextSink())
-    session._mac = POET_MAC
-    session.send_audio = _nothing  # type: ignore[method-assign]
-    with caplog.at_level("INFO"):
-        await session.runtime._reply(b"\x00\x00" * 320)
-    return only(caplog, "provider_failed")
 
 
 async def test_a_failing_asr_provider_says_what_it_could_not_reach(
