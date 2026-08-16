@@ -39,7 +39,6 @@ import asyncio
 import contextlib
 import functools
 from collections.abc import AsyncIterator, Callable, Sequence
-from dataclasses import replace
 from typing import Any
 
 from samtal_server.audio.resample import Resampler
@@ -901,6 +900,10 @@ class PipelineRuntime:
             splitter = SentenceSplitter()
             leg: list[str] = []
             calls: list[ToolCall] = []
+            # Where each of those calls is on the turn's record, filled
+            # in the moment the calls are known and read after the block
+            # below has ended one way or another.
+            slots: list[int] = []
             # The sentence currently being spoken, which runs alongside
             # the model still streaming. At most one sentence is ever
             # run ahead of it: every sentence plays for longer than the
@@ -944,6 +947,14 @@ class PipelineRuntime:
                         usage = event
                     else:
                         calls.append(event)
+                # The earliest point the model's calls exist: both
+                # adapters assemble them after their stream has ended.
+                # Reserved here rather than at the dispatch because
+                # everything between the two can end the reply (the last
+                # sentence's synthesis failing, a barge-in cancelling
+                # mid-execution), and a call the model issued belongs on
+                # the record whether or not it ever ran.
+                slots = self._reserve_tools(calls)
                 self._llm_round_done(providers.llm, working, began, first_token_at, usage)
                 tail = splitter.flush()
                 if tail is not None:
@@ -970,7 +981,7 @@ class PipelineRuntime:
             # Whatever preamble was spoken before the calls is part of
             # the assistant turn that asked for them.
             working.append(Turn("assistant", " ".join(leg), tool_calls=tuple(calls)))
-            results, switch_to = await self._run_tools(calls, switches_left)
+            results, switch_to = await self._run_tools(calls, slots, switches_left)
             if switch_to is not None:
                 break
             working.append(Turn("tool", "", tool_results=tuple(results)))
@@ -1005,50 +1016,47 @@ class PipelineRuntime:
         return tools
 
     async def _run_tools(
-        self, calls: Sequence[ToolCall], switches_left: int
+        self, calls: Sequence[ToolCall], slots: Sequence[int], switches_left: int
     ) -> tuple[list[ToolResult], str | None]:
         """Execute one round of calls. Everything but switch_agent runs
         concurrently, since device and server tools are independent;
         switch_agent is resolved here instead, because a successful one
         ends the loop rather than producing a result the model reads.
 
-        The position each call is recorded under is its place in the
-        list the model issued, which is why both halves are enumerated
-        over `calls` rather than over their own group: a handover the
-        model asked for third is the third call, whatever order this
-        method runs things in."""
+        `slots` says where on the turn's record each of these calls was
+        already reserved, index for index with `calls`, which is why
+        both halves are split out of one enumeration rather than
+        rebuilt: a handover the model asked for third keeps the third
+        call's place, whatever order this method runs things in."""
         plain = [
-            (position, call)
-            for position, call in enumerate(calls)
+            (slots[index], call)
+            for index, call in enumerate(calls)
             if call.name != names.SWITCH_AGENT
         ]
         handovers = [
-            (position, call)
-            for position, call in enumerate(calls)
+            (slots[index], call)
+            for index, call in enumerate(calls)
             if call.name == names.SWITCH_AGENT
         ]
         results = list(
-            await asyncio.gather(*(self._run_one(call, position) for position, call in plain))
+            await asyncio.gather(*(self._run_one(call, slot) for slot, call in plain))
         )
 
         switch_to: str | None = None
-        for order, (position, call) in enumerate(handovers):
-            classified = self._classified(call, position)
+        for order, (slot, call) in enumerate(handovers):
             refusal = self._refuse_handover(call, switches_left, order)
             if refusal is not None:
                 results.append(refusal)
                 # An error result and no duration: nothing ran, and the
                 # refusal is what the turn's record shows in place of it.
-                self._turn.tool(
-                    replace(classified, result=refusal.content, is_error=True)
-                )
+                self._turn.executed(slot, refusal.content, True, None)
                 continue
             switch_to = str(call.arguments["agent"])
-            # A successful switch answers the model nothing, so the row
-            # carries no result and no duration either. Recorded all the
-            # same, because the handover is otherwise only implied by the
-            # legs it produced.
-            self._turn.tool(classified)
+            # A successful switch answers the model nothing, so the
+            # reservation is already the whole of its record: no result
+            # and no duration. It stays on the record all the same,
+            # because the handover is otherwise only implied by the legs
+            # it produced.
         return results, switch_to
 
     def _refuse_handover(
@@ -1089,16 +1097,16 @@ class PipelineRuntime:
             )
         return None
 
-    async def _run_one(self, call: ToolCall, position: int) -> ToolResult:
+    async def _run_one(self, call: ToolCall, slot: int) -> ToolResult:
         """One tool call, bounded and never raising into the loop. Every
         failure becomes an error result: the model explains it in its
         own words, where a canned apology would be fixed-language and
-        would throw away whatever the model could still salvage."""
-        # Before anything runs, so that what the record says a call was
-        # is what the dispatch below decided against, and so that a call
-        # the dispatch turns away at its first line is classified like
-        # any other.
-        classified = self._classified(call, position)
+        would throw away whatever the model could still salvage.
+
+        `slot` is where this call was reserved on the turn's record, and
+        it is filled in below only once there is something to say about
+        it. A cancellation on the way through leaves it as reserved,
+        which is what a call the user talked over looks like."""
         loop = asyncio.get_running_loop()
         started = loop.time()
         try:
@@ -1123,24 +1131,28 @@ class PipelineRuntime:
             duration_ms=round(elapsed * 1000),
             is_error=is_error,
         )
-        self._turn.tool(
-            replace(
-                classified,
-                result=content,
-                is_error=is_error,
-                duration_ms=round(elapsed * 1000),
-            )
-        )
+        self._turn.executed(slot, content, is_error, round(elapsed * 1000))
         return ToolResult(tool_call_id=call.id, content=content, is_error=is_error)
+
+    def _reserve_tools(self, calls: Sequence[ToolCall]) -> list[int]:
+        """Put every call this round issued on the turn's record, at the
+        position the model issued it, and answer where each one landed."""
+        return [
+            self._turn.reserve(self._classified(call, position))
+            for position, call in enumerate(calls)
+        ]
 
     def _classified(self, call: ToolCall, position: int) -> ToolInvocation:
         """The half of a call's record that is known before it runs:
         where its name came from, and what the model asked with it.
 
-        Malformed arguments are the model's own bytes rather than a JSON
-        object, so the flag stands in for them and nothing carries them
-        into a row. The name is still classified, because a model that
-        mangles its arguments still says which tool it meant."""
+        Classified here rather than at the dispatch, and so before
+        anything can stop the dispatch from happening. That is also what
+        closes the set over the paths the routing hides: a malformed
+        call, whose arguments are the model's own bytes rather than a
+        JSON object, is flagged and carries none of them, and its name
+        is classified anyway, because a model that mangles its arguments
+        still says which tool it meant."""
         malformed = call.malformed_arguments is not None
         source, entry = tool_source(
             call.name,

@@ -447,6 +447,76 @@ async def test_a_cancelled_reply_records_what_its_finally_saw() -> None:
     assert [invocation.name for invocation in record.tools] == ["ghost_tool"]
 
 
+class BlockingMemory(MemoryStore):
+    """A memory whose write never returns, so a reply can be cancelled
+    with a tool call demonstrably still in flight."""
+
+    def __init__(self) -> None:
+        super().__init__(Path("/nonexistent"))
+        self.running = asyncio.Event()
+
+    async def remember(self, agent: str, fact: str) -> None:
+        self.running.set()
+        await asyncio.sleep(30)
+
+
+async def test_a_call_cancelled_while_it_ran_is_recorded_unexecuted() -> None:
+    """Every call the model issues becomes an invocation, and a barge-in
+    landing while one is running does not take it off the record: the
+    reservation says what was asked, and the nulls say it never
+    answered."""
+    memory = BlockingMemory()
+    script = ScriptedLlm([[call("remember", text="a fact")]])
+    session, spy, _ = recording_session(scripts={"poet": script}, memory=memory)
+
+    start_reply(session, UTTERANCE)
+    await asyncio.wait_for(memory.running.wait(), 5)
+    await session.runtime._cancel_reply()
+
+    (invocation,) = only_record(spy).tools
+    assert (invocation.position, invocation.source) == (0, "builtin")
+    assert invocation.name == "remember"
+    assert invocation.arguments == {"text": "a fact"}
+    assert (invocation.result, invocation.duration_ms) == (None, None)
+    assert not invocation.is_error
+
+
+class BrokenTts(TtsProvider):
+    """A voice that refuses, so a reply ends between the round that
+    asked for a tool and the dispatch that would have run it."""
+
+    egress = False
+
+    def __init__(self) -> None:
+        self.sample_rate = 24000
+
+    async def synthesize(self, text: str) -> AsyncIterator[bytes]:
+        raise RuntimeError("the voice service refused")
+        yield b""
+
+
+async def test_a_call_is_recorded_when_speech_fails_before_the_dispatch() -> None:
+    """The calls arrive with the round that spoke, and the round's last
+    sentence is awaited before anything is dispatched, so a synthesis
+    that fails there used to take the whole round's calls with it."""
+    script = ScriptedLlm([["Let me check.", call("ghost_tool")], "Never reached."])
+    session, spy, _ = recording_session(scripts={"poet": script})
+    assert session.runtime._providers is not None
+    session.runtime._providers = replace(
+        session.runtime._providers, tts=cast(Any, BrokenTts())
+    )
+
+    await drive_reply(session, UTTERANCE)
+
+    record = only_record(spy)
+    (invocation,) = record.tools
+    assert (invocation.position, invocation.source) == (0, "unknown")
+    assert invocation.name == "ghost_tool"
+    assert (invocation.result, invocation.duration_ms) == (None, None)
+    # Nothing was heard, so nothing is claimed to have been said.
+    assert record.reply is None
+
+
 # The synthesizer's first bytes
 
 

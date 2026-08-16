@@ -20,7 +20,7 @@ which is a leaf module both sides import and neither owns.
 """
 
 from collections.abc import Collection, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from samtal_server.conversations.records import ToolInvocation, TurnLeg, TurnRecord
 from samtal_server.tools import names
@@ -177,8 +177,36 @@ class TurnUnderway:
         if index == 0:
             self.tts_first_audio_ms = elapsed_ms
 
-    def tool(self, invocation: ToolInvocation) -> None:
+    def reserve(self, invocation: ToolInvocation) -> int:
+        """Keep this turn's place for a call the model issued, and answer
+        where it is.
+
+        Taken the moment the model's calls are known, before anything
+        between there and the dispatch can end the reply: a synthesis
+        that fails while the round's last sentence is spoken, or a
+        barge-in landing mid-execution, would otherwise take every call
+        of that round off the record with it. What the reservation says
+        is already true at that point (which name, from which namespace,
+        with which arguments); what happened to it is filled in later,
+        and a call that never ran keeps the nulls it was reserved with,
+        which is exactly what "issued but not executed" looks like.
+        """
         self._tools.append(invocation)
+        return len(self._tools) - 1
+
+    def executed(
+        self, slot: int, result: str | None, is_error: bool, duration_ms: int | None
+    ) -> None:
+        """What became of the call reserved at `slot`. The entry is
+        replaced rather than mutated because the record is frozen, and
+        its position in the list is what makes it findable without
+        matching on anything the model chose."""
+        self._tools[slot] = replace(
+            self._tools[slot],
+            result=result,
+            is_error=is_error,
+            duration_ms=duration_ms,
+        )
 
     def record(self, agent: str | None, spoken: Sequence[str]) -> TurnRecord | None:
         """The finished record, or None where there is no turn to record.
