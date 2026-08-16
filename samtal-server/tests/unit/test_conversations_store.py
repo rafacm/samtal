@@ -45,46 +45,14 @@ from samtal_server.conversations.store import (
 )
 from samtal_server.db import BUSY_TIMEOUT_MS
 from samtal_server.events import attach_server_tap, detach_server_tap
+from tests.support.sessions import WRITER_TIMEOUT_S as TIMEOUT_S
+from tests.support.sessions import Gate
 from tests.support.stores import CONVERSATIONS_MANIFEST as MANIFEST
 from tests.support.stores import rows
-
-# Long enough that a wedged writer fails the assertion rather than the
-# suite's own scheduling, and never reached when the code is correct.
-TIMEOUT_S = 30.0
 
 # A value that must never appear anywhere but the database file, shaped
 # like something an operator would be horrified to find in a log.
 SENTINEL = "hunter2-not-a-real-credential-9f31c7"
-
-class Gate:
-    """The writer's parking seam, driven from the test's thread.
-
-    Called once before each marker transaction. `wait()` returns when
-    the writer has arrived and is stopped; `let_through()` releases it
-    for exactly one more transaction; `open_forever()` stops gating.
-    """
-
-    def __init__(self) -> None:
-        self._arrived = threading.Semaphore(0)
-        self._release = threading.Semaphore(0)
-        self._passthrough = False
-
-    def __call__(self) -> None:
-        if self._passthrough:
-            return
-        self._arrived.release()
-        assert self._release.acquire(timeout=TIMEOUT_S), "the writer was never released"
-
-    def wait(self) -> None:
-        assert self._arrived.acquire(timeout=TIMEOUT_S), "the writer never reached the gate"
-
-    def let_through(self, count: int = 1) -> None:
-        self._release.release(count)
-
-    def open_forever(self) -> None:
-        self._release.release(1024)
-        self._passthrough = True
-
 
 class Wedged:
     """A gate that never lets go. What `stop()` has to survive."""

@@ -23,7 +23,6 @@ import asyncio
 import json
 import re
 import threading
-import time
 from pathlib import Path
 from typing import Any, cast
 
@@ -51,10 +50,10 @@ from samtal_server.providers import build_agent_providers
 from samtal_server.runtime.pipeline import bespoke_runtime_factory
 from samtal_server.tools.mcp import McpServers
 from tests.support.configs import DEVICE_MAC, DEVICE_UUID, recording_config
-from tests.support.sessions import drive_reply, open_session
+from tests.support.sessions import WRITER_TIMEOUT_S as TIMEOUT_S
+from tests.support.sessions import Gate, drive_reply, open_session, until
 from tests.support.sockets import LoopingSocket
 from tests.support.wire import connect, say_something, send_pcm, sentences, shake_hands, speech_pcm
-from tests.unit.test_conversations_store import Gate
 
 README = Path(__file__).resolve().parents[2] / "README.md"
 
@@ -65,10 +64,6 @@ SENTINEL = "hunter2-not-a-real-credential-9f31c7"
 # The same, for an exception message, since a failure report must carry
 # a class name and nothing else.
 POISON = "sk-poison-4b1e-never-a-real-credential"
-
-# Long enough that a wedged writer fails an assertion rather than the
-# suite's own scheduling, and never reached when the code is correct.
-TIMEOUT_S = 30.0
 
 # One frame of silence, which the mock ASR answers with the configured
 # transcript.
@@ -84,18 +79,6 @@ def read(directory: Path, statement: str) -> list[dict[str, Any]]:
             return [dict(row) for row in connection.execute(text(statement)).mappings()]
     finally:
         engine.dispose()
-
-
-def until(ready: Any, complaint: str) -> Any:
-    """Wait for what a test is about, on a running writer. A wait that
-    never ends is the test failing with its own sentence."""
-    deadline = time.monotonic() + TIMEOUT_S
-    while time.monotonic() < deadline:
-        answer = ready()
-        if answer:
-            return answer
-        time.sleep(0.005)
-    raise AssertionError(complaint)
 
 
 def documented_fields() -> dict[str, set[str]]:
