@@ -560,16 +560,21 @@ and reverted.
    stored state are unchanged while the emitted field carries the
    sanitized form. The declarations are pinned to reality by the
    conformance test and by review.
-2. **M2, the emitters enforce**: validation in both `_emit`s,
-   `EventSchemaError`, the forgiving path with its complaint line,
-   the env switch with strict default, the Dockerfile `ENV` line,
-   the no-leak sentinel tests for both modes, the README Logging
+2. **M2, the emitters enforce**: two-step validation in both
+   `_emit`s (pre-merge caller check, then the variant match
+   including template and argument tuple), `EventSchemaError`, the
+   forgiving recovery matrix behind the last-resort guard with the
+   declared `schema_violation` recovery event, mode resolution in
+   `create_app` and `main()`, the Dockerfile `ENV` line, the
+   schema seam and the updated mechanics tests, the five-shape
+   sentinel matrix and the subprocess proofs, the README Logging
    paragraph on the switch. Both pin suites and the full lanes
    green under strict enforcement is the milestone's core proof.
-3. **M3, the table cannot drift**: `test_event_docs.py`, whatever
-   small README edits exactness demands, mutation proofs (drop a
-   row, drop a field mention, drop a token mention, add a bogus
-   row, each observed failing and reverted), CHANGELOG, and the
+3. **M3, the reference cannot drift**: the
+   `samtal-server events reference` command, the committed
+   `docs/reference/events.md`, the CI drift step, the README
+   table's missing rows and name-level `test_event_docs.py`,
+   mutation proofs per the mechanism, CHANGELOG, and the
    implementation-doc wrap.
 
 ## Files touched
@@ -578,15 +583,21 @@ New: `samtal_server/events_schema.py`,
 `tests/unit/test_event_schema_conformance.py`,
 `tests/unit/test_conversations_event_pins.py` (M1, the
 post-baseline characterization pins),
-`tests/unit/test_event_docs.py`, this plan's implementation doc.
+`tests/unit/test_event_docs.py` (M3, name-level),
+`docs/reference/events.md` (M3, generated), this plan's
+implementation doc.
 
 Modified: `samtal_server/events.py` (M2, validation in the two
-`_emit`s and the mode flag), `samtal_server/main.py` (M2, the
-entrypoint's mode resolution), `tests/conftest.py` (M2, pinning the
-lanes strict), `tests/unit/test_events.py` (M2, the mechanics tests
-adopt the schema seam), `Dockerfile` (M2, one `ENV` line),
-`samtal-server/README.md` (M2 one paragraph; M3 exactness edits),
-`CHANGELOG.md` (per milestone).
+`_emit`s and the mode flag), `samtal_server/app.py` (M2,
+`create_app` invokes the mode resolver), `samtal_server/main.py`
+(M2, resolution after dotenv and the subcommand exits; M3, the
+`events reference` subcommand's wiring if it lives there),
+`tests/conftest.py` (M2, pinning the lanes strict),
+`tests/unit/test_events.py` (M2, the mechanics tests adopt the
+schema seam), `Dockerfile` (M2, one `ENV` line),
+`.github/workflows/samtal-server.yml` (M3, the drift step),
+`samtal-server/README.md` (M2 one paragraph; M3 the missing rows
+and the reference pointer), `CHANGELOG.md` (per milestone).
 
 Conditionally modified in M1, only if the provenance inventory
 finds a far-side string no site bounds: the decision-site modules
@@ -620,9 +631,9 @@ example-config pin is unaffected).
   an unknown value refusing startup, a `.env`-carried value, and
   the `-O` strictness proof; both pin suites unmodified and green
   under strict, which is the standing conformance proof.
-- M3: the table checks (exact equality both ways at row, field,
-  and token level, per the delimited grammar) with their mutation
-  proofs.
+- M3: the generated reference byte-checked by the CI drift step,
+  the README name-level checks, and their mutation proofs per the
+  mechanism.
 
 ## Verification
 
@@ -696,11 +707,12 @@ recorded in the PR body with observed failure output per branch.
       adopt the schema seam, the sentinel matrix and subprocess
       proofs pass, both pin suites pass unmodified under strict
       enforcement.
-- [ ] M3: the README table cannot drift: the table splits by
-      channel with the delimited fields-cell grammar and gains the
-      missing rows, `test_event_docs.py` proves exact agreement
-      both ways at row, field, and token level, the mutation
-      matrix is recorded, CHANGELOG closes the issue's entry.
+- [ ] M3: the schema reference cannot drift:
+      `samtal-server events reference` generates
+      `docs/reference/events.md`, the CI drift step holds it
+      byte-identical, the README table gains its missing rows and
+      the name-level `test_event_docs.py`, the mutation matrix is
+      recorded, CHANGELOG closes the issue's entry.
 
 ## Plan review round
 
