@@ -1295,6 +1295,32 @@ a restart](#applying-an-mcp-change-without-a-restart) describes and
 `samtal-server config reload` prints; it is the only route here that
 changes what the server is doing rather than what is stored.
 
+**And one namespace that reads the conversation record**, the store
+[The conversation store](#the-conversation-store) describes:
+
+```
+GET                 /api/conversations
+GET                 /api/conversations/{session}
+GET                 /api/conversations/{session}/turns
+```
+
+The first lists the sessions, newest first, filtered by `?device=` when
+given. The second is one session whole: its row, with how many turns and
+events hang off it. The third is one session's turns, oldest first, each
+carrying its numbers and the tool calls it made nested in the order the
+model issued them. All three page on the monotonic row ids the store was
+built with: `?limit=` holds 50 rows by default and 200 at most, and
+`?cursor=` is a row id this API answered with, meaning the sessions
+before it in the listing and the turns after it in a timeline, which is
+the direction a client that has read up to a turn asks in. A page
+answers `{"items": [...], "next_cursor": <id or null>}`, and the cursor
+is null when there was nothing beyond that page. A deployment that never
+recorded answers 404 naming `server.conversations.enabled`; one that
+recorded and has since switched recording off still serves what it
+recorded. The events themselves are deliberately not served here: the
+database is that surface, and there is no analysis endpoint for the same
+reason there is no analysis command.
+
 `GET /api/config` is the whole domain configuration, masked, with the
 location of every stored secret beside it, which is the JSON of what
 `config show` prints. Every other read answers with the entity's masked
