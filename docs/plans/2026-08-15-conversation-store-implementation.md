@@ -665,3 +665,62 @@ since the narrowing is milestone 5's:
 $ grep -c "text=" samtal_server/runtime/pipeline.py
 3
 ```
+
+### Rebase onto the merged milestone 1
+
+The branch was cut at the milestone 1 tip before that milestone's PR
+#156 review round, so the seven fixes it landed were not underneath it.
+After #156 rebase-merged, the milestone was replayed with
+`git rebase --onto origin/main`. The hashes listed above are the ones it
+was built at, as milestone 1's own list is; replayed they are `9964e95`,
+`f988442`, `5addda6`, `3b42ae7`, `82be402`, `ef97aaf` and `6f85d1e`.
+
+One conflict, in `test_conversations_store.py`. Finding 6 rewrote the
+resurrection case to drive the real `purge()` against a live store at
+two interleavings, and its new lines sit exactly where the `at` rename
+touched the old ones. Resolved by taking the rewritten case whole and
+converting its two `t_ms=` overrides to the readings that produce the
+same offsets, which the suite makes mechanical: every session in it
+opens at `100.0`, so `t_ms=N` is `at=100.0 + N/1000`. The same
+conversion was applied to the one override the fix round added
+elsewhere in that file, which merged without conflict and would
+otherwise have kept a field that no longer exists.
+
+Nothing else conflicted, no behavior changed, and nothing of the fix
+round moved: the milestone's whole change to `store.py` is still the
+four hunks that stamp a turn's offset, with `_release`, `_settle`, the
+raw-connection `_checkpoint`, `Deletion`, `_refusal` and `EVENT_CONTENT`
+untouched beneath them.
+
+One interaction is worth stating, because the two halves were written
+apart and have to agree. Finding 4 made the events table metadata-only
+unconditionally, stripping `tool` from the `tool_call` event whatever
+the switches say, on the grounds that a tool's name is a peer's
+vocabulary and belongs on `tool_invocations` where the text switch
+decides its fate. This milestone is what puts it there: the record
+carries the name, and the writer nulls it under text-off. The event
+keeps what this deployment configured or measured, the record keeps
+what was called, and neither keeps the other's half.
+
+Re-run from `samtal-server/` at `33d02ca`, on `origin/main` at
+`899d265`:
+
+```
+$ uv run ruff check .
+All checks passed!
+```
+
+```
+$ uv run pytest tests/unit -q
+2134 passed, 15 skipped in 263.06s (0:04:23)
+```
+
+```
+$ uv run pytest tests/integration -q
+53 passed in 155.49s (0:02:35)
+```
+
+The unit lane's twenty-test difference from `origin/main` is this
+milestone's own module, unchanged by the rebase. The dormancy checks and
+the untouched-suite checks above were re-run against `origin/main` and
+answer the same way.
