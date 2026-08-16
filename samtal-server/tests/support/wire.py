@@ -8,6 +8,11 @@ reply was. The client here plays the device, with the same headers
 sends, and the same Opus codec the server runs, so a suite driving one of
 these is on the path a board is on.
 
+`connect` is the whole handshake, token and all, for the suites that
+want a conversation; `handshake` and `device_headers` are its two halves
+apart, for the suite that is about what the gate refuses and therefore
+has to present headers the gate will not accept.
+
 Nothing here builds a session directly: everything goes through a
 `TestClient` around an app, which is what makes this the wire rather than
 the in-process drivers in `sessions.py`. The audio shapes come from
@@ -67,6 +72,17 @@ def token_for(client: TestClient, device_id: str | None) -> str:
     if device_auth is None:
         return ""
     return device_auth.issue(DEVICE_UUID, signed_device_id(device_id or ""))
+
+
+def handshake(client: TestClient, headers: dict[str, str]):
+    return client.websocket_connect(WEBSOCKET_PATH, headers=headers)
+
+
+def device_headers(token: str | None, device_id: str = DEVICE_MAC) -> dict[str, str]:
+    headers = {"Device-Id": device_id, "Client-Id": DEVICE_UUID, "Protocol-Version": "1"}
+    if token is not None:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
 
 def shake_hands(websocket, version: int = 1) -> dict:
