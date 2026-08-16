@@ -1308,9 +1308,10 @@ The first lists the sessions, newest first, filtered by `?device=` when
 given. The second is one session whole: its row, with how many turns and
 events hang off it. The third is one session's turns, oldest first, each
 carrying its numbers and the tool calls it made nested in the order the
-model issued them. All three page on the monotonic row ids the store was
-built with: `?limit=` holds 50 rows by default and 200 at most, and
-`?cursor=` is a row id this API answered with, meaning the sessions
+model issued them. The list and the timeline page on the monotonic row
+ids the store was built with; the detail read is one session and takes
+neither argument. `?limit=` holds 50 rows by default and 200 at most,
+and `?cursor=` is a row id this API answered with, meaning the sessions
 before it in the listing and the turns after it in a timeline, which is
 the direction a client that has read up to a turn asks in. A page
 answers `{"items": [...], "next_cursor": <id or null>}`, and the cursor

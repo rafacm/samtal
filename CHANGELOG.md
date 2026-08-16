@@ -50,8 +50,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   many turns and events hang off it; `GET
   /api/conversations/{session}/turns` is one session's timeline oldest
   first, each turn carrying its numbers and the tool calls it made
-  nested in the order the model issued them. All three page on the
-  store's monotonic row ids, which are never reused: `?limit=` holds 50
+  nested in the order the model issued them. The list and the timeline
+  page on the store's monotonic row ids, which are never reused, and the
+  detail read is singular and takes neither argument: `?limit=` holds 50
   rows by default and 200 at most, `?cursor=` means the sessions before
   it in the listing and the turns after it in a timeline, and a page
   answers `{"items": [...], "next_cursor": <id or null>}`. Each read
