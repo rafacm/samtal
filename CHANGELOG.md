@@ -252,6 +252,33 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   changes, no assertion changes, the collected count up by exactly the
   guard's four tests, and every relocated definition compared against
   its origin by normalized AST rather than by eye.
+- **Three places where two encodings have to agree are pinned by a
+  test** (#144, completing it): the drift the 2026-08-14 review found
+  was in pairs nothing checked against each other, so each pair is now
+  a test that states the relation the two sides actually hold.
+  `config.example.yaml` is walked against `ServerConfig`: every leaf
+  field, through the nested sections found in the annotations rather
+  than from a list kept by hand, has to be in the example, written or
+  commented out, at the depth it belongs to, since the file's own
+  convention is that a default worth keeping appears as a commented
+  `# key:` line with its reasoning. The example filenames in
+  `docgen.ENTITIES` are checked against `examples/` both ways: every
+  name an entity gives is a file that exists, and every file is claimed
+  by exactly one entity, so neither a renamed example nor an unclaimed
+  new one can pass. And the five frozensets in `cli.py` that decide
+  whether a body can be read as a pending listing, a status entry, a
+  reload's answer or a prompt block are bridged to the pydantic models
+  in `api.py` that produce those bodies, each with its true relation:
+  a subset where the CLI renders less than the model carries, equality
+  for the status fields and the state vocabulary, the reload outcomes
+  read off the model's annotations with the tuple's no-duplicates
+  clause pinned separately, and the prompt-block fields against what
+  `PromptBlock` requires rather than everything it has, since `name` is
+  optional there. Every branch of every pin was proven by mutation:
+  applied, watched fail with its message, reverted. Test-only: no
+  source file changes, no assertion changes, and no existing test
+  touched. The bridge file says in its docstring that it exists to be
+  deleted whole by #139, which deletes the predicates it pins.
 
 ## 2026-08-15
 

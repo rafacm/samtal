@@ -780,3 +780,206 @@ itself. One finding:
    guard subsection above.
 
 Verdict as posted: mergeable after the listed fix.
+
+## Milestone 4: the drift pins
+
+Nine tests across three files, each stating the relation two encodings
+actually hold, and each branch of each relation proven by mutation. No
+existing test function or assertion was touched: the two existing files
+gained module-level constants, helpers and new test functions only.
+
+Three commits, in the order the milestone was built in:
+
+1. `4aca5fe` Pin the example configuration to ServerConfig
+2. `751587b` Pin the documented examples to the files there are
+3. `c71466d` Bridge the CLI's shape predicates to the API's models
+
+No pin caught real drift. `config.example.yaml` mentions all 35 leaf
+fields of `ServerConfig`, and the 13 files under `examples/` are
+claimed by the 13 names in `docgen.ENTITIES`, one each. So nothing
+outside `tests/` was edited and the plan's "unless a pin catches real
+drift" clause did not fire.
+
+### Pin 1: the example configuration covers `ServerConfig`
+
+`tests/unit/test_config_examples.py`, one test
+(`test_the_example_configuration_mentions_every_server_field`) on two
+helpers and two regexes.
+
+**The relation.** Every leaf field path of `ServerConfig` is mentioned
+in `config.example.yaml` under `server:`, at the depth it belongs to,
+either written or commented out in the literal `# key:` form.
+
+`_sections` reads the nested models out of a field's annotation:
+a `BaseModel` subclass is one, and anything else is searched through
+`typing.get_args`, which is what finds `CaptureConfig` and
+`ConversationsConfig` inside `X | None` the same way it finds
+`AuthConfig` directly. Nothing is listed by hand, so a section added
+later is walked without anyone remembering it. `_leaves` recurses on
+that, and returns 35 paths at this commit; the test asserts there are
+more than 20 of them before using them, since a walk that found
+nothing would make the rest vacuous.
+
+`_mentioned` scans the file once and returns every key path it writes.
+A line is read as a key when it matches
+`^(?P<indent> *)(?P<key>[A-Za-z_][A-Za-z0-9_]*):(?: |$)`, after the
+comment marker and the one space after it have been taken off, which
+is exactly how the file indents a commented-out section (`# database:`
+with `#   dir:` under it, both landing at the depth their live
+equivalents would). An indent stack turns each key into its path. Prose
+does not match the key form, which is the point: a paragraph using the
+word `retention` is not documentation of `retention_days`.
+
+**Deviation from the plan, recorded here as a strengthening.** The plan
+describes two mechanisms, a live YAML key at the right nesting or a
+commented `# key:` line. This is one scan that covers both, and it
+applies the nesting requirement to the commented half as well: a
+commented `# enabled:` under `capture` does not cover
+`conversations.enabled`. The plan's version would accept it, since
+`enabled:` appears in the file four times. The stricter reading is what
+the second mutation below actually exercises, and it passes on the tree
+as committed.
+
+### Pin 2: the documented examples against `examples/`
+
+`tests/unit/test_config_docgen.py`, two tests on one helper. `_claims`
+inverts `docgen.ENTITIES` into filename to claiming entity names.
+
+**The relations.** `test_every_example_an_entity_names_is_a_file_that_exists`:
+every filename in every `Entity.examples` tuple is a file under
+`examples/`. `test_every_example_file_is_claimed_by_exactly_one_entity`:
+every `*.yaml` under `examples/` appears in exactly one entity's tuple,
+which is one assertion for the unclaimed case and one for the
+doubly-claimed one. Each message names the offending file, and the
+double names the entities that claim it. Both tests refuse to run
+vacuously: one asserts some entity claims something, the other that the
+directory is not empty.
+
+`examples/README.md` is a third encoding and stays checked where it was,
+by `test_every_fragment_is_listed_in_the_examples_readme`, untouched.
+
+### Pin 3: the CLI's shape predicates against the API's models
+
+`tests/unit/test_config_cli_shapes.py` (new, 92 lines, six tests). Its
+docstring says the file exists to be deleted wholesale by #139, which
+has the CLI render through the response models and deletes the
+predicates, and says that `cli.PENDING_COLUMNS` is deliberately not
+pinned because its members are column headings a person reads rather
+than field names.
+
+The relations, one per test, all reading the real objects:
+
+- `cli.PENDING_FIELDS <= set(api.PendingDevice.model_fields)`. A subset,
+  not an equality: the model also answers `client_id`, `first_seen` and
+  `last_seen`, which the listing does not render.
+- `set(cli.STATUS_FIELDS) == set(api.McpServerStatus.model_fields)`.
+- `set(cli.STATUS_STATES) == set(typing.get_args(...))` of the
+  `Literal` on `McpServerStatus.state`, with a guard that the field is
+  still a `Literal` at all.
+- `set(cli.RELOAD_OUTCOMES)` equals the names of every `McpReloadResult`
+  field annotated `list[str]`, computed with `typing.get_origin` and
+  `typing.get_args` rather than listed, so `servers` (a
+  `dict[str, McpServerStatus]`) is excluded by its annotation and a
+  fifth outcome would be caught.
+- `len(cli.RELOAD_OUTCOMES) == len(set(cli.RELOAD_OUTCOMES))`, a
+  separate test because the set comparison above passes a duplicate and
+  the tuple is ordered for printing.
+- `set(cli.PROMPT_BLOCK_FIELDS)` equals
+  `{name for name, field in api.PromptBlock.model_fields.items() if
+  field.is_required()}`. The docstring records why the right-hand side
+  is `is_required()` and not `model_fields`: `name` is optional on the
+  model, null for every block that did not come from a published
+  prompt, so a CLI requiring it would refuse most well-formed blocks.
+
+### The mutation matrix
+
+Every branch, applied, observed failing, reverted. Each file was copied
+aside first and copied back afterwards, never restored with
+`git checkout`, and `touch`ed after the restore, per AGENTS.md; every
+mutation run was a pytest run, which writes no bytecode. `git status`
+was clean of source and asset changes after each.
+
+**Example-config coverage** (`config.example.yaml`):
+
+| Mutation | Observed |
+| --- | --- |
+| Delete the live top-level `  port: 8003` | `AssertionError: not in config.example.yaml, neither written nor commented out: port` |
+| Delete the commented nested `  #   retention_days: 90` (inside the commented-out `conversations:` section) | `AssertionError: not in config.example.yaml, neither written nor commented out: conversations.retention_days` |
+
+The two halves fail separately, which is what proves the live walk and
+the comment scan are each doing work, and the second proves the comment
+scan reaches a key at depth rather than only the top-level
+`# websocket_url:` case.
+
+**Docgen examples**, all three branches:
+
+| Mutation | Observed |
+| --- | --- |
+| Add an unclaimed `examples/ghost-example.yaml` | `AssertionError: under examples/ but named by no entity in docgen.ENTITIES: ghost-example.yaml` |
+| Remove `examples/vad-silero.yaml`, which the provider entity claims | `AssertionError: named in docgen.ENTITIES but not under examples/: vad-silero.yaml` |
+| Claim `vad-silero.yaml` from the prompt-fragment entity as well (a temporary edit to `docgen.py`, reverted) | `AssertionError: named by more than one entity: vad-silero.yaml (provider, prompt-fragment)` |
+
+**CLI/API shapes**, one mutation per relation, each a temporary edit to
+`cli.py` or `api.py`, reverted:
+
+| Mutation | Observed |
+| --- | --- |
+| `PENDING_FIELDS` drops `board` | **passes, by design** (see below) |
+| `PENDING_FIELDS` gains `ghost` | `AssertionError: ... Extra items in the left set: 'ghost'` |
+| `STATUS_FIELDS` drops `grants` | `AssertionError: ... Extra items in the right set: 'grants'` |
+| `STATUS_STATES` drops `unused` | `AssertionError: ... Extra items in the right set: 'unused'` |
+| `PROMPT_BLOCK_FIELDS` drops `text` | `AssertionError: ... Extra items in the right set: 'text'` |
+| `RELOAD_OUTCOMES` repeats `stopped` | the equality test passes, `test_no_reload_outcome_is_named_twice` fails: `AssertionError: assert 5 == 4` |
+| `PromptBlock.name` flipped to required (its `default=None` removed) | `AssertionError: ... Extra items in the right set: 'name'` |
+
+The one row that does not fail is the milestone brief's "drop a member
+from `PENDING_FIELDS`", and it cannot fail: the relation the plan
+settles for that pair is a subset, and a smaller subset is still one.
+The mutation that exercises it is the opposite one, adding a name the
+model does not carry, which is the drift the pin exists to catch (a CLI
+demanding a field the API never answers). Both rows are recorded rather
+than only the failing one, because the passing row is a fact about the
+relation and not a gap in the pin.
+
+The last row is the required-versus-optional distinction the plan's
+review round settled as finding 1. Flipping `name` to required on the
+model breaks the equality immediately, which is the check that the pin
+encodes the distinction rather than merely surviving it.
+
+### Verification
+
+Run from `samtal-server/`, with `PYTHONDONTWRITEBYTECODE=1` exported
+for everything outside pytest.
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/unit -q`:
+  `2269 passed, 16 skipped in 300.36s (0:05:00)`
+- `uv run pytest tests/integration -q`: `55 passed in 159.87s (0:02:39)`
+- `uv run pytest tests/unit -q --collect-only | tail -1`: **2276
+  before**, **2285 after**. The rise is exactly the nine new tests: one
+  example-config pin, two docgen pins, six CLI/API ones.
+- `git diff` inspected: no existing test function or assertion changed.
+  The two existing files gained a docstring paragraph each, module-level
+  constants and helpers, and new test functions; nothing else moved.
+- Both existing files stay `ruff check` clean and the added code is
+  `ruff format` clean. `test_config_examples.py` was not `ruff format`
+  clean before this milestone either (one `TestClient(...)` call the
+  formatter would rejoin), which was checked against the committed file
+  and left alone.
+
+### Deviations from the plan
+
+Two, both recorded above and neither weakening a pin.
+
+1. **The example-config pin is one nesting-aware scan rather than a
+   YAML parse plus a form-only comment scan.** The plan's letter asks
+   for a live key at the right nesting or a commented `# key:` line
+   anywhere; this applies the nesting requirement to both halves, which
+   is strictly stronger (the plan's version would let a commented
+   `enabled:` under `capture` cover `conversations.enabled`, since the
+   word appears four times in the file). It passes as committed, and the
+   nested-comment mutation is what exercises the difference.
+2. **`PENDING_FIELDS` is mutated by addition, not by deletion.**
+   Explained in the matrix above: deletion cannot fail a subset
+   relation, so the deletion is recorded as an observed pass and the
+   addition is the branch that proves the pin.
