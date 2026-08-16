@@ -143,7 +143,20 @@ are named for the seam they serve, not the file they came from:
   `FakeFragment`, `FakeDelta`, `FakeChoice`, `FakeChunkUsage`,
   `FakeChunk`, `FakeCompletions`), plus the consolidated `Falsey`
   client probe (the honest-seams check that a falsey injected
-  client is still used, never replaced by truthiness).
+  client is still used, never replaced by truthiness). Three of the
+  four `Falsey` definitions are nested inside test functions, so
+  consolidating them is necessarily a test-function edit; those
+  three deletions (`test_providers_elevenlabs.py:433-451`,
+  `test_providers_openai_tts.py:486-497`,
+  `test_providers_openai_asr.py:809-820`) are the only permitted
+  edits inside test functions in the whole issue, each replacing a
+  nested class with the imported one and changing nothing else in
+  the function. And because the seam those tests probe is
+  falsiness itself, a support probe that accidentally became
+  truthy would leave every identity assertion passing while
+  testing nothing: M1 adds `tests/unit/test_support_fakes.py` with
+  a contract test asserting `bool(Falsey()) is False`, so the
+  premise is pinned where the fake lives.
 - `providers.py`: the scripted pipeline-stage providers that cross
   module boundaries: `ScriptedLlm`, `StallingLlm` (with `STALL_S`),
   `LockingAsr`, `Unreachable`, and the two broken-TTS fakes, which
@@ -208,9 +221,13 @@ moves, the no-cross-import end state, and assertion bodies.
 
 Where two moved names collide (`config_with` twice, `MANIFEST`
 twice, `DEVICE_MAC` with different values in `test_session.py` and
-`test_ota.py`), the move renames them apart with names that say
-which seam they belong to, and the importing sites follow. Renames
-of helpers are in scope; renames or edits of assertions are not.
+`test_ota.py`), the support definitions are renamed apart with
+names that say which seam they belong to, and every importing site
+keeps its current local name through an import alias
+(`from tests.support.stores import CONVERSATIONS_MANIFEST as
+MANIFEST`), so call sites and assertions stay byte-identical.
+Renames live in import lines only; edits of assertions are out of
+scope everywhere.
 The two classes named `FakeDevice` remain two classes: they fake
 different seams (the device edge as a runtime sees it, and the
 device MCP tool channel as the tool client sees it), live in
@@ -371,6 +388,7 @@ New: `tests/support/llm_sdk.py`, `providers.py`, `sockets.py`,
 `boundary.py`, `device_tools.py`, `configs.py`, `wire.py`,
 `sessions.py`, `events.py`, `checkin.py`, `mcp.py`, `stores.py`,
 `registry.py`, `tests/unit/test_support_boundaries.py`,
+`tests/unit/test_support_fakes.py`,
 `tests/unit/test_config_cli_shapes.py`, this plan's implementation
 doc.
 
@@ -407,8 +425,16 @@ From `samtal-server/`, per milestone:
   before and after in the PR body; never lower after.
 - The inventory grep re-run; its line count reaches zero for unit
   tests at M3 and stays there (the guard test enforces it).
-- `git diff` inspected for assertion edits: the only permitted
-  diffs inside test functions are import paths and helper renames.
+- `git diff` inspected for assertion edits: outside import lines,
+  the only permitted diffs inside test functions are the three
+  nested `Falsey` deletions enumerated in the layout section, each
+  replacing a nested class with the imported probe and nothing
+  else.
+- Every relocated definition compared against its origin by
+  normalized AST (`ast.dump` of the parsed def, names aside where
+  a rename was decided), recorded in the PR body as a pass/fail
+  per moved root, so "the body did not change in flight" is a
+  checked claim rather than a reviewed impression.
 - For M4, each pin's mutation proof recorded in the PR body: the
   mutation applied, the failure message observed, the restore.
 - `PYTHONDONTWRITEBYTECODE=1` on every run outside pytest, per
@@ -455,7 +481,8 @@ From `samtal-server/`, per milestone:
 - [ ] M1: the fakes package is born: `tests/support/llm_sdk.py`
       holds both SDK dialect fake families and the consolidated
       `Falsey` probe; the provider test modules import from it;
-      both lanes green, count non-decreasing.
+      `test_support_fakes.py` pins the probe's falsiness; both
+      lanes green, count non-decreasing.
 - [ ] M2: the session family decouples: the eight session-side
       support modules exist, no test module imports any
       `test_session*`, `test_tools_device`, or
@@ -539,6 +566,15 @@ prior plans. Findings as received, condensed but faithful:
    nested-class deletions, compare relocated definitions by
    normalized AST, and use import aliases for collision renames so
    call sites stay byte-identical.
+
+   *Resolution*: accepted in full. The layout section now
+   enumerates the three nested `Falsey` deletions as the only
+   permitted test-function edits and adds
+   `tests/unit/test_support_fakes.py` in M1 pinning
+   `bool(Falsey()) is False`; the verification section requires a
+   normalized-AST comparison of every relocated definition,
+   recorded per root in the PR body; collision renames now live in
+   import aliases so call sites stay byte-identical.
 
 5. **P2: the mutation plan does not exercise every relation the
    pins claim.** Only the commented `websocket_url` deletion is
