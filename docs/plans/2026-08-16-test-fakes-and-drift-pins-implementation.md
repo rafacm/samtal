@@ -132,12 +132,19 @@ reviews exist to buy.
 
 ## Milestone 2: the session family decouples
 
-Eight support modules, seven of them new here, and no test module
-imports `test_session*.py`, `test_tools_device.py` or
-`test_boundary_contract.py` any more. The inventory grep at the
-milestone's start listed 82 statements (84 at `c410af8`, two fewer
-once the configurations moved); it lists 33 at its end, and every one
-of the 33 names a module M3 owns.
+Eight new support modules, and no test module imports
+`test_session*.py`, `test_tools_device.py` or
+`test_boundary_contract.py` any more. The inventory grep at the M1 tip
+listed **84** statements; it lists **33** at the milestone's end, and
+every one of the 33 names a module M3 owns.
+
+The milestone was built across two sessions, and the resumed one first
+recorded 82 rather than 84, because the configuration commit had
+already landed when it started and it took that commit for its
+baseline. 84 is the number that means anything: it is the count before
+this milestone changed a line. The two statements between the figures,
+and the 25 definitions the configuration commit relocated, are inside
+M2 and are verified here with the rest.
 
 Ten commits, in the order the milestone was built in:
 
@@ -159,13 +166,21 @@ and `sockets.py` sit on it; `wire.py`, `boundary.py` and
 from four of the others, comes last. Nothing under `tests/support`
 imports a test module, checked by grep at the end.
 
-`d402952` is described in its own commit message and is not repeated
-here: it moved the two shared `Config` builders and the constants they
-name, and deduplicated `POET_MAC` and `BOTH_MAC`, which had identical
-definitions in two modules.
-
 ### What went where
 
+- **`configs.py`** (new, 236 lines): the configurations a session suite
+  is built on and the constants they name, from five session modules.
+  The device identity (`DEVICE_MAC`, `DEVICE_UUID`, `DEVICE_HELLO`),
+  the audio shapes (`SAMPLE_RATE`, `OUTPUT_RATE`, `FRAME_MS`,
+  `FRAME_BYTES`, `ENDPOINT_SILENCE_MS`, `SPEECH`, `LONG_REPLY`), the
+  two personas (`POET_MAC`, `BOTH_MAC`, `POET_TONE`, `TUTOR_TONE`), and
+  the builders with their thresholds (`config_with_agent`,
+  `base_config`, `STDIO_SERVER`, `registry_config`, `TIMEOUT_S`,
+  `watchdog_config`, `DELAY_MS`, `masked_config`, `capped_config`,
+  `BACKSTOP_S`, `idle_config`). `POET_MAC` and `BOTH_MAC` had identical
+  definitions in two modules; both copies are gone and one definition
+  remains. It imports only `samtal_server` and the standard library,
+  which is the layer the rest of the package sits on.
 - **`events.py`** (new, 22 lines): `events`, `only`. Reading
   `caplog.records` for one event's records, and insisting on exactly
   one. It imports pytest and nothing else, which is what puts it under
@@ -245,6 +260,16 @@ and builtins.
   `sentences`, `heard_ms`, `listen_realtime`, `wait_for_close`, `call`,
   `drive_reply`, `start_reply`, `_nothing`.
 
+Inside `configs.py` the closures are all to its own siblings, which is
+what made it the module the rest can sit on: `FRAME_BYTES` →
+`SAMPLE_RATE`, `FRAME_MS`; `base_config` → `POET_MAC`, `BOTH_MAC`,
+`POET_TONE`, `TUTOR_TONE`; `registry_config` → `base_config`,
+`STDIO_SERVER`; `watchdog_config` → `base_config`, `TIMEOUT_S`;
+`masked_config` → `base_config`, `DELAY_MS`, `POET_TONE`,
+`TUTOR_TONE`; `capped_config` → `config_with_agent`; `idle_config` →
+`config_with_agent`, `BACKSTOP_S`. The other eighteen read nothing but
+`samtal_server` and the standard library.
+
 No sentinel constant is in any of these closures: the sentinel-planting
 tests in this family keep their sentinels where they are.
 
@@ -281,22 +306,74 @@ for everything outside pytest.
 - `uv run pytest tests/unit -q --collect-only | tail -1`: **2272
   before**, **2272 after**. M2 adds no tests, so the count is the M1
   tip's exactly.
-- The inventory grep: **82 statements before, 33 after**, and all 33
-  are M3's (`test_ota`, `test_tools_mcp*`, `test_conversations_*`,
-  `test_config*`, `test_capture`, `test_device_bindings`, `test_drain`,
-  `test_onboarding_*`, `test_ws_auth`, `test_tools_memory`). Zero name
-  `test_session*`, `test_tools_device` or `test_boundary_contract`.
+- The inventory grep: **84 statements at the M1 tip, 33 after**, and
+  all 33 are M3's (`test_ota`, `test_tools_mcp*`,
+  `test_conversations_*`, `test_config*`, `test_capture`,
+  `test_device_bindings`, `test_drain`, `test_onboarding_*`,
+  `test_ws_auth`, `test_tools_memory`). Zero name `test_session*`,
+  `test_tools_device` or `test_boundary_contract`.
 - `grep -rn "tests.unit" tests/support/`: no matches, so the dependency
   arrow points one way already, ahead of M3's guard test.
 - Normalized AST comparison of every relocated definition against its
-  origin at `d402952`, by `ast.dump` with `include_attributes=False`:
-  **all 54 pass.** The boundary rename was applied to the origin's own
-  nodes before dumping, which is the plan's "names aside where a rename
-  was decided".
+  origin at the milestone's own baseline, the M1 tip (the parent of the
+  configuration commit, `74f0fba` on this branch), by `ast.dump` with
+  `include_attributes=False`: **all 79 top-level moved nodes pass**,
+  over 81 comparisons, because `POET_MAC` and `BOTH_MAC` each have two
+  identical origins and were compared against both. That is the 54
+  nodes of the seven later modules plus `configs.py`'s 25, listed per
+  root below. The boundary rename was applied to the origin's own nodes
+  before dumping, which is the plan's "names aside where a rename was
+  decided".
 - `git diff` inspected for edits inside test functions: the only added
   line anywhere inside a function body is the rewritten function-level
   import in `test_tools_memory.py`. Every other change is an import
   line or the removal of a module-level definition.
+
+#### The AST comparison, per root
+
+The seven later modules' 54 roots, all **PASS**, listed by the module
+they landed in:
+
+- `events.py`: `events`, `only`.
+- `providers.py`: `Step`, `ScriptedLlm`, `STALL_S`, `StallingLlm`,
+  `RecordingLlm`, `CountingServers`, `Unreachable`, `GatedAsr`,
+  `ConfirmingAsr`, `ScriptedEndpointer`, `BrokenTts`,
+  `BrokenTts` → `BrokenStreamingTts`.
+- `sockets.py`: `RecordingSocket`, `LoopingSocket`, `QuietSocket`.
+- `boundary.py`: `FRAME_BYTES` → `OUTPUT_FRAME_BYTES`, `REPLY_PCM`,
+  `StubRuntime`, `FakeDevice`.
+- `device_tools.py`: `FakeDevice`, `STATUS`.
+- `wire.py`: `connect`, `token_for`, `shake_hands`, `speech_pcm`,
+  `send_pcm`, `endpoint_silence`, `assert_endpointed_speech`,
+  `collect_until`, `collect_reply`, `is_reply_end`, `is_reply_start`,
+  `is_transcript`, `sentences`, `heard_ms`, `tone_strength`,
+  `say_something`, `listen_realtime`, `wait_for_close`.
+- `sessions.py`: `device_session`, `session_for`, `session_with`,
+  `served`, `open_session`, `masked_session`, `realtime_session`,
+  `call`, `run_reply`, `drive_reply`, `start_reply`, `_nothing`,
+  `reply_with`.
+
+`configs.py`'s 25 roots, all **PASS**, listed by the module they came
+out of:
+
+- from `test_session.py` (14): `DEVICE_MAC`, `DEVICE_UUID`,
+  `DEVICE_HELLO`, `SAMPLE_RATE`, `OUTPUT_RATE`, `FRAME_MS`,
+  `FRAME_BYTES`, `ENDPOINT_SILENCE_MS`, `LONG_REPLY`, `POET_MAC`,
+  `BOTH_MAC`, `POET_TONE`, `TUTOR_TONE`, `config_with_agent`.
+- from `test_session_tools.py` (5): `POET_MAC`, `BOTH_MAC`,
+  `STDIO_SERVER`, `base_config`, `registry_config`.
+- from `test_session_filler.py` (3): `SPEECH`, `DELAY_MS`,
+  `masked_config`.
+- from `test_session_limits.py` (3): `BACKSTOP_S`, `capped_config`,
+  `idle_config`.
+- from `test_session_watchdog.py` (2): `TIMEOUT_S`, `watchdog_config`.
+
+`POET_MAC` and `BOTH_MAC` appear twice in that list on purpose: they
+had a definition in each of two modules, the deduplication the
+configuration commit performed rests on the two being identical, and
+each was compared against both origins. Both comparisons pass for both
+names, which is what makes the deduplication a checked claim rather
+than a reviewed impression. Twenty-five roots, 27 comparisons.
 
 ### Deviations from the plan
 
