@@ -245,8 +245,12 @@ credential-shaped value in a wrong-kind field, a credential-shaped
 undeclared event name, and a credential-shaped undeclared spread
 key, each asserted absent from all the surfaces above.
 
-- **Strict** (the default): `_emit` raises `EventSchemaError`. This
-  is what the test lanes and a source checkout run.
+- **Strict** (the module default): `_emit` raises
+  `EventSchemaError`. This is what every context that never runs
+  the server entrypoint gets: the pytest lanes, CI, an import, a
+  REPL. The lanes additionally pin it explicitly in
+  `tests/conftest.py` beside the existing import-time settings, so
+  an ambient variable on a CI runner cannot quietly relax them.
 - **Forgiving**: the offending fields are dropped from the payload
   (an undeclared event keeps only its base fields), and an invalid
   emission's human sentence is replaced wholesale by a fixed safe
@@ -259,19 +263,42 @@ key, each asserted absent from all the surfaces above.
   same reason a tap failure's report is not one: a complaint that
   went back through validation could recurse.
 - The switch is `SAMTAL_EVENTS_ENFORCEMENT` (`strict` or
-  `forgiving`), read once at import time into a module flag with a
-  setter for tests. The container image sets
-  `SAMTAL_EVENTS_ENFORCEMENT=forgiving` in its `ENV` block, beside
-  the existing `SAMTAL_SERVER__LOG_FORMAT=json`, because the image
-  is the production artifact; a source run is development and stays
-  strict. This is deliberately not a `ServerConfig` field:
-  `events.py` sits below `config/` in the import graph by design,
-  the switch governs telemetry machinery rather than server
-  behavior, and #139 is about to migrate the operator schema this
-  would otherwise join. The README Logging section documents the
-  variable in one paragraph.
-- An unknown value of the variable means strict, because the honest
-  failure mode of a misspelled relaxation is loudness, not silence.
+  `forgiving`), held in a module flag with a setter, and it is the
+  SERVER ENTRYPOINT that resolves it: `main()` reads the variable
+  after it has loaded `.env`, so the documented dotenv layer works
+  for this variable like any other, which an import-time read
+  could never honor (`main.py` imports `app` and therefore
+  `events` before `main()` runs). Resolution in `main()`:
+  - `strict` or `forgiving`: as written;
+  - unset: `forgiving`, because a running server is a deployment
+    whatever artifact it runs from, and a wheel or source
+    deployment must not be one telemetry bug away from losing a
+    reply just because it is not the container;
+  - anything else: the server refuses to start, naming the
+    variable and the two values. A misspelled relaxation must fail
+    at boot, not at the first live violation.
+  The container image still sets
+  `SAMTAL_EVENTS_ENFORCEMENT=forgiving` in its `ENV` block beside
+  `SAMTAL_SERVER__LOG_FORMAT=json`: redundant with the entrypoint
+  default on purpose, so the production posture is visible in the
+  artifact rather than implied. This is deliberately not a
+  `ServerConfig` field: `events.py` sits below `config/` in the
+  import graph by design, the switch governs telemetry machinery
+  rather than server behavior, and #139 is about to migrate the
+  operator schema this would otherwise join. The README Logging
+  section documents the variable in one paragraph.
+- The issue's "strict in development" is read as the development
+  FEEDBACK LOOP: the lanes, imports, and tooling, which the module
+  default keeps strict. A locally launched server process goes
+  through `main()` and is treated as a deployment; a developer who
+  wants a loud local server sets the variable to `strict`, and the
+  README paragraph says so. This interpretation is recorded here
+  because the alternative (strict for every non-container server)
+  is exactly the reply-loss the issue's own decision 2 forbids.
+- M2 exercises the real entrypoint in subprocesses: unset,
+  `forgiving`, `strict`, an unknown value refusing startup, and a
+  `.env` file carrying the variable, so import order and ambient
+  environment are covered rather than assumed.
 
 Validation runs per emit on the event path only (never per frame:
 the per-frame `vad`/`dropped` samples are outside the tap contract
@@ -417,9 +444,13 @@ recorded in the PR body with observed failure output per branch.
   a complaint line, not an outage; the complaint names the event
   and field so the fix is one declaration. This failure mode is
   documented in the implementation doc rather than hidden.
-- **Import-order emissions before the mode flag is read.** The flag
-  is read at module import, before any emitter exists, so there is
-  no window in which emissions are validated under the wrong mode.
+- **Import-order emissions before the entrypoint resolves the
+  mode.** The module default is strict, so an emission between
+  import and `main()`'s resolution would be validated strictly in
+  a server process. Those emissions are module-level constructions
+  only (no event fires at import today, which the conformance walk
+  confirms); the resolution happens in `main()` before `create_app`
+  emits anything, and the subprocess tests cover the real order.
 - **Validation cost on the reply path.** A per-event dict walk over
   fewer than a dozen keys; the events fire per decision, not per
   frame. No caching machinery unless a lane shows a need, which
@@ -574,6 +605,16 @@ Findings as received, condensed but faithful:
    to forgiving, force strict in pytest and CI, keep the image
    explicit, refuse unknown values at startup, and test the real
    entrypoint in subprocesses.
+
+   *Resolution*: accepted in full. The mode is resolved by
+   `main()` after dotenv loading (unset means forgiving there,
+   unknown refuses startup naming the variable), the module
+   default outside the entrypoint stays strict and the lanes pin
+   it in conftest, the image keeps its explicit ENV line as
+   visible posture, and M2 tests the real entrypoint in
+   subprocesses across all five states. The plan records the
+   development-loop interpretation of the issue's strictness
+   wording, with the reply-loss argument as the reason.
 
 8. **P1: M2 cannot keep the unit lane green without modifying
    tests the plan leaves untouched.** `test_events.py` emits
