@@ -1327,7 +1327,7 @@ its section of the implementation doc when written.
   milestone 2 test list green; the event-assertion and pin suites
   unmodified; lanes green.
 - [x] **[Sessions, turns and events on the record](2026-08-15-conversation-store-implementation.md#milestone-3-sessions-turns-and-events-on-the-record)**
-  (PR TBD, branch `feature/conversation-store-m3`): `ConversationsConfig` on
+  (PR #158, branch `feature/conversation-store-m3`): `ConversationsConfig` on
   `ServerConfig` with its `config.example.yaml` and
   `config.deploy.example.yaml` blocks; `create_app` building the
   store, migrating a pre-existing file on disabled boots, and the
