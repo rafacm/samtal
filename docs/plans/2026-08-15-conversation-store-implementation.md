@@ -1625,3 +1625,112 @@ milestone's 34 new cases plus the two added to the OpenAPI suite make
 still regenerate byte-identically against the merged parent, the
 OpenAPI document included, which is what says the round moved nothing
 the contract carries.
+
+### PR #159 review round
+
+One external review of the milestone as first pushed. Three findings,
+one P1, one P2 and one P3; verdict mergeable after fixes. All three
+adopted, one commit each, in the order the findings imply: the header
+that quoted a request first, then the document's untyped structures,
+then the sentence that promised pagination the detail read does not
+have.
+
+1. **P1: the trailing-slash redirect quoted the request back in a
+   header.** FastAPI's router answers `/conversations/?limit=<value>`
+   and `/conversations/<value>/turns/?cursor=<value>` with a 307 whose
+   `Location` is the request's own path segments and query string. The
+   no-leak cases never saw it: they ask for canonical paths and read
+   bodies, and a client that follows the redirect lands on the clean
+   answer.
+   *Resolution*: adopted in `cbd0146`. `redirect_slashes=False` on the
+   whole gated application rather than on these three routes, because
+   the same 307 answers `/config/` and `/agents/<name>/`, where the name
+   in the path is the caller's; this milestone's routes made an existing
+   exposure worse rather than introducing it. A stray slash is now an
+   unmatched path, which the token holder meets as a 404 (Starlette's
+   own, `{"detail": "Not Found"}`, which quotes nothing) and everyone
+   else as the gate's 401. Nothing relied on the redirect, and the
+   checking is worth recording rather than asserting: `/api` and `/api/`
+   resolve through `mount_api`'s explicit route, which rewrites the
+   scope precisely because a redirect was not good enough for a gated
+   namespace, and the outer app's own router still redirects as it did;
+   the `config` CLI client addresses routes without trailing slashes;
+   the committed document spells every path without one; and the API and
+   CLI suites pass unmoved. Five new cases plant the sentinel as a query
+   value and as a path segment with redirects unfollowed and hunt it
+   through every response header as well as the body, both log formats
+   and the process output, and one in `test_config_api.py` holds the
+   property for the configuration routes, where the fix also lands. It
+   has its own changelog entry under Changed, since a request that used
+   to be redirected is now a 404.
+2. **P2: the document left known structures untyped.** A call's
+   `source` and a session's `close_reason` were plain strings, a
+   handover's `legs` an array of unrestricted objects, and `agents` an
+   untyped list, so a generated client cannot tell the four sources
+   apart and treats a leg as an arbitrary map.
+   *Resolution*: adopted in `9fca3d9`. The two closed sets are
+   `Literal`s built from the tuples `conversations/schema.py` already
+   declares (`TOOL_SOURCES`, `CLOSE_REASONS`), so the contract is
+   sourced from the one authority and a token added there reaches the
+   document by being added once. `TurnLeg` is a schema of its own whose
+   four fields are held equal to the record the writer serializes key
+   for key. `agents` is a list of strings. The OpenAPI suite asserts the
+   enums against those tuples, the leg reference and its required
+   fields, and the agent item type, and a round-trip case reads a real
+   handover's legs back.
+   One deliberate departure from the finding's letter: `close_reason` is
+   the `Literal` *and* a string branch. The column is unconstrained on
+   purpose, for the reason `schema.py` gives, that a database refusing
+   an unforeseen sixth token would drop the session row rather than
+   record a close it could not name; a read that refused one would drop
+   a whole page over that row, which is the same mistake one layer up.
+   The document says both halves: these five are what a server latches,
+   and a token from a later release is served as it was stored.
+3. **P3: "all three page" is not true of the detail read.** It takes
+   neither `limit` nor `cursor`.
+   *Resolution*: adopted in `e229b8a`. Corrected in the README, the
+   changelog, the document's own `info.description` and this section's
+   opening, since it was one sentence repeated rather than four
+   different claims. The document had to be regenerated for it, which is
+   what makes the description a place a wrong claim gets caught.
+
+Nothing was done differently from the direction given. One note worth
+recording: the redirect finding is the second time this milestone's
+no-leak hunt had a blind spot that only a differently-shaped request
+exposed (the first was a refusal sentence naming its own default, above),
+and both were places the test looked exactly where the code was written
+to be clean. The header hunt is now part of the sentinel cases rather
+than a thing to remember.
+
+### Verification after the round
+
+From `samtal-server/`, at `e229b8a`:
+
+```
+$ uv run ruff check .
+All checks passed!
+```
+
+```
+$ uv run pytest tests/unit -q
+2239 passed, 15 skipped in 299.52s (0:04:59)
+```
+
+```
+$ uv run pytest tests/integration -q
+55 passed in 162.27s (0:02:42)
+```
+
+The unit lane is eleven cases larger than it was before the round: five
+slashed-path sentinel cases and three for the configuration routes
+beside them, two in the OpenAPI suite (the typed structures, and the
+leg-shape drift guard), and the handover round trip, with `TurnLeg`
+joining the required-field case that already existed. Both committed
+artifacts still regenerate byte-identically:
+
+```
+$ uv run samtal-server config openapi | diff - ../docs/reference/api-openapi.json
+$ uv run samtal-server conversations schema | diff - ../docs/reference/conversations-schema.md
+$ echo $?
+0
+```
