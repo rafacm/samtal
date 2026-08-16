@@ -1307,8 +1307,9 @@ start, one on the purge window, and two on the close reason.
 
 The record is readable over HTTP: three gated GETs under
 `/api/conversations`, in the committed OpenAPI document with the rest of
-the contract, cursor-paginated on the monotonic row ids the schema was
-built with. This milestone is transport and nothing else, and the proof
+the contract, the two listings among them cursor-paginated on the
+monotonic row ids the schema was built with and the session read
+singular. This milestone is transport and nothing else, and the proof
 is that it moved none of what it serves: `git diff` against the
 milestone 3 tip is empty for `app.py`, `conversations/store.py` and
 `conversations/schema.py`.
