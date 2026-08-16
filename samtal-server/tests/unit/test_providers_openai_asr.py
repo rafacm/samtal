@@ -25,6 +25,7 @@ from samtal_server.providers import (
 )
 from samtal_server.providers.base import ProviderError
 from samtal_server.providers.openai_asr import OpenAiAsr
+from tests.support.llm_sdk import Falsey
 
 # One 16 kHz second of s16le silence, comfortably over the API minimum.
 ONE_SECOND = b"\x00\x00" * 16000
@@ -810,11 +811,6 @@ async def test_a_falsey_injected_client_is_still_the_one_used() -> None:
     """`client or ...` drops a double that answers False to a truth test,
     which any object defining __bool__ or __len__ does, and builds a real
     client in its place."""
-
-    class Falsey:
-        def __bool__(self) -> bool:
-            return False
-
     given = Falsey()
     asr = OpenAiAsr(model="gpt-4o-mini-transcribe", api_key="test-key", client=given)  # type: ignore[arg-type]
     assert asr._client is given

@@ -8,6 +8,7 @@ from samtal_server.providers import ProviderError, Turn, build_provider
 from samtal_server.providers.anthropic_llm import AnthropicLlm
 from samtal_server.providers.kit import DEFAULT_TIMEOUT_S, MAX_RETRIES
 from samtal_server.providers.openai_llm import OpenAiCompatibleLlm, chat_messages
+from tests.support.llm_sdk import Falsey as FalseyClient
 
 
 def provider_config(**data: object) -> ProviderConfig:
@@ -112,17 +113,6 @@ def test_an_injected_openai_compatible_client_is_used_as_given() -> None:
         client=given,  # type: ignore[arg-type]
     )
     assert llm._client is given
-
-
-class FalseyClient:
-    """A double that answers False to a truth test, which is what any
-    object defining __bool__ or __len__ does. `client or ...` drops one
-    of these on the floor and builds a real client instead, and the test
-    that thought it had injected a client watches the provider talk to
-    the vendor."""
-
-    def __bool__(self) -> bool:
-        return False
 
 
 def test_a_falsey_anthropic_client_is_still_the_one_used() -> None:
