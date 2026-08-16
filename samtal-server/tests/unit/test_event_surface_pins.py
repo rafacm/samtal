@@ -65,7 +65,7 @@ from samtal_server.config import Config
 from samtal_server.device.bindings import DeviceAgents
 from samtal_server.device.session import DeviceSession
 from samtal_server.logs import _STANDARD_ATTRIBUTES, TEXT_FORMAT, JsonFormatter
-from samtal_server.providers import AsrResult, build_agent_providers
+from samtal_server.providers import AsrResult, Usage, build_agent_providers
 from samtal_server.runtime.pipeline import bespoke_runtime_factory
 from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
@@ -136,6 +136,12 @@ DYNAMIC = "<dynamic>"
 # And what the session id is replaced by, which is worth telling apart
 # from the rest: it is the one dynamic value every sentence carries.
 SESSION = "<session>"
+
+# The model a provider entry is configured with, planted on the identity
+# the scripted providers borrow from the mock they stand in for. The
+# mocks run no model and so name none, and an event that carries no
+# `model` cannot pin the field that carries one.
+MODEL = "qwen3:8b"
 
 # A session id is a uuid4 hex, and it appears in the sentence as well as
 # in the fields.
@@ -676,12 +682,19 @@ async def test_a_whole_exchange_reaches_no_record_of_itself(
 
 
 async def test_llm_round(caplog: pytest.LogCaptureFixture) -> None:
-    session = speaking_session({"poet": ScriptedLlm(["Two words."])})
+    """Driven with a model on the entry and a usage the provider
+    reported, because the fields that only exist in that case are
+    exactly the ones the GenAI vocabulary is about: an unpinned field is
+    a field that can be renamed twice."""
+    script = ScriptedLlm([["Two words.", Usage(prompt_tokens=140, completion_tokens=12)]])
+    session = speaking_session({"poet": script})
+    script.identity = replace(script.identity, model=MODEL)
     with caplog.at_level("INFO"):
         await session.runtime._reply(UTTERANCE)
 
+    round_one = only(caplog, "llm_round")
     assert pinned(
-        only(caplog, "llm_round"),
+        round_one,
         dynamic=("duration_ms", "first_token_ms"),
         dynamic_args=(3,),
     ) == {
@@ -701,9 +714,33 @@ async def test_llm_round(caplog: pytest.LogCaptureFixture) -> None:
             "stage": "llm",
             "provider": "mock",
             "type": "mock",
+            "model": MODEL,
+            "input_tokens": 140,
+            "output_tokens": 12,
             "first_token_ms": DYNAMIC,
         },
     }
+    # The names they replaced, said out loud rather than left to the
+    # exactness of the set above: what a consumer of the old surface
+    # reads for is gone (#120).
+    assert "prompt_tokens" not in payload_of(round_one)
+    assert "completion_tokens" not in payload_of(round_one)
+
+
+async def test_llm_round_without_a_model_or_a_usage(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other half of the same surface: an entry that names no model
+    and a provider that reports no usage carry three fields fewer rather
+    than nulls, which is what makes their presence above meaningful."""
+    session = speaking_session({"poet": ScriptedLlm(["Two words."])})
+    with caplog.at_level("INFO"):
+        await session.runtime._reply(UTTERANCE)
+
+    fields = payload_of(only(caplog, "llm_round"))
+    assert "model" not in fields
+    assert "input_tokens" not in fields
+    assert "output_tokens" not in fields
 
 
 async def test_agent_said_and_handover(caplog: pytest.LogCaptureFixture) -> None:
@@ -918,10 +955,12 @@ async def test_tool_call_for_an_mcp_tool(caplog: pytest.LogCaptureFixture) -> No
 async def test_llm_retry(caplog: pytest.LogCaptureFixture) -> None:
     llm = StallingLlm(delays=[STALL_S, 0.0])
     session = session_for(watchdog_config(), POET_MAC, {"poet": cast(Any, llm)})
+    llm.identity = replace(llm.identity, model=MODEL)
     with caplog.at_level("INFO"):
         await run_reply(session, "are you there")
 
-    assert pinned(only(caplog, "llm_retry"), dynamic=("duration_ms",), dynamic_args=(1,)) == {
+    retried = only(caplog, "llm_retry")
+    assert pinned(retried, dynamic=("duration_ms",), dynamic_args=(1,)) == {
         "logger": "samtal_server.session",
         "level": logging.WARNING,
         "template": "session %s: no first token after %.1f s, retrying round %d",
@@ -937,8 +976,12 @@ async def test_llm_retry(caplog: pytest.LogCaptureFixture) -> None:
             "stage": "llm",
             "provider": "mock",
             "type": "mock",
+            "model": MODEL,
         },
     }
+    # A retry says which model stalled, which is the whole reason the
+    # field is on this event as well as on the round that finished.
+    assert "prompt_tokens" not in payload_of(retried)
 
 
 class Consumer:
