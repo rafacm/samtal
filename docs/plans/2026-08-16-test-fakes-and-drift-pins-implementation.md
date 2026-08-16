@@ -846,14 +846,24 @@ as committed.
 inverts `docgen.ENTITIES` into filename to claiming entity names.
 
 **The relations.** `test_every_example_an_entity_names_is_a_file_that_exists`:
-every filename in every `Entity.examples` tuple is a file under
-`examples/`. `test_every_example_file_is_claimed_by_exactly_one_entity`:
+every name in every `Entity.examples` tuple is a bare filename, and is
+a file under `examples/`. `test_every_example_file_is_claimed_by_exactly_one_entity`:
 every `*.yaml` under `examples/` appears in exactly one entity's tuple,
 which is one assertion for the unclaimed case and one for the
 doubly-claimed one. Each message names the offending file, and the
 double names the entities that claim it. Both tests refuse to run
 vacuously: one asserts some entity claims something, the other that the
 directory is not empty.
+
+The bare-filename assertion is what makes the tally sound, and it came
+out of the PR review round. The tally is keyed by the string an entity
+writes while existence is checked by opening the path, and the two
+disagree about what a name is: `./vad-silero.yaml` written on a second
+entity opens the file the provider entity already claims, so both
+tests passed while one example was documented under two commands.
+Refusing a name that is not its own basename closes that by saying
+what `Entity.examples` holds, rather than normalizing the alias away
+and leaving the loose spelling in the source.
 
 `examples/README.md` is a third encoding and stays checked where it was,
 by `test_every_fragment_is_listed_in_the_examples_readme`, untouched.
@@ -911,13 +921,15 @@ the comment scan are each doing work, and the second proves the comment
 scan reaches a key at depth rather than only the top-level
 `# websocket_url:` case.
 
-**Docgen examples**, all three branches:
+**Docgen examples**, all three branches, plus the alias case the review
+round added:
 
 | Mutation | Observed |
 | --- | --- |
 | Add an unclaimed `examples/ghost-example.yaml` | `AssertionError: under examples/ but named by no entity in docgen.ENTITIES: ghost-example.yaml` |
 | Remove `examples/vad-silero.yaml`, which the provider entity claims | `AssertionError: named in docgen.ENTITIES but not under examples/: vad-silero.yaml` |
 | Claim `vad-silero.yaml` from the prompt-fragment entity as well (a temporary edit to `docgen.py`, reverted) | `AssertionError: named by more than one entity: vad-silero.yaml (provider, prompt-fragment)` |
+| Claim it from the prompt-fragment entity under the alias `./vad-silero.yaml`, which both tests passed before the review round's fix | `AssertionError: not a bare filename in docgen.ENTITIES: ./vad-silero.yaml` |
 
 **CLI/API shapes**, one mutation per relation, each a temporary edit to
 `cli.py` or `api.py`, reverted:
