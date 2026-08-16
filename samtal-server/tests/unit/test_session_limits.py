@@ -24,15 +24,8 @@ import samtal_server.device.session as session_module
 from samtal_server.app import create_app
 from samtal_server.audio.opus import OpusEncoder
 from samtal_server.device.session import GOING_AWAY, NORMAL_CLOSURE, DeviceSession
-from tests.support.configs import (
-    DEVICE_MAC,
-    capped_config,
-    config_with_agent,
-    idle_config,
-)
-from tests.support.sessions import (
-    session_for,
-)
+from tests.support.configs import DEVICE_MAC, capped_config, config_with_agent, idle_config
+from tests.support.sessions import session_for
 from tests.support.wire import (
     collect_reply,
     connect,

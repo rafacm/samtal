@@ -31,12 +31,7 @@ from samtal_server import __version__
 from samtal_server.app import create_app
 from samtal_server.audio.opus import OpusEncoder
 from samtal_server.config import Config
-from samtal_server.device.boundary import (
-    DeviceGone,
-    DeviceOutput,
-    PlayableAudio,
-    SessionInput,
-)
+from samtal_server.device.boundary import DeviceGone, DeviceOutput, PlayableAudio, SessionInput
 from samtal_server.events import SessionEvents
 from samtal_server.providers import (
     LlmEvent,
@@ -52,9 +47,7 @@ from samtal_server.tools.device import DeviceToolClient
 from samtal_server.tools.mcp import McpServers
 from tests.support.boundary import FakeDevice, StubRuntime
 from tests.support.configs import DEVICE_MAC, config_with_agent
-from tests.support.sessions import (
-    device_session,
-)
+from tests.support.sessions import device_session
 from tests.support.wire import connect, send_pcm, shake_hands, speech_pcm
 
 

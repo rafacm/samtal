@@ -25,21 +25,10 @@ from samtal_server.config import Config
 from samtal_server.filler import build_agent_fillers
 from samtal_server.providers import Turn, build_agent_providers
 from samtal_server.providers.base import TtsProvider
-from tests.support.configs import (
-    BOTH_MAC,
-    DELAY_MS,
-    POET_MAC,
-    SPEECH,
-    base_config,
-    masked_config,
-)
+from tests.support.configs import BOTH_MAC, DELAY_MS, POET_MAC, SPEECH, base_config, masked_config
 from tests.support.events import events, only
 from tests.support.providers import BrokenTts, ScriptedLlm, StallingLlm
-from tests.support.sessions import (
-    call,
-    masked_session,
-    session_for,
-)
+from tests.support.sessions import call, masked_session, session_for
 from tests.support.sockets import RecordingSocket
 
 STALL_S = 0.5

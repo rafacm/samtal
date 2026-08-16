@@ -19,9 +19,7 @@ from samtal_server.device.boundary import (
     SessionInput,
 )
 from tests.support.configs import DEVICE_MAC, config_with_agent
-from tests.support.sessions import (
-    device_session,
-)
+from tests.support.sessions import device_session
 
 
 @pytest.mark.parametrize("protocol", [SessionInput, DeviceOutput])

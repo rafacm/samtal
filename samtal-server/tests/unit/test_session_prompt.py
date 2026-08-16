@@ -27,11 +27,7 @@ from samtal_server.runtime.prompt import (
 from samtal_server.tools.memory import MemoryStore
 from tests.support.configs import BOTH_MAC, POET_MAC, base_config
 from tests.support.providers import CountingServers, RecordingLlm, ScriptedLlm
-from tests.support.sessions import (
-    call,
-    run_reply,
-    session_with,
-)
+from tests.support.sessions import call, run_reply, session_with
 
 GUIDANCE = "Ask before unlocking the door."
 

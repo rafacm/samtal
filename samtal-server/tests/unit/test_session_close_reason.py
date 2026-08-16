@@ -24,23 +24,10 @@ from samtal_server.app import create_app
 from samtal_server.conversations.schema import CLOSE_REASONS as STORED_REASONS
 from samtal_server.device.session import CLOSE_REASONS
 from samtal_server.registry import SessionRegistry
-from tests.support.configs import (
-    capped_config,
-    config_with_agent,
-    idle_config,
-)
-from tests.support.sessions import (
-    open_session,
-    served,
-)
+from tests.support.configs import capped_config, config_with_agent, idle_config
+from tests.support.sessions import open_session, served
 from tests.support.sockets import LoopingSocket
-from tests.support.wire import (
-    connect,
-    listen_realtime,
-    say_something,
-    shake_hands,
-    wait_for_close,
-)
+from tests.support.wire import connect, listen_realtime, say_something, shake_hands, wait_for_close
 
 
 def closed(caplog: pytest.LogCaptureFixture) -> Any:

@@ -28,11 +28,7 @@ from samtal_server.device.boundary import DeviceGone
 from samtal_server.logs import TEXT_FORMAT, JsonFormatter
 from samtal_server.providers import ProviderCallError, ProviderCallTimeout
 from tests.support.configs import POET_MAC, base_config
-from tests.support.sessions import (
-    drive_reply,
-    reply_with,
-    session_for,
-)
+from tests.support.sessions import drive_reply, reply_with, session_for
 from tests.support.sockets import QuietSocket
 
 # One frame of silence, which the mock ASR answers with "hello" whatever it
