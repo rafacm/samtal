@@ -50,7 +50,7 @@ from samtal_server.events import Emission
 from samtal_server.providers import build_agent_providers
 from samtal_server.runtime.pipeline import bespoke_runtime_factory
 from samtal_server.tools.mcp import McpServers
-from tests.support.configs import DEVICE_MAC, DEVICE_UUID
+from tests.support.configs import DEVICE_MAC, DEVICE_UUID, recording_config
 from tests.support.sessions import drive_reply, open_session
 from tests.support.sockets import LoopingSocket
 from tests.support.wire import connect, say_something, send_pcm, sentences, shake_hands, speech_pcm
@@ -73,56 +73,6 @@ TIMEOUT_S = 30.0
 # One frame of silence, which the mock ASR answers with the configured
 # transcript.
 UTTERANCE = b"\x00\x00" * 320
-
-
-def recording_config(
-    tmp_path: Path,
-    asr_text: str = "remember that I like tea",
-    llm: dict[str, object] | None = None,
-    capture: bool = False,
-    prompt: str | None = None,
-    **conversations: object,
-) -> Config:
-    """A server that records, with its databases where a test can read
-    them.
-
-    The mock LLM asks for the `remember` builtin on the first round of a
-    turn whose transcript carries the trigger and speaks the result on
-    the second, so an ordinary websocket conversation lands a turn with a
-    tool invocation under it without anything scripted below the wire.
-    """
-    section: dict[str, object] = {"enabled": True}
-    section.update(conversations)
-    server: dict[str, object] = {
-        "database": {"dir": str(tmp_path)},
-        "conversations": section,
-    }
-    if capture:
-        server["capture"] = {"enabled": True, "dir": str(tmp_path / "captures")}
-    return Config(
-        server=server,
-        memory={"dir": str(tmp_path / "memory")},
-        providers={
-            "llm": {
-                "mock": llm
-                or {
-                    "type": "mock",
-                    "reply": "Noted: {tool_result}.",
-                    "tool_when": "remember",
-                    "tool_name": "remember",
-                    "tool_arguments": {"text": "the user likes tea"},
-                }
-            },
-            "asr": {"mock": {"type": "mock", "text": asr_text}},
-            "tts": {"mock": {"type": "mock"}},
-            "vad": {"mock": {"type": "mock"}},
-        },
-        agents={
-            "assistant": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")
-            | ({} if prompt is None else {"prompt": prompt})
-        },
-        default_agent="assistant",
-    )
 
 
 def read(directory: Path, statement: str) -> list[dict[str, Any]]:

@@ -30,7 +30,7 @@ from samtal_server.config.models import (
 from samtal_server.config.store import ConfigStore
 from samtal_server.db import open_database, schema
 from samtal_server.runtime.prompt import Fragment
-from tests.unit.test_config_tools import config_with
+from tests.support.configs import config_with
 
 # Not a real credential. Written in the safe charset on purpose: that is
 # the whole reason the charset rule does not close the leak on its own,

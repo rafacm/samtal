@@ -1,12 +1,11 @@
-import tempfile
 from pathlib import Path
 
 import pytest
-import yaml
 
-from samtal_server.config import Config, ConfigError, compose_config, load_file_config
+from samtal_server.config import Config, ConfigError, load_file_config
 from samtal_server.config.models import DOMAIN_KEYS, normalize_mac
 from samtal_server.conversations.store import RETENTION_DAYS_DEFAULT
+from tests.support.configs import load_config_from_data
 
 # Not a real credential, and shaped so a substring check for it cannot
 # match by accident. Written into the input a parser chokes on, since a
@@ -731,18 +730,3 @@ def test_multiple_problems_reported_together() -> None:
     assert 'agent "nobody"' in message
     assert 'unknown llm provider "ghost"' in message
 
-
-def load_config_from_data(data: dict) -> Config:
-    """One mapping through the whole boot composition: the server half
-    written to a temporary YAML file and read by the real loader, the
-    domain half composed onto it the way the database's snapshot is.
-
-    Two halves, one call, because these tests are about what a
-    configuration means rather than about where each half was kept, and
-    they said the same thing when one file held both."""
-    file_data = {key: value for key, value in data.items() if key not in DOMAIN_KEYS}
-    domain_data = {key: value for key, value in data.items() if key in DOMAIN_KEYS}
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "config.yaml"
-        path.write_text(yaml.safe_dump(file_data), encoding="utf-8")
-        return compose_config(load_file_config(path), domain_data, str(path))
