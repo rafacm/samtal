@@ -2169,3 +2169,142 @@ $ git diff origin/main --stat -- tests/unit/test_conversations_*.py \
 $ echo $?
 0
 ```
+
+### PR #160 review round
+
+One external review of the milestone as first pushed. Four findings, one
+P1 and three P2; verdict mergeable after fixes. All four adopted, one
+commit each, in the order the findings imply: the routing hole first,
+then the pins that were not watching the fields this milestone changed,
+then the sweep's misses, then the two documents that described the
+strip as something it is only half of.
+
+1. **P1: a reload could reroute a call the record had already
+   reserved.** The narrowing gave `tool_call` the reserved entry, but
+   the execution asked the registry again twice (the per-entry timeout,
+   then the routing) and the registry resolved a third time inside its
+   own `call`. A reload landing in that window moves a published name
+   to a more specific entry (`home__inside` coming up takes
+   `home__inside__x` over from `home`), so a call reserved against one
+   entry could run on another, under that other entry's timeout, and
+   then be recorded and logged as the entry that did not run it. The
+   milestone made this visible rather than causing it: before it, the
+   event named the tool and no entry at all.
+   *Resolution*: adopted in `4350768`. The reservation is the single
+   answer all the way down. `_timeout_for` takes the classification
+   rather than a name, `_dispatch` routes on its `source` and `entry`,
+   and `McpServers.call` takes the entry the caller means and refuses a
+   name that has moved (`McpServerDown`, which the loop already turns
+   into the error result any failed tool produces) instead of following
+   it. The layering is worth stating: the refusal is a semantics change
+   and lives in the registry, which is the only place that can know the
+   name moved; the pipeline's part is to pass what it already holds.
+   The expected entry is a required argument rather than an optional
+   one, so a caller cannot omit it and silently get the old behavior.
+   The regression test drives the window directly (reserve, reload the
+   name onto the inner entry, execute) and asserts the refusal, that
+   the new owner's answer is nowhere in the result, and that the event
+   and the row both still name the reserved entry with `is_error`. It
+   fails against the old code with the new owner's answer and a
+   `tool_call` naming the old entry, which is the finding exactly.
+2. **P2: the exact pins were not watching the GenAI fields.** The
+   `llm_round` pin drove a provider that reports no usage and an entry
+   that names no model, so the two renamed token fields and the added
+   `model` were pinned nowhere, and nothing asserted that the old names
+   were gone. A characterization suite that does not carry a field
+   cannot notice it being renamed again.
+   *Resolution*: adopted in `abd5d0b`. `llm_round` is driven with a
+   reported usage and a model on the identity, and pins `input_tokens`,
+   `output_tokens` and `model`; `llm_retry` pins `model`; a second case
+   holds the other half, where an entry with no model and a provider
+   with no usage carry three fields fewer rather than nulls. The old
+   names are asserted absent explicitly, beside the exact field sets
+   that already imply it. The ordering miss is worth recording rather
+   than tidying away: this plan's own rule is that a pin moves in the
+   commit that changes its surface, and for these fields it did not,
+   which is the same shape #153 recorded when a characterization suite
+   turned out to pin less than its docstring claimed. The correction is
+   a commit of its own here, and the rule is unchanged.
+3. **P2: the transcript sweep read for a phrase rather than for a
+   claim.** Three live contradictions survived it, and a fourth turned
+   up in the re-run: the quality-suite doc saying `heard` carries the
+   transcript, an MCP test explaining itself by "the transcript the
+   retained logs are", the emitter's own docstring example emitting a
+   `heard` sentence with an utterance in it, and the glossary reading a
+   premature endpoint off log transcripts.
+   *Resolution*: adopted in `a6323aa`. All four rewritten, plus one
+   phrase the round found ambiguous everywhere else (a session comment
+   calling the retained logs an operator's "log store"). The inventory
+   was re-run over both trees, and the disposition table now lists every
+   remaining nonhistorical hit with its reason for staying, so the
+   record says which hits were read and left rather than only which were
+   changed. The lesson is in the table's own preamble: the first sweep
+   searched for "transcript store", and every miss said the same thing
+   in other words.
+4. **P2: the documents described the whole strip as defensive.** The
+   narrowing deliberately kept `tool` on a `tool_call` for a builtin,
+   so `EVENT_CONTENT`'s `tool` entry is still doing work: it removes
+   that name from the stored row. The store's docstrings, the schema
+   reference and the changelog's capture sentence all said the strip
+   had become defense in depth, which is true of the three text keys
+   and false of this one.
+   *Resolution*: adopted in `f926404`, as documentation rather than as
+   a behavior change, and the choice is recorded because the finding
+   offered the other one. Aligning `EVENT_CONTENT` with the event
+   (keeping a builtin's name in the stored row) would have moved the
+   store in the one milestone that promises to move none of it, and
+   would have edited a store suite this milestone's structural proof
+   rests on being untouched. What the docs now say is what the code
+   does and why it is worth keeping: every name a call carries lives on
+   `tool_invocations` under the text switch rather than in two tables
+   under two rules, and the decision track stays a track of decisions.
+   The changelog's capture entry gets the same correction from the
+   other side, since a captured `tool_call` does keep a builtin's name.
+
+Nothing was done differently from the direction given. One note worth
+recording beside finding 1: the reroute window predates this milestone
+and was reachable through the store's own rows since milestone 2, where
+a call reserved against one entry could be recorded against it and
+executed by another. The narrowing is what made it findable, because it
+put the entry on the event where a reviewer reads.
+
+### Verification after the round
+
+From `samtal-server/`, at `f926404`:
+
+```
+$ uv run ruff check .
+All checks passed!
+```
+
+```
+$ uv run pytest tests/unit -q
+2255 passed, 16 skipped in 305.16s (0:05:05)
+```
+
+```
+$ uv run pytest tests/integration -q
+55 passed in 162.86s (0:02:42)
+```
+
+The unit lane is two cases larger than it was before the round:
+the ownership-transfer regression and the second `llm_round` case. Both
+committed artifacts still regenerate byte-identically, the schema
+reference having been regenerated for finding 4's paragraph:
+
+```
+$ uv run samtal-server conversations schema | diff - ../docs/reference/conversations-schema.md
+$ uv run samtal-server config openapi | diff - ../docs/reference/api-openapi.json
+$ echo $?
+0
+```
+
+And the store's own suites are still byte-identical to the merged
+parent, which finding 4's resolution deliberately kept true:
+
+```
+$ git diff origin/main --stat -- tests/unit/test_conversations_*.py \
+    tests/unit/test_session_record.py tests/integration/test_conversations.py
+$ echo $?
+0
+```
