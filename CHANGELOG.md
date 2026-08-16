@@ -155,8 +155,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   Piper voice, the mocks) carries no field rather than an invented one.
 - **The session capture's decision track inherits the narrowing**
   (#120): the capture is a consumer of the same events, so its
-  `<session>.jsonl` keeps every event minus the text, minus the tool
-  name, and with the renamed token fields. Nothing else about a capture
+  `<session>.jsonl` keeps every event minus the text, minus every tool
+  name a peer chose, and with the renamed token fields. A builtin's own
+  name is still on a captured `tool_call`, exactly as it is on the
+  event; the conversation store's `events` rows drop even that, keeping
+  every called tool's name on `tool_invocations` where the text switch
+  governs it. Nothing else about a capture
   changes: the WAV beside it still records everything said in the room,
   which is the division of labour the capture was built on, and the
   session id correlates all three records. The startup warning says so
