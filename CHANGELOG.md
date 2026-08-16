@@ -69,6 +69,18 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The API namespace redirects nothing, so no response header quotes a
+  request back** (#120): the router's default answered a path with a
+  stray trailing slash (`/api/config/`, `/api/agents/<name>/`,
+  `/api/conversations/?limit=<value>`) with a 307 whose `Location`
+  carried the request's own path segments and query string. That is a
+  value quoted back in a header, where a proxy and a browser both keep
+  it, and it is the one place this API still did so. Trailing-slash
+  redirects are off for the whole gated namespace now.
+  **Operator-visible:** a request to a route path with a trailing slash
+  that used to be redirected is answered 404 (401 without a token, as
+  ever); address the route as the committed OpenAPI document spells it.
+  `/api` and `/api/` both still resolve, which was never a redirect.
 - **A provider's address may not carry a credential, and no record
   keeps one that does** (#120): `base_url:
   https://user:password@host/v1` names nothing secret-shaped, so every

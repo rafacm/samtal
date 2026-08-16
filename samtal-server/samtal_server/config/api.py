@@ -1992,6 +1992,22 @@ def _application() -> FastAPI:
         # A mounted application renders its internal paths, so this is
         # how the document says where they actually are.
         servers=[{"url": MOUNT_PATH}],
+        # No trailing-slash redirect anywhere in this namespace. The
+        # router's default answers `/config/` or `/conversations/` with a
+        # 307 whose Location is the request's own path and query string,
+        # which puts an entity name, a session id or a rejected cursor in
+        # a response header: the one place this API was still quoting
+        # back what it was sent, and headers are what proxies and
+        # browsers keep. A path with a stray slash is now an unmatched
+        # path like any other, which the token holder meets as a 404 and
+        # everyone else as the gate's 401.
+        #
+        # Nothing relied on the redirect. `/api` and `/api/` resolve
+        # through the mount instead (`mount_api` below), which is a
+        # different mechanism and deliberately not a redirect, and no
+        # route this application serves is addressed with a trailing
+        # slash by the CLI client or by the committed document.
+        redirect_slashes=False,
     )
     api.openapi = _openapi(api)  # type: ignore[method-assign]
     for refusal, status in REFUSAL_STATUS.items():

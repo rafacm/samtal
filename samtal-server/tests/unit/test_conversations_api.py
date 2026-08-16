@@ -637,6 +637,51 @@ def test_a_sentinel_in_the_path_reaches_no_body_and_no_log(
     assert SENTINEL not in captured.out + captured.err
 
 
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/conversations/?limit={value}",
+        "/conversations/?cursor={value}",
+        "/conversations/?device={value}",
+        "/conversations/{value}/",
+        "/conversations/{value}/turns/?cursor={value}",
+    ],
+)
+def test_a_stray_trailing_slash_answers_without_quoting_the_request(
+    tmp_path: Path,
+    api: FastAPI,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+    path: str,
+) -> None:
+    """The router's trailing-slash redirect used to answer these with a
+    307 whose Location is the request's own path and query string, which
+    put a session id or a rejected cursor in a response header. The
+    namespace redirects nothing now: a stray slash is an unmatched path,
+    which the token holder meets as a 404.
+
+    Followed redirects are switched off here deliberately. A client that
+    follows one would land on the canonical path and see a clean body,
+    which is exactly how this went unnoticed.
+    """
+    recorded(tmp_path, sessions=1)
+    client = TestClient(
+        api, headers={"Authorization": f"Bearer {TOKEN}"}, follow_redirects=False
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        response = client.get(path.format(value=SENTINEL))
+
+    assert response.status_code == 404
+    assert "location" not in response.headers
+    for name, value in response.headers.items():
+        assert SENTINEL not in name + value
+    assert SENTINEL not in response.text
+    assert SENTINEL not in _leaked(caplog)
+    captured = capsys.readouterr()
+    assert SENTINEL not in captured.out + captured.err
+
+
 def test_a_failure_reaching_the_file_says_nothing_about_it(
     tmp_path: Path,
     client: TestClient,
