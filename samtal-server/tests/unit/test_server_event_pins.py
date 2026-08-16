@@ -83,6 +83,7 @@ from samtal_server.providers import build_agent_providers
 from samtal_server.providers.openai_asr import OpenAiAsr
 from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
+from tests.support.configs import config_with_agent, masked_config
 from tests.unit.test_capture import MANIFEST, store, tone
 from tests.unit.test_device_bindings import AGENT, STAGES, booted
 from tests.unit.test_device_bindings import BOUND_MAC as DB_BOUND_MAC
@@ -106,9 +107,9 @@ from tests.unit.test_ota import (
     post_system_info,
 )
 from tests.unit.test_ota import client_for as ota_client
-from tests.unit.test_session import config_with_agent, connect, shake_hands
+from tests.unit.test_session import connect, shake_hands
 from tests.unit.test_session_events import only
-from tests.unit.test_session_filler import BrokenTts, masked_config
+from tests.unit.test_session_filler import BrokenTts
 from tests.unit.test_tools_mcp import SHADOWED_POSITION
 from tests.unit.test_tools_mcp import config_granting as mcp_granting
 from tests.unit.test_tools_mcp import entry_data as mcp_entry_data

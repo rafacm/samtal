@@ -44,20 +44,17 @@ from samtal_server.runtime import turns
 from samtal_server.runtime.turns import tool_source
 from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
-from tests.unit.test_conversations_store import MANIFEST, rows
-from tests.unit.test_session import POET_TONE, TUTOR_TONE
-from tests.unit.test_session_reply_failures import QuietSocket
-from tests.unit.test_session_tools import (
+from tests.support.configs import (
     BOTH_MAC,
     POET_MAC,
-    ScriptedLlm,
+    POET_TONE,
+    TUTOR_TONE,
     base_config,
-    call,
-    drive_reply,
     registry_config,
-    session_for,
-    start_reply,
 )
+from tests.unit.test_conversations_store import MANIFEST, rows
+from tests.unit.test_session_reply_failures import QuietSocket
+from tests.unit.test_session_tools import ScriptedLlm, call, drive_reply, session_for, start_reply
 from tests.unit.test_tools_device import STATUS, FakeDevice
 
 # One frame of silence, which the mock ASR answers with the configured

@@ -35,73 +35,30 @@ from samtal_server.runtime.pipeline import AgentNotAllowed, bespoke_runtime_fact
 from samtal_server.runtime.speech import _Synthesis
 from samtal_server.tools.mcp import McpServers
 from samtal_server.ws import WEBSOCKET_PATH, signed_device_id
-
-DEVICE_MAC = "AA:BB:CC:DD:EE:FF"
-DEVICE_UUID = "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
-
-SAMPLE_RATE = 16000
-OUTPUT_RATE = 24000
-FRAME_MS = 60
-FRAME_BYTES = SAMPLE_RATE * FRAME_MS // 1000 * 2
+from tests.support.configs import (
+    BOTH_MAC,
+    DEVICE_HELLO,
+    DEVICE_MAC,
+    DEVICE_UUID,
+    ENDPOINT_SILENCE_MS,
+    FRAME_BYTES,
+    FRAME_MS,
+    LONG_REPLY,
+    OUTPUT_RATE,
+    POET_MAC,
+    POET_TONE,
+    SAMPLE_RATE,
+    TUTOR_TONE,
+    config_with_agent,
+)
 
 # The mock TTS formula, for computing expected reply durations.
 TTS_MS_PER_CHAR = 40
 TTS_MIN_MS = 240
 
-# The silence a test sends to end an utterance in the modes that have no
-# listen stop: the endpointer's 700 ms window plus a couple of frames, so
-# which frame trips it does not have to be predicted exactly.
-ENDPOINT_SILENCE_MS = 840
 
-# A reply the mock voice takes about eight seconds to speak, so a barge
-# sent while it streams lands with most of it still unsaid.
-LONG_REPLY = (
-    "There is a longer answer to that, and it takes the mock voice about eight "
-    "seconds to say, which leaves plenty of room for somebody to lose patience "
-    "and cut in long before the end of it arrives."
-)
-
-DEVICE_HELLO = {
-    "type": "hello",
-    "version": 1,
-    "features": {"mcp": True},
-    "transport": "websocket",
-    "audio_params": {
-        "format": "opus",
-        "sample_rate": 16000,
-        "channels": 1,
-        "frame_duration": 60,
-    },
-}
-
-
-def config_with_agent(
-    asr_text: str = "hello",
-    llm_reply: str | None = None,
-    server: dict[str, object] | None = None,
-) -> Config:
-    llm: dict[str, object] = {"type": "mock"}
-    if llm_reply is not None:
-        llm["reply"] = llm_reply
-    return Config(
-        server=server or {},
-        providers={
-            "llm": {"mock": llm},
-            "asr": {"mock": {"type": "mock", "text": asr_text}},
-            "tts": {"mock": {"type": "mock"}},
-            "vad": {"mock": {"type": "mock"}},
-        },
-        agents={"assistant": dict.fromkeys(("llm", "asr", "tts", "vad"), "mock")},
-        default_agent="assistant",
-    )
-
-
-POET_MAC = "aa:bb:cc:dd:ee:01"
 TUTOR_MAC = "aa:bb:cc:dd:ee:02"
-BOTH_MAC = "aa:bb:cc:dd:ee:03"
 UNBOUND_MAC = "aa:bb:cc:dd:ee:04"
-POET_TONE = 440.0
-TUTOR_TONE = 880.0
 
 
 def two_persona_config() -> Config:

@@ -27,13 +27,9 @@ import pytest
 from samtal_server.device.boundary import DeviceGone
 from samtal_server.logs import TEXT_FORMAT, JsonFormatter
 from samtal_server.providers import ProviderCallError, ProviderCallTimeout
+from tests.support.configs import POET_MAC, base_config
 from tests.unit.test_session_events import reply_with
-from tests.unit.test_session_tools import (
-    POET_MAC,
-    base_config,
-    drive_reply,
-    session_for,
-)
+from tests.unit.test_session_tools import drive_reply, session_for
 
 # One frame of silence, which the mock ASR answers with "hello" whatever it
 # holds: these tests are about how the reply ends, not what was said.

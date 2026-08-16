@@ -29,14 +29,12 @@ from samtal_server.providers import (
     Turn,
 )
 from samtal_server.providers.mock import MockAsr
+from tests.support.configs import DEVICE_MAC, LONG_REPLY, config_with_agent
 from tests.unit.test_session import (
-    DEVICE_MAC,
-    LONG_REPLY,
     RecordingSocket,
     assert_endpointed_speech,
     collect_reply,
     collect_until,
-    config_with_agent,
     connect,
     device_session,
     endpoint_silence,

@@ -50,15 +50,8 @@ from samtal_server.providers import (
 from samtal_server.runtime.pipeline import bespoke_runtime_factory
 from samtal_server.tools.device import DeviceToolClient
 from samtal_server.tools.mcp import McpServers
-from tests.unit.test_session import (
-    DEVICE_MAC,
-    config_with_agent,
-    connect,
-    device_session,
-    send_pcm,
-    shake_hands,
-    speech_pcm,
-)
+from tests.support.configs import DEVICE_MAC, config_with_agent
+from tests.unit.test_session import connect, device_session, send_pcm, shake_hands, speech_pcm
 
 OUTPUT_RATE = 24000
 FRAME_BYTES = OUTPUT_RATE * 60 // 1000 * 2

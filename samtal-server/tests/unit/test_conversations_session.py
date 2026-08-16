@@ -50,10 +50,9 @@ from samtal_server.events import Emission
 from samtal_server.providers import build_agent_providers
 from samtal_server.runtime.pipeline import bespoke_runtime_factory
 from samtal_server.tools.mcp import McpServers
+from tests.support.configs import DEVICE_MAC, DEVICE_UUID
 from tests.unit.test_conversations_store import Gate
 from tests.unit.test_session import (
-    DEVICE_MAC,
-    DEVICE_UUID,
     connect,
     say_something,
     send_pcm,

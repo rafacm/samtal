@@ -14,12 +14,8 @@ from starlette.websockets import WebSocketDisconnect
 from samtal_server.app import create_app
 from samtal_server.config import Config
 from samtal_server.ws import WEBSOCKET_PATH, bearer_token
-from tests.unit.test_session import (
-    DEVICE_MAC,
-    DEVICE_UUID,
-    config_with_agent,
-    shake_hands,
-)
+from tests.support.configs import DEVICE_MAC, DEVICE_UUID, config_with_agent
+from tests.unit.test_session import shake_hands
 
 
 def handshake(client: TestClient, headers: dict[str, str]):

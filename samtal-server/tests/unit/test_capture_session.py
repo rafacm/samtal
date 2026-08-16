@@ -18,14 +18,10 @@ from fastapi.testclient import TestClient
 
 from samtal_server.app import create_app
 from samtal_server.capture import CAPTURE_RATE
+from tests.support.configs import DEVICE_MAC, DEVICE_UUID, FRAME_BYTES, FRAME_MS, config_with_agent
 from tests.unit.test_session import (
-    DEVICE_MAC,
-    DEVICE_UUID,
-    FRAME_BYTES,
-    FRAME_MS,
     OpusEncoder,
     collect_reply,
-    config_with_agent,
     connect,
     endpoint_silence,
     say_something,

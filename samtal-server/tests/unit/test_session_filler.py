@@ -25,79 +25,22 @@ from samtal_server.config import Config
 from samtal_server.filler import build_agent_fillers
 from samtal_server.providers import Turn, build_agent_providers
 from samtal_server.providers.base import TtsProvider
-from tests.unit.test_session import POET_TONE, TUTOR_TONE, RecordingSocket
-from tests.unit.test_session_events import events, only
-from tests.unit.test_session_tools import (
+from tests.support.configs import (
     BOTH_MAC,
+    DELAY_MS,
     POET_MAC,
-    ScriptedLlm,
+    SPEECH,
     base_config,
-    call,
-    session_for,
+    masked_config,
 )
+from tests.unit.test_session import RecordingSocket
+from tests.unit.test_session_events import events, only
+from tests.unit.test_session_tools import ScriptedLlm, call, session_for
 from tests.unit.test_session_watchdog import StallingLlm
-
-# Test-scale threshold: well under the scripted stalls below, well over
-# the near-instant mock pipeline.
-DELAY_MS = 60.0
 
 STALL_S = 0.5
 
 UTTERANCE = b"\x00\x00" * 320
-
-# 20 ms the mock energy endpointer classifies as speech: constant
-# amplitude 10000, far over its RMS threshold of 500.
-SPEECH = b"\x10\x27" * 320
-
-
-def masked_config(
-    delay_ms: float = DELAY_MS, server: dict[str, object] | None = None
-) -> Config:
-    """The two-agent config, with a filler per agent (different phrases,
-    different voices) and the mock voices trimmed so a clip is a single
-    Opus frame."""
-    return base_config(
-        **({"server": server} if server is not None else {}),
-        providers={
-            "llm": {"mock": {"type": "mock", "reply": "{system} heard {text}."}},
-            "asr": {"mock": {"type": "mock", "text": "hello"}},
-            "tts": {
-                "tenor": {
-                    "type": "mock",
-                    "tone_hz": POET_TONE,
-                    "ms_per_char": 1,
-                    "min_ms": 60,
-                },
-                "alto": {
-                    "type": "mock",
-                    "tone_hz": TUTOR_TONE,
-                    "ms_per_char": 1,
-                    "min_ms": 60,
-                },
-            },
-            "vad": {"mock": {"type": "mock"}},
-        },
-        agents={
-            "poet": {
-                "prompt": "POET",
-                "tts": "tenor",
-                "filler": {
-                    "enabled": True,
-                    "delay_ms": delay_ms,
-                    "phrases": ["Hmm, let me see...", "Good question..."],
-                },
-            },
-            "tutor": {
-                "prompt": "TUTOR",
-                "tts": "alto",
-                "filler": {
-                    "enabled": True,
-                    "delay_ms": delay_ms,
-                    "phrases": ["Hmm, mal überlegen..."],
-                },
-            },
-        },
-    )
 
 
 async def masked_session(config: Config, mac: str, scripts: dict[str, Any] | None = None):

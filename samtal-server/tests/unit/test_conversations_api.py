@@ -49,15 +49,9 @@ from samtal_server.conversations.api import (
 )
 from samtal_server.conversations.records import ToolInvocation, TurnLeg, TurnRecord
 from samtal_server.conversations.store import ConversationStore, conversations_path
+from tests.support.configs import DEVICE_MAC, DEVICE_UUID
 from tests.unit.test_conversations_session import recording_config, until
-from tests.unit.test_session import (
-    DEVICE_MAC,
-    DEVICE_UUID,
-    connect,
-    say_something,
-    sentences,
-    shake_hands,
-)
+from tests.unit.test_session import connect, say_something, sentences, shake_hands
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 

@@ -18,7 +18,8 @@ from samtal_server.device.boundary import (
     PlayableAudio,
     SessionInput,
 )
-from tests.unit.test_session import DEVICE_MAC, config_with_agent, device_session
+from tests.support.configs import DEVICE_MAC, config_with_agent
+from tests.unit.test_session import device_session
 
 
 @pytest.mark.parametrize("protocol", [SessionInput, DeviceOutput])

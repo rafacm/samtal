@@ -32,24 +32,16 @@ from samtal_server.providers import (
     TextDelta,
     Usage,
 )
-from tests.unit.test_session import (
+from tests.support.configs import (
+    BOTH_MAC,
     DEVICE_MAC,
     DEVICE_UUID,
-    config_with_agent,
-    connect,
-    say_something,
-    shake_hands,
-)
-from tests.unit.test_session_tools import (
-    BOTH_MAC,
     POET_MAC,
-    ScriptedLlm,
-    _nothing,
     base_config,
-    call,
-    run_reply,
-    session_for,
+    config_with_agent,
 )
+from tests.unit.test_session import connect, say_something, shake_hands
+from tests.unit.test_session_tools import ScriptedLlm, _nothing, call, run_reply, session_for
 
 
 def events(caplog: pytest.LogCaptureFixture, name: str) -> list:

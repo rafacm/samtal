@@ -37,15 +37,8 @@ from samtal_server.runtime.prompt import (
 )
 from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
-from tests.unit.test_session_tools import (
-    BOTH_MAC,
-    POET_MAC,
-    ScriptedLlm,
-    base_config,
-    call,
-    run_reply,
-    session_for,
-)
+from tests.support.configs import BOTH_MAC, POET_MAC, base_config
+from tests.unit.test_session_tools import ScriptedLlm, call, run_reply, session_for
 
 GUIDANCE = "Ask before unlocking the door."
 
