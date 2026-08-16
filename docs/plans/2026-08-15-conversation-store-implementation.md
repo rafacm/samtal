@@ -1734,3 +1734,300 @@ $ uv run samtal-server conversations schema | diff - ../docs/reference/conversat
 $ echo $?
 0
 ```
+
+## Milestone 5: the narrowing, content off the events
+
+The events stop carrying what was said. `heard`, `replied` and
+`agent_said` lose their `text`, `tool_call` stops naming any tool a peer
+named, the malformed-arguments warning reports a length instead of the
+model's own bytes, the token counts take the GenAI conventions' names,
+and the provider-bearing events gain the model that answered. Nothing
+about the store moved, which is the point the content-path decision
+bought a milestone ago: the record of a conversation was already being
+written from the reply path rather than read back out of the log, so
+taking the text off the events changed nothing about what is stored. The
+proof is mechanical and stated in the verification below: `git diff`
+against the milestone 4 tip is empty for every one of the store's own
+suites, and they pass.
+
+Eight commits. The one that lands this section and ticks the milestone is
+the ninth:
+
+1. `8647aa2` Take the transcript off the heard event
+2. `12d5ad1` Take the reply off replied and agent_said
+3. `dc2205e` Name only what this server authored on tool_call
+4. `f01d2b1` Report unparseable tool arguments by length
+5. `b7cd445` Name the token counts as the GenAI conventions do
+6. `0da460f` Say which model answered, on the events that name a provider
+7. `b1f4637` Say the store is the record, everywhere it was the logs
+8. `970eae9` Record the narrowing in the changelog
+
+### The four events, and what their sentences say instead
+
+The rule the #152 round set for `session_rejected` and `provider_failed`
+is that the sentence carries what the metadata half carries, so a reader
+of the human line and a reader of the JSON object learn the same thing.
+Each of these four was rewritten to that shape rather than having its
+argument deleted.
+
+| event | sentence | fields |
+| --- | --- | --- |
+| `heard` | `session <id>: heard 0.80 s of speech` | `agent`, `duration_s`, and the language pair where the engine detected one |
+| `replied` | `session <id>: poet replied in 3 sentences` | `agent`, `sentences` |
+| `agent_said` | `session <id>: poet said 1 sentences` | `agent`, `sentences` |
+| `tool_call` | `session <id>: mcp tool from entry "home" took 0.21 s` | `agent`, `source`, `duration_ms`, `is_error`, plus `tool` on a builtin and `entry` on an MCP call |
+
+`sentences` is a fact the events never carried and is worth stating for
+what it is: `spoken` collects a sentence when its audio has gone out, so
+the count is what the user heard rather than what the model generated,
+and a barge-in that cuts a reply after its first sentence says so on the
+event. It is the one honest size available here; a character count would
+be a second rendering of something the store holds properly.
+
+`tool_call`'s sentence is built the way `_provider_failed` builds its
+own: a fragment that is present or absent rather than a template per
+branch, so the four branches share one pinned template and differ in one
+argument. `_tool_named` is where the rule lives, a module function taking
+the `ToolInvocation` the classifier already produced, so the event and
+the `tool_invocations` row cannot disagree about what a call was: they
+are the same answer read twice.
+
+### The identity seam
+
+`ProviderIdentity` gains `model` and `Provider` gains the attribute it is
+stamped from, beside `host` and for the same stated reason: only the
+built entry knows what its own options resolved to. The five keyed
+adapters (`anthropic`, `openai_compatible`, `openai` ASR, `openai` TTS,
+`elevenlabs`) already held the identifier privately and now hold it
+publicly; `faster_whisper` held a loaded engine under that name, so the
+engine became `_engine` and the configured string took `model`. The
+registry stamps it in the one place that already knew the stage, the
+entry and the type.
+
+`provider_fields` then adds `model` when there is one, which puts it on
+`llm_round`, `llm_retry` and `provider_failed` at once. A type with
+nothing to name (the bundled Silero VAD, a Piper voice, the mocks)
+carries no field rather than an invented one, which is the same rule
+`host` has always followed.
+
+### The transcript sweep
+
+`rg -in "transcript" samtal-server docs` returns 318 matched lines across
+80 files. All but the ones listed below are the word in its ASR sense (a
+transcription, the `heard` transcript of an utterance, `show_transcript`,
+`no_transcript` as a barge-in reason), which the narrowing does not
+touch. The claims that the logs are the transcript store, each with its
+disposition:
+
+| hit | disposition |
+| --- | --- |
+| `samtal_server/events.py:7` (module docstring) | rewritten: the events are metadata, the store is the record, correlated by session id |
+| `samtal_server/events.py:68` (`SESSION_LOGGER` comment) | rewritten: the channel is output because a collector filters on it |
+| `samtal_server/logs.py:7` (module docstring) | rewritten: `json` is what a collector groups by session; the records are metadata |
+| `samtal_server/device/session.py:35` (module docstring) | rewritten: both halves are metadata, what was said is in the store |
+| `samtal_server/config/models.py:473` (`log_format` comment) | rewritten, same wording as the example config |
+| `config.example.yaml:85` (`log_format` comment) | rewritten, and it points at `server.conversations` below it |
+| `samtal_server/tools/mcp.py:214` (SDK-logger filter comment) | "and its transcript store" struck; the rest of the reasoning is unchanged and still true |
+| `samtal_server/tools/mcp.py:261` (`McpCallFailed` docstring) | rewritten: a tool result reaches the store's record, which is why a far side's bytes must not become one |
+| `samtal_server/tools/mcp.py:1021` (`_too_long` docstring) | rewritten: the line goes to the retained logs, which keep no far-side bytes |
+| `samtal_server/conversations/store.py:46, :112` (the `EVENT_CONTENT` strip) | rewritten: the strip is defense in depth now, kept for a payload that regains a key and for databases written before the narrowing |
+| `conversations/docgen.py:195` and the regenerated reference | rewritten in the same way, generator and committed copy together |
+| `README.md:1808` (the Logging section's closing paragraph) | rewritten: query the store's `turns` and `tool_invocations`, and the ADR link says why filtering the logs no longer works |
+| `README.md:1889` (the field-marker paragraph in Capturing a session) | rewritten: the marker phrase is on the WAV and the `heard` event points at it; the phrase itself is one query away with the store on |
+| `tests/unit/test_event_surface_pins.py:4` | rewritten: metadata only, and the sentinels are what says so |
+| `tests/unit/test_session_events.py:3` | rewritten the same way |
+| `tests/unit/test_logs.py:4` | rewritten: what a collector groups a deployment's measurements by |
+| `tests/unit/test_session_characterization.py:72` | rewritten: the channel matters because a collector filters on it |
+| `docs/adr/2026-08-04-...md` (title, status, two consequences) | left as recorded and annotated: an ADR is a record of a decision, so the follow-up note says what changed rather than editing the decision under it |
+| `docs/adr/2026-08-15-...md` (context, decision, consequence) | the forward-looking tenses moved to the past; the recorded context is untouched |
+| `docs/plans/*`, `docs/features/*`, `CHANGELOG.md` history | left alone: dated records of what was true when they were written, and the changelog's new entries are where the change is announced |
+| `app.py:288` and `test_server_event_pins.py:1191` (the capture warning: "room audio and transcripts are being written to %s") | left alone, deliberately: it is a privacy warning about what a capture puts on disk, and the WAV still records everything said in the room. The decision track's inheritance of the narrowing is stated in the CHANGELOG. Rewording it would move a fifth pinned event sentence for a warning that would then understate what is being kept |
+
+### Deviations from the plan
+
+Five, each with its reason.
+
+1. **The README's event-table rows landed with the events, not with the
+   documentation sweep.** The plan lists the table among the milestone's
+   documentation. It cannot wait: `test_conversations_session.py`, one of
+   the store's own suites, parses the Logging table and asserts that
+   every field name the store copied appears in the row for its event.
+   Removing a field keeps that subset true, so the `heard` commit was
+   green with a stale row; adding one (`sentences`) does not, so the
+   three text-bearing rows landed in the commit that added the first new
+   field name, and `tool_call`'s and the three provider-bearing ones
+   landed with their own changes. The table is machine-read, which is
+   worth knowing before touching it.
+2. **`replied` and `agent_said` carry a sentence count rather than a
+   character length.** The plan allows "a length or sentence count if
+   honest and useful". The sentence count is measured where the audio
+   goes out, so it reports what the user heard; a character length would
+   be a size of something the store holds properly and would tempt a
+   reader to treat it as a stand-in for the text.
+3. **`faster_whisper`'s loaded engine was renamed.** Making the
+   configured model public collided with the attribute holding the
+   `WhisperModel`, so the engine became `_engine`. One provider's private
+   name, and the only churn the model field caused outside the seam
+   itself.
+4. **The 2026-08-15 ADR moved to the past tense as well.** The plan asks
+   for the 2026-08-04 follow-up note only. Leaving the newer record
+   saying the narrowing "takes effect when #120 lands" would have left
+   the two ADRs disagreeing about which side of the change the reader is
+   on.
+5. **The malformed-arguments warning still names the tool it refused.**
+   The plan scopes this line to replacing the arguments with their
+   length, which is what landed. The name is a peer's bytes on every
+   branch but the builtin one, so this plain warning is now the only line
+   on the reply path that renders one; it is the published-name exposure
+   #154 recorded as a wider question, and it is left where #154 left it
+   rather than widened here. Stated as an open item below.
+
+### Discoveries
+
+- **The README's event table is a machine-read artifact.** Milestone 3
+  made it the event vocabulary's authority and wired a store suite to
+  parse it; nothing about the file says so. It is what forced deviation 1,
+  and it is the reason a field rename is a three-file change rather than
+  a two-file one.
+- **A sentinel that hunts a tool name has to be shaped like a tool
+  name.** The credential sentinel the pin suite already had is
+  hyphenated, and the publishing rule rewrites the characters both LLM
+  APIs refuse, so a hyphenated sentinel would have been "absent" from
+  every record by having been rewritten rather than withheld. The tool
+  sentinel is letters, digits and underscores, which is exactly the
+  observation #154 made about a credential surviving sanitizing intact.
+- **The MCP test server can publish a name the test chooses**
+  (`SAMTAL_TEST_SHADOWED_TOOL`, added by #154's own sentinel work), so
+  the `mcp` branch is driven against a real stdio server publishing a
+  credential-shaped name rather than against a stand-in registry.
+- **`heard`'s duration is deterministic in the pin drivers.** 640 bytes
+  of silence is 0.02 s, so the moved pin carries the value rather than
+  declaring the argument dynamic, which is a slightly stronger pin than
+  the one it replaces.
+- **One test reached into a provider's private engine.**
+  `test_providers_faster_whisper.py`'s `built_with` returned
+  `provider._model`, so the rename surfaced there immediately; it now
+  returns `_engine` and asserts the configured identifier beside it.
+
+### The suites
+
+No new file. The changes land in the suites that already own these
+surfaces, which is what makes them regressions rather than descriptions:
+
+- `tests/unit/test_event_surface_pins.py`: the four pins move with their
+  changes, `tool_call`'s becomes four (one per branch of the closed set),
+  and five sentinel cases land. A credential-shaped utterance reaches no
+  part of the `heard` record; the whole exchange that quotes it back
+  reaches no record of the run at all, in either shipped format or at a
+  tap; the same for a reply spoken through both agents of a handover;
+  and a credential-shaped tool name reaches nothing through the device,
+  the MCP and the unknown branches. `shipped()` is new and small: it
+  renders a record through both formatters an operator can be running,
+  because a payload check alone would miss a value that reached only the
+  rendering.
+- `tests/unit/test_session_tools.py`: the malformed-arguments line is
+  asserted to report a length and to keep the bytes out of every record.
+- `tests/unit/test_providers.py`: every keyed provider type reports the
+  model it was configured with on its identity, and the mocks report
+  none. `tests/unit/test_providers_faster_whisper.py` covers the sixth
+  against its fake engine.
+- `tests/unit/test_session_events.py`, `test_session_barge_in.py`,
+  `test_session_filler.py`, `test_session_characterization.py`: the
+  assertions that read what was said off an event now read it off the
+  session's own history, which is where it was always true.
+
+### Verification
+
+From `samtal-server/`, at `970eae9`:
+
+```
+$ uv run ruff check .
+All checks passed!
+```
+
+```
+$ uv run pytest tests/unit -q
+2222 passed, 16 skipped in 300.60s (0:05:00)
+```
+
+```
+$ uv run pytest tests/integration -q
+55 passed in 164.82s (0:02:44)
+```
+
+The unit lane was 2209 passed and 15 skipped at milestone 4 and is 2222
+and 16 here: thirteen new tests (three utterance and reply sentinels,
+three extra `tool_call` branches, the malformed-arguments case, five
+parameterized provider-model cases and the no-model case) and one more
+skip, the faster-whisper case, which skips wherever that extra is not
+installed.
+
+The committed artifacts regenerate byte-identically:
+
+```
+$ uv run samtal-server conversations schema | diff - ../docs/reference/conversations-schema.md
+$ uv run samtal-server config openapi | diff - ../docs/reference/api-openapi.json
+$ echo $?
+0
+```
+
+The structural proof that the content path never depended on the events'
+text, which is what this milestone rests on: not one of the store's own
+suites changed, and they pass.
+
+```
+$ git diff 7e2eb28 --stat -- tests/unit/test_conversations_*.py \
+    tests/unit/test_session_record.py tests/integration/test_conversations.py
+$ echo $?
+0
+```
+
+The plan's inventory claims, re-established here rather than trusted:
+
+```
+$ grep -n "text=" samtal_server/runtime/pipeline.py
+$ echo $?
+1
+```
+
+No emit site passes a `text=` field any more; the three the plan counted
+are the three that moved.
+
+```
+$ grep -rn "prompt_tokens\|completion_tokens" samtal_server | grep -v providers/
+samtal_server/runtime/pipeline.py:549:        if usage is not None and usage.prompt_tokens is not None:
+samtal_server/runtime/pipeline.py:550:            tokens["input_tokens"] = usage.prompt_tokens
+samtal_server/runtime/pipeline.py:551:        if usage is not None and usage.completion_tokens is not None:
+samtal_server/runtime/pipeline.py:552:            tokens["output_tokens"] = usage.completion_tokens
+samtal_server/runtime/pipeline.py:577:            None if usage is None else usage.prompt_tokens,
+samtal_server/runtime/pipeline.py:578:            None if usage is None else usage.completion_tokens,
+```
+
+Every remaining occurrence outside `providers/` reads the `Usage`
+dataclass, which keeps its names deliberately; nothing writes those two
+names onto a field. The allowlisted rest is `providers/base.py` and the
+adapters that fill it.
+
+```
+$ grep -rn 'event="tool_call"' samtal_server
+samtal_server/runtime/pipeline.py:1172:            event="tool_call",
+```
+
+Acceptance criterion 8 (the event surface narrows: no conversation text
+on `heard`, `replied` or `agent_said`, the GenAI vocabulary adopted, the
+documentation moved, the ADR's supersession recorded) completes here. Its
+schema documentation landed in milestone 1 and its example blocks in
+milestone 3; what this milestone adds is the narrowing itself, the
+renames, the model field, the documentation sweep and the follow-up note
+dated the day it happened.
+
+### Left open
+
+- The malformed-arguments warning still renders `call.name`, which is a
+  peer's bytes on the device, MCP and unknown branches. Deliberate, and
+  the same published-name question #154 recorded on this event's
+  neighbour; the `tool_call` event itself names nothing there.
+- The `capture_enabled` warning still says "room audio and transcripts".
+  True of the WAV, no longer of the decision track beside it. Left for a
+  round that is about the capture's own wording rather than about this
+  surface.
