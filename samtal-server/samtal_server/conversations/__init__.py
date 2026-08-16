@@ -37,6 +37,7 @@ from samtal_server.conversations.records import (
 from samtal_server.conversations.store import (
     DATABASE_FILENAME,
     ConversationStore,
+    SessionSink,
     conversations_path,
     migrate_existing,
     open_conversations,
@@ -47,6 +48,7 @@ from samtal_server.conversations.store import (
 __all__ = [
     "DATABASE_FILENAME",
     "ConversationStore",
+    "SessionSink",
     "SessionTurns",
     "ToolInvocation",
     "TurnLeg",

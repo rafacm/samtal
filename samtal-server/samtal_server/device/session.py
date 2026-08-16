@@ -61,6 +61,7 @@ from samtal_server.capture import (
 )
 from samtal_server.config import Config
 from samtal_server.config.models import normalize_mac
+from samtal_server.conversations import ConversationStore, SessionSink
 from samtal_server.device.bindings import DeviceBindings
 from samtal_server.device.boundary import (
     PIPELINE_SAMPLE_RATE,
@@ -133,6 +134,7 @@ class DeviceSession:
         captures: CaptureStore | None = None,
         device_facts: DeviceFacts | None = None,
         bindings: DeviceBindings | None = None,
+        conversations: ConversationStore | None = None,
     ) -> None:
         self.websocket = websocket
         self.config = config
@@ -144,6 +146,12 @@ class DeviceSession:
         # come to disagree about a rule they both implement.
         self._bindings = bindings if bindings is not None else DeviceBindings.snapshot_only(config)
         self._captures = captures
+        # The conversation record, an optional collaborator exactly like
+        # the captures above: absent unless the deployment asked for one,
+        # compared `is not None`, and never something this class reaches
+        # for on a path that has to work without it.
+        self._conversations = conversations
+        self._record: SessionSink | None = None
         self._device_facts = device_facts if device_facts is not None else DeviceFacts()
         self._capture: SessionCapture | None = None
         # Built only when a capture starts, so a server that is not
@@ -335,8 +343,17 @@ class DeviceSession:
             return
         self.protocol_version = hello.version
         # Before the session_open event below, so that event is the first
-        # line of the decision track rather than missing from it.
-        self._start_capture(client_id)
+        # line of the decision track rather than missing from it, for the
+        # capture and for the store alike.
+        #
+        # One manifest, two consumers: the capture writes it beside the
+        # audio and the store's session row is built from it, which is
+        # what "manifest-shaped" means concretely. The store attaches
+        # after the capture, so the dispatch order stays capture first,
+        # store second, log last.
+        manifest = self._manifest(client_id)
+        self._start_capture(manifest)
+        self._start_recording(manifest)
         await self.websocket.send_text(messages.server_hello(self.session_id, OUTPUT_AUDIO))
         self._events.info(
             "session %s open: device %s (client %s) agent %s%s, protocol v%d, "
@@ -413,9 +430,10 @@ class DeviceSession:
                 duration_s=self._open_duration_s(),
                 reason=self._closed_reason(),
             )
-            # After session_closed, so it is the last line of the
-            # decision track and the WAV header is patched with a length
-            # covering everything.
+            # Both after session_closed, so that event is the last line
+            # of the decision track, the last row of the record, and the
+            # WAV header is patched with a length covering everything.
+            self._stop_recording()
             if self._capture is not None:
                 self._events.detach_capture()
                 self._capture.close()
@@ -512,12 +530,12 @@ class DeviceSession:
             return 0.0
         return round(asyncio.get_running_loop().time() - self._opened_at, 2)
 
-    def _start_capture(self, client_id: str) -> None:
+    def _start_capture(self, manifest: dict[str, Any]) -> None:
         """Begin recording this session, when a directory is configured."""
         if self._captures is None or self._opened_at is None:
             return
         self._capture = self._captures.open(
-            self.session_id, self._opened_at, self._manifest(client_id)
+            self.session_id, self._opened_at, manifest
         )
         if self._capture is None:
             return
@@ -526,8 +544,48 @@ class DeviceSession:
         self._capture_reply_decoder = OpusDecoder(sample_rate=OUTPUT_AUDIO.sample_rate)
         self._capture_resampler = Resampler(OUTPUT_AUDIO.sample_rate, CAPTURE_RATE)
 
+    def _start_recording(self, manifest: dict[str, Any]) -> None:
+        """Begin this session's row in the conversation store, when one
+        is configured.
+
+        Opened with the same reading the capture was, so a `t_ms` in the
+        database and a `t_ms` in the capture's decision track index into
+        the same timeline, and with the same manifest, which is where the
+        session row's device, agents, protocol and providers come from.
+
+        The tap attaches after the capture's, so the store sees exactly
+        what the capture's decision track sees, in the same order and
+        from the same first event: this record is the decision track,
+        `session_open` through `session_closed`. What the initial agent
+        activation emitted before the hello is outside both, because no
+        consumer can be attached before a session has a manifest to be
+        opened with.
+        """
+        if self._conversations is None or self._opened_at is None:
+            return
+        self._conversations.open_session(self.session_id, self._opened_at, manifest)
+        self._record = SessionSink(self._conversations, self.session_id)
+        self._events.attach(self._record)
+
+    def _stop_recording(self) -> None:
+        """Close this session's row: its duration, what ended it, and
+        what it lost. Called after `session_closed` is emitted, so that
+        event is the last row of the record as it is the last line of the
+        decision track."""
+        if self._record is None or self._conversations is None:
+            return
+        self._events.detach(self._record)
+        self._record = None
+        self._conversations.close_session(
+            self.session_id, self._open_duration_s(), self._closed_reason()
+        )
+
     def _manifest(self, client_id: str) -> dict[str, Any]:
-        """What this capture was made against.
+        """What this session was held against.
+
+        Built once and handed to both consumers, so the capture's
+        manifest file and the store's session row say the same things
+        about one session rather than two shapes that could drift.
 
         A capture outlives the code that made it, so it has to carry
         enough to be interpreted later. The barge-in thresholds matter

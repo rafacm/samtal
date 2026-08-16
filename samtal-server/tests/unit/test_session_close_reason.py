@@ -85,19 +85,28 @@ class LoopingSocket:
         self.inbox.put_nowait({"type": "websocket.disconnect"})
 
 
-def served(config: Config, websocket: LoopingSocket) -> DeviceSession:
+def served(
+    config: Config, websocket: LoopingSocket, conversations: Any = None
+) -> DeviceSession:
     """A session built the way `ws.py` builds one, so `run` is what the
-    test drives rather than a hand-assembled close path."""
+    test drives rather than a hand-assembled close path. `conversations`
+    is the store, which reaches a session twice over: through the factory
+    that binds its turn recorder, and as the collaborator the session
+    opens and closes."""
     factory = bespoke_runtime_factory(
-        config, build_agent_providers(config), McpServers({}), None, {}
+        config, build_agent_providers(config), McpServers({}), None, {}, conversations
     )
-    return DeviceSession(cast(Any, websocket), config, factory)
+    return DeviceSession(
+        cast(Any, websocket), config, factory, conversations=conversations
+    )
 
 
-async def open_session(config: Config) -> tuple[DeviceSession, LoopingSocket, Any]:
+async def open_session(
+    config: Config, conversations: Any = None
+) -> tuple[DeviceSession, LoopingSocket, Any]:
     """A live session with its hello exchanged, its `run` in flight."""
     websocket = LoopingSocket()
-    session = served(config, websocket)
+    session = served(config, websocket, conversations)
     task = asyncio.create_task(session.run())
     for _ in range(200):
         await asyncio.sleep(0.01)
