@@ -454,10 +454,16 @@ itself the conformance proof running continuously.
   spread-inventory entry naming the builder (`_echo_fields`,
   `language_fields`, `provider_fields`, and the rest of the nine)
   whose AST the test parses to extract the keys it can produce and
-  asserts they match the entry; and every declared token must
-  appear as a literal in the emitting module (the decision site),
-  found by the same walk. A declared field or token nothing
-  evidences fails the test.
+  asserts they match the entry; and every declared TOKEN SET must
+  map to its actual decision site: the conformance inventory
+  names, per event and field, the producing function or constant,
+  module-qualified and crossing modules where production does
+  (`activation_not_offered.reason` is produced by `onboarding.py`'s
+  refusal constructors, not by `ota.py` where the emit sits), and
+  the test resolves the named object and compares the values it
+  can produce with the declared set, so an unrelated literal or a
+  docstring cannot satisfy the check. A declared field or token
+  nothing evidences fails the test.
 - The registry's own coherence is asserted: every `TOKEN` field
   carries a non-empty token set, no other kind carries one, every
   event has at least one level and one channel, base fields are
@@ -1058,6 +1064,13 @@ eleven findings. As received, condensed but faithful:
    `onboarding.py`, a different module. Require per-event,
    per-field decision-site inventories naming the producing
    function or constant, following cross-module producers.
+
+   *Resolution*: accepted. The conformance inventory names the
+   producing function or constant per event and field,
+   module-qualified and cross-module where production crosses
+   modules, and the test resolves the named object and compares
+   its producible values with the declaration. Amended in the
+   conformance section.
 
 10. **P2: a WARNING complaint disappears at supported log
     levels.** `log_level` admits ERROR and CRITICAL, and such
