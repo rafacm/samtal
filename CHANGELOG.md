@@ -42,6 +42,30 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   at startup, like capture's, because the server is keeping what is
   said to it), `conversations_dropped`, `conversations_failed` and
   `conversations_pruned`.
+- **The conversation record is readable over the API** (#120): three
+  gated reads under `/api/conversations`, in the committed OpenAPI
+  document with the rest of the contract. `GET /api/conversations`
+  lists the sessions newest first, filtered by `?device=` when given;
+  `GET /api/conversations/{session}` is one session whole, with how
+  many turns and events hang off it; `GET
+  /api/conversations/{session}/turns` is one session's timeline oldest
+  first, each turn carrying its numbers and the tool calls it made
+  nested in the order the model issued them. All three page on the
+  store's monotonic row ids, which are never reused: `?limit=` holds 50
+  rows by default and 200 at most, `?cursor=` means the sessions before
+  it in the listing and the turns after it in a timeline, and a page
+  answers `{"items": [...], "next_cursor": <id or null>}`. Each read
+  opens the file for the length of one request, takes no lock and
+  creates nothing. **Operator-visible:** a deployment that never
+  recorded answers 404 naming `server.conversations.enabled`, and one
+  that recorded and has since switched recording off still serves what
+  it recorded, because switching recording off stops the writer and not
+  the reader. Content columns come back as they were stored, which is
+  null where text storage was off, and every session says which way its
+  switches were set. The events themselves are deliberately not served:
+  the database is that surface. Deletion over HTTP is not here either;
+  `samtal-server conversations purge` is what deletes, and it needs no
+  server.
 
 ### Changed
 
