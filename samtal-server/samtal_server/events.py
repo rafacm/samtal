@@ -17,7 +17,8 @@ So the emitter moved here, to an altitude neither the device edge nor a
 runtime owns: `device/`, `runtime/` and every server subsystem import
 downward into this module, and it imports none of them. It also stopped
 being a payload factory that call sites logged around and became the thing
-that emits: a site says `events.info("heard %r", text, event="heard", ...)`
+that emits: a site says
+`events.info("heard %.2f s", seconds, event="heard", duration_s=seconds)`
 and the emitter builds the payload, wraps it, and hands it to every
 attached consumer.
 

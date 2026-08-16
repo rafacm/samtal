@@ -41,7 +41,9 @@ the analysis reads.
    over after enough trailing silence. Continuous `vad` records carry
    what it believed, frame by frame.
 4. **Transcription.** The utterance audio goes to the ASR; `heard`
-   carries the transcript and the utterance duration.
+   carries the utterance duration and the language the engine heard,
+   and the transcript itself is on the conversation store's turn (the
+   events carry no conversation text).
 5. **Generation.** The LLM produces the reply, possibly over several
    rounds when tools are called; each round emits `llm_round` with
    its duration and time to first token. A `switch_agent` call emits

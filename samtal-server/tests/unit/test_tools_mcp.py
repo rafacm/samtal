@@ -1202,7 +1202,7 @@ async def test_a_failed_call_raises_this_servers_own_words_and_nothing_else(
 
     The pipeline renders the exception into the tool result the model is
     given, so every character of it lands in the conversation and in the
-    transcript the retained logs are. An SDK exception raised near a
+    record the conversation store keeps of it. An SDK exception raised near a
     response body quotes that body, and a server holding a credential of
     this deployment's can put it in the error it answers with, so the
     call path answers with a fixed sentence of its own and the chain
