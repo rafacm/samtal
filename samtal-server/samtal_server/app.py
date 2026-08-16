@@ -12,6 +12,7 @@ from samtal_server.config import Config
 from samtal_server.config.api import api_token, build_api, mount_api
 from samtal_server.config.boot import load_boot_config, reload_domain_config
 from samtal_server.config.secrets import SecretStore
+from samtal_server.conversations import ConversationStore, migrate_existing
 from samtal_server.device.bindings import DeviceBindings
 from samtal_server.events import ServerEvents
 from samtal_server.filler import build_agent_fillers
@@ -37,21 +38,37 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     agent whose synthesis fails runs with the feature off rather than
     failing the boot.
 
+    The conversation store's writer thread lives exactly as long as this:
+    `create_app` built the store cold (the file open and migrated, no
+    thread), and it is started first and stopped last. First because
+    everything after it is startup work that can fail, and the writer
+    must not be left running behind a boot that never finished; last
+    because the drain of what is queued belongs after every session has
+    stopped producing. `stop()` is idempotent, so an app that never
+    entered this leaks nothing either.
+
     The way out also disposes the device bindings' read engine, the one
     thing on a running server that still holds the configuration
     database open."""
-    app.state.agent_fillers.update(
-        await build_agent_fillers(app.state.config, app.state.agent_providers)
-    )
-    await app.state.mcp_servers.start_all()
+    conversations = app.state.conversations
+    if conversations is not None:
+        conversations.start()
     try:
-        yield
+        app.state.agent_fillers.update(
+            await build_agent_fillers(app.state.config, app.state.agent_providers)
+        )
+        await app.state.mcp_servers.start_all()
+        try:
+            yield
+        finally:
+            await app.state.mcp_servers.stop_all()
+            # The one database connection pool a running server holds,
+            # let go here so a process on its way out leaves no handle on
+            # the data volume.
+            app.state.bindings.dispose()
     finally:
-        await app.state.mcp_servers.stop_all()
-        # The one database connection pool a running server holds, let
-        # go here so a process on its way out leaves no handle on the
-        # data volume.
-        app.state.bindings.dispose()
+        if conversations is not None:
+            conversations.stop()
 
 
 def _mcp_reloader(
@@ -208,18 +225,49 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     # Filled at startup by the lifespan above, since synthesis is async;
     # empty means no agent masks its latency, which is the default.
     app.state.agent_fillers = {}
+    # What was said, kept where it can be queried. Absent unless the
+    # section exists and says so, which is what keeps recording a
+    # conversation something an operator asks for.
+    #
+    # Built cold: the constructor opens and migrates the file, so a
+    # directory the server cannot write fails the boot rather than the
+    # first conversation, and the writer thread is the lifespan's to
+    # start and stop. Built before the runtime factory below, because
+    # that closure is how a turn's record reaches it.
+    conversations = app.state.config.server.conversations
+    database_dir = app.state.config.server.database.dir
+    app.state.conversations = (
+        None
+        if conversations is None or not conversations.enabled
+        else ConversationStore(
+            database_dir,
+            metrics=conversations.metrics,
+            text=conversations.text,
+            retention_days=conversations.retention_days,
+        )
+    )
+    if app.state.conversations is None:
+        # Recording off still leaves what was recorded readable: an
+        # upgraded deployment that recorded last month serves its history
+        # against the schema this server reads with. Migration is
+        # maintenance of what exists and never creation, so a server that
+        # was not asked for a store still leaves no file behind.
+        migrate_existing(database_dir)
     # How one conversation is built for one connection, closed over
     # once here: the providers, the MCP servers, the memory store and
     # the filler clips all outlive any single websocket, and a device
     # session should not have to name them to get a conversation. Built
     # after all four exist, and after the mutable fillers dict, which
-    # the lifespan fills at startup and this closure sees fill.
+    # the lifespan fills at startup and this closure sees fill. The
+    # store goes with them for the same reason: it outlives every
+    # connection, and the per-session recorder is derived from it here.
     app.state.runtime_factory = bespoke_runtime_factory(
         app.state.config,
         app.state.agent_providers,
         app.state.mcp_servers,
         app.state.memory,
         app.state.agent_fillers,
+        app.state.conversations,
     )
     # What a device says about itself at OTA check-in, kept for the
     # session that follows: a capture manifest needs the firmware
