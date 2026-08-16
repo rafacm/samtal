@@ -171,7 +171,7 @@ async def test_a_changed_fragment_is_stopped_rebuilt_and_started() -> None:
         assert manager_of(servers, "tools") is not was
         assert servers.timeout_for("tools") == 3.5
         assert servers.status()["tools"]["state"] == CONNECTED
-        assert await servers.call("tools__secret_word", {}, "assistant") == (
+        assert await servers.call("tools__secret_word", {}, "assistant", "tools") == (
             "rhubarb",
             False,
         )
@@ -660,7 +660,7 @@ async def test_a_narrowed_allow_list_applies_without_touching_the_connection() -
             "tools__secret_word"
         ]
         with pytest.raises(McpToolNotGranted):
-            await servers.call("tools__add", {"first": 1, "second": 2}, "assistant")
+            await servers.call("tools__add", {"first": 1, "second": 2}, "assistant", "tools")
     finally:
         await servers.stop_all()
 

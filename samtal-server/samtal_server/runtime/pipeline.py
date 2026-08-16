@@ -1169,7 +1169,7 @@ class PipelineRuntime:
         loop = asyncio.get_running_loop()
         started = loop.time()
         try:
-            async with asyncio.timeout(self._timeout_for(call.name)):
+            async with asyncio.timeout(self._timeout_for(classified)):
                 content, is_error = await self._dispatch(call, classified)
         except TimeoutError:
             content, is_error = f'the tool "{call.name}" did not answer in time', True
@@ -1263,25 +1263,37 @@ class PipelineRuntime:
             return await builtin.remember(self._memory, self._agent, call.arguments), False
         if any(tool.name == call.name for tool in self._output.device_tools()):
             return await self._output.call_device_tool(call.name, call.arguments)
-        if self._mcp_servers.owner_of(call.name) is not None:
+        if classified.source == MCP and classified.entry is not None:
             assert self._agent is not None
-            # The agent goes with the call: the registry checks its
+            # The entry the reservation named, not whoever owns the name
+            # by the time this line runs: a reload between the two can
+            # move a published name to a more specific entry, and
+            # following it would run one server's tool under another
+            # server's timeout and then record and log the entry that
+            # did not run it. The registry refuses a name that has moved
+            # rather than rerouting it (`McpServerDown`), which arrives
+            # here as the error result any failed tool produces.
+            #
+            # The agent goes with the call too: the registry checks its
             # grant again there, so a tool the snapshot withheld is
             # refused rather than run when a model asks for it anyway.
-            return await self._mcp_servers.call(call.name, call.arguments, self._agent)
+            return await self._mcp_servers.call(
+                call.name, call.arguments, self._agent, classified.entry
+            )
         return f'there is no tool called "{call.name}"', True
 
-    def _timeout_for(self, name: str) -> float:
+    def _timeout_for(self, classified: ToolInvocation) -> float:
         """A server tool gets its entry's configured timeout; builtins
         and device tools the module default.
 
-        Which entry owns the name is the registry's answer rather than
-        this module's reading of the name, the same answer the dispatch
-        below routes by, so a tool cannot be run against one entry's
-        timeout and dispatched to another."""
-        entry = self._mcp_servers.owner_of(name)
-        if entry is not None:
-            configured = self._mcp_servers.timeout_for(entry)
+        Which entry that is comes from the reservation, which is the
+        same answer the dispatch below routes by and the same one the
+        event and the row carry, so a tool cannot be run against one
+        entry's timeout and dispatched to another. Asking the registry
+        again here is what used to make that possible: a reload landing
+        between the two answers differently."""
+        if classified.entry is not None:
+            configured = self._mcp_servers.timeout_for(classified.entry)
             if configured is not None:
                 return configured
         return DEFAULT_TOOL_TIMEOUT_S
