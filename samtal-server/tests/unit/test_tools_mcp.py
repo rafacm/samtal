@@ -22,7 +22,6 @@ from mcp import ClientSession
 from samtal_server import logs
 from samtal_server.config import Config, McpServerConfig
 from samtal_server.events import Emission, attach_server_tap, detach_server_tap
-from samtal_server.logs import _STANDARD_ATTRIBUTES
 from samtal_server.runtime.prompt import Guidance
 from samtal_server.tools import names
 from samtal_server.tools.mcp import (
@@ -41,6 +40,9 @@ from samtal_server.tools.mcp import (
     McpServers,
     McpToolNotGranted,
 )
+from tests.support.events import events as emitted
+from tests.support.events import fields_of
+from tests.support.events import only as one_event
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
@@ -1003,31 +1005,9 @@ async def test_guidance_is_carried_verbatim_through_the_slice() -> None:
 # closed token sets are in the README's event table, and what these
 # assert is that the table is true.
 #
-# The three helpers are shared with the HTTP and reload suites, which
-# import them, so "what one of these events carries" is read one way in
-# all three.
-
-
-def emitted(caplog: pytest.LogCaptureFixture, name: str) -> list[logging.LogRecord]:
-    """Every record of one event, in the order it was emitted."""
-    return [record for record in caplog.records if getattr(record, "event", None) == name]
-
-
-def one_event(caplog: pytest.LogCaptureFixture, name: str) -> logging.LogRecord:
-    matching = emitted(caplog, name)
-    assert len(matching) == 1, f"expected one {name} record, got {len(matching)}"
-    return matching[0]
-
-
-def fields_of(record: logging.LogRecord) -> dict[str, object]:
-    """The structured half of a record: exactly the attributes the JSON
-    formatter writes as top-level keys, read through `logs.py`'s own
-    standard-attribute set rather than through a list written here, so a
-    field these tests do not know about is a failure rather than a
-    silence."""
-    return {
-        key: value for key, value in vars(record).items() if key not in _STANDARD_ATTRIBUTES
-    }
+# The three helpers are shared with the HTTP and reload suites, so they
+# live in `tests/support/events.py` and "what one of these events
+# carries" is read one way in all three.
 
 
 class Consumer:

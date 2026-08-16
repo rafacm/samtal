@@ -41,7 +41,8 @@ from samtal_server.tools.mcp import (
     McpServerManager,
     _reason,
 )
-from tests.unit.test_tools_mcp import fields_of, one_event
+from tests.support.events import fields_of
+from tests.support.events import only as one_event
 
 # The logger an operator watches for these servers, and the SDK one that
 # talks to them, named rather than spelled out at each assertion.

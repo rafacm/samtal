@@ -59,8 +59,10 @@ from samtal_server.tools.mcp import (
     McpSlice,
     McpToolNotGranted,
 )
+from tests.support.events import fields_of
+from tests.support.events import only as one_event
 from tests.support.mcp_stdio_server import SHIPPED_INSTRUCTIONS
-from tests.unit.test_tools_mcp import MANAGER_LOGGER, fields_of, one_event
+from tests.unit.test_tools_mcp import MANAGER_LOGGER
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
 
