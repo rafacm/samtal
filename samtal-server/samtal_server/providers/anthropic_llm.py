@@ -126,7 +126,7 @@ class AnthropicLlm(LlmProvider):
                 api_key=api_key, timeout=timeout_s, max_retries=MAX_RETRIES
             )
         )
-        self._model = model
+        self.model = model
         self._max_tokens = max_tokens
 
     async def stream(
@@ -137,7 +137,7 @@ class AnthropicLlm(LlmProvider):
         tool_choice: ToolChoice = "auto",
     ) -> AsyncIterator[LlmEvent]:
         request: dict[str, object] = {
-            "model": self._model,
+            "model": self.model,
             "max_tokens": self._max_tokens,
             "messages": anthropic_messages(turns),
         }

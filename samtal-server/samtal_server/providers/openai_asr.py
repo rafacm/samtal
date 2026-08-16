@@ -172,7 +172,7 @@ class OpenAiAsr(AsrProvider):
         min_audio_s: float = MIN_AUDIO_S,
         client: AsyncOpenAI | None = None,
     ) -> None:
-        self._model = model
+        self.model = model
         self.host = endpoint_host(base_url)
         self._language = language
         self._prompt = prompt
@@ -255,7 +255,7 @@ class OpenAiAsr(AsrProvider):
     ) -> str:
         response = await self._client.audio.transcriptions.create(
             file=(UPLOAD_NAME, wav_bytes(pcm, sample_rate), "audio/wav"),
-            model=self._model,
+            model=self.model,
             # The one format every model and every compatible server
             # answers in. `verbose_json` is whisper-1 only, and what it
             # adds beyond the text is not usable here: see the module

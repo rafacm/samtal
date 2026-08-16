@@ -445,7 +445,11 @@ class Unreachable:
     def __init__(self, stage: str, exc: BaseException) -> None:
         self._exc = exc
         self.identity = ProviderIdentity(
-            stage=stage, name="cloud", type="openai", host="api.example.com"
+            stage=stage,
+            name="cloud",
+            type="openai",
+            host="api.example.com",
+            model="gpt-4o-mini",
         )
         self.sample_rate = 16000
 
