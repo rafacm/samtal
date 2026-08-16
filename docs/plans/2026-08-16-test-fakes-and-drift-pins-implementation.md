@@ -596,15 +596,14 @@ indistinguishable from the other two.
 
 ### The guard
 
-`tests/unit/test_support_boundaries.py` (new, 131 lines, four tests).
-`imported_paths` collects every dotted path an import names anywhere in
-a file's AST, including inside a function or a class body, and
-contributes `pkg.name` as well as `pkg` for a `from pkg import name`, so
-both spellings of reaching into a test module are caught. A path names a
-test module when any of its dotted parts starts with `test_`, which
-leaves `conftest` out by construction: the docstring cites the issue's
-decision 2, "support or a conftest", and names the integration and smoke
-lanes as the reason.
+`tests/unit/test_support_boundaries.py` (new). It collects every path an
+import could be naming anywhere in a file's AST, including inside a
+function or a class body, and reports the line when one of them is
+really a test module. `conftest` is not one, which is what decision 2
+asks for: the docstring cites it, "support or a conftest", and names the
+integration and smoke lanes as the reason. How a candidate is classified
+changed in the PR review round, recorded below; what follows is the
+milestone as it was first written.
 
 Two of the four tests are the rules; the other two are planted sources,
 following `test_event_surface_guard.py`, which keeps the mutation proof
@@ -626,6 +625,64 @@ E       AssertionError: assert {'support/stores.py': [29]} == {}
 
 Restored from copies taken beforehand (not `git checkout`, per
 AGENTS.md), `touch`ed, and the four tests pass again.
+
+#### The guard, after the PR review round
+
+The review of PR #163 found the classification wrong in one direction
+(P2): reading the spelling alone, every `from pkg import name` was
+turned into the candidate `pkg.name` and any dotted part starting with
+`test_` made it a test module, so a symbol that happened to be called
+something test-shaped was refused. `from tests.support.configs import
+test_data as data` and `from vendor import test_helper as helper` both
+failed a guard they do not violate. Nothing in the lane is spelled that
+way today, which is why the lane was green; the cost would have been
+paid by whoever wrote the first such name.
+
+The rule now resolves rather than guesses. Every candidate path an
+import could name is turned into a filesystem path under
+`samtal-server/` and looked up: it counts only when it is really a
+`test_*.py` file or a `test_*` package directory. `from pkg import name`
+still offers both `pkg` and `pkg.name`, but the filesystem decides which
+of the two exists, so `from tests.unit import test_capture` is still
+caught while `from tests.support.configs import test_data` is not.
+Relative imports are resolved too, anchored at the importing file's own
+directory and walked up one level per extra dot, since a relative import
+is the obvious way around a rule written about dotted spellings.
+
+Two limits the resolution introduces are stated in the docstring rather
+than left to be discovered: an import naming a module this repository
+does not hold is not reported (it cannot be a test-module import, and
+collection already raises `ImportError` on it), and only static imports
+are seen.
+
+Two acceptance tests were added, taking the count from four to six:
+
+- `test_the_rule_leaves_a_test_shaped_name_alone` plants the reviewer's
+  two examples plus a `test_`-prefixed alias and a `test_`-prefixed
+  production symbol, and expects no line reported.
+- `test_the_rule_follows_a_relative_import_to_the_file_it_names` plants
+  `from .test_ota import ...`, `from ..support.configs import ...` and
+  `from . import test_capture` against a source treated as living in
+  `tests/unit`, and expects lines 1 and 3.
+
+Checked against the old rule directly: it flagged both of the reviewer's
+imports, and the new one flags neither.
+
+**Mutation re-proof.** The same two violations were planted again, in
+`test_drain.py`'s first test function and in `tests/support/stores.py`,
+and both branches still fail with the file and the line named:
+
+```
+E       AssertionError: assert {'unit/test_drain.py': [31]} == {}
+E       AssertionError: assert {'support/stores.py': [29]} == {}
+```
+
+Restored from copies, `touch`ed, and the six tests pass again. Rerun
+afterwards: `uv run ruff check .` is `All checks passed!`,
+`uv run pytest tests/unit -q` is
+`2262 passed, 16 skipped in 298.72s (0:04:58)`, and the collected count
+is **2278**, two above the milestone's 2276 and exactly the two new
+acceptance tests.
 
 ### Verification
 
