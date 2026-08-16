@@ -11,24 +11,35 @@ The deployment profile is checked the same way and for the same reason,
 but it is a script that documents itself as running against a running
 server, so it runs in the integration lane where there is one:
 `tests/integration/test_config_examples.py`.
+
+`config.example.yaml` is the other committed example, and the same
+argument applies to it from the other side: a field it does not mention
+is a field an operator never learns exists, since this file is where
+the server half is documented for a reader rather than for a generator.
+So the last test here walks `ServerConfig` and insists the example
+mentions every field of it.
 """
 
 import io
 import re
 import sys
+import typing
 from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pydantic import BaseModel
 
 from samtal_server.config import cli
 from samtal_server.config.api import build_api, mount_api
 from samtal_server.config.loader import load_file_config
+from samtal_server.config.models import ServerConfig
 from samtal_server.config.secrets import MASTER_KEY_ENV, generate_key
 
 SERVER = Path(__file__).resolve().parents[2]
 EXAMPLES = SERVER / "examples"
+EXAMPLE_CONFIG = SERVER / "config.example.yaml"
 
 API_SECRET_ENV = "SAMTAL_API_SECRET"
 
@@ -42,6 +53,14 @@ COMMAND = re.compile(r"^#\s+samtal-server config (set .+?) -f ")
 # anything references them: a write leaving a reference unresolved is
 # refused, by design.
 ORDER = ("provider", "mcp-server", "prompt-fragment", "agent-defaults", "agent")
+
+# One key of the example configuration, as written or as commented out.
+# The example's own convention is that a field whose default is right
+# for a plain LAN deployment appears as a commented `# key:` line with
+# the reasoning above it, so a commented line is coverage and a
+# sentence of prose that happens to use the word is not.
+KEY_LINE = re.compile(r"^(?P<indent> *)(?P<key>[A-Za-z_][A-Za-z0-9_]*):(?: |$)")
+COMMENT_LINE = re.compile(r"^(?P<indent> *)# ?(?P<rest>.*)$")
 
 
 def _fragments() -> list[Path]:
@@ -120,3 +139,70 @@ def test_every_fragment_is_listed_in_the_examples_readme() -> None:
     readme = (EXAMPLES / "README.md").read_text(encoding="utf-8")
     missing = [path.name for path in _fragments() if f"`{path.name}`" not in readme]
     assert not missing, f"not listed in examples/README.md: {', '.join(missing)}"
+
+
+def _sections(annotation: object) -> list[type[BaseModel]]:
+    """The nested settings models an annotation names, read out of the
+    annotation itself: an optional section is a union, so `capture` and
+    `conversations` are found the same way `auth` is, and a section
+    added later is found without anyone remembering to list it."""
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return [annotation]
+    return [section for argument in typing.get_args(annotation) for section in _sections(argument)]
+
+
+def _leaves(model: type[BaseModel], prefix: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
+    """Every leaf field path of a settings model, as a key path."""
+    found: list[tuple[str, ...]] = []
+    for name, field in model.model_fields.items():
+        sections = _sections(field.annotation)
+        if sections:
+            for section in sections:
+                found += _leaves(section, (*prefix, name))
+        else:
+            found.append((*prefix, name))
+    return found
+
+
+def _mentioned(text: str) -> set[tuple[str, ...]]:
+    """Every key path the file writes, live or commented out, each at
+    the depth it is written at. A comment marker and the one space
+    after it are taken off before the line is read, which is how the
+    file indents a commented-out section's fields (`# database:` with
+    `#   dir:` under it), so nesting is checked on both kinds of line:
+    a key at the wrong depth documents a field that does not exist
+    there."""
+    mentioned: set[tuple[str, ...]] = set()
+    stack: list[tuple[int, str]] = []
+    for raw in text.splitlines():
+        hidden = COMMENT_LINE.match(raw)
+        line = hidden.group("indent") + hidden.group("rest") if hidden else raw
+        found = KEY_LINE.match(line)
+        if not found:
+            continue
+        indent = len(found.group("indent"))
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        stack.append((indent, found.group("key")))
+        mentioned.add(tuple(key for _, key in stack))
+    return mentioned
+
+
+def test_the_example_configuration_mentions_every_server_field() -> None:
+    """The other half of the same argument: a field of `ServerConfig`
+    that `config.example.yaml` does not mention is a field an operator
+    reading the example never learns exists. Mentioning it is enough,
+    since the file's convention is that a default worth keeping is
+    shown as a commented `# key:` line with its reasoning; what does
+    not count is prose using the word, which is why the scan wants the
+    key form. The file holds `memory:` beside `server:`, and this pin
+    is about the `server:` tree."""
+    mentioned = _mentioned(EXAMPLE_CONFIG.read_text(encoding="utf-8"))
+    leaves = _leaves(ServerConfig)
+
+    assert len(leaves) > 20, "the field walk found almost nothing, so the check below is vacuous"
+    missing = [".".join(leaf) for leaf in leaves if ("server", *leaf) not in mentioned]
+    assert not missing, (
+        "not in config.example.yaml, neither written nor commented out: "
+        f"{', '.join(sorted(missing))}"
+    )
