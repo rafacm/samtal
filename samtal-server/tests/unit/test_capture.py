@@ -22,29 +22,12 @@ from samtal_server.capture import (
     CAPTURE_RATE,
     FRAME_BYTES,
     WAV_HEADER_BYTES,
-    CaptureStore,
     DeviceFacts,
     SessionCapture,
     interleave,
 )
-
-MANIFEST = {"session": "abc", "barge_in": {"enabled": True}}
-
-
-def tone(ms: int, value: int = 8000) -> bytes:
-    """Mono s16le of a constant value, so a channel can be told apart
-    from silence by looking at one sample."""
-    return struct.pack("<h", value) * (CAPTURE_RATE * ms // 1000)
-
-
-def store(tmp_path: Path, **kwargs: float) -> CaptureStore:
-    options: dict[str, float] = {
-        "max_session_s": 900.0,
-        "max_total_mb": 2000.0,
-        "min_free_mb": 0.0,
-    }
-    options.update(kwargs)
-    return CaptureStore(tmp_path / "captures", **options)  # type: ignore[arg-type]
+from tests.support.stores import CAPTURE_MANIFEST as MANIFEST
+from tests.support.stores import store, tone
 
 
 def read_channels(path: Path) -> tuple[list[int], list[int]]:
