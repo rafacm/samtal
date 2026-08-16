@@ -51,7 +51,9 @@ beside it.
 import asyncio
 import logging
 import re
+import sys
 from dataclasses import replace
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -65,6 +67,8 @@ from samtal_server.logs import _STANDARD_ATTRIBUTES, TEXT_FORMAT, JsonFormatter
 from samtal_server.providers import AsrResult, build_agent_providers
 from samtal_server.runtime.pipeline import bespoke_runtime_factory
 from samtal_server.tools.mcp import McpServers
+from samtal_server.tools.memory import MemoryStore
+from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 from tests.unit.test_session import (
     DEVICE_MAC,
     DEVICE_UUID,
@@ -98,6 +102,7 @@ from tests.unit.test_session_limits import (
 from tests.unit.test_session_tools import (
     BOTH_MAC,
     POET_MAC,
+    STDIO_SERVER,
     ScriptedLlm,
     _nothing,
     base_config,
@@ -106,6 +111,7 @@ from tests.unit.test_session_tools import (
     session_for,
 )
 from tests.unit.test_session_watchdog import STALL_S, StallingLlm, watchdog_config
+from tests.unit.test_tools_device import FakeDevice
 
 # The utterance the direct drivers hand a reply: 20 ms of silence, which
 # the mock ASR answers whatever it holds.
@@ -115,6 +121,12 @@ UTTERANCE = b"\x00\x00" * 320
 # match by accident. It stands for whatever a caller puts in a header,
 # or a far side in an error, that nobody wrote for a log line.
 SENTINEL = "sk-test-4f8b2c9e-never-a-real-credential"
+
+# The same thing in the shape a tool name can hold: letters, digits and
+# underscores only, so both LLM APIs accept it and the publishing rule's
+# sanitizing leaves it exactly as it is, which is precisely how a
+# credential can arrive as a tool name a peer chose (#154).
+TOOL_SENTINEL = "sk_test_4f8b2c9e_never_a_real_credential"
 
 # What a value that moves between runs is replaced by, so that the key
 # is pinned and the value deliberately is not.
@@ -177,6 +189,27 @@ def args_of(record: logging.LogRecord, dynamic_args: tuple[int, ...]) -> tuple[A
         if index == 0
         else (f"<{type(value).__name__}>" if index in dynamic_args else value)
         for index, value in enumerate(record.args or ())
+    )
+
+
+def assert_unnamed(
+    record: logging.LogRecord, consumer: "Consumer", caplog: pytest.LogCaptureFixture
+) -> None:
+    """A tool name a peer chose reaches no part of the record that
+    describes the call, no other record of the run, and no tap.
+
+    The check every `tool_call` branch but the builtin one runs, because
+    a device's tool name is the board's vocabulary and an MCP tool's is
+    the far side's, and the retained surface admits neither."""
+    assert TOOL_SENTINEL not in record.getMessage()
+    assert TOOL_SENTINEL not in str(record.args)
+    assert TOOL_SENTINEL not in str(payload_of(record))
+    assert not any(TOOL_SENTINEL in rendered for rendered in shipped(record))
+    assert not any(TOOL_SENTINEL in other.getMessage() for other in caplog.records)
+    assert consumer.seen, "it reached no tap at all, so this proves nothing"
+    assert not any(
+        TOOL_SENTINEL in str(emission.payload) or TOOL_SENTINEL in str(emission.args)
+        for emission in consumer.seen
     )
 
 
@@ -480,6 +513,29 @@ def speaking_session(scripts: dict[str, Any] | None = None, mac: str = POET_MAC)
     return session
 
 
+def sentinel_tool_config() -> Config:
+    """One MCP entry, `tools`, publishing a tool under a name the test
+    chooses through the entry's environment.
+
+    The registry is built from this and the session from `base_config()`,
+    which carries no MCP entries at all, so a name that turns up in a
+    reply can only have come from the server."""
+    return base_config(
+        mcp_servers={
+            "tools": {
+                "transport": "stdio",
+                "command": sys.executable,
+                "args": [str(STDIO_SERVER)],
+                "env": {SHADOWED_TOOL_ENV: TOOL_SENTINEL},
+            }
+        },
+        agents={
+            "poet": {"prompt": "POET", "tts": "tenor", "mcp": ["tools"]},
+            "tutor": {"prompt": "TUTOR", "tts": "alto"},
+        },
+    )
+
+
 def uttering(text: str):
     """A session whose ASR answers with `text`, driven the same way.
 
@@ -718,28 +774,144 @@ async def test_what_one_agent_said_before_a_handover_reaches_no_record(
     )
 
 
-async def test_tool_call(caplog: pytest.LogCaptureFixture) -> None:
-    script = ScriptedLlm([[call("ghost_tool")], "I could not do that."])
-    session = session_for(base_config(), POET_MAC, {"poet": script})
+async def test_tool_call_for_a_builtin(
+    caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    """The one branch that names its tool: a builtin's name is this
+    application's own, which is what the narrowing kept it for."""
+    script = ScriptedLlm([[call("remember", text="I like tea")], "Noted."])
+    session = session_for(
+        base_config(), POET_MAC, {"poet": script}, memory=MemoryStore(tmp_path)
+    )
     with caplog.at_level("INFO"):
-        await run_reply(session, "do it")
+        await run_reply(session, "remember that I like tea")
 
-    assert pinned(only(caplog, "tool_call"), dynamic=("duration_ms",), dynamic_args=(2,)) == {
+    assert pinned(only(caplog, "tool_call"), dynamic=("duration_ms",), dynamic_args=(3,)) == {
         "logger": "samtal_server.session",
         "level": logging.INFO,
-        "template": "session %s: tool %s took %.2f s%s",
-        "args": (SESSION, "ghost_tool", "<float>", " and failed"),
-        "sentence": "session <session>: tool ghost_tool took <n> s and failed",
+        "template": "session %s: %s tool%s took %.2f s%s",
+        "args": (SESSION, "builtin", ' "remember"', "<float>", ""),
+        "sentence": 'session <session>: builtin tool "remember" took <n> s',
         "fields": {
             "event": "tool_call",
             "session": DYNAMIC,
             "device": None,
             "agent": "poet",
-            "tool": "ghost_tool",
+            "source": "builtin",
+            "tool": "remember",
+            "duration_ms": DYNAMIC,
+            "is_error": False,
+        },
+    }
+
+
+async def test_tool_call_for_a_name_nobody_publishes(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A name no namespace claims is the model's own invention, so the
+    event names nothing at all and `source` carries the whole answer."""
+    script = ScriptedLlm([[call(TOOL_SENTINEL)], "I could not do that."])
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    consumer = Consumer()
+    session._events.attach(consumer)
+    with caplog.at_level("DEBUG"):
+        await run_reply(session, "do it")
+
+    called = only(caplog, "tool_call")
+    assert pinned(called, dynamic=("duration_ms",), dynamic_args=(3,)) == {
+        "logger": "samtal_server.session",
+        "level": logging.INFO,
+        "template": "session %s: %s tool%s took %.2f s%s",
+        "args": (SESSION, "unknown", "", "<float>", " and failed"),
+        "sentence": "session <session>: unknown tool took <n> s and failed",
+        "fields": {
+            "event": "tool_call",
+            "session": DYNAMIC,
+            "device": None,
+            "agent": "poet",
+            "source": "unknown",
             "duration_ms": DYNAMIC,
             "is_error": True,
         },
     }
+    assert_unnamed(called, consumer, caplog)
+
+
+async def test_tool_call_for_a_device_tool(caplog: pytest.LogCaptureFixture) -> None:
+    """A board publishes its own tool names, so this branch names
+    nothing either. The name is planted as a credential shaped to
+    survive the publishing rule untouched."""
+    device = FakeDevice([{"tools": [{"name": f"self.{TOOL_SENTINEL}", "description": "x"}]}])
+    await device.client.discover()
+    published = f"self_{TOOL_SENTINEL}"
+    script = ScriptedLlm([[call(published)], "Done."])
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    session._device_tools = device.client
+    consumer = Consumer()
+    session._events.attach(consumer)
+    with caplog.at_level("DEBUG"):
+        await run_reply(session, "check the board")
+
+    called = only(caplog, "tool_call")
+    assert pinned(called, dynamic=("duration_ms",), dynamic_args=(3,)) == {
+        "logger": "samtal_server.session",
+        "level": logging.INFO,
+        "template": "session %s: %s tool%s took %.2f s%s",
+        "args": (SESSION, "device", "", "<float>", ""),
+        "sentence": "session <session>: device tool took <n> s",
+        "fields": {
+            "event": "tool_call",
+            "session": DYNAMIC,
+            "device": None,
+            "agent": "poet",
+            "source": "device",
+            "duration_ms": DYNAMIC,
+            "is_error": False,
+        },
+    }
+    assert_unnamed(called, consumer, caplog)
+
+
+async def test_tool_call_for_an_mcp_tool(caplog: pytest.LogCaptureFixture) -> None:
+    """An MCP call names the entry an operator configured and not the
+    tool, which is half the far side's own bytes. The planted name is
+    published by the test server through the entry's environment, so it
+    is a name this project never typed into a fixture."""
+    servers = McpServers.build(sentinel_tool_config())
+    await servers.start_all()
+    published = f"tools__{TOOL_SENTINEL}"
+    script = ScriptedLlm([[call(published)], "Done."])
+    session = session_for(base_config(), POET_MAC, {"poet": script}, mcp_servers=servers)
+    consumer = Consumer()
+    session._events.attach(consumer)
+    try:
+        assert published in {
+            tool.name for tool in servers.tools_for_agent("poet")
+        }, "the planted name was never published, so this proves nothing"
+        with caplog.at_level("DEBUG"):
+            await run_reply(session, "ask the server")
+    finally:
+        await servers.stop_all()
+
+    called = only(caplog, "tool_call")
+    assert pinned(called, dynamic=("duration_ms",), dynamic_args=(3,)) == {
+        "logger": "samtal_server.session",
+        "level": logging.INFO,
+        "template": "session %s: %s tool%s took %.2f s%s",
+        "args": (SESSION, "mcp", ' from entry "tools"', "<float>", ""),
+        "sentence": 'session <session>: mcp tool from entry "tools" took <n> s',
+        "fields": {
+            "event": "tool_call",
+            "session": DYNAMIC,
+            "device": None,
+            "agent": "poet",
+            "source": "mcp",
+            "entry": "tools",
+            "duration_ms": DYNAMIC,
+            "is_error": False,
+        },
+    }
+    assert_unnamed(called, consumer, caplog)
 
 
 async def test_llm_retry(caplog: pytest.LogCaptureFixture) -> None:

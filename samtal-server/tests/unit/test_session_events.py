@@ -547,7 +547,11 @@ async def test_a_tool_call_is_logged_with_its_duration(
         await run_reply(session, "do it")
 
     logged = only(caplog, "tool_call")
-    assert logged.tool == "ghost_tool"
+    # A name no namespace publishes is the model's own invention, so the
+    # event says which namespace was reached into and names nothing
+    # (#120).
+    assert logged.source == "unknown"
+    assert not hasattr(logged, "tool")
     assert logged.agent == "poet"
     assert logged.duration_ms >= 0
     # An unknown tool is an error result, and the record says so.
