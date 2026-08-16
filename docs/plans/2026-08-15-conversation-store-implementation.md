@@ -1302,3 +1302,261 @@ three write-time URL refusals and their neighbours, two on the recorded
 representation, one end-to-end credential sentinel, three on the close
 path's new boundary, one on a cancelled cleanup, two on the writer's
 start, one on the purge window, and two on the close reason.
+
+## Milestone 4: conversation reads under `/api`
+
+The record is readable over HTTP: three gated GETs under
+`/api/conversations`, in the committed OpenAPI document with the rest of
+the contract, cursor-paginated on the monotonic row ids the schema was
+built with. This milestone is transport and nothing else, and the proof
+is that it moved none of what it serves: `git diff` against the
+milestone 3 tip is empty for `app.py`, `conversations/store.py` and
+`conversations/schema.py`.
+
+Four commits. The one that lands this section and ticks the milestone is
+the fifth:
+
+1. `4eafd7e` Serve the conversation record under /api
+2. `2b109cc` Read the conversation record back over HTTP
+3. `e7a4d7a` Say where the conversation record is read
+4. `bfd17b5` Record the conversation reads in the changelog
+
+### The routes, and where they are registered
+
+`conversations/api.py` holds the route functions, the six response
+models and the argument parsing; `config/api.py` registers them inside
+`_application()`, one line after `_runtime(api)`. That is the whole of
+finding 15's resolution: `document()` renders `_application()` directly,
+so a route registered by `build_api` would be served while being
+structurally absent from the contract. `tests/unit/test_api_openapi.py`'s
+exact route inventory gains the three paths, and the byte-identical,
+determinism, validity and reference-resolution cases then cover them by
+construction.
+
+Registration takes `_problems` as an argument rather than importing it.
+The configuration API imports this module to register these routes, so
+an import back would be a cycle; passing the describer in is what lets
+the store's routes say their refusals in the API's own vocabulary
+without either module owning the other.
+
+The document's `info.description` gains a paragraph for the namespace,
+beside the ones for `/devices/pending` and `/runtime`, because a client
+reading the contract alone has no other way to learn that a 404 here can
+mean "this deployment never recorded" rather than "no such session".
+
+### The reader
+
+`build_api` attaches one more runtime fact, `api.state.conversations`, a
+per-request reader over the database directory it already held. It is
+`store_dependency`'s shape and lifetime: open, yield, dispose, nothing
+held between requests, which is what makes a store that was purged,
+moved or restored under a running server met as it is now. The engine is
+milestone 1's `read_conversations`, so the read behavior is the
+parameterized one the plan requires: URI `mode=rw` with no create,
+deferred `BEGIN`, the busy timeout, no migration and no pragma that
+writes.
+
+The existence check lives in the dependency rather than in each handler:
+it is the same answer for all three, and a handler that reached the
+engine would meet a driver error where a sentence belongs, since
+`mode=rw` refuses to create a missing file. A missing file is
+`UnknownEntityError(NO_STORE)`, which the existing refusal map turns into
+a 404 whose body names `server.conversations.enabled`.
+
+### The arguments
+
+`limit`, `cursor` and `device` are taken as strings and parsed by the
+routes. A limit is 1 to 200 and defaults to 50; a cursor is a row id
+bounded by SQLite's integer range, so a very long number is the caller's
+mistake rather than a driver error; a device is normalized the way every
+other MAC in this project is. Each refusal is a fixed sentence naming
+the rule, and none of them repeats what arrived.
+
+A page is read one row longer than it holds. That extra row is what
+makes `next_cursor` honest without a second count: it is null exactly
+when there was nothing beyond the page at the moment it was read, so a
+page that ends the listing exactly does not offer a cursor onto an empty
+one.
+
+### Deviations from the plan
+
+Seven, each with its reason.
+
+1. **The section is not injected, only the directory.** The plan has
+   `build_api` inject "the database directory it already has, and
+   whether the store section exists". Nothing needs the second: whether
+   there is a store to read is whether the file is there, which is the
+   plan's own rule (an existing file is served whether or not recording
+   is on), and the 404 names `server.conversations.enabled` in every
+   case because that is the key that would have created one. A section
+   flag would be a second source for the same answer with no reader.
+   The consequence is worth stating: `app.py` is byte-identical, so this
+   milestone changed no composition root at all.
+2. **The three query arguments are strings in the signature.** Declared
+   as integers they would be refused by FastAPI's own validation, which
+   this application answers through `_malformed_request`: the sanitized
+   body-shaped sentence, which is the wrong sentence for a query
+   argument, and whose default document shape echoes the value it
+   rejected. The plan requires a fixed sentence that never echoes, so
+   the parsing is the route's. What the document loses is a numeric
+   schema, and what it gains instead is the rule written out in each
+   parameter's description, pinned by a test.
+3. **A device filter that is not a MAC is refused rather than matched
+   literally.** The plan says only "filtered by `?device=` when given".
+   Normalizing is what makes the form an operator reads off a label
+   (`AA-BB-CC-DD-EE-FF`) reach the sessions stored in canonical form,
+   and refusing the rest beats an empty page, which would be a true
+   answer to a question the caller did not mean to ask.
+   `normalize_mac`'s own message quotes the value back, so the refusal
+   is built from a fixed sentence and raised outside the `except` arm,
+   where it would otherwise carry that message as its `__context__`.
+4. **A summary carries `id`.** The plan's summary list does not name it.
+   The cursor is the id and `next_cursor` offers only the last one, so a
+   client resuming from a row it listed earlier (rather than from the
+   page end) has nothing to resume with otherwise. The same id is what
+   the timeline's cursor is, where it is one of the turn's columns
+   anyway.
+5. **A turn does not repeat its `session`, and an invocation does not
+   repeat its `id`, `turn` or `session`.** The plan says each turn
+   carries "its columns". These four are answered by the path the
+   timeline was asked for and by the nesting itself; the rest of the
+   columns are all there, and the detail read carries every column of
+   `sessions` with a test that fails if the schema gains one.
+6. **The nested list is `tool_invocations`, the table's own name.** A
+   shorter name beside `tool_calls` (the count) would have been two
+   words for one thing, and the schema reference is the vocabulary for
+   this surface as much as for SQL.
+7. **A database failure inside a read answers through the sanitized
+   500, not through a classified refusal.** Milestone 1 classifies the
+   purge's failures because a CLI prints them to a terminal; over HTTP
+   the guarantee is the middleware that already covers every route here,
+   which logs one line naming the exception's class and answers the
+   fixed sentence. A file that vanishes between the existence check and
+   the query is the case this covers, and the no-leak test pins it with
+   a poisoned driver message.
+
+One thing the plan left to the implementation, recorded rather than
+deviated from: 404, 422 and 500 keep the shared `Problem` shape but get
+their own descriptions through `_problems(..., instead=...)`, because
+the shared sentences are about addressing an entity and reading stored
+configuration, and neither is what these statuses mean here.
+
+### Discoveries
+
+- **A refusal that names its own boundaries cannot be hunted for its
+  input.** The first version of the argument test asserted the rejected
+  value absent from the body, and `limit=0` failed it: the sentence
+  names the default, 50, which contains the zero. The check is now the
+  whole body equal to the fixed sentence, which is the stronger claim
+  anyway (there is nowhere for an echo to be), with the sentinel hunt
+  beside it.
+- **The test's own HTTP client logs the URL it asked for.** A sentinel
+  planted in a path segment turns up in an `httpx` INFO record inside
+  the test process, which is the caller's terminal rather than anything
+  this server wrote. The hunt is scoped to `samtal_server` channels, the
+  precedent `test_config_api_reads.py` already set for exactly this.
+- **The typed tables deserialize the JSON columns on the way out.** The
+  store's own suites read through raw SQL and `json.loads` what they
+  find; selecting `schema.sessions` gives `agents`, `providers`, `legs`
+  and `arguments` back as objects, so the response models carry the
+  structures rather than strings holding them.
+- **The store's close is queued as the websocket goes away**, so the
+  round-trip test polls its own API until the session reads closed
+  rather than assuming the writer got there first. Which is the read
+  contract working as designed: the session row is visible from the
+  open, and the close arrives at its own marker.
+
+### The suite
+
+`tests/unit/test_conversations_api.py`, 34 tests, at two seams. One
+holds a real conversation against a booted server (milestone 3's
+`recording_config` and the session suite's websocket drivers) and then
+asks that same server's API what it recorded, which is the only place
+the pipeline's record, the writer's rows and these routes are checked
+against one another rather than against a hand-written fixture. The
+rest write the store through the real `ConversationStore` and read it
+through `build_api`, because a page boundary, a cursor past the end and
+a text-off row are properties of the reads.
+
+- The round trip: the summary, the detail and the timeline of one
+  conversation, with the reply compared sentence for sentence against
+  what the device was told, and the builtin call the turn made.
+- The listing: newest first with every summary field, the device filter
+  in three spellings of one MAC, and a store recorded by one deployment
+  served by another that records nothing.
+- The pages: a walk through five sessions two at a time recovering the
+  listing once and in order, a page that ends the listing exactly, an
+  empty store, a cursor past the end on both paginated reads, and the
+  timeline's forward cursor.
+- The rows: the detail carrying every column `sessions` has (asserted
+  against the schema, so a new column fails here), a turn's calls nested
+  in the model's order rather than the order they landed in, one
+  session's timeline holding no other session's turns, and an unknown
+  session refused on both reads.
+- The switches: text-off serving the content columns as nulls with the
+  numbers and the routing intact, and metrics-off serving the numbers as
+  nulls with no events row counted and the text intact.
+- The refusals: the gate in front of all three routes, the 404 naming
+  the key on all three with no file created by asking, nine refused
+  arguments, a sentinel in a path segment, and a failure inside the read
+  path answering the generic 500 with nothing of it in the body, the log
+  or the process output.
+
+`tests/unit/test_api_openapi.py` gains the three paths in its exact
+inventory and two cases: every field of the six new schemas required
+(nullable is not optional, which matters most here, where a null is what
+a storage switch leaves behind), and the pagination arguments described,
+since nothing about them is derived from a type.
+
+### Verification
+
+From `samtal-server/`, at `bfd17b5`:
+
+```
+$ uv run ruff check .
+All checks passed!
+```
+
+```
+$ uv run pytest tests/unit -q
+2209 passed, 15 skipped in 299.76s (0:04:59)
+```
+
+```
+$ uv run pytest tests/integration -q
+55 passed in 164.06s (0:02:44)
+```
+
+The unit lane was 2173 at milestone 3 and is 2209 here: the 34 new
+tests and the two added to the OpenAPI suite, and no other suite changed
+count. The integration lane is unchanged at 55.
+
+Both committed artifacts regenerate byte-identically, which is the same
+pair CI diffs:
+
+```
+$ uv run samtal-server config openapi | diff - ../docs/reference/api-openapi.json
+$ uv run samtal-server conversations schema | diff - ../docs/reference/conversations-schema.md
+$ echo $?
+0
+```
+
+And what this milestone did not touch, which is what says it is
+transport only:
+
+```
+$ git diff b26793f --stat -- samtal_server/app.py \
+    samtal_server/conversations/store.py samtal_server/conversations/schema.py
+$ echo $?
+0
+```
+
+Acceptance criterion 7 (read paths: REST read endpoints on the gated
+`/api` sub-application, cursor-paginated from the first version, in the
+committed OpenAPI document) holds: the three routes are the session
+list, the session detail and the turn timeline the issue names, they
+page on the monotonic ids from their first release, they are inside the
+bearer gate by construction, and the document carries them with real
+schemas. The events endpoint the plan leaves open is still open and
+still deferred to the admin UI issue; API deletion is deliberately not
+here.
