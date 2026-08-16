@@ -178,25 +178,48 @@ dataclasses and the declarations:
     mapping, a populated one, and every provenance form.
   `nullable` exists because the session scope's base `device` is
   `None` until the MAC is normalized, and only for fields like it.
-- `EventSpec(name, channels, levels, fields)`. `channels` is the
-  frozenset of logger channels the event may be emitted on, which
-  is the issue's "channel" made concrete and is also what encodes
-  scope: `samtal_server.session` is the session scope, a module
-  `__name__` is a server scope, and `session_rejected` declares
-  both `samtal_server.session` and `samtal_server.ws`. Validation
-  compares the emitting object's actual channel (`SessionEvents`
-  emits on the session channel; a `ServerEvents` carries its
-  channel by construction) against the declaration, and the
-  conformance test ties each module's `ServerEvents(__name__)` to
-  the events declared on that channel, so an event emitted from
-  the wrong module is a violation even when its fields are right.
-  `levels` is the frozenset of logging levels the event is emitted
-  at today, because the levels are part of the compatibility
-  surface. `fields` covers the full payload the log tap receives,
-  base fields included (`event`, and on the session channel
-  `session` and `device`), so one validation reads the finished
-  payload and channel differences fall out of the specs rather
-  than special cases.
+- `EventSpec(name, variants)`, where each `EventVariant` declares
+  one legal emission shape completely: `channel`, `level`,
+  `message` (the exact registry-owned template string), `args`
+  (the argument tuple as per-position kinds), and `fields` (this
+  variant's payload shape). Variants are the unit because one spec
+  with one flat field table cannot describe the surface that
+  exists: `session_rejected` is emitted with three different
+  arities across four templates on two channels, `ota_check` with
+  three arities, `mcp_reload`'s applied and refused answers carry
+  mutually exclusive field sets, and several events change fields
+  with level. A variant is exactly what one emit site (or one
+  branch of one) produces, so the pin suites, which already pin
+  per-site, are the variant inventory's cross-check. Conditional
+  field presence (`duration_ms` on the four failing `mcp_down`
+  reasons, `speech_ms` when the endpointer held) is expressed by
+  variants rather than by per-field optionality wherever the
+  condition follows the site; `required=False` remains only for
+  genuinely value-dependent presence inside one site
+  (`language` on `heard` when the engine detected).
+  The channel encodes scope: `samtal_server.session` is the
+  session scope, a module `__name__` a server scope, and
+  `session_rejected` declares variants on both
+  `samtal_server.session` and `samtal_server.ws`. Validation
+  matches the emission against the event's variants (the emitting
+  object's actual channel included; `SessionEvents` emits on the
+  session channel, a `ServerEvents` carries its channel by
+  construction), and an emission matching no variant is a
+  violation naming the failing dimension. The conformance test
+  ties each module's `ServerEvents(__name__)` to the variants
+  declared on that channel, so an event emitted from the wrong
+  module fails even with lawful fields. Levels are per-variant
+  because they are part of the compatibility surface. A variant's
+  `fields` covers the full payload the log tap receives, base
+  fields included (`event`, and on the session channel `session`
+  and `device`), so one validation reads the finished payload and
+  channel differences fall out of the declarations rather than
+  special cases. M1's inventory therefore reads every emit site's
+  template and every argument position, not only its field
+  keywords; arguments that render joined or derived values (the
+  onboarding provenance, a comma-joined class-name list) are
+  declared as what their builder produces, with the builder named
+  in the conformance inventory.
 - `REGISTRY: dict[str, EventSpec]` with all 57 events, grouped and
   commented by subsystem in the order of the README table, each
   declaration citing nothing: the fields and tokens are the
@@ -854,6 +877,18 @@ eleven findings. As received, condensed but faithful:
    taxonomy. The registry needs per-variant declarations keyed by
    channel, level, template, argument tuple, and field shape, and
    M1 must inventory every argument position.
+
+   *Resolution*: accepted. The registry is now variant-keyed:
+   `EventSpec` holds `EventVariant`s each declaring channel,
+   level, exact message template, per-position argument kinds, and
+   this variant's field shape, with conditional presence expressed
+   by variants where it follows the site and by optionality only
+   where it is value-dependent within one site. M1's inventory
+   reads templates and argument positions site by site, with
+   derived-argument builders named. Amended in the registry
+   section; the grandfather claim about "the one argument outside
+   the taxonomy" is superseded by that inventory, whose result is
+   recorded in the implementation doc.
 
 5. **P1: last-resort recovery can retain a hostile event name, and
    `schema_violation` is outside the declared registry.** Recovery
