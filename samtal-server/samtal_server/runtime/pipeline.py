@@ -75,7 +75,7 @@ from samtal_server.providers import (
 )
 from samtal_server.runtime import prompt
 from samtal_server.runtime.speech import _Synthesis, speak_after
-from samtal_server.runtime.turns import TurnUnderway, tool_source
+from samtal_server.runtime.turns import BUILTIN, MCP, TurnUnderway, tool_source
 from samtal_server.text import SentenceSplitter
 from samtal_server.tools import builtin, names
 from samtal_server.tools.mcp import McpServers
@@ -108,6 +108,26 @@ SWITCH_GREETING = (
     "Greet the user briefly as yourself, in the language they have been "
     "speaking, and carry on from what was said above."
 )
+
+
+def _tool_named(classified: ToolInvocation) -> tuple[dict[str, str], str]:
+    """What a `tool_call` event may name about the call it describes, as
+    its fields and as the fragment its sentence renders.
+
+    Only what this application authored. A builtin's name is this
+    server's own; an MCP entry's name is what the operator wrote in
+    their YAML. A device tool's name is the board's vocabulary and an
+    unknown name is whatever the model invented, and the retained
+    surface admits no far-side bytes whichever peer sent them (#154, the
+    content-and-telemetry ADR). Those two events therefore name nothing:
+    `source` says which namespace was reached into, and the full name is
+    on the store's `tool_invocations` row, where the text switch decides
+    whether it is kept."""
+    if classified.source == BUILTIN:
+        return {"tool": classified.name}, f' "{classified.name}"'
+    if classified.source == MCP and classified.entry is not None:
+        return {"entry": classified.entry}, f' from entry "{classified.entry}"'
+    return {}, ""
 
 
 def provider_fields(stage: str, provider: object) -> dict[str, Any]:
@@ -1139,15 +1159,18 @@ class PipelineRuntime:
         except Exception as exc:
             content, is_error = f'the tool "{call.name}" failed: {exc}', True
         elapsed = loop.time() - started
+        fields, named = _tool_named(classified)
         self._events.info(
-            "session %s: tool %s took %.2f s%s",
+            "session %s: %s tool%s took %.2f s%s",
             self.session_id,
-            call.name,
+            classified.source,
+            named,
             elapsed,
             " and failed" if is_error else "",
             event="tool_call",
             agent=self._agent,
-            tool=call.name,
+            source=classified.source,
+            **fields,
             duration_ms=round(elapsed * 1000),
             is_error=is_error,
         )
