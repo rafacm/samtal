@@ -16,6 +16,15 @@ show. A handler that restated any of that would be the bug. What this
 module owns is transport: the token, the path an entity is addressed
 by, the status code a refusal maps to, and the shape of a body.
 
+One namespace here is not configuration at all. The conversation
+store's reads (`/conversations`) are registered from
+`conversations/api.py`, where their route functions and their response
+models live, because what they answer is that store's business and not
+this one's. They are registered on this application so that the gate,
+the sanitized handlers and the committed document cover them by
+construction, which is the whole reason a route belongs on this mount
+rather than on an application of its own.
+
 The gate is ASGI middleware, not a dependency, because a dependency
 only runs for a matched route: an unmatched path inside /api would
 answer 404 to an unauthenticated caller, which leaks which routes exist
@@ -83,6 +92,7 @@ from samtal_server.config.writes import (
     wrote_provider,
     wrote_secret,
 )
+from samtal_server.conversations import api as conversations
 from samtal_server.db import open_database
 from samtal_server.events import ServerEvents
 
@@ -166,6 +176,16 @@ API_DESCRIPTION = (
     "never a reply of one already running; `GET /runtime/agents/{name}/prompt` "
     "previews what a session opening now would be sent. Everything else about an agent "
     "still waits for a restart, which is why writes to those keep saying so.\n\n"
+    "The `/conversations` namespace is not stored configuration either: it reads the "
+    "conversation store, the record of what was said, which "
+    "`server.conversations.enabled` switches on. Three reads, cursor-paginated on "
+    "monotonic row ids that are never reused: the session list newest first, one "
+    "session whole, and one session's turns oldest first with the calls each turn "
+    "made nested under it. A deployment that never recorded answers 404; one that "
+    "recorded and has since switched recording off still serves what it recorded, "
+    "because switching recording off stops the writer and not the reader. Content "
+    "columns come back as they were stored, which is null where text storage was "
+    "off, and every session says which way its switches were set.\n\n"
     f"{API_OPTIONS_NOTE}"
 )
 
@@ -880,6 +900,13 @@ def build_api(
     # Attached rather than closed over: the read and write routes take
     # it with Depends(...), and milestone 1 has none of them yet.
     api.state.store = store_dependency(database_dir)
+    # The same directory, read for the other database in it. The
+    # conversation reads need no more runtime fact than this: whether
+    # there is a store to read is whether the file is there, which
+    # `enabled` decides at boot and cannot be asked again here, since a
+    # deployment that has switched recording off still serves what it
+    # recorded.
+    api.state.conversations = conversations.reader(database_dir)
     api.state.loaded_agents = frozenset(loaded_agents)
     api.state.pending = pending if pending is not None else _empty_pending()
     api.state.mcp_servers = mcp_servers
@@ -1973,6 +2000,14 @@ def _application() -> FastAPI:
     _reads(api)
     _writes(api)
     _runtime(api)
+    # The conversation store's reads, whose route functions live with
+    # the store rather than here. Registered on this application and not
+    # in `build_api` for the reason this function exists: a route the
+    # committed document does not carry is not in the contract, and this
+    # is what the document is rendered from. `_problems` travels with
+    # them so that module says its refusals in this one's vocabulary
+    # without importing it, which would be a cycle.
+    conversations.routes(api, _problems)
     return api
 
 
