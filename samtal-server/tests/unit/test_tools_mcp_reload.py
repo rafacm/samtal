@@ -62,7 +62,8 @@ from samtal_server.tools.mcp import (
 from tests.support.events import fields_of
 from tests.support.events import only as one_event
 from tests.support.mcp_stdio_server import SHIPPED_INSTRUCTIONS
-from tests.unit.test_tools_mcp import MANAGER_LOGGER
+from tests.support.tools_mcp import MANAGER_LOGGER, reading, started
+from tests.support.tools_mcp import reload_config as config_with
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
 
@@ -83,30 +84,6 @@ def stdio_entry(**overrides: object) -> McpServerConfig:
     return McpServerConfig.model_validate(entry_data(**overrides))
 
 
-def config_with(
-    servers: dict[str, object],
-    grants: dict[str, list],
-    local_only: bool = False,
-) -> Config:
-    """One agent per grant list, so a test can move an entry between
-    agents as well as in and out of the configuration."""
-    return Config(
-        server={"local_only": local_only},
-        providers={
-            stage: {"mock": {"type": "mock"}} for stage in ("llm", "asr", "tts", "vad")
-        },
-        mcp_servers=servers,
-        agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
-        agents={name: {"prompt": "A", "mcp": mcp} for name, mcp in grants.items()},
-        default_agent=next(iter(grants)),
-    )
-
-
-def reading(config: Config, secrets: SecretStore | None = None):
-    """The re-read a reload is handed, standing in for the database."""
-    return lambda: (config, secrets)
-
-
 def manager_of(servers: McpServers, entry: str) -> object:
     """The manager object behind one entry.
 
@@ -116,12 +93,6 @@ def manager_of(servers: McpServers, entry: str) -> object:
     manager that had been stopped and started again.
     """
     return servers._managers[entry]
-
-
-async def started(config: Config, secrets: SecretStore | None = None) -> McpServers:
-    servers = McpServers.build(config, secrets)
-    await servers.start_all()
-    return servers
 
 
 # The diff

@@ -14,21 +14,16 @@ sanitization, call timeouts, registry routing, mark-down on a failed
 call) stays covered once, over stdio, where it already lives.
 """
 
-import asyncio
-import gc
 import json
 import logging
 import socket
 import threading
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import httpx
 import pytest
-import uvicorn
 from mcp.server.fastmcp import FastMCP
-from sse_starlette.sse import AppStatus
 
 import samtal_server.tools.mcp as mcp_module
 from samtal_server import logs
@@ -43,6 +38,7 @@ from samtal_server.tools.mcp import (
 )
 from tests.support.events import fields_of
 from tests.support.events import only as one_event
+from tests.support.tools_mcp import LIFECYCLE_TIMEOUT_S, serving
 
 # The logger an operator watches for these servers, and the SDK one that
 # talks to them, named rather than spelled out at each assertion.
@@ -59,10 +55,6 @@ SDK_CLIENT_LOGGER = "mcp.client.streamable_http"
 # module and to that one message, and the fixture collects the garbage
 # before a finalizer can surface it inside somebody else's test.
 pytestmark = pytest.mark.filterwarnings("ignore:Unclosed <MemoryObject:ResourceWarning")
-
-# How long a server may take to come up or go down before the test gives
-# up on it. Generous: it is a deadlock guard, not a measurement.
-LIFECYCLE_TIMEOUT_S = 20.0
 
 
 def secret_word() -> str:
@@ -89,61 +81,6 @@ async def server_url() -> AsyncIterator[str]:
     server.add_tool(add)
     async with serving(server) as url:
         yield url
-
-
-@asynccontextmanager
-async def serving(server: FastMCP) -> AsyncIterator[str]:
-    """One `FastMCP` instance served over HTTP for the length of a
-    block, as its URL.
-
-    Separate from the fixture above so a test that needs a server
-    publishing something else of its own gets the awkward parts of this
-    (the startup race, the port, and the process-wide SSE flag below)
-    rather than a second copy of them.
-    """
-    config = uvicorn.Config(
-        server.streamable_http_app(),
-        host="127.0.0.1",
-        # The OS picks a free port, so there is no probe-then-bind race
-        # with anything else on the machine.
-        port=0,
-        log_level="warning",
-    )
-    uvicorn_server = uvicorn.Server(config)
-    serving = asyncio.create_task(uvicorn_server.serve())
-    async with asyncio.timeout(LIFECYCLE_TIMEOUT_S):
-        while not uvicorn_server.started:
-            if serving.done():
-                # Surfaces a startup failure as itself rather than as a
-                # timeout twenty seconds later.
-                serving.result()
-                raise RuntimeError("the test server stopped before it started")
-            await asyncio.sleep(0.01)
-    port = uvicorn_server.servers[0].sockets[0].getsockname()[1]
-
-    # sse_starlette keeps one process-wide "the server is shutting down"
-    # flag. It monkeypatches `uvicorn.Server.handle_exit` to set it, and
-    # nothing ever clears it, so `tests/unit/test_drain.py` calling
-    # `handle_exit` on its own server (which chains to the patched base)
-    # leaves it set for the rest of the session. While it is set, every
-    # SSE response in the process returns without sending anything, and
-    # an SSE response is how this server answers a POST, so it would
-    # accept connections and complete no request. Cleared for the length
-    # of the fixture and put back, so this module neither depends on the
-    # order the suite runs in nor changes it for anybody else.
-    shutting_down = AppStatus.should_exit
-    AppStatus.should_exit = False
-    try:
-        yield f"http://127.0.0.1:{port}/mcp"
-    finally:
-        AppStatus.should_exit = shutting_down
-        uvicorn_server.should_exit = True
-        async with asyncio.timeout(LIFECYCLE_TIMEOUT_S):
-            await serving
-        # Still inside this test's warning filters, which is the point:
-        # what the server left behind is finalized here rather than
-        # halfway through whatever runs next.
-        gc.collect()
 
 
 def http_entry(url: str, **overrides: object) -> McpServerConfig:

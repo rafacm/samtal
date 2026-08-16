@@ -43,7 +43,7 @@ from samtal_server.config.api import build_api, mount_api
 from samtal_server.config.models import API_MOUNT_PATH
 from samtal_server.tools.mcp import CONNECTED, REDACTED, McpServers
 from tests.support.mcp_reflecting_server import REFLECTED_ENV
-from tests.unit.test_tools_mcp_http import serving
+from tests.support.tools_mcp import serving
 
 # Not a real credential, and shaped so a substring check for it cannot
 # match by accident.
