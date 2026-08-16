@@ -2917,7 +2917,9 @@
           "agents": {
             "anyOf": [
               {
-                "items": {},
+                "items": {
+                  "type": "string"
+                },
                 "type": "array"
               },
               {
@@ -2925,7 +2927,7 @@
               }
             ],
             "title": "Agents",
-            "description": "Every agent the device is bound to, as the binding resolved at open."
+            "description": "Every agent the device is bound to, by name, as the binding resolved at open. The first is the agent the session started on."
           },
           "protocol": {
             "anyOf": [
@@ -2971,6 +2973,16 @@
           "close_reason": {
             "anyOf": [
               {
+                "type": "string",
+                "enum": [
+                  "limit",
+                  "idle",
+                  "drain",
+                  "client",
+                  "error"
+                ]
+              },
+              {
                 "type": "string"
               },
               {
@@ -2978,7 +2990,7 @@
               }
             ],
             "title": "Close Reason",
-            "description": "What ended it, or null until it closes."
+            "description": "What ended it, one of the five tokens the listing describes, or null until it closes."
           },
           "server_version": {
             "anyOf": [
@@ -3169,6 +3181,16 @@
           "close_reason": {
             "anyOf": [
               {
+                "type": "string",
+                "enum": [
+                  "limit",
+                  "idle",
+                  "drain",
+                  "client",
+                  "error"
+                ]
+              },
+              {
                 "type": "string"
               },
               {
@@ -3176,7 +3198,7 @@
               }
             ],
             "title": "Close Reason",
-            "description": "What ended it, one of `limit`, `idle`, `drain`, `client` or `error`, the first cause to fire winning. Null until it closes."
+            "description": "What ended it, one of `limit`, `idle`, `drain`, `client` or `error`, the first cause to fire winning. Null until it closes. The five tokens are the set a server latches, and the column that holds them is deliberately unconstrained, so a token a later release adds is served as it was stored: a read that refused one would drop a whole page over one row, the same reason the database refuses none."
           },
           "turns": {
             "type": "integer",
@@ -3288,8 +3310,7 @@
             "anyOf": [
               {
                 "items": {
-                  "additionalProperties": true,
-                  "type": "object"
+                  "$ref": "#/components/schemas/TurnLeg"
                 },
                 "type": "array"
               },
@@ -3298,7 +3319,7 @@
               }
             ],
             "title": "Legs",
-            "description": "One entry per agent that took part, `{agent, text, input_tokens, output_tokens}`, and present only when a handover split the reply. The text half is null under text-off and the token halves under metrics-off, because a turn's totals blend agents that may use different models."
+            "description": "One entry per agent that took part, and present only when a handover split the reply. Null is a turn one agent answered whole, which is not the same as an empty list and never becomes one."
           },
           "asr_ms": {
             "anyOf": [
@@ -3808,8 +3829,14 @@
           },
           "source": {
             "type": "string",
+            "enum": [
+              "builtin",
+              "device",
+              "mcp",
+              "unknown"
+            ],
             "title": "Source",
-            "description": "Where the call was routed: `builtin` for one this application authors, `device` for one the device published, `mcp` for one an MCP entry owns, `unknown` for a name nothing answered to. Classified before the call ran."
+            "description": "Where the call was routed: `builtin` for one this application authors, `device` for one the device published, `mcp` for one an MCP entry owns, `unknown` for a name nothing answered to. Classified before the call ran. A closed set here because it is a closed set in the database, which holds the same four tokens under a check constraint."
           },
           "entry": {
             "anyOf": [
@@ -3898,6 +3925,68 @@
         ],
         "title": "ToolInvocation",
         "description": "One call a turn issued, as the timeline nests it.\n\nThe transport shape of a `tool_invocations` row, not the record the\npipeline hands the writer, which is the dataclass of the same name\nin `records.py`."
+      },
+      "TurnLeg": {
+        "properties": {
+          "agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent",
+            "description": "The agent whose leg this is, and null for a session that never activated one."
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text",
+            "description": "What this agent said, null under text-off, and null for an agent that took part without speaking: one that asked for the handover said nothing and spent tokens all the same."
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Tokens",
+            "description": "Input tokens this agent spent on the turn. Null when the provider reported no usage, and under metrics-off."
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Tokens",
+            "description": "Output tokens this agent spent on the turn. Null when the provider reported no usage, and under metrics-off."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "agent",
+          "text",
+          "input_tokens",
+          "output_tokens"
+        ],
+        "title": "TurnLeg",
+        "description": "One agent's share of a turn a handover split.\n\nThe transport shape of one entry of `turns.legs`, whose halves\nfollow different storage switches: the text is content and the token\ncounts are measurements, which is why a leg exists at all rather\nthan the turn's totals being the whole story. The totals blend\nagents that may use different models; this is where they come apart\nagain."
       },
       "ProviderConfig": {
         "additionalProperties": true,
