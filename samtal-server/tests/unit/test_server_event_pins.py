@@ -1188,11 +1188,14 @@ def test_capture_enabled(caplog: pytest.LogCaptureFixture) -> None:
     assert pinned(only(caplog, "capture_enabled")) == {
         "logger": "samtal_server.app",
         "level": logging.WARNING,
-        "template": "session capture is on: room audio and transcripts are being written to %s",
+        "template": (
+            "session capture is on: room audio and a track of the session's events "
+            "are being written to %s"
+        ),
         "args": (Path(CAPTURE_DIR),),
         "sentence": (
-            "session capture is on: room audio and transcripts are being written to "
-            f"{CAPTURE_DIR}"
+            "session capture is on: room audio and a track of the session's events "
+            f"are being written to {CAPTURE_DIR}"
         ),
         "fields": {"event": "capture_enabled", "path": CAPTURE_DIR},
     }

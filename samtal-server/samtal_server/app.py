@@ -288,8 +288,15 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
         )
     )
     if app.state.capture is not None:
+        # Room audio is the whole of what makes this a recording, and the
+        # decision track beside it is what the events already are. It
+        # used to say "transcripts", which was true while the events
+        # carried them; the narrowing (#120) left that half of the
+        # sentence describing nothing the capture writes, and a warning
+        # about what reaches a disk has to be exact in both directions.
         events.warning(
-            "session capture is on: room audio and transcripts are being written to %s",
+            "session capture is on: room audio and a track of the session's events "
+            "are being written to %s",
             capture.dir,
             event="capture_enabled",
             path=str(capture.dir),

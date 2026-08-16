@@ -159,7 +159,10 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   name, and with the renamed token fields. Nothing else about a capture
   changes: the WAV beside it still records everything said in the room,
   which is the division of labour the capture was built on, and the
-  session id correlates all three records.
+  session id correlates all three records. The startup warning says so
+  in the same words: it announced "room audio and transcripts" while the
+  events carried them, and now announces room audio and a track of the
+  session's events.
 - **`session_closed` says why a conversation ended** (#120): the event
   carried only `duration_s`, so the reason was inferable from whichever
   line happened to precede it and from nothing else. It gains `reason`,
