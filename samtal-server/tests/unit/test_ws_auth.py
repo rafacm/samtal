@@ -13,20 +13,9 @@ from starlette.websockets import WebSocketDisconnect
 
 from samtal_server.app import create_app
 from samtal_server.config import Config
-from samtal_server.ws import WEBSOCKET_PATH, bearer_token
+from samtal_server.ws import bearer_token
 from tests.support.configs import DEVICE_MAC, DEVICE_UUID, config_with_agent
-from tests.support.wire import shake_hands
-
-
-def handshake(client: TestClient, headers: dict[str, str]):
-    return client.websocket_connect(WEBSOCKET_PATH, headers=headers)
-
-
-def device_headers(token: str | None, device_id: str = DEVICE_MAC) -> dict[str, str]:
-    headers = {"Device-Id": device_id, "Client-Id": DEVICE_UUID, "Protocol-Version": "1"}
-    if token is not None:
-        headers["Authorization"] = f"Bearer {token}"
-    return headers
+from tests.support.wire import device_headers, handshake, shake_hands
 
 
 def issued_for(client: TestClient, device_id: str = DEVICE_MAC.lower()) -> str:

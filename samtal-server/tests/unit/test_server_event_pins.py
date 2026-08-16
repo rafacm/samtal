@@ -116,12 +116,11 @@ from tests.support.tools_mcp import reload_config as mcp_config
 from tests.support.tools_mcp import running as mcp_running
 from tests.support.tools_mcp import started as mcp_started
 from tests.support.tools_mcp import stdio_entry as mcp_entry
-from tests.support.wire import connect, shake_hands
+from tests.support.wire import connect, device_headers, handshake, shake_hands
 from tests.unit.test_device_bindings import AGENT, STAGES, booted
 from tests.unit.test_device_bindings import DEVICE_MAC as DB_DEVICE_MAC
 from tests.unit.test_device_bindings import check_in as db_check_in
 from tests.unit.test_drain import FakeSession, registry_with
-from tests.unit.test_ws_auth import device_headers, handshake
 
 # What a value that moves between runs is replaced by, so that the key
 # is pinned and the value deliberately is not. The same spelling the
