@@ -353,25 +353,39 @@ with the failure output recorded in the M4 PR body:
 `test_config_cli.py` (2,305 lines, 101 tests) mirrors the source
 monolith. The issue settles that the physical split follows the
 file boundaries #139 produces; what #139 inherits from this plan is
-the scheme: split by behavior into files named like the existing
-`test_config_api_*` family, one file per concern the CLI has after
-#139 unifies dispatch:
+the bucket boundaries, each anchored to a production concern #139's
+issue body names, so the split demonstrably follows #139's
+structure rather than this plan's taste:
 
-- `test_config_cli.py` keeps the acceptance spine (the
-  empty-database-to-working-configuration walk and per-entity
-  write/show/list behavior);
-- `test_config_cli_transport.py`: URL/token/TLS resolution, refusal
-  of unreadable or credentialed URLs, timeouts, unreachable-server
-  reporting;
-- `test_config_cli_secrets.py`: secret entry, masking, refusals,
-  key failures;
-- `test_config_cli_status.py`: MCP status and reload rendering;
-- `test_config_cli_local.py`: the recovery subset;
-- `test_config_cli_grammar.py`: parser behavior, help, exit codes.
+- the acceptance spine (the empty-database-to-working-configuration
+  walk and per-entity write/show/list behavior) stays in
+  `test_config_cli.py`, anchored to the descriptor-driven entity
+  handling (#139: "one descriptor per entity ... consumed by
+  store, views, api, cli, and docgen");
+- transport and client behavior (URL/token/TLS resolution, refusal
+  of unreadable or credentialed URLs, timeouts,
+  unreachable-server reporting), anchored to the CLI-as-API-client
+  seam (#139: "the CLI renders API responses from the same
+  pydantic response models api.py declares");
+- rendering of status, reload, pending and prompt answers,
+  anchored to the same response-model rendering concern, and the
+  natural new home of whatever survives of the shape checks once
+  the frozensets are deleted;
+- the `--local` recovery subset, anchored to the unified dispatch
+  (#139: "local and HTTP branches unify behind one dispatch so
+  acknowledgements and notices come from one place");
+- secrets entry, masking, refusals and key failures, anchored to
+  the secrets write path (#139 keeps `--local` at "exactly the
+  current four commands", two of which are secret commands);
+- parser grammar, help and exit codes, anchored to the parser
+  wiring #139's descriptor generates.
 
-This issue does not move any of those tests; the sentinel-hunting
-no-leak tests in that file stay word-for-word where they are until
-#139 relocates them with the code they pin.
+Exact filenames are #139's to fix when its production split is
+final; the buckets above are the inherited decision, and a #139
+production split that merges or divides a concern moves the bucket
+with it. This issue does not move any of those tests; the
+sentinel-hunting no-leak tests in that file stay word-for-word
+where they are until #139 relocates them with the code they pin.
 
 ### Four milestones, four PRs, stacked
 
@@ -621,6 +635,15 @@ prior plans. Findings as received, condensed but faithful:
    scheme cannot demonstrate compliance with the coordination
    rule. Map each bucket to a #139 concern, or defer exact
    filenames to #139 instead of claiming them decided.
+
+   *Resolution*: accepted, both halves. Each bucket is now anchored
+   to a concern quoted from #139's issue body (descriptor-driven
+   entity handling, response-model rendering, unified dispatch, the
+   secrets write path, generated parser wiring), and exact
+   filenames are explicitly deferred to #139's final production
+   split, with the buckets moving if #139 merges or divides a
+   concern. What this plan hands #139 is the bucket boundaries, no
+   more.
 
 7. **P3: the SDK and M1 inventories are numerically wrong.** The
    block is seven anthropic plus seven openai classes, 14 not 13;
