@@ -9,6 +9,7 @@ provider entirely.
 
 import asyncio
 import json
+import logging
 import sys
 from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
@@ -402,6 +403,29 @@ async def test_malformed_arguments_come_back_as_an_error_result() -> None:
     assert "not a JSON object" in result.content
 
 
+# Not real credentials. The first stands for whatever a model streams
+# where a JSON object belongs; the second is shaped like a tool name, so
+# both LLM APIs accept it and the publishing rule leaves it untouched,
+# which is how a credential arrives as a name a peer chose (#154).
+ARGUMENT_SENTINEL = "sk-test-4f8b2c9e-never-a-real-credential"
+NAME_SENTINEL = "sk_test_4f8b2c9e_never_a_real_credential"
+
+
+async def refuse_malformed(
+    name: str, caplog: pytest.LogCaptureFixture
+) -> tuple[str, logging.LogRecord]:
+    """One call the dispatch turns away at its first line, and the
+    warning it wrote about it."""
+    arguments = f'{{"text": "{ARGUMENT_SENTINEL}"'
+    broken = ToolCall(id="c1", name=name, malformed_arguments=arguments)
+    script = ScriptedLlm([[broken], "Let me try that again."])
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=None)
+    with caplog.at_level("DEBUG"):
+        await run_reply(session, "do it")
+    (line,) = [record for record in caplog.records if "unparseable" in record.getMessage()]
+    return arguments, line
+
+
 async def test_malformed_arguments_are_logged_by_length_and_never_by_value(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -410,18 +434,34 @@ async def test_malformed_arguments_are_logged_by_length_and_never_by_value(
     the refusal says how much of it there was, which is what tells a
     truncated object from an answer in prose, and the bytes reach no
     record at any level."""
-    sentinel = "sk-test-4f8b2c9e-never-a-real-credential"
-    arguments = f'{{"text": "{sentinel}"'
-    broken = ToolCall(id="c1", name="remember", malformed_arguments=arguments)
-    script = ScriptedLlm([[broken], "Let me try that again."])
-    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=None)
-    with caplog.at_level("DEBUG"):
-        await run_reply(session, "remember this")
+    arguments, line = await refuse_malformed("remember", caplog)
 
-    (line,) = [record for record in caplog.records if "unparseable" in record.getMessage()]
     assert f"{len(arguments)} characters" in line.getMessage()
-    assert not any(sentinel in record.getMessage() for record in caplog.records)
-    assert not any(sentinel in str(record.args) for record in caplog.records)
+    # A builtin is the one name this server authored, so this line says
+    # it, exactly as the `tool_call` event beside it does.
+    assert 'builtin tool "remember"' in line.getMessage()
+    assert not any(ARGUMENT_SENTINEL in record.getMessage() for record in caplog.records)
+    assert not any(ARGUMENT_SENTINEL in str(record.args) for record in caplog.records)
+
+
+async def test_a_malformed_call_under_a_name_a_peer_chose_names_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The same rule the narrowing gave `tool_call`, on the plain line
+    that reports the refusal: a name no namespace publishes is the
+    model's own invention and a device's is the board's vocabulary, so
+    the warning says which namespace was reached into and nothing more.
+    Both sentinels are hunted, since this call carries one of each."""
+    arguments, line = await refuse_malformed(NAME_SENTINEL, caplog)
+
+    assert line.getMessage().endswith(
+        f"unknown tool got {len(arguments)} characters of unparseable arguments"
+    )
+    for record in caplog.records:
+        assert NAME_SENTINEL not in record.getMessage()
+        assert NAME_SENTINEL not in str(record.args)
+        assert ARGUMENT_SENTINEL not in record.getMessage()
+        assert ARGUMENT_SENTINEL not in str(record.args)
 
 
 def test_the_switch_agent_schema_is_json_serializable() -> None:
