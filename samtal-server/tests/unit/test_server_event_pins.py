@@ -105,6 +105,9 @@ from tests.support.configs import (
 from tests.support.configs import BOUND_MAC as DB_BOUND_MAC
 from tests.support.events import only
 from tests.support.providers import BrokenTts
+from tests.support.registry import AGENT, STAGES, FakeSession, booted, registry_with
+from tests.support.registry import BINDINGS_DEVICE_MAC as DB_DEVICE_MAC
+from tests.support.registry import check_in as db_check_in
 from tests.support.stores import CAPTURE_MANIFEST as MANIFEST
 from tests.support.stores import corrupt as _corrupt
 from tests.support.stores import store, tone
@@ -117,10 +120,6 @@ from tests.support.tools_mcp import running as mcp_running
 from tests.support.tools_mcp import started as mcp_started
 from tests.support.tools_mcp import stdio_entry as mcp_entry
 from tests.support.wire import connect, device_headers, handshake, shake_hands
-from tests.unit.test_device_bindings import AGENT, STAGES, booted
-from tests.unit.test_device_bindings import DEVICE_MAC as DB_DEVICE_MAC
-from tests.unit.test_device_bindings import check_in as db_check_in
-from tests.unit.test_drain import FakeSession, registry_with
 
 # What a value that moves between runs is replaced by, so that the key
 # is pinned and the value deliberately is not. The same spelling the

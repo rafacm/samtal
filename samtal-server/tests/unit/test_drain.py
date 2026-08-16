@@ -24,38 +24,7 @@ from samtal_server.main import (
     serve,
 )
 from samtal_server.registry import SessionRegistry
-
-
-class FakeSession:
-    """A session that records how it was asked to stop, and answers the
-    way a real one does: True when its reply finished inside the grace."""
-
-    def __init__(self, speaking_for: float = 0.0) -> None:
-        self.speaking_for = speaking_for
-        self.shutdown: tuple[int, str] | None = None
-        self.granted_s: float | None = None
-        self.close_reason: str | None = None
-
-    async def request_shutdown(
-        self,
-        code: int = 1001,
-        reason: str = "server shutting down",
-        grace_s: float = 10.0,
-        close_reason: str | None = None,
-    ) -> bool:
-        self.granted_s = grace_s
-        self.close_reason = close_reason
-        finished = self.speaking_for <= grace_s
-        await asyncio.sleep(min(self.speaking_for, grace_s))
-        self.shutdown = (code, reason)
-        return finished
-
-
-def registry_with(*sessions: FakeSession, max_sessions: int = 8) -> SessionRegistry:
-    registry = SessionRegistry(max_sessions=max_sessions)
-    for session in sessions:
-        assert registry.try_add(cast(Any, session))
-    return registry
+from tests.support.registry import FakeSession, registry_with
 
 
 async def test_draining_asks_every_session_to_stop() -> None:
