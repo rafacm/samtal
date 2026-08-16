@@ -105,20 +105,20 @@ from tests.support.configs import (
 from tests.support.configs import BOUND_MAC as DB_BOUND_MAC
 from tests.support.events import only
 from tests.support.providers import BrokenTts
+from tests.support.tools_mcp import SHADOWED_POSITION
+from tests.support.tools_mcp import config_granting as mcp_granting
+from tests.support.tools_mcp import entry_data as mcp_entry_data
+from tests.support.tools_mcp import reading as mcp_reading
+from tests.support.tools_mcp import reload_config as mcp_config
+from tests.support.tools_mcp import running as mcp_running
+from tests.support.tools_mcp import started as mcp_started
+from tests.support.tools_mcp import stdio_entry as mcp_entry
 from tests.support.wire import connect, shake_hands
 from tests.unit.test_capture import MANIFEST, store, tone
 from tests.unit.test_device_bindings import AGENT, STAGES, booted
 from tests.unit.test_device_bindings import DEVICE_MAC as DB_DEVICE_MAC
 from tests.unit.test_device_bindings import check_in as db_check_in
 from tests.unit.test_drain import FakeSession, registry_with
-from tests.unit.test_tools_mcp import SHADOWED_POSITION
-from tests.unit.test_tools_mcp import config_granting as mcp_granting
-from tests.unit.test_tools_mcp import entry_data as mcp_entry_data
-from tests.unit.test_tools_mcp import running as mcp_running
-from tests.unit.test_tools_mcp import stdio_entry as mcp_entry
-from tests.unit.test_tools_mcp_reload import config_with as mcp_config
-from tests.unit.test_tools_mcp_reload import reading as mcp_reading
-from tests.unit.test_tools_mcp_reload import started as mcp_started
 from tests.unit.test_tools_memory import _corrupt
 from tests.unit.test_ws_auth import device_headers, handshake
 

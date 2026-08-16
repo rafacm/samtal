@@ -9,12 +9,10 @@ import asyncio
 import logging
 import re
 import socket
-import sys
 import time
 import traceback
 from collections.abc import Iterator
 from datetime import datetime, timedelta
-from pathlib import Path
 
 import pytest
 from mcp import ClientSession
@@ -44,41 +42,24 @@ from tests.support.events import events as emitted
 from tests.support.events import fields_of
 from tests.support.events import only as one_event
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
-
-STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
+from tests.support.tools_mcp import (
+    MANAGER_LOGGER,
+    SHADOWED_POSITION,
+    config_granting,
+    entry_data,
+    running,
+    stdio_entry,
+)
 
 # A secret shaped like something an LLM API would accept as a tool name,
 # for the sentinel below: nothing but letters and digits, so the
 # publishing rule's sanitizing leaves it exactly as it is.
 CREDENTIAL = "AKIAIOSFODNN7EXAMPLE"
 
-# Where the test server lists `inside__secret_word`, which is the tool
-# an entry called `home` publishes into `home__inside`'s namespace. The
-# seventh it registers, and the sixth never publishes (too long once a
-# prefix is on it), so the two ways of counting disagree here, which is
-# the whole reason this number is spelled out rather than assumed.
-SHADOWED_POSITION = 7
-
-# What this module logs under, which is what an operator reads.
-MANAGER_LOGGER = "samtal_server.tools.mcp"
-
 # What a reason may look like: type names, and a group's several joined
 # with commas. Anything a far side wrote has spaces, punctuation or
 # quotes in it and does not match.
 REASON_TOKEN = re.compile(r"^[A-Za-z][A-Za-z0-9]*(, [A-Za-z][A-Za-z0-9]*)*$")
-
-
-def stdio_entry(**overrides: object) -> McpServerConfig:
-    return McpServerConfig.model_validate(
-        {"transport": "stdio", "command": sys.executable, "args": [str(STDIO_SERVER)]}
-        | overrides
-    )
-
-
-async def running(config: McpServerConfig, name: str = "tools") -> McpServerManager:
-    manager = McpServerManager(name, config)
-    await manager.start()
-    return manager
 
 
 async def test_a_started_server_offers_its_tools_under_its_entry_name() -> None:
@@ -298,14 +279,6 @@ def config_with(
     )
 
 
-def entry_data(**overrides: object) -> dict[str, object]:
-    return {
-        "transport": "stdio",
-        "command": sys.executable,
-        "args": [str(STDIO_SERVER)],
-    } | overrides
-
-
 async def test_only_referenced_entries_are_managed() -> None:
     config = config_with({"tools": entry_data(), "unused": entry_data()}, ["tools"])
     servers = McpServers.build(config)
@@ -441,24 +414,6 @@ async def test_a_tool_the_server_never_published_is_refused() -> None:
 # What a gated read of the running server answers with. Built from the
 # slice the registry was constructed with and its managers, and from
 # nothing else, so it cannot disagree with what is running.
-
-
-def config_granting(servers: dict[str, object], grants: dict[str, list[str]]) -> Config:
-    """A configuration whose agents reach the entries named, which is
-    what the grants half of the status view is read from."""
-    return Config(
-        server={},
-        providers={
-            "llm": {"mock": {"type": "mock"}},
-            "asr": {"mock": {"type": "mock"}},
-            "tts": {"mock": {"type": "mock"}},
-            "vad": {"mock": {"type": "mock"}},
-        },
-        mcp_servers=servers,
-        agent_defaults=dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"),
-        agents={name: {"prompt": "A", "mcp": entries} for name, entries in grants.items()},
-        default_agent=next(iter(grants)),
-    )
 
 
 async def test_a_connected_server_reports_its_published_tool_names() -> None:
