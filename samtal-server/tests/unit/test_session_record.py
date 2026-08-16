@@ -14,6 +14,7 @@ and pin suites say it by passing unmodified.
 """
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -24,6 +25,7 @@ import pytest
 from samtal_server.config import Config
 from samtal_server.conversations import schema
 from samtal_server.conversations.records import TurnRecord
+from samtal_server.conversations.store import ConversationStore
 from samtal_server.device.session import DeviceSession
 from samtal_server.providers import (
     AsrResult,
@@ -41,6 +43,7 @@ from samtal_server.runtime import turns
 from samtal_server.runtime.turns import tool_source
 from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
+from tests.unit.test_conversations_store import MANIFEST, rows
 from tests.unit.test_session import POET_TONE, TUTOR_TONE
 from tests.unit.test_session_reply_failures import QuietSocket
 from tests.unit.test_session_tools import (
@@ -204,17 +207,72 @@ async def test_the_reused_transcription_carries_its_language_and_no_asr_elapsed(
     assert record.asr_ms is None
 
 
-async def test_the_turn_is_stamped_off_the_sessions_own_clock() -> None:
-    """The store measures a turn's offset and its events' against one
-    origin, so the reading has to come from the clock the events are
-    stamped with rather than from one beside it. A session whose clock is
-    not the loop's is what tells the two apart."""
+class Clock:
+    """The session's clock, under the test's control.
+
+    `step` is how far it moves on every read, which is what tells a
+    record that sampled the clock for itself from one that took the
+    reading its event was stamped with. `advance` is the jump a scripted
+    provider makes, which is how an interval the pipeline measures is
+    exactly the interval the script says, with nothing sleeping.
+    """
+
+    def __init__(self, reading: float = 1000.0, step: float = 0.0) -> None:
+        self.reading = reading
+        self._step = step
+
+    def advance(self, seconds: float) -> None:
+        self.reading += seconds
+
+    def __call__(self) -> float:
+        reading = self.reading
+        self.reading += self._step
+        return reading
+
+
+class SpyTap:
+    """An event tap, which is where an emission's own reading is
+    visible from outside."""
+
+    def __init__(self) -> None:
+        self.emissions: list[Any] = []
+
+    def emit(self, emission: Any) -> None:
+        self.emissions.append(emission)
+
+
+async def test_the_turn_lands_on_its_heard_events_instant(tmp_path: Path) -> None:
+    """The store measures a turn's offset and its events' offsets from
+    one origin, so the two agree only if the turn carries the reading its
+    `heard` was stamped with. A clock that moves on every read is what
+    tells that apart from a second reading taken beside the emit, which
+    lands in another millisecond whenever the two straddle a boundary."""
     session, spy, _ = recording_session(scripts={"poet": ScriptedLlm(["Noted."])})
-    session._events._clock = lambda: 4242.0
+    session._events._clock = Clock(step=0.4)
+    tap = SpyTap()
+    session._events.attach(tap)
 
     await drive_reply(session, UTTERANCE)
 
-    assert only_record(spy).at == 4242.0
+    (heard,) = [one for one in tap.emissions if one.payload["event"] == "heard"]
+    record = only_record(spy)
+    assert record.at == heard.at
+
+    # And through the store, which is what turns both readings into the
+    # offsets a reader compares.
+    store = ConversationStore(tmp_path)
+    store.start()
+    try:
+        store.open_session("s", 1000.0, MANIFEST)
+        store.record_event("s", "heard", logging.INFO, {}, heard.at)
+        store.record_turn("s", record)
+        store.close_session("s", duration_s=1.0, reason="client")
+    finally:
+        store.stop()
+
+    (turn,) = rows(tmp_path, "turns")
+    (event,) = rows(tmp_path, "events")
+    assert turn["t_ms"] == event["t_ms"]
 
 
 async def test_the_transcription_this_turn_ran_is_timed() -> None:

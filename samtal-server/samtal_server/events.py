@@ -309,27 +309,36 @@ class SessionEvents:
         self._capture = None
 
     def now(self) -> float:
-        """The reading this session's events are stamped with.
+        """This session's clock, read.
 
-        For a record that has to land on the same timeline as an event
-        without being one: #120's turn record is stamped where `heard`
-        is emitted, and reading the clock through here is what makes
-        them the same clock rather than two that happen to agree."""
+        For measuring an interval on the same clock the events are
+        stamped with, which is what keeps a duration on the turn record
+        comparable with the offsets around it. Deliberately not how a
+        record lands on an event's instant: a second reading is a second
+        instant, and the emit below answers with the one it stamped for
+        exactly that reason."""
         return self._clock()
 
     # --- what a call site says ----------------------------------------
+    #
+    # Each answers the reading its event was stamped with, so a record
+    # that has to sit at the same instant takes it from the emission
+    # rather than sampling the clock again beside it. Almost every call
+    # site ignores the answer, which costs nothing; the one that does
+    # not is #120's turn record, whose offset has to equal its `heard`
+    # event's exactly rather than to within however long the emit took.
 
-    def debug(self, message: str, *args: Any, event: str, **fields: Any) -> None:
-        self._emit(logging.DEBUG, message, args, event, fields)
+    def debug(self, message: str, *args: Any, event: str, **fields: Any) -> float:
+        return self._emit(logging.DEBUG, message, args, event, fields)
 
-    def info(self, message: str, *args: Any, event: str, **fields: Any) -> None:
-        self._emit(logging.INFO, message, args, event, fields)
+    def info(self, message: str, *args: Any, event: str, **fields: Any) -> float:
+        return self._emit(logging.INFO, message, args, event, fields)
 
-    def warning(self, message: str, *args: Any, event: str, **fields: Any) -> None:
-        self._emit(logging.WARNING, message, args, event, fields)
+    def warning(self, message: str, *args: Any, event: str, **fields: Any) -> float:
+        return self._emit(logging.WARNING, message, args, event, fields)
 
-    def error(self, message: str, *args: Any, event: str, **fields: Any) -> None:
-        self._emit(logging.ERROR, message, args, event, fields)
+    def error(self, message: str, *args: Any, event: str, **fields: Any) -> float:
+        return self._emit(logging.ERROR, message, args, event, fields)
 
     def _emit(
         self,
@@ -338,10 +347,11 @@ class SessionEvents:
         args: tuple[Any, ...],
         event: str,
         fields: dict[str, Any],
-    ) -> None:
+    ) -> float:
         """The one path every conversation event takes: what every one
         of them carries, then this event's own fields, then every
-        consumer in turn with the log last."""
+        consumer in turn with the log last. Answers the reading the
+        emission was stamped with."""
         payload = {
             "event": event,
             "session": self.session_id,
@@ -352,6 +362,7 @@ class SessionEvents:
             payload=payload, at=self._clock(), level=level, message=message, args=args
         )
         _dispatch(tuple(self._taps), self._log, emission, logger)
+        return emission.at
 
     # --- the capture's own tracks, which are not events ---------------
 

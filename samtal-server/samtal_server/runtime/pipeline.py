@@ -676,7 +676,11 @@ class PipelineRuntime:
         self._turn = TurnUnderway()
         try:
             if result is None:
-                started = asyncio.get_running_loop().time()
+                # On the session's clock, which is the loop's: the
+                # record's one duration measured outside an event is
+                # read through the same thing that stamps the offsets it
+                # sits beside.
+                started = self._events.now()
                 async with self._watching("asr", providers.asr):
                     result = await providers.asr.transcribe(
                         pcm, PIPELINE_SAMPLE_RATE, language_hint=self._asr_language
@@ -686,9 +690,7 @@ class PipelineRuntime:
                 # at a different call site as part of a different
                 # decision, and a null here says "not measured this
                 # turn" rather than reporting somebody else's wait.
-                self._turn.asr_ms = round(
-                    (asyncio.get_running_loop().time() - started) * 1000
-                )
+                self._turn.asr_ms = round((self._events.now() - started) * 1000)
             # ASR is done, so the mid-ASR marker comes down: from here a
             # barge-in has nothing of the user's left to destroy.
             self._reply_pcm = None
@@ -706,7 +708,7 @@ class PipelineRuntime:
                     language_fields["language_confidence"] = round(
                         result.language_confidence, 2
                     )
-                self._events.info(
+                heard_at = self._events.info(
                     'session %s: heard "%s"',
                     self.session_id,
                     transcript,
@@ -716,12 +718,13 @@ class PipelineRuntime:
                     duration_s=heard_s,
                     **language_fields,
                 )
-                # Stamped off the emitter's own clock rather than from
-                # beside it, so the turn and the `heard` just emitted are
-                # on one timeline by construction rather than by two
-                # readings happening to agree.
+                # The emission's own reading rather than a second one
+                # taken beside it: the store measures both offsets from
+                # the same origin, so two readings a microsecond apart
+                # put the turn and its `heard` in different milliseconds
+                # whenever they straddle a boundary.
                 self._turn.heard_utterance(
-                    self._events.now(),
+                    heard_at,
                     transcript,
                     heard_s,
                     language_fields.get("language"),
