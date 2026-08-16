@@ -13,7 +13,7 @@ the place a real one would, which is why the two broken voices below
 are two classes rather than one with a flag.
 
 Nothing here builds a session or touches a socket, so this module sits
-directly on `samtal_server` and `tests.support.configs`.
+directly on `samtal_server` and the standard library.
 """
 
 import asyncio
