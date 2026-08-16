@@ -32,12 +32,11 @@ from tests.support.configs import DEVICE_MAC, LONG_REPLY, config_with_agent
 from tests.support.events import events, only
 from tests.support.providers import ConfirmingAsr, GatedAsr, ScriptedEndpointer
 from tests.support.sockets import RecordingSocket
-from tests.unit.test_session import (
+from tests.support.wire import (
     assert_endpointed_speech,
     collect_reply,
     collect_until,
     connect,
-    device_session,
     endpoint_silence,
     heard_ms,
     is_reply_start,
@@ -47,6 +46,7 @@ from tests.unit.test_session import (
     shake_hands,
     speech_pcm,
 )
+from tests.unit.test_session import device_session
 
 # A reply of about four seconds: long enough that an interruption sent
 # right after the first sentence starts lands mid-stream, short enough

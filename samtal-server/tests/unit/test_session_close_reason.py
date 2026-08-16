@@ -34,8 +34,13 @@ from tests.support.configs import (
     idle_config,
 )
 from tests.support.sockets import LoopingSocket
-from tests.unit.test_session import connect, say_something, shake_hands
-from tests.unit.test_session_limits import listen_realtime, wait_for_close
+from tests.support.wire import (
+    connect,
+    listen_realtime,
+    say_something,
+    shake_hands,
+    wait_for_close,
+)
 
 
 def closed(caplog: pytest.LogCaptureFixture) -> Any:

@@ -41,14 +41,14 @@ from tests.support.configs import (
 )
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 from tests.support.providers import ScriptedLlm
-from tests.unit.test_session import (
+from tests.support.wire import (
     connect,
-    device_session,
     say_something,
     sentences,
     shake_hands,
     tone_strength,
 )
+from tests.unit.test_session import device_session
 
 
 def call(name: str, **arguments: Any) -> ToolCall:
