@@ -1343,7 +1343,7 @@ its section of the implementation doc when written.
   acceptance criteria 1, 2, 3, 4 and 6 hold, and criterion 5's
   pruning and purge are now live and documented; lanes green.
 - [x] **[Conversation reads under `/api`](2026-08-15-conversation-store-implementation.md#milestone-4-conversation-reads-under-api)**
-  (PR TBD, branch `feature/conversation-store-m4`): the three routes with typed
+  (PR #159, branch `feature/conversation-store-m4`): the three routes with typed
   response models and cursor pagination; the parameterized
   per-request read engine; 404-without-file naming the key; the regenerated OpenAPI
   document; the server README's API section rows. Accept: the
