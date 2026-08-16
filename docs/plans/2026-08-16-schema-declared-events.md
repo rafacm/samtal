@@ -300,6 +300,19 @@ key, each asserted absent from all the surfaces above.
   `.env` file carrying the variable, so import order and ambient
   environment are covered rather than assumed.
 
+The emitter-mechanics tests need a seam, because strict enforcement
+would otherwise reject them by design: `test_events.py` emits
+synthetic names (`one` through `four`), undeclared fields, and a
+synthetic channel on purpose, since it tests dispatch, taps, copy
+semantics, and ordering rather than the production surface. The
+validator therefore reads the registry through injectable module
+state, and a test-scoped context manager installs a scratch
+registry (declaring the synthetic events) for exactly these tests.
+M2 updates `test_events.py` to use the seam; it is a mechanics
+suite, not one of the two characterization pin files, and those two
+stay byte-unchanged. The full lanes still run every PRODUCTION
+emission under strict enforcement, which is the point.
+
 Validation runs per emit on the event path only (never per frame:
 the per-frame `vad`/`dropped` samples are outside the tap contract
 and untouched). The cost is a dict walk over a handful of keys per
@@ -394,7 +407,10 @@ New: `samtal_server/events_schema.py`,
 `tests/unit/test_event_docs.py`, this plan's implementation doc.
 
 Modified: `samtal_server/events.py` (M2, validation in the two
-`_emit`s and the mode flag), `Dockerfile` (M2, one `ENV` line),
+`_emit`s and the mode flag), `samtal_server/main.py` (M2, the
+entrypoint's mode resolution), `tests/conftest.py` (M2, pinning the
+lanes strict), `tests/unit/test_events.py` (M2, the mechanics tests
+adopt the schema seam), `Dockerfile` (M2, one `ENV` line),
 `samtal-server/README.md` (M2 one paragraph; M3 exactness edits),
 `CHANGELOG.md` (per milestone).
 
@@ -623,6 +639,14 @@ Findings as received, condensed but faithful:
    and the file is absent from the touched list. Update it through
    an explicit schema seam; only the two pin files are the
    byte-unchanged contract.
+
+   *Resolution*: accepted. The validator reads the registry through
+   injectable module state with a test-scoped context manager
+   installing a scratch registry; M2 updates `test_events.py` to
+   declare its synthetic events through the seam, the file joins
+   the touched list, and the two pin files remain the only
+   byte-unchanged contract. Amended in the enforcement section and
+   the files list.
 
 9. **P1: the README check proves containment, not agreement.** The
    check rejected nothing extra, the table holds 34 event rows so
