@@ -60,7 +60,13 @@ remove the matching triplet.
 
 Purging a session that is still running ends its recording. The writer
 finds the row gone at its next turn and stops writing for that session,
-so what the conversation says after the purge is not recorded."""
+so what the conversation says after the purge is not recorded.
+
+A session that has only just started may not be in the file yet. The
+writer commits the session row moments after the conversation opens, and
+a purge deletes what is recorded, so one that arrives inside that window
+reports deleting nothing and the row lands behind it. Run the purge
+again if the counts were zero for a session you know exists."""
 
 
 def main(argv: Sequence[str] | None = None) -> int:

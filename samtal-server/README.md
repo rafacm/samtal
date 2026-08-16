@@ -1947,6 +1947,14 @@ is not recorded. Capture files are a separate instrument and are never
 touched; the session id is the correlation key for whoever needs to
 remove the matching triplet.
 
+A purge deletes what is recorded, and a session that has only just
+started may not be in the file yet: the writer commits the session row
+moments after the conversation opens, so a purge arriving inside that
+window reports deleting nothing and the row lands behind it. Run it
+again if the counts came back zero for a session you know exists. This
+is a queue-latency window rather than a durable state: everything the
+session then records is ordinary rows, deletable by the same command.
+
 Deletion is physical rather than query-level. The database runs with
 `PRAGMA secure_delete=ON`, so a freed page is overwritten with zeros
 instead of lingering in the freelist, and both retention and purge

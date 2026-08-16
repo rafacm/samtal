@@ -265,9 +265,10 @@ def test_the_schema_command_prints_the_reference_and_opens_nothing(
 def test_the_purge_help_says_what_it_does_not_touch(
     tmp_path: Path, run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """Two consequences an operator cannot read off the counts: the
-    capture triplet stays, and a session that is still running stops
-    being recorded."""
+    """Three consequences an operator cannot read off the counts: the
+    capture triplet stays, a session that is still running stops being
+    recorded, and one that has only just started may not be in the file
+    to delete yet."""
     with pytest.raises(SystemExit) as left:
         run("purge", "--help")
 
@@ -275,6 +276,7 @@ def test_the_purge_help_says_what_it_does_not_touch(
     printed = capsys.readouterr().out
     assert "Capture files are never touched" in printed
     assert "still running ends its recording" in printed
+    assert "may not be in the file yet" in printed
 
 
 def test_the_command_word_dispatches_to_this_group(
