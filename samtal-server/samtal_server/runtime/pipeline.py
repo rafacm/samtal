@@ -1164,7 +1164,7 @@ class PipelineRuntime:
         started = loop.time()
         try:
             async with asyncio.timeout(self._timeout_for(call.name)):
-                content, is_error = await self._dispatch(call)
+                content, is_error = await self._dispatch(call, classified)
         except TimeoutError:
             content, is_error = f'the tool "{call.name}" did not answer in time', True
         except asyncio.CancelledError:
@@ -1224,21 +1224,31 @@ class PipelineRuntime:
             arguments=None if malformed else dict(call.arguments),
         )
 
-    async def _dispatch(self, call: ToolCall) -> tuple[str, bool]:
+    async def _dispatch(self, call: ToolCall, classified: ToolInvocation) -> tuple[str, bool]:
         """Route a call by the structure of its name: builtins are bare,
         the device's tools are the ones it listed, and everything else
-        carries its MCP server entry as a prefix."""
+        carries its MCP server entry as a prefix.
+
+        `classified` is the answer `_run_one` already has, passed in
+        rather than recomputed: the one line here that says anything
+        about the call describes it exactly as its `tool_call` event
+        does, and two classifications of one call could disagree."""
         if call.malformed_arguments is not None:
-            # The size, not the bytes. What a model streamed instead of a
-            # JSON object is its own output, which is content and belongs
-            # to the store (#120); the length is what tells a truncated
-            # object from a model that answered in prose, and it is the
-            # half of this line anybody diagnosing ever used. The record
+            # A plain line and not an event, and it obeys the same rule
+            # as the event beside it (#120): the size of what the model
+            # streamed rather than the bytes, since those are content,
+            # and a name only where this server authored one. A device's
+            # tool name and a name nobody publishes are the peer's own
+            # bytes on a retained surface whether the line carrying them
+            # is structured or not. The length is what tells a truncated
+            # object from a model that answered in prose, and the record
             # carries the same fact as its `malformed` flag.
+            _, named = _tool_named(classified)
             logger.warning(
-                "session %s: tool %s got %d characters of unparseable arguments",
+                "session %s: %s tool%s got %d characters of unparseable arguments",
                 self.session_id,
-                call.name,
+                classified.source,
+                named,
                 len(call.malformed_arguments),
             )
             return "the arguments were not a JSON object; call again with valid ones", True
