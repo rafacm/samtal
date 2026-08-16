@@ -342,24 +342,40 @@ itself the conformance proof running continuously.
 
 The table's `when` cells carry prose worth keeping (they explain,
 per event, what moment of the system the event marks), so
-generating the table would trade away its best content. Instead
-`tests/unit/test_event_docs.py` parses the table and cross-checks:
+generating the whole table would trade away its best content. But
+free backticked prose is not a machine representation of a field
+set, the table holds 34 event rows against 57 declared events, and
+its lead sentence's base-field claim is only true for the session
+channel. M3 therefore restructures the table without discarding the
+prose:
 
-- event-name equality both ways: every registry event has exactly
-  one row, every row names a declared event;
-- every declared field name appears in backticks in its row's
-  fields cell (base fields excepted: the section's lead sentence
-  already says every event carries `event`, `session`, `device`);
-- every declared token appears in backticks in its row's cell;
-- levels are not in the table today and are not added by this
-  check; they are declared in the registry and enforced at emit.
+- The table splits into a session-channel table and a
+  server-channel table (matching how the payloads actually differ),
+  each section's lead sentence stating its own base fields
+  truthfully; the 23 missing events get rows, budgeted as M3's
+  main writing task.
+- The fields cell adopts a mechanically delimited grammar the
+  checker parses exactly: the cell is a comma-separated list of
+  `field` names, each optionally followed by one parenthesized
+  annotation; a token-set field's annotation lists every token in
+  backticks; prose lives inside the parentheses. The `when` cell
+  stays free prose.
+- `tests/unit/test_event_docs.py` then checks real agreement, both
+  directions at every layer: every registry event has exactly one
+  row and every row names a declared event (duplicates fail); each
+  row's parsed field list equals the declared non-base field set
+  exactly, so an extra documented field fails like a missing one;
+  each token-set field's parenthesized tokens equal the declared
+  set exactly, bogus tokens included; the two sections' event sets
+  match the channel split.
 
 The check reads the table from the README at test time, so a table
 edit that breaks agreement fails the unit lane, which is what the
-acceptance criterion's "diff-checked in CI" means here. Small README
-edits to reach exactness are expected (a field the table forgot, a
-token the prose spells differently) and are ordinary doc fixes
-recorded in the implementation doc, not behavior changes.
+acceptance criterion's "diff-checked in CI" means here. The
+mutation matrix covers every branch: a dropped row, a bogus row, a
+duplicate row, a dropped field mention, an EXTRA bogus field
+mention, a dropped token, and an extra bogus token, each observed
+failing and reverted.
 
 ### What is deliberately out of scope
 
@@ -471,10 +487,11 @@ recorded in the PR body with observed failure output per branch.
   fewer than a dozen keys; the events fire per decision, not per
   frame. No caching machinery unless a lane shows a need, which
   none is expected to.
-- **The README check is brittle against prose edits.** The check
-  reads backticked names only, never prose; a wording edit that
-  keeps the names passes, and one that drops a name should fail,
-  because that is the drift the check exists to catch.
+- **The README check is brittle against prose edits.** The fields
+  cell's grammar confines prose to parentheses and the `when`
+  cell, which the check never reads for names; a wording edit
+  there passes, and an edit to the delimited field list should
+  fail, because that is the drift the check exists to catch.
 - **`session_rejected` on two channels.** Declared once with both
   channels and the union payload validated per emit; the channel
   gates which emitter may say it, and the base-field difference is
@@ -657,6 +674,15 @@ Findings as received, condensed but faithful:
    generate an appendix), check equality both ways plus duplicate
    rows and scope-aware base fields, add bogus-field and
    bogus-token mutations, and budget the missing rows.
+
+   *Resolution*: accepted. M3 now splits the table by channel with
+   truthful per-section base-field sentences, adds the 23 missing
+   rows as its budgeted writing task, gives the fields cell a
+   mechanically delimited grammar (comma-separated fields, one
+   parenthesized annotation each, tokens enumerated inside), and
+   the check asserts exact equality both ways at every layer, with
+   duplicate-row, bogus-field and bogus-token mutations joining
+   the matrix. Amended in the README-check section.
 
 10. **P2: M1's conformance test cannot prove exactness.** Call-site
     containment does not reject a surplus declared field, and
