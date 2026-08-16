@@ -149,7 +149,11 @@ dataclasses and the declarations:
     confined to sanitization of values the taxonomy cannot
     otherwise admit;
   - `INT`, `FLOAT` (an `INT` value satisfies `FLOAT`, since sites
-    pass round numbers where a measure is integral), `BOOL`;
+    pass round numbers where a measure is integral; `bool` is
+    rejected for both, checked first, because `True` is an `int`
+    to `isinstance` and a boolean in a duration field is a bug;
+    floats must be finite, since NaN and infinities are not
+    measurements and JSON cannot carry them faithfully), `BOOL`;
   - `COUNT`: an `int >= 0`, for the fields whose meaning is "how
     many" (`sentences`, `tools`, and kin; `agents` is NOT one of
     these, see the list kinds);
@@ -338,6 +342,13 @@ M2 updates `test_events.py` to use the seam; it is a mechanics
 suite, not one of the two characterization pin files, and those two
 stay byte-unchanged. The full lanes still run every PRODUCTION
 emission under strict enforcement, which is the point.
+
+Validation is written in explicit conditions that raise; it
+contains no `assert` statement, because `python -O` strips
+assertions and an optimized production process silently losing its
+enforcement is exactly the quiet failure this issue exists to end.
+M2 proves it: a subprocess running under `-O` emits an invalid
+event in strict mode and the test asserts it still raises.
 
 Validation runs per emit on the event path only (never per frame:
 the per-frame `vad`/`dropped` samples are outside the tap contract
@@ -783,5 +794,11 @@ Findings as received, condensed but faithful:
     `python -O`. Use explicit conditions and raises, reject bools
     for numeric kinds, require finiteness, and prove strictness
     under `-O` in a subprocess.
+
+    *Resolution*: accepted. Booleans are rejected for numeric
+    kinds with the isinstance-order stated, floats must be finite,
+    validation uses explicit raising conditions with no assert
+    statement, and M2 carries the `-O` subprocess proof. Amended
+    in the registry and enforcement sections.
 
 Verdict: not ready.
