@@ -139,6 +139,53 @@ def test_the_numbers_reader_takes_a_list_or_a_single_number() -> None:
         assert '"t"' in str(excinfo.value)
 
 
+# Every provider type an entry configures a model on, with the options
+# it needs to build and nothing else. faster-whisper is absent because
+# building one downloads weights; its own suite asserts the same thing
+# against a fake engine.
+MODEL_BEARING = [
+    ("llm", "anthropic", {"model": "claude-sonnet-5"}),
+    (
+        "llm",
+        "openai_compatible",
+        {"base_url": "http://localhost:11434/v1", "model": "qwen3:8b"},
+    ),
+    ("asr", "openai", {"model": "gpt-4o-mini-transcribe"}),
+    ("tts", "openai", {"voice": "alloy", "model": "gpt-4o-mini-tts"}),
+    ("tts", "elevenlabs", {"voice_id": "21m00Tcm4TlvDq8ikWAM", "model": "eleven_flash_v2_5"}),
+]
+
+
+@pytest.mark.parametrize(("stage", "type_", "options"), MODEL_BEARING)
+def test_a_provider_that_runs_a_model_names_it_on_its_identity(
+    monkeypatch: pytest.MonkeyPatch, stage: str, type_: str, options: dict[str, object]
+) -> None:
+    """The identity is what the events describe an entry with, so a
+    model that only the provider's own `__init__` knows is a round
+    nobody can attribute to a model (#120). Every real type reports the
+    identifier it was configured with, unchanged."""
+    monkeypatch.setenv("SAMTAL_TEST_KEY", "sk-test")
+    provider = build_provider(
+        stage,
+        "entry",
+        provider_config(type=type_, api_key_env="SAMTAL_TEST_KEY", **options),
+    )
+    assert provider.identity is not None
+    assert provider.identity.model == options["model"]
+    # And the rest of the identity is what it always was.
+    assert (provider.identity.stage, provider.identity.name) == (stage, "entry")
+
+
+def test_a_provider_with_no_model_to_name_carries_none() -> None:
+    """A bundled engine and the mocks run nothing an operator chose, so
+    the field is absent rather than invented, and the events that
+    describe them carry one field fewer."""
+    for stage in ("llm", "asr", "tts", "vad"):
+        provider = build_provider(stage, "m", provider_config(type="mock"))
+        assert provider.identity is not None
+        assert provider.identity.model is None
+
+
 def test_every_stage_builds_its_mock() -> None:
     assert isinstance(build_provider("llm", "m", provider_config(type="mock")), MockLlm)
     assert isinstance(build_provider("asr", "m", provider_config(type="mock")), MockAsr)

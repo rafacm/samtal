@@ -1009,6 +1009,7 @@ async def test_provider_failed(caplog: pytest.LogCaptureFixture) -> None:
             "provider": "cloud",
             "type": "openai",
             "host": "api.example.com",
+            "model": "gpt-4o-mini",
         },
     }
 
@@ -1039,10 +1040,11 @@ async def test_a_failing_providers_own_words_reach_no_record(
     )
     # And the diagnosis survives it: what failed, where, and how long.
     assert failed.error == "ConnectionRefusedError"
-    assert (failed.stage, failed.provider, failed.host) == (
+    assert (failed.stage, failed.provider, failed.host, failed.model) == (
         "llm",
         "cloud",
         "api.example.com",
+        "gpt-4o-mini",
     )
 
 

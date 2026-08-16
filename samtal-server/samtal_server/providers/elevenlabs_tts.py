@@ -109,7 +109,7 @@ class ElevenLabsTts(TtsProvider):
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self._voice_id = voice_id
-        self._model = model
+        self.model = model
         self.host = API_HOST
         self._output_format = output_format
         self.sample_rate = sample_rate
@@ -131,7 +131,7 @@ class ElevenLabsTts(TtsProvider):
         )
 
     def _body(self, text: str) -> dict[str, object]:
-        body: dict[str, object] = {"text": text, "model_id": self._model}
+        body: dict[str, object] = {"text": text, "model_id": self.model}
         if self._language_code:
             body["language_code"] = self._language_code
         if self._voice_settings:

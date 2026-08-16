@@ -68,10 +68,22 @@ def built_with(
     provider = faster_whisper.build(
         "providers.asr.ears", ProviderConfig.model_validate({"type": "faster_whisper", **options})
     )
-    return provider, provider._model  # type: ignore[attr-defined]
+    return provider, provider._engine  # type: ignore[attr-defined]
 
 
 AUDIO = b"\x00\x00" * 160
+
+
+@pytest.mark.skipif(not HAS_FASTER_WHISPER, reason="faster-whisper extra not installed")
+def test_the_configured_model_is_named_on_the_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The engine is private and the model identifier is not: it is what
+    the registry stamps onto the entry's identity, and from there what
+    the provider-bearing events carry as `model` (#120)."""
+    provider, engine = built_with(monkeypatch, model="medium")
+    assert provider.model == "medium"
+    assert engine.model == "medium"
 
 
 @pytest.mark.skipif(not HAS_FASTER_WHISPER, reason="faster-whisper extra not installed")

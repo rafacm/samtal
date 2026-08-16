@@ -68,12 +68,21 @@ class ProviderIdentity:
     localhost, and it is the actionable half for anyone with an egress
     allowlist: it turns "TTS is broken" into "TTS cannot reach
     api.elevenlabs.io". It is None for an engine that runs in this
-    process and reaches nothing."""
+    process and reaches nothing.
+
+    `model` is which model this entry runs, and it comes from the
+    provider for the same reason: only the entry knows what its own
+    options resolved to. It is the GenAI conventions'
+    `gen_ai.request.model` (#120), so an exporter reads it off the
+    events without mapping, and it is None for a type that has no model
+    to name (a bundled VAD, a Piper voice, the mocks), where an event
+    carries fewer fields rather than inventing one."""
 
     stage: str
     name: str
     type: str
     host: str | None = None
+    model: str | None = None
 
 
 class Provider:
@@ -100,6 +109,13 @@ class Provider:
     anything, and it is a fact about the built entry rather than about
     the type: two `openai` entries can reach different hosts.
 
+    `model` is what this entry runs, set by providers configured with
+    one, and a fact about the built entry in exactly the same way: two
+    `openai` LLM entries can name different models, and which of them
+    answered a slow round is what makes the round attributable. A type
+    with nothing to name (the bundled VAD, a Piper voice, the mocks)
+    leaves it None.
+
     `identity` is None until `build_provider` stamps it, which is every
     provider a running server holds. A hand-built one (a test, a
     fixture) keeps None, and the events that describe it simply carry
@@ -107,6 +123,7 @@ class Provider:
 
     egress: ClassVar[bool | None]
     host: str | None = None
+    model: str | None = None
     identity: ProviderIdentity | None = None
 
 

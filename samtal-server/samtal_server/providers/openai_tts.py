@@ -91,7 +91,7 @@ class OpenAiTts(TtsProvider):
         client: AsyncOpenAI | None = None,
     ) -> None:
         self._voice = voice
-        self._model = model
+        self.model = model
         self.host = endpoint_host(base_url)
         self._instructions = instructions
         self._speed = speed
@@ -123,7 +123,7 @@ class OpenAiTts(TtsProvider):
         failure: ProviderCallError | None = None
         try:
             async with self._client.audio.speech.with_streaming_response.create(
-                model=self._model,
+                model=self.model,
                 voice=self._voice,
                 input=text,
                 response_format="pcm",

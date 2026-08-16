@@ -133,12 +133,18 @@ def _tool_named(classified: ToolInvocation) -> tuple[dict[str, str], str]:
 def provider_fields(stage: str, provider: object) -> dict[str, Any]:
     """Which configuration entry a provider is, for an event that names
     it: the stage it serves, the entry an operator wrote in the YAML,
-    its type, and the host it reaches.
+    its type, the host it reaches, and the model it runs.
 
-    `host` is omitted for an engine that runs in this process, and the
-    rest for a provider the registry did not build (a test's, a
-    fixture's): an event that cannot name the entry says less rather
-    than guessing."""
+    `host` is omitted for an engine that runs in this process, `model`
+    for a type that has none to name, and the rest for a provider the
+    registry did not build (a test's, a fixture's): an event that cannot
+    name the entry says less rather than guessing.
+
+    `model` is the GenAI conventions' `gen_ai.request.model` (#120),
+    which is what makes a round attributable to the model that ran it
+    rather than only to the entry that pointed at one: two entries of a
+    type can name different models, and a turn's token totals blend the
+    rounds of everything that answered it."""
     identity = getattr(provider, "identity", None)
     fields: dict[str, Any] = {"stage": stage}
     if identity is None:
@@ -147,6 +153,8 @@ def provider_fields(stage: str, provider: object) -> dict[str, Any]:
     fields["type"] = identity.type
     if identity.host is not None:
         fields["host"] = identity.host
+    if identity.model is not None:
+        fields["model"] = identity.model
     return fields
 
 

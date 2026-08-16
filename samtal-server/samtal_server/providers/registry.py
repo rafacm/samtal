@@ -275,7 +275,11 @@ def build_provider(
     # provider the operator cannot map back to their configuration.
     if isinstance(provider, Provider):
         provider.identity = ProviderIdentity(
-            stage=stage, name=name, type=config.type, host=provider.host
+            stage=stage,
+            name=name,
+            type=config.type,
+            host=provider.host,
+            model=provider.model,
         )
     return provider
 

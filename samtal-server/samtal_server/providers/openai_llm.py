@@ -155,7 +155,7 @@ class OpenAiCompatibleLlm(LlmProvider):
                 max_retries=MAX_RETRIES,
             )
         )
-        self._model = model
+        self.model = model
         self._max_tokens = max_tokens
         self.host = endpoint_host(base_url)
         # Whether to ask for token counts, rather than whether to read
@@ -175,7 +175,7 @@ class OpenAiCompatibleLlm(LlmProvider):
         tool_choice: ToolChoice = "auto",
     ) -> AsyncIterator[LlmEvent]:
         request: dict[str, Any] = {
-            "model": self._model,
+            "model": self.model,
             "messages": chat_messages(system, turns),
             "max_tokens": self._max_tokens,
             "stream": True,

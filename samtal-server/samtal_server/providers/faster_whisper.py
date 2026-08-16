@@ -67,7 +67,8 @@ class FasterWhisperAsr(AsrProvider):
         language_confidence_floor: float,
     ) -> None:
         logger.info("loading faster-whisper model %s (%s, %s)", model, device, compute_type)
-        self._model = WhisperModel(
+        self.model = model
+        self._engine = WhisperModel(
             model,
             device=device,
             compute_type=compute_type,
@@ -102,7 +103,7 @@ class FasterWhisperAsr(AsrProvider):
         # A configured language always beats the hint: the hint is this
         # provider's own earlier detection coming back from the session.
         pinned = self._language or language_hint
-        segments, info = self._model.transcribe(audio, language=pinned, **self._decode_options)
+        segments, info = self._engine.transcribe(audio, language=pinned, **self._decode_options)
         detected = getattr(info, "language", None)
         confidence = getattr(info, "language_probability", None) if pinned is None else None
 
@@ -124,7 +125,7 @@ class FasterWhisperAsr(AsrProvider):
                 self._language_fallback,
             )
             detected = self._language_fallback
-            segments, info = self._model.transcribe(
+            segments, info = self._engine.transcribe(
                 audio, language=self._language_fallback, **self._decode_options
             )
 
