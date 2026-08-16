@@ -333,8 +333,15 @@ absent from all the surfaces above, in both modes.
   payload field cannot un-render the same value from `args`; a
   valid emission keeps its own sentence untouched. The emit
   proceeds so the operator still gets a line and the taps still
-  get the event, and one plain WARNING sentence on the emitter's
-  own channel reports the violation. Not an event itself, for the
+  get the event, and one plain ERROR sentence on the emitter's
+  own channel reports the violation (ERROR rather than WARNING
+  because `log_level` admits roots above WARNING and a complaint
+  that vanishes under an ERROR root is no complaint; M2 tests the
+  complaint's survival under a root of ERROR; a root of CRITICAL
+  suppresses it along with `provider_failed` and every other
+  ERROR-class diagnostic, that operator's explicit choice,
+  recorded here rather than engineered around with a side
+  channel). Not an event itself, for the
   same reason a tap failure's report is not one: a complaint that
   went back through validation could recurse. The recovery is a
   MATRIX, defined per violation class rather than implied by
@@ -1077,6 +1084,14 @@ eleven findings. As received, condensed but faithful:
     deployments retain no complaint. Emit at a level that
     survives, or a dedicated path, and test under ERROR and
     CRITICAL roots.
+
+    *Resolution*: partially adopted. The complaint moves to ERROR
+    with a survival test under an ERROR root; a CRITICAL root is
+    accepted as suppressing it together with every other
+    ERROR-class diagnostic, that operator's explicit choice, in
+    preference to a dedicated unfiltered side channel that would
+    bypass the logging configuration the deployment chose. Amended
+    in the enforcement section.
 
 11. **P2: the sanitization allowance contradicts the
     identical-behavior and untouched-files claims, and sanitizing
