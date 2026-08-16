@@ -320,8 +320,12 @@ async def test_an_llm_round_is_logged_with_what_it_cost(
     # The history the round was given, which is the cheap proxy for a
     # payload growing turn by turn.
     assert round_one.turns == 1
-    assert round_one.prompt_tokens == 140
-    assert round_one.completion_tokens == 12
+    # The GenAI conventions' names, adapted to this project's field
+    # style, which is also what the store's turns columns are called
+    # (#120). The `Usage` dataclass they are read off keeps the
+    # SDK-shaped names: it is not surface.
+    assert round_one.input_tokens == 140
+    assert round_one.output_tokens == 12
 
 
 async def test_a_provider_that_reports_no_usage_is_not_an_error(
@@ -332,8 +336,8 @@ async def test_a_provider_that_reports_no_usage_is_not_an_error(
         await run_reply(session, "say something")
 
     logged = only(caplog, "llm_round")
-    assert not hasattr(logged, "prompt_tokens")
-    assert not hasattr(logged, "completion_tokens")
+    assert not hasattr(logged, "input_tokens")
+    assert not hasattr(logged, "output_tokens")
     assert logged.duration_ms >= 0
 
 

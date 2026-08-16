@@ -522,7 +522,12 @@ class PipelineRuntime:
         the whole reply rather than one agent's leg, so the generation
         after a handover is a round of its own rather than another
         first round. Token counts appear when the provider reported
-        them; their absence is a fact about the endpoint.
+        them; their absence is a fact about the endpoint. They are named
+        `input_tokens` and `output_tokens`, the GenAI conventions'
+        vocabulary adapted to this project's field style (#120), which
+        is also what the store's `turns` columns have been called since
+        their first migration. The `Usage` dataclass keeps the SDK-shaped
+        names it is filled from: it is not surface.
 
         `first_token_ms` times the first spoken token, so a round that
         only asked for a tool carries none: there was no token, and
@@ -533,9 +538,9 @@ class PipelineRuntime:
         elapsed = loop.time() - began
         tokens: dict[str, Any] = {}
         if usage is not None and usage.prompt_tokens is not None:
-            tokens["prompt_tokens"] = usage.prompt_tokens
+            tokens["input_tokens"] = usage.prompt_tokens
         if usage is not None and usage.completion_tokens is not None:
-            tokens["completion_tokens"] = usage.completion_tokens
+            tokens["output_tokens"] = usage.completion_tokens
         if first_token_at is not None:
             tokens["first_token_ms"] = round((first_token_at - began) * 1000)
         self._events.info(
