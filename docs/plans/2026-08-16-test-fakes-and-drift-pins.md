@@ -534,7 +534,8 @@ From `samtal-server/`, per milestone:
       (PR #163): the remaining four support modules exist, the unit-lane
       cross-import count is zero, `test_support_boundaries.py`
       enforces it; both lanes green, count non-decreasing.
-- [ ] M4: the drift pins land with recorded mutation proofs:
+- [x] [**M4: the drift pins**](2026-08-16-test-fakes-and-drift-pins-implementation.md#milestone-4-the-drift-pins)
+      (PR TBD): the drift pins land with recorded mutation proofs:
       example-config coverage of `ServerConfig`, docgen examples
       against `examples/` both ways, the CLI/API shape bridge in
       `test_config_cli_shapes.py`; CHANGELOG entry; both lanes
