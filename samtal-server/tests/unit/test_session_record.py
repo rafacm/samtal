@@ -28,6 +28,7 @@ from samtal_server.conversations.records import TurnRecord
 from samtal_server.conversations.store import ConversationStore
 from samtal_server.device.session import DeviceSession
 from samtal_server.providers import (
+    AsrProvider,
     AsrResult,
     LlmEvent,
     LlmProvider,
@@ -275,12 +276,45 @@ async def test_the_turn_lands_on_its_heard_events_instant(tmp_path: Path) -> Non
     assert turn["t_ms"] == event["t_ms"]
 
 
+class ScriptedAsr(AsrProvider):
+    """A transcription that takes exactly as long as it says it does, by
+    moving the session's clock rather than by sleeping. What the record
+    reports is then the interval itself and not a lower bound on it."""
+
+    egress = False
+
+    def __init__(self, clock: Clock, elapsed_s: float, text: str = "turn it on") -> None:
+        self._clock = clock
+        self._elapsed_s = elapsed_s
+        self._text = text
+
+    async def transcribe(
+        self, pcm: bytes, sample_rate: int, language_hint: str | None = None
+    ) -> AsrResult:
+        self._clock.advance(self._elapsed_s)
+        return AsrResult(text=self._text)
+
+
+ASR_ELAPSED_S = 0.25
+
+
 async def test_the_transcription_this_turn_ran_is_timed() -> None:
+    """The interval exactly: a nonnegative assertion would pass on a
+    hard-coded zero, which is the one wrong answer worth ruling out for a
+    latency column."""
+    clock = Clock()
     session, spy, _ = recording_session(scripts={"poet": ScriptedLlm(["Understood."])})
+    session._events._clock = clock
+    assert session.runtime._providers is not None
+    session.runtime._providers = replace(
+        session.runtime._providers, asr=cast(Any, ScriptedAsr(clock, ASR_ELAPSED_S))
+    )
+
     await drive_reply(session, UTTERANCE)
 
     record = only_record(spy)
-    assert record.asr_ms is not None and record.asr_ms >= 0
+    assert record.asr_ms == round(ASR_ELAPSED_S * 1000)
+    assert record.heard == "turn it on"
 
 
 # The legs a handover leaves
@@ -578,40 +612,49 @@ async def test_a_call_is_recorded_when_speech_fails_before_the_dispatch() -> Non
 # The synthesizer's first bytes
 
 
-class DelayedTts(TtsProvider):
-    """A voice with a real time to first byte, so the measurement has
-    something to measure."""
+class SentenceTts(TtsProvider):
+    """A voice whose time to first byte depends on which sentence it is
+    given, so the two syntheses a reply runs at once can be told apart by
+    which of their waits the measurement reports."""
 
     egress = False
 
-    def __init__(self, latency_s: float) -> None:
+    def __init__(self, latencies: dict[str, float]) -> None:
         self.sample_rate = 24000
-        self._latency_s = latency_s
+        self._latencies = latencies
 
     async def synthesize(self, text: str) -> AsyncIterator[bytes]:
-        await asyncio.sleep(self._latency_s)
+        await asyncio.sleep(self._latencies[text])
         yield b"\x00\x00" * 240
 
 
-LATENCY_S = 0.05
+# Far enough apart that scheduling jitter cannot carry one into the
+# other's half of the range.
+SLOW_S = 0.30
+QUICK_S = 0.02
 
 
-async def test_the_first_audio_of_the_reply_is_timed_at_the_synthesizer() -> None:
+@pytest.mark.parametrize(("first_s", "second_s"), [(SLOW_S, QUICK_S), (QUICK_S, SLOW_S)])
+async def test_the_first_synthesis_is_what_the_first_audio_times(
+    first_s: float, second_s: float
+) -> None:
+    """The reply's first request, in both completion orders. The two
+    syntheses of a reply overlap, so the second can answer first: taking
+    whichever reported first fails the slow-then-quick case, and letting
+    a later one overwrite fails the quick-then-slow one."""
     script = ScriptedLlm(["One here. Two here."])
     session, spy, _ = recording_session(scripts={"poet": script})
     assert session.runtime._providers is not None
     session.runtime._providers = replace(
-        session.runtime._providers, tts=cast(Any, DelayedTts(LATENCY_S))
+        session.runtime._providers,
+        tts=cast(Any, SentenceTts({"One here.": first_s, "Two here.": second_s})),
     )
 
     await drive_reply(session, UTTERANCE)
 
-    record = only_record(spy)
-    assert record.tts_first_audio_ms is not None
-    # The first request's own wait, not the second sentence's: that one
-    # was started against playback already happening.
-    assert record.tts_first_audio_ms >= LATENCY_S * 1000
-    assert record.tts_first_audio_ms < LATENCY_S * 1000 * 4
+    measured = only_record(spy).tts_first_audio_ms
+    assert measured is not None
+    assert abs(measured - first_s * 1000) < (SLOW_S - QUICK_S) * 1000 / 2
 
 
 async def test_a_reply_that_spoke_nothing_times_no_audio() -> None:
