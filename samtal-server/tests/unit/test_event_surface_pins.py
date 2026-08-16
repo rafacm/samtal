@@ -84,6 +84,7 @@ from tests.support.configs import (
     masked_config,
     watchdog_config,
 )
+from tests.support.device_tools import FakeDevice
 from tests.support.events import only
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 from tests.support.providers import (
@@ -107,7 +108,6 @@ from tests.unit.test_session_barge_in import realtime_session
 from tests.unit.test_session_filler import masked_session
 from tests.unit.test_session_limits import listen_realtime, wait_for_close
 from tests.unit.test_session_tools import _nothing, call, run_reply, session_for
-from tests.unit.test_tools_device import FakeDevice
 
 # The utterance the direct drivers hand a reply: 20 ms of silence, which
 # the mock ASR answers whatever it holds.

@@ -52,12 +52,12 @@ from tests.support.configs import (
     base_config,
     registry_config,
 )
+from tests.support.device_tools import STATUS, FakeDevice
 from tests.support.providers import BrokenStreamingTts as BrokenTts
 from tests.support.providers import ScriptedLlm
 from tests.support.sockets import QuietSocket
 from tests.unit.test_conversations_store import MANIFEST, rows
 from tests.unit.test_session_tools import call, drive_reply, session_for, start_reply
-from tests.unit.test_tools_device import STATUS, FakeDevice
 
 # One frame of silence, which the mock ASR answers with the configured
 # transcript: 640 bytes at 16 kHz, which is the 0.02 s the record
