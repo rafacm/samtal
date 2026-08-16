@@ -862,8 +862,8 @@ conversation ended. A server with no section behaves exactly as it did,
 which the rest of the unit lane passing unmodified beside this is the
 evidence for.
 
-Six commits. The one that lands this section and ticks the milestone is
-the seventh:
+Seven commits. The one that lands this section and ticks the milestone
+is the eighth:
 
 1. `0d2a79a` Give the conversation store a configuration key
 2. `3f45eb1` Open the store when the server is asked for one
@@ -1098,3 +1098,64 @@ through the schema reference, which was generated in milestone 1 and
 still regenerates byte-identically. Criterion 5's pruning and purge were
 built in milestone 1 and are live from this release, and the README
 section is where an operator reads about them.
+
+### Rebase onto the merged milestone 2
+
+The branch was cut at the milestone 2 tip before that milestone's PR
+#157 review round, so its three fixes were not underneath it. After #157
+rebase-merged, the milestone was replayed with `git rebase --onto
+origin/main`. The hashes listed above are the ones it was built at, as
+milestones 1 and 2 record theirs; replayed they are `07147dc`,
+`a862160`, `5854885`, `16bf39f`, `7d7050d`, `bc31016` and `c4d44c8`.
+
+One conflict, in this file, and it is the shape a stacked branch has
+rather than a disagreement: the round appended its own section exactly
+where this milestone appends its section. Resolved by keeping both, the
+round's first, with each verification block left as its own run
+reported it. Nothing else conflicted, and that is structural rather than
+lucky: the round's fixes are in `runtime/turns.py`, `runtime/pipeline.py`
+and `events.py`, and this milestone touches `app.py`,
+`config/models.py`, `conversations/`, `device/session.py`,
+`registry.py`, `ws.py` and suites of its own.
+
+Two of the round's changes reach this milestone, and neither cost it
+anything:
+
+- **A session's emit now answers the reading it stamped.** The sink
+  reads `emission.at`, which is that same reading arriving the other
+  way, so nothing here moves; the device edge's own emits ignore the
+  answer as every other site does.
+- **Every call the model issues is reserved on the record at the end of
+  its round and updated in place.** For a call that ran, the row is
+  exactly what this milestone's suites assert, and they pass unchanged.
+  For a call that never ran, the reservation's nulls are what the
+  writer already stores as no result and no duration, and it counts in
+  `turns.tool_calls`, which is `len(record.tools)` and needed no change.
+  The store is where that shape was already defined, which is why the
+  fix landed a milestone earlier without reaching it.
+
+Re-run from `samtal-server/` at `c4d44c8`, on `origin/main` at
+`33208e0`:
+
+```
+$ uv run ruff check .
+All checks passed!
+```
+
+```
+$ uv run pytest tests/unit -q
+2176 passed, 15 skipped in 289.53s (0:04:49)
+```
+
+```
+$ uv run pytest tests/integration -q
+55 passed in 161.86s (0:02:41)
+```
+
+The arithmetic holds against the new parent rather than the old one:
+`origin/main` is 2137 unit tests and 53 integration ones, and this
+milestone's 39 and 2 make 2176 and 55. The only moved pin is still
+`test_session_closed`, and `git diff origin/main` over the other pin and
+event-assertion suites, over `events.py` and over `runtime/` answers
+with nothing, which is what says this milestone layers on the round
+rather than over it.
