@@ -2066,3 +2066,98 @@ rather than left for a review round to find:
   inherits the narrowing, so it holds none; the sentence now names room
   audio and a track of the session's events, its pin moved with it, and
   the CHANGELOG's capture entry says it in the same words.
+
+### Rebase onto the merged milestone 4
+
+The branch was cut at the milestone 4 tip before that milestone's PR
+#159 review round, so its three fixes were not underneath it. After #159
+rebase-merged, the milestone was replayed with `git rebase --onto
+origin/main`. The hashes listed above are the ones it was built at, as
+every milestone before it records theirs; replayed they are `aef62f2`,
+`2ea25cf`, `d21a376`, `21a0edd`, `a8e659e`, `5452e47`, `6a1dfd6`,
+`12b27ed`, `21f06e0`, `cd76b06`, `6b081c1` and `9f7dac4`.
+
+Two conflicts, both textual, and one silent semantic collision that
+mattered more than either.
+
+- **`CHANGELOG.md`**: the round's two entries and this milestone's five
+  are additions at the same point in `### Changed`. Resolved as a union
+  with the round's kept first and nothing of either reworded, so the
+  merged text is where it was and this milestone's is appended after it.
+- **This file**: the round appends its section exactly where this
+  milestone appends its own, the same shape the three rebases before it
+  met. Resolved by keeping both, the round's first, with each
+  verification block left as the run that produced it reported it.
+- **`_run_one`, silently**: the round reworked the tool record so that
+  every call the model issued is reserved the moment the calls exist,
+  and `_run_one` now takes a slot where it used to compute a
+  classification of its own. This milestone's `tool_call` event reads
+  that classification. Git merged the two without noticing that the
+  name they both refer to had gone, which lints clean under a name-error
+  rule only because `ruff` does not run one here, and the suites are
+  what caught it. Resolved in `6bff55d` by asking the reservation:
+  `TurnUnderway.reserved(slot)` reads the invocation back, so the event
+  and the row it sits beside are one answer read twice. Recomputing
+  would have been the smaller edit and the worse one, since an MCP
+  reload between the reservation and the execution can move which entry
+  owns a name.
+
+The closed sets still have one authority each, which the round's typed
+document made worth re-checking end to end:
+`conversations/schema.py`'s `TOOL_SOURCES` is the source of the API's
+`Literal`, of the `source` column's check constraint and of its
+generated documentation; `runtime/turns.py` spells the same four tokens
+so that classifying a call does not import the storage layer, and
+`test_session_record.py` asserts the two tuples equal. This milestone
+added no token and renamed none: the `tool_call` event carries whatever
+`tool_source` answered, which is the value the row carries. Both drift
+suites and both committed artifacts are unchanged by the rebase.
+
+Nothing else conflicted, and the two things that could have are worth
+naming. `_events.info` now answers the reading it stamped, which is
+what `heard` hands the turn record; the narrowed emission keeps that
+assignment, so the record still lands on its event's instant. And the
+round's `providers` masking and its slashed-path refusals are on paths
+this milestone does not touch.
+
+Re-run from `samtal-server/` at `6bff55d`, on `origin/main` at
+`5b9e1de`:
+
+```
+$ uv run ruff check .
+All checks passed!
+```
+
+```
+$ uv run pytest tests/unit -q
+2253 passed, 16 skipped in 302.94s (0:05:02)
+```
+
+```
+$ uv run pytest tests/integration -q
+55 passed in 162.02s (0:02:42)
+```
+
+The arithmetic holds against the new parent rather than the old one:
+`origin/main` after its round is 2239 passed and 15 skipped, and this
+milestone's fourteen new cases and one new skip make 2253 and 16, with
+the integration lane untouched at 55. Both committed artifacts still
+regenerate byte-identically:
+
+```
+$ uv run samtal-server conversations schema | diff - ../docs/reference/conversations-schema.md
+$ uv run samtal-server config openapi | diff - ../docs/reference/api-openapi.json
+$ echo $?
+0
+```
+
+And the structural proof survives the move: the store's own suites are
+byte-identical to the merged parent, not merely to the tip this branch
+was cut from.
+
+```
+$ git diff origin/main --stat -- tests/unit/test_conversations_*.py \
+    tests/unit/test_session_record.py tests/integration/test_conversations.py
+$ echo $?
+0
+```
