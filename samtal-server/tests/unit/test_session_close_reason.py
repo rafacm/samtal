@@ -191,14 +191,17 @@ async def test_a_failure_on_the_way_out_closes_as_error(
     assert closed(caplog).reason == "error"
 
 
-async def test_a_cleanup_step_that_raises_neither_hides_nor_survives_the_close(
+async def test_a_cleanup_step_that_raises_does_not_hide_the_close(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """The runtime's close is one of three steps ahead of the event. Each
     is guarded on its own, so one that raises is reported by class and
     the event, the store's close and the capture's close all still
-    happen. With nothing else latched, a session that would not shut down
-    cleanly did not end in a conversation, so it reads `error`."""
+    happen.
+
+    The reason stays the device's hang-up: what ended this conversation
+    was decided before the cleanup ran, and a step that would not finish
+    afterwards is a defect to report rather than a different ending."""
     session, websocket, task = await open_session(config_with_agent())
     assert session.runtime is not None
 
@@ -211,12 +214,32 @@ async def test_a_cleanup_step_that_raises_neither_hides_nor_survives_the_close(
         await websocket.close(1000, "goodbye")
         await asyncio.wait_for(task, timeout=5)
 
-    assert closed(caplog).reason == "error"
+    assert closed(caplog).reason == "client"
     # By class, and never the message: an exception on the way out of a
     # session is one of the places a far side's bytes could reach the
     # retained surface.
     assert "ValueError" in caplog.text
     assert "would not let go" not in caplog.text
+
+
+async def test_a_cleanup_failure_is_the_reason_when_nothing_else_is(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The backstop, at its one site. Every path into the close latches
+    before the cleanup runs, so this is what would answer for a path that
+    did not: a session that could not shut down cleanly did not end in a
+    conversation."""
+    session = served(config_with_agent(), LoopingSocket())
+
+    async def refuse() -> None:
+        raise ValueError("the step would not finish")
+
+    with caplog.at_level("INFO"):
+        await session._cleanly("the conversation", refuse())
+
+    assert session._closed_reason() == "error"
+    assert "ValueError" in caplog.text
+    assert "would not finish" not in caplog.text
 
 
 async def test_the_first_cause_wins(caplog: pytest.LogCaptureFixture) -> None:
@@ -236,6 +259,42 @@ async def test_the_first_cause_wins(caplog: pytest.LogCaptureFixture) -> None:
         await asyncio.wait_for(task, timeout=5)
 
     assert closed(caplog).reason == "drain"
+
+
+async def test_a_disconnect_a_drain_arrives_behind_is_still_a_client_close(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The race the other way round, and the reason `client` is latched
+    where the serve loop returns rather than rendered at the end: a
+    shutdown reaching a session whose close is already under way must
+    not take a cause that was decided before the drain existed.
+
+    The cleanup is held open here so the drain lands inside the window
+    that used to be wide enough to lose."""
+    session, websocket, task = await open_session(config_with_agent())
+    reached = asyncio.Event()
+    release = asyncio.Event()
+
+    async def held() -> None:
+        reached.set()
+        await release.wait()
+
+    session._stop_idle_watchdog = held  # type: ignore[method-assign]
+    registry = SessionRegistry(max_sessions=8)
+    assert registry.try_add(session)
+
+    with caplog.at_level("INFO"):
+        # The device hangs up, and the close gets as far as its first
+        # cleanup step.
+        await websocket.close(1000, "goodbye")
+        await asyncio.wait_for(reached.wait(), timeout=5)
+        drain = asyncio.create_task(registry.drain(timeout_s=5))
+        await asyncio.sleep(0.05)
+        release.set()
+        await drain
+        await asyncio.wait_for(task, timeout=5)
+
+    assert closed(caplog).reason == "client"
 
 
 async def test_a_latched_token_is_not_rewritten_by_a_later_one() -> None:

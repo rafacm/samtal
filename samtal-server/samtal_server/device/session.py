@@ -116,7 +116,11 @@ SHUTDOWN_REPLY_GRACE_S = 10.0
 CLOSE_REASONS = ("limit", "idle", "drain", "client", "error")
 
 # What a session that nothing decided to end is closed for: the device
-# closed the socket, or the serve loop simply returned.
+# closed the socket, or the serve loop simply returned. Latched where
+# that happens rather than synthesized at the end, so a drain arriving
+# into a close already under way cannot take a cause that was decided
+# before it; rendering it in the `finally` as well is the backstop for a
+# path that reaches the close having latched nothing at all.
 DEFAULT_CLOSE_REASON = "client"
 
 class DeviceSession:
@@ -401,6 +405,13 @@ class DeviceSession:
             # alone.
             async with asyncio.timeout(self.config.server.limits.max_session_s):
                 await self._serve()
+            # The serve loop returned, which is the device having closed
+            # the socket. Latched here rather than left to the render in
+            # the `finally`: a drain reaching this session while its
+            # close is already under way would otherwise take a cause
+            # that was decided before the drain existed, which is
+            # exactly what first-cause-wins is for.
+            self._latch_close(DEFAULT_CLOSE_REASON)
         except TimeoutError:
             self._events.info(
                 "session %s reached the %.0f s time limit",
@@ -416,7 +427,9 @@ class DeviceSession:
                 NORMAL_CLOSURE, "session time limit reached", close_reason="limit"
             )
         except WebSocketDisconnect:
-            pass
+            # The same cause arriving as an exception rather than as a
+            # return, and latched for the same reason.
+            self._latch_close(DEFAULT_CLOSE_REASON)
         except BaseException:
             # Anything else is leaving through this frame, so the record
             # says the session ended in a failure rather than in a
