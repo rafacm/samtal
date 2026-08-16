@@ -12,8 +12,6 @@ pipeline classifies by (#137).
 """
 
 import asyncio
-import contextlib
-from dataclasses import dataclass, field
 from typing import Any
 
 import anthropic
@@ -42,6 +40,18 @@ from samtal_server.providers.openai_llm import (
     chat_messages,
     chat_tools,
     tool_call_from_fragments,
+)
+from tests.support.llm_sdk import (
+    FakeBlock,
+    FakeChoice,
+    FakeChunk,
+    FakeCompletions,
+    FakeDelta,
+    FakeFragment,
+    FakeFunction,
+    FakeMessage,
+    FakeMessages,
+    FakeStream,
 )
 
 WEATHER = ToolDef(
@@ -112,96 +122,6 @@ def test_anthropic_tool_definitions_pass_the_schema_through() -> None:
             "input_schema": WEATHER.input_schema,
         }
     ]
-
-
-@dataclass
-class FakeBlock:
-    type: str
-    id: str = ""
-    name: str = ""
-    input: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class FakeUsage:
-    input_tokens: int = 11
-    output_tokens: int = 7
-
-
-@dataclass
-class FakeMessage:
-    content: list[FakeBlock]
-    usage: FakeUsage = field(default_factory=FakeUsage)
-
-
-@dataclass
-class FakeTextDelta:
-    text: str
-    type: str = "text_delta"
-
-
-@dataclass
-class FakeStreamEvent:
-    type: str
-    delta: FakeTextDelta | None = None
-
-
-class FakeStream:
-    """The pieces of the SDK's streaming interface the provider uses:
-    iterating yields the stream's events, opening with the
-    message_start every real stream begins with.
-
-    `mid_stream` is raised once the events have been delivered and
-    `final` when the assembled message is asked for, which are the two
-    places a real stream can fail after the request itself landed."""
-
-    def __init__(
-        self,
-        texts: list[str],
-        message: FakeMessage,
-        mid_stream: BaseException | None = None,
-        final: BaseException | None = None,
-    ) -> None:
-        self._texts = texts
-        self._message = message
-        self._mid_stream = mid_stream
-        self._final = final
-
-    def __aiter__(self):
-        return self._events()
-
-    async def _events(self):
-        yield FakeStreamEvent(type="message_start")
-        for text in self._texts:
-            yield FakeStreamEvent(type="content_block_delta", delta=FakeTextDelta(text))
-        if self._mid_stream is not None:
-            raise self._mid_stream
-
-    async def get_final_message(self) -> FakeMessage:
-        if self._final is not None:
-            raise self._final
-        return self._message
-
-
-class FakeMessages:
-    """`opening` is raised where the SDK sends the request, which is on
-    entering the context manager rather than on building it."""
-
-    def __init__(self, stream: FakeStream, opening: BaseException | None = None) -> None:
-        self._stream = stream
-        self._opening = opening
-        self.request: dict[str, Any] = {}
-
-    def stream(self, **request: Any):
-        self.request = request
-
-        @contextlib.asynccontextmanager
-        async def opened():
-            if self._opening is not None:
-                raise self._opening
-            yield self._stream
-
-        return opened()
 
 
 def anthropic_with(texts: list[str], blocks: list[FakeBlock]) -> tuple[AnthropicLlm, FakeMessages]:
@@ -339,72 +259,6 @@ def test_malformed_arguments_survive_as_a_call_the_session_can_refuse() -> None:
 def test_arguments_that_are_not_an_object_are_malformed_too() -> None:
     call = tool_call_from_fragments({"id": "c", "name": "now", "arguments": '"Lund"'}, 0)
     assert call.malformed_arguments == '"Lund"'
-
-
-@dataclass
-class FakeFunction:
-    name: str | None = None
-    arguments: str | None = None
-
-
-@dataclass
-class FakeFragment:
-    index: int
-    id: str | None = None
-    function: FakeFunction | None = None
-
-
-@dataclass
-class FakeDelta:
-    content: str | None = None
-    tool_calls: list[FakeFragment] | None = None
-
-
-@dataclass
-class FakeChoice:
-    delta: FakeDelta
-
-
-@dataclass
-class FakeChunkUsage:
-    prompt_tokens: int
-    completion_tokens: int
-
-
-@dataclass
-class FakeChunk:
-    choices: list[FakeChoice]
-    usage: FakeChunkUsage | None = None
-
-
-class FakeCompletions:
-    """`opening` is raised where the request is sent and `mid_stream`
-    once the chunks have been delivered, which are the two places this
-    dialect's stream can fail."""
-
-    def __init__(
-        self,
-        chunks: list[FakeChunk],
-        opening: BaseException | None = None,
-        mid_stream: BaseException | None = None,
-    ) -> None:
-        self._chunks = chunks
-        self._opening = opening
-        self._mid_stream = mid_stream
-        self.request: dict[str, Any] = {}
-
-    async def create(self, **request: Any):
-        self.request = request
-        if self._opening is not None:
-            raise self._opening
-
-        async def streamed():
-            for chunk in self._chunks:
-                yield chunk
-            if self._mid_stream is not None:
-                raise self._mid_stream
-
-        return streamed()
 
 
 def openai_with(chunks: list[FakeChunk]) -> tuple[OpenAiCompatibleLlm, FakeCompletions]:
