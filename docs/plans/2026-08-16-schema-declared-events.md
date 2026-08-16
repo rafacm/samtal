@@ -549,10 +549,17 @@ and reverted.
    `events_schema.py` with all 57 declarations (the nine spread
    builders read, their key sets and token sets transcribed), the
    conformance test, the registry-coherence tests. No enforcement
-   yet: the emitters do not read the registry in M1, so the release
-   from this merge behaves identically by construction, and the
-   declarations are already pinned to reality by the conformance
-   test and by review.
+   yet: the emitters do not read the registry in M1. The release
+   from this merge is behavior-identical EXCEPT where the
+   provenance inventory forces a decision-site sanitization fix
+   (adversarial-input-only, each its own commit, named in the
+   implementation doc), and those fixes normalize EVENT-ONLY
+   copies: the value a site emits is bounded without changing what
+   the same site answers elsewhere, proven for OTA by an
+   adversarial endpoint test asserting the OTA response bytes and
+   stored state are unchanged while the emitted field carries the
+   sanitized form. The declarations are pinned to reality by the
+   conformance test and by review.
 2. **M2, the emitters enforce**: validation in both `_emit`s,
    `EventSchemaError`, the forgiving path with its complaint line,
    the env switch with strict default, the Dockerfile `ENV` line,
@@ -581,7 +588,14 @@ adopt the schema seam), `Dockerfile` (M2, one `ENV` line),
 `samtal-server/README.md` (M2 one paragraph; M3 exactness edits),
 `CHANGELOG.md` (per milestone).
 
-Untouched on purpose: every emit site in `samtal_server/`, both pin
+Conditionally modified in M1, only if the provenance inventory
+finds a far-side string no site bounds: the decision-site modules
+it names (expected none to two; `ota.py` and `onboarding.py` are
+the plausible candidates), each fix its own adversarial-input-only
+commit under the event-only-copy rule in the milestone section.
+
+Untouched on purpose: every emit site's fields, levels, sentences
+and names (up to the conditional sanitization above), both pin
 suites, `test_event_surface_guard.py`, `logs.py`, the capture side
 channels, `config/` (no new `ServerConfig` field, so the #144
 example-config pin is unaffected).
@@ -1099,5 +1113,13 @@ eleven findings. As received, condensed but faithful:
     conditionally modified decision-site files, drop the
     identical-by-construction claim, normalize event-only copies,
     and prove the OTA response unchanged under adversarial input.
+
+    *Resolution*: accepted. The files section now lists the
+    conditionally modified decision-site modules, the
+    identical-by-construction claim is scoped to what is actually
+    identical, sanitization produces event-only normalized copies,
+    and an adversarial endpoint test proves the OTA response and
+    stored state unchanged. Amended in the milestone and files
+    sections.
 
 Verdict: not ready.
