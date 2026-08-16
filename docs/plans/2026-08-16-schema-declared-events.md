@@ -195,11 +195,23 @@ The registry declares the tap-contract surface only. `vad` and
 
 ### Enforcement lives in `_emit`, and the mode is an env switch
 
-Both emitters validate in `_emit` before dispatch: the event is
-declared for the emitting channel, the level is in the declared
-set, no declared-required field is missing, no undeclared field is
-present, every field matches its kind, every `TOKEN` value is in
-its set. The message arguments are inside the machinery, not
+Both emitters validate in `_emit` before dispatch, in two steps
+whose order is load-bearing. First the caller-supplied fields are
+checked BEFORE the base-field merge, and a session caller
+supplying any base key (`event`, `session`, `device`) is itself a
+violation: today `**fields` merges after the base fields, so a
+spread carrying `session=` would silently replace the emitter's
+own identity and still typecheck, which is spoofing the machinery
+must refuse rather than validate. Only then is the payload built
+(base fields from the emitter, never from the caller) and
+validated whole: the event is declared for the emitting channel,
+the level is in the declared set, no declared-required field is
+missing, no undeclared field is present, every field matches its
+kind, every `TOKEN` value is in its set. On server channels
+`session` and `device` remain ordinary declarable event fields,
+since a server emitter has no base identity to protect. M2's
+tests include collision cases planting sentinel-shaped replacement
+values for each base key. The message arguments are inside the machinery, not
 beside it: `Emission.args` reaches every tap and the formatter
 renders them, so each spec also declares its argument tuple (arity
 and per-position kind, drawn from the same taxonomy), transcribed
@@ -515,6 +527,13 @@ Findings as received, condensed but faithful:
    identity spoofing.** `**fields` can overwrite `session` and
    `device` and still typecheck. Validate caller fields before
    merging and forbid session callers supplying base keys.
+
+   *Resolution*: accepted. Validation is now two ordered steps:
+   caller fields checked pre-merge with base keys forbidden on the
+   session channel, then the emitter-built payload validated
+   whole; server channels keep `session` and `device` as ordinary
+   declarable fields; collision tests plant sentinel-shaped
+   replacements per base key. Amended in the enforcement section.
 
 6. **P1: the violation diagnostics can leak rejected names.**
    Undeclared event names and spread keys are caller-supplied
