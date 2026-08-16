@@ -47,8 +47,8 @@ from samtal_server.providers import (
     build_agent_providers,
 )
 from tests.support.configs import BOTH_MAC, POET_MAC, POET_TONE, base_config, config_with_agent
+from tests.support.events import events, only
 from tests.unit.test_session import connect, send_pcm, shake_hands, speech_pcm
-from tests.unit.test_session_events import events, only
 from tests.unit.test_session_tools import ScriptedLlm, call, drive_reply, session_for, start_reply
 from tests.unit.test_session_watchdog import StallingLlm
 

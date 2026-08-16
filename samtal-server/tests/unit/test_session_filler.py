@@ -33,8 +33,8 @@ from tests.support.configs import (
     base_config,
     masked_config,
 )
+from tests.support.events import events, only
 from tests.unit.test_session import RecordingSocket
-from tests.unit.test_session_events import events, only
 from tests.unit.test_session_tools import ScriptedLlm, call, session_for
 from tests.unit.test_session_watchdog import StallingLlm
 

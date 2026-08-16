@@ -30,6 +30,7 @@ from samtal_server.providers import (
 )
 from samtal_server.providers.mock import MockAsr
 from tests.support.configs import DEVICE_MAC, LONG_REPLY, config_with_agent
+from tests.support.events import events, only
 from tests.unit.test_session import (
     RecordingSocket,
     assert_endpointed_speech,
@@ -46,7 +47,6 @@ from tests.unit.test_session import (
     shake_hands,
     speech_pcm,
 )
-from tests.unit.test_session_events import events, only
 
 # A reply of about four seconds: long enough that an interruption sent
 # right after the first sentence starts lands mid-stream, short enough

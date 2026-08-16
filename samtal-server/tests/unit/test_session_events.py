@@ -40,18 +40,9 @@ from tests.support.configs import (
     base_config,
     config_with_agent,
 )
+from tests.support.events import events, only
 from tests.unit.test_session import connect, say_something, shake_hands
 from tests.unit.test_session_tools import ScriptedLlm, _nothing, call, run_reply, session_for
-
-
-def events(caplog: pytest.LogCaptureFixture, name: str) -> list:
-    return [record for record in caplog.records if getattr(record, "event", None) == name]
-
-
-def only(caplog: pytest.LogCaptureFixture, name: str):
-    matching = events(caplog, name)
-    assert len(matching) == 1, f"expected one {name} record, got {len(matching)}"
-    return matching[0]
 
 
 def hold_a_conversation(config: Config) -> None:

@@ -31,8 +31,8 @@ from samtal_server.providers import (
     Turn,
 )
 from tests.support.configs import POET_MAC, TIMEOUT_S, watchdog_config
+from tests.support.events import events, only
 from tests.unit.test_session import RecordingSocket
-from tests.unit.test_session_events import events, only
 from tests.unit.test_session_tools import run_reply, session_for
 
 # Well past the test-scale timeout below, never actually waited out:

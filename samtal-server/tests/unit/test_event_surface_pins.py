@@ -84,6 +84,7 @@ from tests.support.configs import (
     masked_config,
     watchdog_config,
 )
+from tests.support.events import only
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 from tests.unit.test_session import (
     RecordingSocket,
@@ -99,7 +100,7 @@ from tests.unit.test_session_barge_in import (
     ScriptedEndpointer,
     realtime_session,
 )
-from tests.unit.test_session_events import Unreachable, only
+from tests.unit.test_session_events import Unreachable
 from tests.unit.test_session_filler import masked_session
 from tests.unit.test_session_limits import listen_realtime, wait_for_close
 from tests.unit.test_session_tools import ScriptedLlm, _nothing, call, run_reply, session_for
