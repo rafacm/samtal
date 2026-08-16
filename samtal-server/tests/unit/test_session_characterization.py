@@ -343,7 +343,7 @@ async def test_a_chunk_too_short_to_fill_a_frame_leaves_the_filler_armed(
     played = only(caplog, "filler_played")
     assert played.agent == "poet"
     assert events(caplog, "filler_skipped") == []
-    assert only(caplog, "replied").text == f"{SHORT_SENTENCE.strip()} {TAIL_SENTENCE}"
+    assert session.runtime._turns[-1].content == f"{SHORT_SENTENCE.strip()} {TAIL_SENTENCE}"
 
 
 async def test_the_fillers_first_frame_stamps_and_attributes_speaking_started(
@@ -476,7 +476,7 @@ async def test_the_shutdown_waits_out_a_reply_that_is_still_generating(
     assert reply.done()
     assert socket.frames, "the reply was cut off before it spoke"
     assert socket.closed is not None
-    assert only(caplog, "replied").text == "All done."
+    assert session.runtime._turns[-1].content == "All done."
 
 
 @pytest.mark.parametrize(

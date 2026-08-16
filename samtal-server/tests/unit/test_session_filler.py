@@ -128,7 +128,7 @@ async def test_a_slow_reply_is_masked_at_the_threshold(
     assert played.phrase_index == 0
     started = only(caplog, "speaking_started")
     replied = only(caplog, "replied")
-    assert replied.text == "Recovered now."
+    assert session.runtime._turns[-1].content == "Recovered now."
     # The filler is what started the speaking, and the reply followed.
     order = [caplog.records.index(record) for record in (played, started, replied)]
     assert order == sorted(order)
@@ -142,7 +142,7 @@ async def test_a_fast_reply_plays_no_filler(caplog: pytest.LogCaptureFixture) ->
 
     assert events(caplog, "filler_played") == []
     only(caplog, "speaking_started")
-    assert only(caplog, "replied").text == "POET heard hello."
+    assert session.runtime._turns[-1].content == "POET heard hello."
     # The timer was stood down with the reply, not left running.
     assert session.runtime._filler_task is None
 
@@ -236,7 +236,7 @@ async def test_a_handover_from_a_fillerless_agent_still_masks_the_new_voice(
     played = only(caplog, "filler_played")
     assert played.agent == "tutor"
     only(caplog, "speaking_started")
-    assert only(caplog, "replied").text == "Recovered now."
+    assert session.runtime._turns[-1].content == "Recovered now."
 
 
 async def test_a_fire_on_an_agent_without_clips_quietly_plays_nothing(
@@ -253,7 +253,7 @@ async def test_a_fire_on_an_agent_without_clips_quietly_plays_nothing(
 
     assert events(caplog, "filler_played") == []
     only(caplog, "speaking_started")
-    assert only(caplog, "replied").text == "Recovered now."
+    assert session.runtime._turns[-1].content == "Recovered now."
     assert session.runtime._filler_task is None
     assert session.runtime._filler_sounding is False
     assert session.runtime._filler_fires == 0
@@ -279,7 +279,7 @@ async def test_a_fire_into_live_user_speech_is_skipped(
     assert skipped.reason == "user_speaking"
     assert skipped.speech_ms > 0
     assert events(caplog, "filler_played") == []
-    assert only(caplog, "replied").text == "Recovered now."
+    assert session.runtime._turns[-1].content == "Recovered now."
     # The skip consumed no phrase and left no state behind.
     assert session.runtime._filler_task is None
     assert session.runtime._filler_fires == 0
@@ -304,7 +304,7 @@ async def test_a_fire_during_a_barge_in_confirmation_is_skipped(
     skipped = only(caplog, "filler_skipped")
     assert skipped.reason == "barge_in_pending"
     assert events(caplog, "filler_played") == []
-    assert only(caplog, "replied").text == "Recovered now."
+    assert session.runtime._turns[-1].content == "Recovered now."
     assert session.runtime._filler_task is None
     assert session.runtime._filler_fires == 0
 
