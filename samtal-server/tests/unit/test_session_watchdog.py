@@ -32,37 +32,9 @@ from samtal_server.providers import (
 )
 from tests.support.configs import POET_MAC, TIMEOUT_S, watchdog_config
 from tests.support.events import events, only
+from tests.support.providers import STALL_S, StallingLlm
 from tests.unit.test_session import RecordingSocket
 from tests.unit.test_session_tools import run_reply, session_for
-
-# Well past the test-scale timeout below, never actually waited out:
-# the watchdog cancels the sleep.
-STALL_S = 30.0
-
-
-class StallingLlm(LlmProvider):
-    """A model whose first token takes a scripted time to arrive, per
-    call: the delays list is consumed one per stream, the last entry
-    repeating. What follows the delay is a healthy one-sentence
-    reply."""
-
-    def __init__(self, delays: Sequence[float], reply: str = "Recovered now.") -> None:
-        self.delays = list(delays)
-        self.calls = 0
-        self._reply = reply
-
-    async def stream(
-        self,
-        system: str,
-        turns: Sequence[Turn],
-        tools: Sequence[ToolDef] = (),
-        tool_choice: ToolChoice = "auto",
-    ) -> AsyncIterator[LlmEvent]:
-        delay = self.delays[min(self.calls, len(self.delays) - 1)]
-        self.calls += 1
-        await asyncio.sleep(delay)
-        for index, word in enumerate(self._reply.split(" ")):
-            yield TextDelta(word if index == 0 else " " + word)
 
 
 class DribblingLlm(LlmProvider):

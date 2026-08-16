@@ -11,7 +11,6 @@ import asyncio
 import json
 import logging
 import sys
-from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -23,14 +22,8 @@ from samtal_server.app import create_app
 from samtal_server.config import Config
 from samtal_server.device.session import DeviceSession
 from samtal_server.providers import (
-    LlmEvent,
-    LlmProvider,
-    TextDelta,
     ToolCall,
-    ToolChoice,
-    ToolDef,
     Turn,
-    Usage,
     build_agent_providers,
 )
 from samtal_server.tools.builtin import switch_agent_tool
@@ -47,6 +40,7 @@ from tests.support.configs import (
     registry_config,
 )
 from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
+from tests.support.providers import ScriptedLlm
 from tests.unit.test_session import (
     connect,
     device_session,
@@ -55,31 +49,6 @@ from tests.unit.test_session import (
     shake_hands,
     tone_strength,
 )
-
-Step = str | list[str | ToolCall | Usage]
-
-
-class ScriptedLlm(LlmProvider):
-    """A model whose every round is written down in advance. A round is
-    a sentence to speak, or a list mixing sentences, the tool calls to
-    ask for, and the usage a provider that reports one would end with;
-    the last round repeats if the loop asks for more."""
-
-    def __init__(self, rounds: Sequence[Step]) -> None:
-        self._rounds = list(rounds)
-        self.seen: list[tuple[Sequence[Turn], Sequence[ToolDef], ToolChoice]] = []
-
-    async def stream(
-        self,
-        system: str,
-        turns: Sequence[Turn],
-        tools: Sequence[ToolDef] = (),
-        tool_choice: ToolChoice = "auto",
-    ) -> AsyncIterator[LlmEvent]:
-        self.seen.append((list(turns), list(tools), tool_choice))
-        step = self._rounds[min(len(self.seen) - 1, len(self._rounds) - 1)]
-        for item in [step] if isinstance(step, str) else step:
-            yield TextDelta(item) if isinstance(item, str) else item
 
 
 def call(name: str, **arguments: Any) -> ToolCall:

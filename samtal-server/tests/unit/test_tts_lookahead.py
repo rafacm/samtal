@@ -29,7 +29,8 @@ import samtal_server.device.session as session_module
 from samtal_server.config import Config
 from samtal_server.providers import ToolCall, TtsProvider, build_agent_providers
 from tests.support.configs import base_config
-from tests.unit.test_session_tools import ScriptedLlm, session_for
+from tests.support.providers import ScriptedLlm
+from tests.unit.test_session_tools import session_for
 
 # One sentence's audio plays for longer than the next takes to start,
 # which is what makes a single sentence of lookahead enough. Both are

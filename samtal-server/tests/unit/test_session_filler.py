@@ -34,9 +34,9 @@ from tests.support.configs import (
     masked_config,
 )
 from tests.support.events import events, only
+from tests.support.providers import BrokenTts, ScriptedLlm, StallingLlm
 from tests.unit.test_session import RecordingSocket
-from tests.unit.test_session_tools import ScriptedLlm, call, session_for
-from tests.unit.test_session_watchdog import StallingLlm
+from tests.unit.test_session_tools import call, session_for
 
 STALL_S = 0.5
 
@@ -264,15 +264,6 @@ async def test_the_feature_is_off_by_default(caplog: pytest.LogCaptureFixture) -
 
     assert events(caplog, "filler_played") == []
     only(caplog, "speaking_started")
-
-
-class BrokenTts(TtsProvider):
-    """A voice that fails outright at synthesis time."""
-
-    sample_rate = 24000
-
-    def synthesize(self, text: str) -> AsyncIterator[bytes]:
-        raise RuntimeError("no voice today")
 
 
 class SilentTts(TtsProvider):
