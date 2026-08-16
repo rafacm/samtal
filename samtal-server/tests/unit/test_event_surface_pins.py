@@ -96,6 +96,15 @@ from tests.support.providers import (
     StallingLlm,
     Unreachable,
 )
+from tests.support.sessions import (
+    _nothing,
+    call,
+    device_session,
+    masked_session,
+    realtime_session,
+    run_reply,
+    session_for,
+)
 from tests.support.sockets import RecordingSocket
 from tests.support.wire import (
     connect,
@@ -105,10 +114,6 @@ from tests.support.wire import (
     speech_pcm,
     wait_for_close,
 )
-from tests.unit.test_session import device_session
-from tests.unit.test_session_barge_in import realtime_session
-from tests.unit.test_session_filler import masked_session
-from tests.unit.test_session_tools import _nothing, call, run_reply, session_for
 
 # The utterance the direct drivers hand a reply: 20 ms of silence, which
 # the mock ASR answers whatever it holds.

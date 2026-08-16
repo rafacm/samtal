@@ -12,7 +12,6 @@ length follows the text.
 import asyncio
 import contextlib
 import json
-from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -26,10 +25,9 @@ from samtal_server.audio.opus import OpusEncoder
 from samtal_server.audio.resample import Resampler
 from samtal_server.config import Config
 from samtal_server.protocol import framing
-from samtal_server.providers import Turn, build_agent_providers
-from samtal_server.runtime.pipeline import AgentNotAllowed, bespoke_runtime_factory
+from samtal_server.providers import Turn
+from samtal_server.runtime.pipeline import AgentNotAllowed
 from samtal_server.runtime.speech import _Synthesis
-from samtal_server.tools.mcp import McpServers
 from tests.support.configs import (
     BOTH_MAC,
     DEVICE_HELLO,
@@ -44,6 +42,9 @@ from tests.support.configs import (
     SAMPLE_RATE,
     TUTOR_TONE,
     config_with_agent,
+)
+from tests.support.sessions import (
+    device_session,
 )
 from tests.support.sockets import RecordingSocket
 from tests.support.wire import (
@@ -384,42 +385,6 @@ def test_auto_mode_still_requires_a_new_listen_start_after_the_reply() -> None:
             endpoint_silence(websocket, encoder)
             texts, _ = collect_reply(websocket)
     assert_endpointed_speech(texts, 240)
-
-
-def device_session(
-    config: Config,
-    mac: str,
-    providers: dict[str, Any] | None = None,
-    memory: Any = None,
-    fillers: dict[str, Any] | None = None,
-    websocket: Any = None,
-    mcp_servers: McpServers | None = None,
-    conversations: Any = None,
-) -> session_module.DeviceSession:
-    """A device session with a real bespoke runtime behind it, built the
-    way `run` builds one: the agents resolved from the binding, then the
-    factory called with them. Every test that drives a session below the
-    websocket goes through here, so the composition root has one shape
-    in the tests as well as in the server.
-
-    `mcp_servers` is the running registry, which a test that is about
-    tools supplies; an empty one is what every other test here needs,
-    and is what a deployment with no MCP entries has. `conversations` is
-    the store a turn's record is handed to, None everywhere but in the
-    suite that is about the record, which is what a deployment that has
-    not asked for one has."""
-    factory = bespoke_runtime_factory(
-        config,
-        providers if providers is not None else build_agent_providers(config),
-        mcp_servers if mcp_servers is not None else McpServers({}),
-        memory,
-        fillers if fillers is not None else {},
-        conversations,
-    )
-    session = session_module.DeviceSession(cast(Any, websocket), config, factory)
-    session._agents = config.agents_for_device(mac)
-    session.runtime = factory(session, session._events, session._agents)
-    return session
 
 
 async def test_a_barge_in_keeps_the_sentences_the_user_heard() -> None:

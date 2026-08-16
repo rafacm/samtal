@@ -12,7 +12,6 @@ per round, and moves off the event loop rather than moving in time.
 import asyncio
 import threading
 from pathlib import Path
-from typing import Any
 
 import pytest
 
@@ -25,31 +24,18 @@ from samtal_server.runtime.prompt import (
     server_instructions_heading,
     server_prompt_heading,
 )
-from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
 from tests.support.configs import BOTH_MAC, POET_MAC, base_config
 from tests.support.providers import CountingServers, RecordingLlm, ScriptedLlm
-from tests.unit.test_session_tools import call, run_reply, session_for
+from tests.support.sessions import (
+    call,
+    run_reply,
+    session_with,
+)
 
 GUIDANCE = "Ask before unlocking the door."
 
 FRAGMENT = "The bins go out on Tuesday."
-
-
-def session_with(
-    servers: McpServers | None = None,
-    scripts: dict[str, Any] | None = None,
-    memory: MemoryStore | None = None,
-    mac: str = POET_MAC,
-    config: Config | None = None,
-):
-    return session_for(
-        config if config is not None else base_config(),
-        mac,
-        scripts,
-        memory=memory,
-        mcp_servers=servers,
-    )
 
 
 # The activation cache

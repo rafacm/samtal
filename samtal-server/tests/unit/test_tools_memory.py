@@ -200,8 +200,7 @@ async def test_a_reply_happens_over_an_unreadable_memory_file(
     memory block and the conversation carries on, rather than the read
     ending the reply from inside a worker thread."""
     from tests.support.providers import CountingServers, RecordingLlm
-    from tests.unit.test_session_prompt import session_with
-    from tests.unit.test_session_tools import run_reply
+    from tests.support.sessions import run_reply, session_with
 
     store = MemoryStore(tmp_path)
     _corrupt(store, "poet")

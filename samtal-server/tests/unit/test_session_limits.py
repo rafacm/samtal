@@ -30,6 +30,9 @@ from tests.support.configs import (
     config_with_agent,
     idle_config,
 )
+from tests.support.sessions import (
+    session_for,
+)
 from tests.support.wire import (
     collect_reply,
     connect,
@@ -42,7 +45,6 @@ from tests.support.wire import (
     speech_pcm,
     wait_for_close,
 )
-from tests.unit.test_session_tools import session_for
 
 
 def test_an_idle_session_is_closed_when_it_runs_out_of_time() -> None:
