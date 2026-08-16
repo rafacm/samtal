@@ -526,7 +526,7 @@ From `samtal-server/`, per milestone:
       modules import from it; `test_support_fakes.py` pins the probe's
       falsiness; both lanes green, count non-decreasing.
 - [x] [**M2: the session family decouples**](2026-08-16-test-fakes-and-drift-pins-implementation.md#milestone-2-the-session-family-decouples)
-      (PR TBD): the eight session-side support modules exist, no test
+      (PR #162): the eight session-side support modules exist, no test
       module imports any `test_session*`, `test_tools_device`, or
       `test_boundary_contract` module; both lanes green, count
       non-decreasing.
