@@ -491,19 +491,27 @@ example-config pin is unaffected).
 
 ## Tests
 
-- M1: the conformance test (AST walk, planted-source proof,
-  registry coherence). The strict runtime lane does not exist yet.
-- M2: strict mode raises on each violation class (undeclared event,
-  undeclared field, wrong kind, unlisted token, missing required
-  field, wrong level, wrong scope); forgiving mode drops the
-  offending fields, still emits, and complains once, covered for
-  the same classes; the sentinel test plants
-  `sk-test-...never-a-real-credential` in a violating field and
-  asserts absence from the exception text, the complaint, and both
-  log formats; the env switch's three states (unset = strict,
-  `forgiving`, unrecognized = strict); both pin suites unmodified
-  and green under strict, which is the standing conformance proof.
-- M3: the table checks with their mutation proofs.
+- M1: the conformance test (two-way AST coverage, planted-source
+  proof, registry coherence including argument tuples and
+  descriptor bounds) and the post-baseline characterization pins.
+  The strict runtime lane does not exist yet.
+- M2: strict mode raises on each violation class (undeclared
+  event, undeclared field, wrong kind, unlisted token, missing
+  required field, wrong level, wrong channel, base-key collision,
+  bad argument tuple); forgiving mode follows the recovery matrix,
+  still emits, and complains once, covered per class, plus the
+  injected-raising-validator guard proof; the sentinel matrix
+  plants credential-shaped values as a wrong-kind field value, an
+  undeclared event name, and an undeclared spread key, asserted
+  absent from exception str, repr and args, the complaint, both
+  log formats, `Emission.args`, and an attached tap; the
+  entrypoint subprocess tests cover unset, `forgiving`, `strict`,
+  an unknown value refusing startup, a `.env`-carried value, and
+  the `-O` strictness proof; both pin suites unmodified and green
+  under strict, which is the standing conformance proof.
+- M3: the table checks (exact equality both ways at row, field,
+  and token level, per the delimited grammar) with their mutation
+  proofs.
 
 ## Verification
 
@@ -565,16 +573,23 @@ recorded in the PR body with observed failure output per branch.
       inventory is recorded and the narrowing follow-up issue
       filed; no enforcement wired; both lanes green, pin suites
       untouched.
-- [ ] M2: the emitters enforce at emit time: strict raises
-      `EventSchemaError`, forgiving drops offending fields and
-      complains in one plain sentence, `SAMTAL_EVENTS_ENFORCEMENT`
-      switches with strict as default and unknown values strict,
-      the image sets forgiving, the no-leak sentinel proofs pass,
-      both pin suites pass unmodified under strict enforcement.
-- [ ] M3: the README table cannot drift: `test_event_docs.py`
-      cross-checks rows against the registry both ways with field
-      and token mentions, the mutation matrix is recorded, the
-      README reaches exactness, CHANGELOG closes the issue's entry.
+- [ ] M2: the emitters enforce at emit time: caller fields checked
+      before the base-field merge, strict raises
+      `EventSchemaError`, forgiving follows the recovery matrix
+      behind the last-resort guard with the fixed safe sentence,
+      diagnostics render registry-owned names only,
+      `SAMTAL_EVENTS_ENFORCEMENT` is resolved by the entrypoint
+      after dotenv (unset forgiving there, unknown refuses
+      startup) with the module default strict and conftest pinning
+      the lanes, the image sets forgiving, the mechanics tests
+      adopt the schema seam, the sentinel matrix and subprocess
+      proofs pass, both pin suites pass unmodified under strict
+      enforcement.
+- [ ] M3: the README table cannot drift: the table splits by
+      channel with the delimited fields-cell grammar and gains the
+      missing rows, `test_event_docs.py` proves exact agreement
+      both ways at row, field, and token level, the mutation
+      matrix is recorded, CHANGELOG closes the issue's entry.
 
 ## Plan review round
 
