@@ -127,6 +127,21 @@ server:
   # Unset, the server's own current offset applies.
   # timezone_offset_minutes: 120
 
+  # Recording what was said into conversations.db, which lands on the
+  # /data volume beside the configuration database. Absent, as here,
+  # means nothing is recorded and no file is created. Turn it on
+  # deliberately: it keeps conversation text, and the two switches under
+  # the flag are the only privacy controls this release has, so they are
+  # deployment-wide. Retention is 90 days unless this says otherwise, and
+  # 0 keeps everything forever. The reasoning behind each key is in
+  # config.example.yaml, and the columns are in
+  # docs/reference/conversations-schema.md.
+  # conversations:
+  #   enabled: true
+  #   metrics: true
+  #   text: true
+  #   retention_days: 90
+
   # How long a shutdown waits for conversations in flight to finish
   # speaking. Set the orchestrator's grace period between SIGTERM and
   # SIGKILL to at least twice this, so a drain still in progress is
