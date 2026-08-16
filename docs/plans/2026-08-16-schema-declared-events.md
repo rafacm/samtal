@@ -358,3 +358,117 @@ recorded in the PR body with observed failure output per branch.
       cross-checks rows against the registry both ways with field
       and token mentions, the mutation matrix is recorded, the
       README reaches exactness, CHANGELOG closes the issue's entry.
+
+## Plan review round
+
+External review of commit b436c55 by codex 0.147.0 (model
+gpt-5.6-sol), 2026-08-16, prompted with this plan, the issue body,
+the emitter, the emit sites and spread builders, both pin suites,
+the guard, the README table, the Dockerfile, and the prior plans.
+Findings as received, condensed but faithful:
+
+1. **P1: the registry does not declare or enforce channels.** The
+   issue requires name, level, channel, fields; `EventSpec` had
+   scope but no channel, and nothing tied a module's
+   `ServerEvents(__name__)` to its events. `session_rejected`
+   needs `samtal_server.session` and `samtal_server.ws` on their
+   respective scopes.
+
+2. **P1: the field-kind taxonomy cannot encode the current
+   payloads.** No list kind, and `agents` is not a count:
+   `ota_check` carries `agents` and `unloaded` lists,
+   `session_open` and `activation_complete` carry agent lists,
+   `capture_pruned` a session-id list; `prompt_assembled.sources`
+   is a mapping keyed by dynamic provenance strings
+   (`fragment:<name>` and kin), not a fixed sub-shape.
+
+3. **P1: the proposed string kinds bless unbounded far-side values
+   as trusted metadata.** `ota_check.client`, `board`, `firmware`
+   come from request headers and JSON, bounded only by strip and
+   nonemptiness at their sites; a generic IDENTIFIER/ID kind would
+   accept a credential-shaped string. Inventory string fields by
+   provenance, give field-specific length and syntax constraints,
+   and normalize untrusted values at their decision sites, which
+   requires relaxing the plan's blanket no-emit-site-change rule
+   where the surface cannot satisfy the settled taxonomy.
+
+4. **P1: payload-only validation leaves message and args outside
+   the no-leak machinery.** `Emission.args` reaches taps and the
+   formatter renders them; `asr_prompt_echo`'s recovered branch
+   renders the recovered transcript into the message, and its pin
+   preserves it. Dropping a payload field does not remove the same
+   value from args; forgiving mode must not re-render the original
+   message for an invalid emission; sentinels must inspect args
+   and attached taps.
+
+5. **P1: validating after base-field merging permits session
+   identity spoofing.** `**fields` can overwrite `session` and
+   `device` and still typecheck. Validate caller fields before
+   merging and forbid session callers supplying base keys.
+
+6. **P1: the violation diagnostics can leak rejected names.**
+   Undeclared event names and spread keys are caller-supplied
+   strings; complaints and exceptions must render registry-owned
+   identifiers, fixed codes and counts only, and an undeclared
+   event must not retain its raw name. Add sentinels for an
+   undeclared event name, an undeclared spread key, and a
+   wrong-kind value, asserted absent from exception str, repr and
+   args, complaint records, both formats, and attached taps.
+
+7. **P1: the enforcement-mode seam initializes too early and does
+   not classify production safely.** `main()` loads `.env` after
+   `events.py` is imported, so an import-time read cannot honor
+   the documented dotenv layer; a strict default makes a source or
+   wheel production deployment able to lose a reply; an unknown
+   value silently meaning strict defers a typo's failure to a live
+   emit. Initialize after dotenv, default unclassified server runs
+   to forgiving, force strict in pytest and CI, keep the image
+   explicit, refuse unknown values at startup, and test the real
+   entrypoint in subprocesses.
+
+8. **P1: M2 cannot keep the unit lane green without modifying
+   tests the plan leaves untouched.** `test_events.py` emits
+   undeclared names, undeclared fields, incomplete payloads, and a
+   synthetic channel by design; strict enforcement rejects them,
+   and the file is absent from the touched list. Update it through
+   an explicit schema seam; only the two pin files are the
+   byte-unchanged contract.
+
+9. **P1: the README check proves containment, not agreement.** The
+   check rejected nothing extra, the table holds 34 event rows so
+   23 events are missing, the lead sentence's base-field claim is
+   false for server events, and free backticked prose is not a
+   machine representation of field and token sets. Give rows a
+   mechanically delimited field list with per-field tokens (or
+   generate an appendix), check equality both ways plus duplicate
+   rows and scope-aware base fields, add bogus-field and
+   bogus-token mutations, and budget the missing rows.
+
+10. **P2: M1's conformance test cannot prove exactness.** Call-site
+    containment does not reject a surplus declared field, and
+    spreads are invisible; either require two-way coverage
+    (declared fields evidenced statically or by inventoried
+    spread-builder branches, tokens mapped to decision-site
+    literals) or stop calling M1 provably complete.
+
+11. **P2: the stated pin evidence is stale.** The `conversations_*`
+    events appear in neither pin file; their five paths are only
+    loosely asserted. Add exact pre-enforcement characterization
+    coverage for paths added since the pin files' baseline,
+    without modifying those two files.
+
+12. **P2: forgiving recovery is undefined where no field can be
+    dropped.** Missing required field, wrong level, wrong scope
+    have no defined result, and a validator bug can still escape
+    through a reply path. Provide a recovery matrix per violation
+    class and a final forgiving-mode guard around validation,
+    tested with an injected validator raising a sentinel.
+
+13. **P2: type enforcement lacks optimized-mode and edge
+    semantics.** Booleans are `int` subclasses, nonfinite floats
+    are unaddressed, and `assert`-based validation dies under
+    `python -O`. Use explicit conditions and raises, reject bools
+    for numeric kinds, require finiteness, and prove strictness
+    under `-O` in a subprocess.
+
+Verdict: not ready.
