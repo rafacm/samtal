@@ -40,12 +40,13 @@ from samtal_server.conversations.store import (
     STOP_TIMEOUT_S,
     ConversationStore,
     _Batch,
-    open_conversations,
     purge,
     read_conversations,
 )
 from samtal_server.db import BUSY_TIMEOUT_MS
 from samtal_server.events import attach_server_tap, detach_server_tap
+from tests.support.stores import CONVERSATIONS_MANIFEST as MANIFEST
+from tests.support.stores import rows
 
 # Long enough that a wedged writer fails the assertion rather than the
 # suite's own scheduling, and never reached when the code is correct.
@@ -54,17 +55,6 @@ TIMEOUT_S = 30.0
 # A value that must never appear anywhere but the database file, shaped
 # like something an operator would be horrified to find in a log.
 SENTINEL = "hunter2-not-a-real-credential-9f31c7"
-
-MANIFEST: dict[str, Any] = {
-    "started_at": "2026-08-15T10:00:00+00:00",
-    "server": {"version": "0.1.0", "revision": "abc1234"},
-    "device": {"mac": "aa:bb:cc:dd:ee:ff", "client": "test"},
-    "protocol": "1",
-    "agent": "sam",
-    "agents": ["sam"],
-    "providers": {"llm": {"name": "claude", "type": "anthropic"}},
-}
-
 
 class Gate:
     """The writer's parking seam, driven from the test's thread.
@@ -138,19 +128,6 @@ def _until(ready: Any, complaint: str) -> None:
             return
         time.sleep(0.005)
     raise AssertionError(complaint)
-
-
-def rows(directory: Path, table: str, **where: Any) -> list[dict[str, Any]]:
-    """Read through a second engine, which is what a reader beside a
-    running writer is."""
-    engine = open_conversations(directory)
-    try:
-        clause = " and ".join(f"{name} = :{name}" for name in where)
-        query = f"select * from {table}" + (f" where {clause}" if where else "")
-        with engine.connect() as connection:
-            return [dict(row) for row in connection.execute(text(query), where).mappings()]
-    finally:
-        engine.dispose()
 
 
 def a_turn(**overrides: Any) -> TurnRecord:

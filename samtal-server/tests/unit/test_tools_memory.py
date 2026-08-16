@@ -9,6 +9,8 @@ from samtal_server.runtime import prompt
 from samtal_server.tools import memory as memory_module
 from samtal_server.tools.builtin import remember, remember_tool
 from samtal_server.tools.memory import MemoryStore
+from tests.support.stores import STORED
+from tests.support.stores import corrupt as _corrupt
 
 
 async def test_a_remembered_fact_lands_in_the_agents_own_file(tmp_path: Path) -> None:
@@ -125,20 +127,6 @@ async def test_remembered_facts_reach_the_model_through_the_prompt(tmp_path: Pat
 # that builds a system prompt, so what must never happen is an exception
 # travelling out of it: it would end the reply and put the decoder's own
 # message, and a traceback, in the log.
-
-# Not a real credential, and shaped so a substring check for it cannot
-# match by accident. Written into the corrupt file, where a handler that
-# logged the file or the exception's message would carry it out.
-STORED = "sk-test-3d7f10ba-never-a-real-credential"
-
-CORRUPT = f"- {STORED}\n- \xff\xfe not utf-8 at all\n".encode("latin-1")
-
-
-def _corrupt(store: MemoryStore, agent: str) -> None:
-    path = store.path_for(agent)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(CORRUPT)
-
 
 def test_a_file_that_will_not_decode_reads_as_no_memory(
     tmp_path: Path, caplog: pytest.LogCaptureFixture

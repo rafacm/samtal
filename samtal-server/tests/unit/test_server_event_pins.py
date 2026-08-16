@@ -105,6 +105,9 @@ from tests.support.configs import (
 from tests.support.configs import BOUND_MAC as DB_BOUND_MAC
 from tests.support.events import only
 from tests.support.providers import BrokenTts
+from tests.support.stores import CAPTURE_MANIFEST as MANIFEST
+from tests.support.stores import corrupt as _corrupt
+from tests.support.stores import store, tone
 from tests.support.tools_mcp import SHADOWED_POSITION
 from tests.support.tools_mcp import config_granting as mcp_granting
 from tests.support.tools_mcp import entry_data as mcp_entry_data
@@ -114,12 +117,10 @@ from tests.support.tools_mcp import running as mcp_running
 from tests.support.tools_mcp import started as mcp_started
 from tests.support.tools_mcp import stdio_entry as mcp_entry
 from tests.support.wire import connect, shake_hands
-from tests.unit.test_capture import MANIFEST, store, tone
 from tests.unit.test_device_bindings import AGENT, STAGES, booted
 from tests.unit.test_device_bindings import DEVICE_MAC as DB_DEVICE_MAC
 from tests.unit.test_device_bindings import check_in as db_check_in
 from tests.unit.test_drain import FakeSession, registry_with
-from tests.unit.test_tools_memory import _corrupt
 from tests.unit.test_ws_auth import device_headers, handshake
 
 # What a value that moves between runs is replaced by, so that the key
