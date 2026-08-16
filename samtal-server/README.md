@@ -1984,8 +1984,17 @@ does every database call behind a queue nothing on the session loop ever
 waits on, and it commits at turn boundaries and at session close, so a
 page opened mid conversation reads everything up to the last completed
 turn. A database that is wedged or locked drops events, says so once per
-session, and records the count on the session row; it never delays a
-reply and never drops a session's close.
+session, and records the count on the session row, and it never delays a
+reply.
+
+Turns and closes are never refused at the queue, whatever the backlog:
+they are the record's structural truth and they arrive at conversational
+pace. That is not a promise that a close always lands. A close whose own
+transaction fails leaves the session row open-shaped, with a null
+`closed_at` and no close reason, which is the same incomplete state a
+process killed mid-session leaves behind: it is readable, it is listed,
+and retention prunes it on `started_at` like any other. A line at
+warning level says so when it happens.
 
 ## Which build is running
 

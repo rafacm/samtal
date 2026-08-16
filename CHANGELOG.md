@@ -131,7 +131,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   thread behind an unbounded queue, so no producer on the session loop
   can ever wait on it; the bound sits on the droppable class, so a
   wedged database drops events with one warning per session and a count
-  on the session row, and never drops a turn or a close. It commits at
+  on the session row, and never refuses a turn or a close at the queue
+  (a close whose own transaction fails still leaves the session row
+  open-shaped, which is the documented incomplete state). It commits at
   markers into per-session batches, so a session's turn commits its own
   session and holds no write lock between turns, and every marker first
   confirms its session row still exists, so a purge of a running
