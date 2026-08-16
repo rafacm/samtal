@@ -145,9 +145,18 @@ def _claims() -> dict[str, list[str]]:
 def test_every_example_an_entity_names_is_a_file_that_exists() -> None:
     """The reference links these by name, so a renamed or deleted
     example turns into a link to nothing in the generated document and
-    in the fragment help at once."""
+    in the fragment help at once.
+
+    `Entity.examples` holds filenames, and this insists on that
+    literally before resolving any of them. A name carrying a directory
+    part (`./vad-silero.yaml`) opens the same file while reading as a
+    different string, which would let one file be claimed by two
+    entities without the exactly-one check below noticing."""
     claimed = _claims()
     assert claimed, "no entity names any example, so what follows is vacuous"
+
+    aliased = sorted(name for name in claimed if name != Path(name).name)
+    assert not aliased, f"not a bare filename in docgen.ENTITIES: {', '.join(aliased)}"
 
     missing = sorted(name for name in claimed if not (EXAMPLES / name).is_file())
     assert not missing, f"named in docgen.ENTITIES but not under examples/: {', '.join(missing)}"
