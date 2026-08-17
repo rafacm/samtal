@@ -242,10 +242,18 @@ dataclasses and the declarations:
   channel differences fall out of the declarations rather than
   special cases. M1's inventory therefore reads every emit site's
   template and every argument position, not only its field
-  keywords; arguments that render joined or derived values (the
-  onboarding provenance, a comma-joined class-name list) are
-  declared as what their builder produces, with the builder named
-  in the conformance inventory.
+  keywords. Arguments have their own `ArgSpec` taxonomy beside the
+  field kinds, because the pinned surface carries shapes no field
+  does: `PATHLIKE` (a trusted configured path, `Path` or `str`,
+  which the capture events render), `COMPOSED` (a formatted
+  fragment of identifiers whose grammar and producing builder the
+  declaration names, validated against that grammar: the quoted
+  tool name, the from-entry fragment, the provider-location
+  fragment, the comma-joined agent list), and the shared numeric,
+  identifier, token, and class-name kinds; `IDENTIFIER` is not
+  widened to punctuated strings. M2's tests cover the pinned
+  `Path` and composed-fragment examples and adversarial failures
+  of each grammar.
 - `REGISTRY: dict[str, EventSpec]` with all 57 events, grouped and
   commented by subsystem in the order of the README table, each
   declaration citing nothing: the fields and tokens are the
@@ -339,16 +347,18 @@ absent from all the surfaces above, in both modes.
   channel). Not an event itself, for the
   same reason a tap failure's report is not one: a complaint that
   went back through validation could recurse. The recovery is a
-  MATRIX, defined per violation class rather than implied by
-  "drop": an undeclared field, wrong kind, or unlisted token drops
-  that field; an undeclared event re-labels to `schema_violation`
-  with base fields only; a missing required field emits what was
-  given (nothing to drop, the complaint says which class fired); a
-  wrong level emits at the level the caller chose (a level is not
-  droppable and rewriting it would falsify the record); a wrong
-  channel emits on the channel the emitter owns (it has no other);
-  and every one of these carries the fixed safe sentence and the
-  one-line complaint. Behind the matrix sits a LAST-RESORT GUARD:
+  deterministic ALGORITHM, not a per-class list: variant selection
+  uses registry-owned dimensions only (the emitter's channel
+  first, then the declared templates, then level); a unique match
+  REBUILDS the payload field by field against that variant,
+  keeping only fields that validate and dropping every offender
+  (never a fail-fast that drops one and retains the next), and
+  ANY invalid emission has its message and args replaced by the
+  fixed safe sentence; no unique match, including a template the
+  registry does not know, degrades to the fresh base-only
+  `schema_violation` emission. Multiple simultaneous violations
+  therefore have one defined outcome, reached the same way every
+  time. Behind the matrix sits a LAST-RESORT GUARD:
   in forgiving mode the whole validation runs under its own
   `try/except`, so a bug inside the validator itself cannot raise
   on a reply path. The guard does not degrade the caller's
