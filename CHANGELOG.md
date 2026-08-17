@@ -122,6 +122,32 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The CLI dispatches from one table and renders from the API's own
+  shapes** (#139, M4). A command was two implementations of one act:
+  fourteen `if args.local:` branches chose between reaching the API and
+  opening the database, each with its own copy of the sentence the act
+  answers with and the notice saying when it applies. An act is one row
+  now, carrying the verb, the path this command's arguments address,
+  the body it sends, the shape it is answered with, how that is
+  printed, and, for the four commands `--local` covers, the same act
+  against the database; one dispatcher reads a row, and the
+  acknowledgement and the notice are printed in one place whichever
+  path produced them. The five commanded kinds' rows are built from
+  their descriptors rather than written per kind, the summary tree asks
+  a kind how one of its entries reads, and `--local`, its preamble and
+  its four-command subset are exactly what they were. What the CLI
+  accepts as an answer is the shape `responses.py` declares the route
+  answers with: the five frozensets of field names, the state
+  vocabulary and the ten predicates that walked a body by hand are
+  gone, and with them a whole class of drift where a field renamed on
+  the model left the CLI refusing every well-formed answer. Validation
+  is strict, so nothing is coerced into a rendering, and unknown fields
+  are dropped rather than refused, so a newer server stays readable;
+  the rejected body reaches neither the output nor an exception chain.
+  Nothing an operator reads changed: every refusal, notice, column and
+  document is byte for byte what it was, and each of the sixteen acts
+  with a break-glass path is now pinned to print the same thing on both
+  of them.
 - **The API's entity routes are built from the descriptors** (#139,
   M3). The nine reads and thirteen writes of the five commanded kinds
   were hand-written handlers saying the same nine things in five
