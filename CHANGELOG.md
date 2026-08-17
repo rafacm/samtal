@@ -122,6 +122,37 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The MCP subsystem is six files under one name** (#140, M1).
+  `samtal_server/tools/mcp.py` was 2,338 lines and at least twelve
+  responsibilities, of which one class was 885 lines. It is now the
+  package `samtal_server/tools/mcp/`, whose `__init__` is still the
+  module `samtal_server.tools.mcp`: it builds the one emitter, so the
+  channel these events ride is unchanged by construction, and it
+  re-exports what the six submodules define. `transport` brings a
+  connection up and classifies what went wrong, `prompts` captures what
+  a server ships about itself under its bounds, `manager` runs one
+  server's lifecycle, `slice` holds the configuration a registry was
+  built from, `reload` applies a newly read one, and `registry` answers
+  what needs the managers and the slice together. Straight moves rather
+  than rewrites: every sentence, token, grant rule, refusal and capture
+  bound behaves as it did, and nothing an operator reads or a collector
+  groups by has moved, which the untouched event pin suites and a
+  byte-identical events reference prove. Two rules hold across the
+  split and are stated in the package docstring: events go through the
+  package emitter, and ordinary prose records go through the package
+  logger, so what an operator watches is still one logger's worth of
+  lines. The conformance suite's channel-ownership rule gained the
+  package form to match, with planted cases for the shapes it accepts
+  and the three it refuses.
+- **Importing the MCP layer no longer rearranges logging** (#140, M1).
+  Importing `tools/mcp` used to install a filter on four of the MCP
+  SDK's loggers and turn propagation off at the root of its namespace,
+  as a side effect of the import, so a tool that imported it to read a
+  type paid for it too. The same filters and the same propagation are
+  now `transport.quiet_sdk_loggers()`, idempotent and called as the
+  first act of a manager start and again where a registry is built,
+  which is ahead of every connection on every path. What a third-party
+  server's own client writes still reaches no handler of ours.
 - **The domain configuration's schema is single-sourced** (#139, M5).
   With this, #139 is done. A domain entity was spelled at 14 to 19
   places across 12 to 14 files, and adding the most recent kind
