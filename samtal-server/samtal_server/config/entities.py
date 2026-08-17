@@ -27,17 +27,21 @@ database, no encryption key and no FastAPI, which is exactly what
 A fact group is filled by the milestone that wires its consumer. Where
 a group has no consumer yet it carries its default and says which
 milestone fills it, so that nothing here is a value nothing validates.
-The exceptions, filled now, are the static identity facts: how the kind
-is addressed, whether it has a delete, whether stored secrets can hang
-on it, and which moved configuration key its command is quoted for.
+The exceptions, filled now, are the facts that are data or prose: the
+three vocabularies a kind is addressed in (its route, its key in the
+configuration document, its table), whether it has a delete, whether
+stored secrets can hang on it, and what a read or a delete of an entry
+that is not there answers.
 
-A fact whose value is code rather than data is filled by the module that
-owns the code, through `fill` below, because the hook a kind pays is
-written in terms of that module's own machinery and this one is
-deliberately importable without any of it. One registry filled from
-several modules, rather than one registry per consumer, is the whole
-point: two copies of a kind's facts can come to disagree, and that is
-the drift this module exists to end.
+A fact whose value is a function written in terms of another module's
+machinery is filled by that module instead, through `fill` below, since
+this one is deliberately importable without any of it: the row mappings
+are written in terms of the repository's row helpers and the body
+builders in terms of the masking rules, and the command that renders
+the documentation has neither a database nor an encryption key. One
+registry filled from several modules, rather than one registry per
+consumer, is the whole point: two copies of a kind's facts can come to
+disagree, and that is the drift this module exists to end.
 """
 
 from collections.abc import Callable
@@ -196,10 +200,11 @@ class EntityDescriptor(DocumentedShape):
     # else; the two members are still exactly two.
     secret_slots: str | None = None
 
-    # The table the kind is rowed in, named rather than held: this
-    # module is read by a command with no database to open, so the
-    # schema is the repository's to resolve. Addressing again, in the
-    # third of the three vocabularies a kind is addressed in.
+    # The table the kind is rowed in: addressing again, in the third of
+    # the three vocabularies a kind is addressed in. Named rather than
+    # held, because this module is read by a command with no database to
+    # open, so resolving the name against the schema is the
+    # repository's.
     table: str | None = None
 
     # Store facts, filled by `store.py`, because each is written in
