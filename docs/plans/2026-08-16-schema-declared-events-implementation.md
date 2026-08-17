@@ -45,29 +45,45 @@ channel and 13 server channels**. The conformance test asserts all
 three numbers rather than leaving them as a claim in prose, so a site
 that stops being found is a failure rather than a smaller silent pass.
 
-The nine spread builders were read rather than guessed, and their key
-sets are now parsed out of the builders by the conformance test rather
-than described beside them:
+The nine spread builders were read rather than guessed, and what is
+read is not their keys but their BRANCHES: one complete key set per
+path through the builder, parsed by walking its statements. The PR #167
+review's first finding is why (see the review round below); the table
+records the shapes as they stand after it.
 
-| spread | always | sometimes |
-| --- | --- | --- |
-| `openai_asr:OpenAiAsr._echo_fields` | `outcome`, `duration_s`, `host` | `retry_ms` |
-| `ota:check_version.fields` | `device`, `client`, `board`, `firmware`, `agents`, `unloaded` | `code` |
-| `ota:_version_two.refusal` | `device`, `code` | |
-| `pipeline:PipelineRuntime._reply.language_fields` | | `language`, `language_confidence` |
-| `pipeline:provider_fields` | `stage` | `provider`, `type`, `host`, `model` |
-| `pipeline:PipelineRuntime._llm_round_done.tokens` | | `input_tokens`, `output_tokens`, `first_token_ms` |
-| `pipeline:PipelineRuntime._provider_failed.fields` | delegates to `provider_fields` | |
-| `pipeline:PipelineRuntime._run_one.fields` | delegates to `_tool_named` | |
-| `pipeline:_tool_named` | | `tool`, `entry` |
-| `pipeline:PipelineRuntime._speaking_ms_field` | | `speaking_ms` |
+| spread | alternatives it can produce |
+| --- | --- |
+| `openai_asr:OpenAiAsr._echo_fields` | `outcome duration_s host`, and the same with `retry_ms` |
+| `ota:check_version.fields` | the six of `device client board firmware agents unloaded`, and the same with `code` |
+| `ota:_version_two.refusal` | `device code` |
+| `pipeline:PipelineRuntime._reply.language_fields` | nothing, `language`, `language_confidence`, both: two independent conditions |
+| `pipeline:provider_fields` | `stage`; `stage provider type`; and that with `host`, with `model`, or with both |
+| `pipeline:PipelineRuntime._llm_round_done.tokens` | every subset of `input_tokens output_tokens first_token_ms`: eight |
+| `pipeline:PipelineRuntime._provider_failed.fields` | delegates to `provider_fields` |
+| `pipeline:PipelineRuntime._run_one.fields` | delegates to `_tool_named` |
+| `pipeline:_tool_named` | `tool`, or `entry`, or neither |
+| `pipeline:PipelineRuntime._speaking_ms_field` | nothing, or `speaking_ms` |
 
-The rule the extraction rests on, and which a planted-source test
-pins: a key in the dict literal is produced on every call, a key added
-by a subscript assignment is conditional, because an unconditional one
-would have been written into the literal. It is ten rows for nine
-events because `_run_one`'s local and the builder behind it are two
-identities.
+The rules the extraction rests on, each pinned by a planted-source
+test: a dict literal creates the shapes, a subscript assignment adds a
+key to every shape there is, a branch is the union of both sides, a
+return takes its shapes out of the flow, and shapes start empty so a
+builder assembled inside a conditional picks up no phantom shape from
+the path where it was never built. That last rule is what makes
+`provider` and `type` atomic: the early return in `provider_fields` is
+a shape of its own, and no path carries one of the pair without the
+other. It is ten rows for nine events because `_run_one`'s local and
+the builder behind it are two identities.
+
+Two calls reach only some of their builder's branches, because the
+condition selecting the branch is the condition selecting the call:
+`ota_check`'s `code` is written exactly when an activation was offered,
+which is exactly the branch that emits the first of the four sentences,
+and `_echo_fields` is handed a retry time by every outcome except the
+skip. Those nine calls carry an inventory of their own, which may only
+NARROW: the test asserts each is a subset of the builder's own
+alternatives and that the calls sharing a builder cover all of them
+between them.
 
 **Decision 4 is satisfied by declaration, verified by reading rather
 than assumed.** `provider_fields` carries `model` and the `tokens`
@@ -185,19 +201,35 @@ field of any record; a **rejected** value appears nowhere at all. The
 
 ### The conformance test
 
-Four claims, in the order they build on each other.
+Five claims, in the order they build on each other. The first three
+sentences of the first two, and the whole of the kinds claim, are as the
+PR #167 review left them; the round below records what moved and why.
 
-**Every emit site maps into the registry.** Conformance is keyed by
-source call. Each site is matched to the exact SET of declared variants
-that could have produced it, by channel, method-derived level and
-byte-exact template, and every member of that set is held to the site's
-arity, its static keywords and what its spreads can produce. A set
-rather than a single variant, because one call can select among shapes:
-`tool_call`'s classification picks between mutually exclusive `tool`,
-`entry` and neither, and `provider_fields` emits `provider` and `type`
-atomically with `host` and `model` independently conditional. The
-correlations are retained in the variants; the flattening the round-4
-finding warned about would have admitted shapes no call can produce.
+**Every emit site maps into the registry, shape for shape.** Conformance
+is keyed by source call, and by SET EQUALITY: the payload shapes a call
+can produce and the shapes its variants admit are the same set. A
+variant's admitted shapes are its required fields times every subset of
+its optional ones. Equality in both directions is the point, because
+containment in either alone misses half of it: a variant carrying two
+mutually exclusive fields is contained in the union of everything the
+spreads can say, and a call branch nothing declares is contained in
+nothing at all. That is what forbids a `tool_call` variant carrying both
+`tool` and `entry`, or an `llm_retry` variant carrying `provider`
+without `type`.
+
+**Every kind agrees with what produces it.** A field name and an arity
+say nothing about a kind, so the producing expression is read:
+`bounded_descriptor(board, BOARD_LIMIT)` is a descriptor of exactly that
+length, `normalize_mac(...)` is an id in the MAC form,
+`type(exc).__name__` is a class name, `len(...)` is a count, `round(x)`
+is an integer the registry may call INT or COUNT, `X or None` is
+nullable and `X or "a fixed word"` is not. One step through a function
+the same module defines is followed, which is what makes `ws.py`'s
+`_known_device` readable as a MAC or nothing. The classifier is
+deliberately partial, since a bare attribute read carries no evidence at
+all; what keeps the silence honest is that the number of positions it
+can speak about is pinned at 72 fields and 49 arguments, so a classifier
+that stopped reading fails rather than passing over an empty set.
 
 **Every declaration is evidenced.** Declared non-base field names are
 asserted EQUAL to the names the sites produce, not merely contained in
@@ -206,20 +238,25 @@ to the function or constant that closes them, through five modes
 (a constant, a function's returns, a keyword at a call, a positional
 argument at a call, and a pydantic `Literal` annotation for
 `transport`), and the values that object can produce are compared with
-the declaration.
+the declaration. Each site's own literal is read besides, from its
+keywords and from the arguments a builder takes its tokens from, and
+held to the token set of every variant that matches it, so two variants
+of one event cannot swap their singleton reasons behind a union that
+does not move.
 
 **Every path is pinned.** The sidecar `PINNED_BY` maps each site's
 stable identity to the pytest node IDs pinning it, and the walk's
 identities are asserted equal to the sidecar's keys both ways.
 
-**The registry is coherent**, and the walk sees what it claims to: six
-planted-source tests cover the concatenated template, the method-derived
-level, the two scopes, the per-function ordinal, both spellings of a
-spread, the plain logging call that names no event, and the two
-key-extraction rules.
+**The registry is coherent**, and the walk sees what it claims to:
+planted-source tests cover the concatenated template, the
+method-derived level, the two scopes, the per-function ordinal, both
+spellings of a spread, the plain logging call that names no event, and
+each of the five branch-walk rules.
 
-Four mutations were observed failing and reverted, since a guard nobody
-has seen fail is a guard nobody has seen:
+Twelve mutations have been observed failing and reverted, since a guard
+nobody has seen fail is a guard nobody has seen. Four from the original
+milestone:
 
 | mutation | what failed |
 | --- | --- |
@@ -227,6 +264,24 @@ has seen fail is a guard nobody has seen:
 | a surplus `invented` field on a variant | the site's case, and `test_every_declared_field_is_produced_somewhere` |
 | `CLOSE_REASONS` short of `error` | `test_every_token_set_matches_its_decision_site[session_closed.reason]` |
 | an extra argument on `barge_in_merged` | the site's case |
+
+Four from the review's first finding:
+
+| mutation | what failed |
+| --- | --- |
+| `tool` and `entry` on one `tool_call` variant | `test_every_emit_site_matches_declared_variants[...PipelineRuntime._run_one #1 (tool_call)]` |
+| `provider` without `type` on `llm_retry` | `...[...PipelineRuntime._watchdog_stream #1 (llm_retry)]` |
+| `code` on the `ota_check` branch that offers none | `...[samtal_server.ota:check_version #4 (ota_check)]` |
+| two `barge_in_suppressed` reasons swapped | `test_every_token_a_site_writes_into_a_field_is_declared` on both affected sites |
+
+And four from the second:
+
+| mutation | what failed |
+| --- | --- |
+| `ota_check.board` from DESCRIPTOR to IDENTIFIER | `test_every_field_kind_agrees_with_what_produces_it[samtal_server.ota:check_version #1 (ota_check)]` |
+| `FIRMWARE_BOUNDS` moved to 48 | the same test on all four `ota_check` sites, and the argument test besides |
+| `activation_complete.device` given the session-id syntax | `...[samtal_server.ota:activate #1 (activation_complete)]` |
+| `session_open.client` made non-nullable | `...[samtal_server.device.session:DeviceSession.run #4 (session_open)]` |
 
 ### The sidecar's shape, and a correction to the plan's arithmetic
 
@@ -330,15 +385,120 @@ Two things the work turned up and did not change:
 Run from `samtal-server/`, with `PYTHONDONTWRITEBYTECODE=1` for
 everything outside pytest.
 
+Re-run after the PR review round, which is where these numbers come
+from; the milestone's own first run is in the round's record below.
+
 - `uv run ruff check .`: `All checks passed!`
-- `uv run pytest tests/unit -q`: `2508 passed, 16 skipped`
-- `uv run pytest tests/integration -q`: `55 passed`
+- `uv run pytest tests/unit -q`: `2769 passed, 16 skipped in 296.92s`
+- `uv run pytest tests/integration -q`: `55 passed in 157.28s`
 - `uv run pytest tests/unit --collect-only -q | tail -1`: **2288
-  before**, **2524 after**. The rise of 236 is exactly the new tests: 15
-  descriptor-sanitization tests, 6 conversation-store pins, and 215
-  conformance cases, 162 of which are the two parametrized-per-site
-  families over the 81 sites and 22 the per-token-set family.
+  before**, **2785 after**. The rise of 497 is exactly the new tests: 15
+  descriptor-sanitization tests, 6 conversation-store pins, and 476
+  conformance cases. Four of the conformance families are parametrized
+  per site, which is 324 of them over the 81 sites; 22 more are the
+  per-token-set family and 9 the lawful-configured-name ones.
 - `uv run pytest tests/integration --collect-only -q | tail -1`: **55
   before**, **55 after**.
 - `git diff --stat af9e4d4 -- tests/unit/test_event_surface_pins.py tests/unit/test_server_event_pins.py`:
-  empty, which is the pin suites' byte-unchanged contract.
+  empty, which is the pin suites' byte-unchanged contract, and still
+  empty after the review round's three commits.
+
+### PR review round
+
+The milestone's own verification, before the round below, was
+`All checks passed!`, `2508 passed, 16 skipped` on the unit lane, `55
+passed` on the integration lane, and a collected count of 2524 against
+2288 at the branch base. The section above carries the numbers after
+the round, which is the state this branch is in.
+
+External review of PR #167 (diff `main...31ada64`), 2026-08-17. Three
+findings, two P1 and one P2, all valid and all accepted. As received,
+condensed but faithful, each with its resolution:
+
+1. **P1: spread correlations are flattened, so impossible variants
+   count as produced.** The conformance reduced each spread to
+   `always | sometimes` and considered a variant produced by channel,
+   level and template alone, so a `tool_call` variant carrying both
+   `tool` and `entry`, or an `ota_check` non-activation variant
+   carrying `code`, would pass. Token checking unioned values across
+   variants, so branch-specific token sets could swap undetected.
+   Extract the exact correlated alternatives per source call, compare
+   them for set equality with the complete variants, and add the named
+   mutations.
+
+   *Resolution*: accepted, `e0af8bf`. Each builder is read as a list of
+   ALTERNATIVES, one complete key set per path through it, by walking
+   its statements rather than collecting its keys, and the comparison
+   with the registry is set equality between what a call can produce
+   and what its variants admit. The two calls that reach only some of
+   their builder's branches are inventoried per call, and an override
+   may only narrow. Each site's own token literals are read from its
+   keywords and from the arguments a builder takes its tokens from. The
+   four named mutations are in the table above.
+
+2. **P1: field and argument kinds are not tied to their producers.**
+   The per-site check covered field names and arity only, and coherence
+   asked merely that an ID name some syntax and a DESCRIPTOR carry some
+   bounds, so flipping `ota_check.board` to IDENTIFIER, changing
+   nullability, or substituting a wrong syntax or bound all passed.
+
+   *Resolution*: accepted, `2866a97`. The producing expression is read
+   and the declaration is held to it, for the kind, the nullability, an
+   ID's syntax and a DESCRIPTOR's bounds, and for every argument
+   position besides. The classifier is partial by design and its reach
+   is pinned at 72 fields and 49 arguments so the silence cannot
+   spread. The four named mutations are in the table above.
+
+3. **P2: valid configured names fall outside the declared composed
+   grammars.** `NonBlankStr` admits any stripped non-empty string,
+   quotes, control characters and unbounded length included, and the
+   emitters interpolate those names; the grammars rejected all three,
+   so an agent called `secondary"agent` would become a schema violation
+   the moment M2 enforces, mangling lawful traffic under forgiving
+   mode.
+
+   *Resolution*: accepted, with the decision recorded rather than
+   improvised, `e48d138`. The registry must describe the surface that
+   exists, so the identifier kind and the composed grammars now carry
+   the configuration's own domain. Where a fragment still needs a bound
+   to mean anything it is bounded by STRUCTURE, the quoting or the
+   parenthesized tail, never by a character class or a length nobody
+   promised. Three lawful names, quoted, control-bearing and overlong,
+   are asserted through the configuration type first and then through
+   every affected grammar, and a rule test forbids any grammar over
+   configured names from claiming a length or a character class again.
+   Reverting the patterns fails all four of those tests.
+
+   The narrowing belongs at configuration semantics, where a refusal
+   reaches the operator who can fix it rather than a log line nobody
+   asked for, so the follow-up below is filed to propose it there.
+
+#### Follow-up to file
+
+Not filed from this worktree, which has no GitHub access. The body
+below is written unwrapped so it can be pasted into an issue without
+its sentences shattering, since GitHub renders an issue body with the
+`breaks` extension.
+
+Title: **Give configured names a bounded safe-name rule, at configuration semantics**
+
+```markdown
+`NonBlankStr`, the type behind an agent name, a provider entry name, a provider type and several more, is `StringConstraints(strip_whitespace=True, min_length=1)`: any non-empty string once stripped. It admits quotes, control characters, newlines and any length at all.
+
+That domain reaches further than the configuration file. These names are interpolated into the event surface's sentences and carried in its fields (`agent`, `agents`, `provider`, `type`, `entry`, `from_agent`, `to_agent`, `origin`), and #155's registry had to widen its grammars to match, because a registry claiming a tighter domain than configuration guarantees would turn a lawful deployment's every `session_open` into a schema violation the moment enforcement lands (PR #167 review, finding 3).
+
+Widening was the right call there: the registry describes the surface that exists. But the surface it describes is wider than anybody wants. An agent called `secondary"agent` renders a sentence whose quoting means nothing; one carrying a newline splits a retained record in two; one four thousand characters long is a log line nobody can read. None of those is a leak, and all of them are avoidable.
+
+**Proposal.** A `SafeName` type beside `NonBlankStr`, applied to the names that reach the event surface:
+
+- non-empty once stripped, as now;
+- printable throughout (`str.isprintable()`), which is the rule `bounded_descriptor` already applies to device-reported values and for the same two reasons: a newline splits one retained record into two, and a terminal escape paints an operator's screen;
+- a stated maximum length, so a log line has a bound;
+- refused at parse time with a sentence naming the key and the rule, like every other configuration refusal.
+
+**Which keys.** At least the ones the events interpolate: `agents` keys, `providers.<stage>` keys, `ProviderConfig.type`, the provider references in `agent_defaults` and `AgentConfig`, and `prompt_fragments` keys. MCP entry names already have a tighter rule (`check_mcp_entry_names`, `[A-Za-z0-9_-]+`), which is the precedent for this and the reason `from_entry` is the one fragment whose looseness is a floor rather than the whole truth.
+
+**Migration.** A name a running deployment already uses and the new rule refuses is a boot refusal, so this is a breaking change: it needs its changelog entry, a way to find offending keys before an upgrade, and a decision on whether the first release warns rather than refuses.
+
+**Then the registry tightens from this side.** `samtal_server/events_schema.py`'s composed grammars (`also_bound_to`, `agent_list`, `quoted_tool_name`, `from_entry`, `quoted_provider`, `reaching_host`, `origin_provenance`) and its `IDENTIFIER` domain are bounded by structure alone today, with a comment pointing here. Once configuration guarantees more, they can claim more, and `test_no_composed_grammar_claims_a_length_or_a_character_class` in `tests/unit/test_event_schema_conformance.py` is the test that would then be relaxed deliberately rather than by accident.
+```
