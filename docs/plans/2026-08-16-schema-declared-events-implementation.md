@@ -502,3 +502,265 @@ Widening was the right call there: the registry describes the surface that exist
 
 **Then the registry tightens from this side.** `samtal_server/events_schema.py`'s composed grammars (`also_bound_to`, `agent_list`, `quoted_tool_name`, `from_entry`, `quoted_provider`, `reaching_host`, `origin_provenance`) and its `IDENTIFIER` domain are bounded by structure alone today, with a comment pointing here. Once configuration guarantees more, they can claim more, and `test_no_composed_grammar_claims_a_length_or_a_character_class` in `tests/unit/test_event_schema_conformance.py` is the test that would then be relaxed deliberately rather than by accident.
 ```
+
+  empty, which is the pin suites' byte-unchanged contract.
+
+## Milestone 2: the emitters enforce
+
+`samtal-server/samtal_server/events.py` grew a 460-line enforcement
+section between the dispatch and the two emitters, and both `_emit`
+paths now go through it. Nothing else about the emitters moved: the
+taps, the ordering, the deep copies and the two clocks are exactly what
+M1 left.
+
+Eight commits, in the order the milestone was built in, plus the one
+that records it:
+
+1. `f5adf65` Activate an agent in the stub runtime
+2. `a4d1276` Judge every emission against its declaration
+3. `1710ecc` Resolve the enforcement mode where a server is built
+4. `0ef1d9b` Give the mechanics suite a registry of its own
+5. `5423336` Drive every violation class through both modes
+6. `b29f4d4` Plant a credential through every diagnostic branch
+7. `2c977d3` Run the entrypoint's mode resolution for real
+
+### What the enforcement does, in the order it does it
+
+Two ordered steps, and the order is the whole of the anti-spoofing
+argument. The caller's `**fields` are compared with the emitter's base
+keys BEFORE the merge, so a session caller supplying `event`, `session`
+or `device` is a `base_key_collision` rather than a key that replaced
+the emitter's identity and typechecked; the merge then lets the base win
+whatever the caller passed. A server emitter's base is `event` alone, so
+`session` and `device` stay ordinary declarable fields there.
+
+The finished payload is then matched WHOLE. Variant selection uses
+registry-owned dimensions in one fixed order, the emitter's channel,
+then the declared templates, then the level, and answers which dimension
+failed where nothing survives, which is what lets a refusal say
+`wrong_channel` or `wrong_template` without naming anything the caller
+supplied. Among the survivors, each variant is scored by its full fault
+list (arguments by position, then declared fields in declaration order,
+then the count of what was not declared at all) and the fewest-fault
+candidate is what the diagnostics describe. Everything is an explicit
+condition that raises; there is no `assert` statement in the section,
+and a subprocess under `-O` proves it.
+
+Kinds are held as M1 declared them: `bool` is rejected for the numeric
+kinds and checked FIRST, since `True` is an `int` to `isinstance`;
+floats must be finite; an `int` satisfies `FLOAT`; `DESCRIPTOR` is
+re-bounded here whatever its decision site did; `ID` and `ID_LIST` are
+matched against the named syntax; `SOURCES` keys are matched against the
+know-how grammar, so `memory` fails like any unknown prefix.
+
+### The forgiving algorithm, and one reading the plan needed
+
+Forgiving mode selects the variant the same way, rebuilds the payload
+field by field against it keeping only what validates, and then holds
+the REBUILT emission to that variant whole again. That final check is
+what gates dispatch: a rebuild that leaves a required field missing, or
+whose sentence or arguments were the problem, becomes the declared
+`schema_violation` event, built fresh from the fixed token, the
+emitter's own base identity, the fixed sentence and no arguments. So
+does an undeclared event, an unknown template, an unknown channel, a
+wrong level and an ambiguous selection.
+
+**Deviation 1, a reading rather than a change.** The plan says "ANY
+invalid emission has its message and args replaced by the fixed safe
+sentence", and also that the final check refuses "a required field
+missing, the selection ambiguous, or the template replaced". Read
+literally the first sentence makes the third condition universal: every
+invalid emission would have its template replaced, so every invalid
+emission would become `schema_violation` and the rebuild would be dead
+code the plan spends three paragraphs specifying. This milestone reads
+"any invalid emission" as "any emission still invalid after the
+rebuild", which is the reading that leaves the plan's three named
+conditions distinct and non-redundant. Concretely: an emission whose
+only fault was an undeclared field is rebuilt without it and rides as
+itself, with its own sentence and arguments; everything else loses its
+sentence and becomes the recovery event. The safety argument holds
+either way, and it is worth stating: a rebuild only succeeds when every
+retained field AND every argument validated against the variant, so the
+sentence that survives renders lawful values only. The plan's own risk
+section wants this reading too: a field only production reaches "would
+surface in forgiving mode as a complaint line, not an outage", and an
+outage of the line is exactly what the literal reading produces.
+
+Behind all of it sits one `try`, wrapping candidate selection,
+validation and rebuild alike, so a bug in this module degrades an
+emission rather than raising on a reply path. It does not degrade the
+caller's payload, because the caller's payload is precisely what could
+not be judged: it builds the replacement fresh and reports the failure
+by exception class name alone. Strict has no guard, deliberately: a lane
+has no reply to lose, and a swallowed bug there is a bug nobody finds.
+
+### What a diagnostic may say
+
+One vocabulary serves both modes: `EventSchemaError`'s single `args`
+entry and the forgiving complaint's two logged arguments are the same
+two halves, a label and a summary, so the surfaces cannot drift apart.
+The label is the declared event name or the fixed `an undeclared event`;
+the summary is `"; ".join` of fixed codes with registry-owned details
+(a declared field name, a count, an argument position). Sixteen codes,
+all module constants.
+
+The complaint is a plain `log.error` on the emitter's own channel, not
+an event, for the reason a failed tap's report is not one: a complaint
+that went back through validation could recurse. ERROR rather than
+WARNING because `log_level` admits roots above WARNING; a test asserts
+its survival under a root of ERROR, and a root of CRITICAL suppresses it
+along with every other ERROR-class diagnostic, which is that operator's
+choice.
+
+### The mode, and where it is resolved
+
+`SAMTAL_EVENTS_ENFORCEMENT`, a module flag with `set_enforcement` under
+it and `resolve_enforcement` over it. The module default is strict.
+`create_app` resolves first, before anything that can emit, because a
+production process may import it and serve under an ASGI runner without
+reaching `main()`; `main()` resolves too, after `load_dotenv` and after
+the `config` and `conversations` early exits, inside the same `try` that
+prints every other boot refusal to stderr and exits 1. Unset means
+forgiving at both. Anything else refuses, naming the variable and the
+two values and never echoing the rejected spelling, which a test with a
+credential-shaped value pins.
+
+`tests/conftest.py` SETS the variable rather than defaulting it, unlike
+the two secrets beside it: the module default already makes the lanes
+strict, and what the line buys is a lane that stays strict when it
+builds an app, which an ambient `forgiving` on a CI runner would
+otherwise relax. The Dockerfile's `ENV` block gains
+`SAMTAL_EVENTS_ENFORCEMENT=forgiving`, redundant with the resolver's own
+default on purpose.
+
+### The seam
+
+`events.declared_events()` and `set_declared_events()` are the injectable
+module state; `tests/support/schema.py`'s `scratch_registry` is the
+test-scoped context manager over them. `test_events.py` installs a
+scratch registry through an autouse fixture, budgeted for everything it
+emits: the four synthetic names, and `heard`, `ota_check` and
+`capture_enabled` in the shapes that suite gives them. Declaring them
+turned out to be a second reading of the file rather than a formality:
+two shapes only a line-by-line read finds are in there (a
+session-channel `one` whose whole template is `a`, and an `ota_check`
+emitted without its `device` field), and a permissive stub registry
+would have hidden both. An emission this suite adds and does not declare
+now fails rather than passing quietly.
+
+The two contract pin files are byte-unchanged, which `git diff --stat`
+against the branch base reports as an empty diff.
+
+### What strict enforcement found
+
+**No declaration was wrong.** The whole unit lane and the whole
+integration lane run every production emission through the validator,
+and the registry M1 declared accepted all of them unaltered. That is the
+milestone's core proof and it needed no fixes to the registry, no
+changes to an emit site, and no weakened pin.
+
+**Deviation 2: one test double was wrong, and it is fixed rather than
+declared around.** Three `test_boundary_contract.py` cases failed on
+`session_open` with `not_nullable (agent)`. `StubRuntime`, the boundary
+suite's stand-in conversation runtime, never wrote `events.agent`, so
+the edge emitted `session_open` with a null agent and rendered `None`
+into the sentence. The real runtime's constructor activates the first
+agent (which is why the edge stopped doing it by hand), and a device
+with no agent is turned away before the session opens, so no production
+path can produce that shape. Declaring `agent` nullable would have made
+the registry describe a surface this server does not have. The stub
+gained the one line the real runtime already had, and the contract
+test's assertion moved with it: it now says the value is the runtime's
+own choice rather than anything the edge wrote. This is a test-support
+change, not an emit-site change, and neither pin suite moved.
+
+### The test matrix, as it came out
+
+`tests/unit/test_event_enforcement.py` (67 cases) drives every violation
+class through both modes against a scratch registry of its own, keyed to
+this suite rather than to production events so that the matrix does not
+change whenever the surface does, on real channels so the recovery
+event's own declaration covers them. Undeclared event, undeclared field,
+wrong kind, boolean-for-number, null in a non-nullable field, unlisted
+token, missing required field, wrong level, wrong channel, wrong
+template, wrong arity, wrong argument kind, base-key collision per key,
+bad list element, bad `ID_LIST` element, every allowed `SOURCES` form,
+an empty and a populated mapping, `memory` and two other bad keys, a bad
+provenance value, the two argument-only kinds (`PATHLIKE` as a `Path`
+and as a `str`, `COMPOSED` against its named grammar with four
+adversarial fragments), a check that no declared grammar admits a
+newline, the complaint's survival under an ERROR root, the multi-fault
+single complaint, the guard, and the two internal producers of
+`schema_violation` told apart by what they say.
+
+`tests/unit/test_event_enforcement_sentinels.py` (27 cases) is the
+no-leak half. One credential-shaped spelling, dotted so that it
+satisfies no `ID` syntax and no token set while remaining an ordinary
+printable string, drives all NINE distinct diagnostic branches in both
+modes: wrong-kind field value, undeclared event name, undeclared spread
+key, the message itself, a wrong-kind template argument, an unlisted
+token, a malformed `ID`, a bad list element, a bad provenance key. Each
+strict case asserts `EventSchemaError.args` by equality (and `str` and
+`repr`, which are built from it) and that nothing was written or
+dispatched at all; each forgiving case asserts `record.msg` and
+`record.args` by equality, then hunts the sentinel through both shipped
+log formats, the arguments behind them, `Emission.args` and an attached
+tap. Beside the nine: one wholly hostile call (key, value, message and
+arguments together) through the ordinary forgiving path with nothing
+injected, and the guard matrix, a validator raising a sentinel-bearing
+exception crossed with five hostile shapes. The descriptor proofs are
+the two-class model round 4 settled: an admissible credential-shaped
+board appears in exactly `("checked", "board")` and its declared
+argument position, on the record, in both formats and on the tap, and a
+rejected one (a newline inside it) appears nowhere at all.
+
+`tests/unit/test_event_enforcement_mode.py` (21 cases) covers the
+resolver in process and the entrypoint in subprocesses: unset,
+`forgiving`, `strict`, an unknown value refusing with its message on
+stderr and exit code 1, a `.env` file carrying the mode, a real variable
+still beating that file, `config --help` unblocked by an unusable value,
+and the `-O` proof (`__debug__` false in the child, and an invalid
+strict-mode emission still refused).
+
+### Deviations from the plan
+
+Three, all recorded rather than silent.
+
+1. **"Any invalid emission" is read as "any emission still invalid
+   after the rebuild"**, for the reasons above. Without it the plan's
+   rebuild algorithm is unreachable code and forgiving mode loses every
+   line it complains about.
+2. **A test double changed, and one assertion with it**
+   (`tests/support/boundary.py`, `test_boundary_contract.py`). Strict
+   enforcement refused a shape no production path produces; the double
+   was what produced it. No emit site, declaration or pin moved.
+3. **The complaint and the exception share one sentence.** The plan
+   describes them separately (a fixed complaint, a raising exception).
+   They are built from one `REFUSAL_MESSAGE` template and one label and
+   summary pair here, the complaint logging the two halves unrendered
+   and the exception carrying them rendered, so the two surfaces cannot
+   say different things about the same violation and a test can assert
+   both exactly.
+
+One thing the work turned up and did not change: the emitters keep
+validating on the `vad`/`dropped` side channels' behalf by not touching
+them at all. They are outside the tap contract and outside the registry,
+and they remain outside the enforcement, which is what keeps validation
+per decision rather than per frame.
+
+### Verification
+
+Run from `samtal-server/`, with `PYTHONDONTWRITEBYTECODE=1` for
+everything outside pytest.
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/unit -q`: `2623 passed, 16 skipped`
+- `uv run pytest tests/integration -q`: `55 passed`
+- `uv run pytest tests/unit --collect-only -q | tail -1`: **2524
+  before**, **2639 after**. The rise of 115 is exactly the new tests: 67
+  enforcement cases, 27 sentinel cases and 21 mode cases.
+- `uv run pytest tests/integration --collect-only -q | tail -1`: **55
+  before**, **55 after**.
+- `git diff --stat 31ada64 -- tests/unit/test_event_surface_pins.py tests/unit/test_server_event_pins.py`:
+  empty. Both contract suites pass unmodified under strict enforcement,
+  which is the milestone's core proof.

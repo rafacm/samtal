@@ -1805,6 +1805,21 @@ single tool therefore says which one by its position in that server's
 listing. `samtal-server config status` prints the names themselves, to a
 terminal, when you ask it.
 
+Every event above is declared: its channel, its level, the sentence it
+renders, the arguments that sentence takes and every field it may carry,
+with closed sets for the fields that hold a reason token. The emitters
+hold each emission to that declaration before any of it is written, and
+`SAMTAL_EVENTS_ENFORCEMENT` decides what happens to one that does not
+match. A running server defaults to `forgiving`: the emission is
+recovered into a declared shape, or replaced by a `schema_violation`
+event carrying nothing but the session's own identity, and one line on
+the emitter's channel says what was refused, because a telemetry bug
+must never cost a reply. Everything that is not a running server (the
+test lanes, an import, a REPL) defaults to `strict`, where a violation
+raises instead. Set it to `strict` if you want a local server that
+refuses loudly while you are working on it; anything other than those
+two words refuses to start.
+
 These events are metadata, and metadata only. What was said is in the
 conversation store, keyed by the same `session`: query `turns` there for
 the transcript and the reply, and `tool_invocations` for what a tool was
