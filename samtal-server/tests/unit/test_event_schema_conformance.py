@@ -51,7 +51,7 @@ import importlib
 import itertools
 import logging
 import typing
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from dataclasses import field as data_field
 from functools import cache
@@ -152,27 +152,73 @@ def module_tree(module: str) -> ast.Module:
     return ast.parse(module_source(module))
 
 
+def module_scope(node: ast.AST) -> Iterator[ast.stmt]:
+    """Every statement that runs in a module's own scope, in source
+    order: the top level, and the bodies of the `if`, `try`, `with` and
+    loop statements there, which run in that scope too and bind in it.
+
+    Function and class definitions are not descended into, because a
+    name bound inside one of those is that scope's own and no emit site
+    at module level reaches it.
+    """
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            continue
+        if isinstance(child, ast.stmt):
+            yield child
+        # And into anything else that holds statements: an `except`
+        # handler and a `match` case are not statements themselves.
+        yield from module_scope(child)
+
+
+def binds_the_emitter(target: ast.expr | None) -> bool:
+    """Whether one assignment target binds the emitter's name, however
+    the assignment spells it: the name itself, or the name anywhere
+    inside a tuple, a list, or a starred element of either."""
+    if isinstance(target, ast.Name):
+        return target.id == PACKAGE_EMITTER
+    if isinstance(target, ast.Starred):
+        return binds_the_emitter(target.value)
+    if isinstance(target, ast.Tuple | ast.List):
+        return any(binds_the_emitter(element) for element in target.elts)
+    return False
+
+
 def emitter_bindings(tree: ast.AST) -> list[ast.stmt]:
-    """Every statement at a module's TOP LEVEL that binds the emitter's
+    """Every statement in a module's own SCOPE that binds the emitter's
     name, in source order.
 
-    What an emit site reaches is the binding the module's top level
-    holds, so asking whether the right one is present anywhere is the
-    wrong question: `from . import events` followed by
+    What an emit site reaches is the binding the module's scope holds,
+    so asking whether the right one is present anywhere is the wrong
+    question: `from . import events` followed by
     `from somewhere import events` runs on somebody else's channel while
     reading as this package's. Every binding is collected and the rule
     below asks for exactly one, which is the only shape with nothing to
     argue about. Nested scopes are left alone: a name rebound inside a
     function is that function's own.
+
+    Effective and not decorative, which is the PR #179 review's second
+    finding and the reason this reads more than plain assignments at
+    the top level. A rebinding hides as easily in a tuple
+    (`events, other = foreign, value`) or under a module-level `if` or
+    `try` as in a second import, and all of them run before the first
+    emit; a rule that saw only the obvious form would refuse the honest
+    shapes and pass the shapes worth refusing. The forms that bind a
+    name in this scope are all read: assignment of every arity,
+    annotated and augmented assignment, an import, a `for` target and a
+    `with ... as`.
     """
     found: list[ast.stmt] = []
-    for node in getattr(tree, "body", []):
-        if isinstance(node, ast.Assign | ast.AnnAssign):
+    for node in module_scope(tree):
+        if isinstance(node, ast.Assign | ast.AnnAssign | ast.AugAssign):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            if any(
-                isinstance(target, ast.Name) and target.id == PACKAGE_EMITTER
-                for target in targets
-            ):
+            if any(binds_the_emitter(target) for target in targets):
+                found.append(node)
+        elif isinstance(node, ast.For | ast.AsyncFor):
+            if binds_the_emitter(node.target):
+                found.append(node)
+        elif isinstance(node, ast.With | ast.AsyncWith):
+            if any(binds_the_emitter(item.optional_vars) for item in node.items):
                 found.append(node)
         elif isinstance(node, ast.Import | ast.ImportFrom):
             if any(
@@ -2281,6 +2327,57 @@ def test_an_emitter_rebound_after_a_lawful_one_owns_nothing() -> None:
         "planted.part",
         ast.parse(PACKAGES_EMITTER + "from foreign.subsystem import events\n"),
     ) == "planted.part"
+
+
+def test_an_emitter_rebound_out_of_plain_sight_owns_nothing_either() -> None:
+    """The two shapes a rule that read only plain top-level assignments
+    would have let through, which is the PR #179 review's second
+    finding. Both run in the module's own scope, both run before the
+    first emit, and both leave the emit sites reaching a foreign
+    emitter while the lawful import above them says otherwise.
+
+    A tuple assignment binds every name in it, and a rebinding under a
+    module-level `if` or `try` is a rebinding on the branch that runs.
+    Neither is read as ownership now, and the walk agrees with the rule
+    about both, which is what stops one half from accepting what the
+    other refuses.
+    """
+    unpacked = PACKAGES_EMITTER + "(events, other) = foreign.events, value\n"
+    conditional = PACKAGES_EMITTER + "if FLAG:\n    from foreign.subsystem import events\n"
+    guarded = (
+        OWN_EMITTER
+        + "try:\n    from foreign.subsystem import events\nexcept ImportError:\n    pass\n"
+    )
+    tree_of = trees(
+        {
+            "planted": OWN_EMITTER,
+            "planted.unpacked": unpacked,
+            "planted.conditional": conditional,
+            "planted.guarded": guarded,
+        }
+    )
+
+    assert unowned("planted.unpacked", "planted", tree_of)
+    assert unowned("planted.conditional", "planted", tree_of)
+    assert unowned("planted.guarded", "planted.guarded", tree_of)
+    for module, source in (
+        ("planted.unpacked", unpacked),
+        ("planted.conditional", conditional),
+        ("planted.guarded", guarded),
+    ):
+        assert channel_of(module, ast.parse(source)) == module
+    # And the honest shapes those forms could be confused with are
+    # still accepted: a tuple that binds other names, and a module-level
+    # `if` that binds none.
+    innocent = trees(
+        {
+            "planted": OWN_EMITTER,
+            "planted.part": PACKAGES_EMITTER
+            + "(first, second) = 1, 2\nif FLAG:\n    other = 3\n",
+        }
+    )
+
+    assert unowned("planted.part", "planted", innocent) == ""
 
 
 def test_the_walk_records_a_submodules_emission_on_its_packages_channel() -> None:
