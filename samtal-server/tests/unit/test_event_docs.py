@@ -18,10 +18,13 @@ duplicates. A wording edit passes; a dropped, invented or duplicated row
 does not.
 """
 
+import logging
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -92,6 +95,112 @@ def flat(text: str) -> str:
     as soon as a word ahead of it changes, and an assertion that broke
     on rewrapping would be an assertion about the wrapping."""
     return " ".join(text.split())
+
+
+# --- the reference, sliced so a row can be read against its own row ----
+
+ARGUMENT_HEADER = "| # | Argument | Nullable | Constraint | Note |"
+
+FIELD_HEADER = "| Field | Kind | Required | Nullable | Constraint | Note |"
+
+
+def variant_sections() -> dict[str, list[tuple[str, list[str]]]]:
+    """The rendered document as event name to its variant subsections,
+    each a heading and the lines under it.
+
+    Slicing is what makes the assertions exact. A substring search over
+    the whole document says a property is documented somewhere, which is
+    true of almost anything in two thousand lines of tables."""
+    events: dict[str, list[tuple[str, list[str]]]] = {}
+    event: str | None = None
+    heading: str | None = None
+    body: list[str] = []
+
+    def close() -> None:
+        if event is not None and heading is not None:
+            events[event].append((heading, body))
+
+    for line in events_docgen.reference().splitlines():
+        if line.startswith("### `"):
+            close()
+            event = line.removeprefix("### `").removesuffix("`")
+            events[event] = []
+            heading, body = None, []
+        elif line.startswith("#### "):
+            close()
+            heading, body = line, []
+        elif heading is not None:
+            body.append(line)
+    close()
+    return events
+
+
+def table(lines: list[str], header: str) -> list[list[str]]:
+    """The rows under one table header, as stripped cells.
+
+    Split on unescaped pipes only, since a cell may carry an escaped one
+    and a naive split would turn one row into two halves of nothing."""
+    start = lines.index(header)
+    rows = []
+    for line in lines[start + 2 :]:
+        if not line.startswith("|"):
+            break
+        rows.append([one.strip() for one in re.split(r"(?<!\\)\|", line.strip())[1:-1]])
+    return rows
+
+
+def yes(value: bool) -> str:
+    return "yes" if value else "no"
+
+
+def cell(note: str) -> str:
+    """A declared note as a table cell holds it: one line, pipes
+    escaped."""
+    return flat(note).replace("|", "\\|")
+
+
+def token(value: str) -> str:
+    """A declared token as the constraint column shows it: a code span,
+    quoted where a code span alone would not show the value, which is
+    the empty token and the ones with an edge space."""
+    if value and value == flat(value):
+        return f"`{value}`"
+    return f"`'{value}'`"
+
+
+def check_constraint(rendered: str, declared: Any, kind: str, where: str) -> None:
+    """What the constraint column has to say for one declaration.
+
+    Built from the declaration here rather than from the generator's own
+    helpers, so this is a second opinion about the cell and not the same
+    string computed twice."""
+    if declared.tokens:
+        for one in sorted(declared.tokens):
+            assert token(one) in rendered, f"{where}: token {one!r} missing"
+        # And no sixth token in a set of five: every code span in the
+        # cell is one of the declared values.
+        assert rendered.count("`") == 2 * len(declared.tokens), where
+        return
+    if declared.syntax is not None:
+        assert f"`{declared.syntax.name}`" in rendered, where
+        if kind.endswith("_LIST"):
+            assert "each element" in rendered, where
+        return
+    if declared.bounds is not None:
+        assert str(declared.bounds.max_length) in rendered, where
+        assert declared.bounds.charset in rendered, where
+        return
+    if getattr(declared, "grammar", None) is not None:
+        assert f"`{declared.grammar.name}`" in rendered, where
+        return
+    if declared.joined:
+        assert "joined" in rendered, where
+        return
+    if kind == "SOURCES":
+        assert "provenance" in rendered, where
+        return
+    # Nothing further is declared, so the cell claims nothing further.
+    assert rendered == "", where
 
 
 # --- the README index, at name level ----------------------------------
@@ -170,47 +279,81 @@ def test_the_reference_renders_every_event() -> None:
         assert f"| `{name}`" in rendered, f"{name} has no index row"
 
 
-def test_the_reference_renders_every_variant_of_every_event() -> None:
+def test_every_event_renders_exactly_its_declared_variants() -> None:
     """The drift step guards the content of what is rendered; this
-    guards that everything is. A generator that stopped at an event's
-    first variant would produce a document CI diffs happily."""
-    rendered = events_docgen.reference()
+    guards that everything is, and nothing else. A generator that
+    stopped at an event's first variant would produce a document CI
+    diffs happily."""
+    rendered = variant_sections()
+    assert set(rendered) == set(REGISTRY)
     for name, spec in REGISTRY.items():
-        for position, variant in enumerate(spec.variants, start=1):
-            heading = f"#### Variant {position}: `{variant.channel}` at "
-            assert heading in rendered, f"{name} variant {position} has no section"
-        assert rendered.count(f"#### Variant {len(spec.variants)}: ") >= 1
+        assert [heading for heading, _ in rendered[name]] == [
+            f"#### Variant {position}: `{variant.channel}` at "
+            f"{logging.getLevelName(variant.level)}"
+            for position, variant in enumerate(spec.variants, start=1)
+        ], name
 
 
 def test_the_reference_carries_every_template_byte_for_byte() -> None:
     """The sentence is half the record, and the half a payload rule
     would leave undocumented."""
-    rendered = events_docgen.reference()
+    rendered = variant_sections()
     for name, spec in REGISTRY.items():
-        for variant in spec.variants:
-            assert f"\n{variant.message}\n" in rendered, f"{name}: template not rendered"
+        for (heading, body), variant in zip(rendered[name], spec.variants, strict=True):
+            assert body[body.index("```text") + 1] == variant.message, f"{name} {heading}"
 
 
-def test_the_reference_enumerates_every_declared_token() -> None:
-    rendered = events_docgen.reference()
+def test_every_argument_row_matches_its_declaration() -> None:
+    """Row for row against the variant it belongs to, rather than by
+    hunting for a substring somewhere in a two-thousand-line document.
+    A global search is what let the one nullable argument position go
+    undocumented while the suite stayed green: every property it
+    claimed was true of some other row."""
+    rendered = variant_sections()
     for name, spec in REGISTRY.items():
-        for variant in spec.variants:
-            for field, declared in variant.fields.items():
-                for one in declared.tokens or ():
-                    assert f"`{one}`" in rendered, f"{name}.{field}: {one} is not rendered"
+        for (heading, body), variant in zip(rendered[name], spec.variants, strict=True):
+            where = f"{name} {heading}"
+            if not variant.args:
+                assert ARGUMENT_HEADER not in body, where
+                assert "No arguments: the sentence is fixed." in body, where
+                continue
+            rows = table(body, ARGUMENT_HEADER)
+            assert len(rows) == len(variant.args), where
+            for position, (row, arg) in enumerate(zip(rows, variant.args, strict=True), start=1):
+                index, kind, nullable, constraint, note = row
+                assert index == str(position), where
+                assert kind == f"`{arg.kind.name}`", f"{where} argument {position}"
+                assert nullable == yes(arg.nullable), f"{where} argument {position}"
+                assert note == cell(arg.note), f"{where} argument {position}"
+                check_constraint(constraint, arg, arg.kind.name, f"{where} argument {position}")
 
 
-def test_the_reference_renders_every_declared_note() -> None:
-    """The notes are where the field prose the README used to carry
-    lives now, so a note nothing renders would be prose deleted rather
-    than moved."""
+def test_every_field_row_matches_its_declaration() -> None:
+    """The same, for the payload half: every declared field in its
+    declared order, with the kind, requiredness, nullability, constraint
+    and note that field declares and nothing else."""
+    rendered = variant_sections()
+    for name, spec in REGISTRY.items():
+        for (heading, body), variant in zip(rendered[name], spec.variants, strict=True):
+            where = f"{name} {heading}"
+            rows = table(body, FIELD_HEADER)
+            assert [row[0] for row in rows] == [f"`{one}`" for one in variant.fields], where
+            for row, (field, declared) in zip(rows, variant.fields.items(), strict=True):
+                _, kind, required, nullable, constraint, note = row
+                assert kind == f"`{declared.kind.name}`", f"{where} {field}"
+                assert required == yes(declared.required), f"{where} {field}"
+                assert nullable == yes(declared.nullable), f"{where} {field}"
+                assert note == cell(declared.note), f"{where} {field}"
+                check_constraint(constraint, declared, declared.kind.name, f"{where} {field}")
+
+
+def test_the_reference_renders_every_declared_prose_note() -> None:
+    """The event and variant notes, which are paragraphs rather than
+    cells: the field and argument notes are asserted by the two row
+    tests above, exactly rather than by presence."""
     rendered = flat(events_docgen.reference())
     for name, spec in REGISTRY.items():
-        notes = [spec.note]
-        for variant in spec.variants:
-            notes.append(variant.note)
-            notes += [declared.note for declared in variant.fields.values()]
-            notes += [declared.note for declared in variant.args]
+        notes = [spec.note, *[variant.note for variant in spec.variants]]
         for note in notes:
             if note:
                 assert flat(note) in rendered, f"{name}: a declared note is not rendered"

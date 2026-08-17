@@ -41,7 +41,9 @@ included: `event` everywhere, and `session` and `device` on the session
 channel, where the emitter owns them and a caller supplying one is itself a
 violation. On a server channel `session` and `device` are ordinary fields,
 declared where they are carried. Required says the field is always present in
-that variant; nullable says it may be present and null.
+that variant; nullable says it may be present and null. An argument position
+carries the same nullability column, for the positions whose value the
+sentence may have to render as nothing.
 
 Two per-frame samples are outside all of this on purpose. The endpointer track
 and the dropped-frame counts are capture side channels rather than events, so
@@ -93,6 +95,11 @@ lawful deployment's traffic into violations.
 | `IDENTIFIER_LIST` | A list whose every element is an `IDENTIFIER`. |
 | `ID_LIST` | A list whose every element is an `ID` of the field's declared syntax. |
 | `SOURCES` | The one structured kind: a mapping from prompt provenance to character counts, keyed by the grammar below. |
+
+A `TOKEN` field's constraint column lists its whole set. A value that is
+empty, or that begins or ends with a space, is printed quoted there, for the
+reason the patterns below are: a bare code span shows neither, and a set whose
+members cannot be read exactly is not a closed set.
 
 ## What an argument may be
 
@@ -250,13 +257,13 @@ instead.
 device %s (%s, firmware %s) has no agent and is showing activation code %s; bind it with: samtal-server config add-device %s <agent>
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `reported_mac` syntax |  |
-| 2 | `DESCRIPTOR` | at most 64 characters, every one printable |  |
-| 3 | `DESCRIPTOR` | at most 32 characters, every one printable |  |
-| 4 | `ID` | the `activation_code` syntax |  |
-| 5 | `ID` | the `activation_code` syntax |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `reported_mac` syntax |  |
+| 2 | `DESCRIPTOR` | no | at most 64 characters, every one printable |  |
+| 3 | `DESCRIPTOR` | no | at most 32 characters, every one printable |  |
+| 4 | `ID` | no | the `activation_code` syntax |  |
+| 5 | `ID` | no | the `activation_code` syntax |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -275,12 +282,12 @@ device %s (%s, firmware %s) has no agent and is showing activation code %s; bind
 device %s (%s, firmware %s) is bound to agent %s, which this server has not loaded; restart to load it
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `reported_mac` syntax |  |
-| 2 | `DESCRIPTOR` | at most 64 characters, every one printable |  |
-| 3 | `DESCRIPTOR` | at most 32 characters, every one printable |  |
-| 4 | `COMPOSED` | the `agent_list` grammar |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `reported_mac` syntax |  |
+| 2 | `DESCRIPTOR` | no | at most 64 characters, every one printable |  |
+| 3 | `DESCRIPTOR` | no | at most 32 characters, every one printable |  |
+| 4 | `COMPOSED` | no | the `agent_list` grammar |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -298,11 +305,11 @@ device %s (%s, firmware %s) is bound to agent %s, which this server has not load
 device %s (%s, firmware %s) has no agent: bind it under devices or set default_agent
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `reported_mac` syntax |  |
-| 2 | `DESCRIPTOR` | at most 64 characters, every one printable |  |
-| 3 | `DESCRIPTOR` | at most 32 characters, every one printable |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `reported_mac` syntax |  |
+| 2 | `DESCRIPTOR` | no | at most 64 characters, every one printable |  |
+| 3 | `DESCRIPTOR` | no | at most 32 characters, every one printable |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -320,13 +327,13 @@ device %s (%s, firmware %s) has no agent: bind it under devices or set default_a
 device %s (%s, firmware %s) resolved to agent %s%s
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `reported_mac` syntax |  |
-| 2 | `DESCRIPTOR` | at most 64 characters, every one printable |  |
-| 3 | `DESCRIPTOR` | at most 32 characters, every one printable |  |
-| 4 | `IDENTIFIER` |  |  |
-| 5 | `COMPOSED` | the `also_bound_to` grammar |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `reported_mac` syntax |  |
+| 2 | `DESCRIPTOR` | no | at most 64 characters, every one printable |  |
+| 3 | `DESCRIPTOR` | no | at most 32 characters, every one printable |  |
+| 4 | `IDENTIFIER` | no |  |  |
+| 5 | `COMPOSED` | no | the `also_bound_to` grammar |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -348,9 +355,9 @@ An unbound device that was answered with no activation code, and why.
 device %s is unbound in the configuration this server started with, but the database could not be read, so no activation code was issued: this device may already be bound. Fix the database and it is offered one at its next check
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `mac` syntax |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `mac` syntax |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -364,11 +371,11 @@ device %s is unbound in the configuration this server started with, but the data
 device %s is unbound but was offered no activation code: %s. It is answered exactly as it was before onboarding existed, with no token; bind it by its MAC with: samtal-server config bind-device %s <agent>
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `mac` syntax |  |
-| 2 | `TOKEN` | one of: `128 devices are already waiting to be claimed, which is the cap`, `30 activation codes have been issued in the last 10 minutes, which is the limit` |  |
-| 3 | `ID` | the `mac` syntax |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `mac` syntax |  |
+| 2 | `TOKEN` | no | one of: `128 devices are already waiting to be claimed, which is the cap`, `30 activation codes have been issued in the last 10 minutes, which is the limit` |  |
+| 3 | `ID` | no | the `mac` syntax |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -386,9 +393,9 @@ A waiting device has been claimed; its next check hands it a token.
 device %s is activated: its next configuration check hands it a token
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `mac` syntax |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `mac` syntax |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -406,9 +413,9 @@ A waiting device polled and is still waiting.
 device %s is still waiting to be claimed
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `mac` syntax |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `mac` syntax |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -429,9 +436,9 @@ stop there.
 device %s sent a version-2 activation body that is not a JSON object; it is answered as still waiting. Nothing of the body is quoted here
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `mac` syntax |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `mac` syntax |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -446,9 +453,9 @@ device %s sent a version-2 activation body that is not a JSON object; it is answ
 device %s sent a version-2 activation body naming an algorithm this server does not know; it is answered as still waiting. The value is not quoted here, since it is whatever the request carried
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `mac` syntax |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `mac` syntax |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -463,9 +470,9 @@ device %s sent a version-2 activation body naming an algorithm this server does 
 device %s sent a version-2 activation body answering a challenge this server did not issue for it; it is answered as still waiting
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `mac` syntax |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `mac` syntax |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -485,9 +492,9 @@ refusals, so nothing a request carried is interpolated into the retained log.
 rejected OTA request: %s
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `TOKEN` | one of: `the Client-Id header is required and holds the device UUID`, `the Device-Id header does not hold a MAC address; it has to be six colon-separated hex pairs, for example aa:bb:cc:dd:ee:ff. What was sent is not quoted back, since a header that missed the MAC may hold anything at all`, `the Device-Id header is required and holds the device MAC` |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `TOKEN` | no | one of: `the Client-Id header is required and holds the device UUID`, `the Device-Id header does not hold a MAC address; it has to be six colon-separated hex pairs, for example aa:bb:cc:dd:ee:ff. What was sent is not quoted back, since a header that missed the MAC may hold anything at all`, `the Device-Id header is required and holds the device MAC` |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -503,10 +510,10 @@ Where devices are configured, said once at startup.
 device onboarding is off: devices are configured at the server.ota_path path on %s (%s), which is not printed here, since that segment is this deployment's secret
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `IDENTIFIER` |  |  |
-| 2 | `COMPOSED` | the `origin_provenance` grammar |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `IDENTIFIER` | no |  |  |
+| 2 | `COMPOSED` | no | the `origin_provenance` grammar |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -521,10 +528,10 @@ device onboarding is off: devices are configured at the server.ota_path path on 
 device onboarding is on: devices are configured on %s (%s), at the short path samtal-server config ota-url prints. The path is not repeated here, since its key stands in front of the endpoint that issues device tokens
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `IDENTIFIER` |  |  |
-| 2 | `COMPOSED` | the `origin_provenance` grammar |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `IDENTIFIER` | no |  |  |
+| 2 | `COMPOSED` | no | the `origin_provenance` grammar |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -545,9 +552,9 @@ repeated.
 a request reached the onboarding path carrying %d characters shaped like a key, and not this server's; neither is repeated here. Check the URL typed into the device's captive portal against the one samtal-server config ota-url prints
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `COUNT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `COUNT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -564,9 +571,9 @@ A request carried something that is not key-shaped at all.
 a request reached the onboarding path carrying %d characters that are not shaped like a key at all, so they are not repeated here; the URL to type comes from samtal-server config ota-url
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `COUNT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `COUNT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -585,9 +592,9 @@ chose.
 refused a websocket handshake from an unidentified client: %s
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `TOKEN` | one of: `bad_token`, `no_token` |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `TOKEN` | no | one of: `bad_token`, `no_token` |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -607,9 +614,9 @@ the endpoint makes before a session can run at all.
 session %s rejected: the Device-Id header is not a device MAC (six colon-separated hex pairs)
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -624,11 +631,11 @@ session %s rejected: the Device-Id header is not a device MAC (six colon-separat
 session %s rejected: device %s is bound to agent %s, which this server has not loaded; restart to load it
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `ID` | the `mac` syntax |  |
-| 3 | `COMPOSED` | the `agent_list` grammar |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `ID` | no | the `mac` syntax |  |
+| 3 | `COMPOSED` | no | the `agent_list` grammar |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -643,10 +650,10 @@ session %s rejected: device %s is bound to agent %s, which this server has not l
 session %s rejected: device %s has no agent: bind it under devices or set default_agent
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `ID` | the `mac` syntax |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `ID` | no | the `mac` syntax |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -661,9 +668,9 @@ session %s rejected: device %s has no agent: bind it under devices or set defaul
 refused a websocket handshake from %s: the server is at capacity
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `COMPOSED` | the `device_or_unidentified` grammar |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `COMPOSED` | no | the `device_or_unidentified` grammar |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -682,16 +689,16 @@ A conversation starts.
 session %s open: device %s (client %s) agent %s%s, protocol v%d, %d Hz %d ms frames in
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `ID` | the `mac` syntax |  |
-| 3 | `DESCRIPTOR` | at most 64 characters, every one printable |  |
-| 4 | `IDENTIFIER` |  |  |
-| 5 | `COMPOSED` | the `also_bound_to` grammar |  |
-| 6 | `INT` |  |  |
-| 7 | `INT` |  |  |
-| 8 | `INT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `ID` | no | the `mac` syntax |  |
+| 3 | `DESCRIPTOR` | no | at most 64 characters, every one printable |  |
+| 4 | `IDENTIFIER` | no |  |  |
+| 5 | `COMPOSED` | no | the `also_bound_to` grammar |  |
+| 6 | `INT` | no |  |  |
+| 7 | `INT` | no |  |  |
+| 8 | `INT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -714,10 +721,10 @@ The duration cap fires.
 session %s reached the %.0f s time limit
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `FLOAT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `FLOAT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -736,10 +743,10 @@ The idle timeout hangs up on a realtime session.
 session %s idle for %.0f s, hanging up
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `FLOAT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `FLOAT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -759,10 +766,10 @@ A conversation ends.
 session %s closed (device %s)
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `ID` | the `mac` syntax |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `ID` | no | the `mac` syntax |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -782,9 +789,9 @@ The reply's first audio frame goes out.
 session %s: speaking started
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -804,10 +811,10 @@ store's, and what an operator measures with is how long the user spoke.
 session %s: heard %.2f s of speech
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `FLOAT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `FLOAT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -829,11 +836,11 @@ A reply finishes.
 session %s: %s replied in %d sentences
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `IDENTIFIER` |  |  |
-| 3 | `COUNT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `IDENTIFIER` | no |  |  |
+| 3 | `COUNT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -853,11 +860,11 @@ One agent's part of a reply.
 session %s: %s said %d sentences
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `IDENTIFIER` |  |  |
-| 3 | `COUNT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `IDENTIFIER` | no |  |  |
+| 3 | `COUNT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -877,11 +884,11 @@ session %s: %s said %d sentences
 session %s: handed over from agent %s to %s
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `IDENTIFIER` |  |  |
-| 3 | `IDENTIFIER` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `IDENTIFIER` | no |  |  |
+| 3 | `IDENTIFIER` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -903,11 +910,11 @@ provenance forms.
 session %s: assembled %d characters of prompt for %s
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `COUNT` |  |  |
-| 3 | `IDENTIFIER` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `COUNT` | no |  |  |
+| 3 | `IDENTIFIER` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -931,11 +938,11 @@ A provider the registry did not build names no entry.
 session %s: no first token after %.1f s, retrying round %d
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `FLOAT` |  |  |
-| 3 | `INT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `FLOAT` | no |  |  |
+| 3 | `INT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -957,11 +964,11 @@ type that has none to name.
 session %s: no first token after %.1f s, retrying round %d
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `FLOAT` |  |  |
-| 3 | `INT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `FLOAT` | no |  |  |
+| 3 | `INT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -987,13 +994,13 @@ A generation call finishes.
 session %s: %s round %d took %.2f s over %d turns
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `IDENTIFIER` |  |  |
-| 3 | `INT` |  |  |
-| 4 | `FLOAT` |  |  |
-| 5 | `COUNT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `IDENTIFIER` | no |  |  |
+| 3 | `INT` | no |  |  |
+| 4 | `FLOAT` | no |  |  |
+| 5 | `COUNT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1015,13 +1022,13 @@ session %s: %s round %d took %.2f s over %d turns
 session %s: %s round %d took %.2f s over %d turns
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `IDENTIFIER` |  |  |
-| 3 | `INT` |  |  |
-| 4 | `FLOAT` |  |  |
-| 5 | `COUNT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `IDENTIFIER` | no |  |  |
+| 3 | `INT` | no |  |  |
+| 4 | `FLOAT` | no |  |  |
+| 5 | `COUNT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1055,15 +1062,15 @@ A provider the registry did not build names no entry and no host.
 session %s: %s provider%s %s after %.2f s%s: %s
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `IDENTIFIER` |  |  |
-| 3 | `COMPOSED` | the `empty_fragment` grammar |  |
-| 4 | `TOKEN` | one of: `failed`, `timed out` |  |
-| 5 | `FLOAT` |  |  |
-| 6 | `COMPOSED` | the `empty_fragment` grammar |  |
-| 7 | `CLASS_NAME` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `IDENTIFIER` | no |  |  |
+| 3 | `COMPOSED` | no | the `empty_fragment` grammar |  |
+| 4 | `TOKEN` | no | one of: `failed`, `timed out` |  |
+| 5 | `FLOAT` | no |  |  |
+| 6 | `COMPOSED` | no | the `empty_fragment` grammar |  |
+| 7 | `CLASS_NAME` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1081,15 +1088,15 @@ session %s: %s provider%s %s after %.2f s%s: %s
 session %s: %s provider%s %s after %.2f s%s: %s
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `IDENTIFIER` |  |  |
-| 3 | `COMPOSED` | the `quoted_provider` grammar |  |
-| 4 | `TOKEN` | one of: `failed`, `timed out` |  |
-| 5 | `FLOAT` |  |  |
-| 6 | `COMPOSED` | the `reaching_host` grammar |  |
-| 7 | `CLASS_NAME` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `IDENTIFIER` | no |  |  |
+| 3 | `COMPOSED` | no | the `quoted_provider` grammar |  |
+| 4 | `TOKEN` | no | one of: `failed`, `timed out` |  |
+| 5 | `FLOAT` | no |  |  |
+| 6 | `COMPOSED` | no | the `reaching_host` grammar |  |
+| 7 | `CLASS_NAME` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1116,13 +1123,13 @@ itself is only ever this server's own word for it.
 session %s: %s tool%s took %.2f s%s
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `TOKEN` | one of: `builtin` |  |
-| 3 | `COMPOSED` | the `quoted_tool_name` grammar |  |
-| 4 | `FLOAT` |  |  |
-| 5 | `TOKEN` | one of: ``, `and failed` |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `TOKEN` | no | one of: `builtin` |  |
+| 3 | `COMPOSED` | no | the `quoted_tool_name` grammar |  |
+| 4 | `FLOAT` | no |  |  |
+| 5 | `TOKEN` | no | one of: `''`, `' and failed'` |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1141,13 +1148,13 @@ session %s: %s tool%s took %.2f s%s
 session %s: %s tool%s took %.2f s%s
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `TOKEN` | one of: `mcp` |  |
-| 3 | `COMPOSED` | the `from_entry` grammar |  |
-| 4 | `FLOAT` |  |  |
-| 5 | `TOKEN` | one of: ``, `and failed` |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `TOKEN` | no | one of: `mcp` |  |
+| 3 | `COMPOSED` | no | the `from_entry` grammar |  |
+| 4 | `FLOAT` | no |  |  |
+| 5 | `TOKEN` | no | one of: `''`, `' and failed'` |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1169,13 +1176,13 @@ the model invented, so neither is named.
 session %s: %s tool%s took %.2f s%s
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `TOKEN` | one of: `device`, `unknown` |  |
-| 3 | `COMPOSED` | the `empty_fragment` grammar |  |
-| 4 | `FLOAT` |  |  |
-| 5 | `TOKEN` | one of: ``, `and failed` |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `TOKEN` | no | one of: `device`, `unknown` |  |
+| 3 | `COMPOSED` | no | the `empty_fragment` grammar |  |
+| 4 | `FLOAT` | no |  |  |
+| 5 | `TOKEN` | no | one of: `''`, `' and failed'` |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1197,9 +1204,9 @@ Speech cuts a reply short.
 session %s: barge-in, cancelling the reply in flight
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1219,11 +1226,11 @@ An interruption is dropped and the reply lives.
 session %s: barge-in suppressed, %d ms of speech is under the %.0f ms floor
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `INT` |  |  |
-| 3 | `FLOAT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `INT` | no |  |  |
+| 3 | `FLOAT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1239,9 +1246,9 @@ session %s: barge-in suppressed, %d ms of speech is under the %.0f ms floor
 session %s: barge-in suppressed inside the refractory window
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1257,9 +1264,9 @@ session %s: barge-in suppressed inside the refractory window
 session %s: barge-in suppressed, nothing transcribed
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1279,9 +1286,9 @@ An interruption merges with the utterance the reply was transcribing.
 session %s: barge-in mid-transcription, merging the utterances
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1300,10 +1307,10 @@ The filler timer fired but the user was there first, so no clip played.
 session %s: filler skipped, the user is speaking (%d ms heard)
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `INT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `INT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1320,9 +1327,9 @@ session %s: filler skipped, the user is speaking (%d ms heard)
 session %s: filler skipped, a barge-in is being confirmed
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1343,11 +1350,11 @@ is the turn's `speaking_started`.
 session %s: no reply audio after %d ms, playing filler %d
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `INT` |  |  |
-| 3 | `COUNT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `INT` | no |  |  |
+| 3 | `COUNT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1371,10 +1378,10 @@ names the host instead.
 openai asr: the transcript came back as the configured prompt with %.1f s of the timeout left, too little to retry, treating %.2f s of audio as nothing said
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `FLOAT` |  |  |
-| 2 | `FLOAT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `FLOAT` | no |  |  |
+| 2 | `FLOAT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1389,10 +1396,10 @@ openai asr: the transcript came back as the configured prompt with %.1f s of the
 openai asr: the retry outran the timeout's remaining %.1f s, treating %.2f s of audio as nothing said
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `FLOAT` |  |  |
-| 2 | `FLOAT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `FLOAT` | no |  |  |
+| 2 | `FLOAT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1408,9 +1415,9 @@ openai asr: the retry outran the timeout's remaining %.1f s, treating %.2f s of 
 openai asr: the retry came back as the prompt again, treating %.2f s of audio as nothing said
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `FLOAT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `FLOAT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1426,9 +1433,9 @@ openai asr: the retry came back as the prompt again, treating %.2f s of audio as
 openai asr: the retry came back empty, treating %.2f s of audio as nothing said
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `FLOAT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `FLOAT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1444,9 +1451,9 @@ openai asr: the retry came back empty, treating %.2f s of audio as nothing said
 openai asr: the retry recovered %.2f s of audio the echo guard would have discarded
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `FLOAT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `FLOAT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1467,10 +1474,10 @@ one entry serves every conversation, and the rest of this block is the same.
 mcp server %s connected with %d tool(s)
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `IDENTIFIER` |  |  |
-| 2 | `COUNT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `IDENTIFIER` | no |  |  |
+| 2 | `COUNT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1490,10 +1497,10 @@ An entry fails to come up, or its connection is given up.
 mcp server %s is unavailable, its tools are absent: %s
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `IDENTIFIER` |  |  |
-| 2 | `CLASS_NAME` | one name, or several joined with `, ` |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `IDENTIFIER` | no |  |  |
+| 2 | `CLASS_NAME` | no | one name, or several joined with `, ` |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1512,9 +1519,9 @@ the same name.
 mcp server %s is stopped and its tools are gone
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `IDENTIFIER` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `IDENTIFIER` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1530,9 +1537,9 @@ Always beside an `mcp_call_dropped`, in that order.
 mcp server %s: dropping the connection after a failed call
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `IDENTIFIER` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `IDENTIFIER` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1552,11 +1559,11 @@ published name is what the far side called its tool.
 mcp server %s: the call to published tool %s failed (%s), so its answer is lost
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `IDENTIFIER` |  |  |
-| 2 | `COUNT` |  |  |
-| 3 | `CLASS_NAME` | one name, or several joined with `, ` |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `IDENTIFIER` | no |  |  |
+| 2 | `COUNT` | yes |  |  |
+| 3 | `CLASS_NAME` | no | one name, or several joined with `, ` |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1575,11 +1582,11 @@ A published tool is dropped because a more specific entry owns its name.
 mcp server %s: dropping published tool %d, its name is inside the namespace of the entry %s, which owns it
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `IDENTIFIER` |  |  |
-| 2 | `COUNT` |  |  |
-| 3 | `IDENTIFIER` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `IDENTIFIER` | no |  |  |
+| 2 | `COUNT` | no |  |  |
+| 3 | `IDENTIFIER` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1599,9 +1606,9 @@ connected. Exactly one per reload, at whichever of the two phases ended it.
 mcp servers were not reloaded and nothing was changed (%s)
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `TOKEN` | one of: `database_busy`, `in_progress`, `invalid`, `unexpected`, `unreadable` |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `TOKEN` | no | one of: `database_busy`, `in_progress`, `invalid`, `unexpected`, `unreadable` |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1615,12 +1622,12 @@ mcp servers were not reloaded and nothing was changed (%s)
 mcp servers reloaded: %d started, %d restarted, %d stopped, %d unchanged
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `COUNT` |  |  |
-| 2 | `COUNT` |  |  |
-| 3 | `COUNT` |  |  |
-| 4 | `COUNT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `COUNT` | no |  |  |
+| 2 | `COUNT` | no |  |  |
+| 3 | `COUNT` | no |  |  |
+| 4 | `COUNT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1642,10 +1649,10 @@ An agent's memory could not be read; it remembers nothing this round.
 could not read memory for agent %s (%s); it remembers nothing this round
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `IDENTIFIER` |  |  |
-| 2 | `CLASS_NAME` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `IDENTIFIER` | no |  |  |
+| 2 | `CLASS_NAME` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1663,10 +1670,10 @@ Filler synthesis failed for one agent, so latency masking is off for it.
 agent %s: filler synthesis failed, latency masking is off for this agent (%s)
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `IDENTIFIER` |  |  |
-| 2 | `CLASS_NAME` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `IDENTIFIER` | no |  |  |
+| 2 | `CLASS_NAME` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1684,10 +1691,10 @@ A session is being recorded.
 session %s: capturing to %s
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `PATHLIKE` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `PATHLIKE` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1705,11 +1712,11 @@ A session is not being recorded, and why.
 session %s: not capturing, %s is unusable (%s)
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `PATHLIKE` |  |  |
-| 3 | `CLASS_NAME` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `PATHLIKE` | no |  |  |
+| 3 | `CLASS_NAME` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1724,11 +1731,11 @@ session %s: not capturing, %s is unusable (%s)
 session %s: not capturing, %.0f MB free is below the %.0f MB floor
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `FLOAT` |  |  |
-| 3 | `FLOAT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `FLOAT` | no |  |  |
+| 3 | `FLOAT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1743,10 +1750,10 @@ session %s: not capturing, %.0f MB free is below the %.0f MB floor
 session %s: not capturing, could not open the files (%s)
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `CLASS_NAME` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `CLASS_NAME` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1765,10 +1772,10 @@ A recording reached its per-session ceiling.
 session %s: capture reached its %.0f s limit
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `FLOAT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `FLOAT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1785,11 +1792,11 @@ A recording stopped after a write failed.
 session %s: capture stopped after failing to %s (%s)
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
-| 2 | `TOKEN` | one of: `write an event`, `write audio` |  |
-| 3 | `CLASS_NAME` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `TOKEN` | no | one of: `write an event`, `write audio` |  |
+| 3 | `CLASS_NAME` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1808,11 +1815,11 @@ Old recordings were removed to stay inside the disk budget.
 capture: pruned %d session(s) to stay under %.0f MB: %s
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `COUNT` |  |  |
-| 2 | `FLOAT` |  |  |
-| 3 | `COMPOSED` | the `session_list` grammar |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `COUNT` | no |  |  |
+| 2 | `FLOAT` | no |  |  |
+| 3 | `COMPOSED` | no | the `session_list` grammar |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1829,10 +1836,10 @@ The disk budget is exceeded and nothing more can be pruned.
 capture: %.0f MB on disk is over the %.0f MB budget and nothing more can be pruned; raise max_total_mb or lower max_session_s
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `FLOAT` |  |  |
-| 2 | `FLOAT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `FLOAT` | no |  |  |
+| 2 | `FLOAT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1850,9 +1857,9 @@ should not discover by accident.
 session capture is on: room audio and a track of the session's events are being written to %s
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `PATHLIKE` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `PATHLIKE` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1869,9 +1876,9 @@ Capture is configured but off.
 session capture is configured but off; set server.capture.enabled to record to %s
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `PATHLIKE` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `PATHLIKE` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1890,9 +1897,9 @@ to it. Said once, before anything connects, and at WARNING for the reason
 recording conversations to %s
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `PATHLIKE` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `PATHLIKE` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1910,9 +1917,9 @@ per session at its first drop; the total lands on that session's row.
 session %s: the conversation store is behind, dropping events
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `session_id` syntax |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1930,9 +1937,9 @@ run.
 the conversation store dropped a batch after a write failed (%s)
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `CLASS_NAME` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `CLASS_NAME` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1945,9 +1952,9 @@ the conversation store dropped a batch after a write failed (%s)
 the conversation store could not prune (%s)
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `CLASS_NAME` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `CLASS_NAME` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1965,10 +1972,10 @@ job.
 conversations: pruned %d session(s) older than %d days
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `COUNT` |  |  |
-| 2 | `COUNT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `COUNT` | no |  |  |
+| 2 | `COUNT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -1985,10 +1992,10 @@ A shutdown begins draining.
 draining %d session(s), up to %.0f s
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `COUNT` |  |  |
-| 2 | `FLOAT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `COUNT` | no |  |  |
+| 2 | `FLOAT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -2023,10 +2030,10 @@ A reply was cut, or a session hung.
 drained with %d session(s) cut mid-reply and %d that did not finish
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `COUNT` |  |  |
-| 2 | `COUNT` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `COUNT` | no |  |  |
+| 2 | `COUNT` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -2047,9 +2054,9 @@ snapshot.
 no configuration database at %s: device bindings resolve from the configuration this server was built with
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `PATHLIKE` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `PATHLIKE` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -2066,9 +2073,9 @@ The database could not be read, so the answer is the boot snapshot's.
 cannot read the device bindings for %s; answering from the configuration this server started with, which may be older than the database. The failure's kind is recorded beside this line
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `ID` | the `mac` syntax |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `mac` syntax |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -2087,9 +2094,9 @@ else.
 the configuration API failed to handle a request (%s)
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `CLASS_NAME` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `CLASS_NAME` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
@@ -2105,9 +2112,9 @@ The configuration API met unreadable stored state.
 the configuration API met unreadable stored state (%s)
 ```
 
-| # | Argument | Constraint | Note |
-| --- | --- | --- | --- |
-| 1 | `CLASS_NAME` |  |  |
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `CLASS_NAME` | no |  |  |
 
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |

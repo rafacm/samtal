@@ -186,7 +186,9 @@ def reference() -> str:
             "supplying one is itself a violation. On a server channel `session` "
             "and `device` are ordinary fields, declared where they are carried. "
             "Required says the field is always present in that variant; nullable "
-            "says it may be present and null."
+            "says it may be present and null. An argument position carries the "
+            "same nullability column, for the positions whose value the sentence "
+            "may have to render as nothing."
         ),
         "",
         *_paragraph(
@@ -223,6 +225,14 @@ def reference() -> str:
         "| Kind | What it is |",
         "| --- | --- |",
         *[f"| `{kind.name}` | {_cell(KIND_MEANING[kind])} |" for kind in Kind],
+        "",
+        *_paragraph(
+            "A `TOKEN` field's constraint column lists its whole set. A value "
+            "that is empty, or that begins or ends with a space, is printed "
+            "quoted there, for the reason the patterns below are: a bare code "
+            "span shows neither, and a set whose members cannot be read exactly "
+            "is not a closed set."
+        ),
         "",
         "## What an argument may be",
         "",
@@ -359,10 +369,11 @@ def _variant_section(position: int, variant: EventVariant) -> list[str]:
     lines += ["```text", variant.message, "```", ""]
     if variant.args:
         lines += [
-            "| # | Argument | Constraint | Note |",
-            "| --- | --- | --- | --- |",
+            "| # | Argument | Nullable | Constraint | Note |",
+            "| --- | --- | --- | --- | --- |",
             *[
-                f"| {index} | `{arg.kind.name}` | {_arg_constraint(arg)} | {_cell(arg.note)} |"
+                f"| {index} | `{arg.kind.name}` | {_yes(arg.nullable)} | "
+                f"{_arg_constraint(arg)} | {_cell(arg.note)} |"
                 for index, arg in enumerate(variant.args, start=1)
             ],
             "",
@@ -417,7 +428,22 @@ def _tokens(tokens: frozenset[str] | None) -> str:
     """A closed set, sorted so two runs render it the same way."""
     if not tokens:
         return ""
-    return "one of: " + ", ".join(f"`{_cell(one)}`" for one in sorted(tokens))
+    return "one of: " + ", ".join(_token(one) for one in sorted(tokens))
+
+
+def _token(value: str) -> str:
+    """One declared value of a closed set.
+
+    Quoted where a bare code span would not show it: the empty token
+    (`tool_call`'s trailing fragment renders nothing on the branch that
+    has nothing to add) and the ones that begin or end with a space (the
+    same fragment's other value). A set whose members a reader cannot
+    read exactly is not a closed set, which is the whole of what a
+    `TOKEN` claims.
+    """
+    if value and value == " ".join(value.split()):
+        return "`" + value.replace("|", "\\|") + "`"
+    return "`'" + value.replace("|", "\\|") + "'`"
 
 
 def _syntax(declared: EventField | ArgSpec) -> str:
