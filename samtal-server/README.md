@@ -1755,46 +1755,79 @@ server:
   log_level: INFO
 ```
 
-Every conversation event is logged as a human sentence and, in `json`
-mode, as a line of structured fields. Each carries `event`, `session`,
-and `device`, plus its own:
+Every event is logged as a human sentence and, in `json` mode, as a line
+of structured fields. Every record carries `event`; the ones a
+conversation emits, on the `samtal_server.session` channel, carry
+`session` and `device` beside it, and the server's own channels carry
+either only where the record is about one.
 
-| `event`            | when                            | fields                             |
-| ------------------ | ------------------------------- | ---------------------------------- |
-| `ota_check`        | a device checks in (no session) | `client`, `board`, `firmware`, `agents` |
-| `session_open`     | a conversation starts           | `client`, `agent`, `agents`, `protocol`, `revision` |
-| `heard`            | an utterance is transcribed     | `agent`, `duration_s`, plus `language` and `language_confidence` when the engine detected. No transcript: what was said is the conversation store's |
-| `filler_played`    | the reply was slow, so a pre-synthesized filler clip masked the wait (its first frame is the turn's `speaking_started`) | `agent`, `delay_ms` (measured, from the transcription to the fire), `phrase_index` |
-| `filler_skipped`   | the timer fired but the user was there first, so no clip played | `agent`, `reason` (`user_speaking`, `barge_in_pending`), plus `speech_ms` when the endpointer held speech |
-| `speaking_started` | the reply's first audio frame goes out | `agent`                     |
-| `replied`          | a reply finishes                | `agent`, `sentences` (how many of them the user heard, so a reply a barge-in cut short reports what went out) |
-| `agent_said`       | one agent's part of a reply     | `agent`, `sentences`               |
-| `handover`         | `switch_agent` succeeds         | `from_agent`, `to_agent`           |
-| `barge_in`         | speech cuts a reply short       | `speech_ms`, plus `speaking_ms` when the reply had started speaking |
-| `barge_in_suppressed` | an interruption is dropped and the reply lives | `reason` (`min_speech`, `refractory`, `no_transcript`), `speech_ms` |
-| `barge_in_merged`  | an interruption merges with the utterance the reply was transcribing | `speech_ms` |
-| `llm_round`        | a generation call finishes      | `agent`, `round`, `turns`, `duration_ms`, `stage`, `provider`, `type`, `host`, `model` (where the entry names one), `first_token_ms` (the first spoken token, so a round that only called a tool carries none), plus `input_tokens` and `output_tokens` where the provider reports them |
-| `llm_retry`        | the first-token watchdog cancels a stalled generation and retries the round once | `agent`, `round`, `duration_ms`, `stage`, `provider`, `type`, `host`, `model` |
-| `asr_prompt_echo`  | a transcript came back as the ASR prompt and the clip was retried once without it, on what the first request left of `timeout_s` (no session or device: providers serve them all) | `outcome` (`recovered`: the retry's transcript is heard, `confirmed_empty`: the retry heard nothing, `confirmed_echo`: the prompt again, `timed_out`: the retry outran the remaining budget, `skipped`: under a second of budget remained so no retry was sent), `duration_s`, `retry_ms` (absent on a skip), `host` |
-| `provider_failed`  | an ASR, LLM or TTS call fails; a round whose retry also stalled carries `error: FirstTokenTimeout` | `stage`, `provider`, `type`, `host`, `model`, `error`, `duration_ms`, `agent` |
-| `tool_call`        | a tool returns                  | `agent`, `source` (`builtin`, `device`, `mcp`, `unknown`), `duration_ms`, `is_error`, plus `tool` on a `builtin` (the only names this server authors) and `entry` on an `mcp` call (the configured entry, never the far side's tool name) |
-| `mcp_connected`    | an MCP entry's connect finishes and its tools are published (no session or device: one entry serves every conversation, and the rest of this block is the same) | `entry`, `transport` (`stdio` or `streamable_http`), `tools` (a count, never a list), `duration_ms` |
-| `mcp_down`         | an MCP entry fails to come up, or its connection is given up | `entry`, `reason` (`transport_failed`, `initialize_failed`, `discovery_failed`, `connect_timeout`, `call_failed`, `stopped`), plus `duration_ms` on the four that failed on the way up. `stopped` is the intentional one (a shutdown or a reload) and the only one at INFO |
-| `mcp_call_dropped` | a tool call failed and the connection was dropped because of it, always beside an `mcp_down` with `call_failed` | `entry`, `position` (the tool's place in the far side's listing), `error` (the failure's class name) |
-| `mcp_reload`       | a reload of the MCP servers finishes, whether or not the caller is still connected | `outcome` (`applied` or `refused`); applied carries `started`, `restarted`, `stopped`, `unchanged` (counts) and `duration_ms`, measured from when the request was accepted so it covers the re-read as well as the apply; refused carries `reason` (`in_progress`, `database_busy`, `unreadable`, `invalid`, `unexpected`) |
-| `mcp_tool_shadowed` | a published tool is dropped because a more specific entry owns its name | `entry`, `position` (the tool's place in the far side's listing), `owner` |
-| `session_limit`    | the duration cap fires          | `duration_s`                       |
-| `session_idle`     | the idle timeout hangs up on a realtime session | `idle_s`, `duration_s`     |
-| `session_closed`   | a conversation ends             | `duration_s`, `reason` (`limit`, `idle`, `drain`, `client`, `error`; the first cause to fire, so a drain closing a session an idle timer was about to hang up on reads `drain`) |
-| `session_rejected` | a device is turned away         | `reason`                           |
-| `auth_rejected`    | a handshake is refused          | `reason`; no device, since nothing is authenticated yet and the Device-Id header is whatever the caller sent |
-| `conversations_enabled` | the conversation store opens at startup, which means this server is recording what is said to it (no session or device: it is said once, before anything connects) | `path` |
-| `conversations_dropped` | the store is behind and events for one session are being dropped, said once per session at its first drop; the total lands on that session's row | `session` |
-| `conversations_failed`  | a write to the store failed and its batch was dropped, or a prune could not run | `failure` (the exception's class name, never its message) |
-| `conversations_pruned`  | retention deleted sessions older than the window (at INFO: a policy doing its job) | `sessions` (a count) |
-| `drain_started`    | a shutdown begins draining      | `sessions`, `timeout_s`            |
-| `drain_finished`   | every reply finished speaking   | `sessions`                         |
-| `drain_incomplete` | a reply was cut, or a session hung | `cut_mid_reply`, `unfinished`   |
+Which fields an event carries, which tokens a reason field admits, what
+each of them is held to and which sentence it renders are the generated
+[event schema reference](../docs/reference/events.md), one section per
+event and one subsection per shape it may be emitted in. It is generated
+from the declarations themselves, so it cannot say anything they do not.
+This index is the other half: what exists, and when it fires.
+
+| `event` | when |
+| --- | --- |
+| `ota_check` | a device checks in (no session yet, so the record names the device) |
+| `activation_not_offered` | an unbound device is answered with no activation code, and why |
+| `activation_complete` | a waiting device has been claimed; its next check hands it a token |
+| `activation_pending` | a waiting device polls and is still waiting |
+| `activation_refused` | a version-2 activation poll fails one of the checks this server can hold it to; nothing of the body is ever quoted |
+| `ota_request_rejected` | a request this endpoint could not read, refused with one of three fixed sentences |
+| `onboarding_banner` | where devices are configured, said once at startup |
+| `onboarding_key_mismatch` | a request reaches the onboarding path carrying a key-shaped segment that is not this server's; neither is repeated |
+| `onboarding_key_unshaped` | the same path, carrying something that is not key-shaped at all |
+| `auth_rejected` | a handshake is refused before the accept; no device, since nothing is authenticated yet and the Device-Id header is whatever the caller sent |
+| `session_rejected` | a device is turned away, either by the endpoint before a session can run (`samtal_server.ws`) or by the session after the accept (`samtal_server.session`) |
+| `session_open` | a conversation starts |
+| `session_limit` | the duration cap fires |
+| `session_idle` | the idle timeout hangs up on a realtime session |
+| `session_closed` | a conversation ends |
+| `speaking_started` | the reply's first audio frame goes out |
+| `heard` | an utterance is transcribed. No transcript: what was said is the conversation store's |
+| `replied` | a reply finishes |
+| `agent_said` | one agent's part of a reply |
+| `handover` | `switch_agent` succeeds |
+| `prompt_assembled` | the know-how half of a prompt is assembled and cached, with each block's size by provenance |
+| `llm_retry` | the first-token watchdog cancels a stalled generation and retries the round once |
+| `llm_round` | a generation call finishes |
+| `provider_failed` | an ASR, LLM or TTS call fails; a round whose retry also stalled carries `FirstTokenTimeout` |
+| `tool_call` | a tool returns |
+| `barge_in` | speech cuts a reply short |
+| `barge_in_suppressed` | an interruption is dropped and the reply lives |
+| `barge_in_merged` | an interruption merges with the utterance the reply was transcribing |
+| `filler_skipped` | the filler timer fired but the user was there first, so no clip played |
+| `filler_played` | the reply was slow, so a pre-synthesized filler clip masked the wait (its first frame is the turn's `speaking_started`) |
+| `asr_prompt_echo` | a transcript came back as the ASR prompt and the clip was retried once without it, on what the first request left of `timeout_s` (no session or device: providers serve them all) |
+| `mcp_connected` | an MCP entry's connect finishes and its tools are published (no session or device: one entry serves every conversation, and the rest of this block is the same) |
+| `mcp_down` | an MCP entry fails to come up, or its connection is given up. `stopped` is the intentional one (a shutdown or a reload) and the only one at INFO |
+| `mcp_call_dropped` | a tool call failed and the connection was dropped because of it, always beside an `mcp_down` with `call_failed` |
+| `mcp_tool_shadowed` | a published tool is dropped because a more specific entry owns its name |
+| `mcp_reload` | a reload of the MCP servers finishes, whether or not the caller is still connected |
+| `memory_unreadable` | an agent's memory could not be read, so it remembers nothing this round |
+| `filler_disabled` | filler synthesis failed for one agent, so latency masking is off for it |
+| `capture_started` | a session is being recorded |
+| `capture_declined` | a session is not being recorded, and why |
+| `capture_limit` | a recording reaches its per-session ceiling |
+| `capture_failed` | a recording stops after a write failed |
+| `capture_pruned` | old recordings are removed to stay inside the disk budget |
+| `capture_over_budget` | the disk budget is exceeded and nothing more can be pruned |
+| `capture_enabled` | capture is on, said once at startup and at WARNING: recording room audio is not something to discover by accident |
+| `capture_disabled` | capture is configured but off |
+| `conversations_enabled` | the conversation store opens at startup, which means this server is recording what is said to it (no session or device: it is said once, before anything connects) |
+| `conversations_dropped` | the store is behind and events for one session are being dropped, said once per session at its first drop; the total lands on that session's row |
+| `conversations_failed` | a write to the store failed and its batch was dropped, or a prune could not run |
+| `conversations_pruned` | retention deleted sessions older than the window (at INFO: a policy doing its job) |
+| `drain_started` | a shutdown begins draining |
+| `drain_finished` | every reply finished speaking |
+| `drain_incomplete` | a reply was cut, or a session hung |
+| `device_bindings_snapshot_only` | there is no configuration database, so device bindings resolve from the boot snapshot |
+| `device_bindings_unreadable` | the configuration database could not be read, so the answer is the boot snapshot's and may be older |
+| `api_error` | the configuration API failed to handle a request; the class name and nothing else |
+| `api_storage_error` | the configuration API met unreadable stored state |
+| `schema_violation` | internal: an emission the schema refused and the emitter could not recover into a declared shape, replaced by this one, which carries nothing but the channel's own identity |
 
 No MCP event names a tool, and none of them can. Half of a published
 tool name is whatever the far side called it, sanitizing replaces only
@@ -1807,7 +1840,9 @@ terminal, when you ask it.
 
 Every event above is declared: its channel, its level, the sentence it
 renders, the arguments that sentence takes and every field it may carry,
-with closed sets for the fields that hold a reason token. The emitters
+with closed sets for the fields that hold a reason token. The reference
+this index points at is those declarations rendered, and CI regenerates
+it and refuses any difference. The emitters
 hold each emission to that declaration before any of it is written, and
 `SAMTAL_EVENTS_ENFORCEMENT` decides what happens to one that does not
 match. A running server defaults to `forgiving`: the emission is
