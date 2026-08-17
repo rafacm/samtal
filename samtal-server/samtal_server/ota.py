@@ -45,7 +45,12 @@ from samtal_server import __version__
 from samtal_server.auth import DeviceAuth
 from samtal_server.build_info import revision
 from samtal_server.config import Config
-from samtal_server.config.models import normalize_mac
+from samtal_server.config.models import (
+    BOARD_LIMIT,
+    FIRMWARE_LIMIT,
+    bounded_descriptor,
+    normalize_mac,
+)
 from samtal_server.device.bindings import DeviceAgents, DeviceBindings
 from samtal_server.events import ServerEvents
 from samtal_server.ws import WEBSOCKET_PATH
@@ -233,14 +238,30 @@ async def check_version(request: Request) -> Response:
     # about to open can name it, which a capture manifest needs, since
     # echo cancellation is firmware-side.
     request.app.state.device_facts.record(mac, version, board)
+    # What the event says about the board and the firmware, which is not
+    # what the reply and the recorded facts above say about them.
+    #
+    # `reported_board` and `reported_version` only strip whitespace, and
+    # this endpoint is unauthenticated: whatever a request's JSON body
+    # holds under those keys is a string a stranger chose, of a length
+    # they chose, with any character in it. The response has to echo the
+    # version back untouched (the firmware compares it to decide whether
+    # it is up to date) and the recorded facts feed a capture manifest,
+    # so the narrowing is EVENT-ONLY: a bounded copy for the payload
+    # fields and for the sentence's arguments, both of which are the
+    # retained surface, and nothing else changes. A board or a version a
+    # real device reports passes through unchanged, which is why no pin
+    # moves.
+    said_board = bounded_descriptor(board, BOARD_LIMIT) or "unknown"
+    said_version = bounded_descriptor(version, FIRMWARE_LIMIT) or UNKNOWN_VERSION
     # No session exists yet, so the structured record carries the device
     # rather than a session id; the websocket events pick the device up
     # from here.
     fields: dict[str, Any] = {
         "device": mac,
         "client": client_id,
-        "board": board,
-        "firmware": version,
+        "board": said_board,
+        "firmware": said_version,
         "agents": agents,
         # Named in every record rather than only in the one that
         # complains about it, so a query for devices waiting on a
@@ -260,8 +281,8 @@ async def check_version(request: Request) -> Response:
             "device %s (%s, firmware %s) has no agent and is showing activation code "
             "%s; bind it with: samtal-server config add-device %s <agent>",
             device_id,
-            board,
-            version,
+            said_board,
+            said_version,
             activation["code"],
             activation["code"],
             event="ota_check",
@@ -274,8 +295,8 @@ async def check_version(request: Request) -> Response:
             "device %s (%s, firmware %s) is bound to agent %s, which this server has "
             "not loaded; restart to load it",
             device_id,
-            board,
-            version,
+            said_board,
+            said_version,
             ", ".join(resolution.unloaded),
             event="ota_check",
             **fields,
@@ -285,8 +306,8 @@ async def check_version(request: Request) -> Response:
             "device %s (%s, firmware %s) has no agent: bind it under devices "
             "or set default_agent",
             device_id,
-            board,
-            version,
+            said_board,
+            said_version,
             event="ota_check",
             **fields,
         )
@@ -294,8 +315,8 @@ async def check_version(request: Request) -> Response:
         events.info(
             "device %s (%s, firmware %s) resolved to agent %s%s",
             device_id,
-            board,
-            version,
+            said_board,
+            said_version,
             agents[0],
             f" (also bound to {', '.join(agents[1:])})" if len(agents) > 1 else "",
             event="ota_check",
