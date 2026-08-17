@@ -70,6 +70,33 @@ this record changes what may ride on them, not how they are
 versioned. Live views (the admin UI's "what is happening now") are
 fed from the event tap, not from a store.
 
+### Amendment: device descriptors are metadata (2026-08-17)
+
+Deciding #155's schema registry surfaced a tension between this
+record's "no far-side bytes" and a surface the onboarding work
+built deliberately: `ota_check` and its kin retain the board model,
+firmware version, and client id a device reports at check-in,
+bounded and sanitized at their decision sites, and the operator
+workflow leans on them (which board is waiting to be claimed, which
+firmware a misbehaving device runs). Decided, as a deliberate
+product call rather than a reading of the original text:
+
+- **Bounded device-descriptor metadata is metadata**, in the sense
+  surface 1 permits: an identifier-class fact about the endpoint,
+  not content that traveled through a conversation. Such a field is
+  lawful on the events only where its decision site bounds and
+  sanitizes it, and the #155 registry declares exactly which fields
+  carry it, with the bounds enforced again at emit.
+- **Conversation-derived text remains banned without exception.**
+  A transcript, however it was recovered, is content; the one
+  standing violation (the `asr_prompt_echo` recovered-transcript
+  sentence) is removed by its own narrowing issue as a prerequisite
+  to #155's enforcement, not grandfathered by it.
+
+The distinction, in one sentence: what a device says ABOUT ITSELF
+at check-in may ride the events once bounded; what a person said
+through the device may not.
+
 ## Consequences
 
 - The no-leak contract on the events becomes enforceable by

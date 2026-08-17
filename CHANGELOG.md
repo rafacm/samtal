@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-17
+
+### Changed
+
+- The content-and-telemetry ADR gained a dated amendment: bounded
+  device-descriptor metadata (the board, firmware, and client id a
+  device reports at check-in, sanitized at their decision sites) is
+  metadata the events may carry; conversation-derived text remains
+  banned without exception, and the one standing violation (the
+  `asr_prompt_echo` recovered-transcript sentence) is scheduled for
+  removal by its own narrowing issue ahead of the #155 schema
+  registry.
+
 ## 2026-08-16
 
 ### Added
