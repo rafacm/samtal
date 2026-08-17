@@ -21,7 +21,6 @@ wait for any of it.
 
 import asyncio
 import json
-import re
 import threading
 from pathlib import Path
 from typing import Any, cast
@@ -46,6 +45,7 @@ from samtal_server.conversations.store import (
 from samtal_server.device import session as session_module
 from samtal_server.device.session import DeviceSession
 from samtal_server.events import Emission
+from samtal_server.events_schema import REGISTRY
 from samtal_server.providers import build_agent_providers
 from samtal_server.runtime.pipeline import bespoke_runtime_factory
 from samtal_server.tools.mcp import McpServers
@@ -54,8 +54,6 @@ from tests.support.sessions import WRITER_TIMEOUT_S as TIMEOUT_S
 from tests.support.sessions import Gate, drive_reply, open_session, until
 from tests.support.sockets import LoopingSocket
 from tests.support.wire import connect, say_something, send_pcm, sentences, shake_hands, speech_pcm
-
-README = Path(__file__).resolve().parents[2] / "README.md"
 
 # A value that has no business anywhere in the file when text storage is
 # off, shaped like something an operator would be horrified to find.
@@ -81,28 +79,26 @@ def read(directory: Path, statement: str) -> list[dict[str, Any]]:
         engine.dispose()
 
 
-def documented_fields() -> dict[str, set[str]]:
-    """The README's event table, as event name to the field names its row
-    names.
+def declared_fields() -> dict[str, set[str]]:
+    """Every event's declared field names, from the registry.
 
-    The vocabulary's authority is that table (the schema reference points
-    at it rather than restating thirty rows), so it is what the stored
-    field names are checked against. Only the Logging section is read,
-    since a three-column table elsewhere in the README is about something
-    else entirely.
+    The vocabulary's authority is the registry (#155): the generated
+    reference and the README's index are both rendered from it, and the
+    README's own table stopped naming fields when it became a
+    name-and-when index. So what the stored field names are checked
+    against is the declaration itself rather than a table of prose. The
+    base fields are dropped here because the store keeps them on the row
+    and on the session rather than in the payload column.
     """
-    table: dict[str, set[str]] = {}
-    inside = False
-    for line in README.read_text(encoding="utf-8").splitlines():
-        if line.startswith("## "):
-            inside = line.strip() == "## Logging"
-            continue
-        if not inside:
-            continue
-        found = re.match(r"^\| `(\w+)`\s*\|(.*)\|(.*)\|\s*$", line)
-        if found:
-            table[found.group(1)] = set(re.findall(r"`(\w+)`", found.group(3)))
-    return table
+    return {
+        name: {
+            field
+            for variant in spec.variants
+            for field in variant.fields
+            if field not in {"event", "session", "device"}
+        }
+        for name, spec in REGISTRY.items()
+    }
 
 
 class SpyingSink(SessionSink):
@@ -178,7 +174,7 @@ def test_the_events_rows_are_the_decision_track_verbatim(
             say_something(websocket)
 
     rows = read(tmp_path, "select * from events order by id")
-    documented = documented_fields()
+    declared = declared_fields()
 
     # One row per event this tap position was offered, in the order it
     # was offered them: the decision track, session_open through
@@ -197,13 +193,13 @@ def test_the_events_rows_are_the_decision_track_verbatim(
         }
         # Copied verbatim, names and values alike: the store adds no
         # drift of its own, which is what lets the schema reference point
-        # at the README table instead of restating it.
+        # at the event reference instead of restating it.
         assert fields == expected, row["name"]
         assert row["level"] == emission.level
         assert row["t_ms"] >= 0
-        # And every name it copied is one that table names.
-        assert row["name"] in documented, row["name"]
-        assert set(fields) <= documented[row["name"]], row["name"]
+        # And every name it copied is one the registry declares.
+        assert row["name"] in declared, row["name"]
+        assert set(fields) <= declared[row["name"]], row["name"]
 
 
 def test_the_turns_and_their_tool_calls_land_with_their_numbers(
