@@ -122,6 +122,24 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The repository and the read views work from the descriptors**
+  (#139, M2). `store.py` no longer names its five entity kinds at
+  fourteen methods and a whole-configuration read: the table a kind is
+  rowed in, how one of its rows maps to its model and back, what to
+  refuse when an entry is not there, and which checks the write runs
+  are facts on the kind's descriptor, and there is one read, one write
+  and one delete over all of them. The default row mapping is the model
+  itself, so a kind pays a hook only where its model asks for something
+  a dump cannot say: the MCP server's per-column omissions, the layer's
+  None-inherits tri-state, and the provider's split between declared
+  fields and options extras, all three moved rather than rewritten.
+  `views.py` reads which builder shows a kind from the same registry,
+  and `views.provider_record` stays deliberately hand-built. The two
+  walkers that refused a value JSON cannot carry merge into one, since
+  the second was the first's float branch. Nothing changed for a reader
+  or an operator: every refusal sentence is byte for byte what it was,
+  both committed references regenerate unchanged, and the acceptance
+  suites are untouched.
 - **The README's event table is a name-and-when index** (#155, M3). Its
   fields column is gone: prose field and token claims nothing parses go
   stale while a name-level check stays green, and half-checked
