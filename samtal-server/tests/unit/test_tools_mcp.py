@@ -957,8 +957,9 @@ async def test_guidance_is_carried_verbatim_through_the_slice() -> None:
 # The five structured events this subsystem emits (#138), driven through
 # a real manager against the server this file already spawns. They are a
 # compatibility surface from here on: the names, the fields and the
-# closed token sets are in the README's event table, and what these
-# assert is that the table is true.
+# closed token sets are declared in `events_schema.py` and printed in
+# the generated event reference, and what these assert is that the
+# declaration is true of what the subsystem actually emits.
 #
 # The three helpers are shared with the HTTP and reload suites, so they
 # live in `tests/support/events.py` and "what one of these events

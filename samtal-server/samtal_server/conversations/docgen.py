@@ -14,9 +14,10 @@ between two runs would turn the lane red on an unrelated change.
 
 Two things a column renderer cannot document, and the honest answer to
 each. The event vocabulary that fills `events.name` and `events.fields`
-is defined by the server README's event table, which this links rather
-than restating: thirty rows copied here would drift, and the store adds
-no drift of its own because it copies field names verbatim. And the
+is defined by the event registry, and rendered by the reference beside
+this document, which this links rather than restating: fifty-eight
+declarations copied here would drift, and the store adds no drift of its
+own because it copies field names verbatim. And the
 correspondence to OpenTelemetry's GenAI conventions is a mapping
 between two vocabularies rather than a property of one column, so it is
 written out below where an exporter author reads it once.
