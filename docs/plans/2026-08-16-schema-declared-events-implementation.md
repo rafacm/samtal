@@ -507,22 +507,23 @@ Widening was the right call there: the registry describes the surface that exist
 
 ## Milestone 2: the emitters enforce
 
-`samtal-server/samtal_server/events.py` grew a 460-line enforcement
+`samtal-server/samtal_server/events.py` grew a 590-line enforcement
 section between the dispatch and the two emitters, and both `_emit`
 paths now go through it. Nothing else about the emitters moved: the
 taps, the ordering, the deep copies and the two clocks are exactly what
 M1 left.
 
 Eight commits, in the order the milestone was built in, plus the one
-that records it:
+that records it (hashes as rebased onto merged main after PR #167):
 
-1. `f5adf65` Activate an agent in the stub runtime
-2. `a4d1276` Judge every emission against its declaration
-3. `1710ecc` Resolve the enforcement mode where a server is built
-4. `0ef1d9b` Give the mechanics suite a registry of its own
-5. `5423336` Drive every violation class through both modes
-6. `b29f4d4` Plant a credential through every diagnostic branch
-7. `2c977d3` Run the entrypoint's mode resolution for real
+1. `bca36b6` Activate an agent in the stub runtime
+2. `d6ec9b1` Judge every emission against its declaration
+3. `83b5ab5` Resolve the enforcement mode where a server is built
+4. `10dfc40` Give the mechanics suite a registry of its own
+5. `655f216` Drive every violation class through both modes
+6. `b3dd7f4` Plant a credential through every diagnostic branch
+7. `932ba9a` Run the entrypoint's mode resolution for real
+8. `a34a627` Follow the registry's own domain for a name
 
 ### What the enforcement does, in the order it does it
 
@@ -676,7 +677,7 @@ change, not an emit-site change, and neither pin suite moved.
 
 ### The test matrix, as it came out
 
-`tests/unit/test_event_enforcement.py` (67 cases) drives every violation
+`tests/unit/test_event_enforcement.py` (66 cases) drives every violation
 class through both modes against a scratch registry of its own, keyed to
 this suite rather than to production events so that the matrix does not
 change whenever the surface does, on real channels so the recovery
@@ -687,11 +688,12 @@ template, wrong arity, wrong argument kind, base-key collision per key,
 bad list element, bad `ID_LIST` element, every allowed `SOURCES` form,
 an empty and a populated mapping, `memory` and two other bad keys, a bad
 provenance value, the two argument-only kinds (`PATHLIKE` as a `Path`
-and as a `str`, `COMPOSED` against its named grammar with four
-adversarial fragments), a check that no declared grammar admits a
-newline, the complaint's survival under an ERROR root, the multi-fault
-single complaint, the guard, and the two internal producers of
-`schema_violation` told apart by what they say.
+and as a `str`, `COMPOSED` accepted in the four shapes its structure
+admits and refused in the four it does not), a configured name in four
+exotic but lawful spellings and three blank ones, the complaint's
+survival under an ERROR root, the multi-fault single complaint, the
+guard, and the two internal producers of `schema_violation` told apart
+by what they say.
 
 `tests/unit/test_event_enforcement_sentinels.py` (27 cases) is the
 no-leak half. One credential-shaped spelling, dotted so that it
@@ -724,7 +726,7 @@ strict-mode emission still refused).
 
 ### Deviations from the plan
 
-Three, all recorded rather than silent.
+Four, all recorded rather than silent.
 
 1. **"Any invalid emission" is read as "any emission still invalid
    after the rebuild"**, for the reasons above. Without it the plan's
@@ -741,6 +743,40 @@ Three, all recorded rather than silent.
    and the exception carrying them rendered, so the two surfaces cannot
    say different things about the same violation and a test can assert
    both exactly.
+4. **A configured name is validated as configuration defines it, which
+   is a rebase-time reconciliation rather than a choice** (`a34a627`).
+   M1's PR #167 review (finding 3, commit `3d67940` "Claim of a
+   configured name only what config claims") established that the registry may not claim a tighter
+   domain than configuration semantics guarantee: `NonBlankStr` is
+   `StringConstraints(strip_whitespace=True, min_length=1)` and nothing
+   else, so an agent called `secondary"agent`, one carrying a control
+   character and one four thousand characters long are all lawful
+   configuration today. `IDENTIFIER_LIMIT` was removed with the
+   character-class and length claims in the composed grammars, and a
+   rule test (`test_no_composed_grammar_claims_a_length_or_a_character_class`)
+   keeps that honest. Rebasing M2 onto it was conflict-free in the text
+   and semantically conflicting underneath: the enforcement had been
+   written against the narrower registry, so the lane failed collection
+   with 65 `ImportError`s. Reconciled by following the registry:
+   `_identifier_fault` now asks only what `NonBlankStr` asks (a string,
+   non-empty once stripped), which the list kinds inherit, and the
+   `PATHLIKE` argument check drops its printability claim for the same
+   reason, a configured directory being the operator's word too. Every
+   other kind keeps its exact checks: `DESCRIPTOR` bounds, `ID` and
+   `ID_LIST` syntaxes, `CLASS_NAME`, token sets, the numeric rules and
+   the `SOURCES` grammar are untouched, because none of them describes a
+   configured name. On the test side, the composed-fragment case that
+   expected a newline to be refused flipped to expecting it accepted,
+   beside a quoted and an overlong fragment, and `IDENTIFIER` gained
+   both halves of its new domain explicitly: four exotic-but-lawful
+   names pass, three blank ones do not. **One diagnostic branch was
+   removed**, `test_no_declared_grammar_admits_a_control_character`,
+   which asserted over every registered grammar exactly the claim #167
+   deleted; the conformance suite's rule test now owns that ground from
+   the correct side, as a prohibition on making the claim rather than an
+   assertion that it holds. Tightening returns through #168, at
+   configuration semantics, where a refusal reaches the operator who can
+   fix it rather than a log line nobody asked for.
 
 One thing the work turned up and did not change: the emitters keep
 validating on the `vad`/`dropped` side channels' behalf by not touching
@@ -753,14 +789,17 @@ per decision rather than per frame.
 Run from `samtal-server/`, with `PYTHONDONTWRITEBYTECODE=1` for
 everything outside pytest.
 
+Re-run after the rebase onto merged main (PR #167), which is what the
+numbers below are.
+
 - `uv run ruff check .`: `All checks passed!`
-- `uv run pytest tests/unit -q`: `2623 passed, 16 skipped`
+- `uv run pytest tests/unit -q`: `2883 passed, 16 skipped`
 - `uv run pytest tests/integration -q`: `55 passed`
-- `uv run pytest tests/unit --collect-only -q | tail -1`: **2524
-  before**, **2639 after**. The rise of 115 is exactly the new tests: 67
+- `uv run pytest tests/unit --collect-only -q | tail -1`: **2785
+  before**, **2899 after**. The rise of 114 is exactly the new tests: 66
   enforcement cases, 27 sentinel cases and 21 mode cases.
 - `uv run pytest tests/integration --collect-only -q | tail -1`: **55
   before**, **55 after**.
-- `git diff --stat 31ada64 -- tests/unit/test_event_surface_pins.py tests/unit/test_server_event_pins.py`:
+- `git diff --stat origin/main -- tests/unit/test_event_surface_pins.py tests/unit/test_server_event_pins.py`:
   empty. Both contract suites pass unmodified under strict enforcement,
   which is the milestone's core proof.
