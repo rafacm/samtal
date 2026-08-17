@@ -18,6 +18,12 @@ The functions take the registry they change rather than sitting on
 it: what a reload is about is the two phases and the order of them,
 and that is a story of its own beside the registry's ordinary
 reads.
+
+The answer the API sends is composed here too, for the same reason:
+what one reload did and what is running once it had done it are one
+answer taken in one breath, and which of the two the caller is
+allowed to read a moment later is knowledge this file has and a
+request handler should not have to hold.
 """
 
 import asyncio
@@ -33,6 +39,7 @@ from samtal_server.config.loader import (
     ReloadInProgressError,
     StorageError,
 )
+from samtal_server.config.responses import McpReloadResult
 from samtal_server.config.secrets import SecretStore
 
 from . import events
@@ -219,6 +226,38 @@ async def reload(
         # the later of the two is the one still capable of running,
         # and it is the one the exclusion waits on.
         servers._hold_until(applying if applying is not None else preparing)
+
+
+async def reload_result(
+    servers: "McpServers", read: Callable[[], tuple[Config, SecretStore | None]]
+) -> McpReloadResult:
+    """One reload, as the answer the API sends: what it did, and what
+    every configured entry is doing now that it has been done.
+
+    Both halves in one reply is the endpoint's contract, and taking
+    them together is this file's job rather than a handler's. The
+    outcomes are `McpReload`'s four tuples, which are this
+    application's own vocabulary; the status is the same document
+    `GET /runtime/mcp-servers` answers with, so applying and verifying
+    are one round trip.
+
+    Read with no await between the reload returning and the status
+    being taken, which is the invariant that makes the two halves one
+    world: a reload landing in between would leave outcomes describing
+    a world the status no longer reports.
+
+    Refusals are not caught. The exception types the two phases raise
+    ARE the contract with the API (409, 422, 500), so they travel out
+    of here exactly as they left `_preparation`.
+    """
+    applied = await reload(servers, read)
+    return McpReloadResult(
+        started=list(applied.started),
+        restarted=list(applied.restarted),
+        stopped=list(applied.stopped),
+        unchanged=list(applied.unchanged),
+        servers=servers.typed_status(),
+    )
 
 
 async def _preparation(

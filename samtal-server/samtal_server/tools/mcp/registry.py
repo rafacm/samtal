@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from samtal_server.config import Config
+from samtal_server.config.responses import McpReloadResult, McpServerStatus
 from samtal_server.config.secrets import SecretStore
 from samtal_server.providers import ToolDef
 from samtal_server.runtime.prompt import GuidanceBlock, ServerInstructions
@@ -384,6 +385,12 @@ class McpServers:
         a credential of ours can reflect one in either; a gated read that
         carried them would be the secret-readback path the rest of the
         API refuses to be.
+
+        Mappings and not the API's models, which is a decision and not
+        an omission: what reads this is this server, and what it does
+        with it is index it and serialize it whole. `typed_status`
+        below is the one caller that needs the shapes, and is where
+        they are put on.
         """
         return {entry: self._status_of(entry) for entry in self._configured.entries}
 
@@ -411,6 +418,40 @@ class McpServers:
             "tools": [tool.name for tool in self._reachable(entry)],
             "grants": grants,
         }
+
+    def typed_status(self) -> dict[str, McpServerStatus]:
+        """The same answer as `status()`, as the models the API sends.
+
+        The API-facing view, and the reason it is a view rather than
+        what `status()` returns: every consumer inside this server
+        reads those mappings as mappings, and a `json.dumps` of one is
+        what proves this surface reflects nothing a far side wrote.
+        What the API needs instead is the shape it declares, so the
+        adapter lives here, one line from the knowledge it validates,
+        rather than in a request handler five hundred lines from it.
+
+        Validating rather than constructing, deliberately: the models
+        forbid extra keys, so a field this registry starts answering
+        with and the document does not declare fails here, in this
+        server's own tests, instead of on a client.
+        """
+        return {
+            entry: McpServerStatus.model_validate(status)
+            for entry, status in self.status().items()
+        }
+
+    async def reload_result(
+        self, read: Callable[[], tuple[Config, SecretStore | None]]
+    ) -> McpReloadResult:
+        """The reload above, as the answer the API sends: what it did
+        and what is running now, taken with no await between the two.
+
+        Beside `typed_status` and for the same reason. The composition
+        root hands this to the API as the reload it may call, so the
+        handler applies a configuration and answers with the result,
+        and composes nothing.
+        """
+        return await reloading.reload_result(self, read)
 
     def timeout_for(self, entry: str) -> float | None:
         manager = self._managers.get(entry)
