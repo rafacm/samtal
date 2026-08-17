@@ -27,6 +27,7 @@ find that mistake must not be the one that prints it.
 
 from collections.abc import Mapping, Sequence
 
+from samtal_server.config import entities
 from samtal_server.config.models import (
     PROVIDER_STAGES,
     AgentConfig,
@@ -43,26 +44,36 @@ from samtal_server.config.secrets import mask
 from samtal_server.config.store import Entity, Snapshot, StoredSecret, stored_secrets
 
 # Entity envelopes
+#
+# Which builder shows one entry is a fact about the kind, so it is the
+# kind's descriptor that says it and these are the names its callers
+# know it by.
+
+
+def entity(kind: str, read: Entity[object]) -> dict[str, object]:
+    """One entity as a read shows it: its kind's masked body, inside the
+    envelope every kind is read through."""
+    return _envelope(entities.descriptor(kind).body(read.entry), read.secrets)
 
 
 def provider(read: Entity[ProviderConfig]) -> dict[str, object]:
-    return _envelope(provider_body(read.entry), read.secrets)
+    return entity("provider", read)
 
 
 def mcp_server(read: Entity[McpServerConfig]) -> dict[str, object]:
-    return _envelope(mcp_server_body(read.entry), read.secrets)
+    return entity("mcp-server", read)
 
 
 def prompt_fragment(read: Entity[PromptFragmentConfig]) -> dict[str, object]:
-    return _envelope(prompt_fragment_body(read.entry), read.secrets)
+    return entity("prompt-fragment", read)
 
 
 def agent(read: Entity[AgentConfig]) -> dict[str, object]:
-    return _envelope(agent_body(read.entry), read.secrets)
+    return entity("agent", read)
 
 
 def agent_defaults(read: Entity[AgentDefaults]) -> dict[str, object]:
-    return _envelope(layer_body(read.entry), read.secrets)
+    return entity("agent-defaults", read)
 
 
 def device(read: Entity[list[str]]) -> dict[str, object]:
@@ -91,24 +102,13 @@ def config(snapshot: Snapshot) -> dict[str, object]:
     return {
         "config": {
             "providers": {
-                stage: {
-                    name: provider_body(entry)
-                    for name, entry in sorted(getattr(domain.providers, stage).items())
-                }
+                stage: _bodies(getattr(domain.providers, stage), "provider")
                 for stage in PROVIDER_STAGES
             },
-            "mcp_servers": {
-                name: mcp_server_body(entry)
-                for name, entry in sorted(domain.mcp_servers.items())
-            },
-            "prompt_fragments": {
-                name: prompt_fragment_body(entry)
-                for name, entry in sorted(domain.prompt_fragments.items())
-            },
-            "agent_defaults": layer_body(domain.agent_defaults),
-            "agents": {
-                name: agent_body(entry) for name, entry in sorted(domain.agents.items())
-            },
+            "mcp_servers": _bodies(domain.mcp_servers, "mcp-server"),
+            "prompt_fragments": _bodies(domain.prompt_fragments, "prompt-fragment"),
+            "agent_defaults": entities.descriptor("agent-defaults").body(domain.agent_defaults),
+            "agents": _bodies(domain.agents, "agent"),
             "devices": {mac: list(bound) for mac, bound in sorted(domain.devices.items())},
             "default_agent": domain.default_agent,
         },
@@ -116,13 +116,30 @@ def config(snapshot: Snapshot) -> dict[str, object]:
     }
 
 
+def listing(kind: str, snapshot: Snapshot) -> dict[str, object]:
+    """Every entry of one kind, by name, each in its envelope. What is
+    stored beside an entry comes from the same traversal for all of
+    them, and a kind that can hold no stored secret answers with an
+    empty mapping rather than with a different shape."""
+    descriptor = entities.descriptor(kind)
+    stored = _by_entity(snapshot)
+    return {
+        name: _envelope(descriptor.body(entry), stored.get((descriptor.secret_slots, name), ()))
+        for name, entry in sorted(getattr(snapshot.domain, descriptor.moved_key).items())
+    }
+
+
 def providers(snapshot: Snapshot) -> dict[str, dict[str, object]]:
     """Every provider, by stage and then by name: the way a provider is
     addressed everywhere else, since two stages may hold one name."""
+    descriptor = entities.descriptor("provider")
     stored = _by_entity(snapshot)
     return {
         stage: {
-            name: _envelope(provider_body(entry), stored.get(("provider", f"{stage}.{name}"), ()))
+            name: _envelope(
+                descriptor.body(entry),
+                stored.get((descriptor.secret_slots, f"{stage}.{name}"), ()),
+            )
             for name, entry in sorted(getattr(snapshot.domain.providers, stage).items())
         }
         for stage in PROVIDER_STAGES
@@ -130,25 +147,15 @@ def providers(snapshot: Snapshot) -> dict[str, dict[str, object]]:
 
 
 def mcp_servers(snapshot: Snapshot) -> dict[str, object]:
-    stored = _by_entity(snapshot)
-    return {
-        name: _envelope(mcp_server_body(entry), stored.get(("mcp_server", name), ()))
-        for name, entry in sorted(snapshot.domain.mcp_servers.items())
-    }
+    return listing("mcp-server", snapshot)
 
 
 def prompt_fragments(snapshot: Snapshot) -> dict[str, object]:
-    return {
-        name: _envelope(prompt_fragment_body(entry), ())
-        for name, entry in sorted(snapshot.domain.prompt_fragments.items())
-    }
+    return listing("prompt-fragment", snapshot)
 
 
 def agents(snapshot: Snapshot) -> dict[str, object]:
-    return {
-        name: _envelope(agent_body(entry), ())
-        for name, entry in sorted(snapshot.domain.agents.items())
-    }
+    return listing("agent", snapshot)
 
 
 def devices(snapshot: Snapshot) -> dict[str, object]:
@@ -320,6 +327,16 @@ def layer_body(entry: AgentDefaults) -> dict[str, object]:
     return data
 
 
+# Which builder shows one entry of each kind. `provider_record` is
+# deliberately not among them: a record is not a display, and what it
+# leaves out and why is its own docstring's.
+entities.fill("provider", body=provider_body)
+entities.fill("mcp-server", body=mcp_server_body)
+entities.fill("prompt-fragment", body=prompt_fragment_body)
+entities.fill("agent", body=agent_body)
+entities.fill("agent-defaults", body=layer_body)
+
+
 def device_body(agents: Sequence[str]) -> dict[str, object]:
     """A binding is a list of agent names, in the shape a write of one
     takes, so what a read shows is what a write accepts back."""
@@ -346,6 +363,14 @@ def reference_value(body: Mapping[str, object], key: str) -> object:
         return body.get(key)
     nested = body.get(group)
     return nested.get(name) if isinstance(nested, Mapping) else None
+
+
+def _bodies(section: Mapping[str, object], kind: str) -> dict[str, object]:
+    """Every entry of one kind as the document shows it, by name: the
+    bare bodies, since the document says where the stored secrets are in
+    a list of its own."""
+    body = entities.descriptor(kind).body
+    return {name: body(entry) for name, entry in sorted(section.items())}
 
 
 def _envelope(
@@ -388,7 +413,9 @@ __all__ = [
     "device",
     "device_body",
     "devices",
+    "entity",
     "layer_body",
+    "listing",
     "masked_option",
     "mcp_server",
     "mcp_server_body",
