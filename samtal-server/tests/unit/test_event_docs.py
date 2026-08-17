@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from samtal_server import events_docgen
+from samtal_server import events_cli, events_docgen
 from samtal_server.events import ENFORCEMENT_ENV
 from samtal_server.events_schema import (
     GRAMMARS,
@@ -287,3 +287,36 @@ def test_an_unusable_enforcement_value_does_not_block_the_reference(
     assert done.returncode == 0, done.stderr
     assert done.stdout == events_docgen.reference()
     assert written not in done.stdout
+
+
+def test_a_reader_who_stops_reading_gets_no_traceback(tmp_path: Path) -> None:
+    """`samtal-server events reference | head` is an ordinary thing to
+    do with a document this long, and the document is far longer than a
+    pipe buffer, so the write really does fail rather than finishing
+    into the buffer unnoticed. What the reader must never see for it is
+    a traceback: a closed pipe is a reader who has read enough, and the
+    answer is the shell's own status for one."""
+    child = subprocess.Popen(
+        [sys.executable, "-m", "samtal_server.main", "events", "reference"],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert child.stdout is not None and child.stderr is not None
+    first = child.stdout.readline()
+    # What `head` does: stop reading and close, while the writer is
+    # still going.
+    child.stdout.close()
+    errors = child.stderr.read()
+    status = child.wait()
+    child.stderr.close()
+
+    assert first == "# Event schema reference\n"
+    assert "Traceback" not in errors
+    # And not the other spelling either: an unflushable stream at
+    # interpreter shutdown prints a complaint without a traceback.
+    assert "Exception ignored" not in errors
+    assert errors == ""
+    assert status == events_cli.BROKEN_PIPE_STATUS
