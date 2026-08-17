@@ -92,7 +92,8 @@ no-op for the single-module world it was written for; the split itself,
 which is where the sidecar, the value sources and the test ports move
 with the code; and the log quieting, separable because the split kept
 the import-time statements verbatim so that this commit could be read
-as the one behavioral change it is.
+as the one behavioral change it is. Four more landed in the PR review
+round, recorded at the end of this section.
 
 ### The package, and the two logger rules
 
@@ -115,14 +116,14 @@ with the comment that says why.
 | Module | Lines | Responsibility |
 | --- | --- | --- |
 | `__init__.py` | 238 | the emitter, the 74 re-exports, the two rules |
-| `transport.py` | 283 | bringing a connection up, and classifying failure |
+| `transport.py` | 285 | bringing a connection up, and classifying failure |
 | `prompts.py` | 471 | the #122 capture, under its bounds |
-| `manager.py` | 768 | one server's lifecycle, and the abandonment plumbing |
+| `manager.py` | 777 | one server's lifecycle, and the abandonment plumbing |
 | `slice.py` | 201 | the configuration a registry was built from |
 | `reload.py` | 423 | the two phases, as functions over the registry |
-| `registry.py` | 459 | what needs the managers and the slice together |
+| `registry.py` | 455 | what needs the managers and the slice together |
 
-**Deviation: `manager.py` is 768 lines, not "under roughly 500".** The
+**Deviation: `manager.py` is 777 lines, not "under roughly 500".** The
 plan's own arithmetic implies it: the class is 885 lines at plan time
 and 307 of those are the capture, which leaves 578 for the class alone,
 before its module's imports, the four timeout and status constants, the
@@ -132,7 +133,8 @@ plan puts here. Nothing was left in it that had somewhere else to be:
 its two call sites went to `prompts`, and the only way further down is a
 seventh module for the stop and its abandonment, which is a boundary
 this plan did not draw and M1 is not the place to invent. Recorded as
-the one criterion M1 misses.
+the one criterion M1 misses, and closed by the PR review round below,
+which accepted the file at this size with no seventh module asked for.
 
 **Deviation: `_managers_for` lives in `manager.py`, not `registry.py`.**
 The plan's brief lists it under the registry. It builds
@@ -223,12 +225,16 @@ files.
 
 `quiet_sdk_loggers()` in `transport.py`, same four filters, same
 `propagate = False`, same rationale comment now inside the function.
-Called as the first act of `McpServerManager.start`, because several
-suites (the HTTP no-leak proof among them) build a manager and start it
-without a registry, and again from `McpServers.build`, which costs
-nothing: `Logger.addFilter` does not install a filter twice and turning
-propagation off twice is turning it off. Nothing asserts on the state at
-import time, so nothing needed porting for it.
+
+It was first called from `McpServerManager.start` and from
+`McpServers.build`, which the review's first finding showed to be the
+wrong boundary: `ensure_reconnecting` comes straight to `_begin`, so a
+process whose first connect is a background reconnect connected with
+`mcp` still propagating. It is called from `_begin` now, which is the
+one place a connection is ever begun, and the registry's call went with
+the move because there is nothing left for it to cover. Nothing asserts
+on the state at import time, so nothing needed porting for it; the
+regression that pins the boundary is described in the round below.
 
 ### The port table
 
@@ -264,21 +270,99 @@ From `samtal-server/`, `uv` throughout, `PYTHONDONTWRITEBYTECODE=1`
 outside pytest.
 
 - `uv run ruff check .`: **All checks passed!**
-- `uv run pytest tests/unit -q`: **2943 passed, 16 skipped**. Collected
-  2959 against 2954 at the base commit, and the five are the planted
-  conformance cases and nothing else: a move adds no test and the ports
-  rewrote lines inside tests that already existed.
-- `uv run pytest tests/integration -q`: **55 passed**, unchanged.
+- `uv run pytest tests/unit -q`: **2945 passed, 16 skipped in
+  312.01s**. Collected 2961 against 2954 at the base commit, and the
+  seven are all tests M1 wrote: the five planted conformance cases, the
+  sixth planted by the review round, and the reconnect regression. A
+  move adds no test, and the ports rewrote lines inside tests that
+  already existed.
+- `uv run pytest tests/integration -q`: **55 passed in 158.19s**,
+  unchanged in count.
   `test_mcp_reload.py`'s black-box reload proof needed nothing, as the
   plan said it would not.
 - The reflection sentinels
   (`test_mcp_status_reflection.py`, 8 tests) pass, including
   `test_a_child_that_writes_where_it_likes_reaches_no_operator_surface`,
   which is the proof that the quieting is in force before the first
-  real subprocess connect on the manager-start path.
+  real subprocess connect on the start path, beside the reconnect
+  regression that proves the same of the other one.
 - `uv run samtal-server events reference` diffs clean against
   `docs/reference/events.md`, and byte-identically against the same
   document generated at the base commit: the channel did not move.
 - `git diff --stat` over `test_server_event_pins.py`,
   `test_event_surface_pins.py` and `events_schema.py` is empty.
 - `wc -l` per module is the table above.
+
+### The PR review round
+
+External review of PR #178 by the pipeline's reviewer, 2026-08-17.
+Three findings, all valid, one commit each; the verification above was
+re-run whole afterwards and is the result recorded. The reviewer
+accepted `manager.py` at its size with no seventh module asked for,
+which closes the flagged deviation above.
+
+1. **P1: the public reconnect path bypasses the SDK quieting.**
+   `quiet_sdk_loggers()` was the first act of `McpServerManager.start`,
+   but `ensure_reconnecting` comes straight to `_begin`, so a process
+   whose first connect is a background reconnect connects with `mcp`
+   still propagating and the SDK's records reaching every handler. The
+   CHANGELOG sentence claiming every path was covered was false with
+   it.
+
+   *Resolution* (`cd88749`): the call moves to `_begin`, the one place
+   a connection is ever begun, since both public entries come through
+   it and neither calls the other. `McpServers.build`'s call goes with
+   it rather than staying a second guard: with the boundary there,
+   nothing is left for it to cover. The CHANGELOG sentence and
+   `quiet_sdk_loggers`' own docstring are corrected to name the
+   boundary that holds. The regression,
+   `test_a_background_reconnect_quiets_the_sdk_before_it_connects`,
+   drives a manager through `ensure_reconnecting` having never started
+   it, over an `unquieted` fixture that puts the process-wide state
+   back to a process that has quieted nothing, and asserts both halves:
+   propagation already off before anything has been awaited, which is
+   the ordering, and no `mcp.*` record in capture across a real connect
+   and a line written on each SDK logger. On the previous code it fails
+   at the ordering assertion (`assert not True`).
+
+2. **P2: the package form accepted a borrowed emitter after a
+   rebinding.** The rule asked whether `from . import events` appeared
+   anywhere, so a module that took its package's emitter and then
+   rebound the name to a foreign one passed while emitting on the
+   foreign channel.
+
+   *Resolution* (`066a8ea`): `emitter_bindings` collects every
+   top-level statement that binds the name, in source order, and both
+   accepted forms require exactly one, by the statement the form
+   claims; nested scopes are left alone, since a name rebound inside a
+   function is that function's own. The module form is narrowed by the
+   same rule, because build-then-rebind is the same hole from the other
+   side. Planted in both forms as
+   `test_an_emitter_rebound_after_a_lawful_one_owns_nothing`, with the
+   walk's channel attribution asserted beside the rule so the two
+   halves cannot drift; on the previous rule the case returns the empty
+   string, the rule saying the module owns the channel it borrowed.
+
+3. **P3: the resolver port added private reaches M4 does not map.**
+   The port read `_name`, `_config` and `_secrets` off the manager,
+   which contradicted this section's own claim that no reach was added,
+   and `_secrets` is a seam M4 never planned.
+
+   *Resolution* (`cceadb7`): the literals answer the same question, so
+   the call is `transport._resolve("tools", config.mcp_servers["tools"],
+   None, "env")`. `McpServers.build(config)` stays, unbound, because
+   building is what resolves at construction; its `_managers` reach
+   went with the change, leaving six unit sites where the inventory
+   counted seven.
+
+Found while fixing the above, and fixed as its own commit
+(`dcba261`): **the split dropped one line of prose.** The comment over
+`DROPPED_AFTER_FAILED_CALL` lost its first sentence to an off-by-one in
+the line range it was copied by, so the block began mid-sentence. It
+was found by auditing every line of the file at 51bf990 against the
+package rather than by reading, which is the check that should have run
+before the split was committed; it is the only prose lost in the move.
+The two blocks that changed shape rather than place are word-identical
+and were verified so: the SDK propagation comment, re-wrapped to sit
+inside `quiet_sdk_loggers` at four spaces, and the atomic-swap
+contract, which is `_install`'s docstring now.
