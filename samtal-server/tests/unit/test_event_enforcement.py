@@ -1049,6 +1049,93 @@ def test_one_complaint_reports_every_violation_of_one_emission(
     replaced_by_the_recovery_event(caplog)
 
 
+# --- when saying so is itself what breaks -----------------------------
+
+
+class BrokenHandler(logging.Handler):
+    """A logging handler that raises where `logging` does not catch it.
+
+    `handleError` swallows a failure inside `emit`, so a realistic
+    broken handler has to fail in `handle`, which `callHandlers` calls
+    unwrapped. Which is the point: a handler, a filter and a formatter
+    are all code somebody else installed, and a logging call is not the
+    inert operation it looks like."""
+
+    def handle(self, record: logging.LogRecord) -> bool:
+        raise RuntimeError("the log handler is broken")
+
+
+@pytest.fixture
+def broken_log() -> Iterator[None]:
+    channel = logging.getLogger(CHANNEL)
+    handler = BrokenHandler()
+    channel.addHandler(handler)
+    try:
+        yield
+    finally:
+        channel.removeHandler(handler)
+
+
+def test_a_broken_log_does_not_cost_the_reply_that_was_refused(
+    broken_log: None, tap: Tap
+) -> None:
+    """Reporting a refusal is the last thing in the path, and it is on
+    the channel the emission was going to. If that channel throws, the
+    complaint is lost and the reply is not: the emission still comes
+    back recovered, which the tap ahead of the log tap can see."""
+    forgivingly()
+    lawful(emitter(), invented=1)
+
+    assert [emission.payload["event"] for emission in tap.seen] == ["measured"]
+    assert tap.seen[0].message == SAFE_MESSAGE
+
+
+def test_a_broken_log_does_not_cost_the_reply_the_guard_saved(
+    broken_log: None, monkeypatch: pytest.MonkeyPatch, tap: Tap
+) -> None:
+    """The same, one layer further down: the enforcement broke AND the
+    channel it would report that on is broken too. The guard's own
+    handler is the last one there is, so a logging call that raised
+    inside it would leave nothing behind it at all."""
+    forgivingly()
+    monkeypatch.setattr(events, "_judge", raising_judgement)
+    lawful(emitter())
+
+    assert [emission.payload["event"] for emission in tap.seen] == [SCHEMA_VIOLATION]
+
+
+class BrokenTap:
+    """A consumer with a bug in it, which is the only kind the guards
+    exist for."""
+
+    def emit(self, emission: Emission) -> None:
+        raise RuntimeError("this consumer is broken")
+
+
+def test_a_broken_tap_reported_on_a_broken_log_still_costs_nothing(
+    broken_log: None, tap: Tap
+) -> None:
+    """The oldest guard in the module, hardened the same way. A tap that
+    raises is reported on the emitter's own channel, and that channel is
+    where the emission was going: if the log is what broke, the report
+    goes straight back onto it. The taps after the broken one still saw
+    the event."""
+    forgivingly()
+    broken = BrokenTap()
+    attach_server_tap(broken)
+    try:
+        lawful(emitter())
+    finally:
+        detach_server_tap(broken)
+
+    assert [emission.payload["event"] for emission in tap.seen] == ["measured"]
+
+
+def test_reporting_swallows_whatever_the_channel_does(broken_log: None) -> None:
+    """The helper itself, since everything above depends on it."""
+    events._report(logging.getLogger(CHANNEL), logging.ERROR, "anything %s", "at all")
+
+
 # --- the last-resort guard --------------------------------------------
 
 
