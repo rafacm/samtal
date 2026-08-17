@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-18
+
+### Changed
+
+- **One interface under the three tool sources** (#140, M3). The
+  conversation runtime knew each of the three places a tool comes from
+  by heart: the builtins it built itself, the device's list it scanned
+  twice, and the MCP registry it asked by name, with four calling
+  conventions between them and a timeout that forked on where the call
+  had come from. `samtal_server/tools/source.py` states what they have
+  in common as `ToolSource`, and the runtime's snapshot, dispatch and
+  timeout are one loop over the three sources it is built with.
+  Every question a source is asked is asked about the same claim, the
+  classification reserved on the turn's record before anything ran, so
+  no source is ever in a position to resolve a name a second time and a
+  reload cannot reroute a call in flight. What no source can answer
+  stays with the runtime: arguments a model never closed, a name nobody
+  publishes, and the handover, which ends the tool loop rather than
+  answering the model. Nothing an operator sees moved: the same tools
+  are offered in the same order, the same sentences come back, and the
+  `tool_call` event says what it said.
+
 ## 2026-08-17
 
 ### Added

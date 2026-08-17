@@ -596,3 +596,153 @@ re-run whole afterwards and is the result recorded.
    the tick's parenthetical otherwise as it was. The figures are what
    the one recorded criterion miss is measured against, so a stale one
    is a claim about a criterion.
+
+## M3: the `ToolSource` seam
+
+Two commits: `tools/source.py` first, stating the interface and the
+three implementations while nothing consumes them; then the runtime,
+where three methods that knew each source by heart become three loops
+over the same tuple. The seam is 225 lines and the runtime lost 54 to
+gain 50, which is what a straight replacement of four conventions by
+one looks like.
+
+### The claim is the reservation itself
+
+The plan's review finding 1 required a per-call claim carrying the
+reserved MCP entry through `owns`, `dispatch` and `timeout_for`. The
+type is `conversations.records.ToolInvocation`, unchanged and not
+wrapped: it already carries everything routing reads (the name asked
+for, the arguments asked with, the entry that owned the name when the
+call was classified), it is what `_classified` already returns and what
+`TurnUnderway.reserved` already answers with, and it is what the
+`tool_call` event and the turn's row are built from, so there is
+exactly one classification per call and no second structure that could
+disagree with it.
+
+`tools/source.py` names it structurally rather than importing it:
+
+```python
+class ToolClaim(Protocol):
+    @property
+    def name(self) -> str | None: ...
+    @property
+    def arguments(self) -> dict[str, Any] | None: ...
+    @property
+    def entry(self) -> str | None: ...
+```
+
+Three read-only members, which is the whole of what a source is told,
+and the tool layer does not import the conversation record layer to say
+it. Both `None`s are honest rather than defensive: `name` is optional
+on `ToolInvocation`, and `arguments` is `None` exactly when the model's
+arguments never parsed, which is the one case the runtime answers
+before any source is asked.
+
+### The order, and why it settles nothing
+
+`PipelineRuntime._sources` is a fixed tuple, built once in `__init__`:
+`BuiltinTools`, `DeviceTools`, `McpTools`. That is the order
+`_tool_snapshot` merged in and the order `_dispatch` tested in, and it
+is not a tie-break: `names` makes the three namespaces disjoint by
+construction (builtins bare, the device's carrying its `self` prefix,
+an MCP server's carrying its entry, and an entry may take neither of
+the other two groups' names), so no two sources can own one name.
+
+The one place today's dispatch ordering was load-bearing is the
+no-memory `remember`, and it is the plan's names-not-outcomes
+resolution: `BuiltinTools.owns` answers by name membership whether or
+not the feature is configured, and its `dispatch` returns the exact
+unknown-tool sentence, byte for byte, instead of the call falling
+through to the device scan the way it used to. The two are
+indistinguishable from outside because a device tool cannot be called
+`remember` and an MCP entry cannot either.
+
+`switch_agent` never reaches the loop: `_run_tools` splits it out and
+`_refuse_handover` answers it, both untouched. `BuiltinTools.dispatch`
+still answers it if it ever arrives, as the builtin that cannot run,
+which is what the runtime did with it before.
+
+### What stayed in the runtime
+
+The malformed-arguments branch, with its length-not-value warning
+verbatim; the unknown-tool sentence for a name no source claims; the
+`DEFAULT_TOOL_TIMEOUT_S` constant and its comment. The constant is
+handed to each source at construction rather than read by them, for two
+reasons: how long a builtin or a device tool may take is the runtime's
+policy, and `test_session_tools.py` rebinds
+`pipeline_module.DEFAULT_TOOL_TIMEOUT_S` before the session it patches
+it for is built, which a source reading its own copy of the name would
+not have seen (the M1 lesson about assignment-based patches, from the
+other side).
+
+`_timeout_for` now asks the owning source and keeps the module default
+for a call nobody owns, which is the same answer it gave before: the
+fork was `entry is not None`, and only an `mcp` claim carries an entry.
+
+### Deviations
+
+**The MCP source is a thin adapter, not `McpServers` itself.** The plan
+says the registry implements the protocol directly because "its
+existing methods already match". They do not:
+`McpServers.timeout_for(entry: str) -> float | None` answers about an
+entry, the protocol's `timeout_for(claim) -> float` answers about a
+call, and the entry form is pinned by six assertions the
+no-behavior-change contract forbids porting
+(`test_tools_mcp.py:399,407,408,849`,
+`test_tools_mcp_reload.py:139,146`). A protocol member of that name
+taking a claim would break them, so `McpTools` in `tools/source.py`
+holds the registry and translates: `snapshot` to `tools_for_agent`,
+`owns` to the claim's entry, `dispatch` to
+`call(..., expected=claim.entry)` with the re-resolution-is-wrong
+rationale moved into it, and `timeout_for` to the entry's timeout or
+the default. `tools/mcp/` is untouched by M3 as a result, which is also
+what keeps M1's and M2's byte-identical proofs out of this milestone's
+way.
+
+**`tools/source.py` imports more than `providers.ToolDef` and stdlib.**
+It holds the three implementations beside the interface, so it also
+imports `device.boundary.DeviceOutput`, `tools.builtin`, `tools.names`,
+`tools.memory.MemoryStore` and `tools.mcp.McpServers`. The constraint
+the plan wrote that sentence for holds: every one of those is a module
+`runtime/pipeline.py` already imported, so the pipeline still imports
+downward and nothing new is on the path of anything that imports the
+tool layer. Keeping the interface pure and scattering three ten-line
+adapters across three layers (a class in the device boundary, whose
+docstring says it holds two protocols and nothing else) was the
+alternative, and one file named for the seam reads better than three
+homes for one idea.
+
+### Ports
+
+None. No test file is modified by M3. The three renamed things are
+docstrings; `_tool_snapshot`, `_dispatch`, `_timeout_for`,
+`_classified`, `_reserve_tools` and `_run_one` all keep their names and
+their signatures, which is why `test_session_tools.py` drives the new
+loop unmodified, including the reservation-semantics test that reloads
+a registry between `_reserve_tools` and `_run_one` and the one that
+asserts `_timeout_for(_classified(...)) == 7.5`.
+
+The conformance sidecar is unchanged too: the `tool_call` emit site
+never left `_run_one`, so both of its entries
+(`…pipeline:PipelineRuntime._run_one.fields` and the
+`("samtal_server.runtime.pipeline", "PipelineRuntime._run_one", 1)`
+value source) still name the enclosing function they always named, and
+no other event is emitted from anything this milestone moved.
+
+### Verification
+
+From `samtal-server/`, `uv` throughout, `PYTHONDONTWRITEBYTECODE=1`
+outside pytest.
+
+- `uv run ruff check .`: **All checks passed!**
+- `uv run pytest tests/unit -q`: **2945 passed, 16 skipped**, 2961
+  collected, unchanged from before the milestone: the seam adds no test
+  of its own because the tests that drove the four conventions drive
+  the one interface unmodified.
+- `uv run pytest tests/integration -q`: **55 passed**, unchanged.
+- `uv run samtal-server config openapi` and
+  `uv run samtal-server events reference` both diff clean against
+  `docs/reference/api-openapi.json` and `docs/reference/events.md`.
+- `git diff --stat` over `test_server_event_pins.py` and
+  `test_event_surface_pins.py`: empty, the two contract pin suites
+  byte-unchanged.
