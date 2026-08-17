@@ -40,7 +40,6 @@ from samtal_server.events import (
     detach_server_tap,
 )
 from samtal_server.events_schema import (
-    GRAMMARS,
     MAC,
     QUOTED_TOOL_NAME,
     REGISTRY,
@@ -60,7 +59,6 @@ from samtal_server.events_schema import (
     identifier,
     identifier_list,
     machine_id,
-    matcher,
     server_payload,
     session_payload,
     sources,
@@ -294,6 +292,41 @@ def test_an_optional_field_may_be_absent_and_a_nullable_one_null(
         )
 
     assert [record.event for record in caplog.records] == ["measured", "listed"]
+
+
+@pytest.mark.parametrize(
+    "name",
+    ['secondary"agent', "control\x07bearing", "n" * 4000, " padded "],
+    ids=["quoted", "control character", "overlong", "padded"],
+)
+def test_a_configured_name_is_whatever_configuration_admits(
+    caplog: pytest.LogCaptureFixture, name: str
+) -> None:
+    """`IDENTIFIER` is trusted by PROVENANCE, not by shape. `NonBlankStr`
+    is `strip_whitespace=True, min_length=1` and nothing else, so all
+    four of these are lawful configuration today and the emitters
+    interpolate them into sentences. A length or a character class here
+    would turn such a deployment's ordinary traffic into violations, and
+    forgiving mode would drop the field and replace the sentence on
+    account of a claim configuration never made. Narrowing belongs at
+    configuration semantics (#168), not here."""
+    strictly()
+    with caplog.at_level("DEBUG"):
+        lawful(emitter(), stage=name)
+
+    assert fields_of(caplog.records[0])["stage"] == name
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\n\t"])
+def test_the_one_thing_a_configured_name_may_not_be_is_blank(blank: str) -> None:
+    """The floor `NonBlankStr` does state: non-empty once stripped."""
+    strictly()
+    with pytest.raises(EventSchemaError) as raised:
+        lawful(emitter(), stage=blank)
+
+    assert raised.value.args == (
+        "the event schema refused an emission of measured: bad_bounds (stage)",
+    )
 
 
 # --- an undeclared event ----------------------------------------------
@@ -863,27 +896,39 @@ def test_strict_refuses_a_path_argument_that_is_not_one() -> None:
     )
 
 
-def test_a_composed_fragment_is_held_to_its_named_grammar(
-    caplog: pytest.LogCaptureFixture,
+@pytest.mark.parametrize(
+    "fragment",
+    [' "remember"', ' "secondary\\"agent"', ' "remem\nber"', f' "{"n" * 4000}"'],
+    ids=["as the builder assembles it", "quoted", "control character", "overlong"],
+)
+def test_a_composed_fragment_is_held_to_its_structure_and_no_further(
+    caplog: pytest.LogCaptureFixture, fragment: str
 ) -> None:
     """The quoted tool name, exactly as `_tool_named` assembles it,
-    leading space and all."""
+    leading space and all.
+
+    The last three are the point. A configured name's domain is
+    `NonBlankStr`, which admits quotes, control characters and any
+    length, so a grammar over one bounds by STRUCTURE (a quoted name, a
+    parenthesized tail, a prefix) and never by character class or
+    length. Claiming otherwise would refuse a deployment that named an
+    agent something unusual, which is lawful configuration today."""
     strictly()
     with caplog.at_level("DEBUG"):
-        emitter().info("wrote %s under %s", Path("/data"), ' "remember"', event="wrote")
+        emitter().info("wrote %s under %s", Path("/data"), fragment, event="wrote")
 
-    assert caplog.records[0].args[1] == ' "remember"'
+    assert caplog.records[0].args[1] == fragment
 
 
 @pytest.mark.parametrize(
     "fragment",
-    [' "remem\nber"', " remember", '"remember"', "", ' "remember" and more'],
-    ids=["newline", "unquoted", "no leading space", "empty", "trailing text"],
+    [" remember", '"remember"', "", ' "remember" and more'],
+    ids=["unquoted", "no leading space", "empty", "trailing text"],
 )
 def test_strict_refuses_a_fragment_outside_its_grammar(fragment: str) -> None:
-    """A grammar rather than a string type, because the fragment is the
-    only part of a sentence a builder assembles: what it may be is
-    exactly what its builder can produce."""
+    """The structure, which is what is left of the claim and is the
+    whole of what the builder promises: this fragment is a quoted name
+    behind a space, and nothing else at all."""
     strictly()
     with pytest.raises(EventSchemaError) as raised:
         emitter().info("wrote %s under %s", Path("/data"), fragment, event="wrote")
@@ -891,14 +936,6 @@ def test_strict_refuses_a_fragment_outside_its_grammar(fragment: str) -> None:
     assert raised.value.args == (
         "the event schema refused an emission of wrote: bad_syntax (argument 1)",
     )
-
-
-@pytest.mark.parametrize("named", sorted(GRAMMARS), ids=sorted(GRAMMARS))
-def test_no_declared_grammar_admits_a_control_character(named: str) -> None:
-    """Every grammar in the registry, held to the one rule they all
-    share: a newline in a rendered sentence is one retained record
-    becoming two, and no fragment a builder assembles contains one."""
-    assert not matcher(GRAMMARS[named].pattern).match("what it said\nand then more")
 
 
 # --- what the complaint is, and where it survives ---------------------
