@@ -31,7 +31,6 @@ from . import reload as reloading
 from .manager import UNUSED, McpServerDown, McpServerManager, _managers_for
 from .reload import McpReload, _Preparation
 from .slice import McpSlice, _allowed, _shadowed
-from .transport import quiet_sdk_loggers
 
 
 class McpToolNotGranted(LookupError):
@@ -98,9 +97,6 @@ class McpServers:
 
         `secrets` is the store a snapshot was loaded with, or None for a
         deployment whose credentials are all environment references."""
-        # Harmless where a manager start has already done it, and here
-        # because a registry built is a registry about to connect.
-        quiet_sdk_loggers()
         configured = McpSlice.of(config)
         return cls(_managers_for(config, secrets, configured), configured)
 

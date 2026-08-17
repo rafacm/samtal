@@ -82,14 +82,16 @@ def quiet_sdk_loggers() -> None:
     never connects to anything, would otherwise have the SDK's loggers
     rearranged under it by the import alone.
 
-    Where it is called is what makes the rule reach every connection:
-    the first act of a manager start, since a manager is built and
-    started directly as well as through a registry, and again where a
-    registry is built. Both are ahead of every connect on every path.
+    Where it is called is what makes the rule reach every connection,
+    so it is called at the one place a connect is ever begun: the
+    manager's `_begin`, which creates the task a run lives in. A start
+    and a background reconnect both come through there, and neither
+    calls the other, so any boundary further out would be one a public
+    path walks past.
 
-    Idempotent, which is what lets both of them call it: a filter
-    already installed is not installed twice, and turning propagation
-    off twice is turning it off.
+    Idempotent all the same, since `_begin` runs once per connection: a
+    filter already installed is not installed twice, and turning
+    propagation off twice is turning it off.
     """
     for _sdk_logger in SDK_LOGGERS:
         logging.getLogger(_sdk_logger).addFilter(_emit_nothing)
