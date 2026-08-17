@@ -43,6 +43,7 @@ import hmac
 import os
 from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
+from inspect import Parameter, Signature
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -54,7 +55,7 @@ from pydantic import BaseModel
 from starlette.routing import Route
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from samtal_server.config import views
+from samtal_server.config import entities, views
 from samtal_server.config.docgen import API_OPTIONS_NOTE
 from samtal_server.config.loader import (
     ConfigError,
@@ -66,12 +67,7 @@ from samtal_server.config.loader import (
 )
 from samtal_server.config.models import (
     API_MOUNT_PATH,
-    AgentConfig,
-    AgentDefaults,
     Config,
-    McpServerConfig,
-    PromptFragmentConfig,
-    ProviderConfig,
 )
 from samtal_server.config.responses import (
     Acknowledgement,
@@ -95,22 +91,12 @@ from samtal_server.config.store import ConfigStore
 from samtal_server.config.writes import (
     BINDING_NOTICE,
     CLEARED_DEFAULT_AGENT,
-    MCP_RELOAD_NOTICE,
     RESTART_NOTICE,
-    WROTE_AGENT_DEFAULTS,
     binding_notice,
     bound_device,
     cleared_secret,
-    deleted_agent,
     deleted_device,
-    deleted_mcp_server,
-    deleted_prompt_fragment,
-    deleted_provider,
-    wrote_agent,
     wrote_default_agent,
-    wrote_mcp_server,
-    wrote_prompt_fragment,
-    wrote_provider,
     wrote_secret,
 )
 from samtal_server.conversations import api as conversations
@@ -281,19 +267,16 @@ MALFORMED_REQUEST = (
 # kind of failure it was, and deliberately no more than that.
 UNEXPECTED = "the server failed to handle this request; the failure is recorded in its log"
 
-# The entity models the document carries the schemas of. FastAPI
-# collects the models its own routes declare, and the write routes will
+# The entity models the document carries the schemas of, which is one
+# per commanded kind, in the order the registry lists them. FastAPI
+# collects the models its own routes declare, and the write routes
 # declare none: a fragment is received as a raw object and validated in
 # the repository, because FastAPI's own validation echoes the input it
 # rejected and a fragment can carry a pasted credential. So they are
 # injected below instead, which is also what a client that has read an
 # envelope needs in order to write one back.
-ENTITY_MODELS: tuple[type[BaseModel], ...] = (
-    ProviderConfig,
-    McpServerConfig,
-    PromptFragmentConfig,
-    AgentConfig,
-    AgentDefaults,
+ENTITY_MODELS: tuple[type[BaseModel], ...] = tuple(
+    descriptor.model for descriptor in entities.ENTITIES
 )
 
 # The three bodies that are arguments rather than fragments, as the
@@ -688,6 +671,227 @@ def _problems(
     }
 
 
+# A body, exactly as it was sent, handed to the repository unread.
+#
+# Deliberately not the entity model as a body type. FastAPI's own
+# validation echoes the input it rejected back in its 422 (`"input":
+# ...` per error), and a fragment can carry a credential pasted where a
+# variable name belongs, so declaring the model here would put that
+# value in a response body. Received as an opaque object instead and
+# validated in exactly one place, the repository, which is where the
+# YAML file is validated too: one code path, one sanitized message
+# shape, no second dialect.
+RawBody = Annotated[Any, Body()]
+
+# Which HTTP method each verb is. A collection and an entry are both
+# read, a secret and the entity it hangs on are written and deleted the
+# same way, so six verbs are three methods.
+_METHOD: dict[entities.Verb, str] = {
+    entities.READ_ALL: "GET",
+    entities.READ_ONE: "GET",
+    entities.WRITE: "PUT",
+    entities.WRITE_SECRET: "PUT",
+    entities.DELETE: "DELETE",
+    entities.DELETE_SECRET: "DELETE",
+}
+
+# The verbs that read, and the verbs that write. The document lists
+# every read before every write, because that is the order the two
+# functions below register them in, and the committed bytes have that
+# order in them.
+READS: tuple[entities.Verb, ...] = (entities.READ_ALL, entities.READ_ONE)
+WRITES: tuple[entities.Verb, ...] = (
+    entities.WRITE,
+    entities.DELETE,
+    entities.WRITE_SECRET,
+    entities.DELETE_SECRET,
+)
+
+
+def _entity_routes(api: FastAPI, verbs: Collection[str]) -> None:
+    """The routes of every commanded kind, built from what its
+    descriptor says it has.
+
+    A kind's routes used to be twenty-two hand-written handlers that
+    differed from each other in four ways: the path, the repository
+    method, the sentence, and the prose. Three of those four are the
+    registry's now. The fourth is prose, and prose is what the committed
+    OpenAPI document is made of, so it stays written down per endpoint
+    rather than composed from the kind's name: a summary assembled out
+    of `title` would read almost like the one that is committed, and
+    almost is a drift check that fails.
+
+    Registered in the order the registry lists them, kind by kind, which
+    is the order the document has: the paths appear as they are first
+    registered and the operations under a path in the order they were
+    added to it.
+    """
+    for descriptor in entities.ENTITIES:
+        for endpoint in descriptor.endpoints:
+            if endpoint.verb in verbs:
+                _install(api, descriptor, endpoint)
+
+
+def _install(
+    api: FastAPI, descriptor: entities.EntityDescriptor, endpoint: entities.Endpoint
+) -> None:
+    """One route, with everything the document carries about it said out
+    loud: the operation's name, its description, what it answers and
+    what it can refuse."""
+    extra: dict[str, Any] = {}
+    if endpoint.verb == entities.WRITE:
+        extra["openapi_extra"] = _request_body(descriptor.model)
+    elif endpoint.verb == entities.WRITE_SECRET:
+        extra["openapi_extra"] = _request_body(SecretValue)
+    api.add_api_route(
+        _path(descriptor, endpoint),
+        _handler(descriptor, endpoint),
+        methods=[_METHOD[endpoint.verb]],
+        response_model=endpoint.response,
+        responses=_problems(*endpoint.statuses),
+        **extra,
+    )
+
+
+def _path(descriptor: entities.EntityDescriptor, endpoint: entities.Endpoint) -> str:
+    """Where the route lives: the kind's prefix, the parameters that
+    address one entry under it, and for a credential the slot inside
+    that entry. An identity rides in the path as one decoded segment,
+    so a name carrying a space, a percent sign or a character outside
+    ASCII is reached by percent-encoding it and nothing else."""
+    path = descriptor.route
+    if endpoint.verb != entities.READ_ALL:
+        path += "".join(f"/{{{parameter}}}" for parameter in descriptor.addressing)
+    if endpoint.verb in (entities.WRITE_SECRET, entities.DELETE_SECRET):
+        path += "/secrets/{slot}"
+    return path
+
+
+def _handler(
+    descriptor: entities.EntityDescriptor, endpoint: entities.Endpoint
+) -> Callable[..., dict[str, Any]]:
+    """The route function, built rather than written.
+
+    FastAPI reads three things off a handler that the document then
+    carries: its name, which becomes the operation id and the summary;
+    its docstring, which becomes the description; and its signature,
+    which becomes the parameter list in the order it declares them. All
+    three are set here from the descriptor, because a generated function
+    would otherwise contribute whatever it happened to be called.
+
+    Plain `def`, like the handlers it replaces, so FastAPI runs it on
+    the threadpool and the synchronous repository never blocks the event
+    loop.
+    """
+    act = _act(descriptor, endpoint)
+
+    def handler(**values: Any) -> dict[str, Any]:
+        return act(values)
+
+    handler.__name__ = endpoint.operation
+    handler.__doc__ = endpoint.description
+    handler.__signature__ = Signature(  # type: ignore[attr-defined]
+        _parameters(descriptor, endpoint), return_annotation=dict[str, Any]
+    )
+    return handler
+
+
+def _parameters(
+    descriptor: entities.EntityDescriptor, endpoint: entities.Endpoint
+) -> list[Parameter]:
+    """What the handler takes, in the order the document lists it: the
+    path parameters that address the thing, then the body where there is
+    one, then the repository."""
+    addressed = () if endpoint.verb == entities.READ_ALL else descriptor.addressing
+    names = list(addressed)
+    if endpoint.verb in (entities.WRITE_SECRET, entities.DELETE_SECRET):
+        names.append("slot")
+    parameters = [
+        Parameter(name, Parameter.POSITIONAL_OR_KEYWORD, annotation=str) for name in names
+    ]
+    if endpoint.verb in (entities.WRITE, entities.WRITE_SECRET):
+        parameters.append(
+            Parameter("body", Parameter.POSITIONAL_OR_KEYWORD, annotation=RawBody)
+        )
+    parameters.append(Parameter("store", Parameter.POSITIONAL_OR_KEYWORD, annotation=StoreDep))
+    return parameters
+
+
+def _act(
+    descriptor: entities.EntityDescriptor, endpoint: entities.Endpoint
+) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """What the route does: one repository call, and one view or one
+    acknowledgement.
+
+    Nothing about the configuration is decided here, exactly as nothing
+    was decided in the handlers this replaces. Which entry exists is the
+    repository's decision, what a read may show is the view's, what a
+    write says it did and when it applies is the descriptor's, and what
+    is left is the path, the status code and the shape.
+
+    `values` is what the request resolved to, by the names the signature
+    declared, so a parameter is read by its name rather than by its
+    position.
+    """
+
+    def identity(values: dict[str, Any]) -> tuple[str, ...]:
+        return tuple(values[parameter] for parameter in descriptor.addressing)
+
+    def slot(values: dict[str, Any]) -> SecretLocation:
+        # The identity as a secret location spells it, which is the
+        # dotted join of the parameters that address the entity: a
+        # provider's stage and name, an MCP server's name.
+        return SecretLocation(
+            kind=descriptor.secret_slots,  # type: ignore[arg-type]
+            identity=".".join(identity(values)),
+            slot=values["slot"],
+        )
+
+    def read_all(values: dict[str, Any]) -> dict[str, Any]:
+        return _collection(descriptor, values["store"])
+
+    def read_one(values: dict[str, Any]) -> dict[str, Any]:
+        return views.entity(descriptor.name, descriptor.read(values["store"], *identity(values)))
+
+    def write(values: dict[str, Any]) -> dict[str, Any]:
+        descriptor.write(values["store"], *identity(values), values["body"])
+        return _acknowledge(descriptor.wrote(*identity(values)), descriptor.notice)
+
+    def delete(values: dict[str, Any]) -> dict[str, Any]:
+        descriptor.delete(values["store"], *identity(values))
+        return _acknowledge(descriptor.deleted(*identity(values)), descriptor.notice)
+
+    def write_secret(values: dict[str, Any]) -> dict[str, Any]:
+        location = slot(values)
+        values["store"].set_secret(location, _secret(values["body"]))
+        return _acknowledge(wrote_secret(location.describe()), descriptor.notice)
+
+    def delete_secret(values: dict[str, Any]) -> dict[str, Any]:
+        location = slot(values)
+        values["store"].clear_secret(location)
+        return _acknowledge(cleared_secret(location.describe()), descriptor.notice)
+
+    return {
+        entities.READ_ALL: read_all,
+        entities.READ_ONE: read_one,
+        entities.WRITE: write,
+        entities.DELETE: delete,
+        entities.WRITE_SECRET: write_secret,
+        entities.DELETE_SECRET: delete_secret,
+    }[endpoint.verb]
+
+
+def _collection(descriptor: entities.EntityDescriptor, store: ConfigStore) -> dict[str, Any]:
+    """Every entry of one kind, keyed the way the kind is addressed. The
+    kind addressed by two segments is keyed by both, since two stages
+    may hold one name, which is why that listing has a view of its
+    own."""
+    snapshot = store.load()
+    if len(descriptor.addressing) > 1:
+        return views.providers(snapshot)
+    return views.listing(descriptor.name, snapshot)
+
+
 def _reads(api: FastAPI) -> None:
     """Every read the API serves.
 
@@ -709,80 +913,10 @@ def _reads(api: FastAPI) -> None:
         every stored secret beside it."""
         return views.config(store.load())
 
-    @api.get(
-        "/providers",
-        response_model=dict[str, dict[str, Envelope]],
-        responses=_problems(401, 409, 500),
-    )
-    def read_providers(store: StoreDep) -> dict[str, Any]:
-        """Every provider, by stage and then by name: a provider is
-        addressed by the two together, since two stages may hold one
-        name."""
-        return views.providers(store.load())
-
-    @api.get(
-        "/providers/{stage}/{name}",
-        response_model=Envelope,
-        responses=_problems(401, 404, 409, 422, 500),
-    )
-    def read_provider(stage: str, name: str, store: StoreDep) -> dict[str, Any]:
-        """One provider."""
-        return views.provider(store.read_provider(stage, name))
-
-    @api.get(
-        "/mcp-servers", response_model=dict[str, Envelope], responses=_problems(401, 409, 500)
-    )
-    def read_mcp_servers(store: StoreDep) -> dict[str, Any]:
-        """Every MCP server, by name."""
-        return views.mcp_servers(store.load())
-
-    @api.get(
-        "/mcp-servers/{name}",
-        response_model=Envelope,
-        responses=_problems(401, 404, 409, 422, 500),
-    )
-    def read_mcp_server(name: str, store: StoreDep) -> dict[str, Any]:
-        """One MCP server."""
-        return views.mcp_server(store.read_mcp_server(name))
-
-    @api.get(
-        "/prompt-fragments",
-        response_model=dict[str, Envelope],
-        responses=_problems(401, 409, 500),
-    )
-    def read_prompt_fragments(store: StoreDep) -> dict[str, Any]:
-        """Every shared prompt fragment, by name."""
-        return views.prompt_fragments(store.load())
-
-    @api.get(
-        "/prompt-fragments/{name}",
-        response_model=Envelope,
-        responses=_problems(401, 404, 409, 422, 500),
-    )
-    def read_prompt_fragment(name: str, store: StoreDep) -> dict[str, Any]:
-        """One shared prompt fragment, with its text as it was written:
-        it is what the model is given, and there is nothing in it to
-        mask."""
-        return views.prompt_fragment(store.read_prompt_fragment(name))
-
-    @api.get("/agents", response_model=dict[str, Envelope], responses=_problems(401, 409, 500))
-    def read_agents(store: StoreDep) -> dict[str, Any]:
-        """Every agent, by name."""
-        return views.agents(store.load())
-
-    @api.get(
-        "/agents/{name}", response_model=Envelope, responses=_problems(401, 404, 409, 422, 500)
-    )
-    def read_agent(name: str, store: StoreDep) -> dict[str, Any]:
-        """One agent."""
-        return views.agent(store.read_agent(name))
-
-    @api.get("/agent-defaults", response_model=Envelope, responses=_problems(401, 409, 500))
-    def read_agent_defaults(store: StoreDep) -> dict[str, Any]:
-        """What every agent uses unless it names something else. One
-        entry for the whole deployment, and never missing: an unwritten
-        one reads as the empty entry."""
-        return views.agent_defaults(store.read_agent_defaults())
+    # Every commanded kind's collection and entry reads, from the
+    # registry that says which of them the kind has and what the
+    # document says about each.
+    _entity_routes(api, READS)
 
     @api.get("/devices", response_model=dict[str, Envelope], responses=_problems(401, 409, 500))
     def read_devices(store: StoreDep) -> dict[str, Any]:
@@ -981,19 +1115,6 @@ def _runtime(api: FastAPI) -> None:
         }
 
 
-# A body, exactly as it was sent, handed to the repository unread.
-#
-# Deliberately not the entity model as a body type. FastAPI's own
-# validation echoes the input it rejected back in its 422 (`"input":
-# ...` per error), and a fragment can carry a credential pasted where a
-# variable name belongs, so declaring the model here would put that
-# value in a response body. Received as an opaque object instead and
-# validated in exactly one place, the repository, which is where the
-# YAML file is validated too: one code path, one sanitized message
-# shape, no second dialect.
-RawBody = Annotated[Any, Body()]
-
-
 def _writes(api: FastAPI) -> None:
     """Every write the API serves.
 
@@ -1009,180 +1130,9 @@ def _writes(api: FastAPI) -> None:
     repository method, and answers with what it did and when it applies.
     """
 
-    @api.put(
-        "/providers/{stage}/{name}",
-        response_model=Acknowledgement,
-        responses=_problems(401, 409, 422, 500),
-        openapi_extra=_request_body(ProviderConfig),
-    )
-    def write_provider(
-        stage: str, name: str, body: RawBody, store: StoreDep
-    ) -> dict[str, str]:
-        """Create or replace one provider from a fragment in the shape
-        the YAML section had."""
-        store.set_provider(stage, name, body)
-        return _acknowledge(wrote_provider(stage, name))
-
-    @api.delete(
-        "/providers/{stage}/{name}",
-        response_model=Acknowledgement,
-        responses=_problems(401, 404, 409, 422, 500),
-    )
-    def remove_provider(stage: str, name: str, store: StoreDep) -> dict[str, str]:
-        """Delete one provider, and the secrets stored on it. Refused
-        while an agent or the agent defaults still name it."""
-        store.delete_provider(stage, name)
-        return _acknowledge(deleted_provider(stage, name))
-
-    @api.put(
-        "/providers/{stage}/{name}/secrets/{slot}",
-        response_model=Acknowledgement,
-        responses=_problems(401, 404, 409, 422, 500),
-        openapi_extra=_request_body(SecretValue),
-    )
-    def write_provider_secret(
-        stage: str, name: str, slot: str, body: RawBody, store: StoreDep
-    ) -> dict[str, str]:
-        """Store one of this provider's credentials, encrypted. The slot
-        is the option name the credential fills, such as api_key; a
-        stored secret takes precedence over an environment reference
-        written for the same slot."""
-        location = SecretLocation.provider(stage, name, slot)
-        store.set_secret(location, _secret(body))
-        return _acknowledge(wrote_secret(location.describe()))
-
-    @api.delete(
-        "/providers/{stage}/{name}/secrets/{slot}",
-        response_model=Acknowledgement,
-        responses=_problems(401, 404, 409, 422, 500),
-    )
-    def remove_provider_secret(
-        stage: str, name: str, slot: str, store: StoreDep
-    ) -> dict[str, str]:
-        """Remove one stored credential. A slot holding none is a 404."""
-        location = SecretLocation.provider(stage, name, slot)
-        store.clear_secret(location)
-        return _acknowledge(cleared_secret(location.describe()))
-
-    @api.put(
-        "/mcp-servers/{name}",
-        response_model=Acknowledgement,
-        responses=_problems(401, 409, 422, 500),
-        openapi_extra=_request_body(McpServerConfig),
-    )
-    def write_mcp_server(name: str, body: RawBody, store: StoreDep) -> dict[str, str]:
-        """Create or replace one MCP server. The running server applies
-        it at the next reload, with no restart."""
-        store.set_mcp_server(name, body)
-        return _acknowledge(wrote_mcp_server(name), MCP_RELOAD_NOTICE)
-
-    @api.delete(
-        "/mcp-servers/{name}",
-        response_model=Acknowledgement,
-        responses=_problems(401, 404, 409, 422, 500),
-    )
-    def remove_mcp_server(name: str, store: StoreDep) -> dict[str, str]:
-        """Delete one MCP server, and the secrets stored on it. The
-        running server stops it at the next reload."""
-        store.delete_mcp_server(name)
-        return _acknowledge(deleted_mcp_server(name), MCP_RELOAD_NOTICE)
-
-    @api.put(
-        "/mcp-servers/{name}/secrets/{slot}",
-        response_model=Acknowledgement,
-        responses=_problems(401, 404, 409, 422, 500),
-        openapi_extra=_request_body(SecretValue),
-    )
-    def write_mcp_secret(
-        name: str, slot: str, body: RawBody, store: StoreDep
-    ) -> dict[str, str]:
-        """Store one of this MCP server's credentials, encrypted. The
-        slot is `env.<KEY>` or `headers.<Key>`, which is where the value
-        would otherwise have been written as a $VAR reference.
-
-        Rotation is exactly what the ciphertext half of the reload's
-        diff applies, so this carries the reload notice too: the entry
-        is rebuilt with the fresh credential and reconnected."""
-        location = SecretLocation.mcp_server(name, slot)
-        store.set_secret(location, _secret(body))
-        return _acknowledge(wrote_secret(location.describe()), MCP_RELOAD_NOTICE)
-
-    @api.delete(
-        "/mcp-servers/{name}/secrets/{slot}",
-        response_model=Acknowledgement,
-        responses=_problems(401, 404, 409, 422, 500),
-    )
-    def remove_mcp_secret(name: str, slot: str, store: StoreDep) -> dict[str, str]:
-        """Remove one stored credential, which the next reload applies
-        by rebuilding the entry without it."""
-        location = SecretLocation.mcp_server(name, slot)
-        store.clear_secret(location)
-        return _acknowledge(cleared_secret(location.describe()), MCP_RELOAD_NOTICE)
-
-    @api.put(
-        "/prompt-fragments/{name}",
-        response_model=Acknowledgement,
-        responses=_problems(401, 409, 422, 500),
-        openapi_extra=_request_body(PromptFragmentConfig),
-    )
-    def write_prompt_fragment(name: str, body: RawBody, store: StoreDep) -> dict[str, str]:
-        """Create or replace one shared prompt fragment.
-
-        It carries the restart sentence rather than the reload's: what
-        the reload re-reads is the MCP entries, their secrets and the
-        grant lists, and a fragment is prompt text the agents compose
-        with at their next activation on a server that read it at boot.
-        """
-        store.set_prompt_fragment(name, body)
-        return _acknowledge(wrote_prompt_fragment(name))
-
-    @api.delete(
-        "/prompt-fragments/{name}",
-        response_model=Acknowledgement,
-        responses=_problems(401, 404, 409, 422, 500),
-    )
-    def remove_prompt_fragment(name: str, store: StoreDep) -> dict[str, str]:
-        """Delete one shared prompt fragment. Refused while any layer
-        still includes it."""
-        store.delete_prompt_fragment(name)
-        return _acknowledge(deleted_prompt_fragment(name))
-
-    @api.put(
-        "/agents/{name}",
-        response_model=Acknowledgement,
-        responses=_problems(401, 409, 422, 500),
-        openapi_extra=_request_body(AgentConfig),
-    )
-    def write_agent(name: str, body: RawBody, store: StoreDep) -> dict[str, str]:
-        """Create or replace one agent. Every provider and MCP server it
-        names has to exist already, which is what the natural creation
-        order is about."""
-        store.set_agent(name, body)
-        return _acknowledge(wrote_agent(name))
-
-    @api.delete(
-        "/agents/{name}",
-        response_model=Acknowledgement,
-        responses=_problems(401, 404, 409, 422, 500),
-    )
-    def remove_agent(name: str, store: StoreDep) -> dict[str, str]:
-        """Delete one agent. Refused while a device binding or the
-        default agent still names it."""
-        store.delete_agent(name)
-        return _acknowledge(deleted_agent(name))
-
-    @api.put(
-        "/agent-defaults",
-        response_model=Acknowledgement,
-        responses=_problems(401, 409, 422, 500),
-        openapi_extra=_request_body(AgentDefaults),
-    )
-    def write_agent_defaults(body: RawBody, store: StoreDep) -> dict[str, str]:
-        """Replace what every agent uses unless it names something else.
-        One entry for the whole deployment, so this is a replace and
-        there is nothing to delete."""
-        store.set_agent_defaults(body)
-        return _acknowledge(WROTE_AGENT_DEFAULTS)
+    # Every commanded kind's writes, deletes and credential slots,
+    # from the registry, in the order it lists them.
+    _entity_routes(api, WRITES)
 
     # Before `/devices/{mac}` for the reason the read above is, even
     # though these two paths cannot collide (one segment against two):
