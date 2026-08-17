@@ -70,6 +70,22 @@ def index_rows() -> list[tuple[str, str]]:
     return rows
 
 
+def logging_section() -> str:
+    """The Logging section alone, flattened.
+
+    Sliced at the next top-level heading rather than read to the end of
+    the file, so an assertion about what this section says cannot be
+    satisfied by a sentence three sections further down."""
+    lines = README.read_text(encoding="utf-8").splitlines()
+    start = lines.index("## Logging")
+    end = next(
+        position
+        for position, line in enumerate(lines[start + 1 :], start=start + 1)
+        if line.startswith("## ")
+    )
+    return flat("\n".join(lines[start:end]))
+
+
 def flat(text: str) -> str:
     """The document with its line breaks flattened. Both documents wrap
     their prose, so a sentence asserted on here lands across two lines
@@ -123,8 +139,7 @@ def test_the_base_field_claim_is_scoped_to_the_session_channel() -> None:
     """It was not, and was false for every server channel: those records
     carry `event` and name a session or a device only where the record
     is about one."""
-    section = flat(README.read_text(encoding="utf-8")).split("## Logging")[1]
-    lead = section.split(INDEX_HEADER)[0]
+    lead = logging_section().split(INDEX_HEADER)[0]
     assert f"on the `{SESSION_CHANNEL}` channel" in lead
     assert "carry `session` and `device`" in lead
 
@@ -132,8 +147,7 @@ def test_the_base_field_claim_is_scoped_to_the_session_channel() -> None:
 def test_the_index_points_at_the_generated_reference() -> None:
     """The index makes no schema claim of its own, so it has to say
     where the schema claims are."""
-    section = flat(README.read_text(encoding="utf-8")).split("## Logging")[1]
-    assert "(../docs/reference/events.md)" in section
+    assert "(../docs/reference/events.md)" in logging_section()
 
 
 # --- the generated reference, for completeness -------------------------
