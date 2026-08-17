@@ -716,3 +716,269 @@ External review of PR #174 (diff main...23db60e) by codex 0.147.0
 itself. Verdict: mergeable as is, no findings. The byte-identical
 references and the empty test diff pre-answered the lenses a
 models-move-plus-route-factory touches.
+
+## Milestone 4: the CLI unifies and renders from response models
+
+A command stopped being two implementations of one act. The fourteen
+`if args.local:` branches are one dispatcher over a table of rows, and
+what a body has to be for the CLI to read it is the model the API
+declares it answers with rather than a frozenset of field names kept by
+hand beside it.
+
+`cli.py` grew, from 2135 lines to 2288, and the growth is the honest
+part of the result: a row states what an act is where the branches
+performed it, and the reasons that were spread over twenty function
+bodies are written once beside the field that carries them. What got
+smaller is the number of places a fact is written. A kind's route, the
+arguments that address one entry, the location a fragment refusal
+names, the sentence a delete answers with and the notice under it were
+each written twice, once per path, and are now read off the descriptor;
+the fifteen command functions of the five commanded kinds are three
+dict comprehensions; and the module names a kind by hand in two places,
+its grammar and the summary tree's sections, which are the two places a
+person reads them in.
+
+Five commits, plus the one that records the milestone:
+
+1. `a8600d0` Read an answer as the shape it was promised
+2. `852b86d` Say in one row what a command does with an entity
+3. `6f7487e` Give the settings, the secrets and the reads rows
+4. `629e632` Summarize an entry through its kind's descriptor
+5. `533fa5b` Prove each act says one thing on both paths
+
+### The dispatch table's shape
+
+An `Act` is a frozen dataclass with seven fields: the HTTP method, a
+path builder taking the parsed arguments, an optional body builder, the
+read timeout (the default for everything but the reload), the response
+shape the answer is read as with the refusal a body that is not one
+meets, the renderer, and an optional local fallback. `_act(args)` is the
+only reader of a row: it either calls the fallback or makes the one
+request and reads the answer, and hands whatever came back to the
+renderer. A subparser carries its row on the namespace (`run=_act,
+act=<row>`), which is where `run=<function>` used to point.
+
+The three groups of entity rows are built from the registry rather than
+written per kind: `route` and `addressing` give the path, `moved_key`
+gives the configuration-document location a fragment refusal names,
+`read` and `delete` are the repository's own verbs for the kind,
+`deleted` and `notice` are what a local delete answers, and
+`has_delete` is why the singleton has a write and a show row and no
+delete row. The rows that are not an entity's are written out: the
+device and default-agent settings, whose verbs are their own, and the
+two secret rows, whose slot is addressed under an entity rather than as
+one.
+
+The two single-sided nuances the plan named are row facts. The local
+device delete answers `BINDING_NOTICE` plainly, because the sentence
+the API answers a device write with depends on whether it has the named
+agent loaded and this path has no loaded server to ask. The two secret
+rows call `secret_notice(kind)` where the API splits the same choice
+across four statically-worded routes.
+
+### The response-validation helper
+
+`_understood(shape, answer, refusal)` is the one place an HTTP answer
+becomes something a renderer may print. It runs the answer through
+`_declared`, which drops what the shape does not declare, validates
+what is left with a `TypeAdapter` in strict mode, and dumps the
+validated result back to plain mappings, which is what lets one
+renderer take a value from either path and what leaves the extras
+behind.
+
+Three properties, each deliberate:
+
+- **Strict.** Nothing is coerced: a body is free to put `true` where a
+  size belongs, and a renderer printing the coercion would print
+  something nobody sent. This is what the deleted `_is_count` did, and
+  strict mode refuses `bool` for `int` for the same reason it named.
+- **Extras dropped, not refused.** Every model in `responses.py`
+  forbids extras, because the document it generates is a contract about
+  what the API sends; this client reads it from the other side, where
+  an unknown key means a newer server. `_declared` is guided by the
+  shape rather than by a list of names, so an entry nested inside a
+  listing is treated exactly like one that arrived alone, which is what
+  the status entries inside a reload's answer need.
+- **Sanitized.** `ValidationError` is caught without being bound to a
+  name, the refusal is built inside the handler and raised after it, so
+  the fixed sentence leaves with `__cause__` and `__context__` both
+  empty. `ValidationError.errors()` retains the input it rejected, and
+  on this surface that can be a pasted credential.
+
+Deleted with it: `PENDING_FIELDS`, `STATUS_FIELDS`, `STATUS_STATES`,
+`PROMPT_BLOCK_FIELDS` and ten predicate functions (`_envelope`,
+`_document`, `_pending_entries`, `_status_entries`, `_is_status_entry`,
+`_is_name_list`, `_assembled_prompt`, `_is_prompt_block`, `_is_count`,
+`_reload_outcome`), plus `_mapping` and `_wrote`, which were shape
+checks by another name. `PENDING_COLUMNS` stays: its members are
+headings a person reads. `_names` and `_sequence` stay too, because
+they are rendering rules (bound it, make it printable, treat a null
+grant as a list of nothing) rather than claims about the shape.
+
+### The `RELOAD_OUTCOMES` choice, and its evidence
+
+The plan has M4 delete five predicate constants. Four are gone.
+`RELOAD_OUTCOMES` is kept, derived, and re-exported, because deleting
+it would have modified the contract file:
+
+```
+$ grep -rn 'RELOAD_OUTCOMES' tests/
+tests/unit/test_config_cli.py:929:        dict.fromkeys(cli.RELOAD_OUTCOMES, [])
+tests/unit/test_config_cli.py:941:            {outcome: [] for outcome in cli.RELOAD_OUTCOMES}, id="servers-missing"
+tests/unit/test_config_cli.py:990:    empty = dict.fromkeys(cli.RELOAD_OUTCOMES, []) | {"servers": {}}
+```
+
+All three are in `tests/unit/test_config_cli.py`, which the issue's
+contract forbids modifying, and all three read `cli.RELOAD_OUTCOMES` as
+a name on the module: the acceptance suite builds a reload answer out
+of it. So it lives in `responses.py` now, beside the result it
+describes, read off that model's own list-of-names fields:
+
+```python
+RELOAD_OUTCOMES = tuple(
+    name
+    for name, field in McpReloadResult.model_fields.items()
+    if get_origin(field.annotation) is list and get_args(field.annotation) == (str,)
+)
+```
+
+That is the relation the deleted shape test asserted, built in rather
+than pinned, and `cli.py` imports it, so `cli.RELOAD_OUTCOMES` resolves
+exactly as before and the contract file is byte-unchanged. It is not a
+deprecated alias in the end: it is presentation, which is why it is an
+ordered tuple and not a set, and the renderer still reads it for the
+order the four lines are printed in. `servers` is the only field the
+rule leaves out, which is correct, since it is the status mapping
+carried beside the outcomes rather than an outcome.
+
+### What the models made stricter, and why that is the point
+
+Three acceptance rules narrowed, all of them where the CLI was
+tolerating less than the API promises. They are recorded rather than
+avoided, because "the CLI renders from the same models the API answers
+with" is the decision, and a hand-kept subset of a model is the second
+encoding the issue exists to delete.
+
+1. **A pending listing must carry the whole `PendingDevice`.** The old
+   check required the four fields the columns render and ignored the
+   types. `client_id`, `first_seen` and `last_seen` are now required
+   too, and every field has to be a string. The API declares
+   `dict[str, PendingDevice]` on that route, so an answer missing one
+   is not this API's.
+2. **A write acknowledgement must carry its notice.** `_wrote` used to
+   print the restart sentence when a body carried `wrote` and no
+   readable `notice`. `Acknowledgement` declares both, every write
+   route answers with it, and a body carrying one and not the other now
+   meets the same refusal a body carrying neither always did.
+3. **A reload answer's status half is read as part of the reload's own
+   shape.** An unreadable entry under `servers` used to reach the
+   status listing and meet its sentence; it now meets the reload's,
+   which is the act that was run. Both sentences are byte for byte what
+   they were, and the acceptance suite's `servers-invalid` case asserts
+   the fixed `UNRECOGNIZED_ANSWER` both carry.
+
+Nothing loosened. Extras are tolerated exactly where they were, which
+`_is_status_entry`'s docstring was the only place to say out loud.
+
+### Deviations from the plan
+
+1. **`RELOAD_OUTCOMES` survives, derived.** As above, with its
+   evidence. The plan lists five constants to delete; deleting the
+   fifth would have edited the contract file.
+2. **The four listings read their own answer; the other rows carry the
+   shape.** The plan has the CLI render every HTTP answer through the
+   helper, which it does, but not all from the same place.
+   `_status_listing` and `_prompt_listing` are handed a body directly by
+   the acceptance suite (`test_config_cli.py:687` and `:863`, which
+   assert the refusal carries nothing of the body), so the reading is
+   theirs; the pending and reload listings keep the same shape as their
+   neighbours. Every other act's row names the shape and the dispatcher
+   reads it, which is what the show family needs, since its local
+   fallback produces the value directly and is not validated, exactly
+   as before.
+3. **`summary` is filled here, and the `Setting` hooks are removed.**
+   M1 named `summary` for this milestone, so the summary tree asks a
+   kind how one of its entries reads after its name (` (anthropic)`,
+   ` (12 characters)`, `: tts=voice`). The `Setting` tier's four
+   never-filled hooks (`summary`, `wrote`, `deleted`, `notice`) are
+   removed instead, on M3's reasoning for removing `Setting.endpoints`:
+   a binding's line is the agents a MAC points at, its acknowledgement
+   and notice are computed per request because the notice depends on
+   whether the server has the named agent loaded, and declaring a group
+   nothing will fill is an invitation to force a shape.
+4. **Five commands are not rows.** `ota-url`, `doctor`, `schema`,
+   `reference` and `openapi` reach no API: two are about onboarding a
+   board before there is anything to configure, and three render the
+   models and the routes with no database, server or key. They keep
+   their own functions under a section header that says so.
+5. **`_report` is now `_acknowledged` and takes the acknowledgement.**
+   The printer used to take a sentence and a notice with the restart
+   sentence as its default, which is a choice made at a call site. It
+   takes the acknowledgement both paths produce, and the default is
+   gone: every row says which notice its act carries.
+
+No other deviation. `LOCAL_NOTICE`, `LOCAL_SUBSET`, the `--local` gate
+in `main` and the per-subparser `local_ok` wiring are untouched, the
+grammar is unchanged, and `writes.py` was not edited at all.
+
+### The renderer golden, and how byte-identity was checked
+
+Every renderer was captured before the milestone began and diffed after
+each commit: the summary tree and the whole-configuration document (a
+populated one and an empty one), one entity with stored secrets and one
+without, the pending listing full and empty, the status block with a
+down entry, an escape sequence in a name, a partial grant and an unused
+entry, the assembled prompt with a published prompt's name and control
+characters in a block, the reload full and empty, and the seven
+refusals with their `__cause__` and `__context__`. The diff is empty at
+every commit, which covers the paths the acceptance suite exercises
+with substring assertions rather than whole outputs.
+
+The per-act proofs were checked against deliberate divergences rather
+than assumed to bite: swapping the local device delete's notice for the
+restart sentence fails exactly one case, and showing a provider through
+another kind's view fails two.
+
+### Verification
+
+From `samtal-server/`, with `PYTHONDONTWRITEBYTECODE=1` outside pytest:
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/unit -q`: `2938 passed, 16 skipped in 312.07s`.
+  The lane collected 2943 before this milestone and 2954 after: minus
+  the six tests of `test_config_cli_shapes.py`, which this milestone
+  deletes wholesale as its docstring said it would, plus the seventeen
+  in `tests/unit/test_config_cli_local.py` (2943 - 6 + 17 = 2954). The
+  skips are the same 16.
+- `uv run pytest tests/integration -q`: `55 passed in 159.70s`,
+  collection unchanged at 55.
+- Both generated references regenerate byte-identical, run exactly as
+  the CI drift steps run them, with no regeneration commit anywhere on
+  the branch:
+
+```
+$ uv run samtal-server config reference > "$RUNNER_TEMP/domain-config.md"
+$ diff -u ../docs/reference/domain-config.md "$RUNNER_TEMP/domain-config.md"
+(no output from diff -u: the files are identical)
+$ uv run samtal-server config openapi > "$RUNNER_TEMP/api-openapi.json"
+$ diff -u ../docs/reference/api-openapi.json "$RUNNER_TEMP/api-openapi.json"
+(no output from diff -u: the files are identical)
+```
+
+- `git diff --stat` against the milestone's base over `tests/` shows
+  the deletion and the new file and nothing else:
+
+```
+ samtal-server/tests/unit/test_config_cli_local.py  | 249 +++++++++++++++++++++
+ samtal-server/tests/unit/test_config_cli_shapes.py |  92 --------
+```
+
+  `test_config_cli.py` and both lanes of `test_config_examples.py` are
+  byte-unchanged, and `git diff --stat` over `docs/reference/` prints
+  nothing.
+- The grep proof that no name of the deleted family survives in the
+  source: `grep -rn 'PENDING_FIELDS\|STATUS_FIELDS\|STATUS_STATES\|PROMPT_BLOCK_FIELDS'`
+  over `samtal-server/` and `docs/` matches only `docs/plans/`, which
+  is history: this plan's own verification clause, and the plan and
+  implementation doc of #144, which built the bridge for this milestone
+  to delete.

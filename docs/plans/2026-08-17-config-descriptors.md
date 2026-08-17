@@ -425,11 +425,18 @@ outside pytest.
       OpenAPI document regenerates byte-identical with no regeneration
       commit; the port table is empty; milestone duties in the same
       change.
-- [ ] M4: the CLI unifies and renders from response models: one
-      dispatch table, four local rows, frozensets and predicates
-      and `test_config_cli_shapes.py` deleted, per-act
-      local-equals-HTTP proofs; milestone duties in the same
-      change.
+- [x] [M4](2026-08-17-config-descriptors-implementation.md#milestone-4-the-cli-unifies-and-renders-from-response-models):
+      the CLI unifies and renders from response models (PR TBD): every
+      act is a row carrying its method, path, body, response shape,
+      rendering and, for the four commands `--local` covers, its local
+      fallback, with the entity rows built from the descriptors; the
+      fourteen `if args.local:` branches are one dispatcher; four of the
+      five predicate constants, the ten predicate functions and
+      `test_config_cli_shapes.py` are deleted, `RELOAD_OUTCOMES` staying
+      as a derived tuple in `responses.py` because the contract file
+      reads it; the sixteen acts with both paths are pinned to print the
+      same acknowledgement, notice and document on each; milestone
+      duties in the same change.
 - [ ] M5: the inherited test split executed as a pure move and the
       per-field cost demonstrated; CHANGELOG closes the issue;
       milestone duties in the same change.
