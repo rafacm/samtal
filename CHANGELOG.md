@@ -7,6 +7,48 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-08-17
 
+### Added
+
+- **Every event's schema is declared as data** (#155, M1):
+  `samtal_server/events_schema.py` holds one declaration per event,
+  naming its channel, its level, the exact sentence template it
+  renders, the kind of every argument position, and its field set with
+  per-field kinds, closed token sets, syntaxes and bounds. 58 events in
+  99 variants: the 57 with ordinary emit sites, plus the internal
+  recovery event the forgiving mode will emit. Declarations only in
+  this change; the emitters do not read the registry yet, so no
+  behaviour depends on it, and the release is behaviour-identical
+  except where the four sanitization fixes below bite. A conformance
+  test walks all 81 emit sites and holds the declarations to them both
+  ways, so a field the registry declares that nothing emits fails as
+  loudly as one the code emits and the registry does not know.
+- The five conversation-store event paths gained exact pins
+  (`tests/unit/test_conversations_event_pins.py`), in the two contract
+  pin suites' style. They postdate those suites' baseline and had none.
+
+### Fixed
+
+- **Four decision sites bound the far-side strings their events
+  retain** (#155, M1). Each takes an event-only copy: printable
+  characters only, trimmed, and cut to a declared limit, with what the
+  site answers elsewhere untouched. Visible to adversarial input only;
+  every value a real device sends passes through unaltered.
+  - `ota_check`'s `board` and `firmware` are bounded in the payload and
+    in the four sentences that render them. The OTA reply still echoes
+    the reported version verbatim, which is how the firmware decides
+    whether it is up to date, and the recorded device facts a capture
+    manifest is built from are unchanged.
+  - `ota_check`'s `client` is bounded, and null where nothing printable
+    survives. The device token is still signed for the Client-Id header
+    exactly as it arrived.
+  - `session_open`'s `client` is bounded in its field and in its
+    sentence. The capture manifest and the conversation store still
+    hold the header itself.
+  - The websocket capacity refusal names the normalized MAC or no
+    device at all. With device authentication off nothing had verified
+    that header, so a full server could be made to write one
+    caller-chosen string per attempt into the retained log.
+
 ### Changed
 
 - **Breaking: the echo guard's recovered sentence no longer says what
