@@ -7,6 +7,12 @@ committed at `docs/reference/domain-config.md`, and as the `--help`
 text of the commands that take a fragment. A description that is only
 true in one of them cannot exist, which is the point.
 
+What a model cannot carry, a kind's purpose and its notes and the
+command that writes one, comes from the descriptor registry in
+`entities.py`, which the other surfaces read as well. This module
+renders those descriptors rather than keeping a second copy of them, so
+prose that is only true in the documentation cannot exist either.
+
 A fourth rendering has a different source: the configuration API's
 OpenAPI document comes from that application's routes, committed at
 `docs/reference/api-openapi.json` under the same regenerate-and-diff
@@ -25,7 +31,6 @@ commands in front of it are usable on a machine that has none of those.
 
 import json
 import textwrap
-from dataclasses import dataclass, field
 from types import NoneType, UnionType
 from typing import Annotated, Literal, Union, get_args, get_origin
 
@@ -33,23 +38,26 @@ from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 from pydantic_core import PydanticUndefined
 
-from samtal_server.config.models import (
-    DOMAIN_DESCRIPTIONS,
-    AgentConfig,
-    AgentDefaults,
-    FillerConfig,
-    McpGrant,
-    McpServerConfig,
-    PromptFragmentConfig,
-    ProviderConfig,
+from samtal_server.config.entities import (
+    API_OPTIONS_NOTE,
+    CONFIG_FILE,
+    EXAMPLES,
+    NESTED,
+    SETTINGS,
+    DocumentedShape,
+    Setting,
 )
+from samtal_server.config.entities import ENTITIES as COMMANDED
+from samtal_server.config.models import DOMAIN_DESCRIPTIONS
 from samtal_server.config.store import DomainConfig
 
-# Where the example fragments and the configuration file live, relative
-# to the committed reference (docs/reference/domain-config.md). Printed
-# as written when the same document goes to stdout.
-EXAMPLES = "../../samtal-server/examples"
-CONFIG_FILE = "../../samtal-server/config.example.yaml"
+# Every shape this document has a section for, in the order it documents
+# them: the five entity kinds a command writes, then the two that are
+# only ever nested inside one of those. The registries are in
+# `entities.py`, which is where a kind's facts live now; this is the
+# order they are rendered in, and the name the renderings and their
+# tests have always read them under.
+ENTITIES: tuple[DocumentedShape, ...] = (*COMMANDED, *NESTED)
 
 # The configuration API's committed document, which sits beside the
 # reference in the same directory, so the reference points at it by name.
@@ -67,232 +75,8 @@ DOMAIN = "domain"
 # one that was wrapped on purpose.
 HELP_WIDTH = 78
 
-# What schema generation cannot describe, and where it is described
-# instead. A provider entry passes every key beyond the declared ones
-# through to its implementation (`extra="allow"`), so no schema can
-# enumerate them until typed option models land.
-#
-# Two renderings of one claim, differing only in how they point at the
-# fragments: the reference lists them further down its own page, the
-# OpenAPI document has no page to point down. Built from one string, so
-# the two cannot come to say different things.
-_OPTIONS_CONTRACT = (
-    "A provider entry carries whatever options its `type` takes, and those are "
-    "passed through rather than declared, so no schema can list them. Until typed "
-    "option models land (#88) they are documented in the example fragments"
-)
-_OPTIONS_WHERE = ", which is also where the measured numbers behind each default are kept."
-OPTIONS_NOTE = f"{_OPTIONS_CONTRACT} below{_OPTIONS_WHERE}"
-API_OPTIONS_NOTE = f"{_OPTIONS_CONTRACT} under `samtal-server/examples/`{_OPTIONS_WHERE}"
 
-
-@dataclass(frozen=True)
-class Entity:
-    """One entity kind: its model, and the prose no model can carry."""
-
-    name: str
-    title: str
-    location: str
-    model: type[BaseModel]
-    purpose: str
-    # The command that writes one, or None for a shape that is only ever
-    # nested inside another entity.
-    command: str | None = None
-    examples: tuple[str, ...] = ()
-    notes: tuple[str, ...] = ()
-    # Fragment-shaped commands list their fields in `--help`; a nested
-    # shape has no command to list them on.
-    fields_in_help: bool = field(default=True)
-
-
-ENTITIES: tuple[Entity, ...] = (
-    Entity(
-        name="provider",
-        title="Provider",
-        location="providers.<stage>.<name>",
-        model=ProviderConfig,
-        purpose=(
-            "One engine, named so agents can reference it. Providers are grouped by "
-            "the pipeline stage they serve (llm, asr, tts, vad), and an entry is "
-            "addressed by that stage and its name together: two stages may hold the "
-            "same name. A voice is a provider entry, so two agents that should sound "
-            "different reference two entries."
-        ),
-        command="samtal-server config set provider <stage> <name> -f fragment.yaml",
-        examples=(
-            "llm-anthropic.yaml",
-            "llm-openai-compatible.yaml",
-            "asr-faster-whisper.yaml",
-            "asr-openai.yaml",
-            "tts-piper.yaml",
-            "tts-elevenlabs.yaml",
-            "tts-openai.yaml",
-            "vad-silero.yaml",
-        ),
-        notes=(OPTIONS_NOTE,),
-    ),
-    Entity(
-        name="mcp-server",
-        title="MCP server",
-        location="mcp_servers.<name>",
-        model=McpServerConfig,
-        purpose=(
-            "One MCP server, named so agents can reference it. The name becomes the "
-            "prefix its tools are offered to the model under (`home__turn_on_light`), "
-            "so it must match `[A-Za-z0-9_-]+` and must not be one of the names the "
-            "merged tool list already uses. A server that is down at startup only "
-            "logs a warning: its tools are absent, and it reconnects in the "
-            "background when a session needs it."
-        ),
-        command="samtal-server config set mcp-server <name> -f fragment.yaml",
-        examples=("mcp-server-stdio.yaml", "mcp-server-streamable-http.yaml"),
-    ),
-    Entity(
-        name="prompt-fragment",
-        title="Prompt fragment",
-        location="prompt_fragments.<name>",
-        model=PromptFragmentConfig,
-        purpose=(
-            "One named block of prompt text, shared by the agents that include it. A "
-            "fragment is written once and injected verbatim into the system prompt of "
-            "every agent whose `prompt_includes` names it, which is how household "
-            "facts or a house style stay in one place instead of being copied into "
-            "every persona prompt and drifting apart. The name appears in the "
-            "provenance the assembled prompt is reported under (`fragment:<name>`), so "
-            "it must match `[A-Za-z0-9_-]+`."
-        ),
-        command="samtal-server config set prompt-fragment <name> -f fragment.yaml",
-        examples=("prompt-fragment.yaml",),
-        notes=(
-            "Nothing is added around the text, not one heading: it is prompt text the "
-            "operator wrote, and a heading would editorialize. The blocks are injected "
-            "in the order the including layer lists them, after the agent's own prompt "
-            "and before any MCP server's guidance, and the only bytes trimmed are "
-            "whitespace at the two ends of the whole assembled prompt.",
-            "A fragment that some layer still includes cannot be deleted, which is the "
-            "same reference rule that keeps a referenced provider or MCP server from "
-            "being taken away underneath an agent.",
-            "There is no length cap. `samtal-server config prompt <agent>` reports what "
-            "each block costs and what the whole prompt costs, which is what an "
-            "operator tunes a small model's context budget against.",
-        ),
-    ),
-    Entity(
-        name="agent",
-        title="Agent",
-        location="agents.<name>",
-        model=AgentConfig,
-        purpose=(
-            "One agent: a prompt, plus whichever stages it overrides. Every stage "
-            "must resolve to a provider, on the agent or through agent_defaults, for "
-            "the server to start, so a typical agent is a prompt and a voice."
-        ),
-        command="samtal-server config set agent <name> -f fragment.yaml",
-        examples=("agent.yaml",),
-        notes=(
-            "An agent's name is also the key its remembered facts are stored under, "
-            "so renaming an agent orphans its memory: the old file stays on disk and "
-            f"the renamed agent starts empty. The `memory:` section in "
-            f"[`config.example.yaml`]({CONFIG_FILE}) says what to do about it.",
-        ),
-    ),
-    Entity(
-        name="agent-defaults",
-        title="Agent defaults",
-        location="agent_defaults",
-        model=AgentDefaults,
-        purpose=(
-            "What every agent uses unless it names something else. One entry for the "
-            "whole deployment, and deliberately without a prompt: a prompt is what "
-            "makes an agent that agent, and inheriting one silently would make two "
-            "agents the same one."
-        ),
-        command="samtal-server config set agent-defaults -f fragment.yaml",
-        examples=("agent-defaults.yaml",),
-        notes=(
-            "This entry is a singleton. There is one of it, writing it replaces it "
-            "whole, and it is not keyed by anything. Per-family defaults are a later "
-            "change, and re-keying the table is what it will do.",
-            "An agent that names no provider for a stage inherits this entry's "
-            "provider for that stage. A list field replaces rather than extends: an "
-            "agent naming `mcp` names all of its MCP servers, and `mcp: []` opts it "
-            "out of the tools its siblings have. A `filler` section behaves the same "
-            "way, replacing this one wholly rather than merging with it.",
-        ),
-    ),
-    Entity(
-        name="mcp-grant",
-        title="MCP grant",
-        location="agent_defaults.mcp[], agents.<name>.mcp[]",
-        model=McpGrant,
-        purpose=(
-            "One entry of an `mcp` list, in the form that grants part of a server "
-            "rather than all of it. An entry written as a plain string is the whole "
-            "server; an entry written as this object is the tools it lists and "
-            "nothing else, so an agent can switch the lights without being able to "
-            "unlock the door. Tools are named by the published name without the "
-            "entry prefix (`turn_on_light` for `home__turn_on_light`), which is what "
-            "`samtal-server config status` prints and what the model calls."
-        ),
-        notes=(
-            "There is no deny list, deliberately. A denied set fails open: a server "
-            "that adds a tool would silently grant it to every agent that denied the "
-            "old ones, which is exactly wrong on the shared family device this "
-            "exists for.",
-            "A name that matches nothing cannot be refused when it is written, since "
-            "only a live connection knows what a server publishes. It is logged when "
-            "the server publishes its tools, and the status surface shows the allow "
-            "list beside the published list, so the mismatch is answerable in one "
-            "read.",
-        ),
-        fields_in_help=False,
-    ),
-    Entity(
-        name="filler",
-        title="Filler",
-        location="agent_defaults.filler, agents.<name>.filler",
-        model=FillerConfig,
-        purpose=(
-            "Masking reply latency with a pre-synthesized filled pause. Nested inside "
-            "an agent or the agent defaults rather than written on its own, and off "
-            "unless it says otherwise. The phrases are synthesized in the agent's own "
-            "voice at boot and cached, so the clip costs nothing at the moment it "
-            "masks and keeps working when the TTS provider is the thing being slow."
-        ),
-        fields_in_help=False,
-    ),
-)
-
-# The domain-level fields that are not entities of their own: a mapping
-# and a scalar, written with their own commands rather than a fragment.
-SETTINGS: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
-    (
-        "devices",
-        "Devices",
-        "samtal-server config bind-device <mac> <agent> [<agent> ...]",
-        (
-            "A MAC is stored in its canonical form (lowercase, colon separated), so "
-            "`AA-BB-CC-DD-EE-FF` and `aa:bb:cc:dd:ee:ff` are the same device.",
-            "`samtal-server config delete device <mac>` removes a binding.",
-        ),
-    ),
-    (
-        "default_agent",
-        "Default agent",
-        "samtal-server config set-default-agent <name>",
-        (
-            "`samtal-server config clear-default-agent` unsets it, which is a "
-            "configuration rather than a mistake: the devices map is then the "
-            "allowlist.",
-            "It is required only when agents are defined and no device is bound to "
-            "one, and that rule is checked at boot rather than at write time, so a "
-            "deployment can be built up in the natural order without wedging.",
-        ),
-    ),
-)
-
-
-def entity(name: str) -> Entity:
+def entity(name: str) -> DocumentedShape:
     """The entity kind of that name, or a ConfigError naming the ones
     that exist. Kept here rather than in the CLI so the two renderings
     accept exactly the same names."""
@@ -439,8 +223,8 @@ def reference() -> str:
         lines += _entity_section(candidate)
 
     lines += ["## Domain-level settings", ""]
-    for name, title, command, notes in SETTINGS:
-        lines += _setting_section(name, title, command, notes)
+    for setting in SETTINGS:
+        lines += _setting_section(setting)
 
     lines += [
         "## The whole domain configuration",
@@ -454,7 +238,7 @@ def reference() -> str:
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
-def _entity_section(candidate: Entity) -> list[str]:
+def _entity_section(candidate: DocumentedShape) -> list[str]:
     lines = [
         f"### {candidate.title}",
         "",
@@ -477,20 +261,20 @@ def _entity_section(candidate: Entity) -> list[str]:
     return lines
 
 
-def _setting_section(name: str, title: str, command: str, notes: tuple[str, ...]) -> list[str]:
+def _setting_section(setting: Setting) -> list[str]:
     lines = [
-        f"### {title}",
+        f"### {setting.title}",
         "",
-        f"`{name}`",
+        f"`{setting.name}`",
         "",
-        *_paragraph(DOMAIN_DESCRIPTIONS[name]),
+        *_paragraph(DOMAIN_DESCRIPTIONS[setting.name]),
         "",
         "```bash",
-        command,
+        setting.command,
         "```",
         "",
     ]
-    for note in notes:
+    for note in setting.notes:
         lines += [*_paragraph(note), ""]
     return lines
 
@@ -621,6 +405,10 @@ def _sentence(description: str | None) -> str:
 
 
 __all__ = [
+    # Re-exported from `entities`, where the two renderings of the
+    # provider-options contract live now: `api.py` reads the second one
+    # from here, which is the import it has always had.
+    "API_OPTIONS_NOTE",
     "DOMAIN",
     "ENTITIES",
     "entity",
