@@ -59,6 +59,7 @@ from samtal_server.tools.mcp import (
     McpSlice,
     McpToolNotGranted,
 )
+from samtal_server.tools.mcp import manager as manager_module
 from tests.support.events import fields_of
 from tests.support.events import only as one_event
 from tests.support.mcp_stdio_server import SHIPPED_INSTRUCTIONS
@@ -717,7 +718,7 @@ async def test_a_manager_that_will_not_stop_is_left_behind_inside_the_bound(
     timeout. The wait after the cancellation is bounded too, and what
     happens at that bound is that the task is left to finish while the
     caller gets its answer."""
-    monkeypatch.setattr(mcp_module, "CANCEL_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(manager_module, "CANCEL_TIMEOUT_S", 0.05)
     holding = 3.0
     manager = StubbornManager("tools", stdio_entry(), holding)
     await manager.start()

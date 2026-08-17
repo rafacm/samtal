@@ -25,7 +25,6 @@ import httpx
 import pytest
 from mcp.server.fastmcp import FastMCP
 
-import samtal_server.tools.mcp as mcp_module
 from samtal_server import logs
 from samtal_server.config import McpServerConfig
 from samtal_server.tools.mcp import (
@@ -35,6 +34,9 @@ from samtal_server.tools.mcp import (
     McpServerDown,
     McpServerManager,
     _reason,
+)
+from samtal_server.tools.mcp import (
+    manager as manager_module,
 )
 from tests.support.events import fields_of
 from tests.support.events import only as one_event
@@ -437,7 +439,7 @@ async def test_a_server_that_never_answers_is_down_for_the_bound(
     The bound is shortened to keep the test short. What is under test is
     the token, not the production constant.
     """
-    monkeypatch.setattr(mcp_module, "CONNECT_TIMEOUT_S", 0.3)
+    monkeypatch.setattr(manager_module, "CONNECT_TIMEOUT_S", 0.3)
     with socket.socket() as listening:
         listening.bind(("127.0.0.1", 0))
         listening.listen(1)

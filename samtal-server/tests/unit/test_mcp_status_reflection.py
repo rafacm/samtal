@@ -35,13 +35,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from mcp.server.fastmcp import FastMCP
 
-import samtal_server.tools.mcp as mcp_module
 from samtal_server import logs
 from samtal_server.app import _prompt_preview
 from samtal_server.config import Config, cli
 from samtal_server.config.api import build_api, mount_api
 from samtal_server.config.models import API_MOUNT_PATH
-from samtal_server.tools.mcp import CONNECTED, REDACTED, McpServers
+from samtal_server.tools.mcp import CONNECTED, REDACTED, McpServers, transport
 from tests.support.mcp_reflecting_server import REFLECTED_ENV
 from tests.support.tools_mcp import serving
 
@@ -276,13 +275,13 @@ async def test_a_child_that_writes_where_it_likes_reaches_no_operator_surface(
     """
     monkeypatch.setenv("SAMTAL_TEST_REFLECTED_SECRET", SENTINEL)
     sinks: list[object] = []
-    spawning = mcp_module.stdio_client
+    spawning = transport.stdio_client
 
     def watching(parameters: object, errlog: object = None) -> object:
         sinks.append(errlog)
         return spawning(parameters, errlog=errlog)
 
-    monkeypatch.setattr(mcp_module, "stdio_client", watching)
+    monkeypatch.setattr(transport, "stdio_client", watching)
     entry = {
         "transport": "stdio",
         "command": sys.executable,
