@@ -10,13 +10,17 @@ real-API verification step.
 
 import asyncio
 import io
+import logging
 import wave
+from collections.abc import Iterator
 
 import httpx
 import pytest
 from openai import AsyncOpenAI
 
 from samtal_server.config.models import ProviderConfig
+from samtal_server.events import Emission, attach_server_tap, detach_server_tap
+from samtal_server.logs import TEXT_FORMAT, JsonFormatter
 from samtal_server.providers import (
     ProviderCallError,
     ProviderCallTimeout,
@@ -25,6 +29,8 @@ from samtal_server.providers import (
 )
 from samtal_server.providers.base import ProviderError
 from samtal_server.providers.openai_asr import OpenAiAsr
+from tests.support.events import events as emitted
+from tests.support.events import fields_of
 from tests.support.llm_sdk import Falsey
 
 # One 16 kHz second of s16le silence, comfortably over the API minimum.
@@ -34,6 +40,14 @@ ONE_SECOND = b"\x00\x00" * 16000
 # match by accident. It stands in for what an endpoint can echo back
 # into an error body.
 SENTINEL = "sk-test-4f8b2c9e-never-a-real-credential"
+
+# What the model hands back on the retry in the sentinel test below.
+# The same shape, and a different value from the one above, so a hit
+# says which path let it through: an error body the far side wrote, or
+# a transcript a person spoke. A user reading a key aloud is a turn like
+# any other, which is what makes this the honest stand-in for what a
+# recovered transcript can be.
+RECOVERED = "sk-test-9d3a7b1c-never-a-real-credential"
 
 
 def provider(handler: object, **overrides: object) -> OpenAiAsr:
@@ -79,6 +93,67 @@ def chain(exc: BaseException) -> str:
         parts += [repr(current), str(current)]
         current = current.__cause__ or current.__context__
     return "\n".join(parts)
+
+
+class Tap:
+    """A server-scope consumer that keeps every emission it was handed.
+
+    A clean `LogRecord` does not prove a clean consumer, which is what
+    the server pin suite says about its own sentinels. Non-log taps are
+    dispatched first and are handed the emission's own `args` tuple,
+    whose members are deliberately not copied, so anything passed as a
+    `%` argument reaches every consumer as the object itself. A claim
+    that a value reaches no retained surface is therefore asserted here
+    as well as at the log."""
+
+    def __init__(self) -> None:
+        self.seen: list[Emission] = []
+
+    def emit(self, emission: Emission) -> None:
+        self.seen.append(emission)
+
+    def saw(self, event: str) -> list[Emission]:
+        return [one for one in self.seen if one.payload.get("event") == event]
+
+    def rendered(self) -> str:
+        """Everything a consumer could read off what it was handed: the
+        unrendered sentence, the payload, and every argument behind
+        it."""
+        parts: list[str] = []
+        for emission in self.seen:
+            parts += [emission.message, str(emission.payload), repr(emission.args)]
+            for argument in emission.args:
+                parts += [str(argument), repr(argument)]
+        return "\n".join(parts)
+
+
+@pytest.fixture
+def tap() -> Iterator[Tap]:
+    """A consumer attached to the server hub for one test, which is what
+    a #66/#67 exporter will be. Detached however the test ends, since
+    the hub outlives it."""
+    consumer = Tap()
+    attach_server_tap(consumer)
+    try:
+        yield consumer
+    finally:
+        detach_server_tap(consumer)
+
+
+def surfaces(record: logging.LogRecord) -> str:
+    """Every retained rendering of one record: the unrendered template,
+    the sentence a reader sees, the arguments substituted into it, the
+    structured fields, and both shipped log formats."""
+    return "\n".join(
+        [
+            str(record.msg),
+            record.getMessage(),
+            repr(record.args),
+            str(fields_of(record)),
+            logging.Formatter(TEXT_FORMAT).format(record),
+            JsonFormatter().format(record),
+        ]
+    )
 
 
 def uploaded_audio(request: httpx.Request) -> bytes:
@@ -393,6 +468,56 @@ async def test_an_echo_is_retried_without_the_prompt_and_the_retry_is_heard(
     (event,) = [r for r in caplog.records if getattr(r, "event", None) == "asr_prompt_echo"]
     assert event.outcome == "recovered"  # type: ignore[attr-defined]
     assert event.duration_s == 1.0  # type: ignore[attr-defined]
+
+
+async def test_a_recovered_transcript_reaches_no_record_or_consumer(
+    caplog: pytest.LogCaptureFixture, tap: Tap
+) -> None:
+    """The sentinel for the one echo-guard outcome that has a transcript
+    in hand. It used to be quoted into the `recovered` sentence, and
+    conversation-derived text is banned on the events without exception
+    (the content-and-telemetry ADR, as amended 2026-08-17): a transcript
+    is content however it was recovered. Planted as a credential,
+    because that is what the ban is worth: a user reading a key aloud is
+    a turn like any other, and the retained log is not where it belongs.
+
+    Both retained surfaces, because a clean record does not prove a
+    clean consumer: the tap sees the emission before the log does."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        text = "samtal, Oliver" if len(seen) == 1 else RECOVERED
+        return httpx.Response(200, json={"text": text})
+
+    asr = provider(handler, prompt="samtal, Oliver")
+    with caplog.at_level("DEBUG"):
+        result = await asr.transcribe(ONE_SECOND, 16000)
+
+    # The session is supposed to hear it. The surfaces are not.
+    assert result.text == RECOVERED
+    assert len(seen) == 2
+
+    records = emitted(caplog, "asr_prompt_echo")
+    assert records, "the guard never fired, so this proves nothing"
+    for record in records:
+        assert record.outcome == "recovered"  # type: ignore[attr-defined]
+        assert RECOVERED not in surfaces(record)
+
+    consumed = tap.saw("asr_prompt_echo")
+    assert consumed, "it reached no tap at all, so this proves nothing"
+    for emission in consumed:
+        assert emission.payload["outcome"] == "recovered"
+        assert RECOVERED not in emission.message
+        assert RECOVERED not in repr(emission.args)
+        assert RECOVERED not in str(emission.payload)
+    assert RECOVERED not in tap.rendered()
+
+    # And the diagnosis survives it: how much audio the guard was about
+    # to discard, and what the second hearing cost.
+    (event,) = records
+    assert event.duration_s == 1.0  # type: ignore[attr-defined]
+    assert event.retry_ms >= 0  # type: ignore[attr-defined]
 
 
 async def test_a_retry_that_echoes_again_confirms_nothing_was_said(
