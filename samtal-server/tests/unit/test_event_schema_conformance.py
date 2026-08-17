@@ -51,6 +51,7 @@ import importlib
 import itertools
 import logging
 import typing
+from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import field as data_field
 from functools import cache
@@ -77,9 +78,18 @@ LEVELS = {
 }
 
 # What a session-scoped emitter is reached through. Everything else that
-# answers to these method names with an `event=` keyword is a module's
-# own `ServerEvents(__name__)`, whose channel is that module.
+# answers to these method names with an `event=` keyword is a
+# `ServerEvents(__name__)`, built either by the emitting module itself or
+# by the package it belongs to.
 SESSION_RECEIVER = "self._events"
+
+# How a channel's emitter is built, and how a submodule of the package
+# that owns one reaches it. A relative import of depth one names the
+# module's OWN package by construction, which is what makes "only its
+# own package's emitter" a check by path rather than by a name any
+# module could write.
+EMITTER = "ServerEvents(__name__)"
+PACKAGE_EMITTER = "events"
 
 
 # --- the walk ---------------------------------------------------------
@@ -115,9 +125,26 @@ class Site:
         return f"{self.module}:{self.function} #{self.ordinal} ({self.event})"
 
 
+def module_name(path: Path) -> str:
+    """The importable name of one source file.
+
+    A package's `__init__.py` IS the package: its `__name__` is the
+    package name, so that is the channel an emitter it builds is built
+    for and the module a sidecar identity has to name. Spelling it
+    `...mcp.__init__` would name something that is not what `__name__`
+    holds and not what the emitter's channel says.
+    """
+    held = str(path.relative_to(PACKAGE.parent).with_suffix("")).replace("/", ".")
+    return held.removesuffix(".__init__")
+
+
 @cache
 def module_source(module: str) -> str:
-    return (PACKAGE.parent / f"{module.replace('.', '/')}.py").read_text(encoding="utf-8")
+    """One module's text, whether the name is a file or a package."""
+    held = PACKAGE.parent / f"{module.replace('.', '/')}.py"
+    if not held.exists():
+        held = PACKAGE.parent / module.replace(".", "/") / "__init__.py"
+    return held.read_text(encoding="utf-8")
 
 
 @cache
@@ -125,12 +152,51 @@ def module_tree(module: str) -> ast.Module:
     return ast.parse(module_source(module))
 
 
+def builds_the_emitter(tree: ast.AST) -> bool:
+    """Whether this source constructs a channel's emitter, which is the
+    literal `ServerEvents(__name__)` and nothing else."""
+    return any(
+        isinstance(node, ast.Assign) and ast.unparse(node.value) == EMITTER
+        for node in ast.walk(tree)
+    )
+
+
+def takes_its_packages_emitter(tree: ast.AST) -> bool:
+    """Whether this source emits through the emitter its own package
+    built: `from . import events`, and nothing wider."""
+    return any(
+        isinstance(node, ast.ImportFrom)
+        and node.level == 1
+        and node.module is None
+        and any(
+            alias.name == PACKAGE_EMITTER and alias.asname is None for alias in node.names
+        )
+        for node in ast.walk(tree)
+    )
+
+
+def channel_of(module: str, tree: ast.AST) -> str:
+    """Which channel this module's server-scoped emissions land on: its
+    own where it builds the emitter, and the package's where it takes
+    the one its package built."""
+    if not builds_the_emitter(tree) and takes_its_packages_emitter(tree):
+        return module.rpartition(".")[0]
+    return module
+
+
 class _Walk(ast.NodeVisitor):
     def __init__(self, module: str) -> None:
         self.module = module
+        # Until the module's own imports say otherwise, which is what
+        # `visit_Module` reads before any call is looked at.
+        self.channel = module
         self.stack: list[str] = []
         self.ordinals: dict[tuple[str, str], int] = {}
         self.found: list[Site] = []
+
+    def visit_Module(self, node: ast.Module) -> None:
+        self.channel = channel_of(self.module, node)
+        self.generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.AST) -> None:
         self.stack.append(node.name)  # type: ignore[attr-defined]
@@ -157,7 +223,7 @@ class _Walk(ast.NodeVisitor):
             module=self.module,
             function=enclosing,
             ordinal=self.ordinals[key],
-            channel=SESSION_CHANNEL if receiver == SESSION_RECEIVER else self.module,
+            channel=SESSION_CHANNEL if receiver == SESSION_RECEIVER else self.channel,
             level=LEVELS[function.attr],
             event=ast.literal_eval(named.value),
             message=ast.literal_eval(node.args[0]),
@@ -207,7 +273,7 @@ def emit_sites() -> tuple[Site, ...]:
     """Every emitter call in the package that names an event."""
     found: list[Site] = []
     for path in sorted(PACKAGE.rglob("*.py")):
-        module = str(path.relative_to(PACKAGE.parent).with_suffix("")).replace("/", ".")
+        module = module_name(path)
         walk = _Walk(module)
         walk.visit(module_tree(module))
         found += walk.found
@@ -1563,20 +1629,50 @@ def test_no_ordinary_emit_site_produces_the_internal_event() -> None:
     assert not [site for site in emit_sites() if site.event in schema.INTERNAL_EVENTS]
 
 
+def unowned(module: str, channel: str, tree_of: Callable[[str], ast.AST]) -> str:
+    """Why one module may not emit on one channel, or the empty string
+    where it may.
+
+    A channel is owned by a MODULE or by a PACKAGE. A module owns its
+    own by building `ServerEvents(__name__)` in it, which is what every
+    single-module subsystem does. A package owns one the same way, in
+    its `__init__`, whose `__name__` IS the package name; its submodules
+    emit on it by taking that emitter with `from . import events`, so a
+    subsystem whose responsibilities are several files is still one
+    channel and the retained records' `logger` field is what it always
+    was. Nothing else is ownership: a module that builds no emitter and
+    imports somebody else's is borrowing a channel it does not answer
+    for, which is the shape this refuses.
+
+    `tree_of` reads a module's source, so the rule can be run over
+    planted modules as well as over the package.
+    """
+    tree = tree_of(module)
+    if builds_the_emitter(tree):
+        if channel != module:
+            return f"builds its own emitter and emits on {channel}"
+        return ""
+    if not takes_its_packages_emitter(tree):
+        return "emits without building an emitter or taking its package's"
+    owner = module.rpartition(".")[0]
+    if channel != owner:
+        return f"takes {owner}'s emitter and emits on {channel}"
+    if not builds_the_emitter(tree_of(owner)):
+        return f"{owner} builds no emitter for it"
+    return ""
+
+
 def test_every_module_that_emits_owns_the_channel_it_emits_on() -> None:
-    """A server event is emitted through that module's own
-    `ServerEvents(__name__)`, so an event emitted from the wrong module
-    fails even with lawful fields."""
+    """A server event is emitted through an emitter built for the
+    channel it lands on, so an event emitted from the wrong module fails
+    even with lawful fields. Both forms of ownership are lawful and
+    nothing else is; `unowned` states which."""
     for site in emit_sites():
         if site.channel == SESSION_CHANNEL:
             continue
-        built = [
-            node
-            for node in ast.walk(module_tree(site.module))
-            if isinstance(node, ast.Assign)
-            and ast.unparse(node.value) == "ServerEvents(__name__)"
-        ]
-        assert built, f"{site}: emits on its own channel without building an emitter"
+        assert not unowned(site.module, site.channel, module_tree), (
+            f"{site}: {unowned(site.module, site.channel, module_tree)}"
+        )
         assert site.channel in schema.SERVER_CHANNELS
 
 
@@ -2061,6 +2157,78 @@ def test_the_walk_reads_both_spellings_of_a_spread() -> None:
 
     assert called.spreads == ("planted:Runtime._fields",)
     assert local.spreads == ("planted:Runtime.run.assembled",)
+
+
+OWN_EMITTER = "events = ServerEvents(__name__)\n"
+PACKAGES_EMITTER = "from . import events\n"
+
+
+def trees(sources: dict[str, str]) -> Callable[[str], ast.AST]:
+    """A reader over planted modules, in place of the package's own."""
+    parsed = {module: ast.parse(source) for module, source in sources.items()}
+    return parsed.__getitem__
+
+
+def test_a_module_that_builds_its_own_emitter_owns_that_channel() -> None:
+    """The first accepted form, and the only one before the MCP split:
+    the module builds the emitter and emits on its own name."""
+    tree_of = trees({"planted.one": OWN_EMITTER})
+
+    assert unowned("planted.one", "planted.one", tree_of) == ""
+    assert unowned("planted.one", "planted", tree_of)
+
+
+def test_a_submodule_may_emit_on_the_channel_its_own_package_owns() -> None:
+    """The second accepted form: the `__init__` builds the emitter and
+    the submodule takes it, so one subsystem in several files is one
+    channel."""
+    tree_of = trees({"planted": OWN_EMITTER, "planted.part": PACKAGES_EMITTER})
+
+    assert unowned("planted.part", "planted", tree_of) == ""
+
+
+def test_a_submodule_may_not_emit_on_a_channel_nobody_owns_for_it() -> None:
+    """The rejected shapes, which is what makes the second form a
+    narrowing rather than a hole: an absolute import of some other
+    package's emitter is not ownership, a package that builds none
+    cannot lend one, and a submodule that takes its package's emitter
+    still may not emit on a third name."""
+    borrowed = trees({"planted.part": "from samtal_server.tools.mcp import events\n"})
+    silent = trees({"planted": "\n", "planted.part": PACKAGES_EMITTER})
+    astray = trees({"planted": OWN_EMITTER, "planted.part": PACKAGES_EMITTER})
+
+    assert unowned("planted.part", "samtal_server.tools.mcp", borrowed)
+    assert unowned("planted.part", "planted", silent)
+    assert unowned("planted.part", "elsewhere", astray)
+
+
+def test_the_walk_records_a_submodules_emission_on_its_packages_channel() -> None:
+    """The other half of the amendment: the rule may accept the shape,
+    but the walk is what decides which channel the site is compared
+    against, and it reads the imports rather than the file's place."""
+    walk = _Walk("planted.part")
+    walk.visit(ast.parse(PACKAGES_EMITTER + "def run():\n    events.info('a', event='one')\n"))
+    (borrowed,) = walk.found
+
+    walk = _Walk("planted.part")
+    walk.visit(ast.parse(OWN_EMITTER + "def run():\n    events.info('a', event='one')\n"))
+    (own,) = walk.found
+
+    assert (borrowed.module, borrowed.channel) == ("planted.part", "planted")
+    assert borrowed.identity == ("planted.part", "run", 1)
+    assert (own.module, own.channel) == ("planted.part", "planted.part")
+
+
+def test_a_packages_init_is_named_for_the_package_it_defines() -> None:
+    """And the normalization under both of them. `__init__.py` is the
+    package, so its name is the package's: the channel its emitter is
+    built for, the module a sidecar identity names, and a name
+    `module_source` can still find the text of."""
+    assert module_name(PACKAGE / "runtime" / "__init__.py") == "samtal_server.runtime"
+    assert module_name(PACKAGE / "runtime" / "pipeline.py") == "samtal_server.runtime.pipeline"
+    assert module_source("samtal_server.runtime") == (
+        PACKAGE / "runtime" / "__init__.py"
+    ).read_text(encoding="utf-8")
 
 
 def test_the_walk_leaves_a_logging_call_that_names_no_event_alone() -> None:
