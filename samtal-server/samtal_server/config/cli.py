@@ -49,8 +49,9 @@ import ipaddress
 import os
 import re
 import sys
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn, get_args, get_origin
 from urllib.parse import SplitResult, quote, urlsplit, urlunsplit
@@ -59,7 +60,7 @@ import httpx
 import yaml
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from samtal_server.config import docgen, views
+from samtal_server.config import docgen, entities, views
 from samtal_server.config.loader import CONFIG_ENV_VAR, ConfigError, load_file_config
 from samtal_server.config.models import (
     API_MOUNT_PATH,
@@ -69,6 +70,7 @@ from samtal_server.config.models import (
 )
 from samtal_server.config.responses import (
     RELOAD_OUTCOMES,
+    Acknowledgement,
     AssembledPrompt,
     ConfigDocument,
     Envelope,
@@ -84,14 +86,9 @@ from samtal_server.config.secrets import (
 from samtal_server.config.store import ConfigStore, check_transportable
 from samtal_server.config.writes import (
     BINDING_NOTICE,
-    MCP_RELOAD_NOTICE,
     RESTART_NOTICE,
     cleared_secret,
-    deleted_agent,
     deleted_device,
-    deleted_mcp_server,
-    deleted_prompt_fragment,
-    deleted_provider,
     secret_notice,
     wrote_secret,
 )
@@ -333,75 +330,6 @@ def _usage_problem(message: str) -> str:
 # The commands
 
 
-def _set_provider(args: argparse.Namespace) -> None:
-    fragment = _fragment(args.file)
-    check_transportable(f"providers.{args.stage}.{args.name}", fragment)
-    _wrote(_call(args, "PUT", _path("providers", args.stage, args.name), fragment))
-
-
-def _set_mcp_server(args: argparse.Namespace) -> None:
-    fragment = _fragment(args.file)
-    check_transportable(f"mcp_servers.{args.name}", fragment)
-    _wrote(_call(args, "PUT", _path("mcp-servers", args.name), fragment))
-
-
-def _set_prompt_fragment(args: argparse.Namespace) -> None:
-    fragment = _fragment(args.file)
-    check_transportable(f"prompt_fragments.{args.name}", fragment)
-    _wrote(_call(args, "PUT", _path("prompt-fragments", args.name), fragment))
-
-
-def _set_agent(args: argparse.Namespace) -> None:
-    fragment = _fragment(args.file)
-    check_transportable(f"agents.{args.name}", fragment)
-    _wrote(_call(args, "PUT", _path("agents", args.name), fragment))
-
-
-def _set_agent_defaults(args: argparse.Namespace) -> None:
-    fragment = _fragment(args.file)
-    check_transportable("agent_defaults", fragment)
-    _wrote(_call(args, "PUT", _path("agent-defaults"), fragment))
-
-
-def _delete_provider(args: argparse.Namespace) -> None:
-    if args.local:
-        with _store(args) as store:
-            store.delete_provider(args.stage, args.name)
-        _report(deleted_provider(args.stage, args.name))
-        return
-    _wrote(_call(args, "DELETE", _path("providers", args.stage, args.name)))
-
-
-def _delete_mcp_server(args: argparse.Namespace) -> None:
-    if args.local:
-        with _store(args) as store:
-            store.delete_mcp_server(args.name)
-        # The same sentence the API answers this delete with. The row is
-        # the one the reload re-reads, so the entry stops when a running
-        # server is asked to reload, whichever path deleted it.
-        _report(deleted_mcp_server(args.name), MCP_RELOAD_NOTICE)
-        return
-    _wrote(_call(args, "DELETE", _path("mcp-servers", args.name)))
-
-
-def _delete_prompt_fragment(args: argparse.Namespace) -> None:
-    if args.local:
-        with _store(args) as store:
-            store.delete_prompt_fragment(args.name)
-        _report(deleted_prompt_fragment(args.name))
-        return
-    _wrote(_call(args, "DELETE", _path("prompt-fragments", args.name)))
-
-
-def _delete_agent(args: argparse.Namespace) -> None:
-    if args.local:
-        with _store(args) as store:
-            store.delete_agent(args.name)
-        _report(deleted_agent(args.name))
-        return
-    _wrote(_call(args, "DELETE", _path("agents", args.name)))
-
-
 def _delete_device(args: argparse.Namespace) -> None:
     if args.local:
         with _store(args) as store:
@@ -591,62 +519,6 @@ def _show_all(args: argparse.Namespace) -> None:
             ConfigDocument, _call(args, "GET", _path("config")), UNREADABLE_READ
         )
     print(_show_everything(document), end="")
-
-
-def _show_provider(args: argparse.Namespace) -> None:
-    if args.local:
-        with _store(args) as store:
-            _print_entity(views.provider(store.read_provider(args.stage, args.name)))
-        return
-    _print_entity(
-        _understood(
-            Envelope,
-            _call(args, "GET", _path("providers", args.stage, args.name)),
-            UNREADABLE_READ,
-        )
-    )
-
-
-def _show_mcp_server(args: argparse.Namespace) -> None:
-    if args.local:
-        with _store(args) as store:
-            _print_entity(views.mcp_server(store.read_mcp_server(args.name)))
-        return
-    _print_entity(
-        _understood(Envelope, _call(args, "GET", _path("mcp-servers", args.name)), UNREADABLE_READ)
-    )
-
-
-def _show_prompt_fragment(args: argparse.Namespace) -> None:
-    if args.local:
-        with _store(args) as store:
-            _print_entity(views.prompt_fragment(store.read_prompt_fragment(args.name)))
-        return
-    _print_entity(
-        _understood(
-            Envelope, _call(args, "GET", _path("prompt-fragments", args.name)), UNREADABLE_READ
-        )
-    )
-
-
-def _show_agent(args: argparse.Namespace) -> None:
-    if args.local:
-        with _store(args) as store:
-            _print_entity(views.agent(store.read_agent(args.name)))
-        return
-    _print_entity(
-        _understood(Envelope, _call(args, "GET", _path("agents", args.name)), UNREADABLE_READ)
-    )
-
-
-def _show_agent_defaults(args: argparse.Namespace) -> None:
-    if args.local:
-        with _store(args) as store:
-            _print_entity(views.agent_defaults(store.read_agent_defaults()))
-        return
-    _print_entity(
-        _understood(Envelope, _call(args, "GET", _path("agent-defaults")), UNREADABLE_READ)
-    )
 
 
 def _show_device(args: argparse.Namespace) -> None:
@@ -1759,12 +1631,201 @@ def _wrote(answer: object) -> None:
     _report(what, notice if isinstance(notice, str) else RESTART_NOTICE)
 
 
+def _acknowledged(acknowledgement: Mapping[str, object]) -> None:
+    """One write acknowledged: what it did, and when it takes effect.
+
+    The one place either is printed, whichever path the write took, so
+    the break-glass path and the ordinary one cannot come to describe
+    one act differently.
+    """
+    _report(str(acknowledgement["wrote"]), str(acknowledgement["notice"]))
+
+
 def _report(what: str, notice: str = RESTART_NOTICE) -> None:
     print(f"wrote {what}")
     # Flushed first, so the notice lands after the line it is about
     # rather than ahead of it: stderr is unbuffered and stdout is not.
     sys.stdout.flush()
     print(notice, file=sys.stderr)
+
+
+# The acts
+#
+# One row per thing a command does: where the act is on the API and how
+# this command's arguments address it, what it sends, what it is
+# answered with, how that answer is printed, and, for the four commands
+# `--local` covers, the same act against the database instead. The
+# dispatcher below is the only reader of a row, so an act's two paths
+# are written beside each other and cannot come to describe one act
+# differently, which is the class of drift #134 was.
+#
+# The five commanded kinds' rows are not written out per kind. Where a
+# kind is on the API, what addresses one entry of it, which section it
+# occupies in the configuration document, what a delete of one answers
+# and when that takes effect are facts of its descriptor, filled by the
+# modules that own them, and the builders below turn them into rows.
+# What is written by hand is what a descriptor does not describe: the
+# devices and the default agent are settings written with their own
+# verbs, and the secret slots are addressed under an entity rather than
+# as one.
+
+
+@dataclass(frozen=True, kw_only=True)
+class Act:
+    """One thing a `samtal-server config` command does."""
+
+    # The request: the verb, the path this command's arguments address,
+    # and the body it carries, where it carries one.
+    method: str
+    path: Callable[[argparse.Namespace], str]
+    body: Callable[[argparse.Namespace], object] | None = None
+
+    # How long this one endpoint may take to answer. Every act but the
+    # reload takes the default, whose bound is the database's.
+    read_timeout_s: float = READ_TIMEOUT_S
+
+    # The shape the API says it answers this act with, and the sentence
+    # a body that is not one meets. None where the renderer reads its
+    # own answer, which is every listing: those are entry points the
+    # acceptance suite hands a body to directly, so the reading is
+    # theirs.
+    answers: object | None = None
+    refusal: str = UNREADABLE_READ
+
+    # What is printed, given the answer, whichever path produced it.
+    render: Callable[[Any], None]
+
+    # The break-glass path: the same act against the database, answering
+    # what the API would have answered for it. Present for exactly the
+    # four commands `--local` covers and for nothing else, which is the
+    # same fact `local_ok` states on the subparser.
+    local: Callable[[argparse.Namespace], Any] | None = None
+
+
+def _act(args: argparse.Namespace) -> None:
+    """One act, run whichever way it was reached.
+
+    The acknowledgement and the notice come from here either way: over
+    HTTP they are what the API answered, and locally they are what the
+    kind's descriptor says the API answers for that act, printed by the
+    same renderer.
+    """
+    act: Act = args.act
+    if args.local:
+        act.render(act.local(args))
+        return
+    answer = _call(
+        args,
+        act.method,
+        act.path(args),
+        act.body(args) if act.body is not None else _NOTHING,
+        read_timeout_s=act.read_timeout_s,
+    )
+    act.render(answer if act.answers is None else _understood(act.answers, answer, act.refusal))
+
+
+def _identity(descriptor: entities.EntityDescriptor, args: argparse.Namespace) -> tuple[str, ...]:
+    """What addresses one entry of this kind, taken off the command
+    line. The descriptor's parameters are the URL's path parameters and
+    the CLI's positional arguments, which are the same names for the
+    same reason, so a provider's two are read the way every other kind's
+    one is."""
+    return tuple(getattr(args, parameter) for parameter in descriptor.addressing)
+
+
+def _entity_path(
+    descriptor: entities.EntityDescriptor, *under: str
+) -> Callable[[argparse.Namespace], str]:
+    """Where one entry of this kind is, and what is addressed under it."""
+
+    def path(args: argparse.Namespace) -> str:
+        return _path(descriptor.route.lstrip("/"), *_identity(descriptor, args), *under)
+
+    return path
+
+
+def _fragment_body(
+    descriptor: entities.EntityDescriptor,
+) -> Callable[[argparse.Namespace], object]:
+    """The fragment a write of this kind carries, refused before it
+    travels if JSON has no way to say what YAML said. Where it is being
+    written is the kind's own section of the configuration document and
+    the identity under it, which is what such a refusal names."""
+
+    def body(args: argparse.Namespace) -> object:
+        fragment = _fragment(args.file)
+        location = ".".join((descriptor.moved_key, *_identity(descriptor, args)))
+        check_transportable(location, fragment)
+        return fragment
+
+    return body
+
+
+def _deleting(descriptor: entities.EntityDescriptor) -> Callable[[argparse.Namespace], Any]:
+    """The break-glass delete: this kind's row taken out of the database
+    through its own verb, answered with the sentence and the notice the
+    API answers the same act with. Both are read off the descriptor
+    rather than repeated here, which is what keeps the two paths saying
+    one thing."""
+
+    def delete(args: argparse.Namespace) -> Any:
+        identity = _identity(descriptor, args)
+        with _store(args) as store:
+            descriptor.delete(store, *identity)
+        return {"wrote": descriptor.deleted(*identity), "notice": descriptor.notice}
+
+    return delete
+
+
+def _showing(descriptor: entities.EntityDescriptor) -> Callable[[argparse.Namespace], Any]:
+    """The break-glass read: one entry, masked by the view the API shows
+    it through, in the envelope every kind is read in."""
+
+    def show(args: argparse.Namespace) -> Any:
+        with _store(args) as store:
+            read = descriptor.read(store, *_identity(descriptor, args))
+        return views.entity(descriptor.name, read)
+
+    return show
+
+
+SET_ENTITY: dict[str, Act] = {
+    kind.name: Act(
+        method="PUT",
+        path=_entity_path(kind),
+        body=_fragment_body(kind),
+        answers=Acknowledgement,
+        refusal=UNREADABLE_WRITE,
+        render=_acknowledged,
+    )
+    for kind in entities.ENTITIES
+}
+
+# The singleton has no delete anywhere, and says so by carrying
+# `has_delete=False` rather than by being named as an exception here.
+DELETE_ENTITY: dict[str, Act] = {
+    kind.name: Act(
+        method="DELETE",
+        path=_entity_path(kind),
+        answers=Acknowledgement,
+        refusal=UNREADABLE_WRITE,
+        render=_acknowledged,
+        local=_deleting(kind),
+    )
+    for kind in entities.ENTITIES
+    if kind.has_delete
+}
+
+SHOW_ENTITY: dict[str, Act] = {
+    kind.name: Act(
+        method="GET",
+        path=_entity_path(kind),
+        answers=Envelope,
+        render=_print_entity,
+        local=_showing(kind),
+    )
+    for kind in entities.ENTITIES
+}
 
 
 # The grammar
@@ -1856,18 +1917,18 @@ def _parser() -> argparse.ArgumentParser:
     entity = _fragment_parser(kinds, "provider", [common, fragment])
     entity.add_argument("stage", metavar="STAGE", help=", ".join(PROVIDER_STAGES))
     entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_set_provider)
+    entity.set_defaults(run=_act, act=SET_ENTITY["provider"])
     entity = _fragment_parser(kinds, "mcp-server", [common, fragment])
     entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_set_mcp_server)
+    entity.set_defaults(run=_act, act=SET_ENTITY["mcp-server"])
     entity = _fragment_parser(kinds, "prompt-fragment", [common, fragment])
     entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_set_prompt_fragment)
+    entity.set_defaults(run=_act, act=SET_ENTITY["prompt-fragment"])
     entity = _fragment_parser(kinds, "agent", [common, fragment])
     entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_set_agent)
+    entity.set_defaults(run=_act, act=SET_ENTITY["agent"])
     entity = _fragment_parser(kinds, "agent-defaults", [common, fragment])
-    entity.set_defaults(run=_set_agent_defaults)
+    entity.set_defaults(run=_act, act=SET_ENTITY["agent-defaults"])
 
     deleter = commands.add_parser("delete", help="delete one entity")
     deleter.set_defaults(local_ok=True)
@@ -1875,16 +1936,16 @@ def _parser() -> argparse.ArgumentParser:
     entity = kinds.add_parser("provider", parents=[common])
     entity.add_argument("stage", metavar="STAGE", help=", ".join(PROVIDER_STAGES))
     entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_delete_provider)
+    entity.set_defaults(run=_act, act=DELETE_ENTITY["provider"])
     entity = kinds.add_parser("mcp-server", parents=[common])
     entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_delete_mcp_server)
+    entity.set_defaults(run=_act, act=DELETE_ENTITY["mcp-server"])
     entity = kinds.add_parser("prompt-fragment", parents=[common])
     entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_delete_prompt_fragment)
+    entity.set_defaults(run=_act, act=DELETE_ENTITY["prompt-fragment"])
     entity = kinds.add_parser("agent", parents=[common])
     entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_delete_agent)
+    entity.set_defaults(run=_act, act=DELETE_ENTITY["agent"])
     entity = kinds.add_parser("device", parents=[common])
     entity.add_argument("mac", metavar="MAC")
     entity.set_defaults(run=_delete_device)
@@ -2074,18 +2135,18 @@ def _parser() -> argparse.ArgumentParser:
     entity = kinds.add_parser("provider", parents=[common])
     entity.add_argument("stage", metavar="STAGE", help=", ".join(PROVIDER_STAGES))
     entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_show_provider)
+    entity.set_defaults(run=_act, act=SHOW_ENTITY["provider"])
     entity = kinds.add_parser("mcp-server", parents=[common])
     entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_show_mcp_server)
+    entity.set_defaults(run=_act, act=SHOW_ENTITY["mcp-server"])
     entity = kinds.add_parser("prompt-fragment", parents=[common])
     entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_show_prompt_fragment)
+    entity.set_defaults(run=_act, act=SHOW_ENTITY["prompt-fragment"])
     entity = kinds.add_parser("agent", parents=[common])
     entity.add_argument("name", metavar="NAME")
-    entity.set_defaults(run=_show_agent)
+    entity.set_defaults(run=_act, act=SHOW_ENTITY["agent"])
     entity = kinds.add_parser("agent-defaults", parents=[common])
-    entity.set_defaults(run=_show_agent_defaults)
+    entity.set_defaults(run=_act, act=SHOW_ENTITY["agent-defaults"])
     entity = kinds.add_parser("device", parents=[common])
     entity.add_argument("mac", metavar="MAC")
     entity.set_defaults(run=_show_device)
