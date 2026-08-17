@@ -152,26 +152,65 @@ def module_tree(module: str) -> ast.Module:
     return ast.parse(module_source(module))
 
 
+def emitter_bindings(tree: ast.AST) -> list[ast.stmt]:
+    """Every statement at a module's TOP LEVEL that binds the emitter's
+    name, in source order.
+
+    What an emit site reaches is the binding the module's top level
+    holds, so asking whether the right one is present anywhere is the
+    wrong question: `from . import events` followed by
+    `from somewhere import events` runs on somebody else's channel while
+    reading as this package's. Every binding is collected and the rule
+    below asks for exactly one, which is the only shape with nothing to
+    argue about. Nested scopes are left alone: a name rebound inside a
+    function is that function's own.
+    """
+    found: list[ast.stmt] = []
+    for node in getattr(tree, "body", []):
+        if isinstance(node, ast.Assign | ast.AnnAssign):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(
+                isinstance(target, ast.Name) and target.id == PACKAGE_EMITTER
+                for target in targets
+            ):
+                found.append(node)
+        elif isinstance(node, ast.Import | ast.ImportFrom):
+            if any(
+                (alias.asname or alias.name.split(".")[0]) == PACKAGE_EMITTER
+                for alias in node.names
+            ):
+                found.append(node)
+    return found
+
+
 def builds_the_emitter(tree: ast.AST) -> bool:
     """Whether this source constructs a channel's emitter, which is the
-    literal `ServerEvents(__name__)` and nothing else."""
-    return any(
-        isinstance(node, ast.Assign) and ast.unparse(node.value) == EMITTER
-        for node in ast.walk(tree)
+    literal `ServerEvents(__name__)`, as the one thing its top level
+    binds that name to."""
+    held = emitter_bindings(tree)
+    return (
+        len(held) == 1
+        and isinstance(held[0], ast.Assign)
+        and ast.unparse(held[0].value) == EMITTER
     )
 
 
 def takes_its_packages_emitter(tree: ast.AST) -> bool:
     """Whether this source emits through the emitter its own package
-    built: `from . import events`, and nothing wider."""
-    return any(
-        isinstance(node, ast.ImportFrom)
-        and node.level == 1
-        and node.module is None
+    built: `from . import events`, as the one thing its top level binds
+    that name to and nothing wider."""
+    held = emitter_bindings(tree)
+    if len(held) != 1:
+        return False
+    binding = held[0]
+    return (
+        isinstance(binding, ast.ImportFrom)
+        and binding.level == 1
+        and binding.module is None
         and any(
-            alias.name == PACKAGE_EMITTER and alias.asname is None for alias in node.names
+            alias.name == PACKAGE_EMITTER and alias.asname is None
+            for alias in binding.names
         )
-        for node in ast.walk(tree)
     )
 
 
@@ -1647,6 +1686,14 @@ def unowned(module: str, channel: str, tree_of: Callable[[str], ast.AST]) -> str
     imports somebody else's is borrowing a channel it does not answer
     for, which is the shape this refuses.
 
+    Ownership is read off the EFFECTIVE binding rather than off the
+    presence of a lawful one, which is the PR #178 review's second
+    finding: a module that takes its package's emitter and then rebinds
+    the name to a foreign one emits on the foreign channel while every
+    other check reads it as the package's. So the name is required to be
+    bound at the top level exactly once, and by the statement the form
+    claims.
+
     `tree_of` reads a module's source, so the rule can be run over
     planted modules as well as over the package.
     """
@@ -1656,7 +1703,7 @@ def unowned(module: str, channel: str, tree_of: Callable[[str], ast.AST]) -> str
             return f"builds its own emitter and emits on {channel}"
         return ""
     if not takes_its_packages_emitter(tree):
-        return "emits without building an emitter or taking its package's"
+        return "emits without building an emitter or taking its package's, once"
     owner = module.rpartition(".")[0]
     if channel != owner:
         return f"takes {owner}'s emitter and emits on {channel}"
@@ -2203,6 +2250,37 @@ def test_a_submodule_may_not_emit_on_a_channel_nobody_owns_for_it() -> None:
     assert unowned("planted.part", "samtal_server.tools.mcp", borrowed)
     assert unowned("planted.part", "planted", silent)
     assert unowned("planted.part", "elsewhere", astray)
+
+
+def test_an_emitter_rebound_after_a_lawful_one_owns_nothing() -> None:
+    """The shape a rule that asked "is a lawful binding present" would
+    have let through, and the PR #178 review's second finding: the
+    lawful import is there, and the name the emit sites reach is the
+    one bound after it. What a module emits through is its effective
+    top-level binding, so a second binding of the name is a module that
+    has stopped saying which channel it is on, whichever form it
+    started in.
+    """
+    rebound = trees(
+        {
+            "planted": OWN_EMITTER,
+            "planted.part": PACKAGES_EMITTER + "from foreign.subsystem import events\n",
+        }
+    )
+    rebuilt = trees(
+        {"planted.part": OWN_EMITTER + "from foreign.subsystem import events\n"}
+    )
+
+    assert unowned("planted.part", "planted", rebound)
+    assert unowned("planted.part", "planted.part", rebuilt)
+    # And the walk agrees, which is the half that decides what the
+    # channel is compared against: neither form is read as ownership, so
+    # neither is attributed to the channel it named.
+    assert channel_of("planted.part", ast.parse(PACKAGES_EMITTER)) == "planted"
+    assert channel_of(
+        "planted.part",
+        ast.parse(PACKAGES_EMITTER + "from foreign.subsystem import events\n"),
+    ) == "planted.part"
 
 
 def test_the_walk_records_a_submodules_emission_on_its_packages_channel() -> None:
