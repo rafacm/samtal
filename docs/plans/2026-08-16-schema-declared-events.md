@@ -1135,3 +1135,165 @@ eleven findings. As received, condensed but faithful:
     sections.
 
 Verdict: not ready.
+
+## Plan review round 3
+
+Third external review, of the branch at b9fbc28, codex 0.147.0
+(model gpt-5.6-sol), 2026-08-17. Seven P1 and four P2, verdict not
+ready. Findings 1 and 2 escalated past the plan's authority: the
+reviewer refuted the round-2 rejection grounds (the README's
+documented retention is older than the accepted ADR and does not
+override it), so the conflict went to Rafael, who decided the
+hybrid on 2026-08-17: the ADR is amended (bounded device-descriptor
+metadata is metadata; conversation-derived text banned without
+exception), and the `asr_prompt_echo` narrowing is issue #165,
+implemented as a prerequisite to this issue's enforcement. The
+amendment is on main (744acef) and #165 is in flight. Findings as
+received, condensed but faithful:
+
+1. **P1: `DESCRIPTOR` still violates the settled contract.** The
+   README records behavior, not an ADR override; sanitized
+   far-side strings remain far-side bytes; remove the kind or
+   change the ADR first.
+
+   *Resolution*: resolved by Rafael's ADR amendment (2026-08-17,
+   main@744acef): bounded device-descriptor metadata is metadata
+   the events may carry, declared and re-enforced by this
+   registry. `DESCRIPTOR` now stands on the amended ADR, cited in
+   the registry section, with the containment sentinel unchanged.
+
+2. **P1: the grandfather leaves the exact leak #155 must
+   refuse.** The pin-file argument holds only as sequencing;
+   make the narrowing a prerequisite.
+
+   *Resolution*: accepted via the same decision. Issue #165 (the
+   sentence narrowing, its pin, its changelog breaking entry) is
+   filed and being implemented ahead of this issue; this plan's
+   baseline is post-#165 main, the `GRANDFATHERED_ARGS` machinery
+   is deleted from the design, and decision 5's pins-unmodified
+   contract holds without exception. Amended throughout the
+   enforcement section.
+
+3. **P1: the argument taxonomy cannot encode the pinned
+   surface.** `Path` arguments and formatted identifier
+   compositions are neither identifiers nor tokens; define an
+   argument-only taxonomy.
+
+   *Resolution*: accepted. Arguments get their own `ArgSpec` kinds
+   beside the field kinds: `PATHLIKE` (a trusted configured path,
+   `Path` or `str`) and `COMPOSED` (a formatted fragment whose
+   grammar and producing builder the declaration names, validated
+   against that grammar), alongside the shared numeric and
+   identifier kinds; `IDENTIFIER` is not widened. Tests cover the
+   pinned `Path` and composed-fragment examples and adversarial
+   failures. Amended in the registry section.
+
+4. **P1: forgiving recovery is neither total nor deterministic
+   for variants.** Wrong templates, bad tuples, multi-violation
+   emissions and ambiguous variant selection are undefined; the
+   guard covers only the validator.
+
+   *Resolution*: accepted. The recovery is now an algorithm:
+   variant selection uses registry-owned dimensions only (channel,
+   then declared templates, then level); a unique match rebuilds
+   the payload field by field, validating every retained field and
+   dropping every offender, and replaces message and args on ANY
+   invalid emission; no unique match degrades to the fresh
+   base-only `schema_violation` emission; the last-resort guard
+   wraps the WHOLE enforcement-and-recovery path, not the
+   validator alone. A non-injected combined-violation sentinel
+   (hostile key, value, message, and args together) joins the
+   matrix. Amended in the enforcement section.
+
+5. **P1: the conformance test is event-wide, not
+   variant-exact.** Containment by event name cannot prove each
+   of the 81 sites maps to one variant, and pinned-name
+   comparison misses an unpinned new path.
+
+   *Resolution*: accepted. Conformance is keyed by source call:
+   every one of the 81 sites (branch by branch where one site
+   emits variants) must map to exactly one variant, matching
+   channel, method-derived level, byte-exact template, arity and
+   argument kinds, static fields, and named spread inventory; and
+   the pin-coverage comparison is path-based (76 pinned literal
+   expectations plus the five conversation paths cover the 81).
+   Amended in the conformance section.
+
+6. **P1: the README table is still not provably matched.** Field
+   and token claims in prose rows can go stale while the
+   name-level check stays green.
+
+   *Resolution*: accepted, second option. The README table drops
+   its schema-bearing fields column and becomes a two-column
+   name-and-when index pointing at the generated reference for
+   every field and token fact; the name-level check then covers
+   everything the table still claims. Per-field explanatory prose
+   worth keeping moves into registry-owned note strings rendered
+   by the generated reference. The stale delimited-grammar
+   sentence in the risks section is corrected. Amended in the M3
+   section.
+
+7. **P1: `schema_violation` has no coherent count, level,
+   channel, or milestone placement.** 57 versus 58, unspecified
+   level, 14 possible channels, no emit site for the walk.
+
+   *Resolution*: accepted. The registry is "57 production-source
+   events plus one internal recovery event"; `schema_violation`
+   is fixed at ERROR, declared with one variant per channel (all
+   14), fixed template, no arguments, base fields per channel;
+   the conformance walk exempts it from the emit-site rule the
+   way the extra= guard exempts `events.py`, with its own test
+   asserting the guard is its only producer. Counts, the
+   generated reference, the README index, and the milestone
+   text now say 57 plus one. Amended in the registry, M2, and M3
+   sections.
+
+8. **P2: `events reference` is missing from mode-resolution
+   sequencing.** An invalid server-only variable must not block a
+   docs command.
+
+   *Resolution*: accepted. The subcommand dispatches before
+   enforcement resolution and server argument parsing, beside the
+   `config` and `conversations` exits, with a subprocess test
+   proving an invalid ambient value does not block it. Amended in
+   the enforcement and M3 sections.
+
+9. **P2: the risk section reintroduces leaking unknown field
+   names.** A production-only missed field's complaint must not
+   name the field.
+
+   *Resolution*: accepted. The risk bullet now says the complaint
+   names the declared event and reports the unknown field only as
+   a fixed violation code and count; the key's identity belongs to
+   strict-mode reproduction. Amended in the risks section.
+
+10. **P2: the sanitization resolution understates known mandatory
+    sites and tests only the field.** `reported_board` and
+    `reported_version` only strip whitespace; `session_open`
+    renders a raw Client-Id; args leak even when fields are
+    clean.
+
+    *Resolution*: accepted. The provenance inventory's two known
+    mandatory sites are named up front (`ota.py`'s
+    `reported_board`/`reported_version` bounding, and
+    `session_open`'s client rendering in `device/session.py`),
+    event-only copies cover payload fields AND message arguments,
+    and the adversarial tests assert the sentinel's placement
+    across `record.args`, the rendered sentence, both formats,
+    complaint, exception, and taps, while the OTA response bytes
+    and stored state stay unchanged. Amended in the registry and
+    milestone sections.
+
+11. **P2: milestone documentation and changelog obligations
+    disagree.** Every milestone owes its changelog entry,
+    implementation section, and tick.
+
+    *Resolution*: accepted. Every numbered milestone and checklist
+    entry now carries the per-milestone duties: append the
+    implementation section (deviations or an explicit none),
+    update the changelog, tick and link in the same change.
+    Amended in the milestones sections.
+
+Verdict as posted: not ready; the blocking conflict was resolved by
+Rafael's decision and #165, and the remaining findings are amended
+above.
