@@ -50,6 +50,7 @@ from .transport import (
     _reason,
     _resolve,
     _result_text,
+    quiet_sdk_loggers,
 )
 
 logger = logging.getLogger(__package__)
@@ -265,6 +266,11 @@ class McpServerManager:
     async def start(self) -> None:
         """Connect and list the tools, or log why not. Never raises: a
         dead server is not a boot failure."""
+        # Ahead of the first connection this process makes, and here
+        # rather than only where a registry is built, because a manager
+        # is started on its own by several suites and by nothing that
+        # would think to ask for the quieting first.
+        quiet_sdk_loggers()
         self._begin()
         await self._settled.wait()
 
