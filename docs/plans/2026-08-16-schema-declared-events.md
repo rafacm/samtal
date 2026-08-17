@@ -815,7 +815,7 @@ recorded in the PR body with observed failure output per branch.
       enforcement; implementation-doc section, changelog entry,
       and tick land in the same change.
 - [x] [M3](2026-08-16-schema-declared-events-implementation.md#milestone-3-the-schema-reference-cannot-drift):
-      the schema reference cannot drift (PR TBD):
+      the schema reference cannot drift (PR #170):
       `samtal-server events reference` generates
       `docs/reference/events.md`, the CI drift step holds it
       byte-identical, the README table becomes a two-column
