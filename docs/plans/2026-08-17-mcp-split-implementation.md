@@ -447,14 +447,23 @@ not satisfying the protocol it is passed as, since its `status()`
 answers mappings; the protocol declares the method the registry
 actually offers instead, so the conformance is structural and true.
 
-### The reload route lost a dependency
+### The reload route keeps both dependencies
 
-`reload_mcp_servers` took `servers` and `reload` and refused with 503
-if either was None. The reload callable now answers the whole reply, so
-the registry has nothing left to tell that handler and the parameter
-went with the flattening. The 503 is unchanged in every composition
-that exists: `app.py` passes both or the application has neither, and
-no test builds an application with a reload and no registry.
+`reload_mcp_servers` takes `servers` and `reload` and refuses with 503
+if either is None, as it did before M2. The composing left the handler
+and the registry parameter did not: it is read for one thing, whether
+there is one.
+
+This is the correction of a deviation this milestone made and the PR
+review round took back (finding 1 below). The parameter was dropped on
+the argument that no composition passes a reload without a registry,
+which was true of `app.py` and of every test, and beside the point: a
+guard is the endpoint's behavior rather than a note about its callers,
+and this endpoint is the one that changes state. With the dependency
+gone, `build_api(mcp_reload=..., mcp_servers=None)` applied a
+configuration and answered 200 for a reload whose other half nothing
+could report on. `test_half_a_runtime_refuses_to_reload_from_either_side`
+now pins both directions.
 
 **Discovery: a handler's docstring is committed bytes.** The paragraph
 explaining why the composition moved was first written into

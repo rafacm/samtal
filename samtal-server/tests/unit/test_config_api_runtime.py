@@ -309,6 +309,37 @@ def test_an_application_without_a_server_refuses_to_reload(client: TestClient) -
     assert "no running server" in response.json()["detail"]
 
 
+def test_half_a_runtime_refuses_to_reload_from_either_side(directory: Path) -> None:
+    """The route refuses on "this application has a running server
+    around it", and half a runtime is not one.
+
+    Neither half alone is a composition this server builds today, which
+    is exactly why the refusal has to be the endpoint's own behavior:
+    what an application was handed is decided somewhere else and can
+    change, and a state-changing route that applied a configuration to
+    a registry nothing gave it would be answering 200 for a reload
+    whose other half nobody can report on.
+
+    The result is built here rather than through `outcome` because
+    there is no registry to take a status from, which is the whole
+    point of the composition.
+    """
+    orphan = McpReloadResult(started=[], restarted=[], stopped=[], unchanged=[], servers={})
+
+    with serving(directory, None, answering(orphan)) as client:
+        refused = client.post(RELOAD_PATH)
+    assert refused.status_code == 503
+    assert "no running server" in refused.json()["detail"]
+
+    # And the other way round, which is what the guard said before the
+    # composing moved out of this handler.
+    servers = McpServers.build(config_with({"tools": entry_data()}, ["tools"]))
+    with serving(directory, servers) as client:
+        refused = client.post(RELOAD_PATH)
+    assert refused.status_code == 503
+    assert "no running server" in refused.json()["detail"]
+
+
 def test_a_reload_answers_with_what_it_did_and_what_is_running(directory: Path) -> None:
     servers = McpServers.build(
         config_with({"tools": entry_data(), "shelved": entry_data()}, ["tools"])
