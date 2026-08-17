@@ -1,0 +1,2294 @@
+# Event schema reference
+
+Generated from the registry by `samtal-server events reference`. Do not
+edit this file by hand: CI regenerates it and fails on any difference, so
+an edit here is reverted by the next run. The declarations live in
+`samtal-server/samtal_server/events_schema.py`.
+
+The structured events are this server's observability surface
+([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
+they carry metadata and nothing else
+([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)).
+This document is that surface written down: 58 events in 99 variants, 57 of
+them emitted from ordinary sites and 1 internal. What was said in a
+conversation is in the conversation store instead, keyed by the same `session`
+([its reference](conversations-schema.md)).
+
+The emitters hold every emission to what is written here before any of it is
+dispatched, and `SAMTAL_EVENTS_ENFORCEMENT` decides what happens to one that
+does not match: a running server recovers the emission or replaces it with
+`schema_violation` and says so, and everything that is not a running server
+raises. The [README's Logging section](../../samtal-server/README.md#logging)
+is the human overview, with one line per event saying when it fires.
+
+## How to read it
+
+A variant is one whole emission shape: where it rides, how loud it is, the
+sentence it renders, the arguments that sentence takes, and the payload it
+carries. Events have more than one because the surface does:
+`session_rejected` is emitted with three arities across four templates on two
+channels, `mcp_reload`'s applied and refused answers carry mutually exclusive
+fields, and several events change level with shape. A runtime emission matches
+exactly one variant or it is a violation.
+
+The template is byte-exact, and the argument table's rows are its `%`
+positions in order. A message that is not one of the declared templates fails
+even when every field is lawful, because the rendered sentence reaches the
+same taps the payload does.
+
+A variant's field table is the WHOLE payload a tap receives, base fields
+included: `event` everywhere, and `session` and `device` on the session
+channel, where the emitter owns them and a caller supplying one is itself a
+violation. On a server channel `session` and `device` are ordinary fields,
+declared where they are carried. Required says the field is always present in
+that variant; nullable says it may be present and null.
+
+Two per-frame samples are outside all of this on purpose. The endpointer track
+and the dropped-frame counts are capture side channels rather than events, so
+they are outside the tap contract and outside this registry, which is what
+keeps validation a cost paid per decision rather than per frame.
+
+## The channels
+
+The channel is the scope. One session channel, `samtal_server.session`,
+carries everything a conversation says about itself; the 13 server channels
+are each a subsystem's own module name. An event declared on one channel and
+emitted from another is a violation even when its fields are lawful.
+
+- `samtal_server.session`
+- `samtal_server.app`
+- `samtal_server.capture`
+- `samtal_server.config.api`
+- `samtal_server.conversations.store`
+- `samtal_server.device.bindings`
+- `samtal_server.filler`
+- `samtal_server.onboarding`
+- `samtal_server.ota`
+- `samtal_server.providers.openai_asr`
+- `samtal_server.registry`
+- `samtal_server.tools.mcp`
+- `samtal_server.tools.memory`
+- `samtal_server.ws`
+
+## What a value may be
+
+There is no free-text kind, which is the property the whole registry exists to
+keep. Every string field is one of these, and a field that would need prose is
+a design error the taxonomy refuses to encode. A trusted identifier's domain
+is a non-empty string once stripped, as NonBlankStr defines it: what the
+configuration itself guarantees, since a registry claiming more would turn a
+lawful deployment's traffic into violations.
+
+| Kind | What it is |
+| --- | --- |
+| `IDENTIFIER` | A trusted name the operator or this server chose: an agent, a configured entry, a pipeline stage, a path, an origin. Trusted is about provenance rather than shape, so its domain is the configuration's own and no tighter. |
+| `TOKEN` | One value out of the field's declared closed set, listed in full below. |
+| `CLASS_NAME` | An exception or type name. Never a message: a type name says what went wrong, a message says what a stranger wrote. |
+| `ID` | A bounded machine form this server minted or normalized, held to a named syntax rather than to a generic length. |
+| `DESCRIPTOR` | A far-side string retained deliberately: what a device says about itself at check-in, bounded and stripped of unprintables at its decision site and bounded again at emit. |
+| `INT` | A whole number. Booleans are refused, since `True` is an `int` to Python. |
+| `FLOAT` | A finite number, whole or fractional. Infinities and NaN are refused: they are not measurements and JSON cannot carry them. |
+| `BOOL` | `True` or `False`. |
+| `COUNT` | A whole number of zero or more, for the fields whose meaning is how many. |
+| `IDENTIFIER_LIST` | A list whose every element is an `IDENTIFIER`. |
+| `ID_LIST` | A list whose every element is an `ID` of the field's declared syntax. |
+| `SOURCES` | The one structured kind: a mapping from prompt provenance to character counts, keyed by the grammar below. |
+
+## What an argument may be
+
+The sentence's `%` positions have their own taxonomy beside the field kinds,
+because a rendered sentence carries shapes no payload field does.
+
+| Kind | What it is |
+| --- | --- |
+| `IDENTIFIER` | As the field kind. |
+| `TOKEN` | As the field kind. |
+| `CLASS_NAME` | As the field kind. |
+| `ID` | As the field kind. |
+| `DESCRIPTOR` | As the field kind, reusing the bounds of the field this position renders: a lawful descriptor necessarily reaches the sentence that shows it. |
+| `INT` | As the field kind. |
+| `FLOAT` | As the field kind. |
+| `BOOL` | As the field kind. |
+| `COUNT` | As the field kind. |
+| `PATHLIKE` | A trusted configured path, `Path` or `str`. Argument-only: the payload field beside it carries the same path as an `IDENTIFIER`. |
+| `COMPOSED` | A formatted fragment of identifiers, held to the named grammar below rather than to a string type. Argument-only, and the reason `IDENTIFIER` was not widened to cover punctuation. |
+
+## The id syntaxes
+
+What an `ID` field is held to. Each is anchored at both ends when it is
+matched, so a pattern cannot admit a prefix. Patterns are printed quoted, here
+and below, because a leading or trailing space is part of several of them and
+a bare code span would hide it.
+
+| Syntax | Pattern | Longest | What it is |
+| --- | --- | --- | --- |
+| `mac` | `'[0-9a-f]{2}(?::[0-9a-f]{2}){5}'` | 17 | The canonical form `normalize_mac` answers with. |
+| `reported_mac` | `'[0-9A-Fa-f]{2}(?:[:-][0-9A-Fa-f]{2}){5}'` | 17 | The Device-Id header as the firmware sent it, which the OTA sentence renders beside the normalized form the field carries. Only a header `normalize_mac` accepted ever reaches that sentence, so the looser separator and case are the whole of the difference. |
+| `session_id` | `'[0-9A-Za-z_-]{1,64}'` | 64 | A token this server minted. Production ids are `uuid4().hex`; the syntax is the bounded machine form rather than that one spelling, because the capture and store suites drive sessions of their own naming and a session id is never far-side bytes whoever chose it. |
+| `activation_code` | `'[0-9]{6}'` | 6 | A claim ticket read off a screen, not a credential. |
+| `event_name` | `'[a-z][a-z0-9_]{0,63}'` | 64 | The registry's own key, carried in the payload as `event`. |
+| `language` | `'[A-Za-z]{2,3}(?:[-_][A-Za-z0-9]{1,8})*'` | 16 | A language code as an ASR engine reports it: the bare ISO 639 code or a tagged form such as `en-US`. |
+
+## The composed grammars
+
+What a `COMPOSED` argument is held to, with the code that builds it. Naming
+the builder is what keeps a grammar honest: a fragment nobody assembles is a
+pattern somebody guessed. They are bounded by structure rather than by
+character class or length, since what a fragment promises is its shape and
+never what an operator may have called something.
+
+| Grammar | Pattern | Built by | What it is |
+| --- | --- | --- | --- |
+| `empty_fragment` | `''` | `samtal_server.runtime.pipeline:_tool_named`, `samtal_server.runtime.pipeline:PipelineRuntime._provider_failed` | The nothing a site renders where it has nothing to add. Declared rather than left untyped, so a variant that may only say nothing says exactly that. |
+| `also_bound_to` | `'(?: \(also bound to [\s\S]+\))?'` | `samtal_server.ota:check_version`, `samtal_server.device.session:DeviceSession.run` | The tail naming the agents a device is bound to beside the one that answered, empty for a device bound to exactly one. The names inside it are comma joined, and the grammar does not say so: a configured name may itself hold a comma, so the joined fragment cannot be parsed back into the names that made it, and a pattern claiming otherwise would refuse a lawful deployment. |
+| `agent_list` | `'[\s\S]+'` | `samtal_server.ota:check_version`, `samtal_server.device.session:DeviceSession.run` | The configured agent names a device is bound to, comma-joined. Non-empty, and nothing further: see the tail grammar above for why the joining is not part of the claim. |
+| `session_list` | `'[0-9A-Za-z_-]{1,64}(?:, [0-9A-Za-z_-]{1,64})*'` | `samtal_server.capture:CaptureStore.prune` | The session ids a prune removed, comma-joined. |
+| `quoted_tool_name` | `' "[\s\S]+"'` | `samtal_server.runtime.pipeline:_tool_named` | A builtin's name, which is this server's own word, bounded here by the quoting alone. A device tool's name is the board's vocabulary and an unknown one is whatever the model invented, so neither is ever rendered here. |
+| `from_entry` | `' from entry "[\s\S]+"'` | `samtal_server.runtime.pipeline:_tool_named` | The configured MCP entry a call reached, never the far side's own tool name. Entry names are separately held to `[A-Za-z0-9_-]+` by the configuration, which makes this grammar a floor rather than the whole truth; the floor is what the registry may claim, since the tighter rule is configuration's to keep and to change. |
+| `quoted_provider` | `' "[\s\S]+"'` | `samtal_server.runtime.pipeline:PipelineRuntime._provider_failed` | The configuration entry the failing provider is, bounded by the quoting alone. |
+| `reaching_host` | `'(?: reaching [\s\S]+)?'` | `samtal_server.runtime.pipeline:PipelineRuntime._provider_failed` | Where the call was going, empty for an engine that runs in this process. |
+| `origin_provenance` | `'(?:from\|guessed from) [\s\S]+'` | `samtal_server.onboarding:Origin.provenance` | Which configuration key the banner's origin came out of, and whether it was read or inferred. |
+| `device_or_unidentified` | `'[0-9a-f]{2}(?::[0-9a-f]{2}){5}\|an unidentified device'` | `samtal_server.ws:conversation` | The MAC behind a Device-Id header this server recognizes, or the fixed phrase. Nothing else: with device auth off nothing has verified that header, so an unrecognized one names no device at all. |
+
+## The prompt provenance grammar
+
+`prompt_assembled.sources` is the one structured field: a mapping from where a
+block of the prompt came from to how many characters it contributed, never any
+of the prompt itself. Its keys take these forms, with `<name>` and `<entry>`
+configured names and `<position>` a positive integer.
+
+- `persona`
+- `fragment:<name>`
+- `instructions:<entry>`
+- `server_instructions:<entry>`
+- `server_prompt:<entry>:<position>`
+
+`memory` is deliberately not among them. `prompt_assembled` reports the cached
+know-how half of the prompt and excludes the per-round memory read, so a
+`memory` key is a violation like any unknown prefix, even though it is a
+provenance token elsewhere in the prompt assembly.
+
+```text
+persona|fragment:[A-Za-z0-9_-]+|instructions:[A-Za-z0-9_-]+|server_instructions:[A-Za-z0-9_-]+|server_prompt:[A-Za-z0-9_-]+:[1-9][0-9]*
+```
+
+## The events
+
+One row per event, in the order the sections below run: the order a request
+meets them, from a device's check-in to the server's own lifecycle surfaces.
+
+| Event | Channels | Levels | Variants |
+| --- | --- | --- | --- |
+| `ota_check` | `samtal_server.ota` | INFO, WARNING | 4 |
+| `activation_not_offered` | `samtal_server.ota` | WARNING | 2 |
+| `activation_complete` | `samtal_server.ota` | INFO | 1 |
+| `activation_pending` | `samtal_server.ota` | DEBUG | 1 |
+| `activation_refused` | `samtal_server.ota` | WARNING | 3 |
+| `ota_request_rejected` | `samtal_server.ota` | WARNING | 1 |
+| `onboarding_banner` | `samtal_server.onboarding` | INFO | 2 |
+| `onboarding_key_mismatch` | `samtal_server.onboarding` | WARNING | 1 |
+| `onboarding_key_unshaped` | `samtal_server.onboarding` | WARNING | 1 |
+| `auth_rejected` | `samtal_server.ws` | WARNING | 1 |
+| `session_rejected` | `samtal_server.session`, `samtal_server.ws` | WARNING | 4 |
+| `session_open` | `samtal_server.session` | INFO | 1 |
+| `session_limit` | `samtal_server.session` | INFO | 1 |
+| `session_idle` | `samtal_server.session` | INFO | 1 |
+| `session_closed` | `samtal_server.session` | INFO | 1 |
+| `speaking_started` | `samtal_server.session` | INFO | 1 |
+| `heard` | `samtal_server.session` | INFO | 1 |
+| `replied` | `samtal_server.session` | INFO | 1 |
+| `agent_said` | `samtal_server.session` | INFO | 1 |
+| `handover` | `samtal_server.session` | INFO | 1 |
+| `prompt_assembled` | `samtal_server.session` | INFO | 1 |
+| `llm_retry` | `samtal_server.session` | WARNING | 2 |
+| `llm_round` | `samtal_server.session` | INFO | 2 |
+| `provider_failed` | `samtal_server.session` | WARNING | 2 |
+| `tool_call` | `samtal_server.session` | INFO | 3 |
+| `barge_in` | `samtal_server.session` | INFO | 1 |
+| `barge_in_suppressed` | `samtal_server.session` | INFO | 3 |
+| `barge_in_merged` | `samtal_server.session` | INFO | 1 |
+| `filler_skipped` | `samtal_server.session` | INFO | 2 |
+| `filler_played` | `samtal_server.session` | INFO | 1 |
+| `asr_prompt_echo` | `samtal_server.providers.openai_asr` | INFO, WARNING | 5 |
+| `mcp_connected` | `samtal_server.tools.mcp` | INFO | 1 |
+| `mcp_down` | `samtal_server.tools.mcp` | INFO, WARNING | 3 |
+| `mcp_call_dropped` | `samtal_server.tools.mcp` | WARNING | 1 |
+| `mcp_tool_shadowed` | `samtal_server.tools.mcp` | WARNING | 1 |
+| `mcp_reload` | `samtal_server.tools.mcp` | INFO, WARNING | 2 |
+| `memory_unreadable` | `samtal_server.tools.memory` | WARNING | 1 |
+| `filler_disabled` | `samtal_server.filler` | WARNING | 1 |
+| `capture_started` | `samtal_server.capture` | INFO | 1 |
+| `capture_declined` | `samtal_server.capture` | WARNING | 3 |
+| `capture_limit` | `samtal_server.capture` | INFO | 1 |
+| `capture_failed` | `samtal_server.capture` | WARNING | 1 |
+| `capture_pruned` | `samtal_server.capture` | INFO | 1 |
+| `capture_over_budget` | `samtal_server.capture` | WARNING | 1 |
+| `capture_enabled` | `samtal_server.app` | WARNING | 1 |
+| `capture_disabled` | `samtal_server.app` | INFO | 1 |
+| `conversations_enabled` | `samtal_server.conversations.store` | WARNING | 1 |
+| `conversations_dropped` | `samtal_server.conversations.store` | WARNING | 1 |
+| `conversations_failed` | `samtal_server.conversations.store` | WARNING | 2 |
+| `conversations_pruned` | `samtal_server.conversations.store` | INFO | 1 |
+| `drain_started` | `samtal_server.registry` | INFO | 1 |
+| `drain_finished` | `samtal_server.registry` | INFO | 1 |
+| `drain_incomplete` | `samtal_server.registry` | WARNING | 1 |
+| `device_bindings_snapshot_only` | `samtal_server.device.bindings` | DEBUG | 1 |
+| `device_bindings_unreadable` | `samtal_server.device.bindings` | WARNING | 1 |
+| `api_error` | `samtal_server.config.api` | ERROR | 1 |
+| `api_storage_error` | `samtal_server.config.api` | ERROR | 1 |
+| `schema_violation` (internal) | every channel (14) | ERROR | 14 |
+
+### `ota_check`
+
+What a device said about itself at its configuration check, and what this
+server resolved it to. No session exists yet, so the record names the device
+instead.
+
+#### Variant 1: `samtal_server.ota` at WARNING
+
+```text
+device %s (%s, firmware %s) has no agent and is showing activation code %s; bind it with: samtal-server config add-device %s <agent>
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `reported_mac` syntax |  |
+| 2 | `DESCRIPTOR` | at most 64 characters, every one printable |  |
+| 3 | `DESCRIPTOR` | at most 32 characters, every one printable |  |
+| 4 | `ID` | the `activation_code` syntax |  |
+| 5 | `ID` | the `activation_code` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `device` | `ID` | yes | no | the `mac` syntax |  |
+| `client` | `DESCRIPTOR` | yes | yes | at most 64 characters, every one printable | The device UUID, bounded for the event only: the token the reply issues is still signed for the header exactly as it arrived. |
+| `board` | `DESCRIPTOR` | yes | no | at most 64 characters, every one printable | What the device calls itself. `unknown` when it said nothing usable. |
+| `firmware` | `DESCRIPTOR` | yes | no | at most 32 characters, every one printable | The only moment a device ever states its firmware version: the websocket handshake does not carry it. |
+| `agents` | `IDENTIFIER_LIST` | yes | no |  |  |
+| `unloaded` | `IDENTIFIER_LIST` | yes | no |  | Agents this device is bound to that this process did not load. Named on every record rather than only on the one that complains, so a query for devices waiting on a restart is one field. |
+| `code` | `ID` | yes | no | the `activation_code` syntax |  |
+
+#### Variant 2: `samtal_server.ota` at WARNING
+
+```text
+device %s (%s, firmware %s) is bound to agent %s, which this server has not loaded; restart to load it
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `reported_mac` syntax |  |
+| 2 | `DESCRIPTOR` | at most 64 characters, every one printable |  |
+| 3 | `DESCRIPTOR` | at most 32 characters, every one printable |  |
+| 4 | `COMPOSED` | the `agent_list` grammar |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `device` | `ID` | yes | no | the `mac` syntax |  |
+| `client` | `DESCRIPTOR` | yes | yes | at most 64 characters, every one printable |  |
+| `board` | `DESCRIPTOR` | yes | no | at most 64 characters, every one printable |  |
+| `firmware` | `DESCRIPTOR` | yes | no | at most 32 characters, every one printable |  |
+| `agents` | `IDENTIFIER_LIST` | yes | no |  |  |
+| `unloaded` | `IDENTIFIER_LIST` | yes | no |  |  |
+
+#### Variant 3: `samtal_server.ota` at WARNING
+
+```text
+device %s (%s, firmware %s) has no agent: bind it under devices or set default_agent
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `reported_mac` syntax |  |
+| 2 | `DESCRIPTOR` | at most 64 characters, every one printable |  |
+| 3 | `DESCRIPTOR` | at most 32 characters, every one printable |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `device` | `ID` | yes | no | the `mac` syntax |  |
+| `client` | `DESCRIPTOR` | yes | yes | at most 64 characters, every one printable |  |
+| `board` | `DESCRIPTOR` | yes | no | at most 64 characters, every one printable |  |
+| `firmware` | `DESCRIPTOR` | yes | no | at most 32 characters, every one printable |  |
+| `agents` | `IDENTIFIER_LIST` | yes | no |  |  |
+| `unloaded` | `IDENTIFIER_LIST` | yes | no |  |  |
+
+#### Variant 4: `samtal_server.ota` at INFO
+
+```text
+device %s (%s, firmware %s) resolved to agent %s%s
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `reported_mac` syntax |  |
+| 2 | `DESCRIPTOR` | at most 64 characters, every one printable |  |
+| 3 | `DESCRIPTOR` | at most 32 characters, every one printable |  |
+| 4 | `IDENTIFIER` |  |  |
+| 5 | `COMPOSED` | the `also_bound_to` grammar |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `device` | `ID` | yes | no | the `mac` syntax |  |
+| `client` | `DESCRIPTOR` | yes | yes | at most 64 characters, every one printable |  |
+| `board` | `DESCRIPTOR` | yes | no | at most 64 characters, every one printable |  |
+| `firmware` | `DESCRIPTOR` | yes | no | at most 32 characters, every one printable |  |
+| `agents` | `IDENTIFIER_LIST` | yes | no |  |  |
+| `unloaded` | `IDENTIFIER_LIST` | yes | no |  |  |
+
+### `activation_not_offered`
+
+An unbound device that was answered with no activation code, and why.
+
+#### Variant 1: `samtal_server.ota` at WARNING
+
+```text
+device %s is unbound in the configuration this server started with, but the database could not be read, so no activation code was issued: this device may already be bound. Fix the database and it is offered one at its next check
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `mac` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `device` | `ID` | yes | no | the `mac` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `unreadable` |  |
+
+#### Variant 2: `samtal_server.ota` at WARNING
+
+```text
+device %s is unbound but was offered no activation code: %s. It is answered exactly as it was before onboarding existed, with no token; bind it by its MAC with: samtal-server config bind-device %s <agent>
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `mac` syntax |  |
+| 2 | `TOKEN` | one of: `128 devices are already waiting to be claimed, which is the cap`, `30 activation codes have been issued in the last 10 minutes, which is the limit` |  |
+| 3 | `ID` | the `mac` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `device` | `ID` | yes | no | the `mac` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `128 devices are already waiting to be claimed, which is the cap`, `30 activation codes have been issued in the last 10 minutes, which is the limit` |  |
+
+### `activation_complete`
+
+A waiting device has been claimed; its next check hands it a token.
+
+#### Variant 1: `samtal_server.ota` at INFO
+
+```text
+device %s is activated: its next configuration check hands it a token
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `mac` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `device` | `ID` | yes | no | the `mac` syntax |  |
+| `agents` | `IDENTIFIER_LIST` | yes | no |  |  |
+
+### `activation_pending`
+
+A waiting device polled and is still waiting.
+
+#### Variant 1: `samtal_server.ota` at DEBUG
+
+```text
+device %s is still waiting to be claimed
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `mac` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `device` | `ID` | yes | no | the `mac` syntax |  |
+| `code` | `ID` | yes | yes | the `activation_code` syntax | Null for a MAC this server holds no pending entry for. |
+| `unloaded` | `IDENTIFIER_LIST` | yes | no |  |  |
+
+### `activation_refused`
+
+A version-2 activation poll failed one of the checks this server can hold it
+to. Nothing of the body is ever quoted: the checks name which one failed and
+stop there.
+
+#### Variant 1: `samtal_server.ota` at WARNING
+
+```text
+device %s sent a version-2 activation body that is not a JSON object; it is answered as still waiting. Nothing of the body is quoted here
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `mac` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `device` | `ID` | yes | no | the `mac` syntax |  |
+| `code` | `ID` | yes | no | the `activation_code` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `unreadable_body` |  |
+
+#### Variant 2: `samtal_server.ota` at WARNING
+
+```text
+device %s sent a version-2 activation body naming an algorithm this server does not know; it is answered as still waiting. The value is not quoted here, since it is whatever the request carried
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `mac` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `device` | `ID` | yes | no | the `mac` syntax |  |
+| `code` | `ID` | yes | no | the `activation_code` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `unknown_algorithm` |  |
+
+#### Variant 3: `samtal_server.ota` at WARNING
+
+```text
+device %s sent a version-2 activation body answering a challenge this server did not issue for it; it is answered as still waiting
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `mac` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `device` | `ID` | yes | no | the `mac` syntax |  |
+| `code` | `ID` | yes | no | the `activation_code` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `challenge_mismatch` |  |
+
+### `ota_request_rejected`
+
+A request this endpoint could not read. The sentence is one of three fixed
+refusals, so nothing a request carried is interpolated into the retained log.
+
+#### Variant 1: `samtal_server.ota` at WARNING
+
+```text
+rejected OTA request: %s
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `TOKEN` | one of: `the Client-Id header is required and holds the device UUID`, `the Device-Id header does not hold a MAC address; it has to be six colon-separated hex pairs, for example aa:bb:cc:dd:ee:ff. What was sent is not quoted back, since a header that missed the MAC may hold anything at all`, `the Device-Id header is required and holds the device MAC` |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+
+### `onboarding_banner`
+
+Where devices are configured, said once at startup.
+
+#### Variant 1: `samtal_server.onboarding` at INFO
+
+```text
+device onboarding is off: devices are configured at the server.ota_path path on %s (%s), which is not printed here, since that segment is this deployment's secret
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `IDENTIFIER` |  |  |
+| 2 | `COMPOSED` | the `origin_provenance` grammar |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `origin` | `IDENTIFIER` | yes | no |  |  |
+| `origin_source` | `TOKEN` | yes | no | one of: `server.public_url`, `server.websocket_url`, `the listen address (server.host and server.port)` |  |
+| `onboarding` | `BOOL` | yes | no |  |  |
+
+#### Variant 2: `samtal_server.onboarding` at INFO
+
+```text
+device onboarding is on: devices are configured on %s (%s), at the short path samtal-server config ota-url prints. The path is not repeated here, since its key stands in front of the endpoint that issues device tokens
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `IDENTIFIER` |  |  |
+| 2 | `COMPOSED` | the `origin_provenance` grammar |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `origin` | `IDENTIFIER` | yes | no |  |  |
+| `origin_source` | `TOKEN` | yes | no | one of: `server.public_url`, `server.websocket_url`, `the listen address (server.host and server.port)` |  |
+| `onboarding` | `BOOL` | yes | no |  |  |
+| `keyed` | `BOOL` | yes | no |  | Whether anything stands in front of the short route at all. A fact about the deployment rather than about the key, which is what makes it safe to say. |
+
+### `onboarding_key_mismatch`
+
+A request carried a key-shaped segment, and not this server's. Neither is
+repeated.
+
+#### Variant 1: `samtal_server.onboarding` at WARNING
+
+```text
+a request reached the onboarding path carrying %d characters shaped like a key, and not this server's; neither is repeated here. Check the URL typed into the device's captive portal against the one samtal-server config ota-url prints
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `COUNT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `attempted_length` | `COUNT` | yes | no |  |  |
+
+### `onboarding_key_unshaped`
+
+A request carried something that is not key-shaped at all.
+
+#### Variant 1: `samtal_server.onboarding` at WARNING
+
+```text
+a request reached the onboarding path carrying %d characters that are not shaped like a key at all, so they are not repeated here; the URL to type comes from samtal-server config ota-url
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `COUNT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `attempted_length` | `COUNT` | yes | no |  |  |
+
+### `auth_rejected`
+
+A handshake refused before the accept. No device: nothing is authenticated at
+this point, so the Device-Id header is a string whoever opened the socket
+chose.
+
+#### Variant 1: `samtal_server.ws` at WARNING
+
+```text
+refused a websocket handshake from an unidentified client: %s
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `TOKEN` | one of: `bad_token`, `no_token` |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `bad_token`, `no_token` |  |
+
+### `session_rejected`
+
+A device turned away. Emitted on both scopes: the session channel for the
+refusals a session makes after the accept, and `samtal_server.ws` for the one
+the endpoint makes before a session can run at all.
+
+#### Variant 1: `samtal_server.session` at WARNING
+
+```text
+session %s rejected: the Device-Id header is not a device MAC (six colon-separated hex pairs)
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `bad_device_id` |  |
+
+#### Variant 2: `samtal_server.session` at WARNING
+
+```text
+session %s rejected: device %s is bound to agent %s, which this server has not loaded; restart to load it
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `ID` | the `mac` syntax |  |
+| 3 | `COMPOSED` | the `agent_list` grammar |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `agent_not_loaded` |  |
+
+#### Variant 3: `samtal_server.session` at WARNING
+
+```text
+session %s rejected: device %s has no agent: bind it under devices or set default_agent
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `ID` | the `mac` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `no_agent` |  |
+
+#### Variant 4: `samtal_server.ws` at WARNING
+
+```text
+refused a websocket handshake from %s: the server is at capacity
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `COMPOSED` | the `device_or_unidentified` grammar |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `capacity` |  |
+
+### `session_open`
+
+A conversation starts.
+
+#### Variant 1: `samtal_server.session` at INFO
+
+```text
+session %s open: device %s (client %s) agent %s%s, protocol v%d, %d Hz %d ms frames in
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `ID` | the `mac` syntax |  |
+| 3 | `DESCRIPTOR` | at most 64 characters, every one printable |  |
+| 4 | `IDENTIFIER` |  |  |
+| 5 | `COMPOSED` | the `also_bound_to` grammar |  |
+| 6 | `INT` |  |  |
+| 7 | `INT` |  |  |
+| 8 | `INT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `client` | `DESCRIPTOR` | yes | yes | at most 64 characters, every one printable | The device UUID, bounded for the event only: the capture manifest and the conversation store keep the header as it arrived. |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `agents` | `IDENTIFIER_LIST` | yes | no |  |  |
+| `protocol` | `INT` | yes | no |  |  |
+| `revision` | `IDENTIFIER` | yes | no |  | Which build this server is, so every session from here on is attributable to one. |
+
+### `session_limit`
+
+The duration cap fires.
+
+#### Variant 1: `samtal_server.session` at INFO
+
+```text
+session %s reached the %.0f s time limit
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `FLOAT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `duration_s` | `FLOAT` | yes | no |  |  |
+
+### `session_idle`
+
+The idle timeout hangs up on a realtime session.
+
+#### Variant 1: `samtal_server.session` at INFO
+
+```text
+session %s idle for %.0f s, hanging up
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `FLOAT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `idle_s` | `FLOAT` | yes | no |  |  |
+| `duration_s` | `FLOAT` | yes | no |  |  |
+
+### `session_closed`
+
+A conversation ends.
+
+#### Variant 1: `samtal_server.session` at INFO
+
+```text
+session %s closed (device %s)
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `ID` | the `mac` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `duration_s` | `FLOAT` | yes | no |  |  |
+| `reason` | `TOKEN` | yes | no | one of: `client`, `drain`, `error`, `idle`, `limit` | The first cause to fire, so a drain closing a session an idle timer was about to hang up on reads `drain`. |
+
+### `speaking_started`
+
+The reply's first audio frame goes out.
+
+#### Variant 1: `samtal_server.session` at INFO
+
+```text
+session %s: speaking started
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+
+### `heard`
+
+An utterance is transcribed. No transcript: what was said is the conversation
+store's, and what an operator measures with is how long the user spoke.
+
+#### Variant 1: `samtal_server.session` at INFO
+
+```text
+session %s: heard %.2f s of speech
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `FLOAT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `duration_s` | `FLOAT` | yes | no |  |  |
+| `language` | `ID` | no | no | the `language` syntax | Only engines that detected carry this. |
+| `language_confidence` | `FLOAT` | no | no |  |  |
+
+### `replied`
+
+A reply finishes.
+
+#### Variant 1: `samtal_server.session` at INFO
+
+```text
+session %s: %s replied in %d sentences
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `IDENTIFIER` |  |  |
+| 3 | `COUNT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `sentences` | `COUNT` | yes | no |  | How many of them the user heard, so a reply a barge-in cut short reports what went out. |
+
+### `agent_said`
+
+One agent's part of a reply.
+
+#### Variant 1: `samtal_server.session` at INFO
+
+```text
+session %s: %s said %d sentences
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `IDENTIFIER` |  |  |
+| 3 | `COUNT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `sentences` | `COUNT` | yes | no |  |  |
+
+### `handover`
+
+`switch_agent` succeeds.
+
+#### Variant 1: `samtal_server.session` at INFO
+
+```text
+session %s: handed over from agent %s to %s
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `IDENTIFIER` |  |  |
+| 3 | `IDENTIFIER` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `from_agent` | `IDENTIFIER` | yes | no |  |  |
+| `to_agent` | `IDENTIFIER` | yes | no |  |  |
+
+### `prompt_assembled`
+
+The know-how half of a prompt is assembled and cached. The per-round memory
+read is deliberately not part of it, which is why `memory` is not one of the
+provenance forms.
+
+#### Variant 1: `samtal_server.session` at INFO
+
+```text
+session %s: assembled %d characters of prompt for %s
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `COUNT` |  |  |
+| 3 | `IDENTIFIER` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `characters` | `COUNT` | yes | no |  |  |
+| `sources` | `SOURCES` | yes | no | keyed by the prompt provenance grammar, with counts for values | Each block's size by provenance: how much of the prompt came from where, never any of the prompt itself. |
+
+### `llm_retry`
+
+The first-token watchdog cancels a stalled generation and retries the round
+once.
+
+#### Variant 1: `samtal_server.session` at WARNING
+
+A provider the registry did not build names no entry.
+
+```text
+session %s: no first token after %.1f s, retrying round %d
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `FLOAT` |  |  |
+| 3 | `INT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `round` | `INT` | yes | no |  |  |
+| `duration_ms` | `INT` | yes | no |  |  |
+| `stage` | `IDENTIFIER` | yes | no |  |  |
+
+#### Variant 2: `samtal_server.session` at WARNING
+
+`provider` and `type` are atomic: a provider with an identity carries both.
+`host` is absent for an engine that runs in this process and `model` for a
+type that has none to name.
+
+```text
+session %s: no first token after %.1f s, retrying round %d
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `FLOAT` |  |  |
+| 3 | `INT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `round` | `INT` | yes | no |  |  |
+| `duration_ms` | `INT` | yes | no |  |  |
+| `stage` | `IDENTIFIER` | yes | no |  |  |
+| `provider` | `IDENTIFIER` | yes | no |  |  |
+| `type` | `IDENTIFIER` | yes | no |  |  |
+| `host` | `IDENTIFIER` | no | no |  |  |
+| `model` | `IDENTIFIER` | no | no |  | The GenAI conventions' `gen_ai.request.model`. |
+
+### `llm_round`
+
+A generation call finishes.
+
+#### Variant 1: `samtal_server.session` at INFO
+
+```text
+session %s: %s round %d took %.2f s over %d turns
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `IDENTIFIER` |  |  |
+| 3 | `INT` |  |  |
+| 4 | `FLOAT` |  |  |
+| 5 | `COUNT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `round` | `INT` | yes | no |  | Counts the whole reply rather than one agent's leg, so the generation after a handover is a round of its own. |
+| `turns` | `COUNT` | yes | no |  | The cheap proxy for payload size. |
+| `duration_ms` | `INT` | yes | no |  |  |
+| `stage` | `IDENTIFIER` | yes | no |  |  |
+| `input_tokens` | `COUNT` | no | no |  |  |
+| `output_tokens` | `COUNT` | no | no |  |  |
+| `first_token_ms` | `INT` | no | no |  | Times the first spoken token, so a round that only asked for a tool carries none. |
+
+#### Variant 2: `samtal_server.session` at INFO
+
+```text
+session %s: %s round %d took %.2f s over %d turns
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `IDENTIFIER` |  |  |
+| 3 | `INT` |  |  |
+| 4 | `FLOAT` |  |  |
+| 5 | `COUNT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `round` | `INT` | yes | no |  |  |
+| `turns` | `COUNT` | yes | no |  |  |
+| `duration_ms` | `INT` | yes | no |  |  |
+| `stage` | `IDENTIFIER` | yes | no |  |  |
+| `provider` | `IDENTIFIER` | yes | no |  |  |
+| `type` | `IDENTIFIER` | yes | no |  |  |
+| `host` | `IDENTIFIER` | no | no |  |  |
+| `model` | `IDENTIFIER` | no | no |  | Present where the configured entry names one. The GenAI conventions' `gen_ai.request.model`. |
+| `input_tokens` | `COUNT` | no | no |  | Present where the provider reported usage; their absence is a fact about the endpoint. |
+| `output_tokens` | `COUNT` | no | no |  |  |
+| `first_token_ms` | `INT` | no | no |  |  |
+
+### `provider_failed`
+
+An ASR, LLM or TTS call fails. The class name is reported and the exception's
+message is not: a type name says what went wrong, a message says what a
+stranger wrote.
+
+#### Variant 1: `samtal_server.session` at WARNING
+
+A provider the registry did not build names no entry and no host.
+
+```text
+session %s: %s provider%s %s after %.2f s%s: %s
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `IDENTIFIER` |  |  |
+| 3 | `COMPOSED` | the `empty_fragment` grammar |  |
+| 4 | `TOKEN` | one of: `failed`, `timed out` |  |
+| 5 | `FLOAT` |  |  |
+| 6 | `COMPOSED` | the `empty_fragment` grammar |  |
+| 7 | `CLASS_NAME` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `error` | `CLASS_NAME` | yes | no |  |  |
+| `duration_ms` | `INT` | yes | no |  |  |
+| `stage` | `IDENTIFIER` | yes | no |  |  |
+
+#### Variant 2: `samtal_server.session` at WARNING
+
+```text
+session %s: %s provider%s %s after %.2f s%s: %s
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `IDENTIFIER` |  |  |
+| 3 | `COMPOSED` | the `quoted_provider` grammar |  |
+| 4 | `TOKEN` | one of: `failed`, `timed out` |  |
+| 5 | `FLOAT` |  |  |
+| 6 | `COMPOSED` | the `reaching_host` grammar |  |
+| 7 | `CLASS_NAME` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `error` | `CLASS_NAME` | yes | no |  | A round whose retry also stalled carries `FirstTokenTimeout`. |
+| `duration_ms` | `INT` | yes | no |  |  |
+| `stage` | `IDENTIFIER` | yes | no |  |  |
+| `provider` | `IDENTIFIER` | yes | no |  |  |
+| `type` | `IDENTIFIER` | yes | no |  |  |
+| `host` | `IDENTIFIER` | no | no |  |  |
+| `model` | `IDENTIFIER` | no | no |  |  |
+
+### `tool_call`
+
+A tool returns. `source` says which namespace the model reached into; the name
+itself is only ever this server's own word for it.
+
+#### Variant 1: `samtal_server.session` at INFO
+
+```text
+session %s: %s tool%s took %.2f s%s
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `TOKEN` | one of: `builtin` |  |
+| 3 | `COMPOSED` | the `quoted_tool_name` grammar |  |
+| 4 | `FLOAT` |  |  |
+| 5 | `TOKEN` | one of: ``, `and failed` |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `source` | `TOKEN` | yes | no | one of: `builtin` |  |
+| `tool` | `IDENTIFIER` | yes | no |  | The only tool names this server authors. |
+| `duration_ms` | `INT` | yes | no |  |  |
+| `is_error` | `BOOL` | yes | no |  |  |
+
+#### Variant 2: `samtal_server.session` at INFO
+
+```text
+session %s: %s tool%s took %.2f s%s
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `TOKEN` | one of: `mcp` |  |
+| 3 | `COMPOSED` | the `from_entry` grammar |  |
+| 4 | `FLOAT` |  |  |
+| 5 | `TOKEN` | one of: ``, `and failed` |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `source` | `TOKEN` | yes | no | one of: `mcp` |  |
+| `entry` | `IDENTIFIER` | yes | no |  | The configured entry, never the far side's tool name. |
+| `duration_ms` | `INT` | yes | no |  |  |
+| `is_error` | `BOOL` | yes | no |  |  |
+
+#### Variant 3: `samtal_server.session` at INFO
+
+A device tool's name is the board's vocabulary and an unknown one is whatever
+the model invented, so neither is named.
+
+```text
+session %s: %s tool%s took %.2f s%s
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `TOKEN` | one of: `device`, `unknown` |  |
+| 3 | `COMPOSED` | the `empty_fragment` grammar |  |
+| 4 | `FLOAT` |  |  |
+| 5 | `TOKEN` | one of: ``, `and failed` |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `source` | `TOKEN` | yes | no | one of: `device`, `unknown` |  |
+| `duration_ms` | `INT` | yes | no |  |  |
+| `is_error` | `BOOL` | yes | no |  |  |
+
+### `barge_in`
+
+Speech cuts a reply short.
+
+#### Variant 1: `samtal_server.session` at INFO
+
+```text
+session %s: barge-in, cancelling the reply in flight
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `speech_ms` | `INT` | yes | no |  |  |
+| `speaking_ms` | `INT` | no | no |  | Milliseconds from `speaking_started` to the cancel decision, absent when the reply had not yet spoken. |
+
+### `barge_in_suppressed`
+
+An interruption is dropped and the reply lives.
+
+#### Variant 1: `samtal_server.session` at INFO
+
+```text
+session %s: barge-in suppressed, %d ms of speech is under the %.0f ms floor
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `INT` |  |  |
+| 3 | `FLOAT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `min_speech` |  |
+| `speech_ms` | `INT` | yes | no |  |  |
+
+#### Variant 2: `samtal_server.session` at INFO
+
+```text
+session %s: barge-in suppressed inside the refractory window
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `refractory` |  |
+| `speech_ms` | `INT` | yes | no |  |  |
+
+#### Variant 3: `samtal_server.session` at INFO
+
+```text
+session %s: barge-in suppressed, nothing transcribed
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `no_transcript` |  |
+| `speech_ms` | `INT` | yes | no |  |  |
+
+### `barge_in_merged`
+
+An interruption merges with the utterance the reply was transcribing.
+
+#### Variant 1: `samtal_server.session` at INFO
+
+```text
+session %s: barge-in mid-transcription, merging the utterances
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `speech_ms` | `INT` | yes | no |  |  |
+
+### `filler_skipped`
+
+The filler timer fired but the user was there first, so no clip played.
+
+#### Variant 1: `samtal_server.session` at INFO
+
+```text
+session %s: filler skipped, the user is speaking (%d ms heard)
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `INT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `reason` | `TOKEN` | yes | no | one of: `user_speaking` |  |
+| `speech_ms` | `INT` | yes | no |  |  |
+
+#### Variant 2: `samtal_server.session` at INFO
+
+```text
+session %s: filler skipped, a barge-in is being confirmed
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `reason` | `TOKEN` | yes | no | one of: `barge_in_pending` |  |
+
+### `filler_played`
+
+The reply was slow, so a pre-synthesized clip masked the wait. Its first frame
+is the turn's `speaking_started`.
+
+#### Variant 1: `samtal_server.session` at INFO
+
+```text
+session %s: no reply audio after %d ms, playing filler %d
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `INT` |  |  |
+| 3 | `COUNT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `delay_ms` | `INT` | yes | no |  | Measured, from the transcription to the fire. |
+| `phrase_index` | `COUNT` | yes | no |  |  |
+
+### `asr_prompt_echo`
+
+A transcript came back as the ASR prompt and the clip was retried once without
+it, on what the first request left of `timeout_s`. No session or device:
+providers are shared singletons that serve every conversation, so the event
+names the host instead.
+
+#### Variant 1: `samtal_server.providers.openai_asr` at WARNING
+
+```text
+openai asr: the transcript came back as the configured prompt with %.1f s of the timeout left, too little to retry, treating %.2f s of audio as nothing said
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `FLOAT` |  |  |
+| 2 | `FLOAT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `outcome` | `TOKEN` | yes | no | one of: `skipped` | Under a second of budget remained, so no retry was sent. |
+| `duration_s` | `FLOAT` | yes | no |  |  |
+| `host` | `IDENTIFIER` | yes | no |  |  |
+
+#### Variant 2: `samtal_server.providers.openai_asr` at WARNING
+
+```text
+openai asr: the retry outran the timeout's remaining %.1f s, treating %.2f s of audio as nothing said
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `FLOAT` |  |  |
+| 2 | `FLOAT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `outcome` | `TOKEN` | yes | no | one of: `timed_out` | The retry outran what the first request left of the budget. |
+| `duration_s` | `FLOAT` | yes | no |  |  |
+| `host` | `IDENTIFIER` | yes | no |  |  |
+| `retry_ms` | `INT` | yes | no |  |  |
+
+#### Variant 3: `samtal_server.providers.openai_asr` at WARNING
+
+```text
+openai asr: the retry came back as the prompt again, treating %.2f s of audio as nothing said
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `FLOAT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `outcome` | `TOKEN` | yes | no | one of: `confirmed_echo` | The retry came back as the configured prompt again. |
+| `duration_s` | `FLOAT` | yes | no |  |  |
+| `host` | `IDENTIFIER` | yes | no |  |  |
+| `retry_ms` | `INT` | yes | no |  |  |
+
+#### Variant 4: `samtal_server.providers.openai_asr` at WARNING
+
+```text
+openai asr: the retry came back empty, treating %.2f s of audio as nothing said
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `FLOAT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `outcome` | `TOKEN` | yes | no | one of: `confirmed_empty` | The retry heard nothing. |
+| `duration_s` | `FLOAT` | yes | no |  |  |
+| `host` | `IDENTIFIER` | yes | no |  |  |
+| `retry_ms` | `INT` | yes | no |  |  |
+
+#### Variant 5: `samtal_server.providers.openai_asr` at INFO
+
+```text
+openai asr: the retry recovered %.2f s of audio the echo guard would have discarded
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `FLOAT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `outcome` | `TOKEN` | yes | no | one of: `recovered` | The retry's transcript is heard. What was recovered is not in the sentence: conversation-derived text is banned on the events however it was recovered (#165). |
+| `duration_s` | `FLOAT` | yes | no |  |  |
+| `host` | `IDENTIFIER` | yes | no |  |  |
+| `retry_ms` | `INT` | yes | no |  |  |
+
+### `mcp_connected`
+
+An entry's connect finishes and its tools are published. No session or device:
+one entry serves every conversation, and the rest of this block is the same.
+
+#### Variant 1: `samtal_server.tools.mcp` at INFO
+
+```text
+mcp server %s connected with %d tool(s)
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `IDENTIFIER` |  |  |
+| 2 | `COUNT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `entry` | `IDENTIFIER` | yes | no |  |  |
+| `transport` | `TOKEN` | yes | no | one of: `stdio`, `streamable_http` |  |
+| `tools` | `COUNT` | yes | no |  | A count, never a list. |
+| `duration_ms` | `INT` | yes | no |  |  |
+
+### `mcp_down`
+
+An entry fails to come up, or its connection is given up.
+
+#### Variant 1: `samtal_server.tools.mcp` at WARNING
+
+```text
+mcp server %s is unavailable, its tools are absent: %s
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `IDENTIFIER` |  |  |
+| 2 | `CLASS_NAME` | one name, or several joined with `, ` |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `entry` | `IDENTIFIER` | yes | no |  |  |
+| `reason` | `TOKEN` | yes | no | one of: `connect_timeout`, `discovery_failed`, `initialize_failed`, `transport_failed` |  |
+| `duration_ms` | `INT` | yes | no |  | How long the connect ran before it failed. |
+
+#### Variant 2: `samtal_server.tools.mcp` at INFO
+
+The intentional one, a shutdown or a reload, and the only `mcp_down` at INFO.
+No duration: how long a working connection lasted is a different number under
+the same name.
+
+```text
+mcp server %s is stopped and its tools are gone
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `IDENTIFIER` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `entry` | `IDENTIFIER` | yes | no |  |  |
+| `reason` | `TOKEN` | yes | no | one of: `stopped` |  |
+
+#### Variant 3: `samtal_server.tools.mcp` at WARNING
+
+Always beside an `mcp_call_dropped`, in that order.
+
+```text
+mcp server %s: dropping the connection after a failed call
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `IDENTIFIER` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `entry` | `IDENTIFIER` | yes | no |  |  |
+| `reason` | `TOKEN` | yes | no | one of: `call_failed` |  |
+
+### `mcp_call_dropped`
+
+A tool call failed and the connection was dropped because of it. The tool is
+said by its position in the far side's listing and never by its name: half a
+published name is what the far side called its tool.
+
+#### Variant 1: `samtal_server.tools.mcp` at WARNING
+
+```text
+mcp server %s: the call to published tool %s failed (%s), so its answer is lost
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `IDENTIFIER` |  |  |
+| 2 | `COUNT` |  |  |
+| 3 | `CLASS_NAME` | one name, or several joined with `, ` |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `entry` | `IDENTIFIER` | yes | no |  |  |
+| `position` | `COUNT` | yes | yes |  | The tool's place in the far side's listing, counted from one. Null for a name this connection no longer knows. |
+| `error` | `CLASS_NAME` | yes | no | one name, or several joined with `, ` | The failure's class name, and for a group of them the sorted names joined with a comma. Never a message. |
+
+### `mcp_tool_shadowed`
+
+A published tool is dropped because a more specific entry owns its name.
+
+#### Variant 1: `samtal_server.tools.mcp` at WARNING
+
+```text
+mcp server %s: dropping published tool %d, its name is inside the namespace of the entry %s, which owns it
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `IDENTIFIER` |  |  |
+| 2 | `COUNT` |  |  |
+| 3 | `IDENTIFIER` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `entry` | `IDENTIFIER` | yes | no |  |  |
+| `position` | `COUNT` | yes | no |  | The tool's place in the far side's listing. |
+| `owner` | `IDENTIFIER` | yes | no |  |  |
+
+### `mcp_reload`
+
+A reload of the MCP servers finishes, whether or not the caller is still
+connected. Exactly one per reload, at whichever of the two phases ended it.
+
+#### Variant 1: `samtal_server.tools.mcp` at WARNING
+
+```text
+mcp servers were not reloaded and nothing was changed (%s)
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `TOKEN` | one of: `database_busy`, `in_progress`, `invalid`, `unexpected`, `unreadable` |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `outcome` | `TOKEN` | yes | no | one of: `refused` |  |
+| `reason` | `TOKEN` | yes | no | one of: `database_busy`, `in_progress`, `invalid`, `unexpected`, `unreadable` | Chosen where the exception is classified and never built out of its message. |
+
+#### Variant 2: `samtal_server.tools.mcp` at INFO
+
+```text
+mcp servers reloaded: %d started, %d restarted, %d stopped, %d unchanged
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `COUNT` |  |  |
+| 2 | `COUNT` |  |  |
+| 3 | `COUNT` |  |  |
+| 4 | `COUNT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `outcome` | `TOKEN` | yes | no | one of: `applied` |  |
+| `started` | `COUNT` | yes | no |  |  |
+| `restarted` | `COUNT` | yes | no |  |  |
+| `stopped` | `COUNT` | yes | no |  |  |
+| `unchanged` | `COUNT` | yes | no |  |  |
+| `duration_ms` | `INT` | yes | no |  | Measured from when the request was accepted, so it covers the re-read as well as the apply. |
+
+### `memory_unreadable`
+
+An agent's memory could not be read; it remembers nothing this round.
+
+#### Variant 1: `samtal_server.tools.memory` at WARNING
+
+```text
+could not read memory for agent %s (%s); it remembers nothing this round
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `IDENTIFIER` |  |  |
+| 2 | `CLASS_NAME` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `error` | `CLASS_NAME` | yes | no |  |  |
+
+### `filler_disabled`
+
+Filler synthesis failed for one agent, so latency masking is off for it.
+
+#### Variant 1: `samtal_server.filler` at WARNING
+
+```text
+agent %s: filler synthesis failed, latency masking is off for this agent (%s)
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `IDENTIFIER` |  |  |
+| 2 | `CLASS_NAME` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `error` | `CLASS_NAME` | yes | no |  |  |
+
+### `capture_started`
+
+A session is being recorded.
+
+#### Variant 1: `samtal_server.capture` at INFO
+
+```text
+session %s: capturing to %s
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `PATHLIKE` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `path` | `IDENTIFIER` | yes | no |  |  |
+
+### `capture_declined`
+
+A session is not being recorded, and why.
+
+#### Variant 1: `samtal_server.capture` at WARNING
+
+```text
+session %s: not capturing, %s is unusable (%s)
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `PATHLIKE` |  |  |
+| 3 | `CLASS_NAME` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `unusable` |  |
+| `failure` | `CLASS_NAME` | yes | no |  |  |
+
+#### Variant 2: `samtal_server.capture` at WARNING
+
+```text
+session %s: not capturing, %.0f MB free is below the %.0f MB floor
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `FLOAT` |  |  |
+| 3 | `FLOAT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `min_free_mb` |  |
+| `free_mb` | `COUNT` | yes | no |  |  |
+
+#### Variant 3: `samtal_server.capture` at WARNING
+
+```text
+session %s: not capturing, could not open the files (%s)
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `CLASS_NAME` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `open` |  |
+| `failure` | `CLASS_NAME` | yes | no |  |  |
+
+### `capture_limit`
+
+A recording reached its per-session ceiling.
+
+#### Variant 1: `samtal_server.capture` at INFO
+
+```text
+session %s: capture reached its %.0f s limit
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `FLOAT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+
+### `capture_failed`
+
+A recording stopped after a write failed.
+
+#### Variant 1: `samtal_server.capture` at WARNING
+
+```text
+session %s: capture stopped after failing to %s (%s)
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+| 2 | `TOKEN` | one of: `write an event`, `write audio` |  |
+| 3 | `CLASS_NAME` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `write an event`, `write audio` | Which of the recording's two tracks the write was for. |
+| `failure` | `CLASS_NAME` | yes | no |  |  |
+
+### `capture_pruned`
+
+Old recordings were removed to stay inside the disk budget.
+
+#### Variant 1: `samtal_server.capture` at INFO
+
+```text
+capture: pruned %d session(s) to stay under %.0f MB: %s
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `COUNT` |  |  |
+| 2 | `FLOAT` |  |  |
+| 3 | `COMPOSED` | the `session_list` grammar |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `sessions` | `ID_LIST` | yes | no | each element: the `session_id` syntax | The ids themselves, not a count. |
+
+### `capture_over_budget`
+
+The disk budget is exceeded and nothing more can be pruned.
+
+#### Variant 1: `samtal_server.capture` at WARNING
+
+```text
+capture: %.0f MB on disk is over the %.0f MB budget and nothing more can be pruned; raise max_total_mb or lower max_session_s
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `FLOAT` |  |  |
+| 2 | `FLOAT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `total_mb` | `COUNT` | yes | no |  |  |
+
+### `capture_enabled`
+
+Said once at startup, at WARNING: recording room audio is a thing an operator
+should not discover by accident.
+
+#### Variant 1: `samtal_server.app` at WARNING
+
+```text
+session capture is on: room audio and a track of the session's events are being written to %s
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `PATHLIKE` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `path` | `IDENTIFIER` | yes | no |  |  |
+
+### `capture_disabled`
+
+Capture is configured but off.
+
+#### Variant 1: `samtal_server.app` at INFO
+
+```text
+session capture is configured but off; set server.capture.enabled to record to %s
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `PATHLIKE` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `path` | `IDENTIFIER` | yes | no |  |  |
+
+### `conversations_enabled`
+
+The store opens at startup, which means this server is recording what is said
+to it. Said once, before anything connects, and at WARNING for the reason
+`capture_enabled` is.
+
+#### Variant 1: `samtal_server.conversations.store` at WARNING
+
+```text
+recording conversations to %s
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `PATHLIKE` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `path` | `IDENTIFIER` | yes | no |  |  |
+
+### `conversations_dropped`
+
+The store is behind and events for one session are being dropped. Said once
+per session at its first drop; the total lands on that session's row.
+
+#### Variant 1: `samtal_server.conversations.store` at WARNING
+
+```text
+session %s: the conversation store is behind, dropping events
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `session_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+
+### `conversations_failed`
+
+A write to the store failed and its batch was dropped, or a prune could not
+run.
+
+#### Variant 1: `samtal_server.conversations.store` at WARNING
+
+```text
+the conversation store dropped a batch after a write failed (%s)
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `CLASS_NAME` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `failure` | `CLASS_NAME` | yes | no |  | The exception's class name, never its message. |
+
+#### Variant 2: `samtal_server.conversations.store` at WARNING
+
+```text
+the conversation store could not prune (%s)
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `CLASS_NAME` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `failure` | `CLASS_NAME` | yes | no |  |  |
+
+### `conversations_pruned`
+
+Retention deleted sessions older than the window. At INFO: a policy doing its
+job.
+
+#### Variant 1: `samtal_server.conversations.store` at INFO
+
+```text
+conversations: pruned %d session(s) older than %d days
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `COUNT` |  |  |
+| 2 | `COUNT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `sessions` | `COUNT` | yes | no |  | A count, not a list. |
+
+### `drain_started`
+
+A shutdown begins draining.
+
+#### Variant 1: `samtal_server.registry` at INFO
+
+```text
+draining %d session(s), up to %.0f s
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `COUNT` |  |  |
+| 2 | `FLOAT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `sessions` | `COUNT` | yes | no |  |  |
+| `timeout_s` | `FLOAT` | yes | no |  |  |
+
+### `drain_finished`
+
+Every reply finished speaking.
+
+#### Variant 1: `samtal_server.registry` at INFO
+
+```text
+every session drained
+```
+
+No arguments: the sentence is fixed.
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `sessions` | `COUNT` | yes | no |  |  |
+
+### `drain_incomplete`
+
+A reply was cut, or a session hung.
+
+#### Variant 1: `samtal_server.registry` at WARNING
+
+```text
+drained with %d session(s) cut mid-reply and %d that did not finish
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `COUNT` |  |  |
+| 2 | `COUNT` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `sessions` | `COUNT` | yes | no |  |  |
+| `cut_mid_reply` | `COUNT` | yes | no |  |  |
+| `unfinished` | `COUNT` | yes | no |  |  |
+| `timeout_s` | `FLOAT` | yes | no |  |  |
+
+### `device_bindings_snapshot_only`
+
+There is no configuration database, so bindings resolve from the boot
+snapshot.
+
+#### Variant 1: `samtal_server.device.bindings` at DEBUG
+
+```text
+no configuration database at %s: device bindings resolve from the configuration this server was built with
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `PATHLIKE` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `path` | `IDENTIFIER` | yes | no |  |  |
+
+### `device_bindings_unreadable`
+
+The database could not be read, so the answer is the boot snapshot's.
+
+#### Variant 1: `samtal_server.device.bindings` at WARNING
+
+```text
+cannot read the device bindings for %s; answering from the configuration this server started with, which may be older than the database. The failure's kind is recorded beside this line
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `ID` | the `mac` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `device` | `ID` | yes | no | the `mac` syntax |  |
+| `failure` | `CLASS_NAME` | yes | no |  |  |
+
+### `api_error`
+
+The configuration API failed to handle a request. The class name and nothing
+else.
+
+#### Variant 1: `samtal_server.config.api` at ERROR
+
+```text
+the configuration API failed to handle a request (%s)
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `CLASS_NAME` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+
+### `api_storage_error`
+
+The configuration API met unreadable stored state.
+
+#### Variant 1: `samtal_server.config.api` at ERROR
+
+```text
+the configuration API met unreadable stored state (%s)
+```
+
+| # | Argument | Constraint | Note |
+| --- | --- | --- | --- |
+| 1 | `CLASS_NAME` |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+
+### `schema_violation`
+
+**Internal.** No ordinary emit site produces this event, and the conformance
+walk exempts it by name for that reason; the emitter itself is its only
+producer.
+
+What the emitter emits in forgiving mode when an emission cannot be recovered
+into a declared shape. Fixed at ERROR, because `log_level` admits roots above
+WARNING and a complaint that vanishes under one is no complaint.
+
+#### Variant 1: `samtal_server.session` at ERROR
+
+```text
+an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+```
+
+No arguments: the sentence is fixed.
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+
+#### Variant 2: `samtal_server.app` at ERROR
+
+```text
+an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+```
+
+No arguments: the sentence is fixed.
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+
+#### Variant 3: `samtal_server.capture` at ERROR
+
+```text
+an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+```
+
+No arguments: the sentence is fixed.
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+
+#### Variant 4: `samtal_server.config.api` at ERROR
+
+```text
+an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+```
+
+No arguments: the sentence is fixed.
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+
+#### Variant 5: `samtal_server.conversations.store` at ERROR
+
+```text
+an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+```
+
+No arguments: the sentence is fixed.
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+
+#### Variant 6: `samtal_server.device.bindings` at ERROR
+
+```text
+an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+```
+
+No arguments: the sentence is fixed.
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+
+#### Variant 7: `samtal_server.filler` at ERROR
+
+```text
+an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+```
+
+No arguments: the sentence is fixed.
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+
+#### Variant 8: `samtal_server.onboarding` at ERROR
+
+```text
+an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+```
+
+No arguments: the sentence is fixed.
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+
+#### Variant 9: `samtal_server.ota` at ERROR
+
+```text
+an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+```
+
+No arguments: the sentence is fixed.
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+
+#### Variant 10: `samtal_server.providers.openai_asr` at ERROR
+
+```text
+an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+```
+
+No arguments: the sentence is fixed.
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+
+#### Variant 11: `samtal_server.registry` at ERROR
+
+```text
+an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+```
+
+No arguments: the sentence is fixed.
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+
+#### Variant 12: `samtal_server.tools.mcp` at ERROR
+
+```text
+an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+```
+
+No arguments: the sentence is fixed.
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+
+#### Variant 13: `samtal_server.tools.memory` at ERROR
+
+```text
+an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+```
+
+No arguments: the sentence is fixed.
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+
+#### Variant 14: `samtal_server.ws` at ERROR
+
+```text
+an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+```
+
+No arguments: the sentence is fixed.
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |

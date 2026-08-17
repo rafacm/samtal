@@ -80,6 +80,20 @@ jobs:
             exit 1
           fi
 
+      # And the event schema reference, generated from the registry that
+      # declares every event. This one is the whole no-leak contract's
+      # documentation: which fields an event may carry, which tokens a
+      # reason field admits, what bounds a descriptor is held to. A copy
+      # that can drift from the declarations would document a surface
+      # this server does not have.
+      - name: Check the committed event reference is current
+        run: |
+          uv run samtal-server events reference > "$RUNNER_TEMP/events.md"
+          if ! diff -u ../docs/reference/events.md "$RUNNER_TEMP/events.md"; then
+            echo "::error::docs/reference/events.md is stale; regenerate it with: uv run samtal-server events reference > ../docs/reference/events.md"
+            exit 1
+          fi
+
       # The same for the configuration API's OpenAPI document, which is
       # generated from the routes and committed for the same reason: it
       # is the machine-readable contract, and a copy that can drift from
