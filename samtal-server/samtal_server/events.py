@@ -81,7 +81,9 @@ from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
 from samtal_server.events_schema import (
-    IDENTIFIER_LIMIT,
+    REGISTRY as DECLARED_EVENTS,
+)
+from samtal_server.events_schema import (
     SCHEMA_VIOLATION,
     SCHEMA_VIOLATION_MESSAGE,
     SOURCE_KEY_PATTERN,
@@ -94,9 +96,6 @@ from samtal_server.events_schema import (
     Kind,
     Syntax,
     matcher,
-)
-from samtal_server.events_schema import (
-    REGISTRY as DECLARED_EVENTS,
 )
 
 # The session log channel, by name rather than by `__name__`.
@@ -454,9 +453,22 @@ def _whole_number(value: Any) -> bool:
 
 
 def _identifier_fault(value: Any) -> str | None:
+    """A trusted configured name, held to the domain the configuration
+    actually promises and to nothing tighter (`IDENTIFIER_DOMAIN`).
+
+    `NonBlankStr` is `StringConstraints(strip_whitespace=True,
+    min_length=1)`, so an agent called `secondary"agent`, one carrying a
+    control character and one four thousand characters long are all
+    lawful configuration today. A length or a character class here would
+    turn such a deployment's every `session_open` into a violation, and
+    forgiving mode would then drop the field and replace the sentence:
+    lawful traffic mangled on account of a claim nobody made. Trusted is
+    about provenance, not about shape. Narrowing belongs at
+    configuration semantics (#168), where a refusal reaches the operator
+    who can fix it."""
     if not isinstance(value, str):
         return WRONG_KIND
-    if not value or len(value) > IDENTIFIER_LIMIT or not value.isprintable():
+    if not value.strip():
         return BAD_BOUNDS
     return None
 
@@ -587,10 +599,15 @@ def _argument_fault(spec: ArgSpec, value: Any) -> str | None:
     if value is None:
         return None if spec.nullable else NOT_NULLABLE
     if spec.kind is ArgKind.PATHLIKE:
+        # A configured directory, held to its object type and to
+        # non-emptiness. No character class, for the reason
+        # `_identifier_fault` gives: what an operator may call a
+        # directory is the filesystem's business and the configuration's,
+        # not this module's.
         if not isinstance(value, (str, os.PathLike)):
             return WRONG_KIND
         rendered = os.fspath(value)
-        if not isinstance(rendered, str) or not rendered or not rendered.isprintable():
+        if not isinstance(rendered, str) or not rendered.strip():
             return BAD_BOUNDS
         return None
     if spec.kind is ArgKind.COMPOSED:
