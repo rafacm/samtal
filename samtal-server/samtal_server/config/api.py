@@ -1082,7 +1082,9 @@ def _runtime(api: FastAPI) -> None:
             401, 409, 422, 500, 503, instead={422: RELOAD_REFUSED_DESCRIPTION}
         ),
     )
-    async def reload_mcp_servers(reload: McpReloadDep) -> McpReloadResult:
+    async def reload_mcp_servers(
+        servers: McpServersDep, reload: McpReloadDep
+    ) -> McpReloadResult:
         """Re-read the MCP servers and the agents' grants, and apply
         them to this running server.
 
@@ -1124,10 +1126,16 @@ def _runtime(api: FastAPI) -> None:
         # taking them apart here would put an invariant of the reload's
         # (no await between the outcomes and the status, so the two
         # halves describe one world) in a request handler, which is the
-        # last place able to keep it. Which is also why the registry is
-        # not a dependency of this route any more: nothing is left for
-        # it to answer.
-        if reload is None:
+        # last place able to keep it.
+        #
+        # The registry is still a dependency, and is read for one thing
+        # only: whether there is one. "This application has a running
+        # server around it" is the condition this route refuses on, and
+        # half a runtime is not it, whatever the composition root
+        # happens to pass today. The guard is the endpoint's behavior
+        # and not a note about its callers, so it asks about both
+        # halves, as it did before the composing left.
+        if reload is None or servers is None:
             raise NoRuntimeError(PROBLEM_DESCRIPTIONS[503])
         return await reload()
 
