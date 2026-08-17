@@ -73,18 +73,37 @@ SDK_LOGGERS = (
     "mcp.shared.session",
 )
 
-for _sdk_logger in SDK_LOGGERS:
-    logging.getLogger(_sdk_logger).addFilter(_emit_nothing)
+def quiet_sdk_loggers() -> None:
+    """Put the rule above in force, once and out loud.
 
-# And the net under the list, because a list of module names is a thing
-# that goes stale: a filter stops the records logged through the logger
-# it sits on, and nothing else, so an SDK module this list does not name
-# would reach the handlers unfiltered. Turning propagation off at the
-# root of the SDK's namespace closes that without naming anything: no
-# record from any `mcp.*` logger reaches a handler of ours. An operator
-# who wants the SDK's own diagnostics can still attach a handler to
-# `mcp` itself, which is a deliberate act rather than the default.
-logging.getLogger("mcp").propagate = False
+    Called rather than run when this module is imported (#140), because
+    importing a module is not a thing that should change a process's
+    logging: a tool that imports this to read a type, or a test that
+    never connects to anything, would otherwise have the SDK's loggers
+    rearranged under it by the import alone.
+
+    Where it is called is what makes the rule reach every connection:
+    the first act of a manager start, since a manager is built and
+    started directly as well as through a registry, and again where a
+    registry is built. Both are ahead of every connect on every path.
+
+    Idempotent, which is what lets both of them call it: a filter
+    already installed is not installed twice, and turning propagation
+    off twice is turning it off.
+    """
+    for _sdk_logger in SDK_LOGGERS:
+        logging.getLogger(_sdk_logger).addFilter(_emit_nothing)
+
+    # And the net under the list, because a list of module names is a
+    # thing that goes stale: a filter stops the records logged through
+    # the logger it sits on, and nothing else, so an SDK module this
+    # list does not name would reach the handlers unfiltered. Turning
+    # propagation off at the root of the SDK's namespace closes that
+    # without naming anything: no record from any `mcp.*` logger reaches
+    # a handler of ours. An operator who wants the SDK's own
+    # diagnostics can still attach a handler to `mcp` itself, which is a
+    # deliberate act rather than the default.
+    logging.getLogger("mcp").propagate = False
 
 
 def _resolve(

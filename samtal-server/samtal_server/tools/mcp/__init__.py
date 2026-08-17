@@ -146,6 +146,7 @@ from .transport import (  # noqa: E402
     _reason,
     _resolve,
     _result_text,
+    quiet_sdk_loggers,
 )
 
 # What this subsystem answers to, gathered so that importing a name from
@@ -233,4 +234,5 @@ __all__ = [
     "_stopped",
     "events",
     "logger",
+    "quiet_sdk_loggers",
 ]
