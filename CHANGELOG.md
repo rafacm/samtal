@@ -9,14 +9,32 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **Breaking: the echo guard's recovered sentence no longer says what
+  was recovered** (#165): `asr_prompt_echo`'s one INFO outcome, the
+  retry that heard a real utterance where the guard was about to
+  discard the clip, stopped rendering the transcript into the retained
+  log. The sentence now names the duration alone, which with the
+  event's unchanged `outcome`, `duration_s`, `retry_ms` and `host`
+  fields is the whole of what the branch has to report; the template
+  drops from two arguments to one, and its level, its channel and its
+  field set are untouched. This was the last conversation text on the
+  event surface, which the content-and-telemetry ADR bans without
+  exception, and it was there however innocently the transcript was
+  recovered: a user reading a credential aloud is a turn like any
+  other. A sentinel test plants a credential-shaped transcript and
+  asserts it reaches the session and neither the log record nor an
+  attached event consumer. **Migration:** what was said comes from the
+  conversation store instead, keyed by the same session id and subject
+  to `server.conversations.enabled` with `text: true`; an operator who
+  greps the logs for recovered utterances queries the store's `turns`
+  rows.
 - The content-and-telemetry ADR gained a dated amendment: bounded
   device-descriptor metadata (the board, firmware, and client id a
   device reports at check-in, sanitized at their decision sites) is
   metadata the events may carry; conversation-derived text remains
   banned without exception, and the one standing violation (the
-  `asr_prompt_echo` recovered-transcript sentence) is scheduled for
-  removal by its own narrowing issue ahead of the #155 schema
-  registry.
+  `asr_prompt_echo` recovered-transcript sentence) was removed by its
+  own narrowing above (#165), ahead of the #155 schema registry.
 
 ## 2026-08-16
 

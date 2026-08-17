@@ -96,9 +96,9 @@ implementation doc.
 
 ## Milestones
 
-- [ ] M1: the sentence narrows: template down to one argument, pin
-      updated, sentinel proof in the provider suite, CHANGELOG
-      entry; both lanes green.
+- [x] **[The sentence narrows](2026-08-17-asr-prompt-echo-transcript-implementation.md#milestone-1-the-sentence-narrows)**
+      (PR TBD): template down to one argument, pin updated, sentinel
+      proof in the provider suite, CHANGELOG entry; both lanes green.
 
 ## Plan review round
 
