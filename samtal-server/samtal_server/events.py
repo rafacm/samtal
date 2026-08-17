@@ -213,6 +213,33 @@ def session_clock() -> float:
         return time.monotonic()
 
 
+def _report(
+    channel: logging.Logger, level: int, message: str, *args: Any
+) -> None:
+    """Say one plain sentence about something that went wrong, and never
+    fail while saying it.
+
+    Every report this module makes is made from inside a guard: a tap
+    raised, or an emission was refused, or the enforcement itself broke.
+    A logging call is not the inert operation it looks like, though. A
+    filter or a handler is code somebody else installed, `handle` and
+    `filter` are called unwrapped, and a formatter meets whatever the
+    record carries, so the report can raise exactly where the guard has
+    nothing left to catch it with. The tap report is the sharpest case:
+    the failing tap is often the log tap itself, and reporting its
+    failure back onto the same broken channel is the recursion the
+    guard was built to stop.
+
+    So the report is the last thing that may throw, and it does not.
+    Suppressing blind is the right trade here and only here: what is
+    being protected is a reply, and what is being lost is one diagnostic
+    line about a diagnostic line."""
+    try:
+        channel.log(level, message, *args)
+    except Exception:  # noqa: BLE001 - a report never costs a reply
+        pass
+
+
 def _offer(tap: EventTap, emission: Emission, channel: logging.Logger) -> None:
     """Hand one emission to one tap, under that tap's own guard.
 
@@ -226,7 +253,9 @@ def _offer(tap: EventTap, emission: Emission, channel: logging.Logger) -> None:
         # report that went back through the taps would let a broken
         # tap recurse into itself, and a tap may be an exporter
         # holding whatever a far side answered it with.
-        channel.warning(
+        _report(
+            channel,
+            logging.WARNING,
             "an event tap (%s) failed and was skipped: %s",
             type(tap).__name__,
             type(exc).__name__,
@@ -851,7 +880,9 @@ def _recover(
     judged = _judge(_registry, channel, level, message, args, event, payload, collisions)
     if not judged.faults:
         return Checked(payload, level, message, args)
-    log.error(
+    _report(
+        log,
+        logging.ERROR,
         REFUSAL_MESSAGE,
         judged.label,
         "; ".join(fault.rendered() for fault in judged.faults),
@@ -900,7 +931,10 @@ def _enforce(
     try:
         return _recover(log, channel, base, event, level, message, args, fields)
     except Exception as exc:  # noqa: BLE001 - telemetry never costs a reply
-        log.error(GUARD_MESSAGE, type(exc).__name__)
+        # Through `_report`, because this handler is the last one there
+        # is: a logging call that raised here would leave the guard with
+        # nothing behind it and cost the reply the guard exists for.
+        _report(log, logging.ERROR, GUARD_MESSAGE, type(exc).__name__)
         return _replacement(base)
 
 
