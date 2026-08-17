@@ -398,11 +398,15 @@ outside pytest.
 
 ## Milestones
 
-- [ ] M1: the descriptors exist and docgen consumes them:
-      `entities.py` three-tier registry, docgen derives, both
-      references byte-identical, the `shown_values` finding
-      filed, inventory recorded; implementation section, changelog
-      entry, and tick in the same change.
+- [x] [M1](2026-08-17-config-descriptors-implementation.md#milestone-1-the-descriptors-exist-and-docgen-consumes-them):
+      the descriptors exist and docgen consumes them (PR TBD):
+      `entities.py` holds the three-tier registry with the static
+      identity facts filled and every later group named for the
+      milestone that fills it, docgen renders it and its own entity
+      dataclass and data tables are gone, both references regenerate
+      byte-identical with no regeneration commit, the `shown_values`
+      finding is drafted for filing in the implementation doc, and
+      the fresh inventory is recorded there.
 - [ ] M2: store and views generalize: default row path plus the
       three named hooks, registry-driven CRUD, the walker merge,
       `provider_record` untouched; ported pins listed one by one;
