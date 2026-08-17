@@ -196,13 +196,18 @@ class EntityDescriptor(DocumentedShape):
     # else; the two members are still exactly two.
     secret_slots: str | None = None
 
-    # Store facts, filled by `store.py`. The name of the table the kind
-    # is rowed in, and the row mapping: the default path is
-    # `model_validate`/`model_dump`, and a hook is what a kind pays when
-    # its model demands one, which the inventory proved for exactly
-    # three of the five. `before_parse` and `inside_write` are the
-    # checks the quirky kinds run around their write.
+    # The table the kind is rowed in, named rather than held: this
+    # module is read by a command with no database to open, so the
+    # schema is the repository's to resolve. Addressing again, in the
+    # third of the three vocabularies a kind is addressed in.
     table: str | None = None
+
+    # Store facts, filled by `store.py`, because each is written in
+    # terms of the repository's own row helpers. The row mapping's
+    # default path is `model_validate`/`model_dump`, and a hook is what
+    # a kind pays when its model demands one, which the inventory proved
+    # for exactly three of the five. `before_parse` and `inside_write`
+    # are the checks the quirky kinds run around their write.
     from_row: Hook = None
     to_row: Hook = None
     before_parse: Hook = None
@@ -302,6 +307,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         route="/providers",
         addressing=("stage", "name"),
         moved_key="providers",
+        table="providers",
         secret_slots="provider",
         missing=_no_such("providers", "provider"),
     ),
@@ -323,6 +329,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         route="/mcp-servers",
         addressing=("name",),
         moved_key="mcp_servers",
+        table="mcp_servers",
         secret_slots="mcp_server",
         missing=_no_such("mcp_servers", "MCP server"),
     ),
@@ -358,6 +365,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         route="/prompt-fragments",
         addressing=("name",),
         moved_key="prompt_fragments",
+        table="prompt_fragments",
         missing=_always(NO_SUCH_FRAGMENT),
     ),
     EntityDescriptor(
@@ -381,6 +389,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         route="/agents",
         addressing=("name",),
         moved_key="agents",
+        table="agents",
         missing=_no_such("agents", "agent"),
     ),
     EntityDescriptor(
@@ -409,6 +418,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         route="/agent-defaults",
         addressing=(),
         moved_key="agent_defaults",
+        table="agent_defaults",
         has_delete=False,
     ),
 )
