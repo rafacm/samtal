@@ -122,6 +122,27 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The API's entity routes are built from the descriptors** (#139,
+  M3). The nine reads and thirteen writes of the five commanded kinds
+  were hand-written handlers saying the same nine things in five
+  vocabularies; they are one factory now, walking the registry. What
+  the committed OpenAPI document carries about each route is written
+  down on the kind's descriptor, because those bytes are contract: the
+  operation's name, its description, the response model and the
+  refusals it declares. What the verb settles the same way for every
+  kind is not written down at all: the method, the path under the
+  kind's route, the parameters, the request body and which repository
+  call is made. The pydantic response and request models move to
+  `samtal_server/config/responses.py`, which imports pydantic and
+  nothing else, so that the CLI can render an answer against the shape
+  the API declared without importing FastAPI to do it; `api.py` imports
+  them back and re-exports them under the names they had. The routes
+  the tiers do not describe (the whole-configuration read, the devices
+  and the pending claim, the default agent, the runtime namespace) stay
+  written by hand, because a setting is not an entity. Nothing changed
+  for a caller: `docs/reference/api-openapi.json` regenerates byte for
+  byte, every operation id, summary, description, parameter and status
+  in it included.
 - **The repository and the read views work from the descriptors**
   (#139, M2). `store.py` no longer names its five entity kinds at
   fourteen methods and a whole-configuration read: the table a kind is
