@@ -407,10 +407,13 @@ outside pytest.
       byte-identical with no regeneration commit, the `shown_values`
       finding is filed as issue #171, and the fresh inventory is
       recorded in the implementation doc.
-- [ ] M2: store and views generalize: default row path plus the
+- [x] [M2](2026-08-17-config-descriptors-implementation.md#milestone-2-store-and-views-generalize-over-the-descriptors):
+      store and views generalize (PR TBD): default row path plus the
       three named hooks, registry-driven CRUD, the walker merge,
-      `provider_record` untouched; ported pins listed one by one;
-      milestone duties in the same change.
+      `provider_record` untouched; ported pins listed one by one (there
+      are none, and the one test that reaches into the store's privates
+      names a helper that survives); milestone duties in the same
+      change.
 - [ ] M3: the response models move below FastAPI and api.py
       generalizes: `responses.py`, descriptor-derived routes,
       OpenAPI byte-identical with no regeneration commit;

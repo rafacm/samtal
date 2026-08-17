@@ -298,3 +298,213 @@ Not, through the normal read path, and this is the honest half of the report. `e
 
 Small in code, and the weight is in the decisions: whether the recursive walker is `masked_option` reused (its provider-flavoured `is_secret_option` differs from `is_mcp_secret_key`, which also matches `auth`) or a third walker with the MCP predicate; whether the same depth rule should apply to `McpServerConfig._secret_problems` so that write-time refusal and read-time masking keep saying the same thing; and whether the URL-credential stripping that `recorded_option` applies to providers belongs on an MCP server's `url` too, which is a neighbouring gap this issue does not claim. Two tests, mirroring the provider fail-closed pins that already exist.
 ````
+
+## Milestone 2: store and views generalize over the descriptors
+
+The repository stopped naming its five kinds at every method. What a
+kind is rowed in, how one of its rows becomes a model and back, what to
+refuse when an entry is not there, and which checks its write runs are
+descriptor facts now, and `store.py` has one read, one write and one
+delete over all of them. `views.py` reads which builder shows a kind
+from the same registry. Neither module changed a byte of what it says
+to anybody.
+
+Eleven commits, plus the one that records the milestone:
+
+1. `32e702f` Say on the descriptor what is not there
+2. `a4b4240` Read a stored row through the kind's own mapping
+3. `9e09dd2` Write a row through the kind's own mapping
+4. `cbf577d` Refuse a write where the kind says to
+5. `e7ba1ba` Read, write and delete one kind generically
+6. `1ff5b25` Address a stored secret through its holder
+7. `3ff9a6e` Walk a value once for both refusals
+8. `511081a` Show an entity through its kind's descriptor
+9. `7308897` Say in the registry which table a kind is rowed in
+10. `34fdfa2` Ask one function which builder shows a kind
+11. `4b730cd` Say in the registry which facts it writes down itself
+
+### What each fact group turned out to be
+
+`table` is data, so it is written in the registry beside `route` and
+`moved_key` and the repository resolves it against the schema. That is
+what makes a kind whose model says everything about its row cost
+nothing outside the registry, which is the acceptance criterion this
+milestone can already demonstrate for its half: a new such kind is a
+model, a table with its migration, and one descriptor entry.
+
+The row mapping's default path is `model_validate` over the columns
+named by `model.model_fields`, and `model_dump()` back. Exactly one
+kind takes it: `prompt-fragment`, whose hand-written reader and whose
+inline `{"text": entry.text}` are both gone. The other four keep the
+mappings the inventory proved a dump cannot express, moved unchanged:
+
+- `_provider_from_row` and `_provider_values`, the split between the
+  declared fields and the `options` extras of an `extra="allow"` model.
+- `_mcp_from_row`, all six per-column omission rules, so that
+  `McpServerConfig`'s transport validator keeps reading
+  `model_fields_set`, and `_mcp_values` beside it.
+- `_layer_data` and `_layer_values`, the tri-state where None inherits
+  and an empty list opts out, including the per-element
+  `mcp_entry_fragment` call and the comment saying why it re-emits each
+  grant as it was written.
+- `_agent_from_row` and `_agent_values`, which are the layer's pair plus
+  the prompt. The agent's inline write dict became the named
+  `_agent_values`; the singleton's inline read became the named
+  `_defaults_from_row`.
+
+The checks became two slots, because a write has two moments for one:
+`before_parse` for `prompt-fragment`'s name rule, which must be able to
+refuse a name before anything has looked at the body, and `inside_write`
+for `mcp-server`'s entry-name check and `provider`'s URL-credential
+check, which are about the parsed entry. The paragraph explaining the
+fragment's ordering moved onto the check it explains, which is what a
+reader of the write is now pointed at.
+
+`missing` is the refusal builder from the plan's review round. Four
+kinds share one shape (`<section>.<identity>: no such <noun>`), the
+fragments answer the fixed `NO_SUCH_FRAGMENT` that does not repeat what
+it was given, and the singleton carries none, which is how "there is no
+missing case" is said. The store's read, its delete and its
+stored-secret slot check all ask the descriptor, so those sentences
+exist once each.
+
+### The port table
+
+Empty, and the reason is worth recording rather than asserting: exactly
+one test in the suite reaches into `store.py`'s privates, and the name
+it reaches for survives.
+
+| Test | What it pins | What happened |
+| --- | --- | --- |
+| `tests/unit/test_config_store.py::test_two_concurrent_writers_serialize` | Monkeypatches `store_module._read_domain` to pace two writers and prove BEGIN IMMEDIATE serializes them | No port. `_read_domain` keeps its name, and every caller still resolves it as a module global rather than through a captured reference or a descriptor hook, so the patch reaches the generic read exactly as it reached the five hand-written ones. The test is byte-unchanged and passes. |
+
+No other test named a private helper of `store.py` or `views.py`: the
+grep for `_provider_values`, `_mcp_values`, `_layer_values`,
+`_provider_from_row`, `_mcp_from_row`, `_layer_data`,
+`_fragment_from_row`, `_agent_from_row`, `_nonfinite`,
+`_untransportable`, `_stored_slots`, `_shadowed`, `_secret_row`,
+`_check_no_url_credentials`, `_delete_row`, `_upsert`,
+`_readable_domain` and `_read_domain` across `tests/` finds only that
+one test's two lines, everything else it matches being a name of its
+own elsewhere in the server (`resolve_mcp_values`, the MCP tool
+manager's own `_shadowed`, the `mcp_tool_shadowed` event). The
+tri-state and as-written-grant store tests, the fragment refusal tests
+and the whole `test_config_reads.py` view suite pass unmodified, which
+is what the hooks moving rather than being rewritten is for.
+
+No test was added either, so the collected count is exactly equal
+before and after. That is the strongest available statement that this
+milestone was a move.
+
+### Deviations from the plan
+
+1. **A code-valued fact is filled by the module that owns the code.**
+   The plan says the hooks "live beside the descriptor". They live
+   beside the code they are written in, and reach the descriptor
+   through one documented call, `entities.fill`, at the owning module's
+   import. The alternative was not available: `entities.py` imports the
+   models and the standard library only, which is what lets `docgen`
+   render the reference on a machine with no database or key, and the
+   row mappings are written in terms of the repository's own row
+   helpers while the body builders are written in terms of the masking
+   rules. Importing either from the registry is a cycle, since both
+   import the registry. The other alternative, a per-consumer table
+   keyed by kind, is two copies of a kind's facts that can come to
+   disagree, which is the drift the issue exists to end. `fill` refuses
+   a fact that is not declared and a fact that is already filled, so
+   filling stays once each.
+2. **The hook signatures were settled here, as M1 said they would be.**
+   `from_row(row)` answers the model and computes its own location, so
+   the three moved readers are unchanged; `to_row(entry)` answers the
+   columns; `before_parse(*identity)`; `inside_write(location,
+   identity, entry)`; `missing(*identity)` answers the sentence. The
+   two write checks share one signature so that the write can call
+   whichever its kind names without knowing which it got, and the
+   provider's ignores the identity, which the leading underscore says.
+3. **`missing` is filled at M2, not M3.** The plan lists it among the
+   API facts. Its first three callers are all in the store (the read,
+   the delete, and the entity half of the slot check), so it is filled
+   where those are. M1's `route` deviation is the precedent: a fact is
+   filled by the milestone that first has a consumer for it.
+4. **`NO_SUCH_FRAGMENT` moved to `entities.py`.** The fragment's
+   `missing` is that constant, and the descriptor cannot import the
+   store. It moved with its comment intact and `store.py` re-exports
+   it, so both test files that import it from there are unchanged. This
+   is M1's `API_OPTIONS_NOTE` move in the other direction.
+5. **`_check_slot` keeps its two branches.** Only the entity half
+   generalized: which kind holds the slot, whether the entity exists,
+   and the sentence when it does not. The slot-shape rules stayed two
+   rules, because a provider's slot is a secret-shaped option name and
+   an MCP server's is a dotted `env`/`headers` path, which is not one
+   rule with a parameter. The provider's `_stage` check stayed exactly
+   where it was, so a location naming a stage that is not one still
+   meets the sentence a caller's typo meets everywhere else rather than
+   an `AttributeError`.
+6. **`_shadowed` is not a descriptor hook.** It dispatches on the model
+   type, the descriptor declares no fact for it, and inventing one was
+   not in the plan's list. What did generalize around it is the
+   plumbing the plan named: `stored_secrets`, `_read_secrets`,
+   `_secret_row` and the slot check all read `secret_slots` now, and
+   `EntityKind` is untouched at two members.
+7. **The merged walker returns a composed sentence in both modes.** The
+   plan asked for one walker with a mode flag and byte-identical
+   messages. The row mode used to answer a location that `_stored`
+   formatted into `_NOT_FINITE`; it now answers the formatted sentence,
+   and `_stored` wraps it in the same words, so the bytes are identical
+   and the two modes mean the same thing by their return value. The row
+   mode keeps having no cycle rule and refusing nothing but numbers,
+   which is the requirement that made this merge worth checking rather
+   than assuming: a cyclic input still recurses to a `RecursionError`
+   there exactly as before, and a `set` or a date in a row is still
+   passed over.
+8. **The `Setting` tier keeps its hand-written store code.** Devices and
+   the default agent are written with their own verbs (`bind`, `claim`,
+   `delete`, `set`, `clear`), the tier declares no store facts at all,
+   and the plan's descriptor section says so. Nothing about them moved.
+
+No other deviation. `views.provider_record` is untouched, docstring and
+key-by-key construction intact, and now says so where the body builders
+are registered. `masked_option`, `recorded_option`, `shown_values` and
+`check_no_inline_secrets` are untouched, and the `shown_values` finding
+stays as M1 drafted it.
+
+### The differential check on the walker merge
+
+The one change where "byte-identical" needed more than the suite, since
+the merge crosses two callers with different rules. Both replaced
+walkers were reimplemented verbatim in a scratch script and compared
+against the merged one over 182 shapes: every leaf kind JSON has and
+does not have, nested one to three deep in mappings, lists and tuples,
+with non-string keys, an anchor shared by two keys, and NaN and the
+infinities at every depth. Zero mismatches in either mode, and a
+self-referential list still raises `RecursionError` in the row mode
+under both implementations while both fragment modes name it.
+
+### Verification
+
+From `samtal-server/`, with `PYTHONDONTWRITEBYTECODE=1` outside pytest:
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/unit -q`: `2927 passed, 16 skipped in 306.98s`.
+  The lane collected 2943 before this milestone and 2943 after: no test
+  was added, removed or split, and the skips are the same 16.
+- `uv run pytest tests/integration -q`: `55 passed in 183.91s`,
+  collection unchanged at 55.
+- Both generated references regenerate byte-identical, run exactly as
+  the CI drift steps run them, with no regeneration commit anywhere on
+  the branch:
+
+```
+$ uv run samtal-server config reference > "$RUNNER_TEMP/domain-config.md"
+$ diff -u ../docs/reference/domain-config.md "$RUNNER_TEMP/domain-config.md"
+(no output from diff -u: the files are identical)
+$ uv run samtal-server config openapi > "$RUNNER_TEMP/api-openapi.json"
+$ diff -u ../docs/reference/api-openapi.json "$RUNNER_TEMP/api-openapi.json"
+(no output from diff -u: the files are identical)
+```
+
+- `git diff --stat` against the milestone's base over `tests/` and
+  `docs/reference/` prints nothing at all. Not only the two acceptance
+  files and the two committed references: no test file in the
+  repository changed, which is what an empty port table means when it
+  is true.
