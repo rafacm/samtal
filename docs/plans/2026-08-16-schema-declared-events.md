@@ -68,11 +68,14 @@ merged as PR #166), the surface is:
   payload. M1 therefore adds a pre-enforcement characterization pin
   file (`tests/unit/test_conversations_event_pins.py`, in the exact
   style of the two contract files) covering the five store paths,
-  with the coverage comparison PATH-BASED rather than name-based:
-  the two contract files hold 76 literal per-path expectations,
-  the five store paths complete the 81, and the conformance test
-  asserts that correspondence so an unpinned new path for an
-  existing event name is caught; committed green BEFORE any
+  with the coverage comparison PATH-BASED rather than name-based,
+  through a machine-readable sidecar: M1 commits a mapping from
+  stable source identities (module, enclosing function, call
+  ordinal within it; never line numbers, which churn) to the
+  pytest node IDs that pin them, the two contract files' 76
+  expectations plus the five store paths covering the 81, and the
+  conformance test asserts the mapping's equality both ways so an
+  unpinned new path for an existing event name is caught; committed green BEFORE any
   enforcement exists, so M2's strict lanes stand on pins for the
   whole surface. The two existing files stay byte-unchanged.
 - **One session channel and 13 server channels**: `SessionEvents`
@@ -167,12 +170,18 @@ dataclasses and the declarations:
     configuration, server-minted, far-side sanitized) and assigns
     the kind from the inventory; a far-side string whose decision
     site does NOT sanitize it is a real finding, fixed at that
-    decision site in M1, and two such sites are already proven
+    decision site in M1, and four such sites are already proven
     rather than plausible: `ota.py`'s `reported_board` and
     `reported_version` only strip whitespace before `ota_check`
-    renders them in fields AND message arguments, and
-    `session_open` renders an unbounded raw Client-Id in its
-    sentence and `client` field. The fix is an event-only
+    renders them in fields AND message arguments; `ota_check`'s
+    `client` is the stripped but otherwise unbounded Client-Id
+    header, which gets a bounded event-only copy; `session_open`
+    renders an unbounded raw Client-Id in its sentence and
+    `client` field; and `ws.py`'s capacity-rejection path logs an
+    unnormalized Device-Id when auth is off, which normalizes the
+    MAC or emits null with the fixed unidentified-device argument.
+    An auth-disabled full-capacity sentinel test joins M1's
+    proofs. The fix is an event-only
     normalized copy covering BOTH the payload field and the
     message argument (what the site answers elsewhere, the OTA
     response above all, is untouched); a bounds-and-strip on
@@ -478,7 +487,11 @@ synthetic channel on purpose, since it tests dispatch, taps, copy
 semantics, and ordering rather than the production surface. The
 validator therefore reads the registry through injectable module
 state, and a test-scoped context manager installs a scratch
-registry (declaring the synthetic events) for exactly these tests.
+registry for exactly these tests, budgeted for everything the
+suite actually emits: the four synthetic names AND the
+production-named events it exercises with non-production channels
+or payloads (`heard`, `ota_check`, `capture_enabled`), each with
+the shapes those tests use.
 M2 updates `test_events.py` to use the seam; it is a mechanics
 suite, not one of the two characterization pin files, and those two
 stay byte-unchanged. The full lanes still run every PRODUCTION
@@ -700,10 +713,19 @@ example-config pin is unaffected).
   bad argument tuple); forgiving mode follows the recovery matrix,
   still emits, and complains once, covered per class, plus the
   injected-raising-validator guard proof; the sentinel matrix
-  plants credential-shaped values as a wrong-kind field value, an
-  undeclared event name, and an undeclared spread key, asserted
-  absent from exception str, repr and args, the complaint, both
-  log formats, `Emission.args`, and an attached tap; the
+  plants credential-shaped values through EVERY distinct
+  diagnostic branch: a wrong-kind field value, an undeclared event
+  name, an undeclared spread key, a sentinel-as-message, a
+  wrong-kind template argument, an unlisted token value, a
+  malformed `ID` syntax, a bad list element, and a bad `SOURCES`
+  key, each asserted absent from exception str, repr and args,
+  the complaint, both log formats, `Emission.args`, and an
+  attached tap, with the complaint's `record.msg` and
+  `record.args` and the `EventSchemaError.args` asserted EXACTLY
+  rather than by substring absence; the descriptor two-assertion
+  containment proofs and M1's sanitization sentinels (the OTA
+  response unchanged, the auth-disabled capacity path) are named
+  here because they run in these lanes; the
   entrypoint subprocess tests cover unset, `forgiving`, `strict`,
   an unknown value refusing startup, a `.env`-carried value, and
   the `-O` strictness proof; both pin suites unmodified and green
