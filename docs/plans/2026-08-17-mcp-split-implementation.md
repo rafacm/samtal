@@ -410,9 +410,10 @@ therefore has two reload entry points, which is the honest shape:
 `McpReload` is this application's own vocabulary and `McpReloadResult`
 is what the API sends.
 
-The two files grew by what those views are worth: `registry.py` 459 to
-500 lines and `reload.py` 423 to 462, both still at the plan's
-roughly-500 criterion.
+The two files grew by what those views are worth: `registry.py` 455 to
+496 lines and `reload.py` 423 to 462, both still at the plan's
+roughly-500 criterion. (The 459 first recorded here was read before M1's
+own review round, whose fixes moved it.)
 
 ### The Protocol
 
