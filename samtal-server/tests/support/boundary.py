@@ -54,6 +54,13 @@ class StubRuntime:
         self.output = output
         self.events = events
         self.agents = list(agents)
+        # What the real runtime's constructor does, and what makes this
+        # a stand-in rather than a different contract: the session emits
+        # `session_open` right after the factory answers, and that event
+        # names the agent talking. A runtime that activated none would
+        # have the edge announce a conversation with nobody in it, which
+        # the event schema refuses (#155).
+        self.events.agent = self.agents[0]
         self.heard = bytearray()
         self.closed = False
         self.aborts: list[str | None] = []
