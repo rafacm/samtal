@@ -521,10 +521,13 @@ From `samtal-server/`, `uv` throughout, `PYTHONDONTWRITEBYTECODE=1`
 outside pytest.
 
 - `uv run ruff check .`: **All checks passed!**
-- `uv run pytest tests/unit -q`: **2943 passed, 16 skipped**, 2959
-  collected, unchanged from M1: the ports rewrote lines inside tests
-  that already existed and the typed views added no test of their own.
-- `uv run pytest tests/integration -q`: **55 passed**, unchanged.
+- `uv run pytest tests/unit -q`: **2947 passed, 16 skipped in
+  306.04s**, 2963 collected against M1's 2961. The typed views and the
+  ports added no test of their own, since a port rewrites lines inside
+  a test that already exists; the two are the review round's, the
+  reload route's regression and the planted rebinding cases.
+- `uv run pytest tests/integration -q`: **55 passed in 157.06s**,
+  unchanged in count.
 - `uv run samtal-server config openapi` diffs clean against
   `docs/reference/api-openapi.json`, which is the milestone's core
   proof: the wire shapes, the descriptions and the schemas are the
@@ -534,3 +537,62 @@ outside pytest.
 - The reflection sentinels (`test_mcp_status_reflection.py`) and the
   reload integration proof (`tests/integration/test_mcp_reload.py`)
   pass unmodified.
+
+### The PR review round
+
+External review of PR #179 by the pipeline's reviewer, 2026-08-18.
+Three findings, all valid, one commit each; the verification above was
+re-run whole afterwards and is the result recorded.
+
+1. **P1: an application with half a runtime could execute a reload.**
+   `build_api` takes `mcp_servers` and `mcp_reload` independently, and
+   the route dropped the registry dependency and guarded only the
+   callable, so `mcp_servers=None` with a reloader applied a
+   configuration and answered 200 where the code before M2 answered
+   503. This section's deviation 2 had argued that no composition
+   passes one without the other, which was true and beside the point: a
+   guard on a state-changing route is the endpoint's behavior, not a
+   note about its callers.
+
+   *Resolution* (`a8725cc`): `servers: McpServersDep` is back on the
+   route, read for one thing, whether there is one, and the guard is
+   `reload is None or servers is None` again with the same sentence.
+   The regression,
+   `test_half_a_runtime_refuses_to_reload_from_either_side`, drives
+   both mismatched compositions through the mount and asserts 503 and
+   the sentence for each; on the previous code the first of them
+   answers 200. The deviation above is rewritten as the correction it
+   became. The document does not move a byte: a dependency is not part
+   of the contract.
+
+2. **P2: the ownership rule missed the bindings that hide.**
+   `emitter_bindings` read plain assignments and imports at a module's
+   top level only, so `events, other = foreign.events, value` and a
+   rebinding under a module-level `if` or `try` all passed. Each runs
+   in the module's own scope, before the first emit, and leaves the
+   emit sites reaching a foreign emitter; `unowned` answered the empty
+   string for all three.
+
+   *Resolution* (`59fb728`): `module_scope` yields the statements that
+   run in the module's own scope, descending through control flow and
+   never into a function or a class body, and `binds_the_emitter`
+   recurses an assignment target through tuples, lists and starred
+   elements. Every form that binds a name in that scope is read now:
+   assignment of every arity, annotated and augmented, an import, a
+   `for` target and a `with ... as`. Planted as
+   `test_an_emitter_rebound_out_of_plain_sight_owns_nothing_either`,
+   which refuses the three shapes, asserts the walk attributes each to
+   its own module rather than the borrowed channel, and keeps the
+   honest look-alikes accepted: a tuple that binds other names, and a
+   module-level `if` that binds none.
+
+3. **P3: two line counts had gone stale.** This section said
+   `registry.py` went 459 to 500 lines, and the plan's M1 tick said
+   `manager.py` lands at 768; both were read before the M1 review
+   round's fixes grew the files under them, and the M1 table in this
+   document already said 455 and 777.
+
+   *Resolution* (`74d09d4`): 455 to 496 here, 777 in the tick, with
+   the tick's parenthetical otherwise as it was. The figures are what
+   the one recorded criterion miss is measured against, so a stale one
+   is a claim about a criterion.
