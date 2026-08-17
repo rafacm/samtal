@@ -428,6 +428,7 @@ BAD_BOUNDS = "bad_bounds"
 BAD_ELEMENT = "bad_element"
 BAD_SOURCE_KEY = "bad_source_key"
 BAD_SOURCE_VALUE = "bad_source_value"
+AMBIGUOUS_VARIANT = "ambiguous_variant"
 
 # What an event that is not in the registry is called in a diagnostic,
 # since it cannot be called by the name the caller gave it.
@@ -798,11 +799,27 @@ def _judge(
         faults.append(dimension)
         return Judgement(tuple(faults), None, True, event)
     scored = [(_variant_faults(one, args, payload), one) for one in candidates]
-    best, variant = min(scored, key=lambda pair: len(pair[0]))
-    faults.extend(best)
-    return Judgement(
-        tuple(faults), variant if len(candidates) == 1 else None, True, event
-    )
+    matching = [one for found, one in scored if not found]
+    if len(matching) > 1:
+        # Two declarations this emission satisfies completely, which is
+        # a registry that cannot say what this event is. Accepting it by
+        # picking the first would make the surface depend on declaration
+        # order, and the generated reference would describe two shapes
+        # where one record exists. The conformance suite refuses the
+        # declaration; this refuses the emission, so a scratch registry
+        # or a future edit cannot get one through.
+        faults.append(Fault(AMBIGUOUS_VARIANT, str(len(matching))))
+        return Judgement(tuple(faults), None, True, event)
+    if matching and not faults:
+        return Judgement((), matching[0], True, event)
+    if not matching:
+        best, _ = min(scored, key=lambda pair: len(pair[0]))
+        faults.extend(best)
+    # What a rebuild would aim at: the one variant this emission already
+    # satisfies (a base-key collision leaves the payload itself lawful),
+    # or the only candidate there was.
+    target = matching[0] if matching else (candidates[0] if len(candidates) == 1 else None)
+    return Judgement(tuple(faults), target, True, event)
 
 
 @dataclass(frozen=True)
