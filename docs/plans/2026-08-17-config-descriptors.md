@@ -414,10 +414,17 @@ outside pytest.
       are none, and the one test that reaches into the store's privates
       names a helper that survives); milestone duties in the same
       change.
-- [ ] M3: the response models move below FastAPI and api.py
-      generalizes: `responses.py`, descriptor-derived routes,
-      OpenAPI byte-identical with no regeneration commit;
-      milestone duties in the same change.
+- [x] [M3](2026-08-17-config-descriptors-implementation.md#milestone-3-the-response-models-move-and-apipy-generalizes):
+      the response models move below FastAPI and api.py generalizes
+      (PR TBD): `responses.py` holds the fifteen shapes and imports
+      pydantic and nothing else, the five kinds' twenty-two routes are
+      built from `Endpoint` facts on their descriptors with each
+      route's operation identity, description, response and statuses
+      installed explicitly, `RawBody` and the schema hoisting are
+      untouched, `ENTITY_MODELS` derives from the registry, and the
+      OpenAPI document regenerates byte-identical with no regeneration
+      commit; the port table is empty; milestone duties in the same
+      change.
 - [ ] M4: the CLI unifies and renders from response models: one
       dispatch table, four local rows, frozensets and predicates
       and `test_config_cli_shapes.py` deleted, per-act

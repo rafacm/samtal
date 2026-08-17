@@ -708,7 +708,7 @@ WRITES: tuple[entities.Verb, ...] = (
 )
 
 
-def _entity_routes(api: FastAPI, verbs: Collection[str]) -> None:
+def _entity_routes(api: FastAPI, verbs: Collection[entities.Verb]) -> None:
     """The routes of every commanded kind, built from what its
     descriptor says it has.
 
@@ -901,6 +901,14 @@ def _reads(api: FastAPI) -> None:
     status code and the shape. They are plain `def`, so FastAPI runs
     them on the threadpool and the synchronous repository never blocks
     the event loop.
+
+    The reads of the commanded kinds are built from their descriptors
+    rather than written; the ones written here are the reads the tiers
+    do not describe. The whole configuration is every kind at once. A
+    device binding and the default agent are a mapping and a scalar,
+    written with their own verbs and read without an envelope. The
+    pending listing is the running server's own state and reaches no
+    database at all.
 
     An identity rides in the path as one decoded segment, so a name
     carrying a space, a percent sign or a character outside ASCII is
@@ -1128,6 +1136,13 @@ def _writes(api: FastAPI) -> None:
     handler parses the addressing (which entity, which slot, and for the
     three argument-shaped bodies the one key they carry), calls one
     repository method, and answers with what it did and when it applies.
+
+    The writes of the commanded kinds are built from their descriptors,
+    like their reads. What is written here is what those six verbs do
+    not describe: binding a device by its MAC or by the code it is
+    showing, and setting or clearing the default agent, each with its
+    own verb, its own argument-shaped body, and a notice that depends on
+    whether the agent it names was loaded.
     """
 
     # Every commanded kind's writes, deletes and credential slots,

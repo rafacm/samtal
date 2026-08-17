@@ -516,3 +516,184 @@ External review of PR #173 (diff main...be49dea) by codex 0.147.0
 itself. Verdict: mergeable as is, no findings. The empty port
 table, the equal counts, and the differential walker proof
 pre-answered the lenses a store-and-views move touches.
+
+## Milestone 3: the response models move and api.py generalizes
+
+The five commanded kinds stopped having twenty-two hand-written route
+handlers. `api.py` walks the registry and installs each endpoint a
+descriptor declares, and the pydantic shapes it answers with moved one
+import below FastAPI so that a reader who may not have FastAPI can have
+them. The committed OpenAPI document did not move a byte, which is the
+whole of the claim: every operation id, summary, description, parameter
+and status in it now comes from the registry.
+
+Three commits, plus the one that records the milestone:
+
+1. `1eae4d7` Keep the API's shapes one import below FastAPI
+2. `14ee7e3` Say in the registry what routes a kind has
+3. `a951387` Build a kind's routes from its descriptor
+
+`samtal-server/samtal_server/config/responses.py` (new, 462 lines) holds
+the twelve response models and the three request models, byte for byte
+what they were. `api.py` went from 2142 lines to 1713 and names none of
+the five entity models any more. `entities.py` grew the `Endpoint` shape
+and 22 endpoint literals.
+
+### What the endpoint facts turned out to be
+
+An `Endpoint` says what the committed document says about one route and
+nothing else: the verb, the operation's name, the description exactly as
+the document carries it (already dedented, since that is what FastAPI
+does to a docstring on its way into a description), the response model,
+and the statuses it declares. Those are the bytes a factory cannot
+compose, because they come from what a hand-written handler happened to
+be called and what its docstring happened to say: the operation id is the
+function's name followed by its path, the summary is that name with its
+underscores turned to spaces and title-cased. A summary assembled out of
+a kind's `title` would read almost like the committed one, and almost is
+a drift check that fails.
+
+What is deliberately not on an `Endpoint` is what the verb settles the
+same way for all five kinds: the HTTP method, the path under the kind's
+route, the handler's parameters, the request body (a write of the kind
+carries the kind's own model, a secret write carries the credential
+body), and which repository call is made. Those are one rule with no
+exception across the five, and writing them out per endpoint would have
+been five chances to disagree. The verbs are six because the surface is
+six, and a kind with fewer says so by listing fewer endpoints: the
+singleton has no collection and no delete, and three of the five hold no
+secret.
+
+The descriptions were extracted from the handlers' own docstrings by a
+script rather than retyped, and each is written in the registry as one
+string per line of it, so the diff that ever changes one shows which
+line moved.
+
+The handler itself is built and then told what it is. FastAPI reads
+three things off a route function that the document then carries: its
+`__name__`, its `__doc__`, and its signature, in the order the
+parameters are declared. All three are installed from the descriptor.
+The generated function stays a plain `def`, so FastAPI still runs it on
+the threadpool and the synchronous repository never blocks the event
+loop.
+
+### The byte-identical proof
+
+Both generated references were regenerated exactly as the CI drift steps
+run them, from `samtal-server/`, and diffed against the committed
+copies:
+
+```
+$ uv run samtal-server config reference > "$RUNNER_TEMP/domain-config.md"
+$ diff -u ../docs/reference/domain-config.md "$RUNNER_TEMP/domain-config.md"
+(no output from diff -u: the files are identical)
+$ uv run samtal-server config openapi > "$RUNNER_TEMP/api-openapi.json"
+$ diff -u ../docs/reference/api-openapi.json "$RUNNER_TEMP/api-openapi.json"
+(no output from diff -u: the files are identical)
+```
+
+Both diffs print nothing and exit 0. Neither committed reference is
+touched by this branch: there is no regeneration commit to point at.
+
+Three things about the document turned out to be load-bearing and are
+recorded so the next reader does not have to rediscover them. The paths
+appear in the order they are first registered and the operations under
+one path in the order they were added to it, so the factory is called
+once from `_reads` and once from `_writes` rather than once per kind:
+every read of every kind is registered before any write, which is the
+order the committed document has. The schemas FastAPI collects from
+routes are sorted, but the entity and request models `_entity_schemas`
+injects are not, so `ENTITY_MODELS` deriving from the registry has to
+keep the registry's order, and it does. And the two-segment kind's
+listing is keyed twice, which is why `_collection` asks how many
+parameters address a kind rather than which kind it is.
+
+### Who imports the moved models, and how they kept working
+
+Five importers, all unmodified.
+
+`tests/unit/test_config_cli_shapes.py` reads `api.PendingDevice` and
+`api.McpServerStatus` through `from samtal_server.config import api`.
+`tests/unit/test_config_api_runtime.py`, `test_config_api_pending.py`,
+`test_config_api.py` and `test_api_openapi.py` import constants and
+`build_api` from `api`, which did not move. The fifteen model names are
+re-exported from `api.py` and listed in its `__all__`, which is what
+makes the re-export deliberate rather than an unused import ruff would
+flag, and is M1's `API_OPTIONS_NOTE` move again.
+
+The port table is empty. No test file in the repository changed, and
+`git diff --stat` over `tests/` against the milestone's base prints
+nothing.
+
+### Deviations from the plan
+
+1. **`entities.py` imports `responses.py` as well as the models.** The
+   module docstring's rule was "the models and the standard library, and
+   nothing else", and the rule behind the rule is that `docgen` renders
+   the reference on a machine with no database, no key and no FastAPI.
+   `responses.py` is pydantic and nothing else, so the rule behind it
+   holds; the docstring now says so. The alternative was an endpoint
+   that names its response model as a string for `api.py` to resolve,
+   which is a reference nothing checks.
+2. **`wrote`, `deleted` and `notice` are filled at M3, not M4.** The
+   plan lists them among the CLI's writes facts. Their first consumer is
+   the write factory here, and M1's `route` and M2's `missing` are the
+   precedent: a fact is filled by the milestone that first has a
+   consumer for it. M4 finds them filled and reads them.
+3. **`notice` is a string, not a hook.** M1 declared it as a `Hook`.
+   When a write of a kind takes effect does not depend on what was
+   written: an MCP server and the credentials stored on it are exactly
+   what a reload re-reads, and everything else waits for the restart.
+   That is one sentence per kind, which is the same rule
+   `writes.secret_notice` states for the two kinds that hold secrets. The
+   two acts whose notice does depend on what was written (a device
+   binding, whose agent may not be loaded) belong to the `Setting` tier
+   and compute theirs at the call site as they always have.
+4. **Three store-verb facts the plan did not name.** `read`, `write` and
+   `delete` are filled by `store.py` with its own per-kind methods,
+   unbound. The plan assumed the generic CRUD M2 built would be what the
+   API calls, and it is, one method further out: a kind's own method is
+   where its identity is normalized, and `read_provider` makes the stage
+   canonical before it addresses anything, so a generic read that
+   reached past it would answer `providers.LLM.x: no such provider`
+   where today it answers `providers.llm.x`. Naming the methods on the
+   descriptor also avoids reaching one through a name built out of the
+   kind's own, which is a reference nothing checks.
+5. **`Setting.endpoints` is removed rather than shaped.** M1 declared
+   the group on both tiers. A setting's routes are precisely the ones the
+   entity tier's six verbs cannot describe (bind by MAC, bind by
+   activation code, unbind, set, clear, each with its own
+   argument-shaped body and a notice computed per request), and the plan
+   says the non-entity routes stay hand-written. Declaring a group that
+   will never be filled would be an invitation to force them into it.
+   This is M2's deviation 8 in the API's half.
+6. **`writes.wrote_agent_defaults()` is new.** The singleton's
+   acknowledgement is the constant `WROTE_AGENT_DEFAULTS`, and the
+   descriptor's `wrote` is called the way every other kind's is. The
+   function returns the constant, which stays where it was and keeps its
+   name, so no sentence is written twice and none changed.
+7. **The routes are installed with `add_api_route` rather than the
+   method decorators.** `api.get(path, ...)` is a decorator that calls
+   `api.add_api_route(path, endpoint, methods=["GET"], ...)` with the
+   same defaults, and a factory has the function in hand rather than
+   under a decorator. Same call, one layer down.
+
+No other deviation. `RawBody` is unchanged and still on every write
+route (it moved up the file, beside the factory that reads it, and
+nothing about it changed); `_request_body`, `_resolve_body_schemas`,
+`_entity_schemas` and the schema hoisting are untouched; the bearer
+gate, the sanitized-errors middleware and `store_dependency` were not
+touched at all. `views.provider` and its four siblings, and
+`views.mcp_servers` and its two, stay: the CLI's own read path calls
+them, which is M4's to look at.
+
+### Verification
+
+From `samtal-server/`, with `PYTHONDONTWRITEBYTECODE=1` outside pytest:
+
+- `uv run ruff check .`: `All checks passed!`
+- Both generated references regenerate byte-identical, as above, with no
+  regeneration commit anywhere on the branch.
+- `git diff --stat` against the milestone's base over `tests/` and
+  `docs/reference/` prints nothing at all: no test file in the
+  repository changed, and neither committed reference did.
