@@ -71,9 +71,15 @@ computes `binding_notice(unloaded)`, and the CLI alone maps
 routes.
 
 **The shape bridge M4 deletes.** Five predicate constants at
-`cli.py:159-190`, nine predicate functions, four renderers, and
+`cli.py:159-190`, of which four are frozensets naming a body's fields
+or a state's vocabulary and the fifth is the reload's ordered outcomes;
+ten predicate functions; four renderers; and
 `tests/unit/test_config_cli_shapes.py`, whose docstring says it exists
-to be deleted wholesale by this issue.
+to be deleted wholesale by this issue. This inventory said nine
+functions when it was taken, and the count is corrected here rather
+than left to be rediscovered: M4 enumerated them on the way out and
+there are ten, which is the preamble's own rule that a number moving
+under a later milestone is a finding rather than a typo.
 
 **Command strings.** Seven independent encodings: the loader's
 `MOVED_KEY_COMMANDS`, docgen's entity table, `config.example.yaml`, the
@@ -805,8 +811,9 @@ Three properties, each deliberate:
   empty. `ValidationError.errors()` retains the input it rejected, and
   on this surface that can be a pasted credential.
 
-Deleted with it: `PENDING_FIELDS`, `STATUS_FIELDS`, `STATUS_STATES`,
-`PROMPT_BLOCK_FIELDS` and ten predicate functions (`_envelope`,
+Deleted with it: the four predicate frozensets (`PENDING_FIELDS`,
+`STATUS_FIELDS`, `STATUS_STATES`, the state vocabulary among them, and
+`PROMPT_BLOCK_FIELDS`) and ten predicate functions (`_envelope`,
 `_document`, `_pending_entries`, `_status_entries`, `_is_status_entry`,
 `_is_name_list`, `_assembled_prompt`, `_is_prompt_block`, `_is_count`,
 `_reload_outcome`), plus `_mapping` and `_wrote`, which were shape
@@ -817,9 +824,10 @@ grant as a list of nothing) rather than claims about the shape.
 
 ### The `RELOAD_OUTCOMES` choice, and its evidence
 
-The plan has M4 delete five predicate constants. Four are gone.
-`RELOAD_OUTCOMES` is kept, derived, and re-exported, because deleting
-it would have modified the contract file:
+The plan has M4 delete five predicate constants. Four of them, the
+frozensets above, are gone. `RELOAD_OUTCOMES` is kept, derived, and
+re-exported, because deleting it would have modified the contract
+file:
 
 ```
 $ grep -rn 'RELOAD_OUTCOMES' tests/

@@ -137,13 +137,17 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   a kind how one of its entries reads, and `--local`, its preamble and
   its four-command subset are exactly what they were. What the CLI
   accepts as an answer is the shape `responses.py` declares the route
-  answers with: the five frozensets of field names, the state
-  vocabulary and the ten predicates that walked a body by hand are
-  gone, and with them a whole class of drift where a field renamed on
-  the model left the CLI refusing every well-formed answer. Validation
-  is strict, so nothing is coerced into a rendering, and unknown fields
-  are dropped rather than refused, so a newer server stays readable;
-  the rejected body reaches neither the output nor an exception chain.
+  answers with: the four frozensets naming a body's fields and a
+  state's vocabulary, and the ten predicate functions that walked a
+  body by hand, are gone, and with them a whole class of drift where a
+  field renamed on the model left the CLI refusing every well-formed
+  answer. The fifth of those constants, `RELOAD_OUTCOMES`, survives in
+  derived form: it is the order the reload prints its four lines in,
+  read off the result model's own fields rather than listed again.
+  Validation is strict, so nothing is coerced into a rendering, and
+  unknown fields are dropped rather than refused, so a newer server
+  stays readable; the rejected body reaches neither the output nor an
+  exception chain.
   Nothing an operator reads changed: every refusal, notice, column and
   document is byte for byte what it was, and each of the sixteen acts
   with a break-glass path is now pinned to print the same thing on both
