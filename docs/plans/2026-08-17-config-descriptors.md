@@ -426,7 +426,7 @@ outside pytest.
       commit; the port table is empty; milestone duties in the same
       change.
 - [x] [M4](2026-08-17-config-descriptors-implementation.md#milestone-4-the-cli-unifies-and-renders-from-response-models):
-      the CLI unifies and renders from response models (PR TBD): every
+      the CLI unifies and renders from response models (PR #175): every
       act is a row carrying its method, path, body, response shape,
       rendering and, for the four commands `--local` covers, its local
       fallback, with the entity rows built from the descriptors; the
