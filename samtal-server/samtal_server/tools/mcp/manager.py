@@ -84,6 +84,7 @@ DOWN = "down"
 UNUSED = "unused"
 
 
+# Why a connection is gone when nothing raised on the way in: a tool
 # call failed on it and the manager dropped it so the next session
 # revives it. A fixed token this application owns, like the type names
 # `_reason` answers with and for the same reason, since here there is no
