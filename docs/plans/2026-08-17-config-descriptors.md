@@ -249,8 +249,8 @@ raise type and `_env` rule), `masked_option`/`recorded_option`
 or by accident, but changing it changes behavior). The inventory's
 finding that `shown_values` does not mask a nested MCP secret
 where provider options are masked recursively is a REAL surface
-question this issue must not answer silently: it is filed as its
-own issue during M1 and cross-referenced here.
+question this issue must not answer silently: it was filed as
+issue #171 during M1.
 
 ### The command strings: single-sourced where code reads them
 
@@ -405,8 +405,8 @@ outside pytest.
       milestone that fills it, docgen renders it and its own entity
       dataclass and data tables are gone, both references regenerate
       byte-identical with no regeneration commit, the `shown_values`
-      finding is drafted for filing in the implementation doc, and
-      the fresh inventory is recorded there.
+      finding is filed as issue #171, and the fresh inventory is
+      recorded in the implementation doc.
 - [ ] M2: store and views generalize: default row path plus the
       three named hooks, registry-driven CRUD, the walker merge,
       `provider_record` untouched; ported pins listed one by one;
