@@ -284,22 +284,14 @@ beside it: `Emission.args` reaches every tap and the formatter
 renders them, so each spec also declares its argument tuple (arity
 and per-position kind, drawn from the same taxonomy), transcribed
 in M1 while reading each site, and validation covers the tuple the
-way it covers fields. One argument on the surface today cannot
-satisfy the taxonomy: `asr_prompt_echo`'s recovered branch renders
-the recovered transcript into its sentence, and its pin preserves
-the text. That argument is declared as an explicit, single-entry
-grandfather (`GRANDFATHERED_ARGS`, carrying the site and the
-tracking-issue number), because removing it is a surface narrowing
-this issue's no-behavior-change contract forbids; M1 files the
-follow-up issue for the narrowing and the registry entry cites it,
-so the exception is visible machinery rather than a quiet hole.
-The grandfather is bounded machinery, not a bypass: the
-conformance test asserts the entry set is exactly this one site
-and argument position (a second entry fails the suite), the
-variant it sits in still declares its template and every other
-position, and the follow-up issue's job is to delete the constant,
-at which point the assertion that the set is empty replaces the
-assertion that it is one.
+way it covers fields. No argument on the surface falls outside the taxonomy: the one
+that did, the recovered transcript `asr_prompt_echo` rendered into
+its sentence, is removed by issue #165, implemented as a
+prerequisite to this issue, so this plan's baseline is post-#165
+main and the registry declares the narrowed sentence like any
+other. No grandfather machinery exists; decision 5's
+pins-unmodified contract holds without exception against that
+baseline.
 
 Violations become one `EventSchemaViolation` value, and its
 diagnostics render REGISTRY-OWNED identifiers only. A declared
@@ -695,8 +687,9 @@ recorded in the PR body with observed failure output per branch.
       site to it two ways and proves its own walk on planted
       source; `test_conversations_event_pins.py` pins the
       post-baseline paths exactly; the string-field provenance
-      inventory is recorded and the narrowing follow-up issue
-      filed; no enforcement wired; both lanes green, pin suites
+      inventory is recorded; the milestone's implementation-doc
+      section, changelog entry, and tick land in the same change;
+      no enforcement wired; both lanes green, pin suites
       untouched.
 - [ ] M2: the emitters enforce at emit time: caller fields checked
       before the base-field merge, strict raises
