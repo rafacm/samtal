@@ -554,38 +554,43 @@ re-bounded here whatever its decision site did; `ID` and `ID_LIST` are
 matched against the named syntax; `SOURCES` keys are matched against the
 know-how grammar, so `memory` fails like any unknown prefix.
 
-### The forgiving algorithm, and one reading the plan needed
+### The forgiving algorithm, and the sentence that always goes
 
-Forgiving mode selects the variant the same way, rebuilds the payload
-field by field against it keeping only what validates, and then holds
-the REBUILT emission to that variant whole again. That final check is
-what gates dispatch: a rebuild that leaves a required field missing, or
-whose sentence or arguments were the problem, becomes the declared
-`schema_violation` event, built fresh from the fixed token, the
-emitter's own base identity, the fixed sentence and no arguments. So
-does an undeclared event, an unknown template, an unknown channel, a
-wrong level and an ambiguous selection.
+Forgiving mode selects the variant the same way, drops the caller's
+message and arguments (always, see below), rebuilds the payload field by
+field against the variant keeping only what validates, and then holds the
+REBUILT PAYLOAD to that variant's field table again. That final check is
+what gates dispatch: a rebuild that leaves a required field missing
+becomes the declared `schema_violation` event, built fresh from the fixed
+token, the emitter's own base identity, the fixed sentence and no
+arguments. So does an undeclared event, an event that is not a name, an
+unknown template, an unknown channel, a wrong level and an ambiguous
+selection. What passes the gate rides as its own event, carrying its
+declared fields, `SAFE_MESSAGE` and no arguments.
 
-**Deviation 1, a reading rather than a change.** The plan says "ANY
-invalid emission has its message and args replaced by the fixed safe
-sentence", and also that the final check refuses "a required field
-missing, the selection ambiguous, or the template replaced". Read
-literally the first sentence makes the third condition universal: every
-invalid emission would have its template replaced, so every invalid
-emission would become `schema_violation` and the rebuild would be dead
-code the plan spends three paragraphs specifying. This milestone reads
-"any invalid emission" as "any emission still invalid after the
-rebuild", which is the reading that leaves the plan's three named
-conditions distinct and non-redundant. Concretely: an emission whose
-only fault was an undeclared field is rebuilt without it and rides as
-itself, with its own sentence and arguments; everything else loses its
-sentence and becomes the recovery event. The safety argument holds
-either way, and it is worth stating: a rebuild only succeeds when every
-retained field AND every argument validated against the variant, so the
-sentence that survives renders lawful values only. The plan's own risk
-section wants this reading too: a field only production reaches "would
-surface in forgiving mode as a complaint line, not an outage", and an
-outage of the line is exactly what the literal reading produces.
+**Deviation 1, corrected by the PR #169 review.** The milestone first
+read the plan's "ANY invalid emission has its message and args replaced
+by the fixed safe sentence" as "any emission still invalid AFTER the
+rebuild", on the argument that a successful rebuild implies every
+retained field and every argument validated, so the surviving sentence
+could only render lawful values. That argument is wrong, and the review
+found the case that breaks it: the two halves are not independent. One
+credential can be an undeclared field key, that field's value, AND a
+perfectly lawful `IDENTIFIER` or `PATHLIKE` argument of the same call.
+The payload half dropped it for being undeclared while the sentence half
+rendered it for being a valid identifier, so one emission both refused
+the value and printed it. The plan's literal rule stands: EVERY invalid
+emission loses the caller's message and arguments.
+
+What that would have made redundant, on the original reading, is
+answered by splitting the final check rather than by softening the rule.
+The gate asks about the variant's FIELD table alone, because recovery's
+own sentence is recovery's rendering and not a template the caller
+chose. So the plan's three named conditions stay distinct (a required
+field missing, an ambiguous selection, a template the registry does not
+know), the rebuild is not dead code, and the plan's risk section still
+gets what it asked for: a field only production reaches is a complaint
+line and a slightly quieter event, never an outage.
 
 Behind all of it sits one `try`, wrapping candidate selection,
 validation and rebuild alike, so a bug in this module degrades an
@@ -677,7 +682,7 @@ change, not an emit-site change, and neither pin suite moved.
 
 ### The test matrix, as it came out
 
-`tests/unit/test_event_enforcement.py` (66 cases) drives every violation
+`tests/unit/test_event_enforcement.py` (81 cases) drives every violation
 class through both modes against a scratch registry of its own, keyed to
 this suite rather than to production events so that the matrix does not
 change whenever the surface does, on real channels so the recovery
@@ -695,7 +700,7 @@ survival under an ERROR root, the multi-fault single complaint, the
 guard, and the two internal producers of `schema_violation` told apart
 by what they say.
 
-`tests/unit/test_event_enforcement_sentinels.py` (27 cases) is the
+`tests/unit/test_event_enforcement_sentinels.py` (28 cases) is the
 no-leak half. One credential-shaped spelling, dotted so that it
 satisfies no `ID` syntax and no token set while remaining an ordinary
 printable string, drives all NINE distinct diagnostic branches in both
@@ -726,12 +731,19 @@ strict-mode emission still refused).
 
 ### Deviations from the plan
 
-Four, all recorded rather than silent.
+Four, all recorded rather than silent, and the first is a deviation
+withdrawn rather than one taken.
 
-1. **"Any invalid emission" is read as "any emission still invalid
-   after the rebuild"**, for the reasons above. Without it the plan's
-   rebuild algorithm is unreachable code and forgiving mode loses every
-   line it complains about.
+1. **None on the forgiving rule, in the end.** The milestone read "any
+   invalid emission has its message and args replaced" as "any emission
+   still invalid after the rebuild"; the PR #169 review showed the
+   aliasing case that breaks the reasoning, and the plan's literal rule
+   is what shipped. What the reading was trying to protect (the rebuild
+   not being dead code, the plan's three final-check conditions staying
+   distinct) is answered by the final gate asking about the variant's
+   field table alone. Recorded rather than quietly rewritten, because
+   the wrong reading was in this document for a round and somebody may
+   have read it.
 2. **A test double changed, and one assertion with it**
    (`tests/support/boundary.py`, `test_boundary_contract.py`). Strict
    enforcement refused a shape no production path produces; the double
@@ -789,17 +801,96 @@ per decision rather than per frame.
 Run from `samtal-server/`, with `PYTHONDONTWRITEBYTECODE=1` for
 everything outside pytest.
 
-Re-run after the rebase onto merged main (PR #167), which is what the
-numbers below are.
+Re-run after the rebase onto merged main (PR #167) and again after the
+review round below, which is what the numbers here are.
 
 - `uv run ruff check .`: `All checks passed!`
-- `uv run pytest tests/unit -q`: `2883 passed, 16 skipped`
+- `uv run pytest tests/unit -q`: `2901 passed, 16 skipped`
 - `uv run pytest tests/integration -q`: `55 passed`
 - `uv run pytest tests/unit --collect-only -q | tail -1`: **2785
-  before**, **2899 after**. The rise of 114 is exactly the new tests: 66
-  enforcement cases, 27 sentinel cases and 21 mode cases.
+  before**, **2917 after**. The rise of 132 is the new tests: 81
+  enforcement cases, 28 sentinel cases, 21 mode cases, and the round's
+  two registry-coherence additions to the conformance suite.
 - `uv run pytest tests/integration --collect-only -q | tail -1`: **55
   before**, **55 after**.
 - `git diff --stat origin/main -- tests/unit/test_event_surface_pins.py tests/unit/test_server_event_pins.py`:
   empty. Both contract suites pass unmodified under strict enforcement,
   which is the milestone's core proof.
+
+### PR review round
+
+External review of PR #169, 2026-08-17. Four findings, two P1 and two
+P2, all valid and all accepted. As received, condensed but faithful,
+each with its resolution and the commit that carries it:
+
+1. **P1: forgiving recovery can leak rejected input through a
+   separately valid argument.** Recovery kept the caller's message and
+   arguments whenever the arguments validated on their own, so a
+   credential used both as an undeclared field key or value AND as a
+   lawful `IDENTIFIER` or `PATHLIKE` argument was dropped from the
+   payload and rendered into the log and every tap.
+
+   *Resolution*: accepted (`4396bcf`), and it overturns this section's
+   first deviation, corrected above. The two halves are not independent,
+   so the plan's literal rule stands: every invalid emission loses the
+   caller's message and arguments. The final gate now asks about the
+   variant's FIELD table alone, since recovery's own sentence is
+   recovery's rendering rather than a template the caller chose, which
+   keeps the rebuild meaningful without keeping the leak. An emission
+   that passes rides as its own event with `SAFE_MESSAGE` and no
+   arguments; the recovery event keeps its own declared sentence, so
+   two outcomes read differently in the retained log. The aliasing case
+   is planted in both suites and reverting the return line fails both.
+
+2. **P1: the last-resort guard can itself raise and cost the reply.**
+   The guard's handler called `log.error` outside any guard, and
+   `_offer`'s tap-failure report had the same shape, which is worse: the
+   tap that failed is usually the log tap, so the report goes back onto
+   the channel that just threw.
+
+   *Resolution*: accepted (`6e7a794`). Every report this module makes
+   from inside a guard now goes through one helper that suppresses
+   whatever the channel does. A logging call is not inert: `handle` and
+   `filter` are called unwrapped and a formatter meets whatever the
+   record carries, all of it code somebody else installed. Suppressing
+   blind is right here and only here, because what is protected is a
+   reply and what is lost is one diagnostic line about a diagnostic
+   line. Four tests with a handler that raises where `logging` does not
+   catch it (`emit` is swallowed by `handleError`, `handle` is not)
+   cover the refusal report, the guard's report, the tap report and the
+   helper alone; removing the suppression fails all four.
+
+3. **P2: strict enforcement accepts ambiguous full-variant matches.**
+   The matcher scored candidates and took the fewest-faults one, so two
+   variants an emission satisfied completely were resolved by
+   declaration order; and the conformance suite compared variants by
+   `(channel, level, message)`, so a duplicated declaration stayed
+   green.
+
+   *Resolution*: accepted (`de096a7`). Matching is exactly one full
+   match; more than one is a violation with its own fixed code, strict
+   raising and forgiving demoting to `schema_violation` since there is
+   nothing to rebuild towards. The declaration is refused where it can
+   be fixed too: the conformance suite now compares the payload SHAPES
+   two variants admit, within each group the emitter selects by, and a
+   planted registry proves the check sees both spellings (the same
+   variant twice, and one whose optional field makes its shapes a
+   superset of another's). The real registry is already clean, so this
+   is a guard rather than a fix. The four events with several variants
+   behind one template (`tool_call`, `llm_round`, `llm_retry`,
+   `provider_failed`) stay lawful precisely because their shapes are
+   disjoint.
+
+4. **P2: a non-string event bypasses the safe error mapping.**
+   `registry.get(event)` ran before anything asked whether the event was
+   a name, so an unhashable one raised a raw `TypeError` out of the
+   validator: in strict mode not the error a caller is told to expect,
+   and in forgiving mode a fall through to the last-resort guard, which
+   saved the reply but reported a broken validator rather than a bad
+   call.
+
+   *Resolution*: accepted (`10e3c9c`). The type is checked before the
+   lookup and reported as an ordinary fault through the base field's own
+   name, never by rendering the value: a caller that passed a list
+   passed its contents too. Six cases, hashable and not, plus a sentinel
+   in the event slot asserted absent from every record and every tap.
