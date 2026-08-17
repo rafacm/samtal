@@ -35,8 +35,10 @@ from samtal_server.conversations.schema import TABLES
 # a line), so only paragraphs go through this.
 PROSE_WIDTH = 78
 
-# The event vocabulary's authority, relative to the committed reference.
-EVENT_TABLE = "../../samtal-server/README.md#logging"
+# The event vocabulary's authority, which sits beside this document in
+# the same directory and is generated from the registry that declares
+# every event.
+EVENT_REFERENCE = "events.md"
 
 # What an exporter maps onto, per the observability ADR's adoption of
 # the GenAI conventions "where one exists". Left-hand side is this
@@ -182,10 +184,11 @@ def reference() -> str:
         "",
         *_paragraph(
             f"`events.name` and `events.fields` carry the structured event surface, "
-            f"whose definition is the [server README's event table]({EVENT_TABLE}): "
+            f"whose definition is the [event schema reference]({EVENT_REFERENCE}): "
             f"which events exist, and which fields each one carries. It is not "
-            f"restated here, because a second copy of thirty rows is a second copy to "
-            f"drift. The store copies field names verbatim from the payload, minus "
+            f"restated here, because a second copy of fifty-eight declarations is a "
+            f"second copy to drift. The store copies field names verbatim from the "
+            f"payload, minus "
             f"`event`, `session` and `device`, which live on the row and on the "
             f"session."
         ),

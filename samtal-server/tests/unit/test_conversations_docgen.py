@@ -104,7 +104,7 @@ def test_the_reference_points_at_the_event_vocabularys_authority() -> None:
     definition instead, and says what the store does to the payload on
     the way in."""
     rendered = docgen.reference()
-    assert docgen.EVENT_TABLE in rendered
+    assert docgen.EVENT_REFERENCE in rendered
     assert "restated here" in flat(rendered)
     # Both content keys, and that neither depends on a switch.
     assert "strips `text`" in flat(rendered)

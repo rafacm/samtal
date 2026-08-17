@@ -96,12 +96,11 @@ end.
 ## The event vocabulary
 
 `events.name` and `events.fields` carry the structured event surface, whose
-definition is the [server README's event
-table](../../samtal-server/README.md#logging): which events exist, and which
-fields each one carries. It is not restated here, because a second copy of
-thirty rows is a second copy to drift. The store copies field names verbatim
-from the payload, minus `event`, `session` and `device`, which live on the row
-and on the session.
+definition is the [event schema reference](events.md): which events exist, and
+which fields each one carries. It is not restated here, because a second copy
+of fifty-eight declarations is a second copy to drift. The store copies field
+names verbatim from the payload, minus `event`, `session` and `device`, which
+live on the row and on the session.
 
 Some fields never arrive. The writer strips `text` from `heard`, `replied` and
 `agent_said`, and `tool` from `tool_call`, before the row lands, and does so
