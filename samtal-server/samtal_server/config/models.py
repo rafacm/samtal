@@ -1595,6 +1595,51 @@ def normalize_mac(value: str) -> str:
     return mac
 
 
+# What a device may say about itself on a retained log line, and how
+# much of it.
+#
+# The content-and-telemetry ADR, as amended on 2026-08-17, admits
+# bounded device-descriptor metadata onto the events: what a device says
+# about ITSELF at check-in is an identifier-class fact about the
+# endpoint, unlike what a person said through it. "Bounded" is the whole
+# of the permission, so the bound lives here, beside `normalize_mac`,
+# which is this codebase's other answer to "a device sent this and the
+# server owns what it becomes". Every one of these values arrives on an
+# unauthenticated request, so the limits are what a real board reports
+# with room to spare rather than what a header could hold.
+#
+# The limits are restated in the event registry, which enforces them
+# again where the field is emitted; the conformance test holds the two
+# statements equal.
+BOARD_LIMIT = 64
+FIRMWARE_LIMIT = 32
+CLIENT_ID_LIMIT = 64
+
+
+def bounded_descriptor(value: str, limit: int) -> str:
+    """One device-reported descriptor, cut down to what a log line may
+    carry: printable characters only, trimmed, and no longer than
+    `limit`.
+
+    Unprintables go first and by class rather than by list: a newline
+    would split one retained record into two, and a terminal escape
+    would let whoever sent it paint an operator's screen. `str.isprintable`
+    is false for every control character, for the separators, and for
+    the non-ASCII spaces, which is exactly the set that has to go.
+
+    Trimmed twice, before and after the cut, because a truncation can
+    leave the trailing space that was in the middle of the value.
+
+    The empty string is a possible answer, for a value that was nothing
+    but unprintables. Each caller decides what an empty descriptor means
+    there, because the two sites disagree: an absent board is already
+    "unknown" by the time it reaches here, and an unreadable client id
+    is a null field.
+    """
+    printable = "".join(character for character in value if character.isprintable())
+    return printable.strip()[:limit].strip()
+
+
 def check_mcp_entry_names(value: dict[str, McpServerConfig]) -> dict[str, McpServerConfig]:
     """An entry name becomes a tool-name prefix, so it has to be a legal
     tool name, and it may not be one the merged list already uses. That
