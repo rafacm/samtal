@@ -399,7 +399,7 @@ outside pytest.
 ## Milestones
 
 - [x] [M1](2026-08-17-config-descriptors-implementation.md#milestone-1-the-descriptors-exist-and-docgen-consumes-them):
-      the descriptors exist and docgen consumes them (PR TBD):
+      the descriptors exist and docgen consumes them (PR #172):
       `entities.py` holds the three-tier registry with the static
       identity facts filled and every later group named for the
       milestone that fills it, docgen renders it and its own entity
