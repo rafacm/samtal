@@ -24,6 +24,7 @@ from mcp.client.streamable_http import streamable_http_client
 
 from samtal_server.config import McpServerConfig
 from samtal_server.config.secrets import SecretStore, resolve_mcp_values
+from samtal_server.protocol.mcp import spoken_content
 
 # How long connecting and listing a server's tools may take. The boot
 # waits for this once per server, concurrently.
@@ -275,11 +276,13 @@ def _down_reason(exc: BaseException, phase: str) -> str:
 def _result_text(result: mcp.types.CallToolResult) -> str:
     """A tool result as speakable text. Content a voice assistant cannot
     use is named rather than dropped, so the model can say what it got
-    instead of appearing to ignore it."""
-    parts: list[str] = []
-    for item in result.content:
-        if isinstance(item, mcp.types.TextContent):
-            parts.append(item.text)
-        else:
-            parts.append(f"[unsupported {item.type} content]")
-    return "\n".join(parts)
+    instead of appearing to ignore it.
+
+    Typed content, which is what the SDK hands back: every item has a
+    `type` and a text item's text is a string, so there is nothing here
+    to be tolerant of. The sentence a non-text item is named by is the
+    device channel's too, and lives with it."""
+    return spoken_content(
+        (item.type, item.text if isinstance(item, mcp.types.TextContent) else None)
+        for item in result.content
+    )

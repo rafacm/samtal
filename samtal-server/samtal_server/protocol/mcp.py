@@ -14,6 +14,7 @@ Upstream reference: `docs/mcp-protocol.md` in 78/xiaozhi-esp32.
 """
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -159,17 +160,46 @@ def parse_tools_page(result: dict[str, Any]) -> tuple[list[DeviceTool], str]:
     return tools, cursor if isinstance(cursor, str) else ""
 
 
+def spoken_content(content: Iterable[tuple[str, str | None]]) -> str:
+    """One tool result's content as text a voice assistant can say.
+
+    Text as it came, and everything else named by its type rather than
+    dropped silently, so the model can say what it got back instead of
+    appearing to ignore it.
+
+    Two layers call this, because this server speaks MCP twice: the
+    device's JSON-RPC channel below, where a result is raw JSON of
+    whatever shape arrived, and the SDK client in `tools.mcp.transport`,
+    where it is typed content. They read their own shapes and answer in
+    their own return types, and what they have in common is this
+    sentence and this join. It is one sentence a model reads out loud,
+    so it has one home, and a caller reaches it by normalizing its
+    content to a type and the text that type carries, or None for
+    content that carries none.
+    """
+    return "\n".join(
+        text if text is not None else f"[unsupported {kind} content]"
+        for kind, text in content
+    )
+
+
 def parse_tool_result(result: dict[str, Any]) -> tuple[str, bool]:
     """A `tools/call` result as text plus its error flag. Content items
     the protocol allows but a spoken assistant cannot use (images, audio)
     are named rather than dropped silently, so the model can say what it
-    got back instead of appearing to ignore it."""
-    parts: list[str] = []
+    got back instead of appearing to ignore it.
+
+    Dict-tolerant throughout, unlike the SDK side: what arrives here is
+    whatever a device sent, so an item that is not an object at all is
+    skipped, a missing `type` is `unknown`, and a text item with no
+    `text` is the empty string."""
+    content: list[tuple[str, str | None]] = []
     for item in result.get("content") or []:
         if not isinstance(item, dict):
             continue
-        if item.get("type") == "text":
-            parts.append(str(item.get("text", "")))
+        kind = item.get("type", "unknown")
+        if kind == "text":
+            content.append(("text", str(item.get("text", ""))))
         else:
-            parts.append(f"[unsupported {item.get('type', 'unknown')} content]")
-    return "\n".join(parts), bool(result.get("isError"))
+            content.append((str(kind), None))
+    return spoken_content(content), bool(result.get("isError"))
