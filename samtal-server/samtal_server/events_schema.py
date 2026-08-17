@@ -434,8 +434,11 @@ class EventVariant:
     channel: str
     level: int
     message: str
+    # Required, and before `args` so that it is: a variant with no field
+    # table is not a shape, and a default of None would trade a
+    # construction error for an attribute error somewhere later.
+    fields: dict[str, EventField]
     args: tuple[ArgSpec, ...] = ()
-    fields: dict[str, EventField] = None  # type: ignore[assignment]
     note: str = ""
 
 
