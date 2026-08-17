@@ -482,7 +482,13 @@ async def test_a_recovered_transcript_reaches_no_record_or_consumer(
     a turn like any other, and the retained log is not where it belongs.
 
     Both retained surfaces, because a clean record does not prove a
-    clean consumer: the tap sees the emission before the log does."""
+    clean consumer: the tap sees the emission before the log does.
+
+    And every record rather than the event's, because the retained log
+    is the whole log. This path writes plain `logger` calls beside its
+    events (the retry announcement is one of them, on the very branch
+    that has the transcript in hand), and a sentinel that filtered to
+    `asr_prompt_echo` first would watch one line and bless the file."""
     seen: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -498,11 +504,16 @@ async def test_a_recovered_transcript_reaches_no_record_or_consumer(
     assert result.text == RECOVERED
     assert len(seen) == 2
 
+    # Every line the run wrote, whatever channel it landed on and
+    # whether or not it was an event.
+    assert caplog.records, "nothing was logged at all, so this proves nothing"
+    for record in caplog.records:
+        assert RECOVERED not in surfaces(record), record.name
+
     records = emitted(caplog, "asr_prompt_echo")
     assert records, "the guard never fired, so this proves nothing"
     for record in records:
         assert record.outcome == "recovered"  # type: ignore[attr-defined]
-        assert RECOVERED not in surfaces(record)
 
     consumed = tap.saw("asr_prompt_echo")
     assert consumed, "it reached no tap at all, so this proves nothing"
