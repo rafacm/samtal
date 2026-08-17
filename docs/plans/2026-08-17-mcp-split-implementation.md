@@ -366,3 +366,161 @@ The two blocks that changed shape rather than place are word-identical
 and were verified so: the SDK propagation comment, re-wrapped to sit
 inside `quiet_sdk_loggers` at four spaces, and the atomic-swap
 contract, which is `_install`'s docstring now.
+
+## M2: the typed status and reload surface
+
+Three commits: the decoder unification first, which touches neither of
+the other two files and is the one piece of M2 that is about the wire
+rather than about types; then the typed views at the source, which
+nothing consumes yet; then the Protocol and the two dependencies, which
+is where the API stops saying it was handed `Any`.
+
+### The adapter, and what deliberately did not move
+
+`McpServers.status()` is byte-unchanged and still answers
+`dict[str, dict[str, Any]]`. The reflection sentinel indexes those
+mappings and `json.dumps`es the whole of one, and every consumer inside
+this server reads them as mappings, which is finding 2 of the plan
+review and the reason the typed surface is an adapter rather than a
+reshaped internal.
+
+`McpServers.typed_status()` is that adapter: one dict comprehension
+over `status()`, `McpServerStatus.model_validate` per entry.
+Validating rather than constructing is the point of it, and it is
+recorded in the method: the models forbid extra keys, so a field this
+registry starts answering with and the document does not declare fails
+in this server's own unit lane rather than on a client.
+
+`reload.reload_result(servers, read)` composes the endpoint's whole
+answer where the two phases live: it awaits `reload(servers, read)`,
+then reads `servers.typed_status()` with no await between the two,
+which is exactly the invariant the handler used to hold, moved with
+the construction it belongs to and stated in the function's docstring.
+Refusals are not caught there: the exception types the two phases
+raise ARE the contract with the API (409, 422, 500), and they travel
+out untouched. `McpServers.reload_result(read)` is the one-line
+delegation the composition root hands the API, beside the `reload()`
+the suites drive.
+
+**`McpServers.reload()` keeps returning `McpReload`.** Its four tuples
+are what `test_tools_mcp_reload.py` asserts on, tuple by tuple, and
+`McpReloadResult`'s fields are lists, so folding the two would have
+rewritten a suite the contract says not to touch. The registry
+therefore has two reload entry points, which is the honest shape:
+`McpReload` is this application's own vocabulary and `McpReloadResult`
+is what the API sends.
+
+The two files grew by what those views are worth: `registry.py` 459 to
+500 lines and `reload.py` 423 to 462, both still at the plan's
+roughly-500 criterion.
+
+### The Protocol
+
+In `config/responses.py`, beside the models it answers in, out of
+`typing` and `collections.abc` and those models:
+
+```python
+class McpStatusSource(Protocol):
+    def typed_status(self) -> dict[str, McpServerStatus]: ...
+
+
+type McpReloader = Callable[[], Awaitable[McpReloadResult]]
+```
+
+`api.py`'s two dependencies are
+`Annotated[McpStatusSource | None, Depends(_mcp_servers)]` and
+`Annotated[McpReloader | None, Depends(_mcp_reload)]`, the None being
+the honest shape both dependency functions already returned for an
+application built without a server. `build_api`'s two parameters take
+the same types, `app.py`'s `_mcp_reloader` returns `McpReloader`, and
+the `TYPE_CHECKING` import of `McpServers` in `api.py` is gone: the
+comment that carried its rationale stays and now records that the
+constraint holds by construction, since nothing in the module names
+the registry at all.
+
+**Deviation: the Protocol's method is `typed_status`, not `status`.**
+The plan review's finding 2 says "the `McpStatusSource` Protocol's
+`status()` returns `dict[str, McpServerStatus]`", and the amended plan
+section names `typed_status()` on the registry as what the API
+dependency consumes. Taken literally the first would leave `McpServers`
+not satisfying the protocol it is passed as, since its `status()`
+answers mappings; the protocol declares the method the registry
+actually offers instead, so the conformance is structural and true.
+
+### The reload route lost a dependency
+
+`reload_mcp_servers` took `servers` and `reload` and refused with 503
+if either was None. The reload callable now answers the whole reply, so
+the registry has nothing left to tell that handler and the parameter
+went with the flattening. The 503 is unchanged in every composition
+that exists: `app.py` passes both or the application has neither, and
+no test builds an application with a reload and no registry.
+
+**Discovery: a handler's docstring is committed bytes.** The paragraph
+explaining why the composition moved was first written into
+`reload_mcp_servers`'s docstring, which FastAPI renders as the
+endpoint's `description`; the OpenAPI drift check refused it on the
+spot. It is a comment inside the handler now, which says so in its
+first sentence so the next person does not learn it the same way.
+
+### The decoders
+
+`protocol/mcp.py` gains `spoken_content(content)`: it takes a
+normalized sequence of a content type and the text that type carries
+(`None` for content that carries none) and answers the join, with
+`[unsupported {type} content]` for the None entries. It lives there
+because that module owns the wire shapes and imports nothing of
+`tools/`, so `transport.py` imports downward as the rest of the layer
+does.
+
+Both callers keep everything that is theirs, which is the five
+differences the inventory catalogued: `parse_tool_result` keeps its
+dict tolerance (an item that is not an object skipped, an absent
+`type` reading `unknown`, a missing `text` reading empty) and its
+`tuple[str, bool]`; `_result_text` keeps its typed iteration and its
+`str`. Two of them needed care rather than copying. `item.get("type",
+"unknown")` defaults only on an ABSENT key, so a `{"type": null}` item
+still renders `[unsupported None content]`; the normalization passes
+`str(kind)`, which is what an f-string did with the same value. And
+the text sentinel is `None` rather than a falsy check, so a text item
+whose text is the empty string is still text and still contributes its
+empty line. `test_protocol_mcp.py`'s
+`test_content_a_voice_assistant_cannot_speak_is_named`, the one pinned
+sentence, is unmodified.
+
+### The port table
+
+| File | Was | Is | Why |
+| --- | --- | --- | --- |
+| `test_config_api_runtime.py` | `outcome(**fields) -> McpReload` | `outcome(servers, **fields) -> McpReloadResult`, the four lists off the dataclass plus `servers.typed_status()` | the stub stands in for the callable the API is handed, whose answer is now the whole reply |
+| `test_config_api_runtime.py` | `answering`/`refusing` annotated `McpReload` | annotated `McpReloadResult` | same, in the two stub factories |
+| `test_config_api_runtime.py` | `outcome(started=…)` at the one call site | `outcome(servers, started=…)` | the registry the status half is taken from |
+| `test_config_api_runtime.py` | `async def reload() -> McpReload: return await servers.reload(read)` | `-> McpReloadResult: … servers.reload_result(read)` | the sanitizing test drives the real path, which is now the result-composing one |
+| `test_config_cli_rendering.py` | `_applied(**outcome)` answering `McpReload` | `_applied(servers, **outcome)` answering `McpReloadResult` | same reason: it is a stub of the same callable, and the CLI renders both halves |
+
+Both files gained a `dataclasses.asdict` import and
+`test_config_cli_rendering.py` a `McpReloadResult` one; the reload
+test's one call site binds the registry to a name to pass it. Nothing
+else in either file moved, and no other test file is touched by M2:
+`test_tools_mcp_reload.py`, the reflection sentinels and the reload
+integration proof are byte-identical to their M1 state.
+
+### Verification
+
+From `samtal-server/`, `uv` throughout, `PYTHONDONTWRITEBYTECODE=1`
+outside pytest.
+
+- `uv run ruff check .`: **All checks passed!**
+- `uv run pytest tests/unit -q`: **2943 passed, 16 skipped**, 2959
+  collected, unchanged from M1: the ports rewrote lines inside tests
+  that already existed and the typed views added no test of their own.
+- `uv run pytest tests/integration -q`: **55 passed**, unchanged.
+- `uv run samtal-server config openapi` diffs clean against
+  `docs/reference/api-openapi.json`, which is the milestone's core
+  proof: the wire shapes, the descriptions and the schemas are the
+  same bytes with the flattening gone and the dependencies typed.
+- `uv run samtal-server events reference` diffs clean against
+  `docs/reference/events.md`.
+- The reflection sentinels (`test_mcp_status_reflection.py`) and the
+  reload integration proof (`tests/integration/test_mcp_reload.py`)
+  pass unmodified.

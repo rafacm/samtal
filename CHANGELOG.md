@@ -122,6 +122,29 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The MCP runtime routes know what they were handed** (#140, M2).
+  The status read and the reload action declared their two
+  dependencies as `Any`, because the registry that answers them imports
+  the MCP SDK and the provider layer and rendering the committed
+  OpenAPI document must load neither. They now declare
+  `McpStatusSource` and `McpReloader`, a protocol and a callable shape
+  stated in `config/responses.py` out of typing and the response models
+  alone, so a route says what it asks of a running server and the
+  document still renders without any of that being importable. The
+  answers are composed where the knowledge is: the registry validates
+  its own status into the models the contract declares, and the reload
+  returns the endpoint's whole reply, its outcomes and the status taken
+  with no await between them, which used to be an invariant a request
+  handler was holding by hand. Nothing changed on the wire, which the
+  byte-identical OpenAPI document proves.
+- **Content a voice assistant cannot speak is named once** (#140, M2).
+  This server speaks MCP twice, to the device over JSON-RPC and to
+  configured servers over the SDK, and each side had its own copy of
+  the sentence a model reads out when a tool answers with an image or
+  audio. The sentence and the join are one function in
+  `protocol/mcp.py` now, over a normalized sequence of a content type
+  and the text it carries; both sides keep the decoding that is theirs,
+  including the device channel's tolerance of a result of any shape.
 - **The MCP subsystem is six files under one name** (#140, M1).
   `samtal_server/tools/mcp.py` was 2,338 lines and at least twelve
   responsibilities, of which one class was 885 lines. It is now the
