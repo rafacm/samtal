@@ -1031,18 +1031,17 @@ def _layer_data(location: str, row: Row) -> dict[str, object]:
     return data
 
 
-# Which table each kind is rowed in, and how a row of it is read. The
-# three mappings a model demands are the ones above, unchanged: the MCP
-# server's per-column omissions, which are what lets its transport
-# validator read `model_fields_set`; the layer's tri-state, where None
-# inherits and an empty list opts out; and the provider's split between
-# its declared fields and the options extras. A prompt fragment names no
-# mapping because its model is the whole of it.
-entities.fill("provider", table="providers", from_row=_provider_from_row)
-entities.fill("mcp-server", table="mcp_servers", from_row=_mcp_from_row)
-entities.fill("prompt-fragment", table="prompt_fragments")
-entities.fill("agent", table="agents", from_row=_agent_from_row)
-entities.fill("agent-defaults", table="agent_defaults", from_row=_defaults_from_row)
+# How a row of each kind is read. The three mappings a model demands are
+# the ones above, unchanged: the MCP server's per-column omissions,
+# which are what lets its transport validator read `model_fields_set`;
+# the layer's tri-state, where None inherits and an empty list opts out;
+# and the provider's split between its declared fields and the options
+# extras. A prompt fragment names no mapping at all, because its model
+# is the whole of it.
+entities.fill("provider", from_row=_provider_from_row)
+entities.fill("mcp-server", from_row=_mcp_from_row)
+entities.fill("agent", from_row=_agent_from_row)
+entities.fill("agent-defaults", from_row=_defaults_from_row)
 
 
 def _mapping(location: str, column: str, value: object) -> dict[str, object]:
