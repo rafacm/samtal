@@ -22,6 +22,7 @@ import yaml
 from pydantic import ValidationError
 from pydantic_settings.exceptions import SettingsError
 
+from samtal_server.config import entities
 from samtal_server.config.models import (
     DOMAIN_KEYS,
     Config,
@@ -39,18 +40,15 @@ CONFIG_ENV_VAR = "SAMTAL_CONFIG"
 ENV_PREFIX = "SAMTAL_"
 
 # What writes each moved section now, so the refusal answers the question
-# it raises. One entry per key in DOMAIN_KEYS, checked below.
+# it raises. Read off the descriptors rather than written out again: the
+# command an operator is sent to here and the command the generated
+# reference prints for the same kind were byte-identical strings held
+# together by nothing, which is the duplication the descriptor's
+# `command` exists to end. One entry per key in DOMAIN_KEYS, which is
+# what a kind's `moved_key` and a setting's `name` are.
 MOVED_KEY_COMMANDS: dict[str, str] = {
-    "providers": "samtal-server config set provider <stage> <name> -f fragment.yaml",
-    "mcp_servers": "samtal-server config set mcp-server <name> -f fragment.yaml",
-    "prompt_fragments": (
-        "samtal-server config set prompt-fragment <name> -f fragment.yaml"
-    ),
-    "agent_defaults": "samtal-server config set agent-defaults -f fragment.yaml",
-    "agents": "samtal-server config set agent <name> -f fragment.yaml",
-    "devices": "samtal-server config bind-device <mac> <agent> [<agent> ...]",
-    "default_agent": "samtal-server config set-default-agent <name>",
-}
+    descriptor.moved_key: descriptor.command for descriptor in entities.ENTITIES
+} | {setting.name: setting.command for setting in entities.SETTINGS}
 
 # Where the reference for the moved half is, quoted in the refusal
 # because that document is what a reader needs next.
