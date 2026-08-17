@@ -16,6 +16,10 @@ show. A handler that restated any of that would be the bug. What this
 module owns is transport: the token, the path an entity is addressed
 by, the status code a refusal maps to, and the shape of a body.
 
+The shapes themselves are one module below, in `responses.py`, which
+imports pydantic and nothing else. What a read answers is knowledge the
+CLI needs too, and the CLI must not import FastAPI to get it.
+
 One namespace here is not configuration at all. The conversation
 store's reads (`/conversations`) are registered from
 `conversations/api.py`, where their route functions and their response
@@ -40,13 +44,13 @@ import os
 from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import Body, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 from starlette.routing import Route
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -68,6 +72,23 @@ from samtal_server.config.models import (
     McpServerConfig,
     PromptFragmentConfig,
     ProviderConfig,
+)
+from samtal_server.config.responses import (
+    Acknowledgement,
+    AssembledPrompt,
+    ConfigDocument,
+    DefaultAgent,
+    DefaultAgentName,
+    DeviceBinding,
+    Envelope,
+    McpReloadResult,
+    McpServerStatus,
+    PendingDevice,
+    Problem,
+    PromptBlock,
+    SecretSlot,
+    SecretValue,
+    StoredSecretLocation,
 )
 from samtal_server.config.secrets import SecretLocation, load_keys
 from samtal_server.config.store import ConfigStore
@@ -276,65 +297,13 @@ ENTITY_MODELS: tuple[type[BaseModel], ...] = (
 )
 
 # The three bodies that are arguments rather than fragments, as the
-# document describes them. The models below are documentation and
-# nothing else: they are injected into `components` and named by the
-# routes' `openapi_extra`, and they are deliberately not declared as
-# body types, for the reason the entity models are not either. What
-# enforces them at runtime is the exact-shape parser further down, which
-# describes the expectation and never echoes what it refused.
-
-
-class DeviceBinding(BaseModel):
-    """What a device write carries: the agents the device may reach."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    agents: list[str] = Field(
-        description=(
-            "The agents this device is bound to, by name. The first is the agent a "
-            "conversation starts on and the rest are the ones switch_agent can reach. "
-            "Every name has to be an agent that exists, or the write is refused."
-        )
-    )
-
-
-class DefaultAgentName(BaseModel):
-    """What a default-agent write carries. Clearing it is the DELETE,
-    not a null here: one way to say a thing."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(
-        description=(
-            "The agent an unbound device reaches. It has to be an agent that exists. "
-            "To unset it, DELETE this resource, which leaves the devices map as the "
-            "allowlist."
-        )
-    )
-
-
-class SecretValue(BaseModel):
-    """What a secret write carries: the credential itself, the only
-    plaintext this API ever accepts."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    secret: str = Field(
-        # The runtime parser refuses an empty string, and so does the
-        # repository underneath it, so the document says the same: a
-        # contract that permits what the API refuses is one a client
-        # generator would build the wrong request from.
-        min_length=1,
-        description=(
-            "The credential, in plaintext, stored encrypted under the newest key in "
-            "SAMTAL_MASTER_KEY. It crosses the connection as itself, which is why the "
-            "whole API belongs on a loopback connection or behind TLS. It is never "
-            "read back: a read names the slot and masks the value. It may not be "
-            "empty."
-        ),
-    )
-
-
+# document describes them. The models are documentation and nothing
+# else: they are injected into `components` beside the entity models and
+# named by the routes' `openapi_extra`, and they are deliberately not
+# declared as body types, for the reason the entity models are not
+# either. What enforces them at runtime is the exact-shape parser
+# further down, which describes the expectation and never echoes what it
+# refused.
 REQUEST_MODELS: tuple[type[BaseModel], ...] = (DeviceBinding, DefaultAgentName, SecretValue)
 
 # What each argument-shaped body must be, said as an expectation rather
@@ -462,387 +431,6 @@ RELOAD_REFUSED_DESCRIPTION = (
     "Nothing was stopped, started or swapped, and the running servers are exactly as "
     "they were."
 )
-
-
-# The transport shapes
-#
-# Declared as response models so that the document carries real schemas
-# rather than the empty objects an untyped dictionary return would
-# produce. They are shapes and not a second validation layer: what
-# `views` builds passes through them unchanged, and nothing here decides
-# what a read may show.
-
-
-class SecretSlot(BaseModel):
-    """One slot of an entity that holds a secret stored in the database."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    # Nullable and required, not optional: every read answers with the
-    # key or with null, and a client that has to tell "no reference" from
-    # "the server did not say" has been given a third state it cannot
-    # act on.
-    shadows: str | None = Field(
-        description=(
-            "The entity key this stored secret displaces, or null when the entity "
-            "writes no reference for the slot. A stored secret takes precedence over "
-            "an environment reference written for the same slot, and this names what "
-            "it takes the place of."
-        ),
-    )
-
-
-class Envelope(BaseModel):
-    """One entity as a read returns it: the entity, and its stored-secret
-    slots beside it."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    entity: dict[str, Any] = Field(
-        description=(
-            "The entity's body in the shape a write of it accepts, with every "
-            "secret-bearing value masked. Described rather than validated here: a "
-            "masked value is not one the entity model would accept back, so the "
-            "entity schemas under `components/schemas` are what say which keys a "
-            "write may carry."
-        )
-    )
-    secrets: dict[str, SecretSlot] = Field(
-        description=(
-            "The slots holding a secret stored in the database, by slot name, and "
-            "never their values: reads are masked. Empty for the kinds that can hold "
-            "no stored secret (prompt fragments, agents, agent defaults, devices), so "
-            "that every read has one shape."
-        )
-    )
-
-
-class StoredSecretLocation(BaseModel):
-    """Where one stored secret is, in the whole-configuration read."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    kind: str = Field(description="The kind of entity holding it: provider or mcp_server.")
-    identity: str = Field(
-        description=(
-            "The entity's identity: `<stage>.<name>` for a provider, the name for an "
-            "MCP server."
-        )
-    )
-    slot: str = Field(description="The credential slot inside that entity.")
-    shadows: str | None = Field(
-        description="The entity key this stored secret displaces, or null."
-    )
-
-
-class ConfigDocument(BaseModel):
-    """The whole domain configuration of one deployment, masked."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    config: dict[str, Any] = Field(
-        description=(
-            "The domain half of the configuration (providers, MCP servers, agent "
-            "defaults, agents, devices, the default agent) in the shape "
-            "`docs/reference/domain-config.md` documents, with every secret-bearing "
-            "value masked."
-        )
-    )
-    secrets: list[StoredSecretLocation] = Field(
-        description=(
-            "Where every secret stored in the database is, which the masked document "
-            "above cannot say. A list rather than a mapping, because a location is "
-            "three fields and not a key."
-        )
-    )
-
-
-class PendingDevice(BaseModel):
-    """One device waiting to be claimed, as the listing shows it.
-
-    The listing is keyed by the code, because the code is what the
-    operator has: they are holding a board with six digits on it, and
-    the question the board model and the firmware version answer is
-    which of these entries is that board.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    mac: str = Field(
-        description=(
-            "The device's MAC in canonical form, which is the row a successful claim "
-            "writes."
-        )
-    )
-    client_id: str = Field(
-        description="The UUID the device sent as its Client-Id at its last check-in."
-    )
-    board: str = Field(
-        description=(
-            "The board type the device reported, such as "
-            "waveshare-esp32-s3-touch-lcd-1.54, or `unknown` when it reported none. "
-            "Whatever the device said, bounded in length and stripped of anything "
-            "unprintable."
-        )
-    )
-    firmware: str = Field(
-        description=(
-            "The firmware version the device reported, or 0.0.0 when it reported none."
-        )
-    )
-    first_seen: str = Field(
-        description="When this device first checked in, as an ISO-8601 instant in UTC."
-    )
-    last_seen: str = Field(description="Its most recent check-in, in the same form.")
-    expires_at: str = Field(
-        description=(
-            "When this code stops being claimable. The device re-checks every couple of "
-            "minutes and displays whatever the fresh reply carries, so an expired code "
-            "is replaced on the screen rather than leaving the device stranded."
-        )
-    )
-
-
-class McpServerStatus(BaseModel):
-    """One configured MCP server, as the running server sees it.
-
-    The listing is keyed by the entry's name, because that is what the
-    operator wrote and what every tool the server publishes is prefixed
-    with.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    state: Literal["connected", "down", "unused"] = Field(
-        description=(
-            "What this entry is doing: `connected` and offering the tools below, "
-            "`down` and offering none, or `unused` because no agent references it, so "
-            "this server never built a connection for it at all."
-        )
-    )
-    reason: str | None = Field(
-        description=(
-            "Why a `down` server is down, as a fixed token this server owns: the class "
-            "of the failure, or `DroppedAfterFailedCall` for a connection dropped after "
-            "a tool call failed on it. Null when it is not down. Never a message the "
-            "far side wrote, since an MCP server is a third party and its bytes are not "
-            "this API's to publish."
-        )
-    )
-    since: str = Field(
-        description=(
-            "When this state was last entered, as an ISO-8601 instant in UTC. A new "
-            "reason for staying down counts as entering it again, since it is a fresh "
-            "failure. For an entry no agent references it is when the running "
-            "configuration took effect."
-        )
-    )
-    tools: list[str] = Field(
-        description=(
-            "What this server published, under the names the model is given "
-            "(`<entry>__<tool>`, sanitized). Empty while it is down. Only names cross "
-            "this surface: a description, or the name a server listed before the "
-            "publishing rule got to it, is bytes that server chose, and a server "
-            "holding a credential of this deployment's could reflect it in either."
-        )
-    )
-    grants: dict[str, list[str] | None] = Field(
-        description=(
-            "Which agents may reach this server, by agent name. The value is how much "
-            "of the server the agent gets: null is the whole server, and a list is the "
-            "tools that agent was allowed, by the published name without the entry "
-            "prefix. Beside the published list above it, so an allowed name this "
-            "server does not offer is answerable in one read."
-        )
-    )
-
-
-class McpReloadResult(BaseModel):
-    """What one reload did, and what is running once it had done it.
-
-    Both halves in one answer on purpose: the request that applies a
-    change is the request that says what the change was and how it came
-    out, so believing a write took effect when it did not takes a
-    deliberate act of not reading the reply.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    started: list[str] = Field(
-        description=(
-            "The entries that had no connection before this reload and have one now: "
-            "newly written, or newly named by some agent's `mcp` list. Started is not "
-            "connected: an entry here whose server was unreachable is `down` below, "
-            "with its reason."
-        )
-    )
-    restarted: list[str] = Field(
-        description=(
-            "The entries whose fragment or whose stored secrets changed. Their "
-            "connections were closed and made again, so a rotated credential applies "
-            "here rather than at the next server start."
-        )
-    )
-    stopped: list[str] = Field(
-        description=(
-            "The entries this server no longer connects: deleted, or no longer named "
-            "by any agent. A deleted one is gone from the status below; a "
-            "de-referenced one is still there, as `unused`."
-        )
-    )
-    unchanged: list[str] = Field(
-        description=(
-            "The entries that kept the connection they had. It is a statement about "
-            "the connection and not about the entry's text: an entry whose "
-            "`instructions` was rewritten is here, because that field configures a "
-            "prompt rather than a connection, and restarting a live connection to "
-            "apply it would drop mid-call tools and respawn a stdio child for nothing. "
-            "The conversations using such an entry keep the tools they had and the "
-            "guidance they were activated with; the new guidance reaches them at their "
-            "next activation."
-        )
-    )
-    servers: dict[str, McpServerStatus] = Field(
-        description=(
-            "What every configured entry is doing now that the reload has been applied, "
-            "keyed by entry name: exactly what `GET /runtime/mcp-servers` answers, "
-            "taken in the same breath so that applying and verifying are one round "
-            "trip."
-        )
-    )
-
-
-class PromptBlock(BaseModel):
-    """One block of an assembled system prompt."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    provenance: str = Field(
-        description=(
-            "Where this block came from, as a fixed token this server owns: `persona` "
-            "for the agent's own prompt, `fragment:<name>` for a shared prompt "
-            "fragment the agent includes, `instructions:<entry>` for the guidance "
-            "written on an MCP server entry the agent is granted, "
-            "`server_instructions:<entry>` for the guidance that server ships about "
-            "itself where the entry opted into it, `server_prompt:<entry>:<position>` "
-            "for one of the prompts it publishes, at its position in that entry's "
-            "`inject_prompts` counted from one, `memory` for what the agent remembers. "
-            "The fragment and entry names are the operator's, and both have been "
-            "through the rule that keeps them to `[A-Za-z0-9_-]+`; a published prompt "
-            "is identified by its position rather than by its name, because the name "
-            "is a string the server chose and this token is printed in logs."
-        )
-    )
-    name: str | None = Field(
-        default=None,
-        description=(
-            "The name the entry's `inject_prompts` gave the published prompt this "
-            "block came from, and null for every other kind of block. It is carried "
-            "here and not in the provenance because it is a server-chosen string the "
-            "operator copied into their configuration, so nothing bounds what it "
-            "holds; this body is JSON-encoded and is one of the two places "
-            "operator-written configuration is echoed back, which the tokens printed "
-            "in logs and structured events are not."
-        ),
-    )
-    characters: int = Field(
-        description=(
-            "How long this block is, in characters, counted on what is stored and "
-            "sent. It is what an operator tunes a small model's context budget "
-            "against, block by block."
-        )
-    )
-    text: str = Field(
-        description=(
-            "The block as the model receives it, heading included, whoever wrote it: a "
-            "surface that hid part of the prompt would fail its own purpose, which is "
-            "to say what the model was given, and an entry that opted into a server's "
-            "own guidance opted those bytes into this prompt. The provenance beside it "
-            "is what says whose words they are."
-        )
-    )
-
-
-class AssembledPrompt(BaseModel):
-    """The system prompt a session opening now as this agent would be
-    sent."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    blocks: list[PromptBlock] = Field(
-        description=(
-            "The blocks in the order they are sent, joined by one blank line each: the "
-            "persona, then the shared fragments the agent includes in the order its "
-            "layer lists them, then the guidance of each MCP entry the agent is granted "
-            "in grant order, and within one entry what its operator wrote, then what "
-            "the server ships about itself, then the prompts it publishes in the order "
-            "the entry names them, and then the remembered facts. The order is fixed "
-            "and not configurable. A block that would hold nothing is not sent and is "
-            "not listed, which is what an agent with no prompt of its own produces."
-        )
-    )
-    characters: int = Field(
-        description=(
-            "The whole prompt's length in characters, which is the sum of the blocks "
-            "plus the blank line between each pair of them. The prompt is the blocks "
-            "joined and nothing else, so a character counted here is a character the "
-            "model receives."
-        )
-    )
-
-
-class DefaultAgent(BaseModel):
-    """The agent an unbound device reaches."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str | None = Field(
-        description=(
-            "The default agent's name, or null when none is set, which leaves the "
-            "devices map as the allowlist."
-        ),
-    )
-
-
-class Problem(BaseModel):
-    """A refusal, in the repository's own words."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    detail: str = Field(
-        description=(
-            "What was refused and why, the same sentence the `samtal-server config` "
-            "command prints for it. It names the entity the request addressed and "
-            "the rule that was broken; it never quotes a secret or a configuration "
-            "value that was rejected."
-        )
-    )
-
-
-class Acknowledgement(BaseModel):
-    """What a write answers with: what it did, and when it takes
-    effect."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    wrote: str = Field(
-        description=(
-            "What was written or deleted, naming the entity the way the "
-            "`samtal-server config` command names it in the line it prints."
-        )
-    )
-    notice: str = Field(
-        description=(
-            "When the change takes effect, as one of three sentences. Configuration is "
-            "a boot-time snapshot, so most writes apply at the next server start. A "
-            "device binding and the default agent are read by the running server, so "
-            "they apply at the device's next OTA check or connection with no restart, "
-            "unless they name an agent this server has not loaded, which is the case "
-            "that carries the restart sentence again. A write to an MCP server entry "
-            "or to one of its secret slots names the reload instead, since that is "
-            "what applies it to a running server."
-        )
-    )
 
 
 def build_api(
@@ -2133,6 +1721,25 @@ def _entity_schemas() -> dict[str, Any]:
 __all__ = [
     "API_VERSION",
     "MOUNT_PATH",
+    # The shapes, re-exported. They are declared in `responses.py`, one
+    # import below FastAPI, so that the CLI can have them without it;
+    # they are named here because this is the module that puts them on
+    # routes, and it is the name every caller already knows them by.
+    "Acknowledgement",
+    "AssembledPrompt",
+    "ConfigDocument",
+    "DefaultAgent",
+    "DefaultAgentName",
+    "DeviceBinding",
+    "Envelope",
+    "McpReloadResult",
+    "McpServerStatus",
+    "PendingDevice",
+    "Problem",
+    "PromptBlock",
+    "SecretSlot",
+    "SecretValue",
+    "StoredSecretLocation",
     "api_token",
     "build_api",
     "document",
