@@ -46,6 +46,7 @@ UVICORN_GRACEFUL_SHUTDOWN_S = 5
 # The first words that mean "do this, do not serve".
 CONFIG_COMMAND = "config"
 CONVERSATIONS_COMMAND = "conversations"
+EVENTS_COMMAND = "events"
 
 
 class DrainingServer(uvicorn.Server):
@@ -153,6 +154,16 @@ def main() -> None:
 
         raise SystemExit(conversations_cli.main(sys.argv[2:]))
 
+    if sys.argv[1:2] == [EVENTS_COMMAND]:
+        # The third group, and the one that reaches least: it prints the
+        # event registry and opens nothing at all. Dispatched here, above
+        # the mode resolution below, so that an unusable
+        # SAMTAL_EVENTS_ENFORCEMENT cannot stand between a reader and the
+        # document that says what the events are.
+        from samtal_server import events_cli
+
+        raise SystemExit(events_cli.main(sys.argv[2:]))
+
     parser = argparse.ArgumentParser(prog="samtal-server")
     parser.add_argument(
         "--config",
@@ -166,8 +177,9 @@ def main() -> None:
         # declarations (#155). Here rather than at import, because
         # `.env` is what a deployment sets it in and this module imports
         # the app, and therefore the emitters, long before this line
-        # runs. After the subcommand exits above, too: an invalid value
-        # of a server-only variable must not block a recovery command.
+        # runs. After the three subcommand exits above, too: an invalid
+        # value of a server-only variable must not block a recovery
+        # command or the generated reference.
         # `create_app` resolves it again for a server nothing launched
         # through here.
         resolve_enforcement()
