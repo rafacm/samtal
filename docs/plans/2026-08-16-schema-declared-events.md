@@ -814,11 +814,13 @@ recorded in the PR body with observed failure output per branch.
       proofs pass, both pin suites pass unmodified under strict
       enforcement; implementation-doc section, changelog entry,
       and tick land in the same change.
-- [ ] M3: the schema reference cannot drift:
+- [x] [M3](2026-08-16-schema-declared-events-implementation.md#milestone-3-the-schema-reference-cannot-drift):
+      the schema reference cannot drift (PR TBD):
       `samtal-server events reference` generates
       `docs/reference/events.md`, the CI drift step holds it
-      byte-identical, the README table gains its missing rows and
-      the name-level `test_event_docs.py`, the mutation matrix is
+      byte-identical, the README table becomes a two-column
+      name-and-when index over all 58 events with the name-level
+      `test_event_docs.py` behind it, the mutation matrix is
       recorded; implementation-doc section, changelog entry
       closing the issue, and tick land in the same change.
 
