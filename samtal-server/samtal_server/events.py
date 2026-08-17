@@ -790,6 +790,16 @@ def _judge(
     faults: list[Fault] = []
     if collisions:
         faults.append(Fault(BASE_KEY_COLLISION, ", ".join(collisions)))
+    if not isinstance(event, str):
+        # Before the lookup, because the lookup is what would fail
+        # first and worst: an unhashable event raises `TypeError` out of
+        # `dict.get`, which is not an `EventSchemaError` and, in strict
+        # mode, not the error a caller is told to expect. The type is
+        # named through the base field's own name, never by rendering
+        # the value: a caller that passed a list passed its contents
+        # too.
+        faults.append(Fault(WRONG_KIND, "event"))
+        return Judgement(tuple(faults), None, False, "")
     spec = registry.get(event)
     if spec is None:
         faults.append(Fault(UNDECLARED_EVENT))
