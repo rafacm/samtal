@@ -408,7 +408,7 @@ outside pytest.
       finding is filed as issue #171, and the fresh inventory is
       recorded in the implementation doc.
 - [x] [M2](2026-08-17-config-descriptors-implementation.md#milestone-2-store-and-views-generalize-over-the-descriptors):
-      store and views generalize (PR TBD): default row path plus the
+      store and views generalize (PR #173): default row path plus the
       three named hooks, registry-driven CRUD, the walker merge,
       `provider_record` untouched; ported pins listed one by one (there
       are none, and the one test that reaches into the store's privates
