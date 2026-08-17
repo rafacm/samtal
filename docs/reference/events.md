@@ -16,10 +16,18 @@ conversation is in the conversation store instead, keyed by the same `session`
 
 The emitters hold every emission to what is written here before any of it is
 dispatched, and `SAMTAL_EVENTS_ENFORCEMENT` decides what happens to one that
-does not match: a running server recovers the emission or replaces it with
-`schema_violation` and says so, and everything that is not a running server
-raises. The [README's Logging section](../../samtal-server/README.md#logging)
-is the human overview, with one line per event saying when it fires.
+does not match. `forgiving` recovers the emission into a declared shape, or
+replaces it with `schema_violation` where it cannot, and says so on the
+emitter's own channel; `strict` raises instead.
+
+Which one a process gets when the variable is unset is a default rather than a
+rule about the process: a running server defaults to `forgiving`, because a
+telemetry bug must never cost a reply, and everything that is not a running
+server (a test lane, an import, a REPL) defaults to `strict`. Either mode can
+be asked for in either place, and a developer who wants a loud local server
+sets `strict` exactly that way. The [README's Logging
+section](../../samtal-server/README.md#logging) is the human overview, with
+one line per event saying when it fires.
 
 ## How to read it
 
