@@ -416,7 +416,7 @@ outside pytest.
       change.
 - [x] [M3](2026-08-17-config-descriptors-implementation.md#milestone-3-the-response-models-move-and-apipy-generalizes):
       the response models move below FastAPI and api.py generalizes
-      (PR TBD): `responses.py` holds the fifteen shapes and imports
+      (PR #174): `responses.py` holds the fifteen shapes and imports
       pydantic and nothing else, the five kinds' twenty-two routes are
       built from `Endpoint` facts on their descriptors with each
       route's operation identity, description, response and statuses
