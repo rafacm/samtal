@@ -22,10 +22,22 @@ Plus the clocks, which are the reason there are two emitters at all: a
 session event is stamped by the session loop, because the capture's
 audio is; a server event is stamped by `time.monotonic`, because
 `create_app` emits before any loop is running.
+
+Everything below emits through the schema seam (#155). This suite is
+about the machinery rather than the surface: it emits four synthetic
+names, a handful of production names in shapes production never gives
+them, and a channel no subsystem owns, because that is what isolates
+dispatch from the events themselves. Strict enforcement would refuse
+every one of those by design, so the suite declares exactly what it
+emits in the scratch registry below and installs it around each test.
+The declarations are therefore a second reading of this file: an
+emission this suite adds and does not declare fails here rather than
+passing quietly.
 """
 
 import asyncio
 import logging
+from collections.abc import Iterator
 
 import pytest
 
@@ -39,8 +51,100 @@ from samtal_server.events import (
     server_emitters,
     session_clock,
 )
+from samtal_server.events_schema import (
+    SESSION_CHANNEL,
+    EventSpec,
+    EventVariant,
+    arg_identifier,
+    identifier,
+    server_payload,
+    session_payload,
+    sources,
+    whole,
+)
+from tests.support.schema import scratch_registry
 
 CHANNEL = "samtal_server.test_events"
+
+
+def said(
+    channel: str, level: int, message: str, args: tuple = (), **fields: object
+) -> EventVariant:
+    """One shape this suite emits, declared the way the registry
+    declares one, with the channel's own base fields underneath."""
+    payload = session_payload if channel == SESSION_CHANNEL else server_payload
+    return EventVariant(
+        channel=channel,
+        level=level,
+        message=message,
+        args=args,
+        fields=payload(**fields),  # type: ignore[arg-type]
+    )
+
+
+ONE = arg_identifier()
+
+# What this suite is allowed to say. Four synthetic names for the
+# dispatch tests, and three production names it exercises with a channel
+# or a payload the production surface does not have: `heard` with a
+# field standing in for a real one, `ota_check` on the synthetic
+# channel, `capture_enabled` as the event a server emitter fires where
+# no loop is running.
+SCRATCH = (
+    EventSpec(
+        "one",
+        variants=(
+            said(SESSION_CHANNEL, logging.INFO, "before %s", (ONE,)),
+            said(SESSION_CHANNEL, logging.INFO, "still %s", (ONE,)),
+            said(SESSION_CHANNEL, logging.INFO, "recorded"),
+            said(SESSION_CHANNEL, logging.INFO, "something"),
+            said(SESSION_CHANNEL, logging.INFO, "a"),
+            said(SESSION_CHANNEL, logging.INFO, "something happened", sources=sources()),
+            said(CHANNEL, logging.DEBUG, "a"),
+            said(CHANNEL, logging.INFO, "something"),
+        ),
+    ),
+    EventSpec(
+        "two",
+        variants=(
+            said(SESSION_CHANNEL, logging.INFO, "while %s", (ONE,), extra_field=whole()),
+            said(SESSION_CHANNEL, logging.INFO, "still %s", (ONE,)),
+            said(SESSION_CHANNEL, logging.INFO, "not recorded"),
+            said(SESSION_CHANNEL, logging.INFO, "recorded nowhere"),
+            said(CHANNEL, logging.INFO, "b"),
+        ),
+    ),
+    EventSpec(
+        "three",
+        variants=(
+            said(SESSION_CHANNEL, logging.INFO, "after %s", (ONE,)),
+            said(CHANNEL, logging.WARNING, "c"),
+        ),
+    ),
+    EventSpec("four", variants=(said(CHANNEL, logging.ERROR, "d"),)),
+    EventSpec(
+        "heard",
+        variants=(
+            said(SESSION_CHANNEL, logging.INFO, "something %s", (ONE,), text=identifier()),
+        ),
+    ),
+    EventSpec(
+        "ota_check",
+        variants=(
+            said(CHANNEL, logging.INFO, "checked in %s", (ONE,), device=identifier(required=False)),
+            said(CHANNEL, logging.INFO, "checked in again", device=identifier(required=False)),
+        ),
+    ),
+    EventSpec("capture_enabled", variants=(said(CHANNEL, logging.INFO, "capture is on"),)),
+)
+
+
+@pytest.fixture(autouse=True)
+def _scratch_schema() -> Iterator[None]:
+    """Every test in this file emits against the declarations above,
+    and every other suite in the process keeps the real registry."""
+    with scratch_registry(SCRATCH):
+        yield
 
 
 class Recorder:
