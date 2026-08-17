@@ -1411,7 +1411,13 @@ _SPECS: list[EventSpec] = [
                     provider=identifier(),
                     type=identifier(),
                     host=identifier(required=False),
-                    model=identifier(required=False),
+                    model=identifier(
+                        required=False,
+                        note=(
+                            "Present where the configured entry names one. The GenAI "
+                            "conventions' `gen_ai.request.model`."
+                        ),
+                    ),
                     input_tokens=count(
                         required=False,
                         note=(
@@ -1710,7 +1716,10 @@ _SPECS: list[EventSpec] = [
                 ),
                 args=(arg_real(), arg_real()),
                 fields=server_payload(
-                    outcome=token({"timed_out"}),
+                    outcome=token(
+                        {"timed_out"},
+                        note="The retry outran what the first request left of the budget.",
+                    ),
                     duration_s=real(),
                     host=identifier(),
                     retry_ms=whole(),
@@ -1725,7 +1734,10 @@ _SPECS: list[EventSpec] = [
                 ),
                 args=(arg_real(),),
                 fields=server_payload(
-                    outcome=token({"confirmed_echo"}),
+                    outcome=token(
+                        {"confirmed_echo"},
+                        note="The retry came back as the configured prompt again.",
+                    ),
                     duration_s=real(),
                     host=identifier(),
                     retry_ms=whole(),
@@ -1740,7 +1752,10 @@ _SPECS: list[EventSpec] = [
                 ),
                 args=(arg_real(),),
                 fields=server_payload(
-                    outcome=token({"confirmed_empty"}),
+                    outcome=token(
+                        {"confirmed_empty"},
+                        note="The retry heard nothing.",
+                    ),
                     duration_s=real(),
                     host=identifier(),
                     retry_ms=whole(),
@@ -2338,7 +2353,7 @@ _SPECS.append(
         SCHEMA_VIOLATION,
         internal=True,
         note=(
-            "Internal. What the emitter emits in forgiving mode when an "
+            "What the emitter emits in forgiving mode when an "
             "emission cannot be recovered into a declared shape. Fixed at "
             "ERROR, because `log_level` admits roots above WARNING and a "
             "complaint that vanishes under one is no complaint."
