@@ -708,3 +708,11 @@ From `samtal-server/`, with `PYTHONDONTWRITEBYTECODE=1` outside pytest:
 - `git diff --stat` against the milestone's base over `tests/` and
   `docs/reference/` prints nothing at all: no test file in the
   repository changed, and no committed reference did.
+
+### PR review round
+
+External review of PR #174 (diff main...23db60e) by codex 0.147.0
+(model gpt-5.6-sol), 2026-08-17, posted to the PR by the review run
+itself. Verdict: mergeable as is, no findings. The byte-identical
+references and the empty test diff pre-answered the lenses a
+models-move-plus-route-factory touches.
