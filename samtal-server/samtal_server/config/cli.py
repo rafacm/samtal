@@ -327,86 +327,13 @@ def _usage_problem(message: str) -> str:
     return f"{message}; run with --help for the grammar"
 
 
-# The commands
-
-
-def _delete_device(args: argparse.Namespace) -> None:
-    if args.local:
-        with _store(args) as store:
-            # The row the repository deleted names itself, so this path
-            # normalizes nothing of its own either.
-            deleted = store.delete_device(args.mac)
-        # The same sentence the API answers this delete with. A running
-        # server reads the devices table, so the removal reaches the
-        # device at its next check-in whether the row was deleted
-        # through the API or, as here, underneath it.
-        _report(deleted_device(deleted), BINDING_NOTICE)
-        return
-    _wrote(_call(args, "DELETE", _path("devices", args.mac)))
-
-
-def _bind_device(args: argparse.Namespace) -> None:
-    _wrote(_call(args, "PUT", _path("devices", args.mac), {"agents": list(args.agents)}))
-
-
-def _add_device(args: argparse.Namespace) -> None:
-    _wrote(
-        _call(
-            args,
-            "POST",
-            _path("devices", "pending", args.code),
-            {"agents": list(args.agents)},
-        )
-    )
-
-
-def _pending(args: argparse.Namespace) -> None:
-    print(_pending_listing(_call(args, "GET", _path("devices", "pending"))), end="")
-
-
-def _status(args: argparse.Namespace) -> None:
-    """What the running server's MCP servers are doing.
-
-    A read of the server rather than of the database, so there is no
-    --local for it: what a database says about an entry is what `show
-    mcp-server` prints, and a stopped server has no state to report.
-    """
-    print(_status_listing(_call(args, "GET", _path("runtime", "mcp-servers"))), end="")
-
-
-def _prompt(args: argparse.Namespace) -> None:
-    """The system prompt a new session as this agent would be sent.
-
-    A read of the server rather than of the database, so there is no
-    --local: the persona is stored, the guidance is stored, and what
-    they add up to is a property of the process that loaded them.
-    """
-    print(
-        _prompt_listing(_call(args, "GET", _path("runtime", "agents", args.name, "prompt"))),
-        end="",
-    )
-
-
-def _reload(args: argparse.Namespace) -> None:
-    """Apply the stored MCP servers and grants to the running server.
-
-    The one command that changes what a server is doing without writing
-    anything, and it prints both halves of the answer: what the reload
-    did, and what every configured entry is doing now that it has been
-    done. No --local, for the reason `status` has none, and with more
-    force: there is nothing to reload when there is no server.
-    """
-    print(
-        _reload_listing(
-            _call(
-                args,
-                "POST",
-                _path("runtime", "mcp-servers", "reload"),
-                read_timeout_s=RELOAD_READ_TIMEOUT_S,
-            )
-        ),
-        end="",
-    )
+# The commands that reach no API
+#
+# Everything else a command does is a row in the table further down.
+# These five are not acts of the configuration API at all: two of them
+# are about onboarding a board, which happens before there is anything
+# to configure, and three render the models and the API's own routes
+# without opening a database, reaching a server or needing a key.
 
 
 def _ota_url(args: argparse.Namespace) -> None:
@@ -470,64 +397,6 @@ def _doctor(args: argparse.Namespace) -> None:
     print(
         f"{shown} is samtal-server {_printable(reported['version'])}, and sends devices "
         f"to {websocket} (protocol version {_printable(reported['protocol'])})."
-    )
-
-
-def _set_default_agent(args: argparse.Namespace) -> None:
-    _wrote(_call(args, "PUT", _path("default-agent"), {"name": args.name}))
-
-
-def _clear_default_agent(args: argparse.Namespace) -> None:
-    _wrote(_call(args, "DELETE", _path("default-agent")))
-
-
-def _set_secret(args: argparse.Namespace) -> None:
-    location = _secret_location(args)
-    secret = _read_secret(args)
-    if args.local:
-        # The one recovery command that needs a key: it encrypts.
-        with _store(args, keyed=True) as store:
-            store.set_secret(location, secret)
-        # Which sentence follows the entity the credential is stored on,
-        # the same split the API's four secret routes make.
-        _report(wrote_secret(location.describe()), secret_notice(location.kind))
-        return
-    _wrote(_call(args, "PUT", _secret_path(args), {"secret": secret}))
-
-
-def _clear_secret(args: argparse.Namespace) -> None:
-    location = _secret_location(args)
-    if args.local:
-        with _store(args) as store:
-            store.clear_secret(location)
-        _report(cleared_secret(location.describe()), secret_notice(location.kind))
-        return
-    _wrote(_call(args, "DELETE", _secret_path(args)))
-
-
-def _list(args: argparse.Namespace) -> None:
-    document = _understood(ConfigDocument, _call(args, "GET", _path("config")), UNREADABLE_READ)
-    print(_summary(document), end="")
-
-
-def _show_all(args: argparse.Namespace) -> None:
-    if args.local:
-        with _store(args) as store:
-            document = views.config(store.load())
-    else:
-        document = _understood(
-            ConfigDocument, _call(args, "GET", _path("config")), UNREADABLE_READ
-        )
-    print(_show_everything(document), end="")
-
-
-def _show_device(args: argparse.Namespace) -> None:
-    if args.local:
-        with _store(args) as store:
-            _print_entity(views.device(store.read_device(args.mac)))
-        return
-    _print_entity(
-        _understood(Envelope, _call(args, "GET", _path("devices", args.mac)), UNREADABLE_READ)
     )
 
 
@@ -1622,31 +1491,19 @@ def _database_dir(args: argparse.Namespace) -> Path:
 # Output
 
 
-def _wrote(answer: object) -> None:
-    """What the API said the write did, and when it applies."""
-    what = answer.get("wrote") if isinstance(answer, Mapping) else None
-    notice = answer.get("notice") if isinstance(answer, Mapping) else None
-    if not isinstance(what, str):
-        raise ConfigError(UNREADABLE_WRITE)
-    _report(what, notice if isinstance(notice, str) else RESTART_NOTICE)
-
-
 def _acknowledged(acknowledgement: Mapping[str, object]) -> None:
     """One write acknowledged: what it did, and when it takes effect.
 
     The one place either is printed, whichever path the write took, so
     the break-glass path and the ordinary one cannot come to describe
-    one act differently.
+    one act differently. Which sentence each is, is the act's row above;
+    this is where they are read out.
     """
-    _report(str(acknowledgement["wrote"]), str(acknowledgement["notice"]))
-
-
-def _report(what: str, notice: str = RESTART_NOTICE) -> None:
-    print(f"wrote {what}")
+    print(f"wrote {acknowledgement['wrote']}")
     # Flushed first, so the notice lands after the line it is about
     # rather than ahead of it: stderr is unbuffered and stdout is not.
     sys.stdout.flush()
-    print(notice, file=sys.stderr)
+    print(acknowledgement["notice"], file=sys.stderr)
 
 
 # The acts
@@ -1828,6 +1685,237 @@ SHOW_ENTITY: dict[str, Act] = {
 }
 
 
+# A device binding and the default agent are domain-level fields written
+# with their own verbs (bind, claim, delete, set, clear) rather than from
+# a fragment, so their rows are written here rather than built from a
+# kind's descriptor.
+
+
+def _device_path(args: argparse.Namespace) -> str:
+    return _path("devices", args.mac)
+
+
+def _binding(args: argparse.Namespace) -> object:
+    return {"agents": list(args.agents)}
+
+
+def _claim_path(args: argparse.Namespace) -> str:
+    return _path("devices", "pending", args.code)
+
+
+def _waiting_path(args: argparse.Namespace) -> str:
+    return _path("devices", "pending")
+
+
+def _default_agent_path(args: argparse.Namespace) -> str:
+    return _path("default-agent")
+
+
+def _default_agent_name(args: argparse.Namespace) -> object:
+    return {"name": args.name}
+
+
+def _deleting_device(args: argparse.Namespace) -> Any:
+    """The break-glass unbind. A running server reads the devices table,
+    so the removal reaches the device at its next check-in whether the
+    row was deleted through the API or, as here, underneath it, which is
+    the notice this answers with.
+
+    Plainly that notice, and not the one the API computes: the sentence
+    the API answers a device write with depends on whether it has the
+    named agent loaded, and this path has no loaded server to ask.
+    """
+    with _store(args) as store:
+        # The row the repository deleted names itself, so this path
+        # normalizes nothing of its own either.
+        deleted = store.delete_device(args.mac)
+    return {"wrote": deleted_device(deleted), "notice": BINDING_NOTICE}
+
+
+def _showing_device(args: argparse.Namespace) -> Any:
+    with _store(args) as store:
+        read = store.read_device(args.mac)
+    return views.device(read)
+
+
+DELETE_DEVICE = Act(
+    method="DELETE",
+    path=_device_path,
+    answers=Acknowledgement,
+    refusal=UNREADABLE_WRITE,
+    render=_acknowledged,
+    local=_deleting_device,
+)
+
+SHOW_DEVICE = Act(
+    method="GET",
+    path=_device_path,
+    answers=Envelope,
+    render=_print_entity,
+    local=_showing_device,
+)
+
+BIND_DEVICE = Act(
+    method="PUT",
+    path=_device_path,
+    body=_binding,
+    answers=Acknowledgement,
+    refusal=UNREADABLE_WRITE,
+    render=_acknowledged,
+)
+
+# The same binding, addressed by the six digits on a board's screen
+# instead of by a MAC nobody has had to find.
+ADD_DEVICE = Act(
+    method="POST",
+    path=_claim_path,
+    body=_binding,
+    answers=Acknowledgement,
+    refusal=UNREADABLE_WRITE,
+    render=_acknowledged,
+)
+
+SET_DEFAULT_AGENT = Act(
+    method="PUT",
+    path=_default_agent_path,
+    body=_default_agent_name,
+    answers=Acknowledgement,
+    refusal=UNREADABLE_WRITE,
+    render=_acknowledged,
+)
+
+CLEAR_DEFAULT_AGENT = Act(
+    method="DELETE",
+    path=_default_agent_path,
+    answers=Acknowledgement,
+    refusal=UNREADABLE_WRITE,
+    render=_acknowledged,
+)
+
+
+# A stored credential is addressed under the entity that holds it, in
+# the slot it fills, which is why these two rows are not an entity's.
+# One command covers both kinds, so it asks `secret_notice` which
+# sentence follows the entity the credential is stored on; the API says
+# the same by having four secret routes, each statically one of them.
+
+
+def _secret_body(args: argparse.Namespace) -> object:
+    return {"secret": _read_secret(args)}
+
+
+def _storing_secret(args: argparse.Namespace) -> Any:
+    location = _secret_location(args)
+    secret = _read_secret(args)
+    # The one recovery command that needs a key: it encrypts.
+    with _store(args, keyed=True) as store:
+        store.set_secret(location, secret)
+    return {"wrote": wrote_secret(location.describe()), "notice": secret_notice(location.kind)}
+
+
+def _clearing_secret(args: argparse.Namespace) -> Any:
+    location = _secret_location(args)
+    with _store(args) as store:
+        store.clear_secret(location)
+    return {"wrote": cleared_secret(location.describe()), "notice": secret_notice(location.kind)}
+
+
+SET_SECRET = Act(
+    method="PUT",
+    path=_secret_path,
+    body=_secret_body,
+    answers=Acknowledgement,
+    refusal=UNREADABLE_WRITE,
+    render=_acknowledged,
+    local=_storing_secret,
+)
+
+CLEAR_SECRET = Act(
+    method="DELETE",
+    path=_secret_path,
+    answers=Acknowledgement,
+    refusal=UNREADABLE_WRITE,
+    render=_acknowledged,
+    local=_clearing_secret,
+)
+
+
+# The reads that are not of one entity: the whole configuration, the
+# boards waiting to be claimed, and the three that ask the running
+# server rather than the database.
+
+
+def _printed(listing: Callable[[Any], str]) -> Callable[[Any], None]:
+    """A renderer that answers the whole of its output at once. Each
+    listing ends in its own newline, so nothing is added after it."""
+
+    def render(answer: Any) -> None:
+        print(listing(answer), end="")
+
+    return render
+
+
+def _config_path(args: argparse.Namespace) -> str:
+    return _path("config")
+
+
+def _stored_config(args: argparse.Namespace) -> Any:
+    with _store(args) as store:
+        return views.config(store.load())
+
+
+def _running_path(args: argparse.Namespace) -> str:
+    return _path("runtime", "mcp-servers")
+
+
+def _reload_path(args: argparse.Namespace) -> str:
+    return _path("runtime", "mcp-servers", "reload")
+
+
+def _assembled_path(args: argparse.Namespace) -> str:
+    return _path("runtime", "agents", args.name, "prompt")
+
+
+LIST = Act(
+    method="GET",
+    path=_config_path,
+    answers=ConfigDocument,
+    render=_printed(_summary),
+)
+
+SHOW_ALL = Act(
+    method="GET",
+    path=_config_path,
+    answers=ConfigDocument,
+    render=_printed(_show_everything),
+    local=_stored_config,
+)
+
+PENDING = Act(method="GET", path=_waiting_path, render=_printed(_pending_listing))
+
+# A read of the running server rather than of the database, so there is
+# no local row for it: what a database says about an entry is what `show
+# mcp-server` prints, and a stopped server has no state to report.
+STATUS = Act(method="GET", path=_running_path, render=_printed(_status_listing))
+
+# The other read of the running server, and for the same reason no local
+# row: the persona is stored and the guidance is stored, but what they
+# add up to is a property of the process that loaded them.
+PROMPT = Act(method="GET", path=_assembled_path, render=_printed(_prompt_listing))
+
+# The one act that changes what a server is doing without writing
+# anything, and it prints both halves of the answer: what the reload did,
+# and what every configured entry is doing now that it has been done. No
+# local row either, with more force than the two above: there is nothing
+# to reload when there is no server.
+RELOAD = Act(
+    method="POST",
+    path=_reload_path,
+    read_timeout_s=RELOAD_READ_TIMEOUT_S,
+    render=_printed(_reload_listing),
+)
+
+
 # The grammar
 
 
@@ -1948,7 +2036,7 @@ def _parser() -> argparse.ArgumentParser:
     entity.set_defaults(run=_act, act=DELETE_ENTITY["agent"])
     entity = kinds.add_parser("device", parents=[common])
     entity.add_argument("mac", metavar="MAC")
-    entity.set_defaults(run=_delete_device)
+    entity.set_defaults(run=_act, act=DELETE_DEVICE)
 
     # Two ways to bind a board, and which one an operator wants depends
     # on what they are holding: a MAC they already know, or a device in
@@ -1962,7 +2050,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     bind.add_argument("mac", metavar="MAC")
     bind.add_argument("agents", metavar="AGENT", nargs="+")
-    bind.set_defaults(run=_bind_device)
+    bind.set_defaults(run=_act, act=BIND_DEVICE)
 
     add = commands.add_parser(
         "add-device",
@@ -1978,14 +2066,14 @@ def _parser() -> argparse.ArgumentParser:
         help="the six digits the device is showing and speaking",
     )
     add.add_argument("agents", metavar="AGENT", nargs="+")
-    add.set_defaults(run=_add_device)
+    add.set_defaults(run=_act, act=ADD_DEVICE)
 
     waiting = commands.add_parser(
         "pending",
         parents=[common],
         help="the devices showing an activation code, and the code each is showing",
     )
-    waiting.set_defaults(run=_pending)
+    waiting.set_defaults(run=_act, act=PENDING)
 
     # The other read of the running server rather than of the database,
     # and the reason neither takes --local: there is no state to report
@@ -1999,7 +2087,7 @@ def _parser() -> argparse.ArgumentParser:
             "tools it published"
         ),
     )
-    running.set_defaults(run=_status)
+    running.set_defaults(run=_act, act=STATUS)
 
     # The other read of the running server, and the one that answers
     # what the model is actually given: the configuration says what an
@@ -2014,7 +2102,7 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     assembled.add_argument("name", metavar="AGENT")
-    assembled.set_defaults(run=_prompt)
+    assembled.set_defaults(run=_act, act=PROMPT)
 
     # The one command that changes what the server is doing rather than
     # what is stored, which is why it is a verb of its own rather than a
@@ -2028,7 +2116,7 @@ def _parser() -> argparse.ArgumentParser:
             "server, without a restart and without dropping a conversation"
         ),
     )
-    applying.set_defaults(run=_reload)
+    applying.set_defaults(run=_act, act=RELOAD)
 
     # The two onboarding commands take --config and nothing else. One
     # contacts nothing at all and the other reaches a device-facing
@@ -2061,14 +2149,14 @@ def _parser() -> argparse.ArgumentParser:
         "set-default-agent", parents=[common], help="the agent an unbound device reaches"
     )
     default.add_argument("name", metavar="NAME")
-    default.set_defaults(run=_set_default_agent)
+    default.set_defaults(run=_act, act=SET_DEFAULT_AGENT)
 
     cleared = commands.add_parser(
         "clear-default-agent",
         parents=[common],
         help="unset it, leaving the devices map as the allowlist",
     )
-    cleared.set_defaults(run=_clear_default_agent)
+    cleared.set_defaults(run=_act, act=CLEAR_DEFAULT_AGENT)
 
     secret = commands.add_parser(
         "set-secret", help="store one credential, encrypted, read from stdin or a variable"
@@ -2080,12 +2168,12 @@ def _parser() -> argparse.ArgumentParser:
     entity.add_argument("name", metavar="NAME")
     entity.add_argument("slot", metavar="SLOT", help="the option it fills, such as api_key")
     entity.add_argument("--from-env", metavar="VAR", help="read the value from this variable")
-    entity.set_defaults(run=_set_secret)
+    entity.set_defaults(run=_act, act=SET_SECRET)
     entity = kinds.add_parser("mcp-server", parents=[common])
     entity.add_argument("name", metavar="NAME")
     entity.add_argument("slot", metavar="SLOT", help="env.<KEY> or headers.<KEY>")
     entity.add_argument("--from-env", metavar="VAR", help="read the value from this variable")
-    entity.set_defaults(run=_set_secret)
+    entity.set_defaults(run=_act, act=SET_SECRET)
 
     clear = commands.add_parser("clear-secret", help="remove one stored credential")
     clear.set_defaults(local_ok=True)
@@ -2094,14 +2182,14 @@ def _parser() -> argparse.ArgumentParser:
     entity.add_argument("stage", metavar="STAGE", help=", ".join(PROVIDER_STAGES))
     entity.add_argument("name", metavar="NAME")
     entity.add_argument("slot", metavar="SLOT")
-    entity.set_defaults(run=_clear_secret)
+    entity.set_defaults(run=_act, act=CLEAR_SECRET)
     entity = kinds.add_parser("mcp-server", parents=[common])
     entity.add_argument("name", metavar="NAME")
     entity.add_argument("slot", metavar="SLOT")
-    entity.set_defaults(run=_clear_secret)
+    entity.set_defaults(run=_act, act=CLEAR_SECRET)
 
     listing = commands.add_parser("list", parents=[common], help="a summary tree")
-    listing.set_defaults(run=_list)
+    listing.set_defaults(run=_act, act=LIST)
 
     # Read-only and local: these three render the models and the API's
     # own routes, so they take no --config, open no database, reach no
@@ -2130,7 +2218,7 @@ def _parser() -> argparse.ArgumentParser:
     openapi.set_defaults(run=_openapi)
 
     show = commands.add_parser("show", parents=[common], help="everything, or one entity")
-    show.set_defaults(run=_show_all, local_ok=True)
+    show.set_defaults(run=_act, act=SHOW_ALL, local_ok=True)
     kinds = show.add_subparsers(dest="kind")
     entity = kinds.add_parser("provider", parents=[common])
     entity.add_argument("stage", metavar="STAGE", help=", ".join(PROVIDER_STAGES))
@@ -2149,7 +2237,7 @@ def _parser() -> argparse.ArgumentParser:
     entity.set_defaults(run=_act, act=SHOW_ENTITY["agent-defaults"])
     entity = kinds.add_parser("device", parents=[common])
     entity.add_argument("mac", metavar="MAC")
-    entity.set_defaults(run=_show_device)
+    entity.set_defaults(run=_act, act=SHOW_DEVICE)
 
     return parser
 
