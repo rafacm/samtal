@@ -191,9 +191,9 @@ itself. With the narrowed sentence back: `1 passed, 50 deselected`.
 
 None. The sentence is the plan's exact wording, the pin edit is the one
 dictionary it names, the sentinel covers both surfaces with the
-observed-event assertions the review round added, and the changelog
-carries the `**Breaking:**` bullet beside the rewritten ADR clause, in
-the same change.
+observed-event assertions the plan's review round added, and the
+changelog carries the `**Breaking:**` bullet beside the rewritten ADR
+clause, in the same change.
 
 ### Verification
 
@@ -207,3 +207,72 @@ everything run outside pytest:
   **2287 tests collected** before the change on this branch, **2288
   tests collected** after. Exactly the one sentinel test, as the plan
   requires.
+
+The numbers above are the state at the PR's first push. The review
+round below widens the sentinel's log scan and corrects two claims this
+document and the changelog made; its own verification is recorded with
+it.
+
+### PR #166 review round
+
+One external review of the pull request's diff, 2026-08-17. Three
+findings, one P2 and two P3, each valid and each fixed in its own
+commit. Findings as received, condensed, each with its resolution.
+
+1. **P2: the no-leak sentinel ignores non-event log records.** The test
+   filtered `caplog` to `asr_prompt_echo` before scanning, so an
+   ordinary log line on the same path could retain the transcript with
+   the sentinel still green. Suggested: keep the filtered records for
+   the anti-vacuity and event-field assertions, and run the absence
+   check over every captured record.
+   *Resolution*: adopted in f6d37e0. The finding names a real gap
+   rather than a theoretical one: `openai_asr.py` writes plain `logger`
+   calls beside its events, and one of them (the retry announcement) is
+   on the very branch that has the transcript in hand, so the filtered
+   scan watched one line and blessed the file. `surfaces(record)` and
+   the absence assertion now run over `caplog.records` whole, reporting
+   `record.name` when they trip; the filtered list keeps the two jobs
+   only it can do, the check that the guard fired at all and the
+   event's own field assertions. The widened scan was checked by
+   planting a `logger.info` carrying the transcript beside the event:
+   it fails and names the channel, where the filtered scan passed. The
+   probe was removed and `git diff` on the source confirmed empty.
+   Nothing in the vendor libraries' own DEBUG output carries the
+   sentinel, so the widening cost no exclusions. This also moves the
+   scan above the event-field assertions, so the red-run excerpt quoted
+   earlier in this document shows the ordering as it was at the time.
+2. **P3: this record's whole-repository grep proof was false.** The
+   claim was made from a command that ran in `samtal-server/`, so `.`
+   was that subtree and never reached `docs/`, and the document itself
+   quotes the old template three times.
+   *Resolution*: adopted in 283c6d1. Both halves were wrong and both
+   are corrected above: the proof is now a live-code-and-test search
+   over `samtal-server/samtal_server` and `samtal-server/tests` with
+   the paths written from the repository root, widened to every tracked
+   file with this record excluded, and the exclusion is stated as what
+   it is. Both commands were re-run against the tree they are recorded
+   in and both exit 1.
+3. **P3: the changelog overstated what the sentinel exercises.** The
+   entry said the test asserts the transcript "reaches the session",
+   where the test calls `OpenAiAsr.transcribe` and checks the
+   `AsrResult` it answers with.
+   *Resolution*: adopted in 52e3410, as a wording fix. The entry now
+   says the transcript stays in the transcription result the provider
+   answers with, and names the session as what goes on to hear it. The
+   test is deliberately not extended through a session: the provider
+   suite's subject is the provider, and the surfaces the entry is about
+   are the ones it already covers.
+
+### Verification after the review round
+
+From `samtal-server/`, on the branch with all three fixes, with
+`PYTHONDONTWRITEBYTECODE=1` exported outside pytest:
+
+- `uv run ruff check .`: **All checks passed!**
+- `uv run pytest tests/unit/test_providers_openai_asr.py -q`:
+  **51 passed** in 1.26 s.
+- `uv run pytest tests/unit -q`: **2272 passed, 16 skipped** in
+  295.67 s.
+- `uv run pytest tests/integration -q`: **55 passed** in 156.50 s.
+- Collected count unchanged at **2288 tests collected**: the round
+  widened an assertion rather than adding a test.
