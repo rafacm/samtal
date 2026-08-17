@@ -1307,36 +1307,35 @@ def _summary(document: Mapping[str, object]) -> str:
     for stage in PROVIDER_STAGES:
         lines.append(f"  {stage}:")
         lines += [
-            f"    {name} ({body.get('type')})"
+            f"    {name}{_summarized('provider', body)}"
             + _slots(stored, "provider", f"{stage}.{name}")
             for name, body in config["providers"].get(stage, {}).items()
         ] or ["    (none)"]
 
     lines.append("mcp_servers:")
     lines += [
-        f"  {name} ({body.get('transport')})" + _slots(stored, "mcp_server", name)
+        f"  {name}{_summarized('mcp-server', body)}" + _slots(stored, "mcp_server", name)
         for name, body in config["mcp_servers"].items()
     ] or ["  (none)"]
 
     lines.append("prompt_fragments:")
-    # The size rather than the text: this is the tree, and what an
-    # operator reads it for is which fragments exist and what each of
-    # them costs the prompt budget. `show prompt-fragment` prints one
-    # whole, and `prompt <agent>` prints what an agent adds up to.
     lines += [
-        f"  {name} ({len(str(body.get('text', '')))} characters)"
+        f"  {name}{_summarized('prompt-fragment', body)}"
         for name, body in config["prompt_fragments"].items()
     ] or ["  (none)"]
 
-    defaults = _inline(config["agent_defaults"])
-    lines.append("agent_defaults: " + (defaults or "(none)"))
+    lines.append("agent_defaults" + _summarized("agent-defaults", config["agent_defaults"]))
 
     lines.append("agents:")
     lines += [
-        f"  {name}" + (f": {_inline(_layer(body))}" if _layer(body) else "")
-        for name, body in config["agents"].items()
+        f"  {name}{_summarized('agent', body)}" for name, body in config["agents"].items()
     ] or ["  (none)"]
 
+    # The two settings' lines are written here rather than summarized by
+    # a descriptor: neither is an entity, a binding reads as the agents
+    # it points at and the default agent is one name, and forcing them
+    # into a kind's shape would be inventing a generalization rather
+    # than finding one.
     lines.append("devices:")
     lines += [
         f"  {mac} -> {', '.join(bound)}" for mac, bound in config["devices"].items()
@@ -1344,6 +1343,56 @@ def _summary(document: Mapping[str, object]) -> str:
 
     lines.append(f"default_agent: {config['default_agent'] or '(none)'}")
     return "\n".join(lines) + "\n"
+
+
+# How one entry of each kind reads in that tree, after its name: which
+# engine a provider is, how an MCP server is reached, what a fragment
+# costs, what an agent overrides. A fact of the kind, so the descriptor
+# carries it and the tree above asks rather than knowing five answers.
+
+
+def _summarized(kind: str, body: Mapping[str, object]) -> str:
+    return str(entities.descriptor(kind).summary(body))
+
+
+def _provider_summary(body: Mapping[str, object]) -> str:
+    """Its type, which is what a provider is: everything else in the
+    entry is options for that type."""
+    return f" ({body.get('type')})"
+
+
+def _mcp_server_summary(body: Mapping[str, object]) -> str:
+    return f" ({body.get('transport')})"
+
+
+def _prompt_fragment_summary(body: Mapping[str, object]) -> str:
+    """The size rather than the text: this is the tree, and what an
+    operator reads it for is which fragments exist and what each of them
+    costs the prompt budget. `show prompt-fragment` prints one whole,
+    and `prompt <agent>` prints what an agent adds up to."""
+    return f" ({len(str(body.get('text', '')))} characters)"
+
+
+def _agent_summary(body: Mapping[str, object]) -> str:
+    """What the agent overrides, which is its body without the prompt:
+    that is what the line has room for, and `show agent` is where the
+    prompt is read."""
+    layer = {key: value for key, value in body.items() if key != "prompt"}
+    return f": {_inline(layer)}" if layer else ""
+
+
+def _agent_defaults_summary(body: Mapping[str, object]) -> str:
+    """The singleton, which has no name of its own on the line, so what
+    follows the section's own name is all of it. Empty is a state worth
+    printing: it means every agent has to name everything itself."""
+    return f": {_inline(body) or '(none)'}"
+
+
+entities.fill("provider", summary=_provider_summary)
+entities.fill("mcp-server", summary=_mcp_server_summary)
+entities.fill("prompt-fragment", summary=_prompt_fragment_summary)
+entities.fill("agent", summary=_agent_summary)
+entities.fill("agent-defaults", summary=_agent_defaults_summary)
 
 
 def _stored_slots(secrets: Sequence[Mapping[str, object]]) -> dict[tuple[str, str], list[str]]:
@@ -1356,12 +1405,6 @@ def _stored_slots(secrets: Sequence[Mapping[str, object]]) -> dict[tuple[str, st
 def _slots(stored: Mapping[tuple[str, str], list[str]], kind: str, identity: str) -> str:
     slots = stored.get((kind, identity), [])
     return f"  [secrets: {', '.join(slots)}]" if slots else ""
-
-
-def _layer(body: Mapping[str, object]) -> dict[str, object]:
-    """An agent's overrides: its body without the prompt, which is what
-    the summary line has room for."""
-    return {key: value for key, value in body.items() if key != "prompt"}
 
 
 def _inline(data: Mapping[str, object]) -> str:

@@ -310,9 +310,10 @@ class EntityDescriptor(DocumentedShape):
     # by carrying none.
     missing: Hook = None
 
-    # CLI facts (M4): the renderer that summarizes one entry in a
-    # listing. The subparser's name is `name` and its arguments are
-    # `addressing`, so there is nothing else for the grammar to carry.
+    # CLI facts, filled by `cli.py`: how one entry of this kind reads in
+    # the summary tree, after the name it is listed under. The
+    # subparser's name is `name` and its arguments are `addressing`, so
+    # there is nothing else for the grammar to carry.
     summary: Hook = None
 
     # Writes facts, filled by `writes.py`, which is where the sentences
@@ -357,17 +358,15 @@ class Setting:
     route: str
     addressing: tuple[str, ...] = ()
 
-    # CLI facts (M4) and writes facts (M4). A setting's verbs are its
-    # own (bind, claim, unbind, set, clear), so the groups are named
-    # rather than shaped until the milestone that installs them. There
-    # is deliberately no `endpoints` here: a setting's routes are the
-    # ones the entity tier's six verbs cannot describe, and forcing them
-    # into that shape would be inventing a generalization rather than
-    # finding one.
-    summary: Hook = None
-    wrote: Hook = None
-    deleted: Hook = None
-    notice: Hook = None
+    # There are deliberately no hooks here, and no `endpoints`. A
+    # setting's routes are the ones the entity tier's six verbs cannot
+    # describe (bind by MAC, bind by activation code, unbind, set,
+    # clear), its acknowledgement and its notice are computed per
+    # request because a device binding's notice depends on whether the
+    # server has the named agent loaded, and its line in the summary
+    # tree is the agents a MAC points at rather than a kind's entry.
+    # Declaring groups nothing will fill would be an invitation to force
+    # them into a shape they are not.
 
 
 ENTITIES: tuple[EntityDescriptor, ...] = (
