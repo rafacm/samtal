@@ -16,7 +16,9 @@ lane refuses rather than a finding somebody has to notice.
 Three properties of the declarations are load-bearing:
 
 - **There is no free-text kind.** Every string field is a trusted
-  configured identifier, a token from a closed set, a class name, a
+  configured identifier (trusted by provenance: an operator wrote it,
+  and its domain here is the configuration's own rather than a tighter
+  one this module invented), a token from a closed set, a class name, a
   bounded machine id with a syntax, or a `DESCRIPTOR`: a far-side
   string retained deliberately, lawful only where its decision site
   bounds and sanitizes it, and declared with the maximum length and
@@ -98,7 +100,11 @@ class Kind(Enum):
     a design error this enum refuses to encode."""
 
     # A trusted name the operator or this server chose: an agent, a
-    # configuration entry, a pipeline stage, a path, an origin.
+    # configuration entry, a pipeline stage, a path, an origin. Its
+    # domain is the configuration's own (`IDENTIFIER_DOMAIN`): non-empty
+    # once stripped, and nothing further, because nothing further is
+    # what the operator was promised. Trusted is about provenance, not
+    # about shape.
     IDENTIFIER = "identifier"
     # One value out of the field's declared closed set.
     TOKEN = "token"
@@ -262,15 +268,37 @@ BOARD_BOUNDS = Bounds(64)
 FIRMWARE_BOUNDS = Bounds(32)
 CLIENT_BOUNDS = Bounds(64)
 
-# How long a trusted configured name may be. Generous, because these are
-# names an operator wrote and a host a URL named, and a bound exists
-# here to stop a runaway rather than to police the operator's taste.
-IDENTIFIER_LIMIT = 200
+# What a trusted configured name may be, which is what the
+# configuration says and no more.
+#
+# `NonBlankStr`, the type behind an agent name, a provider entry name
+# and a provider type, is `StringConstraints(strip_whitespace=True,
+# min_length=1)`: any non-empty string once stripped. It admits quotes,
+# control characters and any length at all. An agent called
+# `secondary"agent` is lawful configuration today, so a registry
+# claiming a tighter domain would turn that deployment's every
+# `session_open` into a schema violation the moment M2 enforces, and
+# forgiving mode would then drop the field and replace the sentence:
+# lawful traffic mangled by a claim the configuration never made.
+#
+# So the identifier kinds and the grammars below describe what
+# configuration guarantees. Narrowing belongs at configuration
+# semantics, where a refusal reaches the operator who can fix it, not
+# here, where it reaches a log line nobody asked for. The follow-up
+# issue this milestone files proposes exactly that, and these patterns
+# tighten from that side when it lands.
+IDENTIFIER_DOMAIN = "a non-empty string once stripped, as NonBlankStr defines it"
 
 
 # --- the composed grammars --------------------------------------------
+#
+# Bounded by STRUCTURE rather than by character class or length: what a
+# fragment promises is its shape (a parenthesized tail, a quoted name, a
+# comma-joined list), never what an operator may have called something.
 
-_NAME = r"[^,\"\x00-\x1f]{1,200}"
+# One configured name inside a fragment. Any non-empty run of
+# characters, newlines included, because that is the domain above.
+_NAME = r"[\s\S]+"
 
 EMPTY_FRAGMENT = Grammar(
     "empty_fragment",
@@ -286,23 +314,29 @@ EMPTY_FRAGMENT = Grammar(
 
 ALSO_BOUND_TO = Grammar(
     "also_bound_to",
-    rf"(?: \(also bound to {_NAME}(?:, {_NAME})*\))?",
+    rf"(?: \(also bound to {_NAME}\))?",
     (
         "samtal_server.ota:check_version",
         "samtal_server.device.session:DeviceSession.run",
     ),
     "The tail naming the agents a device is bound to beside the one "
-    "that answered, empty for a device bound to exactly one.",
+    "that answered, empty for a device bound to exactly one. The names "
+    "inside it are comma joined, and the grammar does not say so: a "
+    "configured name may itself hold a comma, so the joined fragment "
+    "cannot be parsed back into the names that made it, and a pattern "
+    "claiming otherwise would refuse a lawful deployment.",
 )
 
 AGENT_LIST = Grammar(
     "agent_list",
-    rf"{_NAME}(?:, {_NAME})*",
+    _NAME,
     (
         "samtal_server.ota:check_version",
         "samtal_server.device.session:DeviceSession.run",
     ),
-    "The configured agent names a device is bound to, comma-joined.",
+    "The configured agent names a device is bound to, comma-joined. "
+    "Non-empty, and nothing further: see the tail grammar above for why "
+    "the joining is not part of the claim.",
 )
 
 SESSION_LIST = Grammar(
@@ -314,31 +348,36 @@ SESSION_LIST = Grammar(
 
 QUOTED_TOOL_NAME = Grammar(
     "quoted_tool_name",
-    r' "[^"\x00-\x1f]{1,200}"',
+    r' "[\s\S]+"',
     ("samtal_server.runtime.pipeline:_tool_named",),
-    "A builtin's name, which is this server's own word. A device tool's "
+    "A builtin's name, which is this server's own word, bounded here by "
+    "the quoting alone. A device tool's "
     "name is the board's vocabulary and an unknown one is whatever the "
     "model invented, so neither is ever rendered here.",
 )
 
 FROM_ENTRY = Grammar(
     "from_entry",
-    r' from entry "[^"\x00-\x1f]{1,200}"',
+    r' from entry "[\s\S]+"',
     ("samtal_server.runtime.pipeline:_tool_named",),
     "The configured MCP entry a call reached, never the far side's own "
-    "tool name.",
+    "tool name. Entry names are separately held to `[A-Za-z0-9_-]+` by "
+    "the configuration, which makes this grammar a floor rather than "
+    "the whole truth; the floor is what the registry may claim, since "
+    "the tighter rule is configuration's to keep and to change.",
 )
 
 QUOTED_PROVIDER = Grammar(
     "quoted_provider",
-    r' "[^"\x00-\x1f]{1,200}"',
+    r' "[\s\S]+"',
     ("samtal_server.runtime.pipeline:PipelineRuntime._provider_failed",),
-    "The configuration entry the failing provider is.",
+    "The configuration entry the failing provider is, bounded by the "
+    "quoting alone.",
 )
 
 REACHING_HOST = Grammar(
     "reaching_host",
-    r"(?: reaching [^\s\x00-\x1f]{1,200})?",
+    r"(?: reaching [\s\S]+)?",
     ("samtal_server.runtime.pipeline:PipelineRuntime._provider_failed",),
     "Where the call was going, empty for an engine that runs in this "
     "process.",
@@ -346,7 +385,7 @@ REACHING_HOST = Grammar(
 
 ORIGIN_PROVENANCE = Grammar(
     "origin_provenance",
-    r"(?:from|guessed from) [^\x00-\x1f]{1,400}",
+    r"(?:from|guessed from) [\s\S]+",
     ("samtal_server.onboarding:Origin.provenance",),
     "Which configuration key the banner's origin came out of, and "
     "whether it was read or inferred.",
