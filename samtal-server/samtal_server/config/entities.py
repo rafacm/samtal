@@ -30,10 +30,18 @@ milestone fills it, so that nothing here is a value nothing validates.
 The exceptions, filled now, are the static identity facts: how the kind
 is addressed, whether it has a delete, whether stored secrets can hang
 on it, and which moved configuration key its command is quoted for.
+
+A fact whose value is code rather than data is filled by the module that
+owns the code, through `fill` below, because the hook a kind pays is
+written in terms of that module's own machinery and this one is
+deliberately importable without any of it. One registry filled from
+several modules, rather than one registry per consumer, is the whole
+point: two copies of a kind's facts can come to disagree, and that is
+the drift this module exists to end.
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import ClassVar
 
 from pydantic import BaseModel
@@ -77,6 +85,35 @@ API_OPTIONS_NOTE = f"{_OPTIONS_CONTRACT} under `samtal-server/examples/`{_OPTION
 # that calls it, and naming one here would be a guess dressed up as a
 # contract.
 Hook = Callable[..., object] | None
+
+# What a read or a delete of a fragment that is not there says. Fixed,
+# and deliberately not the `<section>.<name>: no such ...` shape its
+# neighbours use: a name that addresses no fragment is a name nothing in
+# this deployment has validated, it arrived in a URL path or on a
+# command line, and this sentence travels out as a 404 body and a
+# printed line. The section is what an operator needs to be told; the
+# name is the thing they typed and can see.
+NO_SUCH_FRAGMENT = "prompt_fragments: no prompt fragment of that name exists"
+
+
+def _no_such(section: str, noun: str) -> Callable[..., str]:
+    """The refusal every kind but one answers a missing entry with: the
+    section, the identity that was asked for, and what is not there."""
+
+    def missing(*identity: str) -> str:
+        return f"{section}.{'.'.join(identity)}: no such {noun}"
+
+    return missing
+
+
+def _always(sentence: str) -> Callable[..., str]:
+    """A refusal that says the same thing whatever was asked for, which
+    is what a kind whose identity must not be repeated needs."""
+
+    def missing(*_identity: str) -> str:
+        return sentence
+
+    return missing
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -159,21 +196,21 @@ class EntityDescriptor(DocumentedShape):
     # else; the two members are still exactly two.
     secret_slots: str | None = None
 
-    # Store facts (M2). The table the kind is rowed in, and the row
-    # mapping: the default path is `model_validate`/`model_dump`, and a
-    # hook is what a kind pays when its model demands one, which the
-    # inventory proved for exactly three of the five. `before_parse` and
-    # `inside_write` are the checks the three quirky kinds run around
-    # their write.
+    # Store facts, filled by `store.py`. The name of the table the kind
+    # is rowed in, and the row mapping: the default path is
+    # `model_validate`/`model_dump`, and a hook is what a kind pays when
+    # its model demands one, which the inventory proved for exactly
+    # three of the five. `before_parse` and `inside_write` are the
+    # checks the quirky kinds run around their write.
     table: str | None = None
     from_row: Hook = None
     to_row: Hook = None
     before_parse: Hook = None
     inside_write: Hook = None
 
-    # View facts (M2): the body builder that masks one entry for
-    # display. `views.provider_record` is deliberately not this, and
-    # stays hand-built for the reason its docstring gives.
+    # View facts, filled by `views.py`: the body builder that masks one
+    # entry for display. `views.provider_record` is deliberately not
+    # this, and stays hand-built for the reason its docstring gives.
     body: Hook = None
 
     # API facts (M3). Each endpoint's stable operation identity, exact
@@ -185,10 +222,11 @@ class EntityDescriptor(DocumentedShape):
     # milestone that needs it does not invent a second descriptor.
     endpoints: tuple[object, ...] = ()
 
-    # The refusal for an entry that is not there (M3), used by both the
-    # read and the delete. The fragments answer one fixed sentence that
-    # does not repeat the name that was asked for; the others keep their
-    # own sentences; the singleton has no missing case.
+    # The refusal for an entry that is not there, used by the read, the
+    # delete and the slot check. The fragments answer one fixed sentence
+    # that does not repeat the name that was asked for; the others keep
+    # their own sentences; the singleton has no missing case, and says so
+    # by carrying none.
     missing: Hook = None
 
     # CLI facts (M4): the renderer that summarizes one entry in a
@@ -265,6 +303,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         addressing=("stage", "name"),
         moved_key="providers",
         secret_slots="provider",
+        missing=_no_such("providers", "provider"),
     ),
     EntityDescriptor(
         name="mcp-server",
@@ -285,6 +324,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         addressing=("name",),
         moved_key="mcp_servers",
         secret_slots="mcp_server",
+        missing=_no_such("mcp_servers", "MCP server"),
     ),
     EntityDescriptor(
         name="prompt-fragment",
@@ -318,6 +358,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         route="/prompt-fragments",
         addressing=("name",),
         moved_key="prompt_fragments",
+        missing=_always(NO_SUCH_FRAGMENT),
     ),
     EntityDescriptor(
         name="agent",
@@ -340,6 +381,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         route="/agents",
         addressing=("name",),
         moved_key="agents",
+        missing=_no_such("agents", "agent"),
     ),
     EntityDescriptor(
         name="agent-defaults",
@@ -447,12 +489,56 @@ SETTINGS: tuple[Setting, ...] = (
 )
 
 
+_BY_NAME: dict[str, EntityDescriptor] = {entry.name: entry for entry in ENTITIES}
+
+
+def descriptor(name: str) -> EntityDescriptor:
+    """One commanded kind, by the name its command, its route and its
+    documentation section all carry."""
+    return _BY_NAME[name]
+
+
+def fill(name: str, **facts: object) -> None:
+    """Fill one fact group on a descriptor, from the module that owns
+    the code the facts are.
+
+    Every fact about a kind that is data is written in the registry
+    above, where a reader meets the kind. A fact whose value is a
+    function cannot always be: the row mapping a kind pays when its
+    model demands one is written in terms of the repository's own row
+    helpers, and the body builder that masks one entry is written in
+    terms of the masking rules, and this module is deliberately readable
+    without either, because the command that renders the documentation
+    runs on a machine with no database and no encryption key. So the
+    owning module fills its own group at its import, beside the code it
+    is filling in, and the registry stays one object rather than one
+    copy per consumer that can come to disagree.
+
+    Once each, and only over a fact that is still unset: a group filled
+    twice would mean two modules claiming the same knowledge, which is
+    the thing this ends rather than a thing to allow.
+    """
+    target = _BY_NAME[name]
+    declared = {field.name for field in fields(target)}
+    for fact, value in facts.items():
+        if fact not in declared:
+            raise ValueError(f"{name}: no descriptor fact is called {fact}")
+        if getattr(target, fact) is not None:
+            raise ValueError(f"{name}.{fact} is already filled")
+        # The descriptor is frozen because nothing about a kind changes
+        # while the process runs, and nothing here does: this is the
+        # declaration itself, arriving from the one module that can
+        # write it.
+        object.__setattr__(target, fact, value)
+
+
 __all__ = [
     "API_OPTIONS_NOTE",
     "CONFIG_FILE",
     "ENTITIES",
     "EXAMPLES",
     "NESTED",
+    "NO_SUCH_FRAGMENT",
     "OPTIONS_NOTE",
     "SETTINGS",
     "DocumentedShape",
@@ -460,4 +546,6 @@ __all__ = [
     "Hook",
     "NestedShape",
     "Setting",
+    "descriptor",
+    "fill",
 ]

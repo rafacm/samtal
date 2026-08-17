@@ -39,6 +39,7 @@ from sqlalchemy import Connection, Engine, Row, Table, delete, insert, select, u
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.sql.elements import ColumnElement
 
+from samtal_server.config.entities import NO_SUCH_FRAGMENT
 from samtal_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
@@ -119,15 +120,6 @@ _NON_STRING_KEY = (
     "with a string, so such a key would silently become one and a reader would be "
     "given a key nobody wrote"
 )
-
-# What a read or a delete of a fragment that is not there says. Fixed,
-# and deliberately not the `<section>.<name>: no such ...` shape its
-# neighbours use: a name that addresses no fragment is a name nothing in
-# this deployment has validated, it arrived in a URL path or on a
-# command line, and this sentence travels out as a 404 body and a
-# printed line. The section is what an operator needs to be told; the
-# name is the thing they typed and can see.
-NO_SUCH_FRAGMENT = "prompt_fragments: no prompt fragment of that name exists"
 
 
 class DomainConfig(BaseModel):
