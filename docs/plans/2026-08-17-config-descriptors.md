@@ -147,7 +147,16 @@ above them), holding frozen dataclasses that EXTEND today's
   inventory proved a custom mapping is load-bearing, the
   pre-parse/inside-write check hooks the three quirky entities
   need), view facts (the body builder or the mask hook it needs),
-  API facts (route prefix, has_delete, secret slots or none), CLI
+  API facts (route prefix, has_delete, secret slots or none,
+  and each endpoint's stable operation identity, exact
+  description, response and status declarations, and parameter
+  signature, because the committed OpenAPI document derives its
+  summaries, operation ids and parameter ordering from today's
+  named functions and docstrings and those bytes are contract),
+  the missing-entity refusal builder (fragments answer the fixed
+  `NO_SUCH_FRAGMENT` without repeating the unvalidated name, the
+  others keep their exact sentences, the singleton has no missing
+  case), CLI
   facts (subparser names/help, the summary renderer hook), writes
   facts (the wrote/deleted sentence builders, the notice chooser),
   and the loader moved-key command.
@@ -192,9 +201,17 @@ not import FastAPI. Resolution: the pydantic response models
 `api.py` imports them from there (its OpenAPI output must stay
 byte-identical, which pydantic model identity by name preserves;
 the drift check is the proof), and `cli.py` renders every HTTP
-answer by `model_validate` against the matching response model,
-which is what deletes the frozensets, the nine predicates, and
-`test_config_cli_shapes.py`. The rendering functions keep their
+answer through ONE response-validation helper: strict-mode
+`model_validate` against the matching response model, ignoring
+unknown response fields exactly where today's predicates tolerate
+a newer server's extras, rendering validated fields only, and on
+failure discarding the `ValidationError` inside the handler and
+raising the existing fixed `UNRECOGNIZED_ANSWER` sentence only
+after the `except` block exits, `__cause__` and `__context__`
+both empty, because `ValidationError.errors()` retains the
+rejected input and the acceptance suite requires malformed bodies
+to reach no surface. That helper is what deletes the frozensets,
+the nine predicates, and `test_config_cli_shapes.py`. The rendering functions keep their
 exact output sentences and column layouts: the change is where the
 shape knowledge comes from, not what is printed. The docs-lane
 tests (no FastAPI, no database, no key) keep passing because
@@ -212,8 +229,12 @@ single-sided nuances are preserved as row facts, not re-derived:
 the local device delete keeps printing plain `BINDING_NOTICE`
 (it has no loaded-agent set to compute against, exactly as today),
 and the secret rows carry `secret_notice(kind)` on the CLI side
-while the API keeps its static per-route choice. Byte-identical
-output on both paths is the test.
+while the API keeps its static per-route choice. The per-act proof
+compares the shared acknowledgement and the act's notice
+byte-for-byte after the unchanged local-only preamble
+(`LOCAL_NOTICE` prints on every local invocation by design, so
+whole-invocation equality is not the claim), porting the
+acceptance suite's existing local-versus-API proof.
 
 ### The walkers: consolidate two, leave four, file one finding
 
@@ -291,16 +312,20 @@ Every merge leaves `main` releasable; each PR is one concern.
    listed one by one in the implementation doc.
 3. **M3, the response models move and api.py generalizes**:
    `responses.py`; api.py's routes and `ENTITY_MODELS` derived
-   from descriptors with `RawBody` and the schema hoisting
-   byte-identical; the OpenAPI drift check green with no
-   regeneration commit is the milestone's core proof.
+   from descriptors, the route factory installing each endpoint's
+   descriptor-carried operation identity, description, response
+   and status declarations and parameter signature explicitly,
+   with `RawBody` and the schema hoisting byte-identical; the
+   OpenAPI drift check green with no regeneration commit is the
+   milestone's core proof.
 4. **M4, the CLI unifies and renders from response models**: the
-   dispatch table; the four local rows; rendering via
-   `model_validate`; the frozensets, predicates, and
-   `test_config_cli_shapes.py` deleted; notices provably identical
-   per act (the acceptance suite's existing notice tests are the
-   pins, plus one new test per act asserting local and HTTP
-   outputs byte-equal where both exist).
+   dispatch table; the four local rows; rendering via the
+   sanitized response-validation helper; the frozensets,
+   predicates, and `test_config_cli_shapes.py` deleted; notices
+   provably identical per act (the acceptance suite's existing
+   notice tests are the pins, plus per-act proofs comparing
+   acknowledgement and notice byte-for-byte after the local-only
+   preamble where both paths exist).
 5. **M5, the test split and the cost demonstration**: the
    inherited buckets executed as a pure move; the acceptance
    criterion demonstrated (add a scratch field to a copy of one
@@ -394,3 +419,70 @@ outside pytest.
 - [ ] M5: the inherited test split executed as a pure move and the
       per-field cost demonstrated; CHANGELOG closes the issue;
       milestone duties in the same change.
+
+## Plan review round
+
+External review of commit 28abab2 by codex 0.147.0 (model
+gpt-5.6-sol), 2026-08-17, prompted with the plan, the issue body,
+the config package, the contract surfaces, and the maintainer's
+review bar (findings name broken behavior, unimplementable design,
+contract violations, or factual errors; simplifications over
+elaborations). Five findings, verdict ready after the amendments;
+as received, condensed but faithful, each with its resolution:
+
+1. **P1: response-model validation can retain rejected secrets in
+   exception chains.** `model_validate` without a sanitized
+   boundary lets `ValidationError.errors()` carry the rejected
+   input, and the CLI tests require malformed bodies to appear
+   nowhere in output or the chain.
+
+   *Resolution*: accepted. M4 introduces one response-validation
+   helper that catches `ValidationError`, discards it, and raises
+   the existing fixed `UNRECOGNIZED_ANSWER` sentence only after
+   the handler has exited, `__cause__` and `__context__` both
+   empty, each renderer's wording unchanged. Amended in the
+   response-models section.
+
+2. **P1: the descriptor lacks the endpoint metadata byte-identical
+   OpenAPI needs.** Summaries, operation ids, descriptions,
+   response declarations and parameter ordering derive from the
+   current named functions and docstrings, and those bytes are
+   committed contract.
+
+   *Resolution*: accepted. The descriptor's API facts grow to
+   carry each endpoint's stable operation identity, exact
+   description, response and status declarations, and parameter
+   signature, and M3's route factory installs them explicitly so
+   the generated document stays byte-identical. Amended in the
+   descriptor and M3 sections.
+
+3. **P2: default pydantic validation changes the CLI's acceptance
+   rules.** The response models forbid extras while the CLI
+   tolerates unknown fields from a newer server, and the
+   predicates reject coerced types where pydantic coerces.
+
+   *Resolution*: accepted. The CLI validates in strict mode
+   against the shared models but ignores unknown response fields
+   wherever the current predicates do, rendering only validated
+   fields, so compatibility neither narrows nor loosens. Amended
+   in the response-models section.
+
+4. **P2: generic CRUD has no descriptor fact for the
+   prompt-fragment no-leak 404.** Fragments must answer the fixed
+   `NO_SUCH_FRAGMENT` without repeating the unvalidated name.
+
+   *Resolution*: accepted. The descriptor gains a missing-refusal
+   builder or constant used by both read and delete; fragments use
+   `NO_SUCH_FRAGMENT`, the others keep their exact sentences, the
+   singleton has no missing case. Amended in the descriptor
+   section.
+
+5. **P2: full local and HTTP output cannot be byte-identical while
+   `LOCAL_NOTICE` is mandatory.** Local stderr is the preamble
+   plus the notice, not the HTTP stderr byte-for-byte.
+
+   *Resolution*: accepted. The per-act proof compares the shared
+   acknowledgement and the act's notice byte-for-byte after the
+   unchanged local-only preamble, and M4 ports the acceptance
+   suite's existing proof rather than asserting whole-invocation
+   equality. Amended in the dispatch and M4 sections.
