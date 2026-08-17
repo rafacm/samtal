@@ -76,11 +76,13 @@ the plan's inventory did not name: `manager._resolve("env")`
 (`test_tools_mcp_prompts.py:331`) and `manager._injectable(...)`
 (`test_tools_mcp_prompts.py:557`). All four are ports.
 
-**The private reaches M4 inherits, unchanged by M1:** `_managers` (7
-sites plus the guidance integration test), `_config` (5), `_session`
-(4), `_reloading` (1), `_task` (2), and
-`StubbornManager`/`SlowStopManager` subclassing `_run`, `_became`,
-`_settled` and `_stop` (`test_tools_mcp_reload.py:688-770`).
+**The private reaches M4 inherits:** `_managers` (7 sites plus the
+guidance integration test), `_config` (5), `_session` (4), `_reloading`
+(1), `_task` (2), and `StubbornManager`/`SlowStopManager` subclassing
+`_run`, `_became`, `_settled` and `_stop`
+(`test_tools_mcp_reload.py:688-770`). M1 adds none and retires one: the
+resolver port took `servers._managers["tools"]` out of
+`test_tools_mcp.py`, leaving six unit sites and the integration one.
 
 ## M1: the package with the full split
 
@@ -246,7 +248,7 @@ moved.
 | `test_tools_mcp_prompts.py` | 575-576 | `setattr(mcp_module, "PROMPT_CALL_TIMEOUT_S"/"PROMPT_DISCOVERY_TIMEOUT_S", …)` | `setattr(prompts, …)` | read in `prompts._bounded` and `prompts._discover` |
 | `test_tools_mcp_prompts.py` | 328-333 | `manager = McpServerManager(…); await manager._discovered(session, capabilities, …)` | `await prompts._discovered("tools", stdio_entry(**overrides), session, capabilities, …)` | `_discovered` takes the entry rather than reading a manager; the helper's docstring says "entry" where it said "manager" |
 | `test_tools_mcp_prompts.py` | 553-557 | `manager._injectable(huge, "instructions")` | `prompts._injectable("tools", huge, "instructions")` | same; the manager construction went with it, and the warning still names `mcp server tools` |
-| `test_tools_mcp.py` | 25, 369 | `manager._resolve("env")` | `transport._resolve(manager._name, manager._config, manager._secrets, "env")` | asks the resolver the connection asks, with the manager's own three |
+| `test_tools_mcp.py` | 25, 365-369 | `servers._managers["tools"]`, then `manager._resolve("env")` | `McpServers.build(config)` unbound, then `transport._resolve("tools", config.mcp_servers["tools"], None, "env")` | asks the resolver the connection asks, over the entry the manager was built from; the literals rather than the manager's fields, so the port introduces no reach M4 has to map |
 | `test_secret_resolution.py` | 32, 305 | `McpServerManager("weather", config)._resolve("headers")` | the construction, then `transport._resolve("weather", config, None, "headers")` | the construction is half of what the test is about (an unset reference fails the boot below it), so it stayed |
 
 Reads left alone because a re-export carries them:
