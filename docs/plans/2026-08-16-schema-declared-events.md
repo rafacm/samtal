@@ -132,13 +132,16 @@ dataclasses and the declarations:
     sanitizes it (bounded in length, stripped of unprintables) and
     declared with an explicit per-field maximum length and
     character constraint that validation enforces again at emit.
-    The kind is narrow by construction: M1's provenance inventory
+    The kind stands on the content-and-telemetry ADR's 2026-08-17
+    amendment (Rafael's decision, main@744acef): bounded
+    device-descriptor metadata, what a device says about itself at
+    check-in, is metadata the events may carry once bounded, while
+    conversation-derived text stays banned without exception. The
+    kind is narrow by construction: M1's provenance inventory
     assigns it ONLY where the site's normalization cannot be
     tightened to an `ID` syntax without changing what the surface
-    deliberately retains (`board` is the known case: the README
-    documents that device-reported board strings are kept, bounded
-    and stripped, a decision the onboarding work's review rounds
-    hardened on purpose); a field whose lawful values already fit
+    deliberately retains (`board` is the known case); a field
+    whose lawful values already fit
     a syntactic form (`client` when it is a UUID, `firmware` when
     it is a version) is declared `ID` with that form IF its
     decision site normalizes to it, and otherwise stays
