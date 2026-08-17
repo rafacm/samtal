@@ -417,6 +417,26 @@ GUARD_MESSAGE = (
     "a schema_violation was emitted instead"
 )
 
+# What a recovered emission says instead of the sentence it was given.
+#
+# EVERY invalid emission loses its message AND its arguments, whatever
+# was wrong with it. Dropping a payload field cannot un-render the same
+# value from the arguments, and the two are not independent: one
+# credential can be an undeclared field key or value and a lawful
+# `IDENTIFIER` argument of the same call at once, so a recovery that
+# kept the sentence whenever the arguments happened to validate would
+# drop the value from the payload and print it anyway.
+#
+# Beside `SCHEMA_VIOLATION_MESSAGE` rather than reusing it: that one is
+# the registry's own declared template for the recovery EVENT, and this
+# is what a surviving event says when only its sentence had to go. Two
+# outcomes, two sentences, so a reader of the retained log can tell
+# which happened.
+SAFE_MESSAGE = (
+    "an event was refused by the event schema and its sentence replaced; "
+    "reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which"
+)
+
 # A type name, which is what `CLASS_NAME` admits.
 CLASS_NAME_PATTERN = r"[A-Za-z_][A-Za-z0-9_]*"
 
@@ -629,26 +649,33 @@ def _argument_fault(spec: ArgSpec, value: Any) -> str | None:
 # --- holding an emission to a variant ---------------------------------
 
 
-def _variant_faults(
-    variant: EventVariant,
-    args: tuple[Any, ...],
-    payload: dict[str, Any],
+def _argument_faults(
+    variant: EventVariant, args: tuple[Any, ...]
 ) -> tuple[Fault, ...]:
-    """Everything wrong with one emission against one variant, in a
-    deterministic order: the arguments by position, then the declared
-    fields in declaration order, then the count of what was not
+    """Everything wrong with one argument tuple against one variant, by
+    position."""
+    if len(args) != len(variant.args):
+        return (Fault(WRONG_ARITY, f"{len(variant.args)} declared"),)
+    faults: list[Fault] = []
+    for position, (spec, value) in enumerate(zip(variant.args, args, strict=True)):
+        code = _argument_fault(spec, value)
+        if code is not None:
+            faults.append(Fault(code, f"argument {position}"))
+    return tuple(faults)
+
+
+def _field_faults(
+    variant: EventVariant, payload: dict[str, Any]
+) -> tuple[Fault, ...]:
+    """Everything wrong with one payload against one variant: the
+    declared fields in declaration order, then the count of what was not
     declared at all.
 
-    Channel, template and level are not checked here: they are what
-    selected the variant in the first place."""
+    Separate from the arguments because the recovery's final gate is
+    about this half alone: a recovered emission has lost the caller's
+    sentence and arguments by then, so what is left to ask is whether
+    its FIELD shape is one the registry declares."""
     faults: list[Fault] = []
-    if len(args) != len(variant.args):
-        faults.append(Fault(WRONG_ARITY, f"{len(variant.args)} declared"))
-    else:
-        for position, (spec, value) in enumerate(zip(variant.args, args, strict=True)):
-            code = _argument_fault(spec, value)
-            if code is not None:
-                faults.append(Fault(code, f"argument {position}"))
     for name, field in variant.fields.items():
         if name not in payload:
             if field.required:
@@ -661,6 +688,19 @@ def _variant_faults(
     if undeclared:
         faults.append(Fault(UNDECLARED_FIELDS, str(undeclared)))
     return tuple(faults)
+
+
+def _variant_faults(
+    variant: EventVariant,
+    args: tuple[Any, ...],
+    payload: dict[str, Any],
+) -> tuple[Fault, ...]:
+    """Everything wrong with one emission against one variant, in a
+    deterministic order: the arguments by position, then the fields.
+
+    Channel, template and level are not checked here: they are what
+    selected the variant in the first place."""
+    return _argument_faults(variant, args) + _field_faults(variant, payload)
 
 
 def _candidates(
@@ -783,15 +823,28 @@ def _recover(
     special cases, so simultaneous violations have one defined outcome
     reached the same way every time.
 
-    Select the variant by registry-owned dimensions; rebuild the payload
-    field by field against it, keeping only what validates and dropping
-    every offender rather than failing at the first; then hold the
-    rebuilt emission to that variant WHOLE again. That last check is
-    what stops a recovery dispatching a shape the generated reference
-    denies exists: a rebuild that leaves a required field missing, or
-    whose sentence or arguments were the problem, becomes the declared
-    `schema_violation` event outright instead, and so does an
-    undeclared event, an unknown template and an ambiguous selection.
+    Select the variant by registry-owned dimensions; drop the caller's
+    sentence and arguments, ALWAYS, because an invalid emission is one
+    this module has decided it cannot read and half of it is rendered
+    text; then rebuild the payload field by field against the variant,
+    keeping only what validates and dropping every offender rather than
+    failing at the first; then hold the rebuilt payload to that
+    variant's field table again. That last check is what stops a
+    recovery dispatching a shape the generated reference denies exists:
+    a rebuild that leaves a required field missing becomes the declared
+    `schema_violation` event outright instead, and so does an undeclared
+    event, an unknown template and an ambiguous selection.
+
+    Dropping the arguments unconditionally is the correction PR #169's
+    review forced, and the case that forced it is worth stating: one
+    credential can be BOTH an undeclared field key or value AND a
+    perfectly lawful `IDENTIFIER` or `PATHLIKE` argument of the same
+    call. Keeping the sentence because the arguments independently
+    validated would then drop the value from the payload and render the
+    same value into the log and every tap, which is the leak the whole
+    machinery exists to refuse. So there is no emission that is
+    partly recovered: either it was valid as given, or its sentence is
+    recovery's own.
     """
     collisions = tuple(sorted(key for key in fields if key in base))
     payload = _merged(base, fields)
@@ -811,9 +864,9 @@ def _recover(
         if key in judged.variant.fields
         and _field_fault(judged.variant.fields[key], value) is None
     }
-    if _variant_faults(judged.variant, args, rebuilt):
+    if _field_faults(judged.variant, rebuilt):
         return _replacement(base)
-    return Checked(rebuilt, level, message, args)
+    return Checked(rebuilt, level, SAFE_MESSAGE, ())
 
 
 def _enforce(

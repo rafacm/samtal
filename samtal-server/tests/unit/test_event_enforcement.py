@@ -8,12 +8,20 @@ Strict is the lanes' promise, and it is that a violation stops the run.
 Forgiving is production's, and it is the opposite: a telemetry bug never
 costs a reply. Forgiving is not a list of special cases either, it is
 one algorithm. Select the variant by registry-owned dimensions (the
-emitter's channel, then the declared templates, then the level), rebuild
-the payload field by field against it, then hold the rebuilt emission to
-that variant whole again. What survives that is dispatched as itself;
-what cannot get there becomes the declared `schema_violation` event,
-built fresh, so a hostile name, key, value, message or argument in the
-refused call reaches nothing.
+emitter's channel, then the declared templates, then the level), drop
+the caller's sentence and arguments whatever was wrong, rebuild the
+payload field by field against the variant, then hold the rebuilt
+payload to that variant's field table again. What survives that is
+dispatched as its own event with recovery's sentence; what cannot get
+there becomes the declared `schema_violation` event, built fresh, so a
+hostile name, key, value, message or argument in the refused call
+reaches nothing.
+
+The sentence goes unconditionally, and the case that says why is here:
+one credential can be an undeclared field key and a lawful argument of
+the same call at once, so a recovery that kept the sentence whenever
+the arguments happened to validate would drop the value from the
+payload and print it anyway.
 
 The declarations below are this suite's own, installed through the
 schema seam, because a matrix keyed to production events would be a
@@ -31,6 +39,7 @@ from samtal_server import events
 from samtal_server.events import (
     GUARD_MESSAGE,
     REFUSAL_MESSAGE,
+    SAFE_MESSAGE,
     UNDECLARED_LABEL,
     Emission,
     EventSchemaError,
@@ -373,9 +382,14 @@ def test_strict_refuses_an_undeclared_field() -> None:
 def test_forgiving_drops_an_undeclared_field_and_keeps_the_event(
     caplog: pytest.LogCaptureFixture, tap: Tap
 ) -> None:
-    """The one case the rebuild can carry all the way: nothing else was
-    wrong, so what is left after the drop is a full variant, and the
-    event rides with its own sentence."""
+    """What the rebuild can carry all the way: nothing else was wrong,
+    so what is left after the drop is a declared field shape and the
+    event rides.
+
+    Its sentence does not. An invalid emission loses the caller's
+    message and arguments whatever was wrong with it, because the
+    payload and the sentence are not independent: the same value can sit
+    in a dropped field and in a lawful argument at once."""
     forgivingly()
     with caplog.at_level("DEBUG"):
         lawful(emitter(), invented=1)
@@ -388,8 +402,11 @@ def test_forgiving_drops_an_undeclared_field_and_keeps_the_event(
         "duration_ms": 12,
         "reason": "fast",
     }
-    assert record.getMessage() == "measured asr in 12 ms"
+    assert record.msg == SAFE_MESSAGE
+    assert record.args == ()
     assert tap.seen[0].payload == fields_of(record)
+    assert tap.seen[0].message == SAFE_MESSAGE
+    assert tap.seen[0].args == ()
 
 
 def test_forgiving_drops_every_offender_rather_than_the_first(
@@ -649,13 +666,13 @@ def test_strict_refuses_an_argument_of_the_wrong_kind() -> None:
     )
 
 
-def test_forgiving_replaces_an_emission_with_a_bad_argument(
+def test_forgiving_drops_the_arguments_and_keeps_the_event(
     caplog: pytest.LogCaptureFixture, tap: Tap
 ) -> None:
-    """Dropping a payload field cannot un-render the same value from the
-    arguments, so an emission whose arguments were the problem loses its
-    sentence wholesale, which is what makes the recovery event the only
-    shape left."""
+    """The fields were a declared shape, so the event rides; the
+    sentence and the arguments are what went wrong, and they go
+    wholesale rather than by position. Nothing the caller wrote is
+    rendered."""
     forgivingly()
     with caplog.at_level("DEBUG"):
         emitter().info(
@@ -669,8 +686,44 @@ def test_forgiving_replaces_an_emission_with_a_bad_argument(
         )
 
     refused(caplog, "measured", "wrong_kind (argument 1)")
-    replaced_by_the_recovery_event(caplog)
+    (record,) = emitted(caplog)
+    assert fields_of(record)["event"] == "measured"
+    assert record.msg == SAFE_MESSAGE
+    assert record.args == ()
     assert tap.seen[0].args == ()
+
+
+def test_a_value_in_a_dropped_field_is_not_rendered_from_an_argument(
+    caplog: pytest.LogCaptureFixture, tap: Tap
+) -> None:
+    """The case that makes the rule unconditional (PR #169's review).
+
+    One value, used as an undeclared field key AND as its value AND as a
+    lawful `IDENTIFIER` argument of the same call. Every part of the
+    payload half is dropped; keeping the sentence because the argument
+    independently validated would render it anyway, out of the same call
+    that was refused for carrying it."""
+    planted = "sk-alias-3e8f1c2b-never-a-real-credential"
+    forgivingly()
+    with caplog.at_level("DEBUG"):
+        emitter().info(
+            "measured %s in %d ms",
+            planted,
+            12,
+            event="measured",
+            stage="asr",
+            duration_ms=12,
+            reason="fast",
+            **{planted: planted},
+        )
+
+    refused(caplog, "measured", "undeclared_fields (1)")
+    (record,) = emitted(caplog)
+    assert fields_of(record)["event"] == "measured"
+    assert planted not in str(vars(record))
+    assert planted not in record.getMessage()
+    assert not any(planted in str(one.args) for one in tap.seen)
+    assert not any(planted in str(one.payload) for one in tap.seen)
 
 
 # --- the base keys, checked before the merge --------------------------
