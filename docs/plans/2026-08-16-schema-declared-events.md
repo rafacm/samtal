@@ -164,10 +164,22 @@ dataclasses and the declarations:
     configuration, server-minted, far-side sanitized) and assigns
     the kind from the inventory; a far-side string whose decision
     site does NOT sanitize it is a real finding, fixed at that
-    decision site in M1 (a bounds-and-strip on adversarial input
-    changes nothing for the lawful values the pin suites plant, so
-    the pins stay untouched), and each such fix is its own commit
-    named in the implementation doc. This is the one deliberate
+    decision site in M1, and two such sites are already proven
+    rather than plausible: `ota.py`'s `reported_board` and
+    `reported_version` only strip whitespace before `ota_check`
+    renders them in fields AND message arguments, and
+    `session_open` renders an unbounded raw Client-Id in its
+    sentence and `client` field. The fix is an event-only
+    normalized copy covering BOTH the payload field and the
+    message argument (what the site answers elsewhere, the OTA
+    response above all, is untouched); a bounds-and-strip on
+    adversarial input changes nothing for the lawful values the
+    pin suites plant, so the pins stay untouched, and each fix is
+    its own commit named in the implementation doc. The
+    adversarial tests assert the sentinel's placement across
+    `record.args`, the rendered sentence, both formats, the
+    complaint, the exception, and an attached tap, not the payload
+    field alone. This is the one deliberate
     narrowing of the "no emit site changes" rule, and it is
     confined to sanitization of values the taxonomy cannot
     otherwise admit;
@@ -399,9 +411,12 @@ absent from all the surfaces above, in both modes.
   production process may import `create_app` and serve it under an
   ASGI runner without ever running `main()`, and the plan's own
   rule is that any running server is a deployment. `main()` ALSO
-  resolves, after it has loaded `.env` and after the `config` and
-  `conversations` subcommand early exits (so an invalid value of a
-  server-only variable cannot block a recovery command), which is
+  resolves, after it has loaded `.env` and after the `config`,
+  `conversations`, and (from M3) `events` subcommand early exits
+  (so an invalid value of a server-only variable cannot block a
+  recovery command or schema generation; a subprocess test proves
+  `events reference` succeeds under an invalid ambient value),
+  which is
   what lets the documented dotenv layer set the variable; an
   import-time read could honor neither (`main.py` imports `app`
   and therefore `events` before `main()` runs). The lanes set
@@ -589,7 +604,10 @@ and reverted.
    adversarial endpoint test asserting the OTA response bytes and
    stored state are unchanged while the emitted field carries the
    sanitized form. The declarations are pinned to reality by the
-   conformance test and by review.
+   conformance test and by review. Like every milestone, M1 lands
+   its implementation-doc section (deviations or an explicit
+   none), its changelog entry, and its tick-and-link in the same
+   change.
 2. **M2, the emitters enforce**: two-step validation in both
    `_emit`s (pre-merge caller check, then the variant match
    including template and argument tuple), `EventSchemaError`, the
@@ -600,12 +618,16 @@ and reverted.
    sentinel matrix and the subprocess proofs, the README Logging
    paragraph on the switch. Both pin suites and the full lanes
    green under strict enforcement is the milestone's core proof.
+   M2 lands its implementation-doc section, changelog entry, and
+   tick-and-link in the same change.
 3. **M3, the reference cannot drift**: the
    `samtal-server events reference` command, the committed
    `docs/reference/events.md`, the CI drift step, the README
    table's missing rows and name-level `test_event_docs.py`,
-   mutation proofs per the mechanism, CHANGELOG, and the
-   implementation-doc wrap.
+   mutation proofs per the mechanism, and M3's own
+   implementation-doc section, changelog entry, and tick-and-link,
+   the same per-milestone duty as M1 and M2 rather than a final
+   wrap.
 
 ## Files touched
 
@@ -629,11 +651,12 @@ schema seam), `Dockerfile` (M2, one `ENV` line),
 `samtal-server/README.md` (M2 one paragraph; M3 the missing rows
 and the reference pointer), `CHANGELOG.md` (per milestone).
 
-Conditionally modified in M1, only if the provenance inventory
-finds a far-side string no site bounds: the decision-site modules
-it names (expected none to two; `ota.py` and `onboarding.py` are
-the plausible candidates), each fix its own adversarial-input-only
-commit under the event-only-copy rule in the milestone section.
+Modified in M1 for decision-site sanitization: `ota.py`
+(`reported_board`/`reported_version` bounding) and
+`device/session.py` (the `session_open` client rendering), the two
+proven sites, plus whatever else the provenance inventory turns
+up, each fix its own adversarial-input-only commit under the
+event-only-copy rule in the milestone section.
 
 Untouched on purpose: every emit site's fields, levels, sentences
 and names (up to the conditional sanitization above), both pin
@@ -687,8 +710,12 @@ recorded in the PR body with observed failure output per branch.
   conformance test only sees static keywords; the strict lanes see
   everything the tests exercise. A field only production reaches
   (an error path no test drives) would surface in forgiving mode as
-  a complaint line, not an outage; the complaint names the event
-  and field so the fix is one declaration. This failure mode is
+  a complaint line, not an outage; the complaint names the declared
+  event and reports the unknown field only as a fixed violation
+  code and count (an undeclared field name is caller-supplied
+  bytes under this plan's own model), and the key's identity is
+  recovered by reproducing under strict mode, where the
+  declaration is one fix away. This failure mode is
   documented in the implementation doc rather than hidden.
 - **Import-order emissions before the entrypoint resolves the
   mode.** The module default is strict, so an emission between
@@ -737,13 +764,15 @@ recorded in the PR body with observed failure output per branch.
       the lanes, the image sets forgiving, the mechanics tests
       adopt the schema seam, the sentinel matrix and subprocess
       proofs pass, both pin suites pass unmodified under strict
-      enforcement.
+      enforcement; implementation-doc section, changelog entry,
+      and tick land in the same change.
 - [ ] M3: the schema reference cannot drift:
       `samtal-server events reference` generates
       `docs/reference/events.md`, the CI drift step holds it
       byte-identical, the README table gains its missing rows and
       the name-level `test_event_docs.py`, the mutation matrix is
-      recorded, CHANGELOG closes the issue's entry.
+      recorded; implementation-doc section, changelog entry
+      closing the issue, and tick land in the same change.
 
 ## Plan review round
 
