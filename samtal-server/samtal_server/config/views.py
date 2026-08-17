@@ -53,7 +53,7 @@ from samtal_server.config.store import Entity, Snapshot, StoredSecret, stored_se
 def entity(kind: str, read: Entity[object]) -> dict[str, object]:
     """One entity as a read shows it: its kind's masked body, inside the
     envelope every kind is read through."""
-    return _envelope(entities.descriptor(kind).body(read.entry), read.secrets)
+    return _envelope(_body(kind, read.entry), read.secrets)
 
 
 def provider(read: Entity[ProviderConfig]) -> dict[str, object]:
@@ -107,7 +107,7 @@ def config(snapshot: Snapshot) -> dict[str, object]:
             },
             "mcp_servers": _bodies(domain.mcp_servers, "mcp-server"),
             "prompt_fragments": _bodies(domain.prompt_fragments, "prompt-fragment"),
-            "agent_defaults": entities.descriptor("agent-defaults").body(domain.agent_defaults),
+            "agent_defaults": _body("agent-defaults", domain.agent_defaults),
             "agents": _bodies(domain.agents, "agent"),
             "devices": {mac: list(bound) for mac, bound in sorted(domain.devices.items())},
             "default_agent": domain.default_agent,
@@ -365,12 +365,17 @@ def reference_value(body: Mapping[str, object], key: str) -> object:
     return nested.get(name) if isinstance(nested, Mapping) else None
 
 
+def _body(kind: str, entry: object) -> dict[str, object]:
+    """One entry as its kind is shown, through the builder the kind's
+    descriptor names."""
+    return entities.descriptor(kind).body(entry)
+
+
 def _bodies(section: Mapping[str, object], kind: str) -> dict[str, object]:
     """Every entry of one kind as the document shows it, by name: the
     bare bodies, since the document says where the stored secrets are in
     a list of its own."""
-    body = entities.descriptor(kind).body
-    return {name: body(entry) for name, entry in sorted(section.items())}
+    return {name: _body(kind, entry) for name, entry in sorted(section.items())}
 
 
 def _envelope(
