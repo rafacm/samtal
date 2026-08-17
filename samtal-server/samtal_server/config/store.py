@@ -611,6 +611,49 @@ class ConfigStore:
             raise problem
 
 
+# Which of the methods above a caller with a descriptor and no idea
+# which kind it holds should call. Unbound, so the caller passes the
+# store it has; the identity is the kind's `addressing`, in order, and a
+# write takes the fragment after it.
+#
+# Named rather than assembled out of the kind's name at the call site,
+# because a method reached through a built string is a reference nothing
+# checks, and because what a kind's own method does before it addresses
+# anything belongs to the verb: `read_provider` makes the stage
+# canonical first, and a generic read that skipped that would answer a
+# different refusal for `PROVIDERS/llm`. The singleton has no delete, so
+# it fills none.
+entities.fill(
+    "provider",
+    read=ConfigStore.read_provider,
+    write=ConfigStore.set_provider,
+    delete=ConfigStore.delete_provider,
+)
+entities.fill(
+    "mcp-server",
+    read=ConfigStore.read_mcp_server,
+    write=ConfigStore.set_mcp_server,
+    delete=ConfigStore.delete_mcp_server,
+)
+entities.fill(
+    "prompt-fragment",
+    read=ConfigStore.read_prompt_fragment,
+    write=ConfigStore.set_prompt_fragment,
+    delete=ConfigStore.delete_prompt_fragment,
+)
+entities.fill(
+    "agent",
+    read=ConfigStore.read_agent,
+    write=ConfigStore.set_agent,
+    delete=ConfigStore.delete_agent,
+)
+entities.fill(
+    "agent-defaults",
+    read=ConfigStore.read_agent_defaults,
+    write=ConfigStore.set_agent_defaults,
+)
+
+
 def read_live_binding(engine: Engine, mac: str) -> LiveBinding:
     """One device's binding and the default agent, read while the server
     runs, through the rules that govern every other read of them.
