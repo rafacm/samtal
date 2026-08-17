@@ -1295,7 +1295,8 @@ an oversight rather than as a decision. Recorded as a finding and not
 widened into: making a body builder derive from the model would change
 what a read prints the moment a model gains a field, which is a
 behavior change this issue's contract forbids, and deciding whether the
-display path should fail open or closed is the same question issue #171
+display path should fail open or closed is now issue #176, filed
+from this walkthrough, the same question family as issue #171
 already holds open for the masking path beside it.
 
 ### Verification
