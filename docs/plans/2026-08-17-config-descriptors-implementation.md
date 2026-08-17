@@ -1116,7 +1116,7 @@ because a reader will wonder:
 
 ### The support module, and why it exists
 
-`tests/support/config_cli.py` (new, 160 lines) holds what six suites
+`tests/support/config_cli.py` (new, 166 lines) holds what six suites
 need before they can run anything: `runner`, which is the 80-line
 fixture body the acceptance file had, plus the sentinels, the fragment
 constants and the three helpers (`chain`, `document`, `showing`) that
