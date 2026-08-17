@@ -226,10 +226,10 @@ wanted: it belongs to M3.
    exactly the two tiers with unique names, and stored secrets hang on
    exactly the two kinds `EntityKind` admits. The unit count rises by
    four, which the plan's never-lower rule allows.
-8. **The `shown_values` finding is drafted, not filed.** The plan has
-   M1 file it as its own issue. The issue body is written below, ready
-   to post as it stands; filing it is the maintainer's step, and the
-   plan's cross-reference gains its number then.
+8. **The `shown_values` finding is filed as issue #171.** The plan
+   has M1 file it as its own issue; the body recorded below is what
+   was posted, kept here as the record of what M1 found and why the
+   contract forbade fixing it in place.
 
 No other deviation. No behavior changed, no sentence moved, and no
 consumer other than docgen reads a descriptor yet.
@@ -249,12 +249,12 @@ From `samtal-server/`, with `PYTHONDONTWRITEBYTECODE=1` outside pytest:
 - `tests/unit/test_config_docgen.py`, `tests/unit/test_config_cli.py`
   and `tests/unit/test_config_examples.py` are byte-unchanged.
 
-### Follow-up to file
+### The filed follow-up: issue #171
 
 The inventory found one real surface question inside the walker family,
 and the no-behavior-change contract is exactly why it must not be
 answered here: masking one more value would change what a read prints.
-The issue body below is ready to file as its own issue, and the plan's
+It is filed as issue #171 with the body recorded below; the plan's
 walker section cross-references it.
 
 ````
