@@ -16,7 +16,7 @@ committed bytes: `docs/reference/api-openapi.json` carries them, and
 the drift check compares them.
 """
 
-from typing import Any, Literal
+from typing import Any, Literal, get_args, get_origin
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -266,6 +266,20 @@ class McpReloadResult(BaseModel):
             "trip."
         )
     )
+
+
+# What a reload did, in the order a person reads it: what arrived, what
+# was made again, what went, and what nothing happened to. Presentation,
+# which is why it is a tuple and not a set, but presentation of the
+# result's own fields: read off the model rather than listed again, so a
+# fifth outcome is one line on the model and the CLI prints it. `servers`
+# is the status mapping carried beside the outcomes rather than an
+# outcome, and it is the only field the rule below leaves out.
+RELOAD_OUTCOMES = tuple(
+    name
+    for name, field in McpReloadResult.model_fields.items()
+    if get_origin(field.annotation) is list and get_args(field.annotation) == (str,)
+)
 
 
 class PromptBlock(BaseModel):

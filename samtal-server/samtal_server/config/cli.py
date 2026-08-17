@@ -52,11 +52,12 @@ import sys
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn, get_args, get_origin
 from urllib.parse import SplitResult, quote, urlsplit, urlunsplit
 
 import httpx
 import yaml
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from samtal_server.config import docgen, views
 from samtal_server.config.loader import CONFIG_ENV_VAR, ConfigError, load_file_config
@@ -65,6 +66,15 @@ from samtal_server.config.models import (
     PROVIDER_STAGES,
     FileConfig,
     ServerConfig,
+)
+from samtal_server.config.responses import (
+    RELOAD_OUTCOMES,
+    AssembledPrompt,
+    ConfigDocument,
+    Envelope,
+    McpReloadResult,
+    McpServerStatus,
+    PendingDevice,
 )
 from samtal_server.config.secrets import (
     MASK,
@@ -152,36 +162,30 @@ LOCAL_SUBSET = (
 # like a configuration error.
 UNRECOGNIZED_ANSWER = "a body this client does not recognize"
 
+# The three things a body can fail to be, said in the words each act has
+# always said them in. Which one an act meets is a fact of the act, so it
+# is written on its row rather than at the raise site.
+UNREADABLE_READ = f"the configuration API answered a read with {UNRECOGNIZED_ANSWER}"
+
+UNREADABLE_RELOAD = f"the configuration API answered the reload with {UNRECOGNIZED_ANSWER}"
+
+# A write is the one whose refusal has to say what is now unknown: the
+# request may well have been applied, and this client cannot tell.
+UNREADABLE_WRITE = (
+    f"the configuration API acknowledged the write with {UNRECOGNIZED_ANSWER}; "
+    f"read the configuration back to see whether it was applied."
+)
+
 # How a stored secret is introduced in `show` and `list`. Comment lines
 # rather than a mapping: the mask is not a value that could be written
 # back, and saying so in the document is more honest than rendering it
 # as though it could.
 SECRETS_HEADING = "# stored secrets, set with: samtal-server config set-secret"
 
-# The pending listing's columns, and what a listing of nothing says. The
-# fields are also what a body has to carry to be read as a listing at
-# all.
+# The pending listing's columns. Headings a person reads rather than
+# field names: what the body has to carry to be read as a listing at all
+# is `PendingDevice`, one import below this one.
 PENDING_COLUMNS = ("code", "device", "board", "firmware", "expires")
-
-PENDING_FIELDS = frozenset({"mac", "board", "firmware", "expires_at"})
-
-# What a status entry has to carry to be read as one at all. The same
-# rule the pending listing applies: a body that does not carry these did
-# not come from this API.
-STATUS_FIELDS = frozenset({"state", "reason", "since", "tools", "grants"})
-
-# And what `state` may say. The vocabulary is part of the shape: a
-# rendering that printed whatever arrived there would be printing a word
-# chosen by whatever answered.
-STATUS_STATES = frozenset({"connected", "down", "unused"})
-
-# What one block of an assembled prompt has to carry to be read as one.
-PROMPT_BLOCK_FIELDS = frozenset({"provenance", "characters", "text"})
-
-# What a reload did, in the order a person reads it: what arrived, what
-# was made again, what went, and what nothing happened to. Also what a
-# body has to carry to be read as a reload's answer at all.
-RELOAD_OUTCOMES = ("started", "restarted", "stopped", "unchanged")
 
 NOTHING_CONFIGURED = (
     "this server has no MCP servers configured. An entry is written with "
@@ -574,7 +578,8 @@ def _clear_secret(args: argparse.Namespace) -> None:
 
 
 def _list(args: argparse.Namespace) -> None:
-    print(_summary(_document(_call(args, "GET", _path("config")))), end="")
+    document = _understood(ConfigDocument, _call(args, "GET", _path("config")), UNREADABLE_READ)
+    print(_summary(document), end="")
 
 
 def _show_all(args: argparse.Namespace) -> None:
@@ -582,7 +587,9 @@ def _show_all(args: argparse.Namespace) -> None:
         with _store(args) as store:
             document = views.config(store.load())
     else:
-        document = _document(_call(args, "GET", _path("config")))
+        document = _understood(
+            ConfigDocument, _call(args, "GET", _path("config")), UNREADABLE_READ
+        )
     print(_show_everything(document), end="")
 
 
@@ -591,7 +598,13 @@ def _show_provider(args: argparse.Namespace) -> None:
         with _store(args) as store:
             _print_entity(views.provider(store.read_provider(args.stage, args.name)))
         return
-    _print_entity(_envelope(_call(args, "GET", _path("providers", args.stage, args.name))))
+    _print_entity(
+        _understood(
+            Envelope,
+            _call(args, "GET", _path("providers", args.stage, args.name)),
+            UNREADABLE_READ,
+        )
+    )
 
 
 def _show_mcp_server(args: argparse.Namespace) -> None:
@@ -599,7 +612,9 @@ def _show_mcp_server(args: argparse.Namespace) -> None:
         with _store(args) as store:
             _print_entity(views.mcp_server(store.read_mcp_server(args.name)))
         return
-    _print_entity(_envelope(_call(args, "GET", _path("mcp-servers", args.name))))
+    _print_entity(
+        _understood(Envelope, _call(args, "GET", _path("mcp-servers", args.name)), UNREADABLE_READ)
+    )
 
 
 def _show_prompt_fragment(args: argparse.Namespace) -> None:
@@ -607,7 +622,11 @@ def _show_prompt_fragment(args: argparse.Namespace) -> None:
         with _store(args) as store:
             _print_entity(views.prompt_fragment(store.read_prompt_fragment(args.name)))
         return
-    _print_entity(_envelope(_call(args, "GET", _path("prompt-fragments", args.name))))
+    _print_entity(
+        _understood(
+            Envelope, _call(args, "GET", _path("prompt-fragments", args.name)), UNREADABLE_READ
+        )
+    )
 
 
 def _show_agent(args: argparse.Namespace) -> None:
@@ -615,7 +634,9 @@ def _show_agent(args: argparse.Namespace) -> None:
         with _store(args) as store:
             _print_entity(views.agent(store.read_agent(args.name)))
         return
-    _print_entity(_envelope(_call(args, "GET", _path("agents", args.name))))
+    _print_entity(
+        _understood(Envelope, _call(args, "GET", _path("agents", args.name)), UNREADABLE_READ)
+    )
 
 
 def _show_agent_defaults(args: argparse.Namespace) -> None:
@@ -623,7 +644,9 @@ def _show_agent_defaults(args: argparse.Namespace) -> None:
         with _store(args) as store:
             _print_entity(views.agent_defaults(store.read_agent_defaults()))
         return
-    _print_entity(_envelope(_call(args, "GET", _path("agent-defaults"))))
+    _print_entity(
+        _understood(Envelope, _call(args, "GET", _path("agent-defaults")), UNREADABLE_READ)
+    )
 
 
 def _show_device(args: argparse.Namespace) -> None:
@@ -631,7 +654,9 @@ def _show_device(args: argparse.Namespace) -> None:
         with _store(args) as store:
             _print_entity(views.device(store.read_device(args.mac)))
         return
-    _print_entity(_envelope(_call(args, "GET", _path("devices", args.mac))))
+    _print_entity(
+        _understood(Envelope, _call(args, "GET", _path("devices", args.mac)), UNREADABLE_READ)
+    )
 
 
 def _schema(args: argparse.Namespace) -> None:
@@ -921,26 +946,81 @@ def _secret_path(args: argparse.Namespace) -> str:
     return _path("mcp-servers", args.name, "secrets", args.slot)
 
 
-def _envelope(answer: object) -> dict[str, object]:
-    """One entity read, as the API returns it."""
-    if (
-        isinstance(answer, Mapping)
-        and isinstance(answer.get("entity"), Mapping)
-        and isinstance(answer.get("secrets"), Mapping)
-    ):
-        return dict(answer)
-    raise ConfigError(f"the configuration API answered a read with {UNRECOGNIZED_ANSWER}")
+# Reading an answer
+#
+# What a body has to be to be read as one is the shape the API declared
+# it would send, which is a model in `responses.py` that the API itself
+# answers with. There is no second encoding of it here: a rule this
+# module kept by hand is a rule that goes stale the day a field is
+# renamed, and the two files that would then disagree both say they are
+# describing the same thing.
 
 
-def _document(answer: object) -> dict[str, object]:
-    """The whole configuration, as the API returns it."""
-    if (
-        isinstance(answer, Mapping)
-        and isinstance(answer.get("config"), Mapping)
-        and isinstance(answer.get("secrets"), list)
-    ):
-        return dict(answer)
-    raise ConfigError(f"the configuration API answered a read with {UNRECOGNIZED_ANSWER}")
+def _understood(shape: object, answer: object, refusal: str) -> Any:
+    """One answer, read as the shape the API says it sends, or refused.
+
+    Strict, so nothing is coerced on the way in: a body is free to put
+    `true` where a size belongs or an object where a word does, and a
+    renderer that printed the coercion would be printing something
+    nobody sent. Extra fields are dropped rather than refused, which is
+    the one tolerance this keeps deliberately: a newer server that
+    answers more than this client knows about is readable, and what it
+    said beyond the shape is not printed, because it was not rendered.
+
+    The refusal is built inside the handler and raised after it, and the
+    exception itself is not bound to a name: `ValidationError.errors()`
+    retains the input it rejected, which for this API can be a
+    credential someone pasted into a fragment, and an exception raised
+    while another is being handled keeps that one as its `__context__`
+    for anything walking the chain to find.
+
+    Answers `Any` rather than `object` because what comes back is the
+    shape that was asked for, and every caller reads it as one.
+    """
+    problem: str | None = None
+    try:
+        adapter = TypeAdapter(shape)
+        # Answered back as the mappings the renderers read, so that a
+        # value the break-glass path built and a value that arrived over
+        # HTTP reach the same renderer in the same shape. Dumping a
+        # validated model is also what leaves the extras behind: only
+        # what the shape declares is written back out.
+        return adapter.dump_python(adapter.validate_python(_declared(shape, answer), strict=True))
+    except ValidationError:
+        problem = refusal
+    raise ConfigError(problem)
+
+
+def _declared(shape: object, answer: object) -> object:
+    """The answer with anything the shape does not declare left out.
+
+    Every model in `responses.py` forbids extra keys, because the
+    document it generates is a contract about what this API sends. This
+    client reads that contract from the other side, where an unknown key
+    means a server newer than it, so it drops what it does not know
+    instead of refusing the whole answer. Guided by the shape and not by
+    a list of field names: a mapping keyed by identity is walked into, so
+    an entry nested in a listing is treated exactly as one that arrived
+    on its own.
+    """
+    if isinstance(shape, type) and issubclass(shape, BaseModel):
+        if isinstance(answer, Mapping):
+            return {
+                name: _declared(field.annotation, answer[name])
+                for name, field in shape.model_fields.items()
+                if name in answer
+            }
+        return answer
+    origin, arguments = get_origin(shape), get_args(shape)
+    if origin is dict and isinstance(answer, Mapping):
+        return {key: _declared(arguments[1], value) for key, value in answer.items()}
+    if origin is list and isinstance(answer, list):
+        return [_declared(arguments[0], item) for item in answer]
+    # Anything else is a leaf as far as this is concerned, including the
+    # unions, which carry no model in any of these shapes, and
+    # `dict[str, Any]`, which is where a masked entity body travels
+    # through undescribed on purpose.
+    return answer
 
 
 # The onboarding URL, and what answers on it
@@ -1325,17 +1405,11 @@ def _pending_listing(answer: object) -> str:
     read across a line: the code to type, the MAC it will bind, and the
     board and firmware that tell two boards apart.
     """
-    entries = _pending_entries(answer)
+    entries = _understood(dict[str, PendingDevice], answer, UNREADABLE_READ)
     if not entries:
         return f"{NOTHING_PENDING}\n"
     rows = [PENDING_COLUMNS] + [
-        (
-            code,
-            str(entry["mac"]),
-            str(entry["board"]),
-            str(entry["firmware"]),
-            str(entry["expires_at"]),
-        )
+        (code, entry["mac"], entry["board"], entry["firmware"], entry["expires_at"])
         for code, entry in entries.items()
     ]
     widths = [max(len(row[column]) for row in rows) for column in range(len(PENDING_COLUMNS))]
@@ -1348,16 +1422,6 @@ def _pending_listing(answer: object) -> str:
     )
 
 
-def _pending_entries(answer: object) -> Mapping[str, Mapping[str, object]]:
-    """The listing, as the API returns it: code to device facts."""
-    if isinstance(answer, Mapping) and all(
-        isinstance(code, str) and isinstance(entry, Mapping) and PENDING_FIELDS <= set(entry)
-        for code, entry in answer.items()
-    ):
-        return answer
-    raise ConfigError(f"the configuration API answered a read with {UNRECOGNIZED_ANSWER}")
-
-
 def _status_listing(answer: object) -> str:
     """What every configured MCP server is doing, one block each.
 
@@ -1367,7 +1431,14 @@ def _status_listing(answer: object) -> str:
     that wraps, and the pending listing's shape only works because every
     one of its fields is short.
     """
-    entries = _status_entries(answer)
+    return _status_block(_understood(dict[str, McpServerStatus], answer, UNREADABLE_READ))
+
+
+def _status_block(entries: Mapping[str, Mapping[str, object]]) -> str:
+    """The same listing, from a status document that has already been
+    read. Split from the check because the reload answers one of these
+    inside its own shape, and validating what a shape already validated
+    would be the second encoding this module just stopped keeping."""
     if not entries:
         return f"{NOTHING_CONFIGURED}\n"
     lines: list[str] = []
@@ -1382,32 +1453,29 @@ def _status_listing(answer: object) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _granted(grants: object) -> str:
+def _granted(grants: Mapping[str, object]) -> str:
     """Which agents may reach the server, and how much of it: a bare
     name is the whole server, and a name followed by tools in
     parentheses is the allow list that agent was given. Sorted by agent
     name, so two reads of an unchanged world print the same block."""
     return ", ".join(
         f"{_printable(agent)} ({allowed})" if (allowed := _names(tools)) else _printable(agent)
-        for agent, tools in sorted(_mapping(grants).items())
+        for agent, tools in sorted(grants.items())
     )
 
 
 def _names(values: object) -> str:
-    """A list from a response, printed. Bounded and made printable one
-    by one even though the shape check below has established they are
-    strings: what that check knows about them is their type, not their
-    length and not whether every character in them can be written to a
-    terminal."""
+    """A list of names from an answer, printed. Bounded and made
+    printable one by one even though the shape it was read as has
+    established they are strings: what that shape knows about them is
+    their type, not their length and not whether every character in them
+    can be written to a terminal. `None` is a list of nothing here, which
+    is how a grant of the whole server reads."""
     return ", ".join(_printable(str(value)) for value in _sequence(values))
 
 
 def _sequence(value: object) -> Sequence[object]:
     return value if isinstance(value, Sequence) and not isinstance(value, str) else ()
-
-
-def _mapping(value: object) -> Mapping[str, object]:
-    return value if isinstance(value, Mapping) else {}
 
 
 def _prompt_listing(answer: object) -> str:
@@ -1423,7 +1491,7 @@ def _prompt_listing(answer: object) -> str:
     what is stored and sent, so a replaced character below never
     falsifies the accounting.
     """
-    body = _assembled_prompt(answer)
+    body = _understood(AssembledPrompt, answer, UNREADABLE_READ)
     lines: list[str] = []
     for block in body["blocks"]:
         named = block.get("name")
@@ -1464,41 +1532,6 @@ def _block(value: str) -> str:
     )
 
 
-def _assembled_prompt(answer: object) -> Mapping[str, object]:
-    """The assembled prompt, as the API returns it, checked all the way
-    down for the reason the status document is: the renderer prints what
-    it is given, and a body this client does not recognize did not come
-    from this API."""
-    if (
-        isinstance(answer, Mapping)
-        and _is_count(answer.get("characters"))
-        and isinstance(answer.get("blocks"), list)
-        and all(_is_prompt_block(block) for block in answer["blocks"])
-    ):
-        return answer
-    raise ConfigError(f"the configuration API answered a read with {UNRECOGNIZED_ANSWER}")
-
-
-def _is_prompt_block(block: object) -> bool:
-    # `name` is optional and null for every block but a published
-    # prompt's, so what is checked is its type when it is there rather
-    # than its presence.
-    return (
-        isinstance(block, Mapping)
-        and PROMPT_BLOCK_FIELDS <= set(block)
-        and isinstance(block["provenance"], str)
-        and isinstance(block["text"], str)
-        and isinstance(block.get("name"), str | None)
-        and _is_count(block["characters"])
-    )
-
-
-def _is_count(value: object) -> bool:
-    # bool before int, since a body is free to put one where a number
-    # belongs and `True` would otherwise print as a size.
-    return isinstance(value, int) and not isinstance(value, bool)
-
-
 def _reload_listing(answer: object) -> str:
     """What the reload did, and then what is running.
 
@@ -1506,86 +1539,17 @@ def _reload_listing(answer: object) -> str:
     was asked, and the status underneath because it is the answer to the
     one that follows: an entry that started is not thereby connected,
     and the block below it says which.
+
+    Read as one shape, the status half included, which is what the
+    result declares: the outcome lists are printed name by name and the
+    status half is a document a listing renders, so a stray shape
+    anywhere in here would otherwise become output or a traceback.
     """
-    applied = _reload_outcome(answer)
+    applied = _understood(McpReloadResult, answer, UNREADABLE_RELOAD)
     lines = [
         f"{outcome}: " + (_names(applied[outcome]) or "(none)") for outcome in RELOAD_OUTCOMES
     ]
-    return "\n".join(lines) + "\n\n" + _status_listing(applied["servers"])
-
-
-def _reload_outcome(answer: object) -> Mapping[str, object]:
-    """The reload's answer, as the API returns it: the four outcomes and
-    the status document.
-
-    Checked to the same depth as the status document underneath it, and
-    for the same reason: `_names` prints every element of the outcome
-    lists, and the status half is rendered by the listing that expects
-    to have been handed a document, so a stray shape anywhere in here
-    would otherwise become output or a traceback."""
-    if (
-        isinstance(answer, Mapping)
-        and "servers" in answer
-        and all(
-            isinstance(answer.get(outcome), list)
-            and all(isinstance(name, str) for name in answer[outcome])
-            for outcome in RELOAD_OUTCOMES
-        )
-    ):
-        return answer
-    raise ConfigError(f"the configuration API answered the reload with {UNRECOGNIZED_ANSWER}")
-
-
-def _status_entries(answer: object) -> Mapping[str, Mapping[str, object]]:
-    """The status document, as the API returns it: entry name to what
-    that entry is doing, checked all the way down.
-
-    Every field, its type and, for `state`, its vocabulary, because the
-    renderer prints what it is given and a body this client cannot
-    recognize is a body it did not write: what a proxy, a gateway or a
-    captive portal returns is text nobody vouched for, and a check that
-    only counted keys would have printed whatever was under them.
-
-    Written as plain predicates with no try/except, the rule this module
-    keeps for refusals: an exception raised while another is being
-    handled carries that one as its context, and the one being handled
-    here would hold the body.
-    """
-    if isinstance(answer, Mapping) and all(
-        isinstance(name, str) and _is_status_entry(entry) for name, entry in answer.items()
-    ):
-        return answer
-    raise ConfigError(f"the configuration API answered a read with {UNRECOGNIZED_ANSWER}")
-
-
-def _is_status_entry(entry: object) -> bool:
-    """One entry of the status document, in the shape the committed
-    OpenAPI document declares. Extra keys are tolerated and never
-    printed, so a newer server saying more than this client knows about
-    is readable rather than refused."""
-    if not isinstance(entry, Mapping) or not STATUS_FIELDS <= set(entry):
-        return False
-    reason = entry["reason"]
-    state = entry["state"]
-    return (
-        # The type before the vocabulary: a membership test on an
-        # unhashable value raises rather than answering False, and a
-        # body is free to put an object where a word belongs.
-        isinstance(state, str)
-        and state in STATUS_STATES
-        and isinstance(entry["since"], str)
-        and (reason is None or isinstance(reason, str))
-        and _is_name_list(entry["tools"])
-        and isinstance(entry["grants"], Mapping)
-        and all(
-            isinstance(agent, str) and (allowed is None or _is_name_list(allowed))
-            for agent, allowed in entry["grants"].items()
-        )
-    )
-
-
-def _is_name_list(value: object) -> bool:
-    return isinstance(value, list) and all(isinstance(name, str) for name in value)
+    return "\n".join(lines) + "\n\n" + _status_block(applied["servers"])
 
 
 def _summary(document: Mapping[str, object]) -> str:
@@ -1791,10 +1755,7 @@ def _wrote(answer: object) -> None:
     what = answer.get("wrote") if isinstance(answer, Mapping) else None
     notice = answer.get("notice") if isinstance(answer, Mapping) else None
     if not isinstance(what, str):
-        raise ConfigError(
-            f"the configuration API acknowledged the write with {UNRECOGNIZED_ANSWER}; "
-            f"read the configuration back to see whether it was applied."
-        )
+        raise ConfigError(UNREADABLE_WRITE)
     _report(what, notice if isinstance(notice, str) else RESTART_NOTICE)
 
 
