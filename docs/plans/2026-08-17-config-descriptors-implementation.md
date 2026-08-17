@@ -508,3 +508,11 @@ $ diff -u ../docs/reference/api-openapi.json "$RUNNER_TEMP/api-openapi.json"
   files and the two committed references: no test file in the
   repository changed, which is what an empty port table means when it
   is true.
+
+### PR review round
+
+External review of PR #173 (diff main...be49dea) by codex 0.147.0
+(model gpt-5.6-sol), 2026-08-17, posted to the PR by the review run
+itself. Verdict: mergeable as is, no findings. The empty port
+table, the equal counts, and the differential walker proof
+pre-answered the lenses a store-and-views move touches.
