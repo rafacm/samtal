@@ -38,6 +38,7 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from samtal_server.app import create_app
 from samtal_server.auth import build_device_auth
@@ -444,3 +445,74 @@ def test_a_lawful_client_id_opens_a_session_unchanged(
     record = only(caplog, "session_open")
     assert fields_of(record)["client"] == DEVICE_UUID
     assert record.args[2] == DEVICE_UUID
+
+
+# --- ws.py: the Device-Id a full server is reached with ---------------
+
+
+def full_server(**auth: object) -> Config:
+    config = config_with_agent(server={"auth": auth} if auth else None)
+    config.server.limits.max_sessions = 1
+    return config
+
+
+def refused_at_capacity(client: TestClient, device_id: str) -> None:
+    """One handshake past the capacity ceiling, presenting the given
+    Device-Id."""
+    device_auth = client.app.state.device_auth
+    headers = {"Protocol-Version": "1", "Client-Id": DEVICE_UUID, "Device-Id": device_id}
+    if device_auth is not None:
+        headers["Authorization"] = f"Bearer {device_auth.issue(DEVICE_UUID, device_id)}"
+    with pytest.raises(WebSocketDisconnect):
+        with handshake(client, headers):
+            pass
+
+
+def test_the_capacity_refusal_names_no_device_it_does_not_recognize(
+    caplog: pytest.LogCaptureFixture, tap: Tap
+) -> None:
+    """With device auth off, `refusal_reason` returns before reading
+    anything, so this header is an unauthenticated string a stranger
+    chose and a full server would otherwise write one per attempt into
+    the retained log."""
+    with TestClient(create_app(full_server(enabled=False))) as client:
+        with handshake(client, {"Protocol-Version": "1", "Device-Id": DEVICE_MAC}) as held:
+            shake_hands(held)
+            with caplog.at_level(logging.WARNING):
+                refused_at_capacity(client, REJECTED)
+
+    record = only(caplog, "session_rejected")
+    fields = fields_of(record)
+    assert fields["device"] is None
+    assert record.args == ("an unidentified device",)
+    assert carrying(caplog, REJECTED) == set()
+    assert REJECTED not in record.getMessage()
+    assert REJECTED not in both_formats(caplog)
+    assert tap.seen
+    assert REJECTED not in tap.rendered()
+
+
+def test_the_capacity_refusal_still_names_a_device_it_recognizes(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The lawful value the contract pin plants, in the form it pins it:
+    a header that normalizes to a MAC reads exactly as it did before."""
+    with TestClient(create_app(full_server())) as client:
+        with handshake(
+            client,
+            {
+                "Protocol-Version": "1",
+                "Client-Id": DEVICE_UUID,
+                "Device-Id": DEVICE_MAC,
+                "Authorization": (
+                    f"Bearer {client.app.state.device_auth.issue(DEVICE_UUID, NORMALIZED)}"
+                ),
+            },
+        ) as held:
+            shake_hands(held)
+            with caplog.at_level(logging.WARNING):
+                refused_at_capacity(client, NORMALIZED)
+
+    record = only(caplog, "session_rejected")
+    assert fields_of(record)["device"] == NORMALIZED
+    assert record.args == (NORMALIZED,)

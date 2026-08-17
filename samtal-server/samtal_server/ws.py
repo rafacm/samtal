@@ -31,7 +31,27 @@ WEBSOCKET_PATH = "/xiaozhi/v1/"
 # The scheme both the firmware and xiaozhi-sdk send the token under.
 BEARER = "bearer "
 
+# What a refusal says instead of naming a device, wherever there is no
+# device this server recognizes to name.
+UNIDENTIFIED_DEVICE = "an unidentified device"
+
 router = APIRouter()
+
+
+def _known_device(device_id: str) -> str | None:
+    """The normalized MAC behind a Device-Id header, or None when the
+    header does not hold one.
+
+    The narrow sibling of `signed_device_id`, which passes an unusable
+    header through on purpose so the session can answer about it. Here
+    there is no session to answer and nothing to diagnose, so an
+    unrecognized header becomes no device at all rather than a value a
+    stranger chose on a line an operator keeps.
+    """
+    try:
+        return normalize_mac(device_id)
+    except ValueError:
+        return None
 
 
 def bearer_token(header: str) -> str | None:
@@ -117,11 +137,24 @@ async def conversation(websocket: WebSocket) -> None:
     # Capacity is checked after the token, so a full server still answers a
     # bad token with a refusal about the token.
     if not state.sessions.try_add(session):
+        # The MAC this server recognizes, or nothing.
+        #
+        # "Past the refusal above the token verified against this
+        # header" holds only where there is a token to verify: with
+        # device auth off, `refusal_reason` returns None before reading
+        # anything, so this header is an unauthenticated string a
+        # stranger chose, and a full server would otherwise write one
+        # per attempt into the retained log. Normalizing is what
+        # separates the two cases without a flag: a real Device-Id
+        # normalizes to its MAC and reads exactly as it did before, and
+        # anything else becomes a null field beside the fixed phrase the
+        # empty header already used.
+        known = _known_device(device_id)
         events.warning(
             "refused a websocket handshake from %s: the server is at capacity",
-            device_id or "an unidentified device",
+            known or UNIDENTIFIED_DEVICE,
             event="session_rejected",
-            device=device_id or None,
+            device=known,
             session=session.session_id,
             reason="capacity",
         )
