@@ -439,7 +439,7 @@ outside pytest.
       duties in the same change.
 - [x] [M5](2026-08-17-config-descriptors-implementation.md#milestone-5-the-test-split-and-the-cost-demonstration):
       the inherited test split executed as a pure move and the per-field
-      cost demonstrated (PR TBD): the 101 tests of `test_config_cli.py`
+      cost demonstrated (PR #177): the 101 tests of `test_config_cli.py`
       are six files along the boundaries the other four milestones
       produced, with the scaffolding six suites share in
       `tests/support/config_cli.py` and the `--local` bucket merged into
