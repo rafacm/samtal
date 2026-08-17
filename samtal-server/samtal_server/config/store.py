@@ -380,9 +380,9 @@ class ConfigStore:
             _refuse_unresolved(domain)
             _upsert(
                 connection,
-                schema.providers,
+                _table(_PROVIDER),
                 {"stage": stage, "name": name},
-                _provider_values(entry),
+                _to_row(_PROVIDER, entry),
             )
 
     def delete_provider(self, stage: str, name: str) -> None:
@@ -414,7 +414,7 @@ class ConfigStore:
             domain = _read_domain(connection)
             domain.mcp_servers[name] = entry
             _refuse_unresolved(domain)
-            _upsert(connection, schema.mcp_servers, {"name": name}, _mcp_values(entry))
+            _upsert(connection, _table(_MCP_SERVER), {"name": name}, _to_row(_MCP_SERVER, entry))
 
     def delete_mcp_server(self, name: str) -> None:
         with self._transaction() as connection:
@@ -454,12 +454,9 @@ class ConfigStore:
             _refuse_unresolved(domain)
             _upsert(
                 connection,
-                schema.prompt_fragments,
+                _table(_PROMPT_FRAGMENT),
                 {"name": name},
-                # Written as it was given: the text is what the model is
-                # handed, and its indentation and blank lines are part
-                # of it.
-                {"text": entry.text},
+                _to_row(_PROMPT_FRAGMENT, entry),
             )
 
     def delete_prompt_fragment(self, name: str) -> None:
@@ -480,12 +477,7 @@ class ConfigStore:
             domain = _read_domain(connection)
             domain.agents[name] = entry
             _refuse_unresolved(domain)
-            _upsert(
-                connection,
-                schema.agents,
-                {"name": name},
-                {"prompt": entry.prompt, **_layer_values(entry)},
-            )
+            _upsert(connection, _table(_AGENT), {"name": name}, _to_row(_AGENT, entry))
 
     def delete_agent(self, name: str) -> None:
         """Refused while a device binding or default_agent still names
@@ -506,9 +498,9 @@ class ConfigStore:
             _refuse_unresolved(domain)
             _upsert(
                 connection,
-                schema.agent_defaults,
+                _table(_AGENT_DEFAULTS),
                 {"id": schema.AGENT_DEFAULTS_ID},
-                _layer_values(entry),
+                _to_row(_AGENT_DEFAULTS, entry),
             )
 
     # Devices and the default agent
@@ -811,7 +803,10 @@ def _database_problem(exc: SQLAlchemyError) -> ConfigError:
 # the code it is.
 
 _PROVIDER = entities.descriptor("provider")
-_SINGLETON = entities.descriptor("agent-defaults")
+_MCP_SERVER = entities.descriptor("mcp-server")
+_PROMPT_FRAGMENT = entities.descriptor("prompt-fragment")
+_AGENT = entities.descriptor("agent")
+_AGENT_DEFAULTS = entities.descriptor("agent-defaults")
 
 # The kinds a whole read walks one row per name. The provider is not one
 # of them, because its rows are grouped by stage and the group is
@@ -847,6 +842,15 @@ def _from_row(descriptor: EntityDescriptor, row: Row) -> BaseModel:
         _location(descriptor, *identity),
         {name: getattr(row, name) for name in descriptor.model.model_fields},
     )
+
+
+def _to_row(descriptor: EntityDescriptor, entry: BaseModel) -> dict[str, object]:
+    """One entry as the columns that hold it, the same way round: the
+    kind's own mapping where it has one, and the model's own dump where
+    it does not."""
+    if descriptor.to_row is not None:
+        return descriptor.to_row(entry)
+    return entry.model_dump()
 
 
 # Reading rows
@@ -897,9 +901,9 @@ def _read_domain(connection: Connection) -> DomainConfig:
     if domain is None:
         raise StorageError(problem)
 
-    defaults = connection.execute(select(_table(_SINGLETON))).first()
+    defaults = connection.execute(select(_table(_AGENT_DEFAULTS))).first()
     if defaults is not None:
-        domain.agent_defaults = _from_row(_SINGLETON, defaults)
+        domain.agent_defaults = _from_row(_AGENT_DEFAULTS, defaults)
     default_agent = connection.execute(
         select(schema.domain_settings.c.value).where(
             schema.domain_settings.c.key == schema.DEFAULT_AGENT_KEY
@@ -1107,6 +1111,21 @@ def _layer_values(entry: AgentDefaults) -> dict[str, object]:
         list(entry.prompt_includes) if entry.prompt_includes is not None else None
     )
     return values
+
+
+def _agent_values(entry: AgentConfig) -> dict[str, object]:
+    return {"prompt": entry.prompt, **_layer_values(entry)}
+
+
+# How a row of each kind is written, the mirror of the mappings above. A
+# prompt fragment names none, so it is written through its model: the
+# one column it has is the text as it was given, whose indentation and
+# blank lines are part of it, and a dump of the model that holds it is
+# exactly that.
+entities.fill("provider", to_row=_provider_values)
+entities.fill("mcp-server", to_row=_mcp_values)
+entities.fill("agent", to_row=_agent_values)
+entities.fill("agent-defaults", to_row=_layer_values)
 
 
 def _delete_row(
