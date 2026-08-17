@@ -1066,17 +1066,97 @@ them.
 Run from `samtal-server/`, with `PYTHONDONTWRITEBYTECODE=1` for
 everything outside pytest.
 
+Re-run after the PR review round and the rebase onto merged main, which
+is where these numbers come from.
+
 - `uv run ruff check .`: `All checks passed!`
-- `uv run pytest tests/unit -q`: `2903 passed, 16 skipped`
+- `uv run pytest tests/unit -q`: `2923 passed, 16 skipped`
 - `uv run pytest tests/integration -q`: `55 passed`
-- `uv run pytest tests/unit --collect-only -q | tail -1`: **2899
-  before**, **2919 after**. The rise of 20 is exactly the new file's
-  cases.
+- `uv run pytest tests/unit --collect-only -q | tail -1`: **2917
+  before**, **2939 after**. The rise of 22 is exactly the new file's
+  cases, the round's broken-pipe proof included.
 - `uv run pytest tests/integration --collect-only -q | tail -1`: **55
   before**, **55 after**.
 - The drift check CI will run, run locally:
   `uv run samtal-server events reference > /tmp/events.md && diff -u ../docs/reference/events.md /tmp/events.md`
   is silent, exit 0.
-- `git diff --stat 299c95e -- tests/unit/test_event_surface_pins.py tests/unit/test_server_event_pins.py`:
+- `git diff --stat db64084^ -- tests/unit/test_event_surface_pins.py tests/unit/test_server_event_pins.py`:
   empty. The two contract suites are byte-unchanged across all three
   milestones.
+
+### PR review round
+
+The milestone's own verification, before the round below and before the
+rebase onto merged main, was `All checks passed!`, `2903 passed, 16
+skipped` on the unit lane, `55 passed` on the integration lane, and a
+collected count of 2919 against 2899 at the branch base. The rebase
+moved the base to M2's merged tip, and the Verification section above
+carries the numbers after the round, which is the state this branch is
+in.
+
+External review of PR #170, 2026-08-17. Four findings, one P1, two P2
+and one P3, all valid and all accepted. As received, condensed but
+faithful, each with its resolution and the commit that carries it:
+
+1. **P1: closing stdout exposes a Python traceback.**
+   `events_cli.main()` caught only `EventsCommandError` while the
+   command writes a document longer than a pipe buffer, so
+   `samtal-server events reference | head -n 1` printed a
+   `BrokenPipeError` traceback to stderr.
+
+   *Resolution*: accepted, `b64424a`. The boundary catches
+   `BrokenPipeError`, points the descriptor behind `sys.stdout` at the
+   null device so the interpreter's exit-time flush cannot raise the
+   same complaint in different words, and returns the shell's own status
+   for a process cut off by SIGPIPE (128 + `signal.SIGPIPE`). A
+   subprocess test reads one line, closes the pipe while the writer is
+   still going, and asserts the status, an empty stderr, and the absence
+   of both `Traceback` and `Exception ignored`.
+   The `config` and `conversations` groups have the same shape and were
+   checked: neither reproduces it today, because their documents fit
+   inside the pipe buffer and the write finishes before a reader can
+   close it. There is no shared boundary to fix in one line (each group
+   owns its own `main`), so the fix stays with the command whose output
+   can outgrow a buffer, and this paragraph is the record that the other
+   two are one long document away from the same defect.
+
+2. **P2: the reference omits nullable argument semantics.**
+   `mcp_call_dropped`'s second argument is declared `nullable=True` and
+   the argument table had no nullable column, so the sentence's own
+   position said nothing about a value the field table calls null. The
+   completeness tests searched the whole document for substrings, which
+   is why it passed.
+
+   *Resolution*: accepted, `5ffb555`. The argument table gains the
+   column, mirroring the field table's. The tests now slice the rendered
+   document into events and variants and compare each argument row and
+   each field row against the declaration it belongs to, cell by cell
+   and in declaration order, with the constraint cell's expectation
+   built from the declaration in the test rather than from the
+   generator's helpers. That found a second omission of the same kind
+   immediately: `tool_call`'s trailing fragment is a closed set of two
+   values, the empty string and one that begins with a space, and both
+   were rendered as bare code spans that show neither. Those are printed
+   quoted now, the way the patterns with edge spaces already were, with
+   the rule stated in the document.
+
+3. **P2: the reference describes defaults as unconditional behavior.**
+   It said a running server recovers and everything that is not one
+   raises, which reads as a property of the process rather than as what
+   an unset variable leaves behind.
+
+   *Resolution*: accepted, `4da52db`. Two paragraphs now: what each mode
+   does, then which one an unset variable defaults to in which context
+   and why, with the explicit note that either mode can be asked for in
+   either place, which is how a developer gets a loud local server.
+
+4. **P3: the changelog contradicts the settled descriptor exception.**
+   The entry closing #155 said a field carrying far-side bytes is now a
+   schema violation, past the exception Rafael settled and the ADR
+   amendment records.
+
+   *Resolution*: accepted, `1f168d6`. The sentence now says a NEW or
+   undeclared such field is refused, and names the declared `DESCRIPTOR`
+   fields as the bounded device-descriptor metadata the amended ADR
+   admits, held to their bounds at emit and named as such in the
+   reference.
