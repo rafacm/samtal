@@ -150,13 +150,24 @@ def reference() -> str:
         ),
         "",
         *_paragraph(
-            f"The emitters hold every emission to what is written here before any "
-            f"of it is dispatched, and `SAMTAL_EVENTS_ENFORCEMENT` decides what "
-            f"happens to one that does not match: a running server recovers the "
-            f"emission or replaces it with `schema_violation` and says so, and "
-            f"everything that is not a running server raises. The [README's "
-            f"Logging section]({LOGGING_SECTION}) is the human overview, with one "
-            f"line per event saying when it fires."
+            "The emitters hold every emission to what is written here before any "
+            "of it is dispatched, and `SAMTAL_EVENTS_ENFORCEMENT` decides what "
+            "happens to one that does not match. `forgiving` recovers the "
+            "emission into a declared shape, or replaces it with "
+            "`schema_violation` where it cannot, and says so on the emitter's "
+            "own channel; `strict` raises instead."
+        ),
+        "",
+        *_paragraph(
+            f"Which one a process gets when the variable is unset is a default "
+            f"rather than a rule about the process: a running server defaults to "
+            f"`forgiving`, because a telemetry bug must never cost a reply, and "
+            f"everything that is not a running server (a test lane, an import, a "
+            f"REPL) defaults to `strict`. Either mode can be asked for in either "
+            f"place, and a developer who wants a loud local server sets `strict` "
+            f"exactly that way. The [README's Logging section]({LOGGING_SECTION}) "
+            f"is the human overview, with one line per event saying when it "
+            f"fires."
         ),
         "",
         "## How to read it",
