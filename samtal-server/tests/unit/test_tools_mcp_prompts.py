@@ -51,6 +51,7 @@ from samtal_server.tools.mcp import (
     TOO_MANY_MESSAGES,
     McpServerManager,
     McpServers,
+    prompts,
 )
 from tests.support.mcp_stdio_server import (
     FIRST_VOICE,
@@ -321,15 +322,14 @@ async def discovered(
     **overrides: object,
 ) -> tuple[ServerPrompt, ...]:
     """One discovery phase, run the way `_run` runs it: after the
-    connect envelope, on a manager that is otherwise ordinary.
+    connect envelope, over an entry that is otherwise ordinary.
 
     The redaction of this deployment's own materialized values is
     passed as the identity here and tested where it belongs, over a
     real entry holding a real credential, in
     `test_mcp_status_reflection.py`."""
-    manager = McpServerManager("tools", stdio_entry(**overrides))
-    return await manager._discovered(  # type: ignore[arg-type]
-        session, capabilities, lambda text: text
+    return await prompts._discovered(  # type: ignore[arg-type]
+        "tools", stdio_entry(**overrides), session, capabilities, lambda text: text
     )
 
 
@@ -550,11 +550,10 @@ async def test_a_block_past_the_cap_is_skipped_whole(
 async def test_a_shipped_instructions_block_past_the_cap_is_skipped_whole(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    manager = McpServerManager("tools", stdio_entry())
     huge = "i" * (SHIPPED_BLOCK_LIMIT + 1)
 
     with caplog.at_level(logging.WARNING, logger=MANAGER_LOGGER):
-        assert manager._injectable(huge, "instructions") is None
+        assert prompts._injectable("tools", huge, "instructions") is None
 
     (warned,) = [record.getMessage() for record in caplog.records]
     assert "instructions block" in warned
@@ -572,8 +571,8 @@ def impatient(monkeypatch: pytest.MonkeyPatch) -> tuple[float, float]:
     end of this module. Scaled here so that proving a phase runs out
     does not cost a suite ten seconds of sleeping.
     """
-    monkeypatch.setattr(mcp_module, "PROMPT_CALL_TIMEOUT_S", 0.2)
-    monkeypatch.setattr(mcp_module, "PROMPT_DISCOVERY_TIMEOUT_S", 0.5)
+    monkeypatch.setattr(prompts, "PROMPT_CALL_TIMEOUT_S", 0.2)
+    monkeypatch.setattr(prompts, "PROMPT_DISCOVERY_TIMEOUT_S", 0.5)
     return 0.2, 0.5
 
 

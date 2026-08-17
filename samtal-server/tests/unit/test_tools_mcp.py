@@ -37,6 +37,7 @@ from samtal_server.tools.mcp import (
     McpServerManager,
     McpServers,
     McpToolNotGranted,
+    transport,
 )
 from tests.support.events import events as emitted
 from tests.support.events import fields_of
@@ -366,7 +367,9 @@ async def test_a_resolved_secret_reaches_the_spawned_server(
     # Resolved per connection rather than kept on the manager, so this
     # asks the resolver the connection asks. What it answers is
     # unchanged: the reference became the value.
-    assert manager._resolve("env") == {"API_TOKEN": "sk-test"}
+    assert transport._resolve(
+        manager._name, manager._config, manager._secrets, "env"
+    ) == {"API_TOKEN": "sk-test"}
     # And the configuration itself never held the secret.
     assert config.mcp_servers["tools"].env == {"API_TOKEN": "$SAMTAL_TEST_MCP_TOKEN"}
 

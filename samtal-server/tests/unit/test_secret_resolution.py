@@ -29,7 +29,7 @@ from samtal_server.config.secrets import (
 from samtal_server.providers import ProviderError, build_provider
 from samtal_server.providers.anthropic_llm import AnthropicLlm
 from samtal_server.providers.openai_llm import OpenAiCompatibleLlm
-from samtal_server.tools.mcp import McpServerManager
+from samtal_server.tools.mcp import McpServerManager, transport
 
 ENV_ECHO_SERVER = Path(__file__).parents[1] / "support" / "mcp_env_echo_server.py"
 
@@ -302,7 +302,10 @@ def test_an_mcp_server_without_a_store_still_reads_its_references(
         }
     )
 
-    assert McpServerManager("weather", config)._resolve("headers") == {
+    # Constructing the manager is half of what is under test: it is
+    # where an unset reference fails the boot, below.
+    McpServerManager("weather", config)
+    assert transport._resolve("weather", config, None, "headers") == {
         "Authorization": "from-the-environment"
     }
 

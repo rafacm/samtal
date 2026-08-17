@@ -967,28 +967,31 @@ TOKEN_SOURCES: dict[tuple[str, str], tuple[Decides, ...]] = {
     ("mcp_connected", "transport"): (
         Decides("samtal_server.config.models", ANNOTATION, "McpServerConfig.transport"),
     ),
+    # The phase marker is advanced in two files now: the connect knows
+    # when the handshake began, and the run knows when the listing did.
     ("mcp_down", "reason"): (
-        Decides("samtal_server.tools.mcp", RETURNED, "_down_reason"),
+        Decides("samtal_server.tools.mcp.transport", RETURNED, "_down_reason"),
+        Decides("samtal_server.tools.mcp.transport", ARGUMENT, "reached:0"),
         Decides(
-            "samtal_server.tools.mcp",
+            "samtal_server.tools.mcp.manager",
             ARGUMENT,
             "reached:0",
             scope="McpServerManager",
         ),
-        Decides("samtal_server.tools.mcp", CONSTANT, "STOPPED"),
-        Decides("samtal_server.tools.mcp", CONSTANT, "CALL_FAILED"),
+        Decides("samtal_server.tools.mcp.transport", CONSTANT, "STOPPED"),
+        Decides("samtal_server.tools.mcp.transport", CONSTANT, "CALL_FAILED"),
     ),
     ("mcp_reload", "outcome"): (
-        Decides("samtal_server.tools.mcp", CONSTANT, "APPLIED"),
-        Decides("samtal_server.tools.mcp", CONSTANT, "REFUSED"),
+        Decides("samtal_server.tools.mcp.reload", CONSTANT, "APPLIED"),
+        Decides("samtal_server.tools.mcp.reload", CONSTANT, "REFUSED"),
     ),
     ("mcp_reload", "reason"): (
-        Decides("samtal_server.tools.mcp", RETURNED, "_refusal"),
-        Decides("samtal_server.tools.mcp", ARGUMENT, "_refused:0", scope="McpServers"),
+        Decides("samtal_server.tools.mcp.reload", RETURNED, "_refusal"),
+        Decides("samtal_server.tools.mcp.reload", ARGUMENT, "_refused:0"),
     ),
     ("mcp_reload", "arg:0"): (
-        Decides("samtal_server.tools.mcp", RETURNED, "_refusal"),
-        Decides("samtal_server.tools.mcp", ARGUMENT, "_refused:0", scope="McpServers"),
+        Decides("samtal_server.tools.mcp.reload", RETURNED, "_refusal"),
+        Decides("samtal_server.tools.mcp.reload", ARGUMENT, "_refused:0"),
     ),
     ("barge_in_suppressed", "reason"): (
         Decides(
@@ -1320,28 +1323,28 @@ PINNED_BY: dict[tuple[str, str, int], tuple[str, ...]] = {
     ("samtal_server.runtime.pipeline", "PipelineRuntime._run_filler", 3): (
         f"{SURFACE_PINS}::test_filler_played",
     ),
-    ("samtal_server.tools.mcp", "McpServerManager._run", 1): (
+    ("samtal_server.tools.mcp.manager", "McpServerManager._run", 1): (
         f"{SERVER_PINS}::test_mcp_connected",
     ),
-    ("samtal_server.tools.mcp", "McpServerManager._run", 2): (
+    ("samtal_server.tools.mcp.manager", "McpServerManager._run", 2): (
         f"{SERVER_PINS}::test_mcp_down",
     ),
-    ("samtal_server.tools.mcp", "McpServerManager._run", 3): (
+    ("samtal_server.tools.mcp.manager", "McpServerManager._run", 3): (
         f"{MCP}::test_a_server_stopped_on_purpose_is_down_at_info_with_no_duration",
     ),
-    ("samtal_server.tools.mcp", "McpServerManager._mark_down", 1): (
+    ("samtal_server.tools.mcp.manager", "McpServerManager._mark_down", 1): (
         f"{SERVER_PINS}::test_mcp_call_dropped",
     ),
-    ("samtal_server.tools.mcp", "McpServerManager._mark_down", 2): (
+    ("samtal_server.tools.mcp.manager", "McpServerManager._mark_down", 2): (
         f"{MCP}::test_a_failed_call_drops_the_call_and_then_the_connection",
     ),
-    ("samtal_server.tools.mcp", "McpServers._reachable", 1): (
+    ("samtal_server.tools.mcp.registry", "McpServers._reachable", 1): (
         f"{SERVER_PINS}::test_mcp_tool_shadowed",
     ),
-    ("samtal_server.tools.mcp", "McpServers._refused", 1): (
+    ("samtal_server.tools.mcp.reload", "_refused", 1): (
         f"{MCP_RELOAD}::test_a_refused_reload_says_which_kind_of_refusal_it_was",
     ),
-    ("samtal_server.tools.mcp", "McpServers._apply", 1): (
+    ("samtal_server.tools.mcp.reload", "_apply", 1): (
         f"{SERVER_PINS}::test_mcp_reload",
     ),
     ("samtal_server.tools.memory", "MemoryStore.read", 1): (
