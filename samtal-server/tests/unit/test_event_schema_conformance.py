@@ -538,6 +538,281 @@ def spread_alternatives(key: str) -> tuple[frozenset[str], ...]:
     return local_dict_alternatives(scope, entry.local)
 
 
+# --- what the code says a value is ------------------------------------
+#
+# A field name and an arity say nothing about a KIND. Without this
+# section, flipping `ota_check.board` from DESCRIPTOR to IDENTIFIER,
+# swapping an ID's syntax, or making a nullable field non-nullable would
+# all pass, which is the PR #167 review's second finding: coherence
+# asked only that an ID name SOME syntax and a descriptor carry SOME
+# bounds.
+#
+# So the producing expression is read. `bounded_descriptor(board,
+# BOARD_LIMIT)` is a descriptor of exactly that length and nothing else;
+# `normalize_mac(...)` is an id in the MAC form; `type(exc).__name__` is
+# a class name; `len(...)` is a count; `X or None` is nullable. The
+# classifier speaks where the source lets it and stays silent where it
+# does not, and the counts below are pinned so that silence cannot
+# spread unnoticed.
+
+
+@dataclass(frozen=True)
+class Signature:
+    """What one producing expression says about the value it makes.
+
+    `kinds` is a set of admissible kind names rather than one, because
+    the source sometimes fixes the shape without fixing the kind:
+    `round(x)` makes an integer, which the registry may declare as an
+    INT or, where the meaning is "how many", as a COUNT.
+    """
+
+    kinds: frozenset[str]
+    nullable: bool = False
+    syntax: str | None = None
+    max_length: int | None = None
+
+    def widened(self, other: "Signature") -> "Signature":
+        return Signature(
+            self.kinds | other.kinds,
+            self.nullable or other.nullable,
+            self.syntax,
+            self.max_length,
+        )
+
+
+INTEGRAL = frozenset({"int", "count"})
+LISTS = frozenset({"identifier_list", "id_list"})
+
+# How many field and argument positions across the whole surface the
+# classifier can speak about. Pinned, so that a classifier which
+# stopped reading would fail here rather than turn every kind check
+# above into a pass over an empty set.
+FIELDS_READ = 72
+ARGUMENTS_READ = 49
+
+
+@cache
+def module_values(module: str) -> dict[str, object]:
+    """Everything a module binds at its top level, so a limit written as
+    a constant can be read as the number it is."""
+    loaded = importlib.import_module(module)
+    return {name: value for name, value in vars(loaded).items() if not name.startswith("__")}
+
+
+def _assigned_in(scope: ast.AST, name: str) -> ast.expr | None:
+    """The one expression a local name is assigned from, or None where
+    it is assigned more than once and the answer would be a guess."""
+    found = [
+        node.value
+        for node in ast.walk(scope)
+        if isinstance(node, ast.Assign | ast.AnnAssign)
+        for target in _targets(node)
+        if isinstance(target, ast.Name) and target.id == name and node.value is not None
+    ]
+    return found[0] if len(found) == 1 else None
+
+
+@cache
+def defined_here(module: str) -> frozenset[str]:
+    """The functions a module defines at its own top level. A name it
+    merely imported (`revision`, `normalize_mac`) has its body
+    somewhere else, and following it would be a different module's
+    reading."""
+    return frozenset(
+        node.name
+        for node in ast.iter_child_nodes(module_tree(module))
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    )
+
+
+def _returns_of(module: str, function: str) -> list[ast.expr]:
+    return [
+        node.value
+        for node in ast.walk(scope_of(module, function))
+        if isinstance(node, ast.Return) and node.value is not None
+    ]
+
+
+def classify(
+    node: ast.expr, module: str, scope: str, seen: frozenset[str] = frozenset()
+) -> Signature | None:
+    """What the source says one value is, or None where it says nothing.
+
+    Deliberately partial. A bare attribute read (`self._agent`, a
+    provider's `identity.host`) carries no evidence at all, and inventing
+    one from the field's name would be the guessing this exists to
+    replace.
+    """
+    values = module_values(module)
+
+    if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or) and len(node.values) == 2:
+        left, right = node.values
+        # `X or None` is X, made nullable.
+        if isinstance(right, ast.Constant) and right.value is None:
+            held = classify(left, module, scope, seen)
+            return None if held is None else Signature(
+                held.kinds, True, held.syntax, held.max_length
+            )
+        # `X or "a fixed word"` is X's domain plus one fixed value, which
+        # the registry may carry as X's kind where the word fits it, or
+        # as a composed fragment naming both alternatives.
+        if isinstance(right, ast.Constant | ast.Name):
+            held = classify(left, module, scope, seen)
+            if held is None:
+                return None
+            # The fallback is what takes the None away: `X or "unknown"`
+            # answers a word where X answered nothing.
+            return Signature(
+                held.kinds | {"composed"}, False, held.syntax, held.max_length
+            )
+
+    if isinstance(node, ast.IfExp) and isinstance(node.body, ast.Constant):
+        if node.body.value is None:
+            held = classify(node.orelse, module, scope, seen)
+            return None if held is None else Signature(
+                held.kinds, True, held.syntax, held.max_length
+            )
+
+    if isinstance(node, ast.JoinedStr):
+        return Signature(frozenset({"composed"}))
+
+    if isinstance(node, ast.Compare):
+        return Signature(frozenset({"bool"}))
+
+    if isinstance(node, ast.Constant) and isinstance(node.value, bool):
+        return Signature(frozenset({"bool"}))
+
+    if isinstance(node, ast.Call):
+        called = node.func
+        if isinstance(called, ast.Attribute) and called.attr == "join":
+            return Signature(frozenset({"composed"}))
+        if isinstance(called, ast.Attribute) and called.attr == "__name__":
+            return None
+        if isinstance(called, ast.Name):
+            name = called.id
+            if name == "len":
+                return Signature(frozenset({"count"}))
+            if name == "round":
+                return Signature(INTEGRAL if len(node.args) == 1 else frozenset({"float"}))
+            if name == "list":
+                return Signature(LISTS)
+            if name == "bool":
+                return Signature(frozenset({"bool"}))
+            if name == "normalize_mac":
+                return Signature(frozenset({"id"}), syntax="mac")
+            if name == "bounded_descriptor":
+                limit = node.args[1]
+                held = limit.value if isinstance(limit, ast.Constant) else values.get(
+                    limit.id if isinstance(limit, ast.Name) else ""
+                )
+                assert isinstance(held, int), f"{module}: unreadable descriptor limit"
+                return Signature(frozenset({"descriptor"}), max_length=held)
+            # One step through a function of this module, which is what
+            # `_known_device` is: a normalized MAC, or nothing.
+            if name not in seen and name in defined_here(module):
+                answers = [
+                    classify(answer, module, scope, seen | {name})
+                    for answer in _returns_of(module, name)
+                ]
+                if answers and any(answer is not None for answer in answers):
+                    kinds: frozenset[str] = frozenset()
+                    nullable = False
+                    syntax = None
+                    length = None
+                    for answer in answers:
+                        if answer is None:
+                            continue
+                        kinds |= answer.kinds
+                        nullable = nullable or answer.nullable
+                        syntax = syntax or answer.syntax
+                        length = length or answer.max_length
+                    nullable = nullable or any(
+                        isinstance(answer, ast.Constant) and answer.value is None
+                        for answer in _returns_of(module, name)
+                    )
+                    return Signature(kinds, nullable, syntax, length)
+        return None
+
+    if isinstance(node, ast.Attribute) and node.attr == "__name__":
+        return Signature(frozenset({"class_name"}))
+
+    if isinstance(node, ast.Name):
+        assigned = _assigned_in(scope_of(module, scope), node.id)
+        if assigned is not None:
+            return classify(assigned, module, scope, seen)
+    return None
+
+
+def spread_value_expressions(key: str) -> dict[str, tuple[str, str, ast.expr]]:
+    """Where each key of a spread gets its value, as (module, scope,
+    expression), so a field a call site never spells out is still read
+    off the code that makes it."""
+    entry = SPREAD_INVENTORY[key]
+    module, qualname = key.split(":")
+    if entry.how == DELEGATES:
+        return spread_value_expressions(entry.to)
+    if entry.how == RETURNS:
+        scope = qualname
+        found: dict[str, tuple[str, str, ast.expr]] = {}
+        for node in ast.walk(scope_of(module, qualname)):
+            if isinstance(node, ast.Dict):
+                for held, value in zip(node.keys, node.values, strict=True):
+                    found[ast.literal_eval(held)] = (module, scope, value)
+        return found
+    scope = assembling_scope(qualname, entry.local)
+    found = {}
+    for node in ast.walk(scope_of(module, scope)):
+        for target in _targets(node):
+            if (
+                isinstance(target, ast.Name)
+                and target.id == entry.local
+                and isinstance(node.value, ast.Dict)  # type: ignore[union-attr]
+            ):
+                for held, value in zip(
+                    node.value.keys, node.value.values, strict=True  # type: ignore[union-attr]
+                ):
+                    found[ast.literal_eval(held)] = (module, scope, value)
+            if (
+                isinstance(target, ast.Subscript)
+                and isinstance(target.value, ast.Name)
+                and target.value.id == entry.local
+            ):
+                found[ast.literal_eval(target.slice)] = (module, scope, node.value)  # type: ignore[union-attr]
+    return found
+
+
+def field_producers(site: Site) -> dict[str, tuple[str, str, ast.expr]]:
+    """Every field this call produces whose value expression the source
+    shows, from its own keywords and from its spreads' builders."""
+    found = {
+        name: (site.module, site.function, node)
+        for name, node in site.static_values.items()
+    }
+    for key in site.spreads:
+        found.update(spread_value_expressions(key))
+    return found
+
+
+def agrees(signature: Signature, declared: schema.EventField | schema.ArgSpec) -> str:
+    """Why a declaration and its producer disagree, or the empty string
+    where they do not."""
+    if declared.kind.value not in signature.kinds:
+        return f"declared {declared.kind.value}, produced {sorted(signature.kinds)}"
+    if signature.nullable and not declared.nullable:
+        return "the producer can answer None and the declaration is not nullable"
+    if signature.syntax is not None and declared.kind.value == "id":
+        if declared.syntax is None or declared.syntax.name != signature.syntax:
+            named = declared.syntax and declared.syntax.name
+            return f"declared syntax {named}, produced {signature.syntax}"
+    if signature.max_length is not None and declared.kind.value == "descriptor":
+        if declared.bounds is None or declared.bounds.max_length != signature.max_length:
+            return (
+                f"declared bounds {declared.bounds and declared.bounds.max_length}, "
+                f"produced {signature.max_length}"
+            )
+    return ""
+
+
 # --- the token decision sites -----------------------------------------
 #
 # A token set is only a closed set if something closes it. Each entry
@@ -1159,6 +1434,78 @@ def spread_token_literals(site: Site, constants: dict[str, str]) -> dict[str, st
             if value is not None:
                 written[name] = value
     return written
+
+
+@pytest.mark.parametrize("site", emit_sites(), ids=str)
+def test_every_field_kind_agrees_with_what_produces_it(site: Site) -> None:
+    """The kind, the nullability, an ID's syntax and a DESCRIPTOR's
+    bounds, each against the expression that makes the value.
+
+    `bounded_descriptor(board, BOARD_LIMIT)` is a descriptor of exactly
+    that length; calling it an identifier, or bounding it at some other
+    number, is a claim the code refutes."""
+    for name, (module, scope, node) in field_producers(site).items():
+        signature = classify(node, module, scope)
+        if signature is None:
+            continue
+        for variant in alternatives(site):
+            declared = variant.fields.get(name)
+            if declared is None:
+                continue
+            assert not agrees(signature, declared), f"{site}: {name}: {agrees(signature, declared)}"
+
+
+@pytest.mark.parametrize("site", emit_sites(), ids=str)
+def test_every_argument_kind_agrees_with_what_produces_it(site: Site) -> None:
+    """The same reading for the sentence's arguments, which reach every
+    tap and the formatter alike."""
+    for variant in alternatives(site):
+        for position, declared in enumerate(variant.args):
+            signature = classify(site.args[position], site.module, site.function)
+            if signature is None:
+                continue
+            assert not agrees(signature, declared), (
+                f"{site}: argument {position}: {agrees(signature, declared)}"
+            )
+
+
+def test_the_classifier_still_reads_what_it_used_to_read() -> None:
+    """A classifier that quietly stopped classifying would turn every
+    check above into a pass. These are the counts it reaches today, so a
+    fall is a failure rather than a silence."""
+    fields = sum(
+        1
+        for site in emit_sites()
+        for module, scope, node in field_producers(site).values()
+        if classify(node, module, scope) is not None
+    )
+    arguments = sum(
+        1
+        for site in emit_sites()
+        for node in site.args
+        if classify(node, site.module, site.function) is not None
+    )
+
+    assert (fields, arguments) == (FIELDS_READ, ARGUMENTS_READ)
+
+
+def test_the_classifier_reads_the_four_descriptors_and_their_bounds() -> None:
+    """Named rather than counted, because these four are the whole of
+    what the ADR's amendment admits and the whole of what a wrong bound
+    would mangle."""
+    read = {}
+    for site in emit_sites():
+        for name, (module, scope, node) in field_producers(site).items():
+            signature = classify(node, module, scope)
+            if signature is not None and "descriptor" in signature.kinds:
+                read[(site.event, name)] = (signature.max_length, signature.nullable)
+
+    assert read == {
+        ("ota_check", "board"): (BOARD_LIMIT, False),
+        ("ota_check", "firmware"): (FIRMWARE_LIMIT, False),
+        ("ota_check", "client"): (CLIENT_ID_LIMIT, True),
+        ("session_open", "client"): (CLIENT_ID_LIMIT, True),
+    }
 
 
 @pytest.mark.parametrize("site", emit_sites(), ids=str)
