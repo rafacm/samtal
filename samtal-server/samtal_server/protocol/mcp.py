@@ -10,6 +10,14 @@ This module is the wire layer only: it builds request payloads and
 reads response payloads. Who sends them, when, and what happens to the
 tools lives in `samtal_server.tools.device`.
 
+One thing here is not the device's alone. A tool result reaches a model
+as text, and content a voice assistant cannot speak is named rather
+than dropped; that sentence is the same one whether the tool ran on the
+board or on a configured MCP server, so `spoken_content` below is where
+both decoders join their content, and `tools.mcp.transport` imports it
+from here. This module owns the wire shapes and imports nothing of
+`tools/`, which is what makes it the direction that works.
+
 Upstream reference: `docs/mcp-protocol.md` in 78/xiaozhi-esp32.
 """
 
