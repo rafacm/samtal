@@ -800,7 +800,8 @@ recorded in the PR body with observed failure output per branch.
       section, changelog entry, and tick land in the same change;
       no enforcement wired; both lanes green, pin suites
       untouched.
-- [ ] M2: the emitters enforce at emit time: caller fields checked
+- [x] [M2](2026-08-16-schema-declared-events-implementation.md#milestone-2-the-emitters-enforce):
+      the emitters enforce at emit time (PR TBD): caller fields checked
       before the base-field merge, strict raises
       `EventSchemaError`, forgiving follows the recovery matrix
       behind the last-resort guard with the fixed safe sentence,

@@ -9,6 +9,36 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **The emitters enforce the event schema at emit time** (#155, M2).
+  Both `_emit` paths now hold an emission to its declaration in two
+  ordered steps: what the caller passed is judged before the base
+  fields are merged, so a `**fields` spread carrying `session=` is
+  refused as the identity spoofing it is rather than merged over the
+  emitter's own; then the finished payload is matched whole against the
+  event's declared variants, the emitting channel, the level, the
+  sentence compared byte for byte against the registry's template, the
+  argument tuple against its per-position kinds, and the fields against
+  the variant's table. `SAMTAL_EVENTS_ENFORCEMENT` picks the mode.
+  `strict` raises `EventSchemaError`, which is what every context that
+  is not a running server gets by default: the test lanes, an import, a
+  REPL. `forgiving` recovers, which is what a running server gets:
+  the emission is rebuilt against its variant where that produces a
+  declared shape, and becomes a `schema_violation` event carrying
+  nothing but the emitter's own identity where it does not, with one
+  ERROR line on the emitter's channel naming what was refused. A
+  telemetry bug can therefore no longer cost a reply, and the whole
+  path runs under one guard so that a bug in the enforcement itself
+  cannot either. Diagnostics render registry-owned identifiers only: a
+  declared event or field name, a fixed violation code, a count, an
+  argument position, never a rejected name or a value.
+- `SAMTAL_EVENTS_ENFORCEMENT` (`strict` or `forgiving`), resolved by
+  `create_app` and by the entrypoint after it has loaded `.env`. Unset
+  means `forgiving` at both, because a running server is a deployment
+  whatever artifact it runs from; anything else refuses to start,
+  naming the variable and the two values it takes. The container image
+  sets `forgiving` explicitly, redundant with that default on purpose,
+  so the production posture is visible in the artifact. Documented in
+  the README's Logging section.
 - **Every event's schema is declared as data** (#155, M1):
   `samtal_server/events_schema.py` holds one declaration per event,
   naming its channel, its level, the exact sentence template it
