@@ -24,6 +24,7 @@ from samtal_server.app import create_app
 from samtal_server.config import Config, ConfigError
 from samtal_server.config.boot import load_boot_config
 from samtal_server.config.loader import CONFIG_ENV_VAR
+from samtal_server.events import EventEnforcementError, resolve_enforcement
 from samtal_server.providers import ProviderError
 
 logger = logging.getLogger(__name__)
@@ -161,6 +162,15 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
+        # How strictly this process holds its events to their
+        # declarations (#155). Here rather than at import, because
+        # `.env` is what a deployment sets it in and this module imports
+        # the app, and therefore the emitters, long before this line
+        # runs. After the subcommand exits above, too: an invalid value
+        # of a server-only variable must not block a recovery command.
+        # `create_app` resolves it again for a server nothing launched
+        # through here.
+        resolve_enforcement()
         # Both halves: the file named by --config or SAMTAL_CONFIG, and the
         # domain half from the database that file points at.
         booted = load_boot_config(args.config)
@@ -181,7 +191,7 @@ def main() -> None:
         # configuration problem reaching it is one printed sentence like
         # every other, never a traceback.
         onboarding.log_banner(config.server)
-    except (ConfigError, ProviderError) as exc:
+    except (ConfigError, EventEnforcementError, ProviderError) as exc:
         print(exc, file=sys.stderr)
         raise SystemExit(1) from None
 

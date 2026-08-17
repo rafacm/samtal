@@ -14,7 +14,7 @@ from samtal_server.config.boot import load_boot_config, reload_domain_config
 from samtal_server.config.secrets import SecretStore
 from samtal_server.conversations import ConversationStore, migrate_existing
 from samtal_server.device.bindings import DeviceBindings
-from samtal_server.events import ServerEvents
+from samtal_server.events import ServerEvents, resolve_enforcement
 from samtal_server.filler import build_agent_fillers
 from samtal_server.providers import build_agent_providers
 from samtal_server.registry import SessionRegistry
@@ -143,6 +143,15 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     None for a configuration whose credentials are all environment
     references. They reach exactly the two places a credential is
     materialized: building a provider, and connecting an MCP server."""
+    # How strictly this process holds its events to their declarations
+    # (#155), resolved here rather than at import because a running
+    # server is a deployment whatever launched it: a production process
+    # may import this function and serve the app under an ASGI runner
+    # without ever reaching `main()`, and it must get the forgiving mode
+    # a deployment needs rather than the strict default a lane wants.
+    # First, before anything that could emit, and it refuses an
+    # unusable value here rather than at the first live violation.
+    resolve_enforcement()
     # No interactive docs, no schema. A device needs two paths and a
     # healthcheck needs a third; publishing an API description of them to
     # anyone who asks is surface with no reader, and the security default
