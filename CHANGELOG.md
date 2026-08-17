@@ -25,9 +25,14 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   document.
   With this, #155 is done. One registry declares every event, the
   emitters hold every emission to it, and the documentation is that
-  registry rendered rather than a second copy of it: a field carrying
-  far-side bytes is now a schema violation a test lane refuses, not a
-  review finding somebody has to notice.
+  registry rendered rather than a second copy of it: a new field
+  carrying far-side bytes is now a schema violation a test lane
+  refuses, not a review finding somebody has to notice. The far-side
+  values the surface deliberately keeps are the declared `DESCRIPTOR`
+  fields and only those, which the amended content-and-telemetry ADR
+  admits as bounded device-descriptor metadata; they are named as such
+  in the reference, held to their bounds at emit, and an undeclared one
+  beside them is refused like any other.
 - **The emitters enforce the event schema at emit time** (#155, M2).
   Both `_emit` paths now hold an emission to its declaration in two
   ordered steps: what the caller passed is judged before the base
