@@ -22,12 +22,13 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   exception, and it was there however innocently the transcript was
   recovered: a user reading a credential aloud is a turn like any
   other. A sentinel test plants a credential-shaped transcript and
-  asserts it reaches the session and neither the log record nor an
-  attached event consumer. **Migration:** what was said comes from the
-  conversation store instead, keyed by the same session id and subject
-  to `server.conversations.enabled` with `text: true`; an operator who
-  greps the logs for recovered utterances queries the store's `turns`
-  rows.
+  asserts it stays in the transcription result the provider answers
+  with, which is what the session goes on to hear, and reaches neither
+  the log records nor an attached event consumer. **Migration:** what
+  was said comes from the conversation store instead, keyed by the same
+  session id and subject to `server.conversations.enabled` with
+  `text: true`; an operator who greps the logs for recovered utterances
+  queries the store's `turns` rows.
 - The content-and-telemetry ADR gained a dated amendment: bounded
   device-descriptor metadata (the board, firmware, and client id a
   device reports at check-in, sanitized at their decision sites) is
