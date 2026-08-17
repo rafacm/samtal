@@ -122,6 +122,47 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The domain configuration's schema is single-sourced** (#139, M5).
+  With this, #139 is done. A domain entity was spelled at 14 to 19
+  places across 12 to 14 files, and adding the most recent kind
+  hand-edited 13 of them; it is now its pydantic model plus one entry in
+  `samtal_server/config/entities.py`, which the documentation renderer,
+  the repository, the read views, the API's route factory and the CLI's
+  dispatch table all read. M1 built the registry and pointed docgen at
+  it, M2 gave the repository one read, one write and one delete over all
+  five kinds, M3 built the twenty-two entity routes from the endpoint
+  facts their descriptors carry, M4 made a command one row that both
+  paths run and deleted the hand-kept shapes the CLI used to check an
+  answer against, and M5 splits the 2,305-line acceptance file along the
+  boundaries the other four produced. Nothing an operator or a client
+  reads changed at any of the five: every refusal, notice, column and
+  document is byte for byte what it was, and both committed references
+  regenerate unchanged with no regeneration commit anywhere on the
+  branch. What a new field costs was measured rather than asserted: a
+  scratch field added to one entity's model, its column and its
+  migration reached the store, the API, the CLI and both generated
+  references with no descriptor edit and no other hand edit, the whole
+  unit lane green but for the two drift pins a regeneration command
+  answers. The one surface it does not reach on its own is the read
+  view, whose per-kind body builders are written key by key, which is
+  deliberate for `provider_record` and incidental for the other four;
+  filed rather than changed here, since changing it would change what a
+  read prints.
+- **The config CLI's acceptance suite is six files** (#139, M5).
+  `tests/unit/test_config_cli.py` was 2,305 lines and 101 tests because
+  the module it tested was one module. It keeps the acceptance spine,
+  the empty-database-to-working-configuration walk and the per-kind
+  write, show, list and delete behavior that #139 made
+  descriptor-driven; the rest moved, one file per concern, to
+  `test_config_cli_transport.py`, `test_config_cli_rendering.py`,
+  `test_config_cli_secrets.py`, `test_config_cli_grammar.py` and the
+  `test_config_cli_local.py` M4 started. The scaffolding six suites
+  share (the runner that drives a command against a server of the test's
+  own, the sentinels, the fragment constants) is in
+  `tests/support/config_cli.py`, per #144's rule that no test module
+  imports another. A pure move: every one of the 101 test functions is
+  byte for byte what it was, and the lane collects exactly what it
+  collected before.
 - **The CLI dispatches from one table and renders from the API's own
   shapes** (#139, M4). A command was two implementations of one act:
   fourteen `if args.local:` branches chose between reaching the API and

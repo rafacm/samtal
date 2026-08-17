@@ -1055,3 +1055,279 @@ Re-run after both commits, from `samtal-server/`:
 - Both generated references regenerate byte-identical, which is the
   proof that matters for the first finding: the reference prints the
   same `command` the loader now quotes, and it did not move.
+
+## Milestone 5: the test split and the cost demonstration
+
+The acceptance file stopped being one file because the module it drives
+stopped being one module. `tests/unit/test_config_cli.py` was 2,305
+lines and 101 tests, and it mirrored `cli.py` exactly: everything the
+command group did, in one place, because everything the command group
+did was in one place. The four milestones before this one produced the
+boundaries, and #144's plan had already decided which buckets to cut
+along, each anchored to a concern this issue's body names. This
+milestone cuts them.
+
+Six commits, plus the one that records the milestone:
+
+1. `5632010` Give the config CLI suites one runner
+2. `42eccc6` Move the client's own behavior to its own file
+3. `2d1a11c` Move the four rendered answers to their own file
+4. `41a75e5` Move a credential's whole life to its own file
+5. `ca236aa` Move the grammar and its exit codes to their own file
+6. `c8dfb3f` Move the break-glass path into the file M4 started
+
+### The split
+
+| Bucket, as #144 named it | File | Tests | Cases |
+| --- | --- | --- | --- |
+| The acceptance spine: the empty-database-to-working-configuration walk and per-kind write, show, list and delete | `test_config_cli.py` | 29 | 47 |
+| Transport and client: URL, token and TLS resolution, the refusals of an unreadable or credentialed URL, the timeouts, an unreachable server | `test_config_cli_transport.py` | 19 | 23 |
+| Rendering: the status, reload, pending and prompt answers | `test_config_cli_rendering.py` | 23 | 42 |
+| Secrets: entry, masking, refusals, key failures | `test_config_cli_secrets.py` | 13 | 13 |
+| Parser grammar, help and exit codes | `test_config_cli_grammar.py` | 5 | 5 |
+| The `--local` recovery subset | `test_config_cli_local.py` | 12 | 20 |
+| | **total** | **101** | **150** |
+
+The counts are equal by construction rather than by luck: 101 test
+functions in, 101 out, and the 150 cases they parametrize to are the 150
+the file collected before. `test_config_cli_local.py` holds three more
+tests and seventeen more cases than the table's row, which are M4's own
+and are not part of this move; the unit lane's total is unchanged at
+2,954.
+
+The three judgment calls the bucket list does not settle, recorded
+because a reader will wonder:
+
+- **The two help-text assertions are grammar, not rendering.** One names
+  every state a `status` can print and one names which of the two ways
+  to bind a board takes a MAC; both read `cli._parser().format_help()`,
+  and the help is part of the grammar rather than a rendering of an
+  answer.
+- **`add-device` is spine, the pending listing is rendering.** Claiming
+  a board writes a device row, which is per-kind write behavior; listing
+  what is waiting renders an answer from the running server. They share
+  the helper that puts a device in the pending table, which is why that
+  helper is in support.
+- **A database directory that cannot be opened is spine; a config file
+  that is not there is transport.** The first is the reading commands'
+  own reporting rule, beside the row that cannot be read; the second is
+  the resolution that decides where a command is addressed, which is
+  what the transport file is about.
+
+### The support module, and why it exists
+
+`tests/support/config_cli.py` (new, 160 lines) holds what six suites
+need before they can run anything: `runner`, which is the 80-line
+fixture body the acceptance file had, plus the sentinels, the fragment
+constants and the three helpers (`chain`, `document`, `showing`) that
+more than one bucket reads.
+
+It is a factory rather than a fixture for two reasons. A fixture cannot
+be imported and used as a fixture, which is why #144's decision 2 says
+"support or a conftest"; and a `run` fixture in `tests/unit/conftest.py`
+would be a name visible to every module in the lane, most of which have
+nothing to do with the CLI. Each suite spends four lines wrapping the
+factory instead, and the six wrappers are byte-identical to each other.
+
+The three helpers are imported under their original private spellings
+(`from tests.support.config_cli import document as _document`), which is
+the convention `tests/support/stores.py` already set, and which is what
+kept every moved test body byte-identical rather than renaming a call
+inside an assertion. `tests/unit/test_support_boundaries.py` stays
+green: no test module imports another, and nothing under support imports
+a test module.
+
+### One file or two for `--local`, decided here
+
+M4 wrote `test_config_cli_local.py` for the per-act proof that a local
+run prints what the API prints. The bucket #144 named is the `--local`
+recovery subset, which was still in the acceptance file. They are the
+same concern from two sides, so this milestone merges them: two files
+called `test_config_cli_local.py` and `test_config_cli_recovery.py`
+would be a distinction nobody could hold, and they would have carried
+two copies of the preamble constant, two `run` fixtures, two sets of
+seed helpers and two nine-row tables of the same nine acts.
+
+The merge is where this milestone is not a pure move, and the deviation
+is recorded below rather than smoothed over.
+
+### The port table
+
+Empty in the sense M2 and M3 meant it: no test was ported, rewritten,
+weakened or strengthened. What changed is stated exactly by the
+comparison below.
+
+### How byte-identity was checked
+
+The M2-era method from #144, applied to this shape: every top-level
+`def` and every module-level assignment in the pre-split file and in the
+six files it became was parsed out with `ast.get_source_segment` and
+paired by name. The result:
+
+```
+identical: 122
+changed:   ['run (test_config_cli_local.py)', '_a_provider (test_config_cli_local.py)',
+            '_a_prompt_fragment (test_config_cli_local.py)']
+gone:      ['SECRET', 'OTHER_SECRET', 'API_SECRET_ENV', 'TOKEN', '_chain', '_document',
+            '_showing', 'FRAGMENT_TEXT', 'FRAGMENT_INPUT', 'LOCAL_MUTATIONS']
+new:       ['MUTATIONS (test_config_cli_local.py)']
+```
+
+Every name in `changed` and `gone` is a fixture, a helper or a constant.
+Not one `test_` function appears in either, which is the claim: all 101
+are byte for byte what they were. The `gone` names are the nine that
+moved to support and `LOCAL_MUTATIONS`, which the merge renamed. A
+second pass compared the support module against the originals: the
+factory's body is the old fixture's body line for line, the three
+helpers' bodies are unchanged under their new names, and all six
+constants are identical.
+
+### Deviations from the plan
+
+1. **The `--local` bucket merged into M4's file rather than getting one
+   of its own.** As above. The plan says each bucket gets its file; the
+   recovery subset's file already existed.
+2. **Two seed helpers were reconciled instead of moved.** The two files
+   had seven helpers under the same names, five byte-identical and two
+   not: the acceptance file's `_a_provider` writes `type` and `model`
+   where M4's also writes `api_key_env`, and its `_a_prompt_fragment`
+   writes the elaborate `FRAGMENT_INPUT` where M4's writes one short
+   line. One module can hold one of each, so the richer pair wins:
+   M4's reads compare the shadowing note the environment reference
+   produces, and the moved acts that use these seeds are deletes and
+   secret writes whose compared sentence mentions neither the reference
+   nor the fragment's text. The moved test's own body is unchanged; what
+   changed is which seed its parametrize table names.
+3. **The two nine-row tables became one.** They listed the same nine
+   acts, the acceptance file's carrying a third column saying whether a
+   running server applies the act by reloading. The merged `MUTATIONS`
+   carries the column, the moved proof reads it, and M4's proof
+   parametrizes over the pairs derived from it. Both tests' ids are the
+   strings they always were.
+4. **A support module was added, which the plan's file list did not
+   name.** It names the six bucket files and this doc; the scaffolding
+   had to go somewhere, and #144's rule says where.
+5. **The acceptance file's docstring was rewritten.** It described "the
+   acceptance suite for the whole write path", which after the split is
+   five other files' description too. It now says what the spine keeps
+   and names the five neighbours, which is what a reader landing in one
+   of them needs.
+
+No other deviation. Both committed references are untouched, and no
+production file was edited by this milestone at all.
+
+### The cost demonstration
+
+The issue's first acceptance criterion: adding a new field to an entity
+touches the model, the schema and its migration, and at most the
+descriptor. Measured rather than argued, by adding a scratch field
+(`note: str | None = None`) to `PromptFragmentConfig`, a nullable `note`
+column to the `prompt_fragments` table and a migration adding it, then
+running the surfaces and the whole unit lane against it and reverting.
+
+**What the descriptor world required.** Three files, all three of them
+the ones the criterion admits:
+
+| File | What it needed |
+| --- | --- |
+| `samtal_server/config/models.py` | The field, with its description. |
+| `samtal_server/db/schema.py` | The column. |
+| `samtal_server/db/migrations/versions/0005_*.py` | The migration adding it. |
+
+Nothing else was edited, and the descriptor was not touched at all:
+`entities.py` is byte-unchanged in the experiment. What worked without
+being asked:
+
+- **The write.** `config set prompt-fragment household -f -` with `note`
+  in the body was accepted, answered with its usual acknowledgement and
+  notice, and the value reached the column: the row read back
+  `('household', 'The bins go out.', 'a scratch note')`. That is the
+  default `model_validate`/`model_dump` row path M2 built, which this
+  kind takes.
+- **The API.** No route, request model or response model was touched.
+  The write route carries the kind's own model, so the new field is part
+  of the body it accepts by construction.
+- **Both generated references.** `docs/reference/domain-config.md` gained
+  one row in the fragment's field table, and
+  `docs/reference/api-openapi.json` gained one property in the fragment
+  schema, both derived from the model and both produced by the
+  regeneration command rather than by an editor.
+- **Everything else the suite pins.** The whole unit lane was run against
+  the scratch field: `2 failed, 2936 passed, 16 skipped`, and the two
+  failures are exactly the two drift pins that compare the committed
+  references against the freshly generated ones. Nothing else asked for
+  a hand edit: not `config.example.yaml`, not the example fragment file
+  under `examples/`, not the docgen bijection tests, not the CLI.
+
+**What the pre-descriptor world required.** Read off the branch's base
+commit, `a1d5dd2`, where the same field would have needed five files:
+the same three, plus
+
+| File | Why | Anchor at a1d5dd2 |
+| --- | --- | --- |
+| `samtal_server/config/store.py` | Two hand-written mappings naming the field list: the write's inline `{"text": entry.text}` and the reader's `{"text": row.text}` | `store.py:469` and `store.py:938` |
+| `samtal_server/config/views.py` | The body builder, key by key | `views.py:294` |
+
+Both store sites are gone: M2 replaced them with the default row path,
+which is why a fragment's row costs nothing outside its model now. The
+entity-level baseline this doc's preamble records, 13 hand-edited files
+to add `prompt_fragments`, is the number for a whole new kind rather
+than for a field; it is not what this experiment measured and is not
+claimed as measured here.
+
+**Verdict, and the surface the demonstration surfaced.** The criterion
+holds for the store, the API, the CLI and both generated references: a
+field is its model, its column and its migration, and the descriptor
+does not have to hear about it. It does not hold for the read view. The
+scratch field never appeared in `config show prompt-fragment household`
+or in the whole-configuration document, because
+`views.prompt_fragment_body` returns `{"text": entry.text}` key by key,
+as all four of its siblings do for their kinds. No test failed for it,
+which is part of the finding.
+
+That is a fourth file (`views.py`, one line) whenever the new field is
+meant to be displayed, and it is not obviously a defect: it is exactly
+the rule `views.provider_record`'s docstring states and defends, that a
+new model field is absent from a record until somebody decides it
+belongs. The difference is that `provider_record` says so and the five
+body builders do not, so on the display path the same behavior reads as
+an oversight rather than as a decision. Recorded as a finding and not
+widened into: making a body builder derive from the model would change
+what a read prints the moment a model gains a field, which is a
+behavior change this issue's contract forbids, and deciding whether the
+display path should fail open or closed is the same question issue #171
+already holds open for the masking path beside it.
+
+### Verification
+
+From `samtal-server/`, with `PYTHONDONTWRITEBYTECODE=1` outside pytest:
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/unit -q`: `2938 passed, 16 skipped`. The lane
+  collected 2954 before this milestone and 2954 after: the split adds
+  and removes nothing, and the skips are the same 16.
+- `uv run pytest tests/integration -q`: `55 passed`, collection
+  unchanged at 55.
+- Both generated references regenerate byte-identical, run exactly as
+  the CI drift steps run them, with no regeneration commit anywhere on
+  the branch:
+
+```
+$ uv run samtal-server config reference > "$RUNNER_TEMP/domain-config.md"
+$ diff -u ../docs/reference/domain-config.md "$RUNNER_TEMP/domain-config.md"
+(no output from diff -u: the files are identical)
+$ uv run samtal-server config openapi > "$RUNNER_TEMP/api-openapi.json"
+$ diff -u ../docs/reference/api-openapi.json "$RUNNER_TEMP/api-openapi.json"
+(no output from diff -u: the files are identical)
+```
+
+  Nothing in this milestone touches a production module, so the two
+  references could not have moved; they were regenerated anyway, because
+  a proof that was not run is not a proof.
+- `tests/unit/test_support_boundaries.py` passes: no test module imports
+  another, and nothing under `tests/support` imports a test module.
+- `git diff --stat` against the milestone's base over `samtal_server/`
+  and `docs/reference/` prints nothing at all: no production file and no
+  committed reference changed.
+- The normalized-comparison proof above, which is the strong form of
+  "the moved tests are unchanged".
