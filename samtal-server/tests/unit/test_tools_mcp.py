@@ -426,14 +426,16 @@ async def test_a_resolved_secret_reaches_the_spawned_server(
     config = config_with(
         {"tools": entry_data(env={"API_TOKEN": "$SAMTAL_TEST_MCP_TOKEN"})}, ["tools"]
     )
-    servers = McpServers.build(config)
-    manager = servers._managers["tools"]
+    # Built rather than kept, because building is what resolves at
+    # construction and so what a reference nothing satisfies fails.
+    McpServers.build(config)
     # Resolved per connection rather than kept on the manager, so this
-    # asks the resolver the connection asks. What it answers is
-    # unchanged: the reference became the value.
-    assert transport._resolve(
-        manager._name, manager._config, manager._secrets, "env"
-    ) == {"API_TOKEN": "sk-test"}
+    # asks the resolver the connection asks, with the entry the manager
+    # was built from. What it answers is unchanged: the reference became
+    # the value.
+    assert transport._resolve("tools", config.mcp_servers["tools"], None, "env") == {
+        "API_TOKEN": "sk-test"
+    }
     # And the configuration itself never held the secret.
     assert config.mcp_servers["tools"].env == {"API_TOKEN": "$SAMTAL_TEST_MCP_TOKEN"}
 
