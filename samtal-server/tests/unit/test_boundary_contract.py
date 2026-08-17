@@ -116,9 +116,13 @@ def test_the_factory_is_handed_the_device_it_speaks_for() -> None:
     assert runtime.agents == ["assistant"]
     assert runtime.events.session_id == hello["session_id"]
     assert runtime.events.device == DEVICE_MAC.lower()
-    # Activation is the runtime's, so a stub that never activates leaves
-    # the attribution field alone rather than inheriting one.
-    assert runtime.events.agent is None
+    # Activation is the runtime's, and it is part of what the factory
+    # answers rather than something the edge does afterwards: the edge
+    # emits `session_open` the moment the factory returns, and that
+    # record names the agent talking. So the value here is the stub's
+    # own choice of first agent, made in its constructor the way the
+    # bespoke runtime makes it, and never one the edge wrote.
+    assert runtime.events.agent == runtime.agents[0]
 
 
 def test_frames_that_arrive_before_a_listen_never_reach_the_runtime() -> None:
