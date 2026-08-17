@@ -682,13 +682,10 @@ def stored_secrets(snapshot: Snapshot) -> tuple[StoredSecret, ...]:
     said to shadow one key in a listing and another in a single read.
     """
     entries: dict[tuple[str, str], object] = {
-        ("provider", f"{stage}.{name}"): entry
-        for stage in PROVIDER_STAGES
-        for name, entry in getattr(snapshot.domain.providers, stage).items()
+        (descriptor.secret_slots, identity): entry
+        for descriptor in _SECRET_HOLDERS
+        for identity, entry in _identified(snapshot.domain, descriptor)
     }
-    entries.update(
-        (("mcp_server", name), entry) for name, entry in snapshot.domain.mcp_servers.items()
-    )
     return tuple(
         StoredSecret(
             location=location,
@@ -696,6 +693,20 @@ def stored_secrets(snapshot: Snapshot) -> tuple[StoredSecret, ...]:
         )
         for location in snapshot.secrets.locations()
     )
+
+
+def _identified(domain: DomainConfig, descriptor: EntityDescriptor) -> Iterator[tuple[str, object]]:
+    """Every entry of one kind, by the identity its stored secrets are
+    addressed under: the entry's name, or its group and its name
+    together where the kind is addressed by two, which is what makes a
+    provider's `llm.claude` the same string here as in a location."""
+    section = getattr(domain, descriptor.moved_key)
+    if len(descriptor.addressing) == 1:
+        yield from section.items()
+        return
+    for group in type(section).model_fields:
+        for name, entry in getattr(section, group).items():
+            yield f"{group}.{name}", entry
 
 
 def _stored_slots(
@@ -767,6 +778,15 @@ _AGENT_DEFAULTS = entities.descriptor("agent-defaults")
 _KEYED_BY_NAME = tuple(
     descriptor for descriptor in entities.ENTITIES if descriptor.addressing == ("name",)
 )
+
+# The kinds a stored secret can hang on, which is the registry's own
+# statement of the two members `secrets.EntityKind` admits: a kind that
+# names no slot has no secrets column to read, no row for one to be
+# written to, and no way for a location to address it.
+_SECRET_HOLDERS = tuple(
+    descriptor for descriptor in entities.ENTITIES if descriptor.secret_slots is not None
+)
+_HOLDER_OF = {descriptor.secret_slots: descriptor for descriptor in _SECRET_HOLDERS}
 
 
 def _table(descriptor: EntityDescriptor) -> Table:
@@ -921,15 +941,16 @@ def _read_domain(connection: Connection) -> DomainConfig:
 
 def _read_secrets(connection: Connection, keys: MultiFernet | None) -> SecretStore:
     envelopes: dict[SecretLocation, object] = {}
-    for row in connection.execute(select(schema.providers)):
-        location = f"providers.{row.stage}.{row.name}"
-        for slot, envelope in _mapping(location, "secrets", row.secrets).items():
-            envelopes[SecretLocation.provider(row.stage, row.name, slot)] = envelope
-    for row in connection.execute(select(schema.mcp_servers)):
-        for slot, envelope in _mapping(
-            f"mcp_servers.{row.name}", "secrets", row.secrets
-        ).items():
-            envelopes[SecretLocation.mcp_server(row.name, slot)] = envelope
+    for descriptor in _SECRET_HOLDERS:
+        for row in connection.execute(select(_table(descriptor))):
+            identity = tuple(getattr(row, part) for part in descriptor.addressing)
+            for slot, envelope in _mapping(
+                _location(descriptor, *identity), "secrets", row.secrets
+            ).items():
+                where = SecretLocation(
+                    kind=descriptor.secret_slots, identity=".".join(identity), slot=slot
+                )
+                envelopes[where] = envelope
     return SecretStore(envelopes, keys)
 
 
@@ -1221,14 +1242,21 @@ def _write_secrets(
         )
 
 
+def _secret_identity(descriptor: EntityDescriptor, location: SecretLocation) -> list[str]:
+    """A location's identity back as the parameters the kind is
+    addressed by. Split at the first separator only, so that a name
+    holding one is still one name."""
+    return location.identity.split(".", len(descriptor.addressing) - 1)
+
+
 def _secret_row(location: SecretLocation) -> tuple[Table, list[ColumnElement[bool]]]:
-    if location.kind == "provider":
-        stage, _, name = location.identity.partition(".")
-        return schema.providers, [
-            schema.providers.c.stage == stage,
-            schema.providers.c.name == name,
-        ]
-    return schema.mcp_servers, [schema.mcp_servers.c.name == location.identity]
+    descriptor = _HOLDER_OF[location.kind]
+    table = _table(descriptor)
+    identity = _secret_identity(descriptor, location)
+    return table, [
+        table.c[column] == value
+        for column, value in _row_identity(descriptor, identity).items()
+    ]
 
 
 def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
@@ -1236,10 +1264,14 @@ def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
     defined, not arbitrary: a provider's is a secret-shaped option name,
     an MCP server's is a dotted env or headers path, which is where the
     value would otherwise have been written as a $VAR reference."""
+    descriptor = _HOLDER_OF[location.kind]
+    identity = _secret_identity(descriptor, location)
     if location.kind == "provider":
-        stage, _, name = location.identity.partition(".")
-        if name not in getattr(domain.providers, _stage(stage)):
-            raise UnknownEntityError(f"providers.{stage}.{name}: no such provider")
+        stage, name = identity
+        # The stage is an argument here rather than a stored value, so
+        # it meets the same refusal a caller's typo meets anywhere else.
+        if _entry(domain, descriptor, (_stage(stage), name)) is None:
+            raise UnknownEntityError(descriptor.missing(stage, name))
         if location.slot.lower().endswith("_env") or not is_secret_option(location.slot):
             raise ConfigError(
                 f'"{location.slot}" is not a credential slot on a provider; a slot is '
@@ -1250,8 +1282,8 @@ def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
         _check_addressable(f"providers.{stage}.{name}", "slot", location.slot)
         return
 
-    if location.identity not in domain.mcp_servers:
-        raise UnknownEntityError(f"mcp_servers.{location.identity}: no such MCP server")
+    if _entry(domain, descriptor, identity) is None:
+        raise UnknownEntityError(descriptor.missing(*identity))
     group, _, key = location.slot.partition(".")
     if group not in MCP_SECRET_GROUPS or not key:
         raise ConfigError(
