@@ -148,7 +148,44 @@ WROTE = EventSpec(
     ),
 )
 
-SPECS = (MEASURED, LISTED, OPENED, WROTE, REGISTRY[SCHEMA_VIOLATION])
+def _twice(**fields: object) -> EventVariant:
+    return EventVariant(
+        channel=CHANNEL,
+        level=logging.INFO,
+        message="said twice",
+        args=(),
+        fields=server_payload(**fields),  # type: ignore[arg-type]
+    )
+
+
+# A declaration the conformance suite refuses: two variants one payload
+# satisfies completely. The emitter has to refuse the EMISSION as well,
+# so that a scratch registry, a future edit or a merge cannot get an
+# ambiguous record through on the strength of declaration order.
+TWICE = EventSpec(
+    "twice",
+    variants=(_twice(stage=identifier()), _twice(stage=identifier())),
+)
+
+# The same thing without the copy-paste: one variant's optional field
+# makes its shapes a superset of the other's.
+WIDENED = EventSpec(
+    "widened",
+    variants=(
+        _twice(stage=identifier()),
+        _twice(stage=identifier(), note=identifier(required=False)),
+    ),
+)
+
+SPECS = (
+    MEASURED,
+    LISTED,
+    OPENED,
+    WROTE,
+    TWICE,
+    WIDENED,
+    REGISTRY[SCHEMA_VIOLATION],
+)
 
 
 @pytest.fixture(autouse=True)
@@ -1047,6 +1084,59 @@ def test_one_complaint_reports_every_violation_of_one_emission(
         "missing_field (duration_ms); unlisted_token (reason); undeclared_fields (1)",
     )
     replaced_by_the_recovery_event(caplog)
+
+
+# --- two declarations one record satisfies ----------------------------
+
+
+@pytest.mark.parametrize("event", ["twice", "widened"])
+def test_strict_refuses_an_emission_two_variants_both_admit(event: str) -> None:
+    """Matching is exactly one full variant, not the best of several.
+
+    Several variants behind one template are lawful and necessary, since
+    one call selects among correlated shapes; what makes them lawful is
+    that the shapes are disjoint. Accepting a payload two of them admit
+    would make the record's meaning depend on declaration order and
+    would have the generated reference claim two shapes where one record
+    exists. The conformance suite refuses the declaration; this refuses
+    the emission, so an edit that slips past review still cannot write
+    an ambiguous line."""
+    strictly()
+    with pytest.raises(EventSchemaError) as raised:
+        emitter().info("said twice", event=event, stage="asr")
+
+    assert raised.value.args == (
+        f"the event schema refused an emission of {event}: ambiguous_variant (2)",
+    )
+
+
+def test_forgiving_replaces_an_emission_two_variants_both_admit(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Nothing to rebuild towards, so there is nothing to rebuild."""
+    forgivingly()
+    with caplog.at_level("DEBUG"):
+        emitter().info("said twice", event="twice", stage="asr")
+
+    refused(caplog, "twice", "ambiguous_variant (2)")
+    replaced_by_the_recovery_event(caplog)
+
+
+def test_an_unambiguous_shape_still_passes_where_another_variant_is_near(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other side of it: `widened`'s second variant is the only one
+    admitting the optional field, so a payload carrying it is not
+    ambiguous at all and rides untouched."""
+    strictly()
+    with caplog.at_level("DEBUG"):
+        emitter().info("said twice", event="widened", stage="asr", note="from-cache")
+
+    assert fields_of(caplog.records[0]) == {
+        "event": "widened",
+        "stage": "asr",
+        "note": "from-cache",
+    }
 
 
 # --- when saying so is itself what breaks -----------------------------

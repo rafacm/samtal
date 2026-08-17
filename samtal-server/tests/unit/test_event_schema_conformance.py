@@ -46,6 +46,7 @@ calibrated to that: the registry is declared and statically conformant.
 """
 
 import ast
+import dataclasses
 import importlib
 import itertools
 import logging
@@ -1897,6 +1898,79 @@ def test_the_source_provenance_grammar_is_the_know_how_halfs() -> None:
     assert matcher.match(prompt.server_prompt_provenance("home", 2))
     assert not matcher.match(prompt.MEMORY)
     assert not matcher.match("invented:home")
+
+
+def selection_groups(
+    spec: schema.EventSpec,
+) -> dict[tuple[str, int, str], list[schema.EventVariant]]:
+    """One event's variants, grouped the way the emitter selects among
+    them: channel, then declared template, then level. Two variants in
+    different groups can never both match one emission, since all three
+    are compared exactly."""
+    grouped: dict[tuple[str, int, str], list[schema.EventVariant]] = {}
+    for variant in spec.variants:
+        grouped.setdefault((variant.channel, variant.level, variant.message), []).append(
+            variant
+        )
+    return grouped
+
+
+def ambiguities(spec: schema.EventSpec) -> list[tuple[str, frozenset[str]]]:
+    """Every payload shape two variants of one event both admit."""
+    return [
+        (key[2][:60], shape)
+        for key, group in selection_groups(spec).items()
+        for first, second in itertools.combinations(group, 2)
+        for shape in sorted(expansions(first) & expansions(second))
+    ]
+
+
+def test_no_two_variants_of_an_event_admit_one_payload() -> None:
+    """A registry that cannot say which shape a record is.
+
+    Four events declare several variants behind one template, because
+    one call selects among correlated shapes (`tool_call`'s classifier,
+    `provider_fields`' independently conditional keys). That is lawful
+    and necessary, and it stays lawful precisely while the shapes are
+    disjoint: the emitter requires exactly one full match, so two
+    variants admitting one payload would be an emission the registry
+    describes twice, a generated reference claiming two shapes where one
+    record exists, and an outcome that depended on declaration order.
+
+    The emitter refuses such an emission at run time (M2, PR #169's
+    review). This refuses the declaration, which is where it can be
+    fixed."""
+    found = {
+        name: ambiguities(spec)
+        for name, spec in REGISTRY.items()
+        if ambiguities(spec)
+    }
+
+    assert found == {}
+
+
+def test_the_ambiguity_check_sees_a_duplicated_variant() -> None:
+    """The guard, on a planted registry, since a guard nobody has seen
+    fail is a guard nobody has seen. Both spellings of the failure: the
+    same variant twice, and one variant whose optional field makes its
+    shapes a superset of another's."""
+    variant = REGISTRY["speaking_started"].variants[0]
+    twice = schema.EventSpec("twice", variants=(variant, variant))
+
+    optional = dataclasses.replace(
+        variant,
+        fields={
+            **variant.fields,
+            "agent": dataclasses.replace(variant.fields["agent"], required=False),
+        },
+    )
+    widened = schema.EventSpec("widened", variants=(variant, optional))
+
+    assert ambiguities(twice)
+    assert ambiguities(widened)
+    # And the shape they collide on is the one both admit, not a
+    # coincidence of the comparison.
+    assert frozenset({"agent"}) in {shape for _, shape in ambiguities(widened)}
 
 
 def test_the_counts_every_document_repeats() -> None:
