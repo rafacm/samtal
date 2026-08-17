@@ -149,10 +149,13 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   SDK's loggers and turn propagation off at the root of its namespace,
   as a side effect of the import, so a tool that imported it to read a
   type paid for it too. The same filters and the same propagation are
-  now `transport.quiet_sdk_loggers()`, idempotent and called as the
-  first act of a manager start and again where a registry is built,
-  which is ahead of every connection on every path. What a third-party
-  server's own client writes still reaches no handler of ours.
+  now `transport.quiet_sdk_loggers()`, called where a manager creates
+  the task one connection lives in. That is the one place a connect is
+  ever begun, and it is the boundary for a reason: a start is not the
+  only way in, since a session opening revives a down server through a
+  background reconnect that comes straight there. What a third-party
+  server's own client writes still reaches no handler of ours, on
+  either path.
 - **The domain configuration's schema is single-sourced** (#139, M5).
   With this, #139 is done. A domain entity was spelled at 14 to 19
   places across 12 to 14 files, and adding the most recent kind

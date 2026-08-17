@@ -28,6 +28,7 @@ from samtal_server.tools.mcp import (
     DISCOVERY_FAILED,
     DOWN,
     DROPPED_AFTER_FAILED_CALL,
+    SDK_LOGGERS,
     STOPPED,
     TRANSPORT_FAILED,
     UNUSED,
@@ -125,6 +126,69 @@ async def test_a_server_that_came_back_is_reconnected_in_the_background() -> Non
         assert await manager.call("tools__secret_word", {}) == ("rhubarb", False)
     finally:
         await manager.stop()
+
+
+@pytest.fixture
+def unquieted() -> Iterator[None]:
+    """The SDK's loggers as a process that has quieted nothing holds
+    them.
+
+    The quieting is process-wide and every suite that starts a manager
+    installs it, so a test about when it is installed has to put the
+    state back first or it reads whatever ran before it rather than
+    what the code does.
+    """
+    root = logging.getLogger("mcp")
+    held = [(logging.getLogger(name), list(logging.getLogger(name).filters))
+            for name in SDK_LOGGERS]
+    propagating = root.propagate
+    for child, _ in held:
+        child.filters = []
+    root.propagate = True
+    try:
+        yield
+    finally:
+        for child, filters in held:
+            child.filters = list(filters)
+        root.propagate = propagating
+
+
+async def test_a_background_reconnect_quiets_the_sdk_before_it_connects(
+    caplog: pytest.LogCaptureFixture, unquieted: None
+) -> None:
+    """A session opening revives a down server, and that path begins a
+    connection without going through `start`.
+
+    So the quieting belongs where the task is created rather than at
+    either caller: a process whose first connect is a background
+    reconnect would otherwise talk to a server with the SDK's own
+    loggers still reaching every handler of ours, which is where a
+    session id a server picked, and a traceback quoting the bytes it
+    tripped on, would land. Asserted before the task has run as well as
+    after the connect, because the ordering is the whole of the
+    property.
+    """
+    manager = McpServerManager("tools", stdio_entry())
+
+    with caplog.at_level(logging.DEBUG):
+        manager.ensure_reconnecting()
+        # Nothing has been awaited since, so the task that line created
+        # has not run: this is the rule in force BEFORE the connect
+        # rather than somewhere during it.
+        assert not logging.getLogger("mcp").propagate
+        try:
+            async with asyncio.timeout(20):
+                while not manager.up:
+                    await asyncio.sleep(0.05)
+            for name in SDK_LOGGERS:
+                logging.getLogger(name).warning("the session id a server picked")
+        finally:
+            await manager.stop()
+
+    assert [record for record in caplog.records if record.name.startswith("mcp.")] == []
+    # And the reconnect said so on this server's own logger, so the
+    # absence above is an absence from a log something was written to.
+    assert [record for record in caplog.records if record.name == MANAGER_LOGGER]
 
 
 async def test_a_stopped_server_leaves_no_child_behind() -> None:

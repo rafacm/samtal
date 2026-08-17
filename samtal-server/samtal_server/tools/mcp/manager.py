@@ -266,11 +266,6 @@ class McpServerManager:
     async def start(self) -> None:
         """Connect and list the tools, or log why not. Never raises: a
         dead server is not a boot failure."""
-        # Ahead of the first connection this process makes, and here
-        # rather than only where a registry is built, because a manager
-        # is started on its own by several suites and by nothing that
-        # would think to ask for the quieting first.
-        quiet_sdk_loggers()
         self._begin()
         await self._settled.wait()
 
@@ -391,6 +386,19 @@ class McpServerManager:
         self._begin()
 
     def _begin(self) -> None:
+        """Create the task one run of this server lives in.
+
+        The one place a connection is ever begun, which is why the SDK
+        quieting is here rather than at a caller. `start` is not the
+        only public way in: a session opening revives a down server
+        through `ensure_reconnecting`, which comes straight here, so a
+        rule installed in `start` would leave a process whose first
+        connect is a background reconnect talking to a server with the
+        SDK's own loggers still reaching every handler of ours.
+        """
+        # Before the task exists rather than inside it, so the rule is
+        # in force at the instant a connect becomes reachable.
+        quiet_sdk_loggers()
         self._settled = asyncio.Event()
         self._task = asyncio.create_task(self._run(), name=f"mcp-{self._name}")
 
