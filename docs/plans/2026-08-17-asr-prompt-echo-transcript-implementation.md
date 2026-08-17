@@ -138,16 +138,27 @@ inside the one test:
 ```
 
 The plan's risk (a second consumer of the wording) did not
-materialize. After the change, the old template text appears nowhere:
+materialize. After the change, the old template text survives in no
+live code and no test. Run from the repository root, so the paths are
+the ones written here:
 
 ```
-$ grep -n 'the retry recovered "' tests/unit/test_server_event_pins.py tests/unit/test_event_surface_pins.py; echo "exit=$?"
-exit=1
-$ grep -rn 'the retry recovered "' tests/; echo "exit=$?"
-exit=1
-$ grep -rn 'the retry recovered "' --include='*.py' --include='*.md' .   # the whole repository
+$ grep -rn 'the retry recovered "' samtal-server/samtal_server samtal-server/tests; echo "exit=$?"
 exit=1
 ```
+
+Widened to every tracked file, with this record excluded, since the
+document quotes the old template in the diff and the red-run excerpts
+above and would otherwise match itself:
+
+```
+$ git grep -n 'the retry recovered "' -- . ':(exclude)docs/plans/2026-08-17-asr-prompt-echo-transcript-implementation.md'; echo "exit=$?"
+exit=1
+```
+
+The exclusion is the whole of the difference: this file is the only
+place in the repository the retired sentence still appears, which is
+what a historical record is for.
 
 ### The sentinel, red then green
 
