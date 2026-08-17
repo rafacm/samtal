@@ -47,6 +47,7 @@ from samtal_server.build_info import revision
 from samtal_server.config import Config
 from samtal_server.config.models import (
     BOARD_LIMIT,
+    CLIENT_ID_LIMIT,
     FIRMWARE_LIMIT,
     bounded_descriptor,
     normalize_mac,
@@ -254,12 +255,20 @@ async def check_version(request: Request) -> Response:
     # moves.
     said_board = bounded_descriptor(board, BOARD_LIMIT) or "unknown"
     said_version = bounded_descriptor(version, FIRMWARE_LIMIT) or UNKNOWN_VERSION
+    # And the same for the client id, for the same reason and with one
+    # difference: the header is required above, so it is never empty
+    # here, but nothing has bounded it. It is the device UUID the token
+    # is signed for, so `token_for` below keeps the header exactly as it
+    # arrived; what the event carries is the bounded copy, and null
+    # where nothing printable survived, since a field that says nothing
+    # is more honest than one that says the empty string.
+    said_client = bounded_descriptor(client_id, CLIENT_ID_LIMIT) or None
     # No session exists yet, so the structured record carries the device
     # rather than a session id; the websocket events pick the device up
     # from here.
     fields: dict[str, Any] = {
         "device": mac,
-        "client": client_id,
+        "client": said_client,
         "board": said_board,
         "firmware": said_version,
         "agents": agents,

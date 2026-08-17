@@ -39,8 +39,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from samtal_server.app import create_app
+from samtal_server.auth import build_device_auth
 from samtal_server.config import Config
-from samtal_server.config.models import BOARD_LIMIT, FIRMWARE_LIMIT
+from samtal_server.config.models import BOARD_LIMIT, CLIENT_ID_LIMIT, FIRMWARE_LIMIT
 from samtal_server.events import Emission, attach_server_tap, detach_server_tap
 from samtal_server.logs import JsonFormatter
 from samtal_server.ota import OTA_PATH
@@ -294,3 +295,72 @@ def test_the_json_record_carries_the_bounded_copy_and_nothing_else(
     assert written["board"].isprintable()
     assert len(written["board"]) <= BOARD_LIMIT
     assert REJECTED not in json.dumps(written)
+
+
+# --- ota.py: the Client-Id header a check-in carries ------------------
+
+
+HOSTILE_CLIENT = f"{ADMISSIBLE}\r\n\x1b[2J" + "z" * 400 + REJECTED
+
+
+def test_ota_check_bounds_the_client_id_it_was_sent(
+    caplog: pytest.LogCaptureFixture, tap: Tap
+) -> None:
+    """The Client-Id header is required but nothing bounds it, and this
+    endpoint is unauthenticated, so the event carries a bounded copy."""
+    with caplog.at_level(logging.INFO):
+        response = ota_client().post(
+            OTA_PATH,
+            json=SYSTEM_INFO,
+            headers={"Device-Id": DEVICE_MAC, "Client-Id": HOSTILE_CLIENT},
+        )
+
+    assert response.status_code == 200
+    held = fields_of(only(caplog, "ota_check"))["client"]
+    assert len(held) <= CLIENT_ID_LIMIT
+    assert held.isprintable()
+    assert carrying(caplog, REJECTED) == set()
+    assert REJECTED not in both_formats(caplog)
+    assert REJECTED not in tap.rendered()
+
+
+def test_a_client_id_of_nothing_but_unprintables_is_null(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A field that says nothing is more honest than one that says the
+    empty string."""
+    with caplog.at_level(logging.INFO):
+        ota_client().post(
+            OTA_PATH,
+            json=SYSTEM_INFO,
+            headers={"Device-Id": DEVICE_MAC, "Client-Id": "\x07\x1b\x00"},
+        )
+
+    assert fields_of(only(caplog, "ota_check"))["client"] is None
+
+
+def test_the_token_is_still_signed_for_the_header_as_it_arrived(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Event-only again: the device UUID a token is signed for is the
+    header, so a bounded copy in the reply would hand the device a token
+    its own next handshake could not present."""
+    config = Config(
+        providers=MOCK_PROVIDERS,
+        agents={"assistant": MOCK_AGENT},
+        devices={NORMALIZED: "assistant"},
+    )
+    client = TestClient(create_app(config))
+
+    with caplog.at_level(logging.INFO):
+        answered = client.post(
+            OTA_PATH,
+            json=SYSTEM_INFO,
+            headers={"Device-Id": DEVICE_MAC, "Client-Id": HOSTILE_CLIENT},
+        ).json()
+
+    auth = build_device_auth(config)
+    assert auth is not None
+    assert auth.verify(answered["websocket"]["token"], HOSTILE_CLIENT, NORMALIZED)
+    # And the event still says nothing a stranger chose.
+    assert carrying(caplog, REJECTED) == set()
