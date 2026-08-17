@@ -65,9 +65,12 @@ main@f35001a, after #120's M5 narrowing and #144, the surface is:
   attributes rather than the exact channel, sentence, arguments and
   payload. M1 therefore adds a pre-enforcement characterization pin
   file (`tests/unit/test_conversations_event_pins.py`, in the exact
-  style of the two contract files) covering the five store paths
-  and any other post-baseline path a diff of pinned event names
-  against the inventory turns up, committed green BEFORE any
+  style of the two contract files) covering the five store paths,
+  with the coverage comparison PATH-BASED rather than name-based:
+  the two contract files hold 76 literal per-path expectations,
+  the five store paths complete the 81, and the conformance test
+  asserts that correspondence so an unpinned new path for an
+  existing event name is caught; committed green BEFORE any
   enforcement exists, so M2's strict lanes stand on pins for the
   whole surface. The two existing files stay byte-unchanged.
 - **One session channel and 13 server channels**: `SessionEvents`
@@ -359,9 +362,10 @@ absent from all the surfaces above, in both modes.
   `schema_violation` emission. Multiple simultaneous violations
   therefore have one defined outcome, reached the same way every
   time. Behind the matrix sits a LAST-RESORT GUARD:
-  in forgiving mode the whole validation runs under its own
-  `try/except`, so a bug inside the validator itself cannot raise
-  on a reply path. The guard does not degrade the caller's
+  in forgiving mode the WHOLE enforcement-and-recovery path
+  (candidate selection, validation, rebuild, and matrix
+  application alike) runs under one `try/except`, so a bug
+  anywhere inside it cannot raise on a reply path. The guard does not degrade the caller's
   payload, because the caller's payload is exactly what could not
   be judged: it constructs a FRESH emission from whole cloth, the
   fixed event token `schema_violation`, the emitter's own trusted
@@ -376,7 +380,11 @@ absent from all the surfaces above, in both modes.
   matrix, an injected validator raising a sentinel-bearing
   exception combined with a hostile event name, a hostile key, a
   hostile value, a hostile message, and hostile args, asserting
-  the reply survives and no sentinel appears on any surface.
+  the reply survives and no sentinel appears on any surface; and
+  one non-injected combined-violation sentinel emits hostile key,
+  value, message and args together through the ordinary forgiving
+  path, proving the algorithm's one defined outcome without any
+  fault injection.
 - The switch is `SAMTAL_EVENTS_ENFORCEMENT` (`strict` or
   `forgiving`), held in a module flag with a setter, and it is
   APPLICATION CONSTRUCTION that resolves it: `create_app` invokes
@@ -457,8 +465,13 @@ itself the conformance proof running continuously.
 `test_event_surface_guard.py`:
 
 - An AST walk over `samtal_server/` collects every emitter call
-  with an `event=` literal and asserts the name is declared and
-  every statically-named keyword field is declared for it.
+  with an `event=` literal and keys conformance BY SOURCE CALL:
+  each of the 81 sites (branch by branch where one site emits
+  more than one shape) must map to exactly one declared variant,
+  matching the module's channel, the method-derived level, the
+  byte-exact template, the positional arity and argument kinds,
+  the statically-named fields, and the named spread inventory; a
+  site matching no variant, or two, fails naming the site.
 - Coverage is TWO-WAY, because containment alone would let a
   surplus declared field sit unused as a permanent enlargement of
   the allowlist: every declared non-base field must be evidenced,
