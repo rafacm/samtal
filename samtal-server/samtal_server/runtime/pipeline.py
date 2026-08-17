@@ -77,9 +77,10 @@ from samtal_server.runtime import prompt
 from samtal_server.runtime.speech import _Synthesis, speak_after
 from samtal_server.runtime.turns import BUILTIN, MCP, TurnUnderway, tool_source
 from samtal_server.text import SentenceSplitter
-from samtal_server.tools import builtin, names
+from samtal_server.tools import names
 from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
+from samtal_server.tools.source import BuiltinTools, DeviceTools, McpTools, ToolSource
 
 # How many times one reply may stream, call tools, and stream again.
 # The last permitted round forbids calling, so a reply always ends in
@@ -275,6 +276,19 @@ class PipelineRuntime:
         self._filler_sounding = False
         self._filler_fires = 0
         self._agents = list(agents)
+        # The three places a tool can come from, asked in the order the
+        # namespace gives them: builtins are bare, the device's tools
+        # carry its prefix, an MCP server's carry their entry's, and
+        # configuration forbids an entry from taking either of the other
+        # groups' names, so no two of these can own one name and the
+        # order settles nothing that was in doubt. Each is handed the
+        # default bound rather than reading it, so how long a builtin or
+        # a device tool may take stays this module's answer.
+        self._sources: tuple[ToolSource, ...] = (
+            BuiltinTools(self._agents, memory, DEFAULT_TOOL_TIMEOUT_S),
+            DeviceTools(output, DEFAULT_TOOL_TIMEOUT_S),
+            McpTools(mcp_servers, DEFAULT_TOOL_TIMEOUT_S),
+        )
         # The activation the connect used to do by hand, and the MCP
         # revive that followed it, in that order. No task is spawned
         # here: the reply task is created on the first utterance, and
@@ -1050,22 +1064,18 @@ class PipelineRuntime:
         apply, the device's tools once discovery has finished, and the
         tools of the MCP servers it is granted that are up.
 
+        Each source answers for itself, in the fixed order they were
+        built in, so the merged list is the same list it always was and
+        this method holds no rule about any one of them.
+
         Taken per reply rather than per session, so a server that came
         back, a device that finished discovering and a reload that
-        landed mid-conversation are all picked up on the next utterance.
-        Which servers the agent is granted is the registry's answer
-        rather than this session's configuration, for the same reason:
-        the grants are what a reload swaps."""
+        landed mid-conversation are all picked up on the next
+        utterance."""
         assert self._agent is not None
         tools: list[ToolDef] = []
-        # A device bound to one agent has nowhere to switch, so it gets
-        # no dead tool.
-        if len(self._agents) > 1:
-            tools.append(builtin.switch_agent_tool(self._agents))
-        if self._memory is not None:
-            tools.append(builtin.remember_tool())
-        tools.extend(self._output.device_tools())
-        tools.extend(self._mcp_servers.tools_for_agent(self._agent))
+        for source in self._sources:
+            tools.extend(source.snapshot(self._agent))
         return tools
 
     async def _run_tools(
@@ -1231,14 +1241,19 @@ class PipelineRuntime:
         )
 
     async def _dispatch(self, call: ToolCall, classified: ToolInvocation) -> tuple[str, bool]:
-        """Route a call by the structure of its name: builtins are bare,
-        the device's tools are the ones it listed, and everything else
-        carries its MCP server entry as a prefix.
+        """Hand a call to the source that owns it, or answer it here.
+
+        Two answers are nobody's tool to give and stay: a call whose
+        arguments the model never closed, which no source should be
+        asked to run, and a name none of them claims, which is what the
+        model invented one looks like.
 
         `classified` is the answer `_run_one` already has, passed in
-        rather than recomputed: the one line here that says anything
-        about the call describes it exactly as its `tool_call` event
-        does, and two classifications of one call could disagree."""
+        rather than recomputed, and it is the whole of what a source is
+        told: the one line here that says anything about the call
+        describes it exactly as its `tool_call` event does, two
+        classifications of one call could disagree, and a source that
+        resolved the name again could route around the reservation."""
         if call.malformed_arguments is not None:
             # A plain line and not an event, and it obeys the same rule
             # as the event beside it (#120): the size of what the model
@@ -1258,44 +1273,25 @@ class PipelineRuntime:
                 len(call.malformed_arguments),
             )
             return "the arguments were not a JSON object; call again with valid ones", True
-        if call.name == names.REMEMBER and self._memory is not None:
-            assert self._agent is not None
-            return await builtin.remember(self._memory, self._agent, call.arguments), False
-        if any(tool.name == call.name for tool in self._output.device_tools()):
-            return await self._output.call_device_tool(call.name, call.arguments)
-        if classified.source == MCP and classified.entry is not None:
-            assert self._agent is not None
-            # The entry the reservation named, not whoever owns the name
-            # by the time this line runs: a reload between the two can
-            # move a published name to a more specific entry, and
-            # following it would run one server's tool under another
-            # server's timeout and then record and log the entry that
-            # did not run it. The registry refuses a name that has moved
-            # rather than rerouting it (`McpServerDown`), which arrives
-            # here as the error result any failed tool produces.
-            #
-            # The agent goes with the call too: the registry checks its
-            # grant again there, so a tool the snapshot withheld is
-            # refused rather than run when a model asks for it anyway.
-            return await self._mcp_servers.call(
-                call.name, call.arguments, self._agent, classified.entry
-            )
+        assert self._agent is not None
+        for source in self._sources:
+            if source.owns(classified):
+                return await source.dispatch(classified, self._agent)
         return f'there is no tool called "{call.name}"', True
 
     def _timeout_for(self, classified: ToolInvocation) -> float:
-        """A server tool gets its entry's configured timeout; builtins
-        and device tools the module default.
+        """How long this call may take, answered by the source that owns
+        it: a server tool gets its entry's configured timeout, builtins
+        and device tools the module default above.
 
-        Which entry that is comes from the reservation, which is the
-        same answer the dispatch below routes by and the same one the
-        event and the row carry, so a tool cannot be run against one
-        entry's timeout and dispatched to another. Asking the registry
-        again here is what used to make that possible: a reload landing
-        between the two answers differently."""
-        if classified.entry is not None:
-            configured = self._mcp_servers.timeout_for(classified.entry)
-            if configured is not None:
-                return configured
+        Asked of the same claim the dispatch routes by, so a tool cannot
+        be run against one entry's timeout and dispatched to another.
+        Asking the registry by name here is what used to make that
+        possible: a reload landing between the two answers
+        differently."""
+        for source in self._sources:
+            if source.owns(classified):
+                return source.timeout_for(classified)
         return DEFAULT_TOOL_TIMEOUT_S
 
     async def _system_prompt(self) -> str:
