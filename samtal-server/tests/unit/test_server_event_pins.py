@@ -1745,12 +1745,12 @@ async def test_asr_prompt_echo_recovered(caplog: pytest.LogCaptureFixture) -> No
         "logger": "samtal_server.providers.openai_asr",
         "level": logging.INFO,
         "template": (
-            'openai asr: the retry recovered "%s" from %.2f s of audio the echo guard would have '
+            "openai asr: the retry recovered %.2f s of audio the echo guard would have "
             "discarded"
         ),
-        "args": ("Yes, please.", 1.0),
+        "args": (1.0,),
         "sentence": (
-            'openai asr: the retry recovered "Yes, please." from <n> s of audio the '
+            "openai asr: the retry recovered <n> s of audio the "
             "echo guard would have discarded"
         ),
         "fields": {

@@ -366,10 +366,16 @@ class OpenAiAsr(AsrProvider):
                 **self._echo_fields("confirmed_empty", duration_s, retry_ms),
             )
             return ""
+        # The recovered transcript is not in the sentence, and naming
+        # that one exists would add no diagnostic the fields lack.
+        # Conversation-derived text is banned on the events without
+        # exception (the content-and-telemetry ADR, as amended
+        # 2026-08-17), however it was recovered; what was said reaches
+        # the session below and, when recording is on, the conversation
+        # store, which is the surface that holds content.
         events.info(
-            'openai asr: the retry recovered "%s" from %.2f s of audio '
+            "openai asr: the retry recovered %.2f s of audio "
             "the echo guard would have discarded",
-            retry,
             duration_s,
             event="asr_prompt_echo",
             **self._echo_fields("recovered", duration_s, retry_ms),
