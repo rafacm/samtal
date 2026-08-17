@@ -990,3 +990,68 @@ $ diff -u ../docs/reference/api-openapi.json "$RUNNER_TEMP/api-openapi.json"
   is history: this plan's own verification clause, and the plan and
   implementation doc of #144, which built the bridge for this milestone
   to delete.
+
+### PR review round
+
+External review of PR #175 by codex (model gpt-5.6-sol), 2026-08-17.
+Two findings, both accepted, each fixed in its own commit:
+
+1. **P2: the loader's command map is still handwritten.** The plan's
+   command-strings section assigns `loader.py` to this milestone: the
+   descriptor's `command` becomes the one source for the two code
+   encodings of a command string, and the milestone's brief omitted it,
+   so `MOVED_KEY_COMMANDS` still held seven strings byte-identical to
+   the seven the reference prints. `test_config_entities.py` said out
+   loud that the duplication should survive only until M4.
+
+   *Resolution*: fixed in `add8368`. `MOVED_KEY_COMMANDS` is a dict
+   comprehension over `entities.ENTITIES` keyed by `moved_key`, merged
+   with one over `entities.SETTINGS` keyed by `name`, which are the two
+   halves of `DOMAIN_KEYS`. The `Setting` tier already carried
+   `command` from M1, so nothing had to be filled. `loader.py` now
+   imports `entities`, which imports the models and `responses.py` and
+   nothing else, so no cycle and no new dependency: `entities` sits
+   below `loader` exactly as the models do. The map is byte for byte
+   what it was, checked field by field against the handwritten literal
+   before the commit, and both refusal builders are untouched.
+
+   What happened to the coherence test: it would have become a
+   comparison of the derivation against itself, so it moved down a
+   level rather than staying vacuous.
+   `test_the_registry_carries_the_loaders_moved_key_commands` is now
+   `test_the_loader_quotes_each_kinds_command_in_full`, which writes a
+   file carrying each moved section in turn, loads it through
+   `load_file_config`, and asserts the whole command string appears in
+   the refusal under `write it with: `. That is the claim the table
+   comparison was making, stated where it cannot be tautological: what
+   the derivation has to preserve is the sentence an operator reads.
+   `test_config.py`'s `set(MOVED_KEY_COMMANDS) == set(DOMAIN_KEYS)` is
+   the other half and needed no change, since a descriptor with a wrong
+   `moved_key` fails it. The new test was checked against a deliberate
+   divergence: truncating the quoted command to twenty characters in
+   `_check_moved_keys` fails it. The collected count is unchanged at
+   2954, one test replacing one test.
+
+2. **P3: the predicate-removal counts disagree.** The changelog said
+   five frozensets plus a state vocabulary, which counts
+   `STATUS_STATES` twice and one constant too many, and the
+   implementation doc said nine predicate functions in the inherited
+   inventory while enumerating ten in the M4 section.
+
+   *Resolution*: fixed in `fdd2626`. Both documents now say four
+   predicate frozensets and ten predicate functions deleted, with
+   `RELOAD_OUTCOMES` named as the fifth constant that stayed, derived.
+   The inventory's nine is corrected where it is written, under that
+   section's own rule that a number moving under a later milestone is a
+   finding rather than a typo. The 2026-08-16 changelog entry
+   describing #144's pins carries the same loose "five frozensets" and
+   was left alone: it is a dated record of what was written then.
+
+Re-run after both commits, from `samtal-server/`:
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/unit -q`: `2938 passed, 16 skipped in 305.63s`,
+  collection unchanged at 2954.
+- Both generated references regenerate byte-identical, which is the
+  proof that matters for the first finding: the reference prints the
+  same `command` the loader now quotes, and it did not move.
