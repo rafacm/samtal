@@ -39,7 +39,8 @@ from sqlalchemy import Connection, Engine, Row, Table, delete, insert, select, u
 from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.sql.elements import ColumnElement
 
-from samtal_server.config.entities import NO_SUCH_FRAGMENT
+from samtal_server.config import entities
+from samtal_server.config.entities import NO_SUCH_FRAGMENT, EntityDescriptor
 from samtal_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
@@ -799,12 +800,61 @@ def _database_problem(exc: SQLAlchemyError) -> ConfigError:
     return StorageError(f"the configuration database could not be read or written: {detail}")
 
 
+# Rows and the kinds they hold
+#
+# One kind is one table, one row mapping and one location, and all three
+# are the descriptor's. The default mapping is the model itself: every
+# declared field is a column of the same name, so validating the row
+# against the model is the whole of it. A hook is what a kind pays where
+# its model asks for something a dump cannot say, which the inventory
+# found for three of the five, and each of those is filled below beside
+# the code it is.
+
+_PROVIDER = entities.descriptor("provider")
+_SINGLETON = entities.descriptor("agent-defaults")
+
+# The kinds a whole read walks one row per name. The provider is not one
+# of them, because its rows are grouped by stage and the group is
+# checked with a sentence of its own; neither is the singleton, which is
+# one row and is read after the rest.
+_KEYED_BY_NAME = tuple(
+    descriptor for descriptor in entities.ENTITIES if descriptor.addressing == ("name",)
+)
+
+
+def _table(descriptor: EntityDescriptor) -> Table:
+    """The table one kind is rowed in. The descriptor names it rather
+    than holding it, since the registry is read by a command that has no
+    database to open."""
+    return getattr(schema, descriptor.table)
+
+
+def _location(descriptor: EntityDescriptor, *identity: str) -> str:
+    """Where an entry is written in the configuration document, which is
+    what every refusal about it names: the section it lives in, and the
+    parameters that address one entry under it."""
+    return ".".join((descriptor.moved_key, *identity))
+
+
+def _from_row(descriptor: EntityDescriptor, row: Row) -> BaseModel:
+    """One stored row as its model, through the kind's own mapping where
+    it has one and through the model itself where it does not."""
+    if descriptor.from_row is not None:
+        return descriptor.from_row(row)
+    identity = tuple(getattr(row, part) for part in descriptor.addressing)
+    return _stored(
+        descriptor.model,
+        _location(descriptor, *identity),
+        {name: getattr(row, name) for name in descriptor.model.model_fields},
+    )
+
+
 # Reading rows
 
 
 def _read_domain(connection: Connection) -> DomainConfig:
     providers: dict[str, dict[str, ProviderConfig]] = {stage: {} for stage in PROVIDER_STAGES}
-    for row in connection.execute(select(schema.providers)):
+    for row in connection.execute(select(_table(_PROVIDER))):
         if row.stage not in providers:
             # A stored row, not an argument: the same sentence the stage
             # check raises for a caller's typo, but nothing the caller
@@ -813,27 +863,29 @@ def _read_domain(connection: Connection) -> DomainConfig:
                 f'providers.{row.stage}.{row.name}: "{row.stage}" is not a provider '
                 f"stage; expected one of: " + ", ".join(PROVIDER_STAGES)
             )
-        providers[row.stage][row.name] = _provider_from_row(row)
+        providers[row.stage][row.name] = _from_row(_PROVIDER, row)
 
     # The rows are read one by one above and assembled here, and the
     # assembly validates too: an entry name, a MAC or a binding that
     # cannot be read is as much a stored-state failure as a column of
     # the wrong shape.
+    #
+    # The kinds keyed by a name come from the registry, in the order it
+    # lists them, which is the order this document has always had and
+    # the order a bad row's refusal has always come out in. Arguments
+    # are evaluated left to right, so the providers are assembled first
+    # and the devices last, exactly as when each kind was named here.
     domain: DomainConfig | None = None
     problem: str | None = None
     try:
         domain = DomainConfig(
             providers=ProvidersConfig(**providers),
-            mcp_servers={
-                row.name: _mcp_from_row(row)
-                for row in connection.execute(select(schema.mcp_servers))
-            },
-            prompt_fragments={
-                row.name: _fragment_from_row(row)
-                for row in connection.execute(select(schema.prompt_fragments))
-            },
-            agents={
-                row.name: _agent_from_row(row) for row in connection.execute(select(schema.agents))
+            **{
+                descriptor.moved_key: {
+                    row.name: _from_row(descriptor, row)
+                    for row in connection.execute(select(_table(descriptor)))
+                }
+                for descriptor in _KEYED_BY_NAME
             },
             devices={
                 row.mac: _list(f"devices.{row.mac}", "agents", row.agents)
@@ -845,11 +897,9 @@ def _read_domain(connection: Connection) -> DomainConfig:
     if domain is None:
         raise StorageError(problem)
 
-    defaults = connection.execute(select(schema.agent_defaults)).first()
+    defaults = connection.execute(select(_table(_SINGLETON))).first()
     if defaults is not None:
-        domain.agent_defaults = _stored(
-            AgentDefaults, "agent_defaults", _layer_data("agent_defaults", defaults)
-        )
+        domain.agent_defaults = _from_row(_SINGLETON, defaults)
     default_agent = connection.execute(
         select(schema.domain_settings.c.value).where(
             schema.domain_settings.c.key == schema.DEFAULT_AGENT_KEY
@@ -925,16 +975,14 @@ def _mcp_from_row(row: Row) -> McpServerConfig:
     return _stored(McpServerConfig, location, data)
 
 
-def _fragment_from_row(row: Row) -> PromptFragmentConfig:
-    return _stored(
-        PromptFragmentConfig, f"prompt_fragments.{row.name}", {"text": row.text}
-    )
-
-
 def _agent_from_row(row: Row) -> AgentConfig:
     location = f"agents.{row.name}"
     data = {"prompt": row.prompt or "", **_layer_data(location, row)}
     return _stored(AgentConfig, location, data)
+
+
+def _defaults_from_row(row: Row) -> AgentDefaults:
+    return _stored(AgentDefaults, "agent_defaults", _layer_data("agent_defaults", row))
 
 
 def _layer_data(location: str, row: Row) -> dict[str, object]:
@@ -956,6 +1004,20 @@ def _layer_data(location: str, row: Row) -> dict[str, object]:
     if row.prompt_includes is not None:
         data["prompt_includes"] = _list(location, "prompt_includes", row.prompt_includes)
     return data
+
+
+# Which table each kind is rowed in, and how a row of it is read. The
+# three mappings a model demands are the ones above, unchanged: the MCP
+# server's per-column omissions, which are what lets its transport
+# validator read `model_fields_set`; the layer's tri-state, where None
+# inherits and an empty list opts out; and the provider's split between
+# its declared fields and the options extras. A prompt fragment names no
+# mapping because its model is the whole of it.
+entities.fill("provider", table="providers", from_row=_provider_from_row)
+entities.fill("mcp-server", table="mcp_servers", from_row=_mcp_from_row)
+entities.fill("prompt-fragment", table="prompt_fragments")
+entities.fill("agent", table="agents", from_row=_agent_from_row)
+entities.fill("agent-defaults", table="agent_defaults", from_row=_defaults_from_row)
 
 
 def _mapping(location: str, column: str, value: object) -> dict[str, object]:
