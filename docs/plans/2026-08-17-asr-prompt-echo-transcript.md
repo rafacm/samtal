@@ -50,13 +50,24 @@ expected.
   (`tests/unit/test_providers_openai_asr.py`, which already owns
   the echo-guard scenarios): the fake answers the retry with
   `sk-test-...never-a-real-credential`-shaped text, and the test
-  asserts the value appears in no log record's message, args, or
-  fields, in either format, while the transcription result still
-  carries it (the session is supposed to hear it; the log is not).
+  covers both retained surfaces the emitter serves, because a
+  clean `LogRecord` does not prove a clean consumer (the server
+  pin suite says exactly this about its own sentinels): a server
+  tap is attached and the sentinel asserted absent from
+  `Emission.message`, `Emission.args`, and `Emission.payload`,
+  and every log record's raw and rendered message, args, extracted
+  fields, and both format renderings are checked the same way,
+  with the test also asserting the tap and the recovered event
+  were actually observed (a sentinel test that saw no event proves
+  nothing). The transcription result still carries the text: the
+  session is supposed to hear it; the surfaces are not.
 - **One milestone, one PR**, branch `fix/asr-prompt-echo-transcript`.
-  This is a surface narrowing, so the changelog entry goes under
-  Changed with the breaking framing the ADR's note prescribes,
-  alongside the entry #120's narrowings used.
+  This is a surface narrowing, so the changelog gets a
+  `**Breaking:**` bullet under 2026-08-17's Changed, modeled on
+  the 2026-08-16 narrowing entries, and the SAME change updates
+  the existing ADR-amendment bullet that says the violation "is
+  scheduled for removal": once this lands that sentence is stale,
+  so it is rewritten to say the narrowing landed here.
 
 ## Files touched
 
@@ -88,3 +99,28 @@ implementation doc.
 - [ ] M1: the sentence narrows: template down to one argument, pin
       updated, sentinel proof in the provider suite, CHANGELOG
       entry; both lanes green.
+
+## Plan review round
+
+External review of commit da3a93d by codex 0.147.0 (model
+gpt-5.6-sol), 2026-08-17. Two findings, verdict ready after the
+amendments:
+
+1. **P2: the sentinel omits the event-consumer surface.** Server
+   taps receive a distinct `Emission` before logging, and the pin
+   suite itself says a clean `LogRecord` does not prove a clean
+   consumer.
+
+   *Resolution*: accepted. The sentinel now attaches a server tap
+   and asserts absence from `Emission.message`, `args`, and
+   `payload` as well as every log surface, and asserts the tap and
+   the recovered event were actually observed. Amended in the
+   sentinel decision.
+
+2. **P2: the changelog plan leaves a stale "scheduled for
+   removal" claim.** The 2026-08-17 ADR bullet describes this
+   narrowing as future work, which this change makes false.
+
+   *Resolution*: accepted. The same change rewrites that bullet to
+   say the narrowing landed here, beside the new `**Breaking:**`
+   #165 bullet. Amended in the milestone decision.
