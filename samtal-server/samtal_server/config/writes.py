@@ -17,6 +17,7 @@ act differently.
 
 from collections.abc import Sequence
 
+from samtal_server.config import entities
 from samtal_server.config.secrets import EntityKind
 
 # Printed after most mutating commands, and answered with most
@@ -134,7 +135,39 @@ def cleared_secret(location: str) -> str:
 
 WROTE_AGENT_DEFAULTS = "agent-defaults"
 
+
+def wrote_agent_defaults() -> str:
+    """The singleton's acknowledgement, which names no entry because
+    there is only the one. A function so that it answers to the same
+    call every other kind's does, and the constant beside it so that
+    nothing has to be rewritten to keep saying it."""
+    return WROTE_AGENT_DEFAULTS
+
+
 CLEARED_DEFAULT_AGENT = "default agent cleared; the devices map is now the allowlist"
+
+
+# What a write of one kind says it did, and when it applies, hung on the
+# kind so that both write paths ask one place instead of choosing at
+# their own call site. The notice is a fact of the kind and not of the
+# route: an MCP server and the credentials stored on it are exactly what
+# a reload re-reads, and everything else waits for the restart that
+# reads the configuration again, which is the same rule
+# `secret_notice` states for the two kinds that can hold a secret.
+entities.fill(
+    "provider", wrote=wrote_provider, deleted=deleted_provider, notice=RESTART_NOTICE
+)
+entities.fill(
+    "mcp-server", wrote=wrote_mcp_server, deleted=deleted_mcp_server, notice=MCP_RELOAD_NOTICE
+)
+entities.fill(
+    "prompt-fragment",
+    wrote=wrote_prompt_fragment,
+    deleted=deleted_prompt_fragment,
+    notice=RESTART_NOTICE,
+)
+entities.fill("agent", wrote=wrote_agent, deleted=deleted_agent, notice=RESTART_NOTICE)
+entities.fill("agent-defaults", wrote=wrote_agent_defaults, notice=RESTART_NOTICE)
 
 
 __all__ = [
@@ -153,6 +186,7 @@ __all__ = [
     "deleted_provider",
     "secret_notice",
     "wrote_agent",
+    "wrote_agent_defaults",
     "wrote_default_agent",
     "wrote_mcp_server",
     "wrote_prompt_fragment",
