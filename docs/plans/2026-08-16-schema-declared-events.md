@@ -373,10 +373,17 @@ absent from all the surfaces above, in both modes.
   nothing else), the fixed safe sentence, and an empty argument
   tuple, so a hostile event name, key, value, message or argument
   in the original call reaches nothing. `schema_violation` is
-  itself a declared registry event with exactly that fixed shape,
-  covered by the conformance test and the generated reference like
-  any other, so the recovery path is inside the machinery rather
-  than a second undeclared surface. M2 tests the guard with a
+  itself a declared registry event, the one INTERNAL event beside
+  the 57 production-source events (the registry's own counts and
+  every document say 57 plus one): fixed at ERROR, one variant per
+  channel across `samtal_server.session` and all 13 server
+  channels, a fixed template, no arguments, and the channel's base
+  fields, nothing else. It has no ordinary emit site for the
+  conformance walk to find, so the walk exempts it by name the way
+  the extra= guard exempts `events.py`, and its own test asserts
+  the last-resort guard is its only producer; the generated
+  reference and the README index carry it like any other event,
+  marked internal. M2 tests the guard with a
   matrix, an injected validator raising a sentinel-bearing
   exception combined with a hostile event name, a hostile key, a
   hostile value, a hostile message, and hostile args, asserting
@@ -526,17 +533,22 @@ owns the right machinery, so M3 uses it:
   fails, alongside the three existing drift checks. Every registry
   property the documentation claims is therefore checked by
   construction: the document IS the registry, rendered.
-- **The README prose table stays as the human overview**, `when`
-  cells and all, and gains the 23 missing events as name-and-prose
-  rows plus a pointer to the generated reference for the exact
-  schemas. `tests/unit/test_event_docs.py` checks it at NAME
-  level: every registry event appears in exactly one row, every
-  row names a declared event, no duplicates; `session_rejected` is
-  one row whose prose names both channels, which a name-level
-  check handles without a channel-table split. Field-level and
-  token-level prose in the table is illustrative, answered by the
-  generated reference rather than parsed; the lead sentence is
-  corrected to scope its base-field claim to the session channel.
+- **The README prose table becomes a two-column name-and-when
+  index**: the `fields` column is REMOVED, because prose field and
+  token claims the checker does not parse can go stale while a
+  name-level check stays green, and half-checked documentation
+  reads as checked. Per-field explanatory prose worth keeping (a
+  count never a list, which reasons are intentional) moves into
+  registry-owned note strings the generated reference renders, so
+  nothing is lost, only relocated to the surface that is checked.
+  The index gains the missing events (the 57 production events
+  plus the internal recovery event) and a pointer to the generated
+  reference for every field and token fact.
+  `tests/unit/test_event_docs.py` checks the index at name level:
+  every registry event in exactly one row, every row a declared
+  event, no duplicates; `session_rejected` is one row whose prose
+  names both channels; the section's lead sentence scopes its
+  base-field claim to the session channel.
 
 The mutation matrix follows the mechanism: a registry mutation
 (field added, token dropped, level changed) must make the CI drift
@@ -689,11 +701,11 @@ recorded in the PR body with observed failure output per branch.
   fewer than a dozen keys; the events fire per decision, not per
   frame. No caching machinery unless a lane shows a need, which
   none is expected to.
-- **The README check is brittle against prose edits.** The fields
-  cell's grammar confines prose to parentheses and the `when`
-  cell, which the check never reads for names; a wording edit
-  there passes, and an edit to the delimited field list should
-  fail, because that is the drift the check exists to catch.
+- **The README check is brittle against prose edits.** The index
+  carries names and prose only; a wording edit passes, a
+  dropped, added, or duplicated row fails, and every schema fact
+  lives in the generated reference the CI drift step holds
+  byte-identical, which is the drift the checks exist to catch.
 - **`session_rejected` on two channels.** Declared once with both
   channels and the union payload validated per emit; the channel
   gates which emitter may say it, and the base-field difference is
