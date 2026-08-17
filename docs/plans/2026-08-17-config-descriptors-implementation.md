@@ -692,8 +692,19 @@ them, which is M4's to look at.
 From `samtal-server/`, with `PYTHONDONTWRITEBYTECODE=1` outside pytest:
 
 - `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/unit -q`: `2927 passed, 16 skipped in 311.73s`.
+  The lane collected 2943 before this milestone and 2943 after: no test
+  was added, removed or split, and the skips are the same 16. No
+  coherence test was added either, deliberately: what would pin an
+  endpoint fact is the OpenAPI drift check, which already refuses every
+  byte of every operation, and an equal count is the strongest available
+  statement that this milestone was a move.
+- `uv run pytest tests/integration -q`: `55 passed in 159.97s`,
+  collection unchanged at 55.
 - Both generated references regenerate byte-identical, as above, with no
-  regeneration commit anywhere on the branch.
+  regeneration commit anywhere on the branch. The other two committed
+  references, the conversation store's schema and the event schema,
+  regenerate identical as well.
 - `git diff --stat` against the milestone's base over `tests/` and
   `docs/reference/` prints nothing at all: no test file in the
-  repository changed, and neither committed reference did.
+  repository changed, and no committed reference did.
