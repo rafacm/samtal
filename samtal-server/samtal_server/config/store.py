@@ -373,7 +373,7 @@ class ConfigStore:
         stage = _stage(stage)
         name = _identifier(f"providers.{stage}", name)
         entry = _parse(ProviderConfig, f"providers.{stage}.{name}", fragment)
-        _check_no_url_credentials(f"providers.{stage}.{name}", entry)
+        _check_no_url_credentials(f"providers.{stage}.{name}", (stage, name), entry)
         with self._transaction() as connection:
             domain = _read_domain(connection)
             getattr(domain.providers, stage)[name] = entry
@@ -403,13 +403,7 @@ class ConfigStore:
     def set_mcp_server(self, name: str, fragment: object) -> None:
         name = _identifier("mcp_servers", name)
         entry = _parse(McpServerConfig, f"mcp_servers.{name}", fragment)
-        problem: str | None = None
-        try:
-            check_mcp_entry_names({name: entry})
-        except ValueError as exc:
-            problem = str(exc)
-        if problem is not None:
-            raise ConfigError(problem)
+        _check_entry_name(f"mcp_servers.{name}", (name,), entry)
         with self._transaction() as connection:
             domain = _read_domain(connection)
             domain.mcp_servers[name] = entry
@@ -429,24 +423,12 @@ class ConfigStore:
         """Create or replace `prompt_fragments.<name>` from a fragment in
         the same shape the section has: `{text: ...}`.
 
-        The name is checked here as well as on the loaded snapshot, for
-        the reason an MCP entry name is: a write is where a name is
-        chosen, and refusing it at the write is what keeps the stored
-        state loadable. The refusal names the section and the rule and
-        never the name, which is the whole difference from the entry-name
-        check beside it.
-
-        It is checked before the body is parsed, and the order is the
-        whole of it. Every refusal about a body names the location it was
-        written at, which is `prompt_fragments.<name>`, so a request that
-        gets both wrong at once (a pasted credential in the path and a
-        body that will not parse) would have been answered by a sentence
-        about the body carrying the name it must not repeat. A name this
-        rejects is never spoken of again.
+        The name is checked before the body is parsed, which is the one
+        thing about this write that is not like its neighbours'
+        (`_check_fragment_name` says why).
         """
         name = _identifier("prompt_fragments", name)
-        if not is_valid_fragment_name(name):
-            raise ConfigError(PROMPT_FRAGMENT_NAME_RULE)
+        _check_fragment_name(name)
         entry = _parse(PromptFragmentConfig, f"prompt_fragments.{name}", fragment)
         with self._transaction() as connection:
             domain = _read_domain(connection)
@@ -1318,7 +1300,58 @@ def _identifier(location: str, name: str) -> str:
     return cleaned
 
 
-def _check_no_url_credentials(location: str, entry: ProviderConfig) -> None:
+# The checks a kind runs around its own write, and the two moments they
+# run at. A name is checked before the body is parsed; everything about
+# the body is checked after it and before the transaction opens. Both
+# take the same three arguments, so that a kind's check is named on its
+# descriptor rather than found inside a write: the location the refusal
+# will name, the parameters that address the entry, and the parsed entry
+# itself. A check that does not need one of them says so by ignoring it.
+
+
+def _check_fragment_name(name: str) -> None:
+    """A fragment's name is checked at the write as well as on the
+    loaded snapshot, for the reason an MCP entry name is: a write is
+    where a name is chosen, and refusing it at the write is what keeps
+    the stored state loadable. The refusal names the section and the
+    rule and never the name, which is the whole difference from the
+    entry-name check beside it.
+
+    It is checked before the body is parsed, and the order is the whole
+    of it. Every refusal about a body names the location it was written
+    at, which is `prompt_fragments.<name>`, so a request that gets both
+    wrong at once (a pasted credential in the path and a body that will
+    not parse) would have been answered by a sentence about the body
+    carrying the name it must not repeat. A name this rejects is never
+    spoken of again.
+    """
+    if not is_valid_fragment_name(name):
+        raise ConfigError(PROMPT_FRAGMENT_NAME_RULE)
+
+
+def _check_entry_name(
+    location: str, identity: tuple[str, ...], entry: McpServerConfig
+) -> None:
+    """An MCP server's name becomes the prefix its tools are published
+    under, so the same rule the loaded snapshot applies is applied to
+    the one name being written.
+
+    Recorded inside the handler and raised outside it, as every refusal
+    built from another exception here is: the ValueError carries the
+    name, and the sentence this raises is the one that travels out.
+    """
+    problem: str | None = None
+    try:
+        check_mcp_entry_names({identity[0]: entry})
+    except ValueError as exc:
+        problem = str(exc)
+    if problem is not None:
+        raise ConfigError(problem)
+
+
+def _check_no_url_credentials(
+    location: str, _identity: tuple[str, ...], entry: ProviderConfig
+) -> None:
     """A provider's address holds no credential.
 
     The secret-shaped-key rules above stop a secret written under a name
@@ -1341,6 +1374,11 @@ def _check_no_url_credentials(location: str, entry: ProviderConfig) -> None:
     """
     for key, value in entry.options.items():
         _refuse_url_credentials(f"{location}.{key}", value)
+
+
+entities.fill("provider", inside_write=_check_no_url_credentials)
+entities.fill("mcp-server", inside_write=_check_entry_name)
+entities.fill("prompt-fragment", before_parse=_check_fragment_name)
 
 
 def _refuse_url_credentials(path: str, value: object) -> None:
