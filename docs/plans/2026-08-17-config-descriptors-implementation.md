@@ -1192,11 +1192,16 @@ constants are identical.
    not: the acceptance file's `_a_provider` writes `type` and `model`
    where M4's also writes `api_key_env`, and its `_a_prompt_fragment`
    writes the elaborate `FRAGMENT_INPUT` where M4's writes one short
-   line. One module can hold one of each, so the richer pair wins:
-   M4's reads compare the shadowing note the environment reference
-   produces, and the moved acts that use these seeds are deletes and
-   secret writes whose compared sentence mentions neither the reference
-   nor the fragment's text. The moved test's own body is unchanged; what
+   line. One module can hold one of each, and the survivor was chosen
+   per helper by what the file's own tests compare: `_a_provider`
+   keeps M4's `api_key_env` variant, because M4's reads compare the
+   shadowing note the environment reference produces, while
+   `_a_prompt_fragment` keeps M4's short line, because no test in the
+   file reads the fragment's text back and the elaborate
+   `FRAGMENT_INPUT` belongs to the acceptance spine's round-trip
+   tests, which kept it. The moved acts that use these seeds are
+   deletes and secret writes whose compared sentence mentions neither
+   the reference nor the fragment's text. The moved test's own body is unchanged; what
    changed is which seed its parametrize table names.
 3. **The two nine-row tables became one.** They listed the same nine
    acts, the acceptance file's carrying a third column saying whether a
@@ -1332,3 +1337,24 @@ $ diff -u ../docs/reference/api-openapi.json "$RUNNER_TEMP/api-openapi.json"
   committed reference changed.
 - The normalized-comparison proof above, which is the strong form of
   "the moved tests are unchanged".
+
+### PR review round
+
+External review of PR #177 (diff main...2e9d5ed) by codex 0.147.0
+(model gpt-5.6-sol), 2026-08-17, posted to the PR by the review run
+itself. One finding:
+
+1. **P3: the seed-helper reconciliation record did not match the
+   surviving helper.** The deviation entry said the richer pair
+   won, but `_a_prompt_fragment` in the file keeps M4's one-line
+   fragment.
+
+   *Resolution*: accepted; the record was wrong, not the code. The
+   entry now states the per-helper choice as it was actually made:
+   the provider helper kept the richer `api_key_env` variant
+   because the file's reads compare what it produces, and the
+   fragment helper kept the short line because nothing in the file
+   reads the text back, the elaborate input staying with the
+   acceptance spine that does.
+
+Verdict as posted: mergeable after the listed fix.
