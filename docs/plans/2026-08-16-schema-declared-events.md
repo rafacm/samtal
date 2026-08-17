@@ -1359,3 +1359,102 @@ received, condensed but faithful:
 Verdict as posted: not ready; the blocking conflict was resolved by
 Rafael's decision and #165, and the remaining findings are amended
 above.
+
+## Plan review round 4
+
+Fourth external review, of the branch rebased onto main@af9e4d4
+(the post-#165 baseline), codex 0.147.0 (model gpt-5.6-sol),
+2026-08-17. Four P1, three P2, one P3; verdict ready after the
+P1/P2 amendments. As received, condensed but faithful, each with
+its resolution:
+
+1. **P1: ArgSpec cannot encode lawful descriptor arguments.** All
+   four `ota_check` templates render `board` and `firmware`, and
+   `session_open` renders `client`; and a lawful descriptor
+   necessarily reaches its declared argument positions, rendered
+   logs, and every tap, so "exactly its own field and nowhere
+   else" is unsatisfiable as stated.
+
+   *Resolution*: accepted. ArgSpec gains a `DESCRIPTOR` argument
+   kind that reuses the corresponding field's bounds and character
+   constraint, and the sentinel model splits in two: an admissible
+   descriptor appears in exactly its declared field and argument
+   positions on every intended consumer and nowhere else; a
+   rejected or pre-sanitization value appears nowhere at all.
+
+2. **P1: one source call cannot always map to exactly one
+   variant.** `tool_call`'s `source` selects mutually exclusive
+   field-and-argument shapes from one call; `provider_fields`
+   emits `provider` and `type` atomically with independently
+   conditional `host` and `model`; flattening to optional fields
+   admits impossible shapes.
+
+   *Resolution*: accepted. Conformance maps each source call to an
+   exact SET of producer alternatives with their field and token
+   correlations retained (the declared variants for that call),
+   and every runtime emission must match exactly one full variant;
+   "one call, one variant" holds only where the call has one
+   shape.
+
+3. **P1: forgiving recovery can dispatch a shape the reference
+   denies exists.** Dropping fields or replacing the sentence
+   yields an emission matching no declared variant.
+
+   *Resolution*: accepted. Every recovered emission passes a final
+   full-variant check; if the rebuild leaves a required field
+   missing, selection ambiguous, or the template replaced, the
+   emission becomes the declared `schema_violation` event instead,
+   so nothing dispatched ever has an undeclared shape.
+
+4. **P1: the mandatory sanitization inventory misses two
+   unauthenticated paths.** `ota_check.client` is the stripped but
+   unbounded Client-Id header, and `ws.py`'s capacity-rejection
+   path logs an unnormalized Device-Id when auth is off.
+
+   *Resolution*: accepted. Both are named as mandatory M1 sites: a
+   bounded event-only Client-Id copy for `ota_check`, and the
+   capacity path normalizes the MAC or emits null with the fixed
+   unidentified-device argument; an auth-disabled full-capacity
+   sentinel test joins M1.
+
+5. **P2: the no-leak tests miss diagnostic branches and disagree
+   across sections.** The Tests section lists three shapes where
+   the enforcement section requires five, and a wrong-kind
+   sentinel does not exercise the unlisted-token, bad-ID-syntax,
+   bad-list-element, or bad-SOURCES-key branches.
+
+   *Resolution*: accepted. The Tests section now lists the five
+   shapes plus value-bearing sentinels through every distinct
+   diagnostic branch, with exact assertions on the complaint's
+   `record.msg` and `record.args` and on `EventSchemaError.args`
+   rather than substring absence, and names the
+   descriptor-containment and sanitization tests.
+
+6. **P2: path-based pin coverage has no machine-readable
+   mapping.** The pin files identify records by event name, so 76
+   expectations do not establish per-path correspondence.
+
+   *Resolution*: accepted. M1 adds a sidecar mapping from stable
+   source identities (module, enclosing function, call ordinal;
+   never line numbers) to pytest node IDs, asserted equal both
+   ways by the conformance test.
+
+7. **P2: `schema_violation` has contradictory producer
+   assertions.** Ordinary forgiving fallback produces it too, so
+   "the guard is its only producer" is false.
+
+   *Resolution*: accepted. The rule is: no ordinary source emit
+   site may produce it; both the ordinary forgiving fallback and
+   the exception guard may; the tests exercise and distinguish
+   both internal paths.
+
+8. **P3: the mechanics-suite scratch registry has more shapes
+   than budgeted.** `test_events.py` also emits production-named
+   events with non-production channels or payloads.
+
+   *Resolution*: accepted. The scratch registry budgets all seven
+   names and every exercised shape, stated in the enforcement
+   section's seam paragraph.
+
+Verdict as posted: ready after the P1/P2 amendments, which the
+next commits apply.
