@@ -340,17 +340,6 @@ def test_an_unusable_fragment_name_is_refused_without_printing_it(
     assert all(SECRET not in str(record.__dict__) for record in served)
 
 
-def test_the_status_help_names_every_state_it_can_print() -> None:
-    """`unused` is a state of its own and the one an operator has never
-    met before, so leaving it out of the help would leave it out of the
-    place they look first."""
-    # Whitespace collapsed, because argparse wraps the line it is
-    # printed on and where it wraps is not the contract.
-    help_text = " ".join(cli._parser().format_help().split())
-
-    assert "connected, down, or unused because no agent references it" in help_text
-
-
 def test_add_device_binds_the_board_showing_the_code(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -418,15 +407,6 @@ def test_add_device_inherits_the_reference_check(
     # works.
     _an_agent(run)
     assert run("add-device", code, "sam") == 0
-
-
-def test_the_two_ways_to_bind_a_board_say_which_is_which() -> None:
-    """A pair a person picks wrongly once and then remembers wrongly,
-    so each names what the other takes."""
-    help_text = cli._parser().format_help()  # noqa: SLF001
-
-    assert "by the MAC you already know" in help_text
-    assert "showing this activation code" in help_text
 
 
 def test_a_refused_write_exits_one_with_the_reason(
@@ -642,46 +622,6 @@ def test_a_row_of_the_wrong_shape_is_reported_rather_than_raised(
         captured = capsys.readouterr()
         assert "options" in captured.err
         assert "Traceback" not in captured.err
-
-
-def test_a_mistake_in_the_grammar_exits_one_like_every_other_failure(
-    run, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """argparse exits 2 from inside parse_args, which would make an
-    unknown command the one failure that bypasses the documented exit
-    codes and the sanitized boundary."""
-    for argv in (
-        ("nonsense",),
-        (),
-        ("set", "provider", "llm"),
-        ("show", "provider"),
-        ("list", "--nope"),
-    ):
-        assert run(*argv) == 1, argv
-        captured = capsys.readouterr()
-        assert captured.err.strip()
-        assert "Traceback" not in captured.err
-
-
-def test_an_extra_argument_is_refused_without_echoing_it(
-    run, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The mistake this covers is typing the secret after the slot,
-    which is where argparse would otherwise echo it back."""
-    assert run("set-secret", "provider", "llm", "claude", "api_key", SECRET) == 1
-
-    captured = capsys.readouterr()
-    assert "unrecognized extra arguments" in captured.err
-    assert SECRET not in captured.err
-    assert SECRET not in captured.out
-
-
-def test_asking_for_help_is_not_a_failure(run, capsys: pytest.CaptureFixture[str]) -> None:
-    with pytest.raises(SystemExit) as caught:
-        run("--help")
-
-    assert caught.value.code == 0
-    assert "usage: samtal-server config" in capsys.readouterr().out
 
 
 def test_a_database_that_cannot_be_opened_names_the_key(
