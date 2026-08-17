@@ -599,8 +599,8 @@ ORIGIN_SOURCES = (
 # set of exactly two values this server minted: what makes a `TOKEN` a
 # token is that the set is closed, not that its members are short.
 PENDING_REFUSALS = (
-    "16 devices are already waiting to be claimed, which is the cap",
-    "8 activation codes have been issued in the last 10 minutes, which is the limit",
+    "128 devices are already waiting to be claimed, which is the cap",
+    "30 activation codes have been issued in the last 10 minutes, which is the limit",
 )
 
 # What `_bad_request` says, and the whole of what it may say: every
