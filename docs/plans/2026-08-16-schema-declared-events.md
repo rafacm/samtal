@@ -156,12 +156,13 @@ dataclasses and the declarations:
     fields at all is a recorded product decision this issue cannot
     re-decide; what the registry adds is honesty about which
     fields carry far-side bytes rather than laundering them as
-    identifiers, plus a sentinel proof of the boundary: M2 plants
-    a credential-shaped but syntactically admissible value in each
-    `DESCRIPTOR` field and asserts it appears in exactly its own
-    declared field of its own event's record and NOWHERE else (no
-    other field, no complaint, no exception text, no other tap
-    surface).
+    identifiers, plus a two-assertion sentinel proof of the
+    boundary, one per value class: an ADMISSIBLE credential-shaped
+    value appears in exactly its declared field and its declared
+    `DESCRIPTOR` argument positions on every intended consumer
+    (the record, both formats, an attached tap) and nowhere else
+    (no other field, no complaint, no exception text); a REJECTED
+    or pre-sanitization value appears nowhere at all.
     M1 inventories every string field by provenance (operator
     configuration, server-minted, far-side sanitized) and assigns
     the kind from the inventory; a far-side string whose decision
@@ -267,8 +268,12 @@ dataclasses and the declarations:
   declaration names, validated against that grammar: the quoted
   tool name, the from-entry fragment, the provider-location
   fragment, the comma-joined agent list), and the shared numeric,
-  identifier, token, and class-name kinds; `IDENTIFIER` is not
-  widened to punctuated strings. M2's tests cover the pinned
+  identifier, token, and class-name kinds, plus `DESCRIPTOR` for
+  the argument positions that lawfully render a descriptor field
+  (`ota_check`'s four templates render `board` and `firmware`,
+  `session_open` renders `client`), reusing that field's declared
+  bounds and character constraint; `IDENTIFIER` is not widened to
+  punctuated strings. M2's tests cover the pinned
   `Path` and composed-fragment examples and adversarial failures
   of each grammar.
 - `REGISTRY: dict[str, EventSpec]` with all 57 events, grouped and
@@ -375,7 +380,13 @@ absent from all the surfaces above, in both modes.
   registry does not know, degrades to the fresh base-only
   `schema_violation` emission. Multiple simultaneous violations
   therefore have one defined outcome, reached the same way every
-  time. Behind the matrix sits a LAST-RESORT GUARD:
+  time. And nothing dispatched ever has an undeclared shape: every
+  recovered emission passes a FINAL full-variant check before
+  dispatch, and if the rebuild leaves a required field missing,
+  the selection ambiguous, or the template replaced, the emission
+  becomes the declared `schema_violation` event outright, because
+  a tap fed a shape the generated reference denies exists would
+  make the reference a liar. Behind the matrix sits a LAST-RESORT GUARD:
   in forgiving mode the WHOLE enforcement-and-recovery path
   (candidate selection, validation, rebuild, and matrix
   application alike) runs under one `try/except`, so a bug
@@ -395,7 +406,10 @@ absent from all the surfaces above, in both modes.
   fields, nothing else. It has no ordinary emit site for the
   conformance walk to find, so the walk exempts it by name the way
   the extra= guard exempts `events.py`, and its own test asserts
-  the last-resort guard is its only producer; the generated
+  that no ordinary source emit site produces it while both
+  internal paths that may (the ordinary forgiving fallback on
+  undeclared events and ambiguous rebuilds, and the last-resort
+  exception guard) are exercised and distinguished; the generated
   reference and the README index carry it like any other event,
   marked internal. M2 tests the guard with a
   matrix, an injected validator raising a sentinel-bearing
@@ -490,12 +504,20 @@ itself the conformance proof running continuously.
 
 - An AST walk over `samtal_server/` collects every emitter call
   with an `event=` literal and keys conformance BY SOURCE CALL:
-  each of the 81 sites (branch by branch where one site emits
-  more than one shape) must map to exactly one declared variant,
-  matching the module's channel, the method-derived level, the
-  byte-exact template, the positional arity and argument kinds,
-  the statically-named fields, and the named spread inventory; a
-  site matching no variant, or two, fails naming the site.
+  each of the 81 sites maps to its exact SET of declared producer
+  alternatives (one variant where the call has one shape; the
+  correlated set where one call's builder selects among shapes,
+  as `tool_call`'s `source` does for its mutually exclusive
+  `tool`/`entry`/neither fields and `provider_fields` does for
+  its atomic `provider`+`type` with independently conditional
+  `host` and `model`), matching the module's channel, the
+  method-derived level, the byte-exact templates, the positional
+  arities and argument kinds, the statically-named fields, and
+  the named spread inventory, with the correlations retained
+  rather than flattened into optionality that would admit
+  impossible shapes; a site matching no declared set, or shapes
+  beyond it, fails naming the site, and every RUNTIME emission
+  must match exactly one full variant.
 - Coverage is TWO-WAY, because containment alone would let a
   surplus declared field sit unused as a permanent enlargement of
   the allowlist: every declared non-base field must be evidenced,
