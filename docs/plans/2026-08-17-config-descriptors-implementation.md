@@ -466,7 +466,7 @@ No other deviation. `views.provider_record` is untouched, docstring and
 key-by-key construction intact, and now says so where the body builders
 are registered. `masked_option`, `recorded_option`, `shown_values` and
 `check_no_inline_secrets` are untouched, and the `shown_values` finding
-stays as M1 drafted it.
+stays with issue #171, where M1 filed it.
 
 ### The differential check on the walker merge
 
