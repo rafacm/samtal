@@ -1588,12 +1588,9 @@ def _stored[Model: BaseModel](
     failed and never their values, and is built inside the handler and
     raised outside it, since a ValidationError holds the whole row.
     """
-    where = _nonfinite(data)
-    if where is not None:
-        raise StorageError(
-            f"{location}: {_NOT_FINITE.format(where=where)}; the row cannot be read "
-            f"as configuration"
-        )
+    unwritable = _untransportable(data, numbers_only=True)
+    if unwritable is not None:
+        raise StorageError(f"{location}: {unwritable}; the row cannot be read as configuration")
     problem: str | None = None
     try:
         return model.model_validate(dict(data))
@@ -1603,10 +1600,24 @@ def _stored[Model: BaseModel](
 
 
 def _untransportable(
-    value: object, path: str = "", ancestors: frozenset[int] = frozenset()
+    value: object,
+    path: str = "",
+    ancestors: frozenset[int] = frozenset(),
+    *,
+    numbers_only: bool = False,
 ) -> str | None:
     """What in `value` JSON cannot carry, said without quoting any of it,
     or None.
+
+    One walk, asked two questions, because the second is the first's
+    float branch and nothing else. A fragment somebody wrote is asked
+    all of it: a YAML file can hold a date, a set, a key that is not a
+    string, and a structure that contains itself, and none of those has
+    a written form JSON reads back as what it says. A stored row is
+    asked about the numbers only, and that is not a narrowing for
+    tidiness: the row came out of a JSON column, so it cannot hold any
+    of the rest, and it must be walked without a cycle rule because a
+    row cannot refer to itself either.
 
     Cycle-safe by carrying the containers currently above this one
     rather than every container already seen: two keys pointing at the
@@ -1615,16 +1626,21 @@ def _untransportable(
     A container that is its own ancestor is the one that cannot be
     written at all.
     """
-    if id(value) in ancestors:
+    if not numbers_only and id(value) in ancestors:
         return _RECURSIVE.format(where=path or "the fragment")
     if isinstance(value, Mapping):
         below = ancestors | {id(value)}
         for key, nested in value.items():
-            if not isinstance(key, str):
+            if not numbers_only and not isinstance(key, str):
                 return _NON_STRING_KEY.format(
                     where=path or "the fragment", kind=type(key).__name__
                 )
-            found = _untransportable(nested, f"{path}.{key}" if path else key, below)
+            found = _untransportable(
+                nested,
+                f"{path}.{key}" if path else str(key),
+                below,
+                numbers_only=numbers_only,
+            )
             if found is not None:
                 return found
         return None
@@ -1632,13 +1648,22 @@ def _untransportable(
         below = ancestors | {id(value)}
         for position, item in enumerate(value):
             found = _untransportable(
-                item, f"{path}.{position}" if path else str(position), below
+                item,
+                f"{path}.{position}" if path else str(position),
+                below,
+                numbers_only=numbers_only,
             )
             if found is not None:
                 return found
         return None
     if isinstance(value, float) and not math.isfinite(value):
+        # NaN and the infinities have no JSON spelling. A stored one is
+        # serialized as null on the way out, which quietly turns a
+        # configuration into a different one: the option disappears and
+        # the provider falls back to its own default.
         return _NOT_FINITE.format(where=path or "the value")
+    if numbers_only:
+        return None
     # bool before int, and both before the refusal, because bool is a
     # subclass of int and neither needs naming twice.
     if value is None or isinstance(value, (str, bool, int, float)):
@@ -1646,33 +1671,6 @@ def _untransportable(
     return _NOT_TRANSPORTABLE.format(
         where=path or "the fragment", kind=type(value).__name__
     )
-
-
-def _nonfinite(value: object, path: str = "") -> str | None:
-    """Where the first value that is a number but not a finite one sits,
-    or None.
-
-    NaN and the infinities have no JSON spelling. A stored one is
-    serialized as null on the way out, which quietly turns a
-    configuration into a different one: the option disappears and the
-    provider falls back to its own default. So a fragment carrying one
-    is refused where every other fragment rule is applied, and a row
-    holding one reports that it cannot be read rather than answering
-    with a value nobody wrote.
-    """
-    if isinstance(value, float) and not math.isfinite(value):
-        return path or "the value"
-    if isinstance(value, Mapping):
-        for key, nested in value.items():
-            found = _nonfinite(nested, f"{path}.{key}" if path else str(key))
-            if found is not None:
-                return found
-    elif isinstance(value, (list, tuple)):
-        for position, item in enumerate(value):
-            found = _nonfinite(item, f"{path}.{position}" if path else str(position))
-            if found is not None:
-                return found
-    return None
 
 
 def _validation_problems(headline: str, exc: ValidationError) -> str:
