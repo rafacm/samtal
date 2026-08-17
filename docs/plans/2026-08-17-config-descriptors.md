@@ -437,9 +437,19 @@ outside pytest.
       reads it; the sixteen acts with both paths are pinned to print the
       same acknowledgement, notice and document on each; milestone
       duties in the same change.
-- [ ] M5: the inherited test split executed as a pure move and the
-      per-field cost demonstrated; CHANGELOG closes the issue;
-      milestone duties in the same change.
+- [x] [M5](2026-08-17-config-descriptors-implementation.md#milestone-5-the-test-split-and-the-cost-demonstration):
+      the inherited test split executed as a pure move and the per-field
+      cost demonstrated (PR TBD): the 101 tests of `test_config_cli.py`
+      are six files along the boundaries the other four milestones
+      produced, with the scaffolding six suites share in
+      `tests/support/config_cli.py` and the `--local` bucket merged into
+      the file M4 started; every test function is byte-identical by a
+      parsed comparison and the lane collects exactly what it collected
+      before; a scratch field added to one model, its column and its
+      migration reached the store, the API, the CLI and both generated
+      references with no descriptor edit, the read view being the one
+      surface it does not reach and the finding this recorded; CHANGELOG
+      closes the issue; milestone duties in the same change.
 
 ## Plan review round
 
