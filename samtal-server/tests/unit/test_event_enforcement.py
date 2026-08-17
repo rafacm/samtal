@@ -403,6 +403,61 @@ def test_forgiving_replaces_an_undeclared_event_with_the_recovery_event(
     assert tap.seen[0].payload["event"] == SCHEMA_VIOLATION
 
 
+def test_strict_refuses_an_event_that_is_not_a_name() -> None:
+    """The registry lookup is a dict lookup, so an unhashable event
+    would have raised a raw `TypeError` from inside the validator: not
+    the error a strict caller is told to expect, and in forgiving mode
+    the guard's business rather than the recovery's. The type is checked
+    before the lookup and reported through the base field's own name."""
+    strictly()
+    with pytest.raises(EventSchemaError) as raised:
+        emitter().info("something", event=["sk-list-9d3a7f2e-never-a-real-credential"])
+
+    assert raised.value.args == (
+        f"the event schema refused an emission of {UNDECLARED_LABEL}: "
+        "wrong_kind (event)",
+    )
+
+
+@pytest.mark.parametrize(
+    "named",
+    [
+        ["sk-list-9d3a7f2e-never-a-real-credential"],
+        {"sk-dict-9d3a7f2e-never-a-real-credential": 1},
+        12,
+        None,
+    ],
+    ids=["unhashable list", "unhashable dict", "a number", "nothing at all"],
+)
+def test_forgiving_replaces_an_event_that_is_not_a_name(
+    caplog: pytest.LogCaptureFixture, tap: Tap, named: object
+) -> None:
+    """Hashable or not, it is not a name, and the recovery keeps no part
+    of it: the payload's `event` becomes the fixed token rather than
+    whatever was passed."""
+    forgivingly()
+    with caplog.at_level("DEBUG"):
+        emitter().info("something", event=named)  # type: ignore[arg-type]
+
+    refused(caplog, UNDECLARED_LABEL, "wrong_kind (event)")
+    replaced_by_the_recovery_event(caplog)
+    assert tap.seen[0].payload == {"event": SCHEMA_VIOLATION}
+
+
+def test_a_sentinel_in_place_of_an_event_name_reaches_nothing(
+    caplog: pytest.LogCaptureFixture, tap: Tap
+) -> None:
+    """The value is caller-supplied bytes wherever it sits, and sitting
+    in the event slot does not make it a name this module may repeat."""
+    planted = "sk-named-7c4b1a0d-never-a-real-credential"
+    forgivingly()
+    with caplog.at_level("DEBUG"):
+        emitter().info("something", event=[planted])  # type: ignore[arg-type]
+
+    assert planted not in str([vars(record) for record in caplog.records])
+    assert not any(planted in str(one.payload) for one in tap.seen)
+
+
 # --- an undeclared field ----------------------------------------------
 
 
