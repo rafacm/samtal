@@ -9,6 +9,23 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **One descriptor per domain entity** (#139, M1).
+  `samtal_server/config/entities.py` declares what the pydantic models
+  cannot carry, in three tiers: the five kinds written with a command
+  of their own, the two shapes that exist only nested inside one of
+  those, and the two domain-level fields written with their own verbs.
+  Each entry holds its documentation prose, how the kind is addressed
+  (the API path prefix and the parameters under it, which are also the
+  CLI's positional arguments), whether it has a delete, whether stored
+  secrets hang on it, and which moved configuration key its command is
+  quoted for. The generated reference now renders those descriptors
+  rather than keeping a second copy of them: docgen's own entity
+  dataclass and its two data tables are gone. Nothing else reads the
+  registry yet, and nothing changed for a reader or an operator, which
+  is the point of doing it this way: both committed references,
+  `docs/reference/domain-config.md` and
+  `docs/reference/api-openapi.json`, regenerate byte for byte, so the
+  move is provable rather than asserted.
 - **The event schema reference cannot drift** (#155, M3).
   `samtal-server events reference` prints the whole registry as a
   document: one section per event, one subsection per shape it may be
