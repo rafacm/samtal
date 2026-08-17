@@ -47,6 +47,7 @@ calibrated to that: the registry is declared and statically conformant.
 
 import ast
 import importlib
+import itertools
 import logging
 import typing
 from dataclasses import dataclass
@@ -97,6 +98,10 @@ class Site:
     args: tuple[ast.expr, ...]
     static_fields: frozenset[str]
     spreads: tuple[str, ...]
+    # The expression behind each keyword field, and behind each spread,
+    # so a value the call spells out can be read rather than guessed.
+    static_values: dict[str, ast.expr] = data_field(default_factory=dict, compare=False)
+    spread_calls: tuple[ast.expr, ...] = ()
 
     @property
     def identity(self) -> tuple[str, str, int]:
@@ -166,6 +171,14 @@ class _Walk(ast.NodeVisitor):
                 for keyword in node.keywords
                 if keyword.arg is None
             ),
+            static_values={
+                keyword.arg: keyword.value
+                for keyword in node.keywords
+                if keyword.arg is not None and keyword.arg != "event"
+            },
+            spread_calls=tuple(
+                keyword.value for keyword in node.keywords if keyword.arg is None
+            ),
         )
 
 
@@ -218,10 +231,18 @@ def scope_of(module: str, qualname: str) -> ast.AST:
 # --- the spread builders ----------------------------------------------
 #
 # Nine events take part of their payload from a `**spread` whose keys
-# the call site does not show. Each entry names the builder and states
-# the keys it produces; the extraction below parses that builder and the
-# test asserts the two agree, so the inventory is checked rather than
-# believed.
+# the call site does not show. What matters about a spread is not which
+# keys it can produce but which SETS of them it can produce together:
+# `_tool_named` answers `tool`, or `entry`, or neither, and a registry
+# variant declaring both would be a shape no call can make. Flattening
+# those branches into "always" and "sometimes" would have let exactly
+# such a variant through, which is the PR #167 review's first finding.
+#
+# So each builder is read as a list of ALTERNATIVES, one complete key
+# set per path through it, and the extraction below walks the builder's
+# statements rather than its keys. Each entry states the alternatives it
+# expects; the test asserts the walk and the entry agree, so the
+# inventory is checked rather than believed.
 
 
 LOCAL = "local"
@@ -229,62 +250,100 @@ RETURNS = "returns"
 DELEGATES = "delegates"
 
 
+def sets(*groups: str) -> tuple[frozenset[str], ...]:
+    """One alternative per group, a group being its keys space
+    separated. `sets("a b", "")` is "either both of them, or neither"."""
+    return tuple(frozenset(group.split()) for group in groups)
+
+
 @dataclass(frozen=True)
 class Spread:
-    """One builder's key inventory. `always` is what it produces on
-    every call, `sometimes` what it adds conditionally.
+    """One builder, and the complete payload shapes it can produce.
 
     `local` names the dict the builder assembles, which is also the last
     segment of the key where the spread is a local rather than a call.
+    `token_arguments` names the fields whose value the CALL supplies
+    positionally, so a site's own literal can be held to the token set
+    its variant declares.
     """
 
     how: str
-    always: frozenset[str] = frozenset()
-    sometimes: frozenset[str] = frozenset()
+    alternatives: tuple[frozenset[str], ...] = ()
     local: str = "fields"
     # DELEGATES only: the builder this local is assigned from.
     to: str = ""
+    token_arguments: tuple[tuple[str, int], ...] = ()
 
 
 SPREAD_INVENTORY: dict[str, Spread] = {
     # `asr_prompt_echo`: the five outcomes share three fields and differ
-    # in level and sentence, so they are gathered in one builder.
+    # in level and sentence, so they are gathered in one builder. A skip
+    # sent no retry, so it times none.
     "samtal_server.providers.openai_asr:OpenAiAsr._echo_fields": Spread(
         LOCAL,
-        always=frozenset({"outcome", "duration_s", "host"}),
-        sometimes=frozenset({"retry_ms"}),
+        alternatives=sets(
+            "outcome duration_s host",
+            "outcome duration_s host retry_ms",
+        ),
+        token_arguments=(("outcome", 0),),
     ),
     # `ota_check`: the whole payload, assembled once and spread into
-    # whichever of the four sentences the resolution chose.
+    # whichever of the four sentences the resolution chose. The code is
+    # there exactly when an activation was offered.
     "samtal_server.ota:check_version.fields": Spread(
         LOCAL,
-        always=frozenset({"device", "client", "board", "firmware", "agents", "unloaded"}),
-        sometimes=frozenset({"code"}),
+        alternatives=sets(
+            "device client board firmware agents unloaded",
+            "device client board firmware agents unloaded code",
+        ),
     ),
     # `activation_refused`: what all three refusals name.
     "samtal_server.ota:_version_two.refusal": Spread(
-        LOCAL, local="refusal", always=frozenset({"device", "code"})
+        LOCAL, local="refusal", alternatives=sets("device code")
     ),
-    # `heard`: only engines that detected carry these.
+    # `heard`: only engines that detected carry these, and the two are
+    # independent, since a provider may report a language without a
+    # confidence.
     "samtal_server.runtime.pipeline:PipelineRuntime._reply.language_fields": Spread(
         LOCAL,
         local="language_fields",
-        sometimes=frozenset({"language", "language_confidence"}),
+        alternatives=sets(
+            "",
+            "language",
+            "language_confidence",
+            "language language_confidence",
+        ),
     ),
     # `llm_retry` and `llm_round`: which configuration entry a provider
-    # is. `stage` always; the identity only for a provider the registry
-    # built, and `host` and `model` only where there is one to name.
+    # is. `provider` and `type` are ATOMIC, which is what the early
+    # return makes them: a provider the registry did not build names
+    # neither. `host` and `model` are independent of each other.
     "samtal_server.runtime.pipeline:provider_fields": Spread(
         LOCAL,
-        always=frozenset({"stage"}),
-        sometimes=frozenset({"provider", "type", "host", "model"}),
+        alternatives=sets(
+            "stage",
+            "stage provider type",
+            "stage provider type host",
+            "stage provider type model",
+            "stage provider type host model",
+        ),
     ),
     # `llm_round`: the GenAI usage vocabulary, present where the
-    # provider reported it.
+    # provider reported it. Three independent conditions, so eight
+    # shapes.
     "samtal_server.runtime.pipeline:PipelineRuntime._llm_round_done.tokens": Spread(
         LOCAL,
         local="tokens",
-        sometimes=frozenset({"input_tokens", "output_tokens", "first_token_ms"}),
+        alternatives=sets(
+            "",
+            "input_tokens",
+            "output_tokens",
+            "first_token_ms",
+            "input_tokens output_tokens",
+            "input_tokens first_token_ms",
+            "output_tokens first_token_ms",
+            "input_tokens output_tokens first_token_ms",
+        ),
     ),
     # `provider_failed`: the same provider identity, read once so the
     # sentence's fragments and the fields cannot disagree.
@@ -292,63 +351,151 @@ SPREAD_INVENTORY: dict[str, Spread] = {
         DELEGATES, to="samtal_server.runtime.pipeline:provider_fields"
     ),
     # `tool_call`: what a call may be named by, which is only ever what
-    # this application authored.
+    # this application authored. Mutually exclusive by construction:
+    # `tool` and `entry` are two branches of one return.
     "samtal_server.runtime.pipeline:PipelineRuntime._run_one.fields": Spread(
         DELEGATES, to="samtal_server.runtime.pipeline:_tool_named"
     ),
     "samtal_server.runtime.pipeline:_tool_named": Spread(
-        RETURNS, sometimes=frozenset({"tool", "entry"})
+        RETURNS, alternatives=sets("tool", "entry", "")
     ),
     # `barge_in`: absent when the reply had not yet spoken.
     "samtal_server.runtime.pipeline:PipelineRuntime._speaking_ms_field": Spread(
-        RETURNS, sometimes=frozenset({"speaking_ms"})
+        RETURNS, alternatives=sets("", "speaking_ms")
     ),
 }
 
 
-def local_dict_keys(scope: ast.AST, name: str) -> tuple[frozenset[str], frozenset[str]]:
-    """The keys one named local dict can hold.
+# Where one call reaches only some of its builder's alternatives.
+#
+# A builder's branches are visible in the builder; which of them a
+# particular call can be reached with is not, because the condition that
+# selects the branch is the same condition that selects the call. Both
+# cases here are of that shape: `ota_check`'s `code` is written exactly
+# when an activation was offered, which is exactly the branch that emits
+# the first of the four sentences, and `_echo_fields` is handed a retry
+# time by every outcome except the skip.
+#
+# An override may only NARROW: the test asserts each is a subset of the
+# builder's own alternatives, and that the calls sharing a builder cover
+# all of them between them, so a branch cannot be dropped everywhere.
+CALL_ALTERNATIVES: dict[tuple[str, str, int], tuple[frozenset[str], ...]] = {
+    ("samtal_server.ota", "check_version", 1): sets(
+        "device client board firmware agents unloaded code"
+    ),
+    ("samtal_server.ota", "check_version", 2): sets(
+        "device client board firmware agents unloaded"
+    ),
+    ("samtal_server.ota", "check_version", 3): sets(
+        "device client board firmware agents unloaded"
+    ),
+    ("samtal_server.ota", "check_version", 4): sets(
+        "device client board firmware agents unloaded"
+    ),
+    ("samtal_server.providers.openai_asr", "OpenAiAsr._retry_without_prompt", 1): sets(
+        "outcome duration_s host"
+    ),
+    ("samtal_server.providers.openai_asr", "OpenAiAsr._retry_without_prompt", 2): sets(
+        "outcome duration_s host retry_ms"
+    ),
+    ("samtal_server.providers.openai_asr", "OpenAiAsr._retry_without_prompt", 3): sets(
+        "outcome duration_s host retry_ms"
+    ),
+    ("samtal_server.providers.openai_asr", "OpenAiAsr._retry_without_prompt", 4): sets(
+        "outcome duration_s host retry_ms"
+    ),
+    ("samtal_server.providers.openai_asr", "OpenAiAsr._retry_without_prompt", 5): sets(
+        "outcome duration_s host retry_ms"
+    ),
+}
 
-    A key in the literal it is built from is produced on every call; a
-    key added by a subscript assignment is produced conditionally, since
-    an unconditional one would have been written into the literal.
+
+def _targets(node: ast.stmt) -> list[ast.expr]:
+    if isinstance(node, ast.Assign):
+        return list(node.targets)
+    if isinstance(node, ast.AnnAssign):
+        return [node.target]
+    return []
+
+
+def _walk_body(
+    body: list[ast.stmt], name: str, states: set[frozenset[str]]
+) -> tuple[set[frozenset[str]], set[frozenset[str]]]:
+    """Run one block over the shapes a named local dict can have.
+
+    Answers the shapes that fall out of the block's end and the shapes
+    that left it by `return`. A dict literal CREATES the shapes, a
+    subscript assignment adds a key to every shape there is, and a
+    branch is the union of the shapes on each side of it. States start
+    empty and stay empty until a literal is assigned, so a builder whose
+    dict is assembled inside a conditional does not pick up a phantom
+    shape from the path where it was never built.
     """
-    always: set[str] = set()
-    sometimes: set[str] = set()
-    for node in ast.walk(scope):
-        targets: list[ast.expr] = []
-        if isinstance(node, ast.Assign):
-            targets = list(node.targets)
-        elif isinstance(node, ast.AnnAssign):
-            targets = [node.target]
-        for target in targets:
+    returned: set[frozenset[str]] = set()
+    for node in body:
+        for target in _targets(node):
             if (
                 isinstance(target, ast.Name)
                 and target.id == name
                 and isinstance(node.value, ast.Dict)  # type: ignore[union-attr]
             ):
-                always |= {ast.literal_eval(key) for key in node.value.keys}  # type: ignore[union-attr]
+                states = {
+                    frozenset(ast.literal_eval(key) for key in node.value.keys)  # type: ignore[union-attr]
+                }
             if (
                 isinstance(target, ast.Subscript)
                 and isinstance(target.value, ast.Name)
                 and target.value.id == name
             ):
-                sometimes.add(ast.literal_eval(target.slice))
-    return frozenset(always), frozenset(sometimes - always)
+                added = ast.literal_eval(target.slice)
+                states = {held | {added} for held in states}
+        if isinstance(node, ast.If | ast.For | ast.While | ast.AsyncFor):
+            taken, left = _walk_body(node.body, name, states)
+            returned |= left
+            if isinstance(node, ast.If) and node.orelse:
+                untaken, left = _walk_body(node.orelse, name, states)
+                returned |= left
+            else:
+                # A loop may run no times, and an `if` with no `else`
+                # may not fire, so the shapes before it survive it.
+                untaken = states
+            states = taken | untaken
+        elif isinstance(node, ast.Try):
+            for block in (node.body, node.orelse, node.finalbody):
+                taken, left = _walk_body(block, name, states)
+                returned |= left
+                states = states | taken
+            for handler in node.handlers:
+                taken, left = _walk_body(handler.body, name, states)
+                returned |= left
+                states = states | taken
+        elif isinstance(node, ast.With | ast.AsyncWith):
+            states, left = _walk_body(node.body, name, states)
+            returned |= left
+        elif isinstance(node, ast.Return):
+            returned |= states
+            states = set()
+    return states, returned
 
 
-def returned_dict_keys(scope: ast.AST) -> tuple[frozenset[str], frozenset[str]]:
-    """The keys a builder's returned dicts can hold. A key every return
-    carries is always produced; anything else is conditional."""
-    returned: list[set[str]] = []
+def local_dict_alternatives(scope: ast.AST, name: str) -> tuple[frozenset[str], ...]:
+    """Every complete shape one named local dict can have."""
+    body = list(getattr(scope, "body", []))
+    states, returned = _walk_body(body, name, set())
+    return tuple(sorted(states | returned, key=sorted))
+
+
+def returned_dict_alternatives(scope: ast.AST) -> tuple[frozenset[str], ...]:
+    """Every shape a builder's returned dict literals can have, one per
+    return rather than one per key."""
+    shapes: list[frozenset[str]] = []
     for node in ast.walk(scope):
         if isinstance(node, ast.Return) and node.value is not None:
             for inner in ast.walk(node.value):
                 if isinstance(inner, ast.Dict):
-                    returned.append({ast.literal_eval(key) for key in inner.keys})
-    assert returned, "the builder returns no dict literal at all"
-    always = set.intersection(*returned)
-    return frozenset(always), frozenset(set.union(*returned) - always)
+                    shapes.append(frozenset(ast.literal_eval(key) for key in inner.keys))
+    assert shapes, "the builder returns no dict literal at all"
+    return tuple(sorted(set(shapes), key=sorted))
 
 
 def delegated_to(module: str, qualname: str, local: str) -> str:
@@ -376,18 +523,19 @@ def assembling_scope(qualname: str, local: str) -> str:
     return qualname.removesuffix(f".{local}")
 
 
-def spread_keys(key: str) -> tuple[frozenset[str], frozenset[str]]:
+@cache
+def spread_alternatives(key: str) -> tuple[frozenset[str], ...]:
     """What one inventory entry's builder really produces, parsed."""
     entry = SPREAD_INVENTORY[key]
     module, qualname = key.split(":")
     if entry.how == DELEGATES:
         owner = assembling_scope(qualname, entry.local)
         assert delegated_to(module, owner, entry.local) == entry.to, key
-        return spread_keys(entry.to)
+        return spread_alternatives(entry.to)
     if entry.how == RETURNS:
-        return returned_dict_keys(scope_of(module, qualname))
+        return returned_dict_alternatives(scope_of(module, qualname))
     scope = scope_of(module, assembling_scope(qualname, entry.local))
-    return local_dict_keys(scope, entry.local)
+    return local_dict_alternatives(scope, entry.local)
 
 
 # --- the token decision sites -----------------------------------------
@@ -885,22 +1033,49 @@ def alternatives(site: Site) -> tuple[schema.EventVariant, ...]:
     )
 
 
-@dataclass
-class Produces:
-    """What one site puts in the payload, beside the base fields."""
+def reachable(site: Site, key: str) -> tuple[frozenset[str], ...]:
+    """The alternatives one spread can produce AT THIS CALL, which is
+    its builder's own set unless the call is one the inventory narrows.
+    """
+    return CALL_ALTERNATIVES.get(site.identity, spread_alternatives(key))
 
-    always: set[str] = data_field(default_factory=set)
-    sometimes: set[str] = data_field(default_factory=set)
 
-
-def produced_by(site: Site) -> Produces:
-    produces = Produces(always=set(site.static_fields))
+def produced_by(site: Site) -> set[frozenset[str]]:
+    """Every complete payload shape one call can produce, beside the
+    base fields: its static keywords, times each alternative of each
+    spread it carries."""
+    shapes = {frozenset(site.static_fields)}
     for key in site.spreads:
         assert key in SPREAD_INVENTORY, f"{site}: no inventory entry for {key}"
-        always, sometimes = spread_keys(key)
-        produces.always |= always
-        produces.sometimes |= sometimes
-    return produces
+        shapes = {
+            held | branch for held in shapes for branch in reachable(site, key)
+        }
+    return shapes
+
+
+def expansions(variant: schema.EventVariant) -> set[frozenset[str]]:
+    """Every complete payload shape one variant admits, beside the base
+    fields: its required fields, times every subset of its optional
+    ones.
+
+    This is what makes the comparison with a call's alternatives an
+    equality rather than a containment. A variant with a field the call
+    cannot produce has an expansion nothing matches; a call with a shape
+    no variant admits has one nothing matches either."""
+    base = base_of(variant.channel)
+    own = {name for name in variant.fields if name not in base}
+    required = frozenset(name for name in own if variant.fields[name].required)
+    optional = sorted(own - required)
+    return {
+        required | frozenset(chosen)
+        for size in range(len(optional) + 1)
+        for chosen in itertools.combinations(optional, size)
+    }
+
+
+def admitted_by(site: Site) -> set[frozenset[str]]:
+    """Every shape the registry says this call may produce."""
+    return {shape for variant in alternatives(site) for shape in expansions(variant)}
 
 
 # --- 1: every emit site maps into the registry ------------------------
@@ -918,31 +1093,72 @@ def test_the_walk_finds_the_whole_surface() -> None:
 
 @pytest.mark.parametrize("site", emit_sites(), ids=str)
 def test_every_emit_site_matches_declared_variants(site: Site) -> None:
-    """Keyed by source call. A site matches the SET of variants that
-    share its channel, level and template, and every member of that set
-    has to agree with the site's arity, its static keywords, and what
-    its spreads can produce."""
+    """Keyed by source call, and by SET EQUALITY rather than by
+    containment.
+
+    The shapes this call can produce and the shapes the registry admits
+    for it are the same set. Containment in either direction alone would
+    miss half of it: a variant carrying two mutually exclusive fields
+    would be contained in the union of everything the spreads can say,
+    and a call branch nothing declares would be contained in nothing at
+    all. Equality is what forbids a shape no call can make."""
     matched = alternatives(site)
     assert matched, (
         f"{site}: no declared variant on {site.channel} at level {site.level} "
         f"with this template"
     )
 
-    produces = produced_by(site)
-    base = base_of(site.channel)
     for variant in matched:
-        declared = set(variant.fields)
         assert len(variant.args) == len(site.args), f"{site}: arity"
-        # What the site always emits has to be declared, and what the
-        # variant declares has to be something the site can produce.
-        assert produces.always <= declared, f"{site}: undeclared fields"
-        assert declared - base <= produces.always | produces.sometimes, f"{site}: unproduced"
-        required = {
-            name
-            for name, held in variant.fields.items()
-            if held.required and name not in base
-        }
-        assert required <= produces.always | produces.sometimes, f"{site}: unproducible"
+    assert produced_by(site) == admitted_by(site), f"{site}: payload shapes"
+
+
+@pytest.mark.parametrize("site", emit_sites(), ids=str)
+def test_every_token_a_site_writes_into_a_field_is_declared(site: Site) -> None:
+    """A singleton token set is only pinned to its variant if something
+    reads the value the site writes. Without this, two variants of one
+    event could swap their reason tokens and every other check would
+    stay green, since the union across variants would not move."""
+    constants = module_constants(site.module)
+    for variant in alternatives(site):
+        for name, written in static_field_literals(site, constants).items():
+            declared = variant.fields.get(name)
+            if declared is None or declared.kind is not Kind.TOKEN:
+                continue
+            assert written in (declared.tokens or frozenset()), (
+                f"{site}: {name}={written!r} is not in this variant's token set"
+            )
+        for name, written in spread_token_literals(site, constants).items():
+            declared = variant.fields.get(name)
+            assert declared is not None and declared.kind is Kind.TOKEN, f"{site}: {name}"
+            assert written in (declared.tokens or frozenset()), (
+                f"{site}: {name}={written!r} is not in this variant's token set"
+            )
+
+
+def static_field_literals(site: Site, constants: dict[str, str]) -> dict[str, str]:
+    """The keyword fields whose value the call spells out."""
+    written: dict[str, str] = {}
+    for name, node in site.static_values.items():
+        value = literal_or_constant(node, constants)
+        if value is not None:
+            written[name] = value
+    return written
+
+
+def spread_token_literals(site: Site, constants: dict[str, str]) -> dict[str, str]:
+    """The fields a spread builder takes from its call's own arguments,
+    read off that call. `_echo_fields("skipped", ...)` is where an
+    `asr_prompt_echo` outcome is really decided."""
+    written: dict[str, str] = {}
+    for key, node in zip(site.spreads, site.spread_calls, strict=True):
+        for name, position in SPREAD_INVENTORY[key].token_arguments:
+            if not isinstance(node, ast.Call) or len(node.args) <= position:
+                continue
+            value = literal_or_constant(node.args[position], constants)
+            if value is not None:
+                written[name] = value
+    return written
 
 
 @pytest.mark.parametrize("site", emit_sites(), ids=str)
@@ -1028,15 +1244,46 @@ def test_the_declared_channels_are_the_channels_that_exist() -> None:
 
 def test_every_spread_inventory_entry_matches_its_builder() -> None:
     """The inventory is parsed out of the builder rather than described
-    beside it, so a builder that gains a key fails here."""
-    parsed = {key: spread_keys(key) for key in SPREAD_INVENTORY}
+    beside it, so a builder that gains a branch fails here."""
+    parsed = {
+        key: set(spread_alternatives(key))
+        for key, entry in SPREAD_INVENTORY.items()
+        if entry.how != DELEGATES
+    }
     declared = {
-        key: (entry.always, entry.sometimes)
+        key: set(entry.alternatives)
         for key, entry in SPREAD_INVENTORY.items()
         if entry.how != DELEGATES
     }
 
-    assert {key: value for key, value in parsed.items() if key in declared} == declared
+    assert parsed == declared
+
+
+def test_a_narrowed_call_only_ever_narrows() -> None:
+    """An override says which of a builder's branches one call can be
+    reached with. It may not invent a shape the builder cannot make,
+    and the calls that share a builder have to cover every branch of it
+    between them, or a branch would be declared nowhere."""
+    covered: dict[str, set[frozenset[str]]] = {}
+    for site in emit_sites():
+        for key in site.spreads:
+            branches = set(spread_alternatives(key))
+            narrowed = set(reachable(site, key))
+            assert narrowed <= branches, f"{site}: {key} narrowed to a shape it cannot make"
+            covered.setdefault(key, set()).update(narrowed)
+
+    assert covered == {key: set(spread_alternatives(key)) for key in covered}
+
+
+def test_the_narrowings_are_the_two_the_source_hides() -> None:
+    """Both overrides exist because the condition selecting the branch
+    is the condition selecting the call, which no reading of the builder
+    alone can see. A third would want the same explanation."""
+    assert {identity[:2] for identity in CALL_ALTERNATIVES} == {
+        ("samtal_server.ota", "check_version"),
+        ("samtal_server.providers.openai_asr", "OpenAiAsr._retry_without_prompt"),
+    }
+    assert set(CALL_ALTERNATIVES) <= {site.identity for site in emit_sites()}
 
 
 def test_the_inventory_names_every_spread_the_surface_uses() -> None:
@@ -1052,8 +1299,8 @@ def test_every_declared_field_is_produced_somewhere() -> None:
     field sit unused for ever."""
     evidenced: set[str] = set()
     for site in emit_sites():
-        produces = produced_by(site)
-        evidenced |= produces.always | produces.sometimes
+        for shape in produced_by(site):
+            evidenced |= shape
 
     declared: set[str] = set()
     for spec in REGISTRY.values():
@@ -1318,6 +1565,12 @@ def test_the_counts_every_document_repeats() -> None:
 # --- 5: the walk sees the shapes it claims to see ---------------------
 
 
+def planted_scope(source: str) -> ast.AST:
+    """One planted definition, as `scope_of` would answer with it: the
+    definition itself rather than the module around it."""
+    return ast.parse(source).body[0]
+
+
 def planted(source: str) -> list[Site]:
     walk = _Walk("planted")
     walk.visit(ast.parse(source))
@@ -1395,10 +1648,11 @@ def test_the_walk_leaves_a_logging_call_that_names_no_event_alone() -> None:
     assert planted("def handler():\n    logger.info('plain', 1)\n") == []
 
 
-def test_the_key_extraction_tells_always_from_sometimes() -> None:
-    """The rule the spread inventory rests on: a key in the literal is
-    produced on every call, a key added by a subscript is not."""
-    scope = ast.parse(
+def test_the_branch_walk_keeps_a_conditional_key_out_of_the_other_shape() -> None:
+    """The rule the spread inventory rests on: a subscript assignment
+    inside a branch makes a SECOND shape rather than an optional key on
+    the only one."""
+    scope = planted_scope(
         "def build():\n"
         "    fields = {'always': 1}\n"
         "    if something:\n"
@@ -1406,18 +1660,90 @@ def test_the_key_extraction_tells_always_from_sometimes() -> None:
         "    return fields\n"
     )
 
-    assert local_dict_keys(scope, "fields") == (
+    assert set(local_dict_alternatives(scope, "fields")) == {
         frozenset({"always"}),
-        frozenset({"sometimes"}),
+        frozenset({"always", "sometimes"}),
+    }
+
+
+def test_the_branch_walk_keeps_two_conditions_independent() -> None:
+    """Two conditions nothing correlates make four shapes, which is
+    what `language_fields` and the token counts really are."""
+    scope = planted_scope(
+        "def build():\n"
+        "    held = {}\n"
+        "    if one:\n"
+        "        held['a'] = 1\n"
+        "    if two:\n"
+        "        held['b'] = 2\n"
     )
 
+    assert len(set(local_dict_alternatives(scope, "held"))) == 4
 
-def test_the_key_extraction_intersects_the_returns() -> None:
-    scope = ast.parse(
+
+def test_the_branch_walk_makes_an_early_return_a_shape_of_its_own() -> None:
+    """What makes `provider` and `type` atomic: the path that returns
+    before them carries neither, and no path carries one without the
+    other."""
+    scope = planted_scope(
+        "def build():\n"
+        "    fields = {'stage': 1}\n"
+        "    if identity is None:\n"
+        "        return fields\n"
+        "    fields['provider'] = 2\n"
+        "    fields['type'] = 3\n"
+        "    return fields\n"
+    )
+
+    assert set(local_dict_alternatives(scope, "fields")) == {
+        frozenset({"stage"}),
+        frozenset({"stage", "provider", "type"}),
+    }
+
+
+def test_the_branch_walk_builds_no_shape_before_the_dict_exists() -> None:
+    """A builder whose dict is assembled inside a conditional has the
+    shapes of that conditional and no phantom empty one from the path
+    where it was never built."""
+    scope = planted_scope(
+        "def build():\n"
+        "    if transcript:\n"
+        "        held = {}\n"
+        "        if one:\n"
+        "            held['a'] = 1\n"
+        "        emit(**held)\n"
+    )
+
+    assert set(local_dict_alternatives(scope, "held")) == {
+        frozenset(),
+        frozenset({"a"}),
+    }
+
+
+def test_the_return_extraction_keeps_the_branches_apart() -> None:
+    """One shape per return, not one set of keys across them: `tool` and
+    `entry` are two answers, never one answer carrying both."""
+    scope = planted_scope(
         "def build(kind):\n"
         "    if kind:\n"
         "        return {'shared': 1, 'one': 2}\n"
         "    return {'shared': 1}\n"
     )
 
-    assert returned_dict_keys(scope) == (frozenset({"shared"}), frozenset({"one"}))
+    assert set(returned_dict_alternatives(scope)) == {
+        frozenset({"shared", "one"}),
+        frozenset({"shared"}),
+    }
+
+
+def test_the_expansion_of_a_variant_is_its_optional_powerset() -> None:
+    """The other half of the equality: a variant with two optional
+    fields admits four shapes, which is exactly what `heard` is."""
+    variant = REGISTRY["heard"].variants[0]
+
+    assert expansions(variant) == {
+        frozenset({"agent", "duration_s"}),
+        frozenset({"agent", "duration_s", "language"}),
+        frozenset({"agent", "duration_s", "language_confidence"}),
+        frozenset({"agent", "duration_s", "language", "language_confidence"}),
+    }
