@@ -11,10 +11,14 @@ and the document that says what the events are.
 Usage errors leave as a sentence of this module's own, for the reason
 the conversations group gives: several of argparse's quote what was
 typed back at the user, and a value on stderr is a value in whatever
-collects stderr.
+collects stderr. A reader who stops reading leaves the same way: this
+document is long enough to outrun a pipe buffer, so `| head` is an
+ordinary thing to do with it and has to be an ordinary thing to answer.
 """
 
 import argparse
+import os
+import signal
 import sys
 from collections.abc import Sequence
 from typing import NoReturn
@@ -25,6 +29,12 @@ from samtal_server import events_docgen
 # refusal for a word that is not one of them names them, so the two
 # cannot come to disagree.
 COMMANDS = ("reference",)
+
+# What a process that was cut off reports, by the convention a shell
+# already understands: the signal that would have killed it, offset by
+# 128. `head -n 1` is not an error to report; it is a reader who has
+# read enough.
+BROKEN_PIPE_STATUS = 128 + signal.SIGPIPE
 
 
 class EventsCommandError(Exception):
@@ -42,7 +52,33 @@ def main(argv: Sequence[str] | None = None) -> int:
     except EventsCommandError as exc:
         print(exc, file=sys.stderr)
         return 1
+    except BrokenPipeError:
+        return _reader_stopped_reading()
     return 0
+
+
+def _reader_stopped_reading() -> int:
+    """A consumer closed the pipe, which is not a failure to report.
+
+    Two things have to happen for it to stay unreported. The status is
+    the shell's own for a process cut off by SIGPIPE, so a pipeline reads
+    the way a pipeline does. And the file descriptor behind `sys.stdout`
+    is replaced with the null device before returning, because the
+    interpreter flushes its streams on the way out and a flush to a pipe
+    nobody is reading raises a second time, after this function is out of
+    the way: Python would print `Exception ignored on flushing
+    sys.stdout` to stderr, which is the traceback this exists to prevent
+    wearing different words.
+    """
+    try:
+        empty = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(empty, sys.stdout.fileno())
+    except OSError:
+        # Whatever stdout has become cannot be redirected. There is
+        # nothing further to do about it and nothing to say about it
+        # either, since saying it is what this avoids.
+        pass
+    return BROKEN_PIPE_STATUS
 
 
 class _Parser(argparse.ArgumentParser):
