@@ -9,6 +9,25 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Added
 
+- **The event schema reference cannot drift** (#155, M3).
+  `samtal-server events reference` prints the whole registry as a
+  document: one section per event, one subsection per shape it may be
+  emitted in, with the channel it rides, its level, the byte-exact
+  sentence it renders, the kind of every argument position and a field
+  table naming every field's kind, requiredness, nullability, token
+  set, syntax or bounds, plus the taxonomies, syntaxes and grammars
+  those tables point at. It is committed at `docs/reference/events.md`,
+  and CI regenerates it and diffs it byte for byte, the fourth such
+  step beside the domain configuration, the conversation store and the
+  OpenAPI document. The command opens nothing and dispatches before the
+  entrypoint resolves `SAMTAL_EVENTS_ENFORCEMENT`, so an unusable value
+  of a server-only variable cannot stand between a reader and the
+  document.
+  With this, #155 is done. One registry declares every event, the
+  emitters hold every emission to it, and the documentation is that
+  registry rendered rather than a second copy of it: a field carrying
+  far-side bytes is now a schema violation a test lane refuses, not a
+  review finding somebody has to notice.
 - **The emitters enforce the event schema at emit time** (#155, M2).
   Both `_emit` paths now hold an emission to its declaration in two
   ordered steps: what the caller passed is judged before the base
@@ -81,6 +100,18 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The README's event table is a name-and-when index** (#155, M3). Its
+  fields column is gone: prose field and token claims nothing parses go
+  stale while a name-level check stays green, and half-checked
+  documentation reads as checked. The index now names all 58 events,
+  the 24 it had never listed included, each with a sentence saying when
+  it fires, and every field, token, kind and bound lives in the
+  generated reference it points at. A test holds the index to the
+  registry at name level: every declared event in exactly one row,
+  every row a declared event, no duplicates. The lead sentence's
+  base-field claim is scoped to the session channel, where it is true.
+  The conversation store's reference points at the event reference for
+  the same reason.
 - **Breaking: the echo guard's recovered sentence no longer says what
   was recovered** (#165): `asr_prompt_echo`'s one INFO outcome, the
   retry that heard a real utterance where the guard was about to

@@ -894,3 +894,189 @@ each with its resolution and the commit that carries it:
    name, never by rendering the value: a caller that passed a list
    passed its contents too. Six cases, hashable and not, plus a sentinel
    in the event slot asserted absent from every record and every tap.
+
+## Milestone 3: the schema reference cannot drift
+
+`samtal-server/samtal_server/events_docgen.py` (new, 468 lines) renders
+the registry as a document, and `samtal_server/events_cli.py` (new, 105
+lines) is the command in front of it: `samtal-server events reference`.
+`docs/reference/events.md` (new, 2294 lines) is that document committed,
+and the workflow's fourth drift step holds it byte-identical to a fresh
+rendering. The README's event table lost its fields column and became a
+two-column name-and-when index over all **58 events**, 24 of which it
+had never listed, and
+`samtal-server/tests/unit/test_event_docs.py` (new, 275 lines) is what
+holds it to the registry at name level.
+
+Nine commits, in the order the milestone was built in, plus the one
+that records it:
+
+1. `f537363` Render the event registry as a reference
+2. `b310687` Move the table's field prose into the registry
+3. `d6567b1` Hold the committed event reference to the registry
+4. `1545080` Turn the event table into a name-and-when index
+5. `b141f8e` Send the store's reference to the new authority
+6. `e1fd346` Check the index names every declared event
+7. `06fde97` Check stored field names against the registry
+8. `358c215` Name the registry where prose named the table
+9. `0ac6e26` Read the section the assertions are about
+
+### The document, and what it renders
+
+One section per event in the registry's own declaration order, one
+subsection per variant, and above them the vocabulary those tables point
+at rather than repeat:
+
+- the two taxonomies, one row per `Kind` and per `ArgKind` with the
+  sentence a reader needs and an enum cannot carry;
+- the six `ID` syntaxes, with pattern, maximum length and the note the
+  declaration carries;
+- the ten composed grammars, with the pattern, the note, and the
+  module-qualified builders that produce them, which is what keeps a
+  grammar from being a pattern somebody guessed;
+- the prompt provenance grammar, its five forms and the exclusion of
+  `memory`;
+- the fourteen channels;
+- an index table of all 58 events with their channels, levels and
+  variant counts.
+
+Each variant carries its byte-exact template in a fenced block, an
+argument table (position, kind, constraint, note) and a field table
+(field, kind, required, nullable, constraint, note). The constraint
+column is where a token set is enumerated in full, an `ID` names its
+syntax, a `DESCRIPTOR` states its bounds and a `COMPOSED` argument names
+its grammar. The rendering is deterministic: declaration order
+throughout, token sets and channel sets sorted, no timestamps.
+
+Three of the composed grammars match a leading or trailing space
+(`from_entry`, `quoted_tool_name`, `also_bound_to`), and both a bare
+code span and the whitespace flattening every other table cell gets
+would have eaten it. Patterns are therefore printed quoted, which makes
+the empty pattern (`empty_fragment`) visible too, and a test pins that
+one rendering.
+
+### What moved into the registry, and what was already there
+
+The plan budgeted for moving the README's per-field prose into
+registry-owned notes. Most of it turned out to be there already: M1
+transcribed the table while declaring the fields, so `tools` is "a
+count, never a list", `sentences` is "how many of them the user heard",
+`stopped` is the intentional `mcp_down` and the only one at INFO, and so
+on down the table. Four claims were missing and were added as notes:
+what each of `timed_out`, `confirmed_echo` and `confirmed_empty` says
+about the ASR echo retry, and that `llm_round` names a `model` only
+where the configured entry does. `schema_violation`'s note lost its
+leading "Internal", which the reference now says structurally, from the
+declaration rather than from a sentence that could come to disagree with
+it.
+
+### The index
+
+58 rows, in the registry's order, each naming a declared event with a
+sentence saying when it fires. The existing 34 rows kept their `when`
+prose where it was good, which most of it was; the 24 that were missing
+took theirs from the declarations' own notes. Two rows carry something
+structural: `session_rejected` is one row naming both channels it rides
+(one row cannot inhabit two channel tables, and two rows fail the
+duplicate rule), and `schema_violation` says it is internal.
+
+The section's lead was false and is now scoped: it claimed every record
+carries `event`, `session` and `device`, which holds on the session
+channel and on no server channel. It now says so, and points at the
+generated reference for every field and token fact.
+
+### The conversation store's reference moved with it
+
+Not in the plan's file list, and it had to: `conversations/docgen.py`
+named the README's event table as the definition of "which events exist,
+and which fields each one carries". The table no longer carries fields.
+It points at `events.md` beside it now, which is generated from the same
+registry under the same regenerate-and-diff rule, so the committed
+`conversations-schema.md` moved by five lines in the same change.
+
+### The mutation matrix, as it came out
+
+Six mutations, each applied, observed failing, reverted (copy aside,
+copy back, `touch`, per this repository's restore rule). The registry
+half was run exactly as CI runs it: regenerate to a temporary file and
+`diff -u` it against the committed copy.
+
+| mutation | what failed | what it said |
+| --- | --- | --- |
+| a field added to `drain_finished` | the drift diff, exit 1 | one added row in that variant's field table, the added field's name, kind, requiredness and nullability |
+| `error` dropped from `CLOSE_REASONS` | the drift diff, exit 1 | one changed row: `session_closed`'s `reason` constraint listing four tokens where the committed copy lists five |
+| `conversations_pruned` moved to WARNING | the drift diff, exit 1 | two hunks: the index row's level column, and the variant heading, INFO against WARNING |
+| the `handover` row dropped | `test_every_declared_event_has_a_row`, and the count in `test_no_event_is_listed_twice` | `assert not ['handover']`, then `assert 57 == 58` |
+| a `handover_done` row invented | `test_every_row_names_a_declared_event`, and the same count | `assert not ['handover_done']`, then `assert 59 == 58` |
+| the `handover` row duplicated | `test_no_event_is_listed_twice` | `assert not ['handover']` |
+
+The two directions are worth naming separately, because they are what
+round 3's finding 6 asked for: a registry change that the committed
+document does not follow turns the lane red byte for byte, and a
+document change that the registry does not know turns it red by name.
+
+### One suite read the table, and now reads the registry
+
+`test_conversations_session.py` parsed the README's Logging table to
+learn which fields each event may carry, and asserted every stored field
+name appeared in that event's row. With the fields column gone the parse
+returned an empty mapping and the assertion failed, which is how the
+dependency was found: nothing in the plan named this file. It reads the
+registry now, the same declarations the README index and the generated
+reference are rendered from, so the check gained exactness (a
+declaration rather than prose) and lost its dependency on how a document
+is laid out. `conversations/docgen.py` and the comment in
+`test_tools_mcp.py` are the other two places that named the table; the
+first moved with the pointer above, and the second names the registry's
+token sets.
+
+### Deviations from the plan
+
+Four, all recorded rather than silent.
+
+1. **The command group is its own module with its own error type.** The
+   plan left the wiring open ("if it lives there"). `events_cli.py`
+   follows the conversations group's shape (a parser whose usage errors
+   become this module's own sentences, so argparse's habit of quoting
+   what was typed back at the user reaches no stderr), but it raises
+   `EventsCommandError` rather than borrowing `ConfigError`: borrowing
+   it would have imported the settings machinery into a command that
+   opens nothing.
+2. **The store's reference is in the touched list now** (above), which
+   the plan's files section did not anticipate.
+3. **The subprocess proof lives in `test_event_docs.py`**, beside the
+   command it is about, rather than in `test_event_enforcement_mode.py`
+   beside the sibling proof for `config --help`. Both spellings of an
+   unusable value are covered, a plain misspelling and a
+   credential-shaped one, and each asserts the value is not echoed into
+   the document either.
+4. **A suite outside the plan's list changed**, for the reason the
+   section above gives. It is neither pin file; both remain
+   byte-unchanged.
+
+The generator's own additions beyond "one section per event" (the
+taxonomy tables, the syntax and grammar tables, the channel list, the
+index) are not deviations but what the plan's "field table (kind,
+required, nullable, token sets, ID syntaxes, descriptor bounds)"
+requires once the field tables name their syntaxes instead of repeating
+them.
+
+### Verification
+
+Run from `samtal-server/`, with `PYTHONDONTWRITEBYTECODE=1` for
+everything outside pytest.
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/unit -q`: `2903 passed, 16 skipped`
+- `uv run pytest tests/integration -q`: `55 passed`
+- `uv run pytest tests/unit --collect-only -q | tail -1`: **2899
+  before**, **2919 after**. The rise of 20 is exactly the new file's
+  cases.
+- `uv run pytest tests/integration --collect-only -q | tail -1`: **55
+  before**, **55 after**.
+- The drift check CI will run, run locally:
+  `uv run samtal-server events reference > /tmp/events.md && diff -u ../docs/reference/events.md /tmp/events.md`
+  is silent, exit 0.
+- `git diff --stat 299c95e -- tests/unit/test_event_surface_pins.py tests/unit/test_server_event_pins.py`:
+  empty. The two contract suites are byte-unchanged across all three
+  milestones.
