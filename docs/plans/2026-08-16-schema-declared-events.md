@@ -51,7 +51,9 @@ Settled by issue #155 and not re-litigated here:
 ## Evidence, re-verified at plan time
 
 The issue's evidence is pinned to main@749bd23 (68 paths); at
-main@f35001a, after #120's M5 narrowing and #144, the surface is:
+main@af9e4d4, after #120's M5 narrowing, #144, the 2026-08-17 ADR
+amendment, and #165's sentence narrowing (this plan's prerequisite,
+merged as PR #166), the surface is:
 
 - **81 emit sites, 57 distinct event names**, inventoried by an AST
   scan of every `events.<level>(...)` call carrying `event=` in
