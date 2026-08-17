@@ -89,3 +89,17 @@ API_SECRET_ENV = "SAMTAL_API_SECRET"
 TEST_API_SECRET = "test-api-token-" + "fedcba9876543210" * 2
 
 os.environ.setdefault(API_SECRET_ENV, TEST_API_SECRET)
+
+# Every event these lanes drive is held to its declaration (#155), and a
+# violation raises rather than being recovered from. The emitters
+# default to that already, so this is not what makes the lanes strict;
+# what it makes is a lane that STAYS strict when it builds an app.
+# `create_app` resolves this variable, and an unset one means forgiving
+# there, deliberately: a running server is a deployment however it was
+# launched. Set rather than defaulted, unlike the two secrets above,
+# because an ambient `forgiving` on a CI runner would quietly relax
+# every app-building lane in the suite, which is the one thing this
+# variable must not be able to do.
+ENFORCEMENT_ENV = "SAMTAL_EVENTS_ENFORCEMENT"
+
+os.environ[ENFORCEMENT_ENV] = "strict"
