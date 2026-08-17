@@ -2094,3 +2094,105 @@ def test_the_expansion_of_a_variant_is_its_optional_powerset() -> None:
         frozenset({"agent", "duration_s", "language_confidence"}),
         frozenset({"agent", "duration_s", "language", "language_confidence"}),
     }
+
+
+# --- 6: a lawful configured name is lawful on the events --------------
+#
+# `NonBlankStr` is `StringConstraints(strip_whitespace=True,
+# min_length=1)` and nothing else, so an agent called `secondary"agent`,
+# one carrying a control character, and one a thousand characters long
+# are all valid configuration today. The registry may not claim a
+# tighter domain than that: M2 enforces these grammars, and a claim
+# configuration never made would drop the field and replace the sentence
+# for a deployment that did nothing wrong.
+#
+# The PR #167 review's third finding, and the reason the grammars are
+# bounded by structure rather than by character class or length.
+
+LAWFUL_NAMES = (
+    pytest.param('secondary"agent', id="quoted"),
+    pytest.param("second\x07ary\nagent", id="control-bearing"),
+    pytest.param("a" * 4000, id="overlong"),
+)
+
+
+@pytest.mark.parametrize("name", LAWFUL_NAMES)
+def test_a_lawful_configured_name_passes_the_configuration(name: str) -> None:
+    """The premise the rest of this section rests on. If the
+    configuration refused these, the grammars could refuse them too."""
+    from pydantic import TypeAdapter
+
+    from samtal_server.config.models import NonBlankStr
+
+    assert TypeAdapter(NonBlankStr).validate_python(name) == name
+
+
+@pytest.mark.parametrize("name", LAWFUL_NAMES)
+def test_a_lawful_configured_name_rides_every_composed_grammar(name: str) -> None:
+    """Each fragment as its own builder assembles it, against the
+    grammar the registry declares for it."""
+    fragments = {
+        schema.ALSO_BOUND_TO: f" (also bound to {', '.join([name, name])})",
+        schema.AGENT_LIST: ", ".join([name, name]),
+        schema.QUOTED_TOOL_NAME: f' "{name}"',
+        schema.FROM_ENTRY: f' from entry "{name}"',
+        schema.QUOTED_PROVIDER: f' "{name}"',
+        schema.REACHING_HOST: f" reaching {name}",
+        schema.ORIGIN_PROVENANCE: f"from {name}",
+    }
+
+    refused = [
+        grammar.name
+        for grammar, fragment in fragments.items()
+        if not schema.matcher(grammar.pattern).match(fragment)
+    ]
+
+    assert refused == []
+
+
+@pytest.mark.parametrize("name", LAWFUL_NAMES)
+def test_a_lawful_configured_name_is_a_lawful_identifier_field(name: str) -> None:
+    """And the fields themselves. An IDENTIFIER carries the
+    configuration's domain, so the only thing it refuses is emptiness."""
+    assert schema.IDENTIFIER_DOMAIN
+    assert name.strip()
+    fields = {
+        (event, held)
+        for event, spec in REGISTRY.items()
+        for variant in spec.variants
+        for held, declared in variant.fields.items()
+        if declared.kind is Kind.IDENTIFIER
+    }
+
+    # No IDENTIFIER field declares a syntax or a bound, which is what
+    # would otherwise refuse this name once M2 enforces.
+    claiming = [
+        (event, held)
+        for event, held in fields
+        for spec in [REGISTRY[event]]
+        for variant in spec.variants
+        for name_, declared in variant.fields.items()
+        if name_ == held
+        and declared.kind is Kind.IDENTIFIER
+        and (declared.syntax is not None or declared.bounds is not None)
+    ]
+
+    assert claiming == []
+
+
+def test_no_composed_grammar_claims_a_length_or_a_character_class() -> None:
+    """The rule, stated as a rule rather than as seven examples. A
+    grammar over configured names bounds by structure; the two that
+    bound by class are over values this server mints itself."""
+    minted = {
+        schema.EMPTY_FRAGMENT.name,
+        schema.SESSION_LIST.name,
+        schema.DEVICE_OR_UNIDENTIFIED.name,
+    }
+    claiming = [
+        grammar.name
+        for grammar in schema.GRAMMARS.values()
+        if grammar.name not in minted and ("{1," in grammar.pattern or "\\x00" in grammar.pattern)
+    ]
+
+    assert claiming == []
