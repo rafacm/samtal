@@ -355,6 +355,49 @@ def test_forgiving_says_only_what_the_registry_owns(
     assert not any(SENTINEL in str(one.args) for one in tap.seen)
 
 
+def test_one_value_in_two_places_is_dropped_from_both(
+    caplog: pytest.LogCaptureFixture, tap: Tap
+) -> None:
+    """Aliasing, which is what makes the sentence's replacement
+    unconditional (PR #169's review).
+
+    The same credential is an undeclared field key, that field's value,
+    and a perfectly lawful `IDENTIFIER` argument of the same call.
+    Judging the two halves independently would drop it from the payload
+    for being undeclared and render it into the sentence for being a
+    valid identifier, printing on one line what was refused on the
+    other. So an invalid emission loses its arguments whatever was wrong
+    with it, and the event rides on its field shape alone."""
+    events.set_enforcement(events.FORGIVING)
+
+    with caplog.at_level("DEBUG"):
+        ServerEvents(CHANNEL).info(
+            "measured %s in %d ms",
+            SENTINEL,
+            12,
+            event="measured",
+            stage="asr",
+            duration_ms=12,
+            reason="fast",
+            **{SENTINEL: SENTINEL},
+        )
+
+    (complaint,) = [one for one in caplog.records if not hasattr(one, "event")]
+    assert complaint.args == ("measured", "undeclared_fields (1)")
+    # The event survives, which is the half a complaint is not allowed
+    # to cost, and carries its declared fields and nothing else.
+    (record,) = [one for one in caplog.records if hasattr(one, "event")]
+    assert fields_of(record) == {
+        "event": "measured",
+        "stage": "asr",
+        "duration_ms": 12,
+        "reason": "fast",
+    }
+    assert record.args == ()
+    assert SENTINEL not in both_formats(caplog)
+    assert SENTINEL not in tap.rendered()
+
+
 def test_the_recovery_keeps_no_part_of_a_wholly_hostile_call(
     caplog: pytest.LogCaptureFixture, tap: Tap
 ) -> None:
