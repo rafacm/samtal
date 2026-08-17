@@ -60,7 +60,7 @@ from samtal_server.capture import (
     SessionCapture,
 )
 from samtal_server.config import Config
-from samtal_server.config.models import normalize_mac
+from samtal_server.config.models import CLIENT_ID_LIMIT, bounded_descriptor, normalize_mac
 from samtal_server.config.views import provider_record
 from samtal_server.conversations import ConversationStore, SessionSink
 from samtal_server.device.bindings import DeviceBindings
@@ -375,12 +375,24 @@ class DeviceSession:
             manifest = self._manifest(client_id)
             self._start_capture(manifest)
             self._start_recording(manifest)
+            # What the event says about the client id, which is not what
+            # the manifest above says about it. The header is the device
+            # UUID, unbounded and unvalidated: with device auth off
+            # nothing has looked at it at all, and with it on the token
+            # was verified against whatever string arrived. The manifest
+            # keeps the header, because the capture and the conversation
+            # store are the surfaces that hold what the device said;
+            # the event carries a bounded copy, null where nothing
+            # printable survived, and renders that same copy in its
+            # sentence, since dropping a field would not un-render an
+            # argument.
+            said_client = bounded_descriptor(client_id, CLIENT_ID_LIMIT)
             self._events.info(
                 "session %s open: device %s (client %s) agent %s%s, protocol v%d, "
                 "%d Hz %d ms frames in",
                 self.session_id,
                 mac,
-                client_id or "unknown",
+                said_client or "unknown",
                 self._agent,
                 f" (also bound to {', '.join(self._agents[1:])})"
                 if len(self._agents) > 1
@@ -389,7 +401,7 @@ class DeviceSession:
                 hello.audio_params.sample_rate,
                 hello.audio_params.frame_duration,
                 event="session_open",
-                client=client_id or None,
+                client=said_client or None,
                 agent=self._agent,
                 agents=list(self._agents),
                 protocol=self.protocol_version,

@@ -33,6 +33,7 @@ a formality.
 import json
 import logging
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -46,8 +47,9 @@ from samtal_server.events import Emission, attach_server_tap, detach_server_tap
 from samtal_server.logs import JsonFormatter
 from samtal_server.ota import OTA_PATH
 from tests.support.checkin import MOCK_AGENT, MOCK_PROVIDERS, NORMALIZED, SYSTEM_INFO
-from tests.support.configs import DEVICE_MAC, DEVICE_UUID
+from tests.support.configs import DEVICE_MAC, DEVICE_UUID, config_with_agent
 from tests.support.events import fields_of, only
+from tests.support.wire import handshake, shake_hands
 
 # What the bound lets through: credential-shaped, printable, and short
 # enough for every limit here. Its presence is asserted, positively, in
@@ -364,3 +366,81 @@ def test_the_token_is_still_signed_for_the_header_as_it_arrived(
     assert auth.verify(answered["websocket"]["token"], HOSTILE_CLIENT, NORMALIZED)
     # And the event still says nothing a stranger chose.
     assert carrying(caplog, REJECTED) == set()
+
+
+# --- device/session.py: the Client-Id a handshake presents ------------
+#
+# Header values cannot carry a carriage return or a newline, which the
+# HTTP client refuses to send, so the hostile client id here is long
+# rather than unprintable. The printability half of the bound is proven
+# above, where the value travels in a JSON body instead.
+
+WIRE_CLIENT = f"{ADMISSIBLE}-" + "z" * 400 + REJECTED
+
+
+def open_a_session(client: TestClient, client_id: str) -> None:
+    """One handshake presenting the given Client-Id, with a token signed
+    for that same header, which is the identity pair the OTA reply would
+    have issued for."""
+    device_auth = client.app.state.device_auth
+    token = "" if device_auth is None else device_auth.issue(client_id, NORMALIZED)
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Protocol-Version": "1",
+        "Client-Id": client_id,
+        "Device-Id": DEVICE_MAC,
+    }
+    with handshake(client, headers) as websocket:
+        shake_hands(websocket)
+
+
+def test_session_open_bounds_the_client_id_the_handshake_presented(
+    caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    """The event carries a bounded copy in its field and renders that
+    same copy in its sentence."""
+    config = config_with_agent(
+        server={"capture": {"enabled": True, "dir": str(tmp_path / "captures")}}
+    )
+    with caplog.at_level(logging.INFO), TestClient(create_app(config)) as client:
+        open_a_session(client, WIRE_CLIENT)
+
+    record = only(caplog, "session_open")
+    held = fields_of(record)["client"]
+    assert len(held) <= CLIENT_ID_LIMIT
+    assert record.args[2] == held
+    assert carrying(caplog, REJECTED) == set()
+    assert REJECTED not in both_formats(caplog)
+
+
+def test_the_capture_manifest_keeps_the_client_id_as_it_arrived(
+    caplog: pytest.LogCaptureFixture, tmp_path: Path
+) -> None:
+    """Event-only. The capture and the conversation store are the
+    surfaces that hold what the device said, and the manifest is built
+    from the header rather than from the event's copy."""
+    config = config_with_agent(
+        server={"capture": {"enabled": True, "dir": str(tmp_path / "captures")}}
+    )
+    with caplog.at_level(logging.INFO), TestClient(create_app(config)) as client:
+        open_a_session(client, WIRE_CLIENT)
+
+    wavs = list((tmp_path / "captures").glob("*.wav"))
+    assert len(wavs) == 1
+    manifest = json.loads(wavs[0].with_suffix(".json").read_text())
+    assert manifest["device"]["client"] == WIRE_CLIENT
+
+
+def test_a_lawful_client_id_opens_a_session_unchanged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The value the contract pin plants, carried exactly as it pins
+    it."""
+    with caplog.at_level(logging.INFO), TestClient(
+        create_app(config_with_agent())
+    ) as client:
+        open_a_session(client, DEVICE_UUID)
+
+    record = only(caplog, "session_open")
+    assert fields_of(record)["client"] == DEVICE_UUID
+    assert record.args[2] == DEVICE_UUID
