@@ -298,43 +298,40 @@ class ConfigStore:
     # model-shaped half can never carry.
 
     def read_provider(self, stage: str, name: str) -> Entity[ProviderConfig]:
-        stage = _stage(stage)
-        with self._transaction() as connection:
-            entry = getattr(_read_domain(connection).providers, stage).get(name)
-            if entry is None:
-                raise UnknownEntityError(f"providers.{stage}.{name}: no such provider")
-            return self._with_secrets(connection, entry, "provider", f"{stage}.{name}")
+        return self._read(_PROVIDER, _stage(stage), name)
 
     def read_mcp_server(self, name: str) -> Entity[McpServerConfig]:
-        with self._transaction() as connection:
-            entry = _read_domain(connection).mcp_servers.get(name)
-            if entry is None:
-                raise UnknownEntityError(f"mcp_servers.{name}: no such MCP server")
-            return self._with_secrets(connection, entry, "mcp_server", name)
+        return self._read(_MCP_SERVER, name)
 
     def read_prompt_fragment(self, name: str) -> Entity[PromptFragmentConfig]:
-        with self._transaction() as connection:
-            entry = _read_domain(connection).prompt_fragments.get(name)
-            if entry is None:
-                raise UnknownEntityError(NO_SUCH_FRAGMENT)
-            # A fragment is prompt text and holds no credential slot, so
-            # there is nothing stored beside it.
-            return Entity(entry=entry, secrets=())
+        return self._read(_PROMPT_FRAGMENT, name)
 
     def read_agent(self, name: str) -> Entity[AgentConfig]:
-        with self._transaction() as connection:
-            entry = _read_domain(connection).agents.get(name)
-            if entry is None:
-                raise UnknownEntityError(f"agents.{name}: no such agent")
-            # An agent holds no credential of its own: it references
-            # providers and MCP servers, and theirs are stored on them.
-            return Entity(entry=entry, secrets=())
+        return self._read(_AGENT, name)
 
     def read_agent_defaults(self) -> Entity[AgentDefaults]:
         """The singleton, which always exists: an unwritten one is the
         empty entry rather than a missing entity."""
+        return self._read(_AGENT_DEFAULTS)
+
+    def _read(self, descriptor: EntityDescriptor, *identity: str) -> Entity:
+        """One entity of one kind, or the refusal its kind answers a
+        missing entry with.
+
+        What comes back beside it is its stored-secret slots, and only
+        the two kinds that can hold one have any: a fragment is prompt
+        text, and an agent references providers and MCP servers whose
+        credentials are stored on them.
+        """
         with self._transaction() as connection:
-            return Entity(entry=_read_domain(connection).agent_defaults, secrets=())
+            entry = _entry(_read_domain(connection), descriptor, identity)
+            if entry is None:
+                raise UnknownEntityError(descriptor.missing(*identity))
+            if descriptor.secret_slots is None:
+                return Entity(entry=entry, secrets=())
+            return self._with_secrets(
+                connection, entry, descriptor.secret_slots, ".".join(identity)
+            )
 
     def read_device(self, mac: str) -> Entity[list[str]]:
         """One device's binding, keyed by the canonical form of its MAC,
@@ -370,54 +367,16 @@ class ConfigStore:
         design, so a whole-row replacement would silently erase every
         stored secret on an ordinary edit.
         """
-        stage = _stage(stage)
-        name = _identifier(f"providers.{stage}", name)
-        entry = _parse(ProviderConfig, f"providers.{stage}.{name}", fragment)
-        _check_no_url_credentials(f"providers.{stage}.{name}", (stage, name), entry)
-        with self._transaction() as connection:
-            domain = _read_domain(connection)
-            getattr(domain.providers, stage)[name] = entry
-            _refuse_unresolved(domain)
-            _upsert(
-                connection,
-                _table(_PROVIDER),
-                {"stage": stage, "name": name},
-                _to_row(_PROVIDER, entry),
-            )
+        self._write(_PROVIDER, (_stage(stage), name), fragment)
 
     def delete_provider(self, stage: str, name: str) -> None:
-        stage = _stage(stage)
-        with self._transaction() as connection:
-            # The row carries its own secrets column, so deleting the
-            # entity deletes its stored secrets with it.
-            _delete_row(
-                connection,
-                schema.providers,
-                (
-                    schema.providers.c.stage == stage,
-                    schema.providers.c.name == name,
-                ),
-                f"providers.{stage}.{name}: no such provider",
-            )
+        self._delete(_PROVIDER, _stage(stage), name)
 
     def set_mcp_server(self, name: str, fragment: object) -> None:
-        name = _identifier("mcp_servers", name)
-        entry = _parse(McpServerConfig, f"mcp_servers.{name}", fragment)
-        _check_entry_name(f"mcp_servers.{name}", (name,), entry)
-        with self._transaction() as connection:
-            domain = _read_domain(connection)
-            domain.mcp_servers[name] = entry
-            _refuse_unresolved(domain)
-            _upsert(connection, _table(_MCP_SERVER), {"name": name}, _to_row(_MCP_SERVER, entry))
+        self._write(_MCP_SERVER, (name,), fragment)
 
     def delete_mcp_server(self, name: str) -> None:
-        with self._transaction() as connection:
-            _delete_row(
-                connection,
-                schema.mcp_servers,
-                (schema.mcp_servers.c.name == name,),
-                f"mcp_servers.{name}: no such MCP server",
-            )
+        self._delete(_MCP_SERVER, name)
 
     def set_prompt_fragment(self, name: str, fragment: object) -> None:
         """Create or replace `prompt_fragments.<name>` from a fragment in
@@ -427,63 +386,74 @@ class ConfigStore:
         thing about this write that is not like its neighbours'
         (`_check_fragment_name` says why).
         """
-        name = _identifier("prompt_fragments", name)
-        _check_fragment_name(name)
-        entry = _parse(PromptFragmentConfig, f"prompt_fragments.{name}", fragment)
-        with self._transaction() as connection:
-            domain = _read_domain(connection)
-            domain.prompt_fragments[name] = entry
-            _refuse_unresolved(domain)
-            _upsert(
-                connection,
-                _table(_PROMPT_FRAGMENT),
-                {"name": name},
-                _to_row(_PROMPT_FRAGMENT, entry),
-            )
+        self._write(_PROMPT_FRAGMENT, (name,), fragment)
 
     def delete_prompt_fragment(self, name: str) -> None:
         """Refused while any layer still includes it, by the same
         reference pass every other write runs."""
-        with self._transaction() as connection:
-            _delete_row(
-                connection,
-                schema.prompt_fragments,
-                (schema.prompt_fragments.c.name == name,),
-                NO_SUCH_FRAGMENT,
-            )
+        self._delete(_PROMPT_FRAGMENT, name)
 
     def set_agent(self, name: str, fragment: object) -> None:
-        name = _identifier("agents", name)
-        entry = _parse(AgentConfig, f"agents.{name}", fragment)
-        with self._transaction() as connection:
-            domain = _read_domain(connection)
-            domain.agents[name] = entry
-            _refuse_unresolved(domain)
-            _upsert(connection, _table(_AGENT), {"name": name}, _to_row(_AGENT, entry))
+        self._write(_AGENT, (name,), fragment)
 
     def delete_agent(self, name: str) -> None:
         """Refused while a device binding or default_agent still names
         it, by the same reference pass every other write runs."""
-        with self._transaction() as connection:
-            _delete_row(
-                connection,
-                schema.agents,
-                (schema.agents.c.name == name,),
-                f"agents.{name}: no such agent",
-            )
+        self._delete(_AGENT, name)
 
     def set_agent_defaults(self, fragment: object) -> None:
-        entry = _parse(AgentDefaults, "agent_defaults", fragment)
+        self._write(_AGENT_DEFAULTS, (), fragment)
+
+    def _write(
+        self, descriptor: EntityDescriptor, identity: tuple[str, ...], fragment: object
+    ) -> None:
+        """Create or replace one entity from a fragment in the same shape
+        its section of the YAML file has.
+
+        The order is every kind's: the name is made usable, then
+        whatever the kind checks before a body is looked at, then the
+        body through the model that owns it, then whatever the kind
+        checks about the parsed entry. Only after all of that does the
+        transaction open, so nothing a caller got wrong costs a write
+        lock.
+
+        Inside it, the entry is put where the configuration would hold
+        it and the reference pass runs against the state the write would
+        leave, which is what makes an unresolvable write refusable
+        before it lands. The columns the kind names are what is written,
+        so the `secrets` column nobody named stays as it was.
+        """
+        if descriptor.addressing:
+            name = _identifier(_location(descriptor, *identity[:-1]), identity[-1])
+            identity = (*identity[:-1], name)
+        location = _location(descriptor, *identity)
+        if descriptor.before_parse is not None:
+            descriptor.before_parse(*identity)
+        entry = _parse(descriptor.model, location, fragment)
+        if descriptor.inside_write is not None:
+            descriptor.inside_write(location, identity, entry)
         with self._transaction() as connection:
             domain = _read_domain(connection)
-            domain.agent_defaults = entry
+            _place(domain, descriptor, identity, entry)
             _refuse_unresolved(domain)
             _upsert(
                 connection,
-                _table(_AGENT_DEFAULTS),
-                {"id": schema.AGENT_DEFAULTS_ID},
-                _to_row(_AGENT_DEFAULTS, entry),
+                _table(descriptor),
+                _row_identity(descriptor, identity),
+                _to_row(descriptor, entry),
             )
+
+    def _delete(self, descriptor: EntityDescriptor, *identity: str) -> None:
+        """Remove one entity, by the identity that addresses it and
+        nothing else. A row carries its own secrets column, so deleting
+        the entity deletes its stored secrets with it."""
+        table = _table(descriptor)
+        where = [
+            table.c[column] == value
+            for column, value in _row_identity(descriptor, identity).items()
+        ]
+        with self._transaction() as connection:
+            _delete_row(connection, table, where, descriptor.missing(*identity))
 
     # Devices and the default agent
 
@@ -833,6 +803,54 @@ def _to_row(descriptor: EntityDescriptor, entry: BaseModel) -> dict[str, object]
     if descriptor.to_row is not None:
         return descriptor.to_row(entry)
     return entry.model_dump()
+
+
+def _row_identity(descriptor: EntityDescriptor, identity: Sequence[str]) -> dict[str, object]:
+    """The columns that address one row: the parameters the kind is
+    addressed by, under their own names, since a path parameter and the
+    column it selects on are the same fact. A kind addressed by nothing
+    is the singleton, whose one row is written under a fixed key."""
+    if not descriptor.addressing:
+        return {"id": schema.AGENT_DEFAULTS_ID}
+    return dict(zip(descriptor.addressing, identity, strict=True))
+
+
+def _section(
+    domain: DomainConfig, descriptor: EntityDescriptor, identity: Sequence[str]
+) -> object:
+    """The mapping one entry of a kind is keyed in. Every addressing
+    parameter but the last names a group inside the section: a provider
+    is addressed by its stage and its name together, and the stage is
+    the group."""
+    section = getattr(domain, descriptor.moved_key)
+    for group in identity[:-1]:
+        section = getattr(section, group)
+    return section
+
+
+def _entry(
+    domain: DomainConfig, descriptor: EntityDescriptor, identity: Sequence[str]
+) -> object:
+    """One entry out of a whole configuration, or None when it holds
+    none of that identity. The singleton is never None: an unwritten one
+    is the empty entry rather than a missing entity."""
+    if not descriptor.addressing:
+        return getattr(domain, descriptor.moved_key)
+    return _section(domain, descriptor, identity).get(identity[-1])
+
+
+def _place(
+    domain: DomainConfig,
+    descriptor: EntityDescriptor,
+    identity: Sequence[str],
+    entry: BaseModel,
+) -> None:
+    """The entry where the configuration would hold it, so that the
+    reference pass runs against the state the write would leave."""
+    if not descriptor.addressing:
+        setattr(domain, descriptor.moved_key, entry)
+        return
+    _section(domain, descriptor, identity)[identity[-1]] = entry
 
 
 # Reading rows
