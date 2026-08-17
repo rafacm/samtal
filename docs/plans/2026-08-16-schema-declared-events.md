@@ -789,7 +789,7 @@ recorded in the PR body with observed failure output per branch.
 ## Milestones
 
 - [x] [M1](2026-08-16-schema-declared-events-implementation.md#milestone-1-the-registry-exists-and-is-statically-conformant):
-      the registry exists and is statically conformant (PR TBD):
+      the registry exists and is statically conformant (PR #167):
       `samtal_server/events_schema.py` declares all 57 events with
       fields, kinds, levels, scopes, and token sets;
       `test_event_schema_conformance.py` ties every static emit
