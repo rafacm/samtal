@@ -613,11 +613,12 @@ def _mcp_servers(request: Request) -> McpStatusSource | None:
     return request.app.state.mcp_servers
 
 
-# The registry's own type would be the forward reference PendingDep
-# cannot use; this is the surface a route actually reaches it through,
-# declared in `responses.py` out of typing and the models, so the
-# annotation resolves at import without the MCP SDK being anywhere
-# near it.
+# `Any` stood here for the reason PendingDep's does: FastAPI resolves a
+# route's annotations at import, and the registry's own type is a name
+# this module deliberately does not import at runtime. What replaces it
+# is not that type but the surface a route actually reaches it through,
+# declared in `responses.py` out of typing and the response models, so
+# the annotation resolves at import with the MCP SDK nowhere near it.
 McpServersDep = Annotated[McpStatusSource | None, Depends(_mcp_servers)]
 
 
