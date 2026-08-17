@@ -9,6 +9,13 @@ rather than against a hand-kept list of the keys it expects. `writes.py`
 records why the CLI must not import the API, and `config schema` and
 `config reference` are the commands that would otherwise pay for it.
 
+Beside the models, and for the same reason, the two runtime surfaces
+the API is handed: the protocol a status read is taken through and the
+shape of the callable a reload is applied by. Both are stated in
+typing and these models, which is what lets a route say what it was
+handed without the module that renders the document loading the MCP
+SDK to find out.
+
 Every model forbids extra keys, so a field that is answered is a field
 that was declared. The descriptions are the document's prose, written
 for whoever reads the contract rather than the code, and they are
@@ -16,7 +23,8 @@ committed bytes: `docs/reference/api-openapi.json` carries them, and
 the drift check compares them.
 """
 
-from typing import Any, Literal, get_args, get_origin
+from collections.abc import Awaitable, Callable
+from typing import Any, Literal, Protocol, get_args, get_origin
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -280,6 +288,37 @@ RELOAD_OUTCOMES = tuple(
     for name, field in McpReloadResult.model_fields.items()
     if get_origin(field.annotation) is list and get_args(field.annotation) == (str,)
 )
+
+
+class McpStatusSource(Protocol):
+    """Where the two answers above come from: the running server's MCP
+    registry, through the one method this API asks it for.
+
+    A protocol and not the class, declared here beside the shapes it
+    answers in, because the registry imports the MCP SDK and this
+    project's provider layer and rendering the committed document must
+    load neither: `api.py` records that constraint and used to pay for
+    it with `Annotated[Any]` dependencies, which is a route saying it
+    knows nothing about what it was handed. This says the true and much
+    smaller thing instead, in typing and pydantic and nothing else.
+
+    An application built without a server around it has no registry and
+    is handed None, which the status read answers as an empty object.
+    """
+
+    def typed_status(self) -> dict[str, McpServerStatus]: ...
+
+
+# And what applies a re-read of the stored configuration to that
+# registry: a callable, because what it closes over (the configuration
+# this process booted on, and the managers that are running) is the
+# composition root's business and not this API's. It answers the whole
+# of the reload's reply, taken in one breath where the two phases live,
+# so the handler applies a configuration and adds nothing to what came
+# back. None is the honest answer for an application without a server,
+# and the route refuses rather than pretending to have applied
+# something.
+type McpReloader = Callable[[], Awaitable[McpReloadResult]]
 
 
 class PromptBlock(BaseModel):

@@ -11,6 +11,7 @@ from samtal_server.capture import CaptureStore, DeviceFacts
 from samtal_server.config import Config
 from samtal_server.config.api import api_token, build_api, mount_api
 from samtal_server.config.boot import load_boot_config, reload_domain_config
+from samtal_server.config.responses import McpReloader, McpReloadResult
 from samtal_server.config.secrets import SecretStore
 from samtal_server.conversations import ConversationStore, migrate_existing
 from samtal_server.device.bindings import DeviceBindings
@@ -20,7 +21,7 @@ from samtal_server.providers import build_agent_providers
 from samtal_server.registry import SessionRegistry
 from samtal_server.runtime import prompt
 from samtal_server.runtime.pipeline import bespoke_runtime_factory
-from samtal_server.tools.mcp import McpReload, McpServers
+from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
 
 events = ServerEvents(__name__)
@@ -75,9 +76,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             conversations.stop()
 
 
-def _mcp_reloader(
-    config: Config, servers: McpServers
-) -> Callable[[], Awaitable[McpReload]]:
+def _mcp_reloader(config: Config, servers: McpServers) -> McpReloader:
     """What the configuration API's reload route calls.
 
     Closed over here because this is where both halves are known: the
@@ -87,14 +86,20 @@ def _mcp_reloader(
     than being done here, which keeps the tools layer clear of the
     database and leaves the registry deciding where a blocking read runs
     (a worker thread) and when it is allowed to run at all.
+
+    What comes back is the endpoint's whole answer, composed by the
+    registry: this is the wiring between an application that must not
+    load the MCP layer and a layer that must not know what a route is,
+    and a shape either of them had to take apart would be a third
+    place that knew both.
     """
 
     def read() -> tuple[Config, SecretStore]:
         reloaded = reload_domain_config(config)
         return reloaded.config, reloaded.secrets
 
-    async def reload() -> McpReload:
-        return await servers.reload(read)
+    async def reload() -> McpReloadResult:
+        return await servers.reload_result(read)
 
     return reload
 

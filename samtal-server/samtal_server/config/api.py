@@ -77,8 +77,10 @@ from samtal_server.config.responses import (
     DefaultAgentName,
     DeviceBinding,
     Envelope,
+    McpReloader,
     McpReloadResult,
     McpServerStatus,
+    McpStatusSource,
     PendingDevice,
     Problem,
     PromptBlock,
@@ -114,11 +116,15 @@ if TYPE_CHECKING:
     from samtal_server.onboarding import PendingDevice as PendingRecord
     from samtal_server.onboarding import PendingDevices
 
-    # Named here for the same reason and with more force: the MCP
-    # registry imports the SDK's clients and this project's provider
-    # layer, none of which rendering a document has any business
-    # loading. It arrives as an argument and is read through one method.
-    from samtal_server.tools.mcp import McpServers
+    # The MCP registry was named here too, for the same reason and with
+    # more force: it imports the SDK's clients and this project's
+    # provider layer, none of which rendering a document has any
+    # business loading. It is not named anywhere any more. What the
+    # routes are handed is `McpStatusSource` and `McpReloader` from
+    # `responses.py`, which say what this application asks of a running
+    # server out of typing and the response models, so the annotations
+    # resolve at import and the constraint holds by construction rather
+    # than by a forward reference nobody may resolve.
 
 events = ServerEvents(__name__)
 
@@ -421,8 +427,8 @@ def build_api(
     database_dir: Path,
     loaded_agents: Collection[str] = (),
     pending: "PendingDevices | None" = None,
-    mcp_servers: "McpServers | None" = None,
-    mcp_reload: Callable[[], Awaitable[Any]] | None = None,
+    mcp_servers: McpStatusSource | None = None,
+    mcp_reload: McpReloader | None = None,
     agent_prompt: Callable[[str], Awaitable[Any]] | None = None,
 ) -> FastAPI:
     """The sub-application the server mounts: the routes, gated.
@@ -600,25 +606,29 @@ def _pending(request: Request) -> "PendingDevices":
 PendingDep = Annotated[Any, Depends(_pending)]
 
 
-def _mcp_servers(request: Request) -> "McpServers | None":
+def _mcp_servers(request: Request) -> McpStatusSource | None:
     """The running server's MCP managers, or None for an application
     built without a server around it. Taken from the application for the
     reason the store is."""
     return request.app.state.mcp_servers
 
 
-# Annotated `Any` for the reason PendingDep is.
-McpServersDep = Annotated[Any, Depends(_mcp_servers)]
+# The registry's own type would be the forward reference PendingDep
+# cannot use; this is the surface a route actually reaches it through,
+# declared in `responses.py` out of typing and the models, so the
+# annotation resolves at import without the MCP SDK being anywhere
+# near it.
+McpServersDep = Annotated[McpStatusSource | None, Depends(_mcp_servers)]
 
 
-def _mcp_reload(request: Request) -> Callable[[], Awaitable[Any]] | None:
+def _mcp_reload(request: Request) -> McpReloader | None:
     """What applies a re-read of the stored configuration to the running
     MCP managers, or None for an application built without a server.
     Taken from the application for the reason the store is."""
     return request.app.state.mcp_reload
 
 
-McpReloadDep = Annotated[Any, Depends(_mcp_reload)]
+McpReloadDep = Annotated[McpReloader | None, Depends(_mcp_reload)]
 
 
 def _agent_prompt(request: Request) -> Callable[[str], Awaitable[Any]] | None:
@@ -986,7 +996,7 @@ def _runtime(api: FastAPI) -> None:
         response_model=dict[str, McpServerStatus],
         responses=_problems(401),
     )
-    async def read_mcp_server_status(servers: McpServersDep) -> dict[str, Any]:
+    async def read_mcp_server_status(servers: McpServersDep) -> dict[str, McpServerStatus]:
         """What each configured MCP server is doing right now.
 
         Runtime state of the server this application is mounted on, like
@@ -1004,7 +1014,7 @@ def _runtime(api: FastAPI) -> None:
         to report and answers with an empty object, which is the honesty
         `loaded_agents = ()` already has.
         """
-        return {} if servers is None else servers.status()
+        return {} if servers is None else servers.typed_status()
 
     @api.get(
         "/runtime/agents/{name}/prompt",
@@ -1071,9 +1081,7 @@ def _runtime(api: FastAPI) -> None:
             401, 409, 422, 500, 503, instead={422: RELOAD_REFUSED_DESCRIPTION}
         ),
     )
-    async def reload_mcp_servers(
-        servers: McpServersDep, reload: McpReloadDep
-    ) -> dict[str, Any]:
+    async def reload_mcp_servers(reload: McpReloadDep) -> McpReloadResult:
         """Re-read the MCP servers and the agents' grants, and apply
         them to this running server.
 
@@ -1108,19 +1116,19 @@ def _runtime(api: FastAPI) -> None:
         and has changed nothing, like a write that could not take the
         database's lock.
         """
-        if reload is None or servers is None:
+        # This docstring is the endpoint's description in the committed
+        # document, so what belongs to the handler rather than to the
+        # contract is said here. What the reload did and what is running
+        # afterwards arrive together, composed where the two phases are:
+        # taking them apart here would put an invariant of the reload's
+        # (no await between the outcomes and the status, so the two
+        # halves describe one world) in a request handler, which is the
+        # last place able to keep it. Which is also why the registry is
+        # not a dependency of this route any more: nothing is left for
+        # it to answer.
+        if reload is None:
             raise NoRuntimeError(PROBLEM_DESCRIPTIONS[503])
-        applied = await reload()
-        # Taken here rather than answered by the registry, and with no
-        # await between the two, so the outcomes and the status describe
-        # one world.
-        return {
-            "started": list(applied.started),
-            "restarted": list(applied.restarted),
-            "stopped": list(applied.stopped),
-            "unchanged": list(applied.unchanged),
-            "servers": servers.status(),
-        }
+        return await reload()
 
 
 def _writes(api: FastAPI) -> None:

@@ -24,12 +24,14 @@ prompt's reader came to see whole, and the escape sequence that must not
 reach the terminal on any of them.
 """
 
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
 
 from samtal_server.config import Config, cli
 from samtal_server.config.loader import ConfigError
+from samtal_server.config.responses import McpReloadResult
 from samtal_server.tools.mcp import McpReload, McpServers
 from tests.support.config_cli import chain as _chain
 from tests.support.config_cli import runner
@@ -431,12 +433,18 @@ def test_a_prompt_refusal_carries_nothing_of_the_body() -> None:
 # refuses a body that is not one.
 
 
-def _applied(**outcome: object):
-    """A server that answers a reload with what it did, standing in for
-    a registry these tests deliberately do not start."""
+def _applied(servers: McpServers, **outcome: object):
+    """A server that answers a reload with what it did and what is
+    running, standing in for a registry these tests deliberately do not
+    start. Both halves, because both are what the callable a running
+    server hands the API answers with: they are composed where the two
+    phases are, so that nothing can happen between them."""
 
-    async def reload() -> McpReload:
-        return McpReload(**outcome)
+    async def reload() -> McpReloadResult:
+        return McpReloadResult(
+            **{field: list(names) for field, names in asdict(McpReload(**outcome)).items()},
+            servers=servers.typed_status(),
+        )
 
     return reload
 
@@ -445,8 +453,9 @@ def test_reload_prints_what_it_did_and_what_is_running(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
     entry = {"transport": "streamable_http", "url": "http://127.0.0.1:9/mcp"}
-    run.runtime["mcp_servers"] = _configured({"weather": entry}, {"sam": ["weather"]})
-    run.runtime["mcp_reload"] = _applied(started=("weather",), stopped=("gone",))
+    servers = _configured({"weather": entry}, {"sam": ["weather"]})
+    run.runtime["mcp_servers"] = servers
+    run.runtime["mcp_reload"] = _applied(servers, started=("weather",), stopped=("gone",))
 
     assert run("reload") == 0
 

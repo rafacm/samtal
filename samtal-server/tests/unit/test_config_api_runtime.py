@@ -12,6 +12,7 @@ legally be named after a word a route wants.
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,7 @@ from samtal_server.config.loader import (
     StorageError,
 )
 from samtal_server.config.models import MemoryConfig
+from samtal_server.config.responses import McpReloadResult
 from samtal_server.config.secrets import MASTER_KEY_ENV, generate_key
 from samtal_server.config.store import ConfigStore
 from samtal_server.db import open_database
@@ -258,21 +260,32 @@ def test_an_entry_named_status_is_still_an_entity(client: TestClient) -> None:
 # from another one, which is exactly what the managers' one-task rule
 # forbids. The registry handed in here has never been started, so its
 # status is a read of plain attributes.
+#
+# What the stub answers is the whole reply, status included, because
+# that is what the callable this application is handed answers: the
+# outcomes and the status are taken together where the two phases live,
+# so that no await can land between them, and this route adds nothing
+# to what came back.
 
 
-def outcome(**fields: object) -> McpReload:
-    return McpReload(**fields)
+def outcome(servers: McpServers, **fields: object) -> McpReloadResult:
+    """A reload's whole answer, the way the registry composes one: the
+    four outcome lists, and the status of the registry beside them."""
+    return McpReloadResult(
+        **{field: list(names) for field, names in asdict(McpReload(**fields)).items()},
+        servers=servers.typed_status(),
+    )
 
 
-def answering(applied: McpReload):
-    async def reload() -> McpReload:
+def answering(applied: McpReloadResult):
+    async def reload() -> McpReloadResult:
         return applied
 
     return reload
 
 
 def refusing(exc: Exception):
-    async def reload() -> McpReload:
+    async def reload() -> McpReloadResult:
         raise exc
 
     return reload
@@ -300,7 +313,7 @@ def test_a_reload_answers_with_what_it_did_and_what_is_running(directory: Path) 
     servers = McpServers.build(
         config_with({"tools": entry_data(), "shelved": entry_data()}, ["tools"])
     )
-    applied = outcome(started=("tools",), stopped=("gone",), unchanged=("shelved",))
+    applied = outcome(servers, started=("tools",), stopped=("gone",), unchanged=("shelved",))
 
     with serving(directory, servers, answering(applied)) as client:
         response = client.post(RELOAD_PATH)
@@ -355,8 +368,8 @@ def test_a_read_that_fails_unexpectedly_answers_without_quoting_it(
     def read() -> tuple[Config, None]:
         raise RuntimeError(f"could not connect using {sentinel}")
 
-    async def reload() -> McpReload:
-        return await servers.reload(read)
+    async def reload() -> McpReloadResult:
+        return await servers.reload_result(read)
 
     with caplog.at_level("INFO"):
         with serving(directory, servers, reload) as client:
