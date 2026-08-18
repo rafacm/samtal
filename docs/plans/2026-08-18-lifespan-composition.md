@@ -462,3 +462,77 @@ external review round; every merge leaves `main` releasable: M1
 is a pure re-homing, M2 moves construction without changing what
 is constructed, M3 changes an engine's lifetime behind unchanged
 refusal mapping, M4 tightens shutdown ownership.
+
+## Plan review round
+
+External review: codex-cli 0.147.0, model gpt-5.6-sol, 2026-08-18,
+against commit 75e5f08. Eleven findings; verdict "ready after the
+P1/P2 amendments". All eleven adopted.
+
+1. **P1: M1 removes state its unchanged lifespan still reads.**
+   The current lifespan reads six attributes M1 deletes; M1 as
+   written fails at startup. M1 must also rewrite the lifespan to
+   read composition fields while construction stays synchronous.
+
+2. **P1: the config API is exempted from the settled decision.**
+   The plan kept the sub-app's seven-field untyped bag and
+   exempted it from the acceptance grep, while the issue requires
+   the API to read typed fields. The API runtime dependencies
+   must become a typed object carried by the composition and
+   attached to the sub-app, and the grep exemption goes.
+
+3. **P1: the standalone `build_api` path has no engine owner.**
+   The config-API suites run `build_api(...)` as a top-level app
+   with no parent lifespan; the replacement dependency would find
+   no engine. The standalone path needs its own lifespan that
+   opens, migrates, installs, and disposes; mounted operation
+   uses the parent-owned instance.
+
+4. **P1: lifespan failures bypass the sanitized startup
+   boundary.** `main()` calls `serve()` outside its except arm,
+   and uvicorn renders lifespan exceptions as tracebacks, which
+   both loses the one-line sentence and can leak provider
+   exception chains. A sanitized lifespan-to-entrypoint bridge is
+   required, verified against real uvicorn startup with a
+   sentinel-bearing chained failure.
+
+5. **P1: the no-migration engine breaks API-first fresh
+   deployments.** The integration API-first path builds
+   `create_app(Config(...))` over a fresh directory and relies on
+   the first request's `open_database` to create the schema. The
+   lifespan-owned open must run migrations once at startup; the
+   plan cannot assume `load_boot_config` ran.
+
+6. **P2: the teardown proof misses partial-startup leaks.**
+   Cleanup must be registered per acquisition (exit-stack
+   discipline), with a startup-failure test proving an engine
+   acquired before a later failure is disposed.
+
+7. **P2: the proposed startup contention re-scope cannot reach a
+   lock.** A bare `write_engine` touches no lock at entry. With
+   amendment 5 the lifespan opens via `open_database`, and the
+   existing open-phase held-lock test stays exactly as it is,
+   pinning `open_database` directly; no re-scope.
+
+8. **P2: moving the conversation-store injection after entry
+   destroys its test.** `test_conversations_boot` replaces the
+   store before entry so `start()` fails inside the lifespan.
+   That test patches the constructor instead; only the
+   runtime-factory injection moves inside the entered context.
+
+9. **P2: shutdown has no path before the composition exists.** A
+   SIGTERM during a minutes-long provider build reaches missing
+   state. A signal before composition installation bypasses the
+   drain and delegates straight to uvicorn shutdown, with a test
+   driving a signal while startup is blocked.
+
+10. **P2: `_CompositionSeed` retains a second copy of the API
+    token.** The token is resolved and consumed in the describe
+    phase (passed into the API gate) and never stored on the
+    seed.
+
+11. **P2: the CLI banner would announce a server that later fails
+    startup.** The banner becomes a post-startup emission: main
+    passes it as an `on_started` callback the lifespan invokes
+    after a successful build, keeping it CLI-only; the banner
+    tests migrate with it.
