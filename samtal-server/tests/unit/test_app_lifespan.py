@@ -33,6 +33,8 @@ from sqlalchemy.pool import Pool
 import samtal_server.app as app_module
 from samtal_server.app import StartupFailed, create_app, startup_failure
 from samtal_server.config import Config
+from samtal_server.config.api import UNEXPECTED, ApiRuntime
+from samtal_server.config.models import API_MOUNT_PATH
 from samtal_server.conversations.store import DATABASE_FILENAME
 from samtal_server.db import open_database
 from samtal_server.device.bindings import DeviceBindings
@@ -42,6 +44,12 @@ from samtal_server.tools.mcp import McpServers
 from tests.support.configs import config_with_agent
 
 SENTENCE = "the llm provider 'mock' could not be built"
+
+API_SECRET_ENV = "SAMTAL_API_SECRET"
+
+TOKEN = "test-api-token-" + "0123456789abcdef" * 2
+
+BEARER = {"Authorization": f"Bearer {TOKEN}"}
 
 
 def recording_config(tmp_path: Path) -> Config:
@@ -59,23 +67,30 @@ def recording_config(tmp_path: Path) -> Config:
 def migrated(tmp_path: Path) -> None:
     """The configuration database, where a boot leaves it.
 
-    Load bearing for every disposal assertion here: `DeviceBindings.open`
-    creates no database and opens no engine when there is no file, and
-    answers from the boot snapshot instead, so a test that asserts a pool
-    was let go without this has asserted `dispose()` on an object holding
-    nothing. Boot migrates this database before the app is built, which
-    is what this stands in for.
+    Load bearing for every disposal assertion here, and for the
+    check-in test at the end: `DeviceBindings.open` creates no database
+    and opens no engine when there is no file, and answers from the boot
+    snapshot instead, so a test that asserts a pool was let go without
+    this has asserted `dispose()` on an object holding nothing. Both
+    production entry points migrate this database before the app is
+    built, through `load_boot_config`, which is what this stands in for.
     """
     open_database(tmp_path).dispose()
 
 
 def engine_of(view: DeviceBindings) -> Engine:
     """The connection pool a bindings view is holding, and the check that
-    it is holding one at all."""
+    it is holding one at all.
+
+    `DeviceBindings.open` opens no engine when there is no database file,
+    so without `migrated()` above a disposal assertion would be
+    `dispose()` on an object holding nothing. This is what says so rather
+    than letting such a test pass.
+    """
     engine = view._engine
     assert engine is not None, (
         "the bindings view opened no engine, so nothing below proves a disposal: "
-        "the configuration database has to exist before the app is built"
+        "the build has to open the configuration database before opening the view"
     )
     return engine
 
@@ -307,3 +322,46 @@ def test_the_api_gets_its_live_pieces_before_the_first_request(tmp_path: Path) -
         assert mounted.pending is composition.pending
         assert mounted.mcp_servers is composition.mcp_servers
         assert mounted.loaded_agents == frozenset({"assistant"})
+
+
+def test_the_mounted_api_holds_the_engine_only_while_the_server_serves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The engine goes onto the mounted application's runtime when the
+    lifespan opens it and comes off when the lifespan ends.
+
+    Coming off is the half that has to be said out loud. `dispose()`
+    replaces an engine's connection pool rather than closing the engine
+    down, so an engine reached after disposal opens fresh connections
+    quite happily: a handle left behind would let a request arriving
+    after teardown open connections no lifespan owns and nothing will
+    ever close. What such a request meets instead is the refusal for an
+    application nobody is serving, sanitized on the way out like every
+    other unexpected failure.
+    """
+    monkeypatch.setenv(API_SECRET_ENV, TOKEN)
+    app = create_app(recording_config(tmp_path))
+    mounted = app.state.seed.api
+    # Read off the mounted application rather than the composition,
+    # because before the lifespan there is no composition to read, which
+    # is the first of the three states under test. What is there is the
+    # runtime `build_api` described, holding no engine because describing
+    # an application acquires nothing.
+    described: ApiRuntime = mounted.state.api_runtime
+    assert described.store is None
+
+    with TestClient(app) as client:
+        runtime: ApiRuntime = mounted.state.api_runtime
+        # The build installs the live one over it, and it is the same
+        # object the composition carries.
+        assert runtime is app.state.composition.api
+        assert runtime.store is not None
+        assert client.get(f"{API_MOUNT_PATH}/config", headers=BEARER).status_code == 200
+
+    assert runtime.store is None
+    assert mounted.state.api_runtime is runtime
+
+    late = TestClient(app).get(f"{API_MOUNT_PATH}/config", headers=BEARER)
+
+    assert late.status_code == 500
+    assert late.json() == {"detail": UNEXPECTED}

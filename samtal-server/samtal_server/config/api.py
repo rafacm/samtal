@@ -479,6 +479,31 @@ def open_store(directory: Path) -> Iterator[StoreHandle]:
         engine.dispose()
 
 
+@contextlib.contextmanager
+def installed(runtime: "ApiRuntime", handle: StoreHandle) -> Iterator[None]:
+    """Hold `handle` on `runtime` for the length of this block.
+
+    Both owners of the engine install it through here, so that both let
+    go of it the same way. Letting go is the half worth stating:
+    `Engine.dispose()` replaces an engine's connection pool rather than
+    closing the engine down, so an engine reached after disposal opens
+    fresh connections quite happily. A handle left on the runtime after
+    teardown would therefore let a late request open connections that no
+    lifespan owns and nothing will ever close. Cleared, that request
+    meets `store_dependency`'s refusal instead, which is the honest
+    answer for an application that is no longer being served.
+
+    The mounted owner registers this on its exit stack after the open
+    and therefore unwinds it before the disposal, which is the order the
+    `with` below has for free.
+    """
+    runtime.store = handle
+    try:
+        yield
+    finally:
+        runtime.store = None
+
+
 def engine_lifespan(runtime: "ApiRuntime", directory: Path) -> Lifespan[FastAPI]:
     """The standalone owner of the engine: this application's own
     lifespan.
@@ -488,8 +513,7 @@ def engine_lifespan(runtime: "ApiRuntime", directory: Path) -> Lifespan[FastAPI]
     opens the engine and installs it here, because Starlette runs no
     lifespan for a mounted application. Run as the top-level application
     (which is what the configuration API's own suites do), this is what
-    opens it, and the handle is cleared on the way out so that a request
-    after shutdown refuses rather than reaching a disposed engine.
+    opens it.
 
     The application argument is ignored: what this installs into is the
     runtime object it was built beside, so a test that mounts this
@@ -499,12 +523,8 @@ def engine_lifespan(runtime: "ApiRuntime", directory: Path) -> Lifespan[FastAPI]
 
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-        with open_store(directory) as handle:
-            runtime.store = handle
-            try:
-                yield
-            finally:
-                runtime.store = None
+        with open_store(directory) as handle, installed(runtime, handle):
+            yield
 
     return lifespan
 
