@@ -107,6 +107,36 @@ class McpServers:
     def __contains__(self, entry: object) -> bool:
         return entry in self._managers
 
+    def manager_of(self, entry: str) -> McpServerManager:
+        """The manager behind one entry, or a KeyError for an entry that
+        has none.
+
+        Identity, which is the one thing about a manager nothing else
+        answers. What a reload leaves alone is this object, and every
+        visible property of it (its state, its tools, its instant) would
+        read the same on a manager that had been stopped and started
+        again, so a suite proving a connection stood has to hold the
+        object and look again. The same read serves a reconnect driven
+        from outside, which is not something an operator asks for: it is
+        what happens when a server goes away and comes back.
+
+        A KeyError rather than None for an entry no agent references,
+        because an entry with no manager is a question about the
+        configuration, and `status()` is where that one is answered.
+        """
+        return self._managers[entry]
+
+    @property
+    def reloading(self) -> bool:
+        """Whether a reload is between its two phases right now.
+
+        The exclusion, read from outside. An apply outlives the caller
+        that asked for it, so this is how anything waiting for the world
+        to settle knows that the second phase has finished and the next
+        reload would be answered rather than refused.
+        """
+        return self._reloading
+
     async def start_all(self) -> None:
         """Connect every server concurrently, so one slow box does not
         add its timeout to the boot of the next."""

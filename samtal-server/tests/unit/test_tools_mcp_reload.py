@@ -85,18 +85,25 @@ def stdio_entry(**overrides: object) -> McpServerConfig:
     return McpServerConfig.model_validate(entry_data(**overrides))
 
 
-def manager_of(servers: McpServers, entry: str) -> object:
-    """The manager object behind one entry.
+def managers_in(servers: McpServers) -> dict[str, object]:
+    """Which manager each entry that has one is being served by.
 
-    Reached through the registry's own attribute on purpose: what an
-    unchanged entry keeps is this object, and every visible property of
-    it (its state, its tools, its instant) would look the same on a
-    manager that had been stopped and started again.
+    Identity per entry, which is what a refusal must not have moved:
+    `manager_of` is asked about every entry the status surface names,
+    since an entry with no manager is exactly the state a refused
+    reload could have left behind for one that had.
     """
-    return servers._managers[entry]
+    return {
+        entry: servers.manager_of(entry) for entry in servers.status() if entry in servers
+    }
 
 
 # The diff
+#
+# What an unchanged entry keeps is the manager object itself, which is
+# why these read `manager_of` rather than the status: every visible
+# property of one (its state, its tools, its instant) would look the
+# same on a manager that had been stopped and started again.
 
 
 async def test_a_new_entry_is_started_and_an_unchanged_one_is_left_alone() -> None:
@@ -106,7 +113,7 @@ async def test_a_new_entry_is_started_and_an_unchanged_one_is_left_alone() -> No
     )
     servers = await started(before)
     try:
-        kept = manager_of(servers, "tools")
+        kept = servers.manager_of("tools")
         offered = servers.tools_for(["tools"])
 
         applied = await servers.reload(reading(after))
@@ -117,7 +124,7 @@ async def test_a_new_entry_is_started_and_an_unchanged_one_is_left_alone() -> No
         assert applied.unchanged == ("tools",)
         # The same manager, and the very same published tool objects on
         # it: nothing reconnected, nothing was listed a second time.
-        assert manager_of(servers, "tools") is kept
+        assert servers.manager_of("tools") is kept
         assert servers.status()["tools"]["state"] == CONNECTED
         assert all(
             before is after
@@ -135,14 +142,14 @@ async def test_a_changed_fragment_is_stopped_rebuilt_and_started() -> None:
     )
     servers = await started(before)
     try:
-        was = manager_of(servers, "tools")
+        was = servers.manager_of("tools")
         assert servers.timeout_for("tools") == 15.0
 
         applied = await servers.reload(reading(after))
 
         assert applied.restarted == ("tools",)
         assert (applied.started, applied.stopped, applied.unchanged) == ((), (), ())
-        assert manager_of(servers, "tools") is not was
+        assert servers.manager_of("tools") is not was
         assert servers.timeout_for("tools") == 3.5
         assert servers.status()["tools"]["state"] == CONNECTED
         assert await servers.call("tools__secret_word", {}, "assistant", "tools") == (
@@ -168,13 +175,13 @@ async def test_an_instructions_only_edit_keeps_the_connection() -> None:
     )
     servers = await started(before)
     try:
-        kept = manager_of(servers, "tools")
+        kept = servers.manager_of("tools")
 
         applied = await servers.reload(reading(after))
 
         assert applied.unchanged == ("tools",)
         assert (applied.started, applied.restarted, applied.stopped) == ((), (), ())
-        assert manager_of(servers, "tools") is kept
+        assert servers.manager_of("tools") is kept
         assert servers.status()["tools"]["state"] == CONNECTED
         # And what an agent activating now is told about the entry is
         # the text that was just written.
@@ -190,13 +197,13 @@ async def test_adding_guidance_to_an_entry_that_had_none_keeps_the_connection() 
     )
     servers = await started(before)
     try:
-        kept = manager_of(servers, "tools")
+        kept = servers.manager_of("tools")
         assert servers.guidance_for_agent("assistant") == ()
 
         applied = await servers.reload(reading(after))
 
         assert applied.unchanged == ("tools",)
-        assert manager_of(servers, "tools") is kept
+        assert servers.manager_of("tools") is kept
         assert servers.guidance_for_agent("assistant") == (Guidance("tools", "New guidance."),)
     finally:
         await servers.stop_all()
@@ -214,13 +221,13 @@ async def test_the_server_instructions_opt_in_toggles_without_a_reconnect() -> N
     )
     servers = await started(off)
     try:
-        kept = manager_of(servers, "tools")
+        kept = servers.manager_of("tools")
         assert servers.guidance_for_agent("assistant") == ()
 
         applied = await servers.reload(reading(on))
 
         assert applied.unchanged == ("tools",)
-        assert manager_of(servers, "tools") is kept
+        assert servers.manager_of("tools") is kept
         assert servers.guidance_for_agent("assistant") == (
             ServerInstructions("tools", SHIPPED_INSTRUCTIONS),
         )
@@ -228,7 +235,7 @@ async def test_the_server_instructions_opt_in_toggles_without_a_reconnect() -> N
         applied = await servers.reload(reading(off))
 
         assert applied.unchanged == ("tools",)
-        assert manager_of(servers, "tools") is kept
+        assert servers.manager_of("tools") is kept
         assert servers.guidance_for_agent("assistant") == ()
     finally:
         await servers.stop_all()
@@ -245,12 +252,12 @@ async def test_an_inject_prompts_edit_restarts_the_connection() -> None:
     )
     servers = await started(before)
     try:
-        was = manager_of(servers, "tools")
+        was = servers.manager_of("tools")
 
         applied = await servers.reload(reading(after))
 
         assert applied.restarted == ("tools",)
-        assert manager_of(servers, "tools") is not was
+        assert servers.manager_of("tools") is not was
         assert [
             block.name for block in servers.guidance_for_agent("assistant")
         ] == ["house_style"]
@@ -271,12 +278,12 @@ async def test_an_edit_beside_the_guidance_still_restarts_the_entry() -> None:
     )
     servers = await started(before)
     try:
-        was = manager_of(servers, "tools")
+        was = servers.manager_of("tools")
 
         applied = await servers.reload(reading(after))
 
         assert applied.restarted == ("tools",)
-        assert manager_of(servers, "tools") is not was
+        assert servers.manager_of("tools") is not was
     finally:
         await servers.stop_all()
 
@@ -299,13 +306,13 @@ async def test_rotated_stored_ciphertext_rebuilds_only_that_entry() -> None:
     )
     servers = await started(config, before)
     try:
-        kept = manager_of(servers, "extra")
+        kept = servers.manager_of("extra")
 
         applied = await servers.reload(reading(config, after))
 
         assert applied.restarted == ("tools",)
         assert applied.unchanged == ("extra",)
-        assert manager_of(servers, "extra") is kept
+        assert servers.manager_of("extra") is kept
     finally:
         await servers.stop_all()
 
@@ -363,12 +370,12 @@ async def test_an_entry_granted_to_another_agent_keeps_its_connection() -> None:
     after = config_with({"tools": entry_data()}, {"assistant": [], "helper": ["tools"]})
     servers = await started(before)
     try:
-        kept = manager_of(servers, "tools")
+        kept = servers.manager_of("tools")
 
         applied = await servers.reload(reading(after))
 
         assert applied.unchanged == ("tools",)
-        assert manager_of(servers, "tools") is kept
+        assert servers.manager_of("tools") is kept
         assert servers.tools_for_agent("assistant") == []
         assert servers.tools_for_agent("helper")
         assert servers.status()["tools"]["grants"] == {"helper": None}
@@ -387,14 +394,18 @@ async def test_an_entry_granted_to_another_agent_keeps_its_connection() -> None:
 async def unchanged_by(servers: McpServers, read) -> str:
     """Run a reload that must be refused, and assert nothing moved."""
     before = servers.status()
-    kept = dict(servers._managers)
+    kept = managers_in(servers)
     granted = servers.tools_for_agent("assistant")
 
     with pytest.raises(ConfigError) as caught:
         await servers.reload(read)
 
     assert servers.status() == before
-    assert servers._managers == kept
+    assert managers_in(servers) == kept
+    # And no manager under an entry the status surface does not name,
+    # which is the one way the mapping above could agree while the set
+    # of managers had moved.
+    assert len(servers) == len(kept)
     assert servers.tools_for_agent("assistant") == granted
     return str(caught.value)
 
@@ -546,7 +557,7 @@ async def test_a_candidate_that_cannot_connect_applies_as_down_and_revives() -> 
         # And it is revivable, the way any down server is: the box comes
         # back, a session opens, and the tools arrive with no reload and
         # no restart.
-        manager_of(servers, "extra")._config = servers._managers["tools"]._config
+        servers.manager_of("extra")._config = servers._managers["tools"]._config
         servers.revive_for_agents(["assistant"])
         async with asyncio.timeout(20):
             while servers.status()["extra"]["state"] != CONNECTED:
@@ -623,13 +634,13 @@ async def test_a_narrowed_allow_list_applies_without_touching_the_connection() -
     )
     servers = await started(before)
     try:
-        kept = manager_of(servers, "tools")
+        kept = servers.manager_of("tools")
         assert len(servers.tools_for_agent("assistant")) > 1
 
         applied = await servers.reload(reading(after))
 
         assert applied.unchanged == ("tools",)
-        assert manager_of(servers, "tools") is kept
+        assert servers.manager_of("tools") is kept
         assert [tool.name for tool in servers.tools_for_agent("assistant")] == [
             "tools__secret_word"
         ]
@@ -756,7 +767,7 @@ async def test_a_manager_that_will_not_stop_is_left_behind_inside_the_bound(
 async def settled(servers: McpServers) -> None:
     """Wait for an apply that outlived its caller to finish."""
     async with asyncio.timeout(20):
-        while servers._reloading:
+        while servers.reloading:
             await asyncio.sleep(0.01)
 
 
@@ -824,7 +835,7 @@ async def test_a_caller_that_goes_away_during_the_starts_leaves_one_world(
     )
     servers = await started(before)
     try:
-        kept = manager_of(servers, "tools")
+        kept = servers.manager_of("tools")
 
         asked = asyncio.create_task(servers.reload(reading(after)))
         await asyncio.sleep(0.05)
@@ -836,7 +847,7 @@ async def test_a_caller_that_goes_away_during_the_starts_leaves_one_world(
         # The started candidate is in the world it was started for, and
         # the unchanged entry was never touched.
         assert servers.status()["extra"]["state"] == CONNECTED
-        assert manager_of(servers, "tools") is kept
+        assert servers.manager_of("tools") is kept
         assert {tool.name for tool in servers.tools_for_agent("assistant")} >= {
             "extra__secret_word",
             "tools__secret_word",
