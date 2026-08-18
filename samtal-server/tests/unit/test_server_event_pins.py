@@ -851,11 +851,9 @@ def test_neither_key_reaches_a_record_or_a_consumer_on_a_miss(
     one."""
     key = "S7K3XQ2M"
     attempted = "S7K3XQ2N"
-    client = TestClient(
-        create_app(Config(server={"onboarding": {"key": key}}))
-    )
+    config = Config(server={"onboarding": {"key": key}})
 
-    with caplog.at_level("DEBUG"):
+    with entered_client(config) as client, caplog.at_level("DEBUG"):
         assert client.get(f"/x/{attempted}/").status_code == 404
 
     miss = only(caplog, "onboarding_key_mismatch")
