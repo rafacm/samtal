@@ -155,7 +155,10 @@ from .transport import (  # noqa: E402
 #
 # The underscored names are here for the same reason and not as an
 # invitation: the suites read some of them off this module, and the
-# smallest public seam for each is milestone 4's to draw. A re-export
+# ones that had a public seam worth drawing were given one
+# (`manager_of` and `reloading` on the registry, `session` on a
+# manager, `abandoned` beside the stop, and `McpManager` for what a
+# registry needs of one server). A re-export
 # copies a binding, so it serves an IMPORT and not a rebinding: a test
 # that monkeypatches a relocated constant patches the submodule that
 # owns it, which is what the port table records.
