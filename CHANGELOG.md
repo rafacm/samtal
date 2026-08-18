@@ -9,6 +9,28 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **What a running server is made of is one typed object** (#142, M1).
+  The composition root hung thirteen untyped attributes on `app.state`,
+  and the mounted configuration API kept a seven-attribute bag of its
+  own beside them, so a handler reading any one of them could learn
+  what was there and what type it had only by reading the function that
+  set it. `samtal_server/composition.py` declares it instead: the
+  `Composition` a server is (the configuration, the device auth, the
+  bindings, the pending table, the MCP managers, the memory store, the
+  session registry, the providers, the filler cache, the conversation
+  store, the runtime factory, the device facts, the capture store, and
+  the API's own `ApiRuntime`). `app.state` carries that one attribute
+  and the sub-application carries `api_runtime`; the websocket
+  endpoint, the OTA endpoint, the shutdown drain and the API's
+  dependencies bind one of the two and read declared fields. The filler
+  cache is an `AgentFillers` rather than a bare dictionary, which
+  answers exactly as the empty dictionary did before boot fills it and
+  exactly as the filled one after, and can now say which of the two it
+  is doing. Nothing an operator sees changed: construction still
+  happens where it happened, the API token is still resolved into a
+  local and stored nowhere, and all four generated references
+  regenerate identical.
+
 - **The latency mask is its own module** (#141, M2). The second of the
   two clusters the conversation runtime was carrying: the filler timer
   armed at the transcription, the fire-time checks that stand it down

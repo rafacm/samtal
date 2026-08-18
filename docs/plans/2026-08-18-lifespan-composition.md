@@ -502,8 +502,9 @@ provider build, and asserts the engine was disposed.
 
 ## Milestones
 
-- [ ] **M1: the typed composition object.** Add
-  `samtal_server/composition.py` (the dataclass) and
+- [x] **[M1: the typed composition
+  object](2026-08-18-lifespan-composition-implementation.md#m1-the-typed-composition-object)**.
+  Add `samtal_server/composition.py` (the dataclass) and
   `AgentFillers` in `filler.py`; `create_app` builds exactly what
   it builds today but hangs the one `Composition` on
   `app.state` (fillers wrapped in `AgentFillers`); `ws.py`,
@@ -515,7 +516,7 @@ provider build, and asserts the engine was disposed.
   untouched would fail at startup); grep proves `app.state.` is
   only the two typed objects; CHANGELOG; implementation-doc
   section. Construction still synchronous in `create_app` this
-  milestone, so no fixture migration yet.
+  milestone, so no fixture migration yet. (PR TBD.)
 - [ ] **M2: the lifespan owns construction.** Move the build into
   the lifespan (describe/build split, `_CompositionSeed`,
   providers under `to_thread`, capture events with their identity
