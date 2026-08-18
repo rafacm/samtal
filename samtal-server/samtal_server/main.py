@@ -68,6 +68,16 @@ class DrainingServer(uvicorn.Server):
         if self._draining or self._drain_s <= 0:
             super().handle_exit(sig, frame)
             return
+        if getattr(self._app.state, "composition", None) is None:
+            # Signalled before there is anything to drain. Startup builds
+            # the composition and can spend minutes in it (a provider
+            # loading a model), so a redeploy landing on a starting pod
+            # is an ordinary case and not a rare one: the sessions the
+            # drain reaches through do not exist yet, and reading for
+            # them would raise inside a signal handler. Passed straight
+            # through, the same way a second signal is.
+            super().handle_exit(sig, frame)
+            return
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:

@@ -149,6 +149,15 @@ class FakeApp:
         self.state = type("State", (), {"composition": composition})()
 
 
+class StartingApp:
+    """An app whose lifespan has not finished building. Its state bag is
+    empty, which is exactly what a served app's is until the composition
+    is installed."""
+
+    def __init__(self) -> None:
+        self.state = type("State", (), {})()
+
+
 def draining_server(registry: SessionRegistry, drain_s: float = 5.0) -> DrainingServer:
     app = cast(Any, FakeApp(registry))
     return DrainingServer(uvicorn.Config(app), app, drain_s)
@@ -178,6 +187,21 @@ async def test_a_second_signal_forces_the_exit() -> None:
     # An operator in a hurry: the second signal is passed straight to
     # uvicorn rather than starting another drain.
     server.handle_exit(signal.SIGTERM, None)
+    assert server.should_exit
+
+
+async def test_a_signal_before_the_composition_exists_is_passed_straight_through() -> None:
+    """Construction is the lifespan's (#142), and it can spend minutes in
+    a provider loading a model, so a redeploy landing on a pod that is
+    still starting is ordinary. There are no sessions to drain yet and no
+    composition to read them from, so the signal goes to uvicorn the same
+    way a second one does, rather than raising inside a signal handler.
+    """
+    starting = cast(Any, StartingApp())
+    server = DrainingServer(uvicorn.Config(starting), starting, 5.0)
+
+    server.handle_exit(signal.SIGTERM, None)
+
     assert server.should_exit
 
 
