@@ -371,11 +371,22 @@ outside world use".
   and `public_origin`'s rebuilt-netloc rule (credentials cannot
   ride into a log) moves unmodified. The sentinel and
   sanitization suites pass untouched.
-- **Pin before reshaping.** The wire is already pinned by the
-  body-equality tests (short path versus legacy path, wrong key
-  versus never-served, both spellings, no-redirect, no key echo)
-  and the server-event pins; those files passing byte-unmodified
-  is the proof. No new pins are needed before the move.
+- **Pin before reshaping.** The review round showed the existing
+  tests are weaker than they look for THIS purpose: `_stable`
+  compares two routes through the same (possibly changed)
+  handler, the poll tests assert status codes, and describe
+  asserts substrings; only the wrong-key 404 comparison is
+  byte-exact. So M2 adds a wire baseline, run as a verification
+  step rather than a committed test: a script (kept in the
+  scratchpad, its outputs recorded in the implementation doc)
+  drives the check, activation offer, poll, and describe routes
+  against an entered app with the dynamics fixed (the support
+  clock, a seeded code, a pinned token secret, a pinned
+  firmware/revision), captured once on the pre-split commit and
+  once after, comparing status, raw `response.content`, and the
+  relevant headers. Existing tests stay unmodified; the
+  body-equality and no-redirect tests remain the regression
+  net afterwards.
 - **Closed sets.** No reason token changes and no decision site
   changes meaning; the `TOKEN_SOURCES` relocations re-point the
   same closed sets at the same decisions in their new homes, and
@@ -544,6 +555,10 @@ P1/P2 amendments". All seven adopted.
    content, and relevant headers captured for check, offer,
    poll, and describe) diffed against the post-split responses
    is required; existing tests stay unmodified.
+
+   *Resolution*: the pin-before-reshaping lens now specifies the
+   baseline script, its fixed dynamics, and the recorded
+   pre/post capture, referenced from M2's checklist.
 
 7. **P3: the facts seam conflates all-device facts with
    unbound-only state.** Two seams, not one: observed facts stay
