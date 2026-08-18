@@ -20,7 +20,7 @@ from dotenv import find_dotenv, load_dotenv
 from fastapi import FastAPI
 
 from samtal_server import logs, onboarding
-from samtal_server.app import create_app, startup_failure
+from samtal_server.app import StartupFailed, create_app, startup_failure
 from samtal_server.composition import Composition
 from samtal_server.config import Config, ConfigError
 from samtal_server.config.boot import load_boot_config
@@ -38,6 +38,12 @@ logger = logging.getLogger(__name__)
 # a read timeout above this.
 PING_INTERVAL_S = 20.0
 PING_TIMEOUT_S = 20.0
+
+# Where uvicorn writes what went wrong, including the traceback of a
+# lifespan that refused to start. Named here because the filter below
+# reaches for it by name, which is uvicorn's own contract for its
+# loggers.
+UVICORN_ERROR_LOGGER = "uvicorn.error"
 
 # What uvicorn's own graceful shutdown gets, after our drain has already
 # had the conversations. Short, because by then there is nothing left to
@@ -138,6 +144,43 @@ def uvicorn_config(app: FastAPI, config: Config) -> uvicorn.Config:
     )
 
 
+class _QuietStartupFailure(logging.Filter):
+    """Drops the traceback uvicorn renders for a refused startup, on the
+    one path that reports the refusal itself.
+
+    Construction is the lifespan's since #142, so a boot failure happens
+    inside uvicorn rather than in front of it, and Starlette hands
+    uvicorn the whole formatted traceback of whatever the lifespan
+    raised. Left alone, an operator who mistyped a provider option meets
+    a stack of frames from this application, FastAPI and contextlib, and
+    then the same sentence twice: once at the end of that traceback and
+    once from `main()`. The contract this entry point has always kept for
+    a refused boot is one sentence and nothing else.
+
+    So the record carrying that traceback is dropped, and only while the
+    lifespan has actually recorded a boot failure: a lifespan exception
+    that is not one is a bug, and its traceback is the whole of what
+    anybody has to work with. `serve()` installs this and takes it off
+    again, so it is the command line's alone. A server started as
+    `uvicorn samtal_server.app:app` keeps uvicorn's own startup-failure
+    surface, which is what the plan records for that path.
+    """
+
+    def __init__(self, app: FastAPI) -> None:
+        super().__init__()
+        self._app = app
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if startup_failure(self._app) is None:
+            return True
+        if record.exc_info is not None and isinstance(record.exc_info[1], StartupFailed):
+            return False
+        message = record.getMessage()
+        return "Traceback (most recent call last)" not in message and (
+            StartupFailed.__name__ not in message
+        )
+
+
 def serve(app: FastAPI, config: Config) -> None:
     """Run the server until it is signalled to stop, or until its startup
     refuses.
@@ -150,14 +193,20 @@ def serve(app: FastAPI, config: Config) -> None:
     a boot failure with. So a `SystemExit` is swallowed exactly when the
     lifespan recorded a boot failure, and `main()` reports it; anything
     else that raises `SystemExit` in there is not ours to interpret and
-    goes on out.
+    goes on out. The filter above is the other half of the same
+    contract, and is on the logger only for as long as this runs.
     """
     server = DrainingServer(uvicorn_config(app, config), app, config.server.drain_s)
+    quiet = _QuietStartupFailure(app)
+    uvicorn_errors = logging.getLogger(UVICORN_ERROR_LOGGER)
+    uvicorn_errors.addFilter(quiet)
     try:
         server.run()
     except SystemExit:
         if startup_failure(app) is None:
             raise
+    finally:
+        uvicorn_errors.removeFilter(quiet)
 
 
 def main() -> None:
