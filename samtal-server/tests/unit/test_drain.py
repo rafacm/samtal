@@ -9,7 +9,9 @@ anything the drain could not finish.
 """
 
 import asyncio
+import gc
 import signal
+import weakref
 from typing import Any, cast
 
 import pytest
@@ -239,6 +241,123 @@ async def test_the_drain_task_is_owned_and_finished_before_serving_ends(
     # Nothing else drove the loop, so the conversation reached its end
     # because serving waited for it.
     assert session.shutdown == (1001, "server shutting down")
+
+
+def uvicorn_that_waits_out_the_drain(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The other shape: serving that stays up until the drain task is
+    over, so the settle meets a task that has already ended."""
+
+    async def _serve(server: uvicorn.Server, sockets: Any = None) -> None:
+        server.handle_exit(signal.SIGTERM, None)
+        await asyncio.sleep(0)
+        task = getattr(server, "_drain_task", None)
+        if task is not None:
+            # Waited on rather than awaited: waiting does not take what
+            # the task ended with off it, which is the whole of what the
+            # settle has to be seen doing.
+            await asyncio.wait({task}, timeout=5)
+
+    monkeypatch.setattr(uvicorn.Server, "_serve", _serve)
+
+
+# A credential-shaped string, in the message of an exception raised where
+# a client under the drain would raise one.
+DRAIN_SENTINEL = "sk-live-drain-9f3c2a"
+
+
+class LeakyDrainFailure(Exception):
+    """Stands in for a library exception from under the drain, quoting in
+    its message what it was handed."""
+
+
+def logged_text(caplog: pytest.LogCaptureFixture) -> str:
+    return "\n".join(
+        [record.getMessage() for record in caplog.records]
+        + [str(record.exc_info) for record in caplog.records]
+    )
+
+
+async def assert_the_task_left_nothing_behind(server: DrainingServer) -> None:
+    """Drop the drain task and collect it, which proves both that it
+    really went and that it left nothing for the loop's own handler to
+    print: an exception nobody took off a task is reported there, in
+    full, when the collector reaches it."""
+    loop = asyncio.get_running_loop()
+    reported: list[dict[str, Any]] = []
+    loop.set_exception_handler(lambda _loop, context: reported.append(context))
+    try:
+        task = server._drain_task
+        assert task is not None
+        server._drain_task = None
+        gone = weakref.ref(task)
+        del task
+        # More than one pass, and a turn of the loop between them: the
+        # task, its coroutine and the traceback of whatever it raised
+        # reference each other, so what frees them is the cycle
+        # collector rather than the last reference going.
+        for _ in range(3):
+            gc.collect()
+            await asyncio.sleep(0)
+        assert gone() is None, "the task outlived the check, which proves nothing"
+        assert reported == []
+    finally:
+        loop.set_exception_handler(None)
+
+
+async def test_a_drain_that_failed_before_the_settle_says_only_its_class(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The path with nothing to wait for is still the path that has to
+    ask. A drain runs through provider clients and a database, so what it
+    raises can quote a credential, and an exception left on a task is
+    printed in full by the collector."""
+
+    class FailingRegistry:
+        async def drain(self, timeout_s: float) -> None:
+            raise LeakyDrainFailure(f"the endpoint refused: key={DRAIN_SENTINEL}")
+
+    uvicorn_that_waits_out_the_drain(monkeypatch)
+    server = draining_server(cast(Any, FailingRegistry()))
+
+    with caplog.at_level("WARNING"):
+        await server._serve()
+
+    text = logged_text(caplog)
+    assert "LeakyDrainFailure" in text
+    assert DRAIN_SENTINEL not in text
+    assert DRAIN_SENTINEL not in capsys.readouterr().err
+    # No traceback either: a chain is the other way the message travels.
+    assert all(record.exc_info is None for record in caplog.records)
+    await assert_the_task_left_nothing_behind(server)
+
+
+async def test_a_drain_that_fails_during_the_settle_says_only_its_class(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """And the waited path says the same thing, rather than the
+    exception it was handed while waiting."""
+
+    class SlowlyFailingRegistry:
+        async def drain(self, timeout_s: float) -> None:
+            await asyncio.sleep(0.02)
+            raise LeakyDrainFailure(f"the endpoint refused: key={DRAIN_SENTINEL}")
+
+    uvicorn_that_stops_mid_drain(monkeypatch)
+    server = draining_server(cast(Any, SlowlyFailingRegistry()))
+
+    with caplog.at_level("WARNING"):
+        await server._serve()
+
+    text = logged_text(caplog)
+    assert "LeakyDrainFailure" in text
+    assert DRAIN_SENTINEL not in text
+    assert DRAIN_SENTINEL not in capsys.readouterr().err
+    assert all(record.exc_info is None for record in caplog.records)
+    await assert_the_task_left_nothing_behind(server)
 
 
 async def test_a_drain_that_outlives_its_bound_is_abandoned(
