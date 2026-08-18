@@ -517,14 +517,16 @@ provider build, and asserts the engine was disposed.
   only the two typed objects; CHANGELOG; implementation-doc
   section. Construction still synchronous in `create_app` this
   milestone, so no fixture migration yet. (PR #187)
-- [ ] **M2: the lifespan owns construction.** Move the build into
+- [x] **[M2: the lifespan owns
+  construction](2026-08-18-lifespan-composition-implementation.md#m2-the-lifespan-owns-construction)**.
+  Move the build into
   the lifespan (describe/build split, `_CompositionSeed`,
   providers under `to_thread`, capture events with their identity
   keys, teardown order), add `tests/support/apps.py` and migrate
   the affected unit and integration files, add the leak-checking
   and full-teardown tests, verify the `ProviderError` startup
   path, CHANGELOG; implementation-doc section with the fixture
-  migration inventory.
+  migration inventory. (PR TBD)
 - [ ] **M3: the config API's lifespan-owned engine.** Parent
   lifespan opens the engine once (no per-request migrations) and
   derives keys once; `store_dependency` serves from state;
