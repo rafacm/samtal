@@ -11,8 +11,11 @@ reading the function that set them (#142).
 This module holds the declaration and nothing else. It imports only
 downward, towards the things it names, and never `ws`, `ota` or `app`,
 so a reader can import the type for an annotation without an import
-cycle; those readers name it under `TYPE_CHECKING` for the same reason
-`config/api.py` and `registry.py` defer their own.
+cycle. `ws` and `ota` name it at module scope on the strength of that,
+and they are the evidence it holds; both used to defer it under
+`TYPE_CHECKING` instead, and both could stop once the onboarding module
+no longer reached back to `ota` for a router (issue #143), which is what
+put this module in their import path at all.
 """
 
 from dataclasses import dataclass

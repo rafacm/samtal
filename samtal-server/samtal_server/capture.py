@@ -618,9 +618,9 @@ class DeviceFacts:
 
     The firmware version is arguably the most load-bearing field in a
     capture manifest, because echo cancellation is firmware-side, and
-    `ota.py` is the only place the device ever states it. Bounded, so a
-    server that many devices check in with does not accumulate them
-    forever.
+    `ota.reply.check_version` is the only place the device ever states
+    it. Bounded, so a server that many devices check in with does not
+    accumulate them forever.
     """
 
     def __init__(self, limit: int = 256) -> None:
