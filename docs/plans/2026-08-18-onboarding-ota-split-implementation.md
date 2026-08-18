@@ -387,7 +387,9 @@ plan asks for went into `DeviceAgents.authoritative`'s own comment in
   `samtal_server.ota:check_version`. That is the citation the plan
   predicted for M2, resolved by location by the same walk that forced
   M1's `ORIGIN_PROVENANCE`. No registry entry, channel, template, field
-  or level changed.
+  or level changed. Two section comments in `events_schema.py` lost the
+  `.py` from `# --- ota.py:` and `# --- onboarding.py:`, which is the
+  only other edit that file took and which nothing generates from.
 - **No test file changed except the conformance suite, and one new
   file.** `git diff --stat` against the branch base (`8c20596`) lists
   `tests/unit/test_event_schema_conformance.py` and
