@@ -760,7 +760,13 @@ def _managers_for(
 # task that ends in an exception nobody retrieved prints one at
 # interpreter shutdown. Both are answered by keeping it until it is
 # done and consuming whatever it ended with.
-_abandoned: set[asyncio.Task[None]] = set()
+#
+# Public because what it holds is a fact about this process rather than
+# a detail of the stop that put it there: a reload that answered while
+# a connection was still unwinding left something running, and this is
+# where anything asking whether it has finished looks. Written by the
+# two functions below and by nothing else.
+abandoned: set[asyncio.Task[None]] = set()
 
 
 def _abandon(task: asyncio.Task[None]) -> None:
@@ -772,12 +778,12 @@ def _abandon(task: asyncio.Task[None]) -> None:
     stack, and nothing here touches it again. What is given up is the
     waiting, which belongs to a caller holding a request open.
     """
-    _abandoned.add(task)
+    abandoned.add(task)
     task.add_done_callback(_forget)
 
 
 def _forget(task: asyncio.Task[None]) -> None:
-    _abandoned.discard(task)
+    abandoned.discard(task)
     # Retrieved and dropped: a cancelled task raises here, and one whose
     # unwind failed raises whatever that was, and neither has anyone
     # left to tell.
