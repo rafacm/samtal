@@ -3,7 +3,9 @@ gates in front of a barge-in.
 
 The sibling of [`turns.py`](turns.py), and the two are told apart by
 what they are about: `turns.py` records what a turn contained, this
-module decides who is speaking. Nothing here reads a transcript and
+module decides who is speaking. Nothing here retains a transcript or
+orchestrates a reply (the gate does inspect the confirmation ASR's
+text, but only to decide the cancel, and hands it on untouched), and
 nothing there watches the microphone.
 
 While the device listens, every decoded frame lands in the utterance
