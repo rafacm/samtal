@@ -407,3 +407,65 @@ off `-m1`), merged to `main` by rebase via its own PR after its
 own external review round; both are behavior-preserving with the
 suites passing unmodified, so every merge leaves `main`
 releasable.
+
+## Plan review round
+
+External review: codex-cli 0.147.0, model gpt-5.6-sol, 2026-08-18,
+against commit 67d52a6. Seven findings; verdict "ready after the
+P1/P2 amendments". All seven adopted.
+
+1. **P1: the chosen cross-package emitter is explicitly
+   forbidden.** The conformance walk permits only a module's own
+   emitter or `from . import events` within its own package, with
+   a planted test rejecting an absolute import of another
+   package's emitter; the plan's primary choice would also
+   recreate the onboarding-to-ota edge, and its fallback is
+   unimplementable against a `dict | None` return that cannot
+   distinguish refusal shapes. The ota-owned wrapper must be
+   chosen now, with `activation_for` returning a result that
+   distinguishes offered, not-applicable, unreadable, and
+   pending-table refusal, and `ota.reply` owning both emissions.
+
+2. **P1: the facade breaks the `MINT_BUDGET` monkeypatch
+   contract.** Four unmodified tests assign
+   `samtal_server.onboarding.MINT_BUDGET`; a re-exported integer
+   snapshot leaves the submodule global unchanged and the tests
+   exercising the wrong bound. Write-through compatibility must
+   be preserved, with the existing four tests as the
+   verification.
+
+3. **P2: M1 retires the lightweight-import deferrals too
+   early.** Importing any onboarding submodule executes the
+   facade, which still aggregates the temporary router edge to
+   ota in M1, so `config openapi` and the CLI would pull the
+   conversation stack. The config API and CLI deferrals stay
+   through M1 and retire in M2, with an import-weight check.
+
+4. **P2: `onboarding.build_router` has no transitional
+   contract.** M1 must name its temporary home, and M2 must
+   retire the construction-only symbol when `app.py` switches to
+   the alias router; the whole-current-public-surface promise
+   must exclude this deliberately moved factory.
+
+5. **P2: the origin design does not implement the settled
+   single-helper decision.** Sharing only a scheme fragment
+   leaves two assemblers. One URL-assembly helper with two modes
+   (raw request netloc for the wire; parsed and rebuilt
+   hostname/port with provenance for retained output) is
+   required, with both existing names as compatibility wrappers
+   that do not assemble independently.
+
+6. **P2: the cited tests cannot prove pre-split byte
+   identity.** `_stable` compares two routes through the same
+   new handler and drops `server_time`; polls assert status,
+   describe asserts substrings; only the 404 comparison is
+   byte-exact. A pre-move baseline (dynamics fixed; status, raw
+   content, and relevant headers captured for check, offer,
+   poll, and describe) diffed against the post-split responses
+   is required; existing tests stay unmodified.
+
+7. **P3: the facts seam conflates all-device facts with
+   unbound-only state.** Two seams, not one: observed facts stay
+   at `check_version` for every device; pending `last_seen`
+   stays at `activation_for`/`observe` for unbound ones. No new
+   recorder.
