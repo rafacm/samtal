@@ -422,7 +422,7 @@ Twelve sidecar identities, which is the twelve emit sites. The
 `Offer:refused` half stayed in `onboarding.pending` where M1 put it, and
 the ota half followed `_activation` into the reply wrapper.
 
-#### The greps
+#### The three checks
 
 **(a) No import of `ota` anywhere under `samtal_server/onboarding/`.**
 
@@ -432,16 +432,57 @@ $
 ```
 
 **(b) No function-body import in either package, in either direction.**
+By parsing, not by matching indentation. This section first recorded an
+indentation grep and recorded it as empty; it is not, and the PR review
+round caught it (finding 4). It matches a wrapped docstring line in
+`origin.py` that begins with the word "from", and it would miss any
+import indented deeper than two levels, so it was wrong in both
+directions and its recorded output was false.
 
-```console
-$ grep -rn "^    from \|^        from \|^    import \|^        import " \
-    samtal_server/onboarding/ samtal_server/ota/
-$
+What replaces it walks the syntax tree for `Import` and `ImportFrom`
+nodes nested inside a `FunctionDef` or `AsyncFunctionDef`, at any depth
+(kept in the session scratchpad as `function-body-imports-143.py`):
+
+```python
+def nested_imports(source: Path) -> list[str]:
+    tree = ast.parse(source.read_text(encoding="utf-8"), filename=str(source))
+    found: dict[int, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        for inner in ast.walk(node):
+            if isinstance(inner, ast.Import | ast.ImportFrom):
+                found[inner.lineno] = f"{source}:{inner.lineno}: {ast.unparse(inner)}"
+    return [found[line] for line in sorted(found)]
+
+
+def main() -> int:
+    hits = [
+        hit
+        for root in sys.argv[1:]
+        for source in sorted(Path(root).rglob("*.py"))
+        for hit in nested_imports(source)
+    ]
+    for hit in hits:
+        print(hit)
+    return 1 if hits else 0
 ```
 
-Both are empty. The three that died are `activation_object`,
-`ACTIVATION_ALGORITHMS` and `portal_url_line`; the fourth, in
-`config/cli.py`'s `_onboarding_url`, died with the deferrals.
+```console
+$ python function-body-imports-143.py samtal_server/onboarding samtal_server/ota
+$ echo $?
+0
+```
+
+Empty, and the emptiness means something: pointed at `samtal_server` as
+a whole the same script prints fourteen, in `config/docgen.py`,
+`main.py` and `providers/registry.py`, so a run that finds nothing in
+these two packages is a run that would have found something.
+
+Grep (a) above is exact as it stands, since `ota` appears in no prose in
+that package. The three function-body imports that died are
+`activation_object`, `ACTIVATION_ALGORITHMS` and `portal_url_line`; the
+fourth, in `config/cli.py`'s `_onboarding_url`, died with the deferrals.
 
 **(c) The re-export surface, shown importable.** Every name any module
 or suite imports from `samtal_server.ota`, in one statement:
@@ -548,11 +589,12 @@ that carries it is assembled by a different module than it was.
 Issue #143's five criteria, each against what proves it.
 
 1. **Split by responsibility so the cycle disappears structurally.**
-   Two packages of four and five modules; grep (a) shows no import of
-   `ota` under `onboarding/` and grep (b) no function-body import in
-   either package in either direction. The cycle cannot come back by
-   accident: the alias router is where the handlers are, and the guard
-   is a dependency of it.
+   Two packages of four and five modules; check (a) shows no import of
+   `ota` under `onboarding/` and check (b), which parses rather than
+   matching indentation, no function-body import in either package in
+   either direction. The cycle cannot come back by accident: the alias
+   router is where the handlers are, and the guard is a dependency of
+   it.
 2. **The unbound-device decision gets one home.**
    `onboarding/unbound.py:activation_for`, called by exactly one caller,
    the `ota/reply.py` wrapper whose whole body is the two warnings.
