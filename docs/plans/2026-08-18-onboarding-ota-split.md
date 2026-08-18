@@ -532,6 +532,10 @@ P1/P2 amendments". All seven adopted.
    required, with both existing names as compatibility wrappers
    that do not assemble independently.
 
+   *Resolution*: the origin section now declares the one
+   `assemble` helper with its wire and retained modes, and both
+   names become wrappers that never assemble independently.
+
 6. **P2: the cited tests cannot prove pre-split byte
    identity.** `_stable` compares two routes through the same
    new handler and drops `server_time`; polls assert status,
