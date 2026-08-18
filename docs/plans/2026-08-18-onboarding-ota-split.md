@@ -260,35 +260,46 @@ async def activation_for(
 ) -> dict | None
 ```
 
+The signature above is amended by the review round: the return
+type is not `dict | None` but a small typed result declared in
+`unbound.py` that distinguishes every outcome the caller must
+tell apart:
+
+```python
+@dataclass(frozen=True)
+class Unbound:
+    activation: dict | None      # the offer, when one is made
+    outcome: Literal[
+        "offered",         # a code (new or re-displayed)
+        "not_applicable",  # onboarding off, or device bound/unloaded
+        "unreadable",      # resolution not authoritative
+        "refused",         # the table said no
+    ]
+    refusal: str | None          # CAPACITY_REACHED / BUDGET_SPENT
+```
+
 The body is today's `_activation` sequence moved whole: the
 onboarding-enabled gate, the agents-or-unloaded emptiness test,
-the `authoritative` provenance check with its warning, the
-`observe` call, the refused-offer warning, and
+the `authoritative` provenance check, the `observe` call, and
 `activation_object` (which moves into the same module, being the
-one cross-half function). `ota/reply.check_version` calls
-`activation_for` where it called `_activation`; the emissions
-inside keep their channel by importing the right package's
-`events` object: the two `activation_not_offered` warnings ride
-`samtal_server.ota` today, so they stay with a thin `_activation`
-wrapper in `ota/reply.py` OR move and re-channel. Decided here:
-**the two warnings move with the decision and keep their channel
-by being emitted through the ota package's events instance,
-imported by `unbound.py` for exactly these two sites**, with a
-comment saying the channel is the observability contract and the
-decision's home is the code's; the conformance sidecar follows
-the new location while the channel stays `samtal_server.ota`.
-This is the same one-channel-many-modules shape the tools/mcp
-package already has, only across package lines; if the
-conformance walk's receiver rules make a cross-package import of
-an events instance unclassifiable, the fallback (recorded in the
-implementation doc if taken) is the thin wrapper in `reply.py`
-that keeps the two emissions in ota and calls the decision for
-everything else. Either way `bindings.DeviceAgents.authoritative`
-stays the input it is, `observe` stays the table's mint
-mechanics, and exactly one function answers what an unbound
-device gets; `activate`'s deliberate authoritative-blind re-read
-is untouched and its rationale comment gains a pointer to the new
-home.
+one cross-half function), each branch returning its tagged
+outcome instead of warning in place. **The two
+`activation_not_offered` warnings stay in the ota package**: a
+thin `_activation` wrapper in `ota/reply.py` calls
+`activation_for`, emits the `unreadable` and `refused` warnings
+through ota's own `events` (fields and messages byte-identical,
+fed from the result's tags), and hands `check_version` the
+activation dict or None exactly as today. This is settled now,
+not deferred: the conformance walk permits only a module's own
+emitter or `from . import events` within its own package (it has
+a planted test rejecting an absolute import of another package's
+emitter), and a cross-package emitter import would also recreate
+the onboarding-to-ota edge this issue exists to remove.
+`bindings.DeviceAgents.authoritative` stays the input it is,
+`observe` stays the table's mint mechanics, and exactly one
+function answers what an unbound device gets; `activate`'s
+deliberate authoritative-blind re-read is untouched and its
+rationale comment gains a pointer to the new home.
 
 The #96/#40 seam: `activation_for`'s call site in
 `check_version` is immediately after today's
@@ -363,11 +374,12 @@ address does the outside world use".
   handler functions; the body-equality and no-redirect tests
   catch a re-implementation, and the router move is
   reference-preserving by construction.
-- **The cross-package events emission** (the two
-  `activation_not_offered` warnings) may fight the conformance
-  walk's receiver classification. The fallback is designed in
-  (the thin wrapper), the choice is recorded when made, and
-  either shape keeps channel, schema, and pins untouched.
+- **The typed `Unbound` result must not drift from the
+  emissions it feeds.** The wrapper's two warnings are driven by
+  the result's tags, so a new outcome without a matching arm
+  would go silent; the conformance suite's closed-set assertions
+  on `activation_not_offered.reason` and the pins are the check,
+  and the wrapper's match is exhaustive over the literal.
 - **Facade completeness.** A missed re-export fails the
   unmodified test suites immediately (imports are the first thing
   a suite does), so the failure mode is loud and cheap.
@@ -425,6 +437,12 @@ P1/P2 amendments". All seven adopted.
    chosen now, with `activation_for` returning a result that
    distinguishes offered, not-applicable, unreadable, and
    pending-table refusal, and `ota.reply` owning both emissions.
+
+   *Resolution*: the unbound-decision section now declares the
+   typed `Unbound` result with its four-outcome literal, settles
+   the ota-owned wrapper as the only shape, and the risk bullet
+   about the cross-package emitter is replaced by a
+   result-to-emission drift check.
 
 2. **P1: the facade breaks the `MINT_BUDGET` monkeypatch
    contract.** Four unmodified tests assign
