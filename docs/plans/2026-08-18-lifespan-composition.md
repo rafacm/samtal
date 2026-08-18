@@ -526,7 +526,7 @@ provider build, and asserts the engine was disposed.
   the affected unit and integration files, add the leak-checking
   and full-teardown tests, verify the `ProviderError` startup
   path, CHANGELOG; implementation-doc section with the fixture
-  migration inventory. (PR TBD)
+  migration inventory. (PR #188)
 - [ ] **M3: the config API's lifespan-owned engine.** Parent
   lifespan opens the engine once (no per-request migrations) and
   derives keys once; `store_dependency` serves from state;
