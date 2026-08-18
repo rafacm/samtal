@@ -284,25 +284,39 @@ async def test_the_replys_own_audio_waits_out_a_clip_already_sounding(
     assert len(device.sent) > 1
 
 
-async def test_a_cancelled_reply_takes_its_filler_with_it(
+async def test_a_cancelled_reply_takes_even_a_sounding_filler_with_it(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """A barge-in or an abort kills the reply, and the filler is reply
-    audio: abandoning fires without awaiting, and the settle that
-    follows sees the cancellation through."""
-    runner, device = runner_for({"poet": clips_for("Hmm, let me see...")})
+    audio, so it dies with the reply rather than being waited out. That
+    is the whole difference between abandoning and settling: a clip
+    mid-send survives a settle and does not survive this."""
+    device = HeldDevice()
+    runner, _ = runner_for({"poet": clips_for("Hmm, let me see...")}, device=device)
 
     with caplog.at_level("INFO"):
         runner.arm()
-        runner.abandon()
-        # Not awaited: the task is still there, being cancelled.
-        assert runner.armed is True
         await asyncio.sleep(FIRED_S)
-        await runner.settle()
+        # Mid-send and still held, which is exactly the state `tail`
+        # waits out.
+        assert runner.sounding is True
+        runner.abandon()
+        settling = asyncio.create_task(runner.settle())
+        await asyncio.sleep(0.01)
+        # The send is still held, so a settle that had to see this clip
+        # out would still be sitting here. Asked as "already finished"
+        # rather than as a timeout, because the settle suppresses the
+        # cancellation a timeout would deliver and would look like it
+        # had returned on its own.
+        assert settling.done(), "the settle waited out a clip it was told to abandon"
+        await settling
 
-    assert events(caplog, "filler_played") == []
+    # The clip announced itself and then went nowhere: the send it was
+    # cancelled inside of never delivered a frame.
+    only(caplog, "filler_played")
     assert device.sent == []
     assert runner.armed is False
+    assert runner.sounding is False
 
 
 async def test_one_clip_per_turn_and_the_variants_rotate(
