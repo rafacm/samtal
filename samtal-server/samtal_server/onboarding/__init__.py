@@ -17,7 +17,8 @@ A file each, under this one:
   in `ota.router`, because the guard is a dependency of it and not the
   other way round.
 - `origin` answers what address the outside world reaches this server
-  on, retained or on the wire, and logs the startup banner that says it.
+  on, in one assembler with a retained mode and a wire mode, and logs
+  the startup banner that says it.
 - `pending` is the table of waiting devices, its bounds and its claim
   lifecycle. It imports nothing device-facing, which is what lets the
   configuration API and `samtal-server config` read it.
@@ -109,9 +110,11 @@ from .keys import (  # noqa: E402
     onboarding_path,
 )
 from .origin import (  # noqa: E402
+    NetLoc,
     Origin,
     _bracketed,
     _origin_of,
+    assemble,
     log_banner,
     portal_url_line,
     public_origin,
@@ -158,6 +161,7 @@ __all__ = [
     "TYPO_ATTEMPT_LENGTH",
     "Claim",
     "Handler",
+    "NetLoc",
     "Offer",
     "Origin",
     "PendingDevice",
@@ -173,6 +177,7 @@ __all__ = [
     "_origin_of",
     "activation_for",
     "activation_object",
+    "assemble",
     "derive_key",
     "events",
     "log_banner",

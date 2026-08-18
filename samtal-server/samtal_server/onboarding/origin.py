@@ -9,8 +9,10 @@ deployment names itself the same way wherever it is named, and the
 provenance travels with the value because two of the three sources it
 resolves are inferences. The fourth calls `websocket_url_for`.
 
-Both live here (issue #143), so there is one place to read to know what
-address a device is told about.
+Both of them assemble through `assemble` below and neither assembles on
+its own, which is the point of gathering them here (issue #143): there
+is one place that turns a scheme, an authority and a path into a URL,
+and one place to read to know what a device is told.
 
 The two modes are a real distinction and not a convenience. An address
 this server RETAINS (a banner, a screen, a log line, a printed URL) is
@@ -34,20 +36,41 @@ from samtal_server.device.boundary import WEBSOCKET_PATH
 from . import events
 from .keys import onboarding_key
 
+# What `assemble` may be handed as an authority, and the whole of the
+# difference between its two modes. A `str` is a netloc taken verbatim
+# from a request; a pair is a hostname and an optional port this module
+# parsed out of something and rebuilds, bracketing an IPv6 literal on
+# the way back.
+NetLoc = str | tuple[str, int | None]
+
+
+def assemble(scheme: str, netloc: NetLoc, path: str = "") -> str:
+    """One URL, from the three pieces every caller here has.
+
+    The only place in this codebase that writes `scheme://authority`.
+    Which mode a caller is in is which type it passes, and the two are
+    documented in this module's own docstring: verbatim for the wire,
+    rebuilt for anything retained.
+    """
+    if isinstance(netloc, tuple):
+        hostname, port = netloc
+        netloc = f"{_bracketed(hostname)}{'' if port is None else f':{port}'}"
+    return f"{scheme}://{netloc}{path}"
+
 
 def websocket_url_for(config: Config, request: Request) -> str:
     """The websocket URL to hand this device: the configured one, or the
     address it just reached the OTA endpoint on.
 
-    The wire mode: what goes into the reply is the netloc the request
-    arrived with, exactly as it arrived. Cannot fail, and trusts no
-    forwarded header.
+    The wire mode of `assemble`, and the one caller of it: what goes
+    into the reply is the netloc the request arrived with, exactly as it
+    arrived. Cannot fail, and trusts no forwarded header.
     """
     configured = config.server.websocket_url
     if configured:
         return configured
     scheme = "wss" if request.url.scheme == "https" else "ws"
-    return f"{scheme}://{request.url.netloc}{WEBSOCKET_PATH}"
+    return assemble(scheme, request.url.netloc, WEBSOCKET_PATH)
 
 
 @dataclass(frozen=True)
@@ -104,7 +127,7 @@ def public_origin(server: ServerConfig) -> Origin:
         )
     reasons.append("set server.public_url to name this deployment exactly")
     return Origin(
-        f"http://{_bracketed(server.host)}:{server.port}",
+        assemble("http", (server.host, server.port)),
         "the listen address (server.host and server.port)",
         guessed=True,
         note=", " + "; ".join(reasons),
@@ -115,9 +138,9 @@ def _origin_of(websocket_url: str) -> str | None:
     """The http origin behind a `ws://` or `wss://` URL, or None when
     there is none to take.
 
-    The retained mode: built from the parsed hostname and port, never
-    from the raw netloc, so a `user:password@host` cannot ride into a
-    log line through the banner. Both of the parse steps
+    The retained mode of `assemble`: built from the parsed hostname and
+    port, never from the raw netloc, so a `user:password@host` cannot
+    ride into a log line through the banner. Both of the parse steps
     that raise are caught: `urlsplit` itself for a malformed IPv6 host,
     and `.port` for one that is not a number in range. The configuration
     validator refuses both, and this is what keeps a configuration built
@@ -131,7 +154,7 @@ def _origin_of(websocket_url: str) -> str | None:
     if not hostname:
         return None
     scheme = "https" if parts.scheme == "wss" else "http"
-    return f"{scheme}://{_bracketed(hostname)}{'' if port is None else f':{port}'}"
+    return assemble(scheme, (hostname, port))
 
 
 def _bracketed(host: str) -> str:
