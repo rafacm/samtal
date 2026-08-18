@@ -9,6 +9,26 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The configuration API is served over one database engine, not one
+  per request** (#142, M3). Every call to `/api` opened the
+  configuration database, ran an Alembic up-to-dateness check inside
+  it, re-parsed `SAMTAL_MASTER_KEY` and threw the engine away. The
+  engine is now opened once by whichever lifespan owns the application
+  (the server's when the API is mounted, the API's own when it is run
+  standalone, never both, since a mounted application gets no lifespan
+  of its own) and disposed when that lifespan ends, with the encryption
+  keys derived once beside it. The open still migrates, so a first
+  deployment whose first act is an API write still gets a schema, and a
+  server that migrated at boot pays one no-op check. Nothing an
+  operator sees changed: a write still takes the lock per transaction,
+  contention is still met inside the request and still answered 409
+  with the repository's own sentence, and a database another writer is
+  holding at startup is refused as the boot failure it is, with the one
+  sanitized sentence a refused boot prints. The conversation store's
+  reads keep opening per request, deliberately: a store restored or
+  purged under a running server is met as it is now, which is that
+  store's own property.
+
 - **A server acquires what it is made of when it starts serving, and
   lets go of it when it stops** (#142, M2). `create_app` built
   everything: an application that was built and never served held a
