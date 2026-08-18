@@ -254,13 +254,32 @@ def build_provider(
     # names the entity and the slot to set again, and wrapping it as a
     # failure to build a provider would bury that under the wrong
     # heading.
+    #
+    # What the library said is deliberately not in the sentence. This
+    # message is printed to an operator as it is (it is a boot failure,
+    # and the entry point answers one with a single line), and the text
+    # arriving here is whatever a third-party client raised while being
+    # handed this entry's options: an SDK that cannot reach its endpoint
+    # quotes the URL, one that will not authenticate quotes what it was
+    # given, and a copy of either into a printed line puts it wherever
+    # that line is kept. The same rule the device bindings' failed reads
+    # follow (`device/bindings.py`): the class name is said, the message
+    # is not, and the exception itself is this one's `__cause__` for
+    # whoever has a debugger. Options are validated by our own reader and
+    # raise `ProviderError` above, so the case this loses nothing on is
+    # the common one.
     try:
         with provider_secrets_in_force(ProviderSecrets(stage, name, secrets)):
             provider = factory(label, config)
     except (ProviderError, ConfigError):
         raise
     except Exception as exc:
-        raise ProviderError(f"{label}: could not build {config.type} provider: {exc}") from exc
+        raise ProviderError(
+            f"{label}: the {config.type} provider would not build "
+            f"({type(exc).__name__}). What it said is not repeated here, because a "
+            f"library failing to start can quote the endpoint or the credential this "
+            f"entry names; check this entry's options and the service it points at"
+        ) from exc
     # The egress rule itself lives in one module that this registry and
     # the MCP build path both call (#30, #136); what stays here is the
     # exception type, which is this surface's contract, wrapped around
