@@ -65,7 +65,17 @@ def _loaded(*statements: str) -> frozenset[str]:
         """
     ).format(body="\n".join(statements))
     finished = subprocess.run(
-        [sys.executable, "-c", source],
+        # `-B`, and it is not a detail. `conftest.py` clears the two
+        # trees' bytecode caches once, before the first import of
+        # anything under test, and then writes none for the rest of the
+        # run: a `.pyc` is validated on the source's size and its mtime
+        # in whole seconds, so an edit that keeps the byte count inside
+        # one second is invisible, and the repository would rather have
+        # no cache than a lying one. A child interpreter started without
+        # this flag writes a full set back after that clearing, which
+        # hands the next `uv run samtal-server` exactly the stale cache
+        # the safeguard exists to prevent.
+        [sys.executable, "-B", "-c", source],
         capture_output=True,
         text=True,
         check=True,
