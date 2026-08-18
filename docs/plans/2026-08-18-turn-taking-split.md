@@ -446,7 +446,7 @@ non-endpointing result while `speech_ms()` stays test-controlled.
   CHANGELOG entry, implementation-doc section with the M1 half of
   the scenario-mapping table.
 - [x] **[M2: the filler runner](2026-08-18-turn-taking-split-implementation.md#m2-the-filler-runner).**
-  (PR TBD) Add `runtime/filler_runner.py`
+  (PR #186) Add `runtime/filler_runner.py`
   (`FillerRunner`, `TurnView`, the observation properties),
   delegate from `PipelineRuntime` (`arm`/`tail`/`settle`/
   `abandon` call sites), relocate the `filler_skipped` reason
