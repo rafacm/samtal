@@ -448,7 +448,7 @@ outside world use".
   still aggregates the router edge, so retiring them now would
   make `config openapi` and the CLI pull the conversation stack.
 - [x] **[M2: the ota package and the cycle's end](2026-08-18-onboarding-ota-split-implementation.md#m2-the-ota-package-and-the-cycles-end).**
-  (PR TBD) Convert
+  (PR #198) Convert
   `ota.py` to the three-module package plus facade, move the
   short-alias router to `ota/router.py` and `spellings` with it,
   point the reply wrapper at `activation_for` (the three
