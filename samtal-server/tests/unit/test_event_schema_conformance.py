@@ -971,7 +971,7 @@ def agrees(signature: Signature, declared: schema.EventField | schema.ArgSpec) -
 # names the function or the constant that decides one, module-qualified
 # and following production across modules where it goes there:
 # `activation_not_offered`'s refusal reasons are produced in
-# `onboarding.py`, not in `ota.py` where the emit sits.
+# `onboarding/pending.py`, not in `ota.py` where the emit sits.
 
 CONSTANT = "constant"
 RETURNED = "returned"
@@ -1024,7 +1024,7 @@ TOKEN_SOURCES: dict[tuple[str, str], tuple[Decides, ...]] = {
     ("activation_not_offered", "reason"): (
         Decides("samtal_server.ota", KEYWORD, "reason", scope="_activation"),
         Decides(
-            "samtal_server.onboarding",
+            "samtal_server.onboarding.pending",
             KEYWORD,
             "Offer:refused",
             scope="PendingDevices.observe",
@@ -1034,7 +1034,7 @@ TOKEN_SOURCES: dict[tuple[str, str], tuple[Decides, ...]] = {
     # alone: the unreadable-database refusal renders no reason at all.
     ("activation_not_offered", "arg:1"): (
         Decides(
-            "samtal_server.onboarding",
+            "samtal_server.onboarding.pending",
             KEYWORD,
             "Offer:refused",
             scope="PendingDevices.observe",
@@ -1047,7 +1047,9 @@ TOKEN_SOURCES: dict[tuple[str, str], tuple[Decides, ...]] = {
         Decides("samtal_server.ota", ARGUMENT, "_bad_request:0"),
     ),
     ("onboarding_banner", "origin_source"): (
-        Decides("samtal_server.onboarding", ARGUMENT, "Origin:1", scope="public_origin"),
+        Decides(
+            "samtal_server.onboarding.origin", ARGUMENT, "Origin:1", scope="public_origin"
+        ),
     ),
     ("mcp_connected", "transport"): (
         Decides("samtal_server.config.models", ANNOTATION, "McpServerConfig.transport"),
@@ -1281,17 +1283,17 @@ PINNED_BY: dict[tuple[str, str, int], tuple[str, ...]] = {
     ("samtal_server.filler", "build_agent_fillers", 1): (
         f"{SERVER_PINS}::test_filler_disabled",
     ),
-    ("samtal_server.onboarding", "log_banner", 1): (
-        f"{SERVER_PINS}::test_onboarding_banner_with_onboarding_off",
-    ),
-    ("samtal_server.onboarding", "log_banner", 2): (
-        f"{SERVER_PINS}::test_onboarding_banner_with_onboarding_on",
-    ),
-    ("samtal_server.onboarding", "_log_mismatch", 1): (
+    ("samtal_server.onboarding.keys", "_log_mismatch", 1): (
         f"{SERVER_PINS}::test_onboarding_key_mismatch",
     ),
-    ("samtal_server.onboarding", "_log_mismatch", 2): (
+    ("samtal_server.onboarding.keys", "_log_mismatch", 2): (
         f"{SERVER_PINS}::test_onboarding_key_unshaped",
+    ),
+    ("samtal_server.onboarding.origin", "log_banner", 1): (
+        f"{SERVER_PINS}::test_onboarding_banner_with_onboarding_off",
+    ),
+    ("samtal_server.onboarding.origin", "log_banner", 2): (
+        f"{SERVER_PINS}::test_onboarding_banner_with_onboarding_on",
     ),
     ("samtal_server.ota", "check_version", 1): (
         f"{SERVER_PINS}::test_ota_check_offering_an_activation_code",

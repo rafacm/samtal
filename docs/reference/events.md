@@ -162,7 +162,7 @@ never what an operator may have called something.
 | `from_entry` | `' from entry "[\s\S]+"'` | `samtal_server.runtime.pipeline:_tool_named` | The configured MCP entry a call reached, never the far side's own tool name. Entry names are separately held to `[A-Za-z0-9_-]+` by the configuration, which makes this grammar a floor rather than the whole truth; the floor is what the registry may claim, since the tighter rule is configuration's to keep and to change. |
 | `quoted_provider` | `' "[\s\S]+"'` | `samtal_server.runtime.pipeline:PipelineRuntime._provider_failed` | The configuration entry the failing provider is, bounded by the quoting alone. |
 | `reaching_host` | `'(?: reaching [\s\S]+)?'` | `samtal_server.runtime.pipeline:PipelineRuntime._provider_failed` | Where the call was going, empty for an engine that runs in this process. |
-| `origin_provenance` | `'(?:from\|guessed from) [\s\S]+'` | `samtal_server.onboarding:Origin.provenance` | Which configuration key the banner's origin came out of, and whether it was read or inferred. |
+| `origin_provenance` | `'(?:from\|guessed from) [\s\S]+'` | `samtal_server.onboarding.origin:Origin.provenance` | Which configuration key the banner's origin came out of, and whether it was read or inferred. |
 | `device_or_unidentified` | `'[0-9a-f]{2}(?::[0-9a-f]{2}){5}\|an unidentified device'` | `samtal_server.ws:conversation` | The MAC behind a Device-Id header this server recognizes, or the fixed phrase. Nothing else: with device auth off nothing has verified that header, so an unrecognized one names no device at all. |
 
 ## The prompt provenance grammar
