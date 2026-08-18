@@ -377,9 +377,13 @@ plan asks for went into `DeviceAgents.authoritative`'s own comment in
 ### Verification
 
 - `uv run ruff check .`: clean.
-- `uv run pytest tests/unit -q`: 2990 passed, 16 skipped. Two more than
-  M1's 2988, which are the two import-weight tests added below; no
-  other count moved.
+- `uv run pytest tests/unit -q`: 2999 passed, 16 skipped. Four more
+  than the 2995 the branch point holds (M1's 2988 plus the seven cases
+  its review round added in `test_unbound.py`): the three import-weight
+  cases and the one outcome-mapping check described below. No other
+  count moved. The figure was 2990 before this milestone's own review
+  round, which added the third import-weight case and the mapping
+  check.
 - `uv run pytest tests/integration -q`: 58 passed, the same as M1.
 - The four generated references, regenerated and diffed against the
   committed copies: `domain-config.md`, `conversations-schema.md` and
@@ -511,13 +515,20 @@ nothing about them changed.
 
 #### The import-weight check
 
-`tests/unit/test_onboarding_import_weight.py`, two tests, both green: a
-subprocess that imports `samtal_server.onboarding`, and one that imports
-`samtal_server.config.cli`, each asserting that `samtal_server.ota`,
-`samtal_server.ws` and `samtal_server.providers` are absent from
+`tests/unit/test_onboarding_import_weight.py`, three tests, all green,
+each a fresh interpreter started with `-B`: one imports
+`samtal_server.onboarding`, one imports `samtal_server.config.cli`, and
+one calls `samtal_server.config.api.document()`. Each asserts that
+`samtal_server.ota`, `samtal_server.ws`, `samtal_server.providers`,
+`samtal_server.tools.mcp` and `samtal_server.audio` are absent from
 `sys.modules` afterwards. The CLI is included because it is the reader
 the deferrals existed for, and holding it as well as the package means
-an edge added inside the package fails the test that names the caller.
+an edge added inside the package fails the test that names the caller;
+the document render is included because building the application
+evaluates route handlers and response models that importing the module
+never reaches, and that is where a lazy edge would fire. (The third
+case, the last two forbidden names and the `-B` are this milestone's
+review round, findings 2 and 3.)
 
 The test's docstring says out loud what is NOT asserted: SQLAlchemy is
 loaded, through `onboarding.unbound` importing `device.bindings` for the
@@ -619,3 +630,100 @@ Issue #143's five criteria, each against what proves it.
    at the other seam, and the unbound-only `last_seen` refresh stays
    inside `activation_for`/`observe`. No recorder was added and no
    machinery was built.
+
+### The PR review round (M2)
+
+External review of PR #198. Five findings, all accepted. One commit
+each.
+
+1. **P2: nothing checked the outcome-to-warning mapping.**
+   `test_unbound.py` (M1's review round) holds what `activation_for`
+   answers, and the conformance suite holds the reasons the warnings
+   carry, but nothing held the step between them: a fifth member added
+   to the `Unbound.outcome` literal would fall out of `_activation`'s
+   match with no arm and no error, and the device it was about would be
+   answered with nothing said.
+
+   *Fix* (`a66088f`): a conformance test beside the `TOKEN_SOURCES`
+   machinery, reusing the suite's own `scope_of`. It resolves the
+   `Literal` members off `Unbound.outcome` with
+   `get_type_hints`/`get_args`, collects the string values every `case`
+   in `ota.reply._activation` names (flattening or-patterns), and
+   asserts exact set equality both ways; a wildcard arm fails
+   separately, since it is the one way to make the mapping total
+   without naming what it is total over. Checked to bite in both
+   directions: a fifth literal fails naming `invented`, and replacing
+   the do-nothing arm with `case _` fails on the wildcard.
+
+2. **P2: the import-weight test never touched the configuration API.**
+   It imported the package and the CLI, while the changelog claimed the
+   bound for the API's document render as well. Importing `config.api`
+   would not have been enough either: `document()` builds the whole
+   application to describe it, so it evaluates route handlers and
+   response models a bare import never reaches, and that render is
+   where a lazy edge would fire.
+
+   *Fix* (`d543366`): a third fresh-process case running `document()`,
+   and the forbidden set grown from three names to five with
+   `samtal_server.tools.mcp` and `samtal_server.audio`, the two the
+   API's own deferral comments named beside the pending table. None of
+   the five had to be dropped as a real dependency: all five are absent
+   for all three cases. `_loaded` takes statements rather than a module
+   name, which is what lets a case call something. Checked to bite: a
+   lazy `import samtal_server.audio` planted inside `document()` fails
+   the new case and neither of the other two.
+
+3. **P2: the subprocess children defeated the stale-bytecode
+   safeguard.** They ran without `-B`, so each wrote a full set of
+   `.pyc` files back into `samtal_server/` after `conftest.py` had
+   cleared the trees, handing the next run outside pytest exactly the
+   stale cache the safeguard exists to prevent.
+
+   *Fix* (`e788cf7`): every child starts `[sys.executable, "-B", "-c",
+   source]`, with the reason in a comment beside the flag. Measured on
+   a cleared tree: the three cases left 8 `__pycache__` directories and
+   34 `.pyc` files behind before, and leave none now. The whole unit
+   lane, run from a cleared tree, leaves none either.
+
+   Found while proving it, and left alone: the INTEGRATION lane still
+   leaves 15 `__pycache__` directories under `samtal_server/`. Traced
+   by running each file of that lane against a cleared tree, they come
+   from `test_config_examples.py` (13 on its own) and
+   `test_smoke_seeds.py` (15), both of which run the deployment seed
+   scripts and so start `samtal-server` in subprocesses nothing passes
+   `-B` to. Neither file is touched by this branch and the hole
+   predates it, so fixing it here would be an unrelated change riding
+   in a review round; it is recorded so that the next reader of this
+   safeguard knows the unit lane is clean and the integration lane is
+   not.
+
+4. **P3: this document's function-body-import verification was
+   false.** The indentation grep recorded here as empty is not empty:
+   it matches a wrapped docstring line in `origin.py` beginning with
+   the word "from", and it cannot see an import indented deeper than
+   two levels. Wrong in both directions, and recorded as met.
+
+   *Fix* (`b803759`): check (b) above is now an AST walk for `Import`
+   and `ImportFrom` nodes nested inside a `FunctionDef` or
+   `AsyncFunctionDef` at any depth, recorded verbatim and kept in the
+   session scratchpad as `function-body-imports-143.py`. It answers
+   empty for both packages and fourteen for `samtal_server` as a whole,
+   so the emptiness is evidence rather than an artifact of the
+   instrument.
+
+5. **P3: three comments outlived what they described.**
+   `composition.py` said `ws` and `ota` name the composition under
+   `TYPE_CHECKING` and cited `config/api.py`'s deferral as the same
+   case, both untrue in this branch; `capture.py`'s `DeviceFacts`
+   pointed at the deleted `ota.py`; and `config/api.py` claimed
+   importing `onboarding.pending` costs only the standard library,
+   when reaching it runs the package `__init__` and so loads `unbound`,
+   the bindings view and SQLAlchemy.
+
+   *Fix* (`f757617`): each corrected in its own voice. The composition
+   paragraph now names the two module-scope imports as the evidence its
+   claim holds; `capture.py` names `ota.reply.check_version`; and
+   `config/api.py` states the real cost and why it is accepted, which
+   is that the module imports `open_database` just above and so has
+   SQLAlchemy either way, the line that matters being the conversation
+   stack, which is the line the import-weight test holds.
