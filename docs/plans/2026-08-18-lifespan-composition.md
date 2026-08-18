@@ -428,11 +428,13 @@ existing fakes.
   `app.state` (fillers wrapped in `AgentFillers`); `ws.py`,
   `ota.py`, `main.py` read typed fields; the twenty-six test
   state-reads and the two post-hoc injectors move to the
-  composition attribute; grep proves `app.state.` is only the
-  composition plus the sub-app bags; CHANGELOG;
-  implementation-doc section. Construction still synchronous in
-  `create_app` this milestone, so no fixture migration yet and
-  the lifespan is untouched.
+  composition attribute; the lifespan is rewritten in the same
+  milestone to bind `comp = app.state.composition` and read its
+  fields (it reads six attributes M1 deletes, so leaving it
+  untouched would fail at startup); grep proves `app.state.` is
+  only the two typed objects; CHANGELOG; implementation-doc
+  section. Construction still synchronous in `create_app` this
+  milestone, so no fixture migration yet.
 - [ ] **M2: the lifespan owns construction.** Move the build into
   the lifespan (describe/build split, `_CompositionSeed`,
   providers under `to_thread`, capture events with their identity
@@ -473,6 +475,9 @@ P1/P2 amendments". All eleven adopted.
    The current lifespan reads six attributes M1 deletes; M1 as
    written fails at startup. M1 must also rewrite the lifespan to
    read composition fields while construction stays synchronous.
+
+   *Resolution*: the M1 milestone now names the lifespan rewrite
+   explicitly, with construction staying synchronous until M2.
 
 2. **P1: the config API is exempted from the settled decision.**
    The plan kept the sub-app's seven-field untyped bag and
