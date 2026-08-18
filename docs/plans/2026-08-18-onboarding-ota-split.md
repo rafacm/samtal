@@ -405,30 +405,45 @@ address does the outside world use".
 
 - [ ] **M1: the onboarding package.** Convert `onboarding.py` to
   the four-module package plus facade `__init__` (keys, origin,
-  pending, unbound with `activation_for` not yet called by ota),
-  move `ACTIVATION_TIMEOUT_MS`/`ACTIVATION_ALGORITHMS` into
-  `unbound.py`, retire the `config/api.py` and `config/cli.py`
-  deferrals and their apology comments, update the conformance
-  location keys the suite names, regenerate the events reference
-  expecting an empty diff, verify every onboarding suite passes
-  unmodified, CHANGELOG entry, implementation-doc section with
-  the re-export grep recorded. `ota.py` still works against the
-  facade unchanged this milestone, cycle intact but shrunk to
-  the one module-scope edge.
+  pending, unbound with `activation_for` not yet called by ota;
+  the tunable bounds defined in the facade ahead of the submodule
+  imports), move `ACTIVATION_TIMEOUT_MS`/`ACTIVATION_ALGORITHMS`
+  into `unbound.py`, keep `build_router` defined in the facade as
+  the ONE surviving onboarding-to-ota edge (a construction-only
+  factory `app.py` still calls, named as temporary in its
+  comment), update the conformance location keys the suite names,
+  regenerate the events reference expecting an empty diff, verify
+  every onboarding suite passes unmodified, CHANGELOG entry,
+  implementation-doc section with the re-export grep recorded.
+  The `config/api.py` and `config/cli.py` deferrals stay in M1:
+  importing any onboarding submodule executes the facade, which
+  still aggregates the router edge, so retiring them now would
+  make `config openapi` and the CLI pull the conversation stack.
 - [ ] **M2: the ota package and the cycle's end.** Convert
   `ota.py` to the three-module package plus facade, move the
   short-alias router to `ota/router.py` and `spellings` with it,
-  point `check_version` at `activation_for` (the three
-  function-body imports die with `_activation`), unify
+  point the reply wrapper at `activation_for` (the three
+  function-body imports die with `_activation`), retire
+  `onboarding.build_router` when `app.py` switches to
+  `ota.router.build_alias_router` (the facade's public-surface
+  promise deliberately excludes this construction-only factory;
+  no test imports it, verified by grep in M1), unify
   `websocket_url_for` into `onboarding/origin.py`, re-home
   `WEBSOCKET_PATH` to `device/boundary.py` and let `ws.py` import
-  `Composition` at module scope, update `app.py`'s router
-  registration and the conformance location keys, regenerate the
-  events reference expecting an empty diff, run the no-cycle and
-  no-function-body-import greps, verify every onboarding and OTA
-  suite (unit and integration) passes unmodified, CHANGELOG
-  entry, implementation-doc section with the acceptance sweep
-  (all five criteria mapped).
+  `Composition` at module scope, retire the `config/api.py` and
+  `config/cli.py` deferrals and their apology comments now that
+  the onboarding package has no path to ota, with an
+  import-weight check (a subprocess imports
+  `samtal_server.onboarding` and asserts `samtal_server.ota`,
+  `samtal_server.ws`, and the providers package are absent from
+  `sys.modules`), update `app.py`'s router registration and the
+  conformance location keys, regenerate the events reference
+  expecting an empty diff, run the no-cycle and
+  no-function-body-import greps, capture the pre/post wire
+  baseline (below), verify every onboarding and OTA suite (unit
+  and integration) passes unmodified, CHANGELOG entry,
+  implementation-doc section with the acceptance sweep (all five
+  criteria mapped).
 
 Each milestone is a stacked branch off the previous one
 (`feature/onboarding-ota-split-m1` off this plan's branch, `-m2`
@@ -481,11 +496,19 @@ P1/P2 amendments". All seven adopted.
    conversation stack. The config API and CLI deferrals stay
    through M1 and retire in M2, with an import-weight check.
 
+   *Resolution*: M1 now keeps both deferrals and says why; M2
+   retires them with the subprocess import-weight check.
+
 4. **P2: `onboarding.build_router` has no transitional
    contract.** M1 must name its temporary home, and M2 must
    retire the construction-only symbol when `app.py` switches to
    the alias router; the whole-current-public-surface promise
    must exclude this deliberately moved factory.
+
+   *Resolution*: M1 names the facade as `build_router`'s
+   temporary home and the one surviving edge; M2 retires the
+   symbol when `app.py` switches, with a grep in M1 proving no
+   test imports it.
 
 5. **P2: the origin design does not implement the settled
    single-helper decision.** Sharing only a scheme fragment
