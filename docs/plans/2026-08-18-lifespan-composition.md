@@ -245,19 +245,30 @@ which is the direction the issue wants.
 
 ### The config API's engine and keys
 
-The parent lifespan opens one `write_engine` for the domain
-database (via a new `open_database_engine` variant that does not
-re-run migrations; boot already ran them, and startup order
-guarantees boot happened first in production, while tests that
-build apps against fresh directories get migrations from
-`load_boot_config` or their own setup), derives the Fernet keys
-once via `load_keys()`, and attaches a `ConfigStore` factory to
-the sub-app state. `store_dependency` becomes: take the
-lifespan-owned engine and keys from state, yield
-`ConfigStore(engine, keys)`, no dispose. `BEGIN IMMEDIATE` is per
-transaction (`ConfigStore._transaction`) and does not move, so
-write contention behavior is unchanged; the busy-refusal mapping
-stays at the same decision sites.
+The engine has exactly one owner per process, and which lifespan
+owns it depends on how the API runs:
+
+- **Mounted (production and whole-app tests)**: the parent
+  lifespan opens it via `open_database` (so migrations run once
+  at startup; see the fresh-deployment note below), derives the
+  Fernet keys once via `load_keys()`, installs the store handle
+  into the sub-app's `api_runtime`, and disposes it at teardown.
+  Starlette never runs a mounted app's lifespan, so there is no
+  double-open.
+- **Standalone (`build_api(...)` as the top-level app, the
+  config-API suites)**: the API app gets its own lifespan doing
+  the same open-install-dispose against the directory `build_api`
+  was given. A standalone client that never enters the lifespan
+  has no engine, which is part of the fixture migration those
+  suites undergo anyway.
+
+`store_dependency` becomes: take the installed store handle from
+`api_runtime`, yield `ConfigStore(engine, keys)`, no dispose; a
+missing handle is a programming error and raises, never a silent
+per-request open. `BEGIN IMMEDIATE` is per transaction
+(`ConfigStore._transaction`) and does not move, so write
+contention behavior is unchanged; the busy-refusal mapping stays
+at the same decision sites.
 
 The documented property, re-examined as the issue requires:
 reason (a) (boot's "nothing after boot reads the database") was
@@ -510,6 +521,12 @@ P1/P2 amendments". All eleven adopted.
    no engine. The standalone path needs its own lifespan that
    opens, migrates, installs, and disposes; mounted operation
    uses the parent-owned instance.
+
+   *Resolution*: the engine section now defines both ownership
+   paths (parent lifespan when mounted, the API's own lifespan
+   when standalone, never both because mounted lifespans do not
+   run), and the standalone suites' `with`-adoption is folded
+   into the fixture migration.
 
 4. **P1: lifespan failures bypass the sanitized startup
    boundary.** `main()` calls `serve()` outside its except arm,
