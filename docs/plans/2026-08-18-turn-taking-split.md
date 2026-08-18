@@ -356,8 +356,13 @@ names must not change, the conformance sidecar addresses them),
 touches only `_reply_task`/`_reply`, which do not move, and needs
 no edit. Test assets from #144 (`ScriptedEndpointer`,
 `ConfirmingAsr`, `GatedAsr`, `BrokenTts`, the config and session
-helpers) are reused as they are; `ScriptedEndpointer` satisfies
-the endpointer shape structurally and needs no registration.
+helpers) are reused with one mechanical edit: `ScriptedEndpointer`
+satisfies the endpointer shape structurally and needs no
+registration, but its docstring says feeding is never exercised
+(true while tests called `_finish_utterance` directly), and the
+rewritten suites plus the new direct tests do drive `feed`. The
+docstring is updated in M1 to say `feed()` returns the scripted
+non-endpointing result while `speech_ms()` stays test-controlled.
 
 ## The standing review lenses, answered
 
@@ -538,3 +543,6 @@ the amendments below.
    says feeding is never exercised; the rewritten suites and the
    new direct tests drive `feed`. The mechanical docstring update
    belongs in the plan.
+
+   *Resolution*: the Tests section and the M1 milestone now name
+   the docstring update.
