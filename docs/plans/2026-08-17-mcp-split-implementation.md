@@ -761,3 +761,208 @@ twice claim in the module docstring and CHANGELOG overstated the
 device source's deliberate live-scan (both narrowed to MCP routing
 with the edge behavior named). Verdict as posted: mergeable after
 the listed fixes.
+
+## M4: tests through public seams
+
+Six commits, one per seam with the ports it makes possible: the
+registry's two reads, the manager's session, the abandoned set's name,
+the four managers whose configuration was being rewritten under them,
+the manager protocol with the stand-in it makes possible, and the stop
+bound's subclass. No production behaviour moves in any of them: what
+changes is what a test is allowed to know.
+
+### The seams, reach by reach
+
+| Reach, and where | Seam | The port |
+| --- | --- | --- |
+| `servers._managers[entry]` (`test_tools_mcp.py:1284`, `test_tools_mcp_reload.py:96` in its own `manager_of` helper, `:390`, `:397`, `:549`, `test_agent_guidance.py:466`) | `McpServers.manager_of(entry)`, KeyError for an entry with no manager | the helper collapses onto it, its rationale moving into the method and into the section comment above the diff tests |
+| `servers._reloading` (`test_tools_mcp_reload.py:759`) | `McpServers.reloading`, read-only | `while servers.reloading:` in the helper that waits out an apply whose caller went away |
+| `manager._session` patched (`test_tools_mcp.py:257`, `:1170`, `:1223`, `test_tools_mcp_prompts.py:206`) | `McpServerManager.session`, read-only | `monkeypatch.setattr(manager.session, "call_tool", refuse)`, the same patch of the same live object |
+| `mcp_module._abandoned` (`test_tools_mcp_reload.py:739`, `:744`, `:800`) | `manager.abandoned`, the module-level name renamed and re-exported | `manager_module.abandoned` |
+| `manager._config = …` (`test_tools_mcp.py:116`, `:120`, `:293`, `:307`, `:312`) and the read at `test_tools_mcp_reload.py:549` | none: the world moves instead | `command_arrives` in `tests/support/tools_mcp.py`, and one entry whose path is empty and then is not |
+| `StubbornManager(McpServerManager)` overriding `_run` and writing `_became`, `_settled`, `_stop`, plus `manager._task` (`test_tools_mcp_reload.py:690-744`) | `transport.stdio_client` (M1's sanctioned patch target) and `manager.abandoned` | `stubbornly_unwinding`, and the task read out of the abandoned set |
+| `SlowStopManager(McpServerManager)` overriding `_run`, plus `going._task` (`test_tools_mcp_reload.py:762-799`) | `McpManager`, the protocol, and construction with a mapping | a stand-in answering the protocol, asserted on the bound it was stopped under and on the stop having finished |
+
+### The protocol
+
+`McpManager` in `manager.py`, above the class that answers it, taken
+from what `registry.py` and `reload.py` actually call and nothing else:
+`state`, `reason`, `since`, `tool_timeout_s`, `shipped_instructions`
+and `shipped_prompts` as read-only properties; `tools()`,
+`listed_at(published)`, `expect(allowed)`, `same_as(other)` and
+`ensure_reconnecting()`; and `start()`, `stop(timeout=None)` and
+`call(published, arguments)` as coroutines. Fourteen members.
+
+Three names the manager has that are deliberately not in it: `name`,
+`up` and the new `session`. Nothing in the registry or the reload reads
+them, and a member nobody calls is one a stand-in has to answer for
+nothing.
+
+`same_as` takes `Any` rather than the protocol, which is the one place
+the interface is deliberately loose: what two managers are compared by
+is knowledge an implementation has about itself (its entry fragment and
+the fingerprint of the secrets behind it), and the candidate on the
+other side of the comparison is always one the reload just built.
+
+`McpServers.__init__`, `manager_of`, `_install`, `_shadowed` and the
+reload's three lists are typed against it. `_managers_for` still
+answers concrete managers, because building them is exactly what it
+does.
+
+### Deviations
+
+**The read-only `config` property was not added.** The plan names "the
+six `_config` reads"; five of the six are WRITES
+(`manager._config = stdio_entry(...)`) and the sixth is the read half
+of a write. A read-only property serves none of them, and a settable
+one would be a public way to do the thing no caller does: the only
+thing that ever changes a running manager's configuration is a reload,
+and a reload does it by replacing the manager. So the reaches are
+retired rather than re-expressed. What each of those tests was really
+about is a server that was down and is not any more, and that is now
+what they do: the entry names a path with nothing at it, and
+`command_arrives` puts this suite's stdio server there, which is a
+stronger test of the same sentence (`ensure_reconnecting` really
+reconnects to a server that really arrived). The fourth wanted two
+failures of different kinds under one entry and gets them from the same
+path: nothing there, and then something there this process may not
+execute (`FileNotFoundError`, then `PermissionError`).
+
+**No manager factory parameter.** The plan pairs the protocol with "a
+MANAGER FACTORY parameter on `McpServers` construction (and/or
+`build`)". Construction already takes the mapping of managers, which
+the plan itself calls a de-facto seam, and that is what the stand-in is
+injected through, so a factory would have had no caller: it would have
+had to thread through `_managers_for` and the reload's `_prepared` for
+a test that wants the arriving candidates to be real anyway. The
+protocol landed; the factory did not.
+
+**The stubborn stop is not a protocol stand-in, and could not be.**
+The plan turns both subclasses into stand-ins answering the protocol.
+That works for `SlowStopManager`, whose test is about what the reload
+does around a slow stop. It cannot work for `StubbornManager`: that
+test's subject IS `McpServerManager.stop`, whose bound, cancellation
+and abandonment are all inside it, so a stand-in would replace the
+subject with its own stop and then assert on that. What the test needs
+is a task that swallows its cancellation and goes on running, and
+suppressing a cancellation is something code inside the task does: no
+configuration, and no unhelpful far side, can produce one (a hostile
+child process cannot, because the cancel is delivered in this process
+and anyio honours it).
+
+So what stands in is the transport rather than the manager.
+`stubbornly_unwinding` wraps the stdio client that ships in an exit
+which swallows its cancellation and sleeps again, patched over
+`transport.stdio_client`, which M1's port table already established as
+the patch target for that name. The manager under test is then the one
+that ships, with its real run, its real exit stack and a real child
+process, against a way out that will not close, and the assertions get
+stronger rather than weaker: the task is read out of `abandoned` (so
+exactly one was left behind, which the old assertion did not say), it
+is still running at the bound, and the set is empty once it ends.
+Checked by reverting `abandoned.add(task)` in `_abandon`, on which the
+test fails at the unpacking.
+
+**`manager.py` is 886 lines**, up from the 777 M1 recorded as the one
+criterion it missed. The protocol is 109 of them. It sits with its one
+implementation on purpose: a seventh module holding fifty lines of
+interface would put the contract a file away from the class that
+answers it, and this package's modules are named for
+responsibilities rather than for kinds of declaration. `registry.py`
+goes 496 to 526.
+
+**Found while ticking: the plan's milestone list had a broken item.**
+M3's tick left the first four lines of its own unticked entry above the
+new one, so the list carried a fifth item made of half of M3's
+description and the tail of M2's parenthetical. Removed here, since a
+milestone list a fresh session resumes from is exactly the thing that
+must not be read twice.
+
+**The fifth `_session` patch stays.** `test_server_event_pins.py:1838`
+patches `manager._session` the way the four ported sites did. Both the
+plan and this milestone's brief require the contract pin suites
+byte-unchanged, and a pin suite that moves with the code it pins is not
+a pin, so it is left exactly as it is and recorded here rather than
+found by a later grep.
+
+### The port table
+
+Every modified test line, with the reason. Line numbers are the ones
+at M3's tip (`d8ad2eb`).
+
+| File | Line | Was | Is | Why |
+| --- | --- | --- | --- | --- |
+| `test_tools_mcp.py` | 11 | `import socket` | — | the socket probe went with the second failure's port |
+| `test_tools_mcp.py` | 47-54 | the support import | `+ command_arrives` | the three reconnect ports |
+| `test_tools_mcp.py` | 114-121 | `_config` written twice around a start | an entry naming an empty path, then `command_arrives` | the world moves rather than the manager's configuration; a docstring says so |
+| `test_tools_mcp.py` | 257 | `monkeypatch.setattr(manager._session, …)` | `manager.session` | the seam |
+| `test_tools_mcp.py` | 277-296 | a nonexistent command, then an HTTP URL on a free port assigned to `_config` | one path: absent, then present and not executable | two failures of different kinds under the entry the manager was built with |
+| `test_tools_mcp.py` | 305-313 | `_config` written twice | the same path port | as above |
+| `test_tools_mcp.py` | 1170, 1223 | `manager._session` patched | `manager.session` | the seam |
+| `test_tools_mcp.py` | 1284 | `servers._managers["home"].tools()` | `servers.manager_of("home").tools()` | the seam |
+| `test_tools_mcp_prompts.py` | 206 | `manager._session` patched | `manager.session` | the seam |
+| `test_tools_mcp_reload.py` | 28 | `import samtal_server.tools.mcp as mcp_module` | — | its only use was `_abandoned` |
+| `test_tools_mcp_reload.py` | 88-96 | the `manager_of(servers, entry)` helper | `managers_in(servers)`, over `manager_of` | the helper's own rationale moves to the registry method; the new one answers the mapping `unchanged_by` compares |
+| `test_tools_mcp_reload.py` | 24 sites | `manager_of(servers, "x")` | `servers.manager_of("x")` | the seam |
+| `test_tools_mcp_reload.py` | 390, 397 | `dict(servers._managers)` and its comparison | `managers_in(servers)`, plus `len(servers) == len(kept)` | equal per entry and stronger by the count, which is the one way the mapping could agree while the set had moved |
+| `test_tools_mcp_reload.py` | 528-549 | `"extra"` at `/nonexistent/mcp`, revived by assigning `_config` | `"extra"` at an empty path, revived by `command_arrives` | the box comes back rather than the entry being rewritten |
+| `test_tools_mcp_reload.py` | 690-711 | `class StubbornManager(McpServerManager)` | `stubbornly_unwinding(holding_s)` | the deviation above |
+| `test_tools_mcp_reload.py` | 725-744 | `task = manager._task`, `task in _abandoned` | `(left,) = manager_module.abandoned` | one private reach fewer and one assertion more |
+| `test_tools_mcp_reload.py` | 759 | `while servers._reloading:` | `while servers.reloading:` | the seam |
+| `test_tools_mcp_reload.py` | 762-770 | `class SlowStopManager(McpServerManager)` | a stand-in answering `McpManager` | the protocol seam |
+| `test_tools_mcp_reload.py` | 778, 1004 | `SlowStopManager("tools", stdio_entry())` | `SlowStopManager()` | it has no entry to be built from |
+| `test_tools_mcp_reload.py` | 799 | `going._task is None or going._task.done()` | `going.stops == [STOP_TIMEOUT_S]` and `going.finished` | what the reload asked, and that it ran to its end behind the shield |
+| `test_agent_guidance.py` | 466 | `app.state.mcp_servers._managers[ENTRY]` | `.manager_of(ENTRY)` | the seam |
+| `tests/support/tools_mcp.py` | — | — | `+ command_arrives` | the three reconnect ports and the reload's |
+
+`test_tools_mcp_http.py`, the reflection sentinels, the reload
+integration proof, both contract pin suites and the conformance suite
+are byte-unchanged.
+
+### The acceptance criterion, as a grep
+
+The issue asks that tests reach managers and reload through public
+seams and that the `StubbornManager`-style private subclassing is gone.
+From `samtal-server/`:
+
+```
+grep -rn "_managers\b\|_abandoned\|\._session\|\._reloading\|\._task\b\|\._config\b\|\._became\|\._settled\|\._stop\b\|\._run\b\|(McpServerManager)" tests/
+```
+
+Seven lines answer, and none of them is a reach:
+
+- `test_tools_device.py:125` and `test_session_limits.py:253`, test
+  names with the word `abandoned` in them, about other subsystems;
+- `test_tools_mcp_reload.py:618`, a test name with `managers` in it;
+- `test_event_schema_conformance.py:1411`, `:1414`, `:1417`, the
+  sidecar's value-source keys, which name `McpServerManager._run` as
+  the function three emit sites are in: strings about where the code
+  is, not calls into it;
+- `test_server_event_pins.py:1838`, the fifth `_session` patch, left
+  byte-unchanged on purpose (above).
+
+### Verification
+
+From `samtal-server/`, `uv` throughout, `PYTHONDONTWRITEBYTECODE=1`
+outside pytest.
+
+- `uv run ruff check .`: **All checks passed!**
+- `uv run pytest tests/unit -q`: **2947 passed, 16 skipped in
+  306.82s**, 2963 collected, against 2963 before the milestone. A port
+  rewrites lines inside a test that already exists, and this milestone
+  wrote no new one. (The before figure is measured at `d8ad2eb`; M3's
+  section records 2961, which is M2's count from before M2's own
+  review round added two tests. The lane moved under neither M3 nor
+  M4.)
+- `uv run pytest tests/integration -q`: **55 passed in 159.31s**,
+  unchanged in count.
+- `uv run samtal-server config openapi` and
+  `uv run samtal-server events reference` both diff clean against
+  `docs/reference/api-openapi.json` and `docs/reference/events.md`.
+- `git diff --stat` over `test_server_event_pins.py`,
+  `test_event_surface_pins.py`, `test_event_schema_conformance.py`,
+  `test_mcp_status_reflection.py` and
+  `tests/integration/test_mcp_reload.py`: empty across the milestone.
+- The abandonment regression check above: with `abandoned.add(task)`
+  removed from `_abandon`, the stop-bound test fails at the unpacking,
+  and the file was restored and `touch`ed afterwards.

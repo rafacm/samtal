@@ -9,6 +9,27 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The MCP subsystem answers for itself** (#140, M4, which closes the
+  issue). The last of the four milestones is about what the tests are
+  allowed to know: a registry says which manager an entry has and
+  whether a reload is between its two phases, a manager says which
+  session it is calling over, the tasks a stop gave up waiting for
+  have a name rather than a hiding place, and `McpManager` states what
+  a registry needs of one server, so a suite can stand something in
+  for one instead of inheriting from the real thing and reaching
+  inside it. Four tests that used to rewrite a running server's
+  configuration to make it look like a box coming back now let the box
+  come back. Nothing an operator sees changed, which is the point of
+  the milestone as it was of the three before it.
+
+  With it #140 is done. A 2,338-line file is a package of six modules
+  with a stated responsibility each, under the module name it always
+  had, so every retained record still reads the same (M1); the status
+  and reload surface the API sends is built where the knowledge is,
+  with the document byte-identical (M2); the three places a tool can
+  come from answer one interface, and the runtime loops over them
+  instead of knowing each by heart (M3).
+
 - **One interface under the three tool sources** (#140, M3). The
   conversation runtime knew each of the three places a tool comes from
   by heart: the builtins it built itself, the device's list it scanned
