@@ -9,6 +9,20 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **A shutdown waits for the drain it started** (#142, M4). The task
+  that lets conversations finish their sentence was created and
+  forgotten: nothing held a reference to it, so the event loop was free
+  to collect it mid-drain, and anything it raised was reported by the
+  garbage collector instead of by the shutdown that started it. The
+  server now owns that task and does not finish serving until the task
+  has finished, or until its bound expires (the drain budget plus the
+  margin the registry holds back for the closes), in which case the
+  drain is abandoned with a warning rather than allowed to hold the
+  process up. What an operator sees on a redeploy is unchanged: the
+  first signal drains, a second one still forces the exit on the spot,
+  and a signal arriving before there is anything to drain still passes
+  straight through.
+
 - **The configuration API is served over one database engine, not one
   per request** (#142, M3). Every call to `/api` opened the
   configuration database, ran an Alembic up-to-dateness check inside
