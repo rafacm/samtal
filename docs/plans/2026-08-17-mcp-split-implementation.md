@@ -966,3 +966,13 @@ outside pytest.
 - The abandonment regression check above: with `abandoned.add(task)`
   removed from `_abandon`, the stop-bound test fails at the unpacking,
   and the file was restored and `touch`ed afterwards.
+
+### The PR review round (M4)
+
+External review of PR #181 (diff main...5e051f5) by codex 0.147.0
+(model gpt-5.6-sol), 2026-08-18. One finding: the protocol-backed
+constructor took a dict, which is invariant, rejecting both the
+production call and pre-typed protocol dictionaries. Fixed by
+taking and holding a Mapping, never copied, which the reload's
+whole-mapping rebind and every read site already fit. Verdict as
+posted: mergeable after the listed fix.
