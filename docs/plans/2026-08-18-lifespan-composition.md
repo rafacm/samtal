@@ -289,6 +289,15 @@ per-request open. `BEGIN IMMEDIATE` is per transaction
 contention behavior is unchanged; the busy-refusal mapping stays
 at the same decision sites.
 
+The fresh-deployment note: the open MUST be `open_database`, not
+a bare `write_engine`, because the API-first path builds
+`create_app(Config(...))` over a directory nothing has migrated
+(the integration conftest does exactly this, and today the first
+request's per-request open creates the schema). `upgrade_to_head`
+is idempotent and cheap when current, so production pays one
+no-op check after boot's own migration; nothing may assume
+`load_boot_config` ran.
+
 The documented property, re-examined as the issue requires:
 reason (a) (boot's "nothing after boot reads the database") was
 already retired by #86/#101 themselves, which is why the section
@@ -567,6 +576,10 @@ P1/P2 amendments". All eleven adopted.
    the first request's `open_database` to create the schema. The
    lifespan-owned open must run migrations once at startup; the
    plan cannot assume `load_boot_config` ran.
+
+   *Resolution*: the engine section's fresh-deployment note now
+   mandates `open_database` (migrate once at startup, idempotent)
+   for both ownership paths and forbids assuming boot ran.
 
 6. **P2: the teardown proof misses partial-startup leaks.**
    Cleanup must be registered per acquisition (exit-stack
