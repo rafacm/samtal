@@ -4,22 +4,25 @@ import pytest
 
 from samtal_server.app import create_app
 from samtal_server.config import Config
+from tests.support.apps import entered_app
 
 
 def test_given_config_is_the_one_the_app_serves() -> None:
     config = Config(server={"port": 9999})
-    app = create_app(config)
-    assert app.state.composition.config is config
+    with entered_app(config) as (app, _):
+        assert app.state.composition.config is config
 
 
 def test_app_without_a_config_loads_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Both halves: the file half from the environment, and the domain
-    half from the database it names."""
+    half from the database it names. Read in the describe phase, since a
+    configuration that will not load is a refusal whatever launched the
+    app, and carried to the build on the seed."""
     monkeypatch.setenv("SAMTAL_SERVER__DATABASE__DIR", str(tmp_path / "db"))
-    app = create_app()
-    assert isinstance(app.state.composition.config, Config)
+    with entered_app() as (app, _):
+        assert isinstance(app.state.composition.config, Config)
 
 
 @pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])

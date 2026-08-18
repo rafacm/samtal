@@ -9,16 +9,18 @@ here is what a request meets.
 import json
 import logging
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
 from samtal_server import logs
-from samtal_server.app import create_app
 from samtal_server.config import Config
 from samtal_server.onboarding import KEY_LENGTH, derive_key, onboarding_key
 from samtal_server.ota import OTA_PATH
+from tests.support.apps import entered_client
 from tests.support.checkin import SYSTEM_INFO
 from tests.support.configs import DEVICE_MAC, DEVICE_UUID
 
@@ -38,8 +40,10 @@ def _fixed_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(AUTH_SECRET_ENV, SECRET)
 
 
-def client_for(config: Config | None = None) -> TestClient:
-    return TestClient(create_app(config if config is not None else Config()))
+@contextmanager
+def client_for(config: Config | None = None) -> Iterator[TestClient]:
+    with entered_client(config if config is not None else Config()) as client:
+        yield client
 
 
 def _stable(response: Any) -> dict:
@@ -83,67 +87,67 @@ def test_a_pinned_key_replaces_the_derivation() -> None:
     config = Config(server={"onboarding": {"key": "AB2C4D5E"}})
     assert onboarding_key(config.server) == "AB2C4D5E"
 
-    client = client_for(config)
-    assert client.post("/x/AB2C4D5E/", json=SYSTEM_INFO, headers=HEADERS).status_code == 200
-    assert client.post(f"/x/{KEY}/", json=SYSTEM_INFO, headers=HEADERS).status_code == 404
+    with client_for(config) as client:
+        assert client.post("/x/AB2C4D5E/", json=SYSTEM_INFO, headers=HEADERS).status_code == 200
+        assert client.post(f"/x/{KEY}/", json=SYSTEM_INFO, headers=HEADERS).status_code == 404
 
 
 def test_auth_turned_off_leaves_no_secret_and_mounts_the_route_keyless() -> None:
     config = Config(server={"auth": {"enabled": False}})
     assert onboarding_key(config.server) is None
 
-    client = client_for(config)
-    assert client.post("/x/", json=SYSTEM_INFO, headers=HEADERS).status_code == 200
-    # And nothing is served under a key, since there is no key.
-    assert client.post(f"/x/{KEY}/", json=SYSTEM_INFO, headers=HEADERS).status_code == 404
+    with client_for(config) as client:
+        assert client.post("/x/", json=SYSTEM_INFO, headers=HEADERS).status_code == 200
+        # And nothing is served under a key, since there is no key.
+        assert client.post(f"/x/{KEY}/", json=SYSTEM_INFO, headers=HEADERS).status_code == 404
 
 
 def test_both_paths_are_mounted_by_default() -> None:
-    client = client_for()
-    assert client.post(f"/x/{KEY}/", json=SYSTEM_INFO, headers=HEADERS).status_code == 200
-    assert client.post(OTA_PATH, json=SYSTEM_INFO, headers=HEADERS).status_code == 200
+    with client_for() as client:
+        assert client.post(f"/x/{KEY}/", json=SYSTEM_INFO, headers=HEADERS).status_code == 200
+        assert client.post(OTA_PATH, json=SYSTEM_INFO, headers=HEADERS).status_code == 200
 
 
 def test_a_null_ota_path_leaves_only_the_short_route() -> None:
-    client = client_for(Config(server={"ota_path": None}))
-    assert client.post(f"/x/{KEY}/", json=SYSTEM_INFO, headers=HEADERS).status_code == 200
-    assert client.post(OTA_PATH, json=SYSTEM_INFO, headers=HEADERS).status_code == 404
-    assert client.get(OTA_PATH).status_code == 404
+    with client_for(Config(server={"ota_path": None})) as client:
+        assert client.post(f"/x/{KEY}/", json=SYSTEM_INFO, headers=HEADERS).status_code == 200
+        assert client.post(OTA_PATH, json=SYSTEM_INFO, headers=HEADERS).status_code == 404
+        assert client.get(OTA_PATH).status_code == 404
 
 
 def test_onboarding_turned_off_mounts_no_short_route() -> None:
-    client = client_for(Config(server={"onboarding": {"enabled": False}}))
-    assert client.post(f"/x/{KEY}/", json=SYSTEM_INFO, headers=HEADERS).status_code == 404
-    assert client.get(f"/x/{KEY}/").status_code == 404
-    assert client.post("/x/", json=SYSTEM_INFO, headers=HEADERS).status_code == 404
-    # The legacy path is untouched, which is the whole of what this
-    # deployment asked for.
-    assert client.post(OTA_PATH, json=SYSTEM_INFO, headers=HEADERS).status_code == 200
+    with client_for(Config(server={"onboarding": {"enabled": False}})) as client:
+        assert client.post(f"/x/{KEY}/", json=SYSTEM_INFO, headers=HEADERS).status_code == 404
+        assert client.get(f"/x/{KEY}/").status_code == 404
+        assert client.post("/x/", json=SYSTEM_INFO, headers=HEADERS).status_code == 404
+        # The legacy path is untouched, which is the whole of what this
+        # deployment asked for.
+        assert client.post(OTA_PATH, json=SYSTEM_INFO, headers=HEADERS).status_code == 200
 
 
 def test_the_key_matches_however_a_phone_keyboard_types_it() -> None:
-    client = client_for()
-    for typed in (KEY, KEY.lower(), "2eOwIw3N"):
-        response = client.post(f"/x/{typed}/", json=SYSTEM_INFO, headers=HEADERS)
-        assert response.status_code == 200, typed
+    with client_for() as client:
+        for typed in (KEY, KEY.lower(), "2eOwIw3N"):
+            response = client.post(f"/x/{typed}/", json=SYSTEM_INFO, headers=HEADERS)
+            assert response.status_code == 200, typed
 
 
 def test_the_short_path_answers_exactly_what_the_legacy_path_answers() -> None:
-    client = client_for()
-    short = client.post(f"/x/{KEY}/", json=SYSTEM_INFO, headers=HEADERS)
-    legacy = client.post(OTA_PATH, json=SYSTEM_INFO, headers=HEADERS)
-    assert short.status_code == legacy.status_code == 200
-    assert _stable(short) == _stable(legacy)
-    assert short.headers["content-type"] == legacy.headers["content-type"]
+    with client_for() as client:
+        short = client.post(f"/x/{KEY}/", json=SYSTEM_INFO, headers=HEADERS)
+        legacy = client.post(OTA_PATH, json=SYSTEM_INFO, headers=HEADERS)
+        assert short.status_code == legacy.status_code == 200
+        assert _stable(short) == _stable(legacy)
+        assert short.headers["content-type"] == legacy.headers["content-type"]
 
 
 def test_a_wrong_key_is_answered_exactly_as_a_path_that_never_existed() -> None:
-    client = client_for()
-    missed = client.post("/x/AAAAAAAA/", json=SYSTEM_INFO, headers=HEADERS)
-    unserved = client.post("/no/such/route/", json=SYSTEM_INFO, headers=HEADERS)
-    assert missed.status_code == unserved.status_code == 404
-    assert missed.content == unserved.content
-    assert missed.headers["content-type"] == unserved.headers["content-type"]
+    with client_for() as client:
+        missed = client.post("/x/AAAAAAAA/", json=SYSTEM_INFO, headers=HEADERS)
+        unserved = client.post("/no/such/route/", json=SYSTEM_INFO, headers=HEADERS)
+        assert missed.status_code == unserved.status_code == 404
+        assert missed.content == unserved.content
+        assert missed.headers["content-type"] == unserved.headers["content-type"]
 
 
 def test_a_wrong_key_says_nothing_about_the_right_one(
@@ -154,27 +158,27 @@ def test_a_wrong_key_says_nothing_about_the_right_one(
     #153 review ended that, because repeating the correct key turned
     every probe of this path into a request for it and a near miss is a
     hint at the real one. What is left is the shape of what arrived."""
-    client = client_for()
-    with caplog.at_level(logging.WARNING):
-        response = client.post("/x/2EOWIW3M/", json=SYSTEM_INFO, headers=HEADERS)
-        described = client.get("/x/2EOWIW3M/")
+    with client_for() as client:
+        with caplog.at_level(logging.WARNING):
+            response = client.post("/x/2EOWIW3M/", json=SYSTEM_INFO, headers=HEADERS)
+            described = client.get("/x/2EOWIW3M/")
 
-    ours = [r for r in caplog.records if r.name.startswith("samtal_server")]
-    text, objects = _rendered(ours)
-    assert "2EOWIW3M" not in text
-    assert KEY not in text
-    assert all("2EOWIW3M" not in json.dumps(payload) for payload in objects)
-    assert all(KEY not in json.dumps(payload) for payload in objects)
-    assert any(payload["event"] == "onboarding_key_mismatch" for payload in objects)
-    # And what is left is what a reader can act on.
-    assert objects[0]["attempted_length"] == len(KEY)
+        ours = [r for r in caplog.records if r.name.startswith("samtal_server")]
+        text, objects = _rendered(ours)
+        assert "2EOWIW3M" not in text
+        assert KEY not in text
+        assert all("2EOWIW3M" not in json.dumps(payload) for payload in objects)
+        assert all(KEY not in json.dumps(payload) for payload in objects)
+        assert any(payload["event"] == "onboarding_key_mismatch" for payload in objects)
+        # And what is left is what a reader can act on.
+        assert objects[0]["attempted_length"] == len(KEY)
 
-    # The response says none of it either, at any status, on either
-    # method, as it always did.
-    for answered in (response, described):
-        assert answered.status_code == 404
-        assert KEY not in answered.text
-        assert KEY not in str(answered.headers)
+        # The response says none of it either, at any status, on either
+        # method, as it always did.
+        for answered in (response, described):
+            assert answered.status_code == 404
+            assert KEY not in answered.text
+            assert KEY not in str(answered.headers)
 
 
 def _rendered(records: list[logging.LogRecord]) -> tuple[str, list[dict]]:
@@ -197,7 +201,8 @@ def test_an_over_typed_key_is_still_the_typo_kind_of_miss(
     decides what is quoted, since nothing is; it decides which of the
     two events this is, which is the whole of the classification now."""
     with caplog.at_level(logging.WARNING):
-        client_for().get(f"/x/{KEY}X/")
+        with client_for() as client:
+            client.get(f"/x/{KEY}X/")
     ours = [r for r in caplog.records if r.name.startswith("samtal_server")]
     text, objects = _rendered(ours)
     assert f"{KEY}X" not in text
@@ -227,7 +232,8 @@ def test_an_unshaped_key_is_counted_rather_than_repeated(
     segment: str, caplog: pytest.LogCaptureFixture
 ) -> None:
     with caplog.at_level(logging.WARNING):
-        response = client_for().get(f"/x/{segment}/")
+        with client_for() as client:
+            response = client.get(f"/x/{segment}/")
     assert response.status_code == 404
 
     text, objects = _rendered(caplog.records)
@@ -249,7 +255,8 @@ def test_the_correct_key_is_not_broadcast_at_unshaped_probes(
     asserted separately for the scan: this is the shape an attacker
     chooses, and the one a regression would reach for first."""
     with caplog.at_level(logging.WARNING):
-        client_for().get("/x/" + "A" * 500 + "/")
+        with client_for() as client:
+            client.get("/x/" + "A" * 500 + "/")
     text, objects = _rendered(caplog.records)
     assert KEY not in text
     assert all(KEY not in json.dumps(payload) for payload in objects)
@@ -264,23 +271,23 @@ def test_a_wrong_key_without_the_slash_is_answered_the_same_way(method: str) -> 
     from a path that was never served. The router registers that
     spelling itself, behind the same guard, so a miss is a miss on
     either one."""
-    client = client_for()
-    # The device's POST carries a body; a person checking the URL by
-    # hand sends a GET with none. Both must miss the same way.
-    body = {"json": SYSTEM_INFO} if method == "post" else {}
+    with client_for() as client:
+        # The device's POST carries a body; a person checking the URL by
+        # hand sends a GET with none. Both must miss the same way.
+        body = {"json": SYSTEM_INFO} if method == "post" else {}
 
-    missed = getattr(client, method)(
-        "/x/AAAAAAAA", headers=HEADERS, follow_redirects=False, **body
-    )
-    unserved = getattr(client, method)(
-        "/no/such/route", headers=HEADERS, follow_redirects=False, **body
-    )
+        missed = getattr(client, method)(
+            "/x/AAAAAAAA", headers=HEADERS, follow_redirects=False, **body
+        )
+        unserved = getattr(client, method)(
+            "/no/such/route", headers=HEADERS, follow_redirects=False, **body
+        )
 
-    assert missed.status_code == unserved.status_code == 404
-    assert missed.content == unserved.content
-    assert missed.headers["content-type"] == unserved.headers["content-type"]
-    assert "location" not in missed.headers
-    assert "AAAAAAAA" not in str(missed.headers)
+        assert missed.status_code == unserved.status_code == 404
+        assert missed.content == unserved.content
+        assert missed.headers["content-type"] == unserved.headers["content-type"]
+        assert "location" not in missed.headers
+        assert "AAAAAAAA" not in str(missed.headers)
 
 
 def test_the_short_path_serves_both_spellings_itself() -> None:
@@ -291,42 +298,41 @@ def test_the_short_path_serves_both_spellings_itself() -> None:
     redirected, and this asserts it with redirects disabled, which is
     what the device does.
     """
-    client = client_for()
+    with client_for() as client:
 
-    answered = client.post(
-        f"/x/{KEY}", json=SYSTEM_INFO, headers=HEADERS, follow_redirects=False
-    )
-    assert answered.status_code == 200
-    assert "location" not in answered.headers
-    # The version the system info carried, so the body reached the
-    # handler rather than being lost on the way to another URL.
-    assert answered.json()["firmware"]["version"] == "2.4.0"
+        answered = client.post(
+            f"/x/{KEY}", json=SYSTEM_INFO, headers=HEADERS, follow_redirects=False
+        )
+        assert answered.status_code == 200
+        assert "location" not in answered.headers
+        # The version the system info carried, so the body reached the
+        # handler rather than being lost on the way to another URL.
+        assert answered.json()["firmware"]["version"] == "2.4.0"
 
-    slashed = client.post(
-        f"/x/{KEY}/", json=SYSTEM_INFO, headers=HEADERS, follow_redirects=False
-    )
-    assert _stable(answered) == _stable(slashed)
+        slashed = client.post(
+            f"/x/{KEY}/", json=SYSTEM_INFO, headers=HEADERS, follow_redirects=False
+        )
+        assert _stable(answered) == _stable(slashed)
 
-    described = client.get(f"/x/{KEY}", headers=HEADERS, follow_redirects=False)
-    assert described.status_code == 200
-    assert "location" not in described.headers
+        described = client.get(f"/x/{KEY}", headers=HEADERS, follow_redirects=False)
+        assert described.status_code == 200
+        assert "location" not in described.headers
 
 
 def test_a_query_on_the_slashless_spelling_still_reaches_the_handler() -> None:
     """A portal that appends something of its own must not turn the URL
     into a miss."""
-    answered = client_for().get(
-        f"/x/{KEY}?probe=1", headers=HEADERS, follow_redirects=False
-    )
+    with client_for() as client:
+        answered = client.get(f"/x/{KEY}?probe=1", headers=HEADERS, follow_redirects=False)
     assert answered.status_code == 200
 
 
 def test_the_keyless_route_serves_both_spellings_too() -> None:
     """Auth off is the trial network, where the portal behaves exactly
     as it does everywhere else."""
-    client = client_for(Config(server={"auth": {"enabled": False}}))
-    for path in ("/x/", "/x"):
-        answered = client.post(
-            path, json=SYSTEM_INFO, headers=HEADERS, follow_redirects=False
-        )
-        assert answered.status_code == 200, path
+    with client_for(Config(server={"auth": {"enabled": False}})) as client:
+        for path in ("/x/", "/x"):
+            answered = client.post(
+                path, json=SYSTEM_INFO, headers=HEADERS, follow_redirects=False
+            )
+            assert answered.status_code == 200, path

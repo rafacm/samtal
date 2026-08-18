@@ -83,6 +83,7 @@ from samtal_server.providers import build_agent_providers
 from samtal_server.providers.openai_asr import OpenAiAsr
 from samtal_server.tools.mcp import McpServers
 from samtal_server.tools.memory import MemoryStore
+from tests.support.apps import entered_client
 from tests.support.checkin import (
     MOCK_AGENT,
     MOCK_PROVIDERS,
@@ -323,9 +324,7 @@ RESOLVED = DEVICE_MAC.lower()
 
 
 def test_ota_check_offering_an_activation_code(caplog: pytest.LogCaptureFixture) -> None:
-    client = activation_client()
-
-    with caplog.at_level("WARNING"):
+    with activation_client() as client, caplog.at_level("WARNING"):
         code = check_in(client)["activation"]["code"]
 
     assert pinned(
@@ -367,9 +366,8 @@ def test_ota_check_naming_an_agent_this_server_never_loaded(
 ) -> None:
     config = unbound_config()
     config.devices[NORMALIZED] = ["written-since-boot"]
-    client = TestClient(create_app(config))
 
-    with caplog.at_level("WARNING"):
+    with entered_client(config) as client, caplog.at_level("WARNING"):
         check_in(client)
 
     assert pinned(only(caplog, "ota_check")) == {
@@ -402,9 +400,9 @@ def test_ota_check_naming_an_agent_this_server_never_loaded(
 
 
 def test_ota_check_with_no_agent_at_all(caplog: pytest.LogCaptureFixture) -> None:
-    client = ota_client(Config(server={"onboarding": {"enabled": False}}))
+    config = Config(server={"onboarding": {"enabled": False}})
 
-    with caplog.at_level("WARNING"):
+    with ota_client(config) as client, caplog.at_level("WARNING"):
         post_system_info(client)
 
     assert pinned(only(caplog, "ota_check")) == {
@@ -435,8 +433,8 @@ def test_ota_check_resolving_to_an_agent(caplog: pytest.LogCaptureFixture) -> No
         providers=MOCK_PROVIDERS, agents={"assistant": MOCK_AGENT}, default_agent="assistant"
     )
 
-    with caplog.at_level("INFO"):
-        post_system_info(ota_client(config))
+    with ota_client(config) as client, caplog.at_level("INFO"):
+        post_system_info(client)
 
     assert pinned(only(caplog, "ota_check")) == {
         "logger": "samtal_server.ota",
@@ -507,9 +505,7 @@ def test_activation_not_offered_because_the_mint_budget_is_spent(
     through the endpoint: what is under test is the line, not the
     counter, which test_onboarding_activation.py drives for real."""
     monkeypatch.setattr("samtal_server.onboarding.MINT_BUDGET", 0)
-    client = activation_client()
-
-    with caplog.at_level("WARNING"):
+    with activation_client() as client, caplog.at_level("WARNING"):
         check_in(client)
 
     assert pinned(only(caplog, "activation_not_offered")) == {
@@ -536,9 +532,7 @@ def test_activation_not_offered_because_the_mint_budget_is_spent(
 
 
 def test_activation_complete(caplog: pytest.LogCaptureFixture) -> None:
-    client = activation_client()
-
-    with caplog.at_level("INFO"):
+    with activation_client() as client, caplog.at_level("INFO"):
         assert activate(client, mac=BOUND_MAC).status_code == 200
 
     assert pinned(only(caplog, "activation_complete")) == {
@@ -561,11 +555,11 @@ def test_activation_complete(caplog: pytest.LogCaptureFixture) -> None:
 def test_activation_pending(caplog: pytest.LogCaptureFixture) -> None:
     """The one server event below INFO besides the bindings snapshot
     line, so its level is what a migration is most likely to move."""
-    client = activation_client()
-    code = check_in(client)["activation"]["code"]
+    with activation_client() as client:
+        code = check_in(client)["activation"]["code"]
 
-    with caplog.at_level("DEBUG"):
-        assert activate(client).status_code == 202
+        with caplog.at_level("DEBUG"):
+            assert activate(client).status_code == 202
 
     assert pinned(only(caplog, "activation_pending"), dynamic=("code",)) == {
         "logger": "samtal_server.ota",
@@ -584,15 +578,15 @@ def test_activation_pending(caplog: pytest.LogCaptureFixture) -> None:
 
 
 def test_activation_refused_by_an_unreadable_body(caplog: pytest.LogCaptureFixture) -> None:
-    client = activation_client()
-    check_in(client)
+    with activation_client() as client:
+        check_in(client)
 
-    with caplog.at_level("WARNING"):
-        client.post(
-            f"{OTA_PATH}{ACTIVATE_SEGMENT}",
-            content=b"not json at all",
-            headers={"Device-Id": DEVICE_MAC, "Activation-Version": "2"},
-        )
+        with caplog.at_level("WARNING"):
+            client.post(
+                f"{OTA_PATH}{ACTIVATE_SEGMENT}",
+                content=b"not json at all",
+                headers={"Device-Id": DEVICE_MAC, "Activation-Version": "2"},
+            )
 
     assert pinned(only(caplog, "activation_refused"), dynamic=("code",)) == {
         "logger": "samtal_server.ota",
@@ -616,15 +610,15 @@ def test_activation_refused_by_an_unreadable_body(caplog: pytest.LogCaptureFixtu
 
 
 def test_activation_refused_by_an_unknown_algorithm(caplog: pytest.LogCaptureFixture) -> None:
-    client = activation_client()
-    challenge = check_in(client)["activation"]["challenge"]
+    with activation_client() as client:
+        challenge = check_in(client)["activation"]["challenge"]
 
-    with caplog.at_level("WARNING"):
-        activate(
-            client,
-            body={"algorithm": "rot13", "challenge": challenge, "hmac": "00"},
-            version="2",
-        )
+        with caplog.at_level("WARNING"):
+            activate(
+                client,
+                body={"algorithm": "rot13", "challenge": challenge, "hmac": "00"},
+                version="2",
+            )
 
     assert pinned(only(caplog, "activation_refused"), dynamic=("code",)) == {
         "logger": "samtal_server.ota",
@@ -650,15 +644,19 @@ def test_activation_refused_by_an_unknown_algorithm(caplog: pytest.LogCaptureFix
 
 
 def test_activation_refused_by_a_challenge_mismatch(caplog: pytest.LogCaptureFixture) -> None:
-    client = activation_client()
-    check_in(client)
+    with activation_client() as client:
+        check_in(client)
 
-    with caplog.at_level("WARNING"):
-        activate(
-            client,
-            body={"algorithm": "hmac-sha256", "challenge": "11:22:33:44:55:66", "hmac": "00"},
-            version="2",
-        )
+        with caplog.at_level("WARNING"):
+            activate(
+                client,
+                body={
+                    "algorithm": "hmac-sha256",
+                    "challenge": "11:22:33:44:55:66",
+                    "hmac": "00",
+                },
+                version="2",
+            )
 
     assert pinned(only(caplog, "activation_refused"), dynamic=("code",)) == {
         "logger": "samtal_server.ota",
@@ -682,8 +680,8 @@ def test_activation_refused_by_a_challenge_mismatch(caplog: pytest.LogCaptureFix
 
 
 def test_ota_request_rejected(caplog: pytest.LogCaptureFixture) -> None:
-    with caplog.at_level("WARNING"):
-        assert post_system_info(ota_client(), device_id=None).status_code == 400
+    with ota_client() as client, caplog.at_level("WARNING"):
+        assert post_system_info(client, device_id=None).status_code == 400
 
     assert pinned(only(caplog, "ota_request_rejected")) == {
         "logger": "samtal_server.ota",
@@ -822,9 +820,7 @@ def test_onboarding_key_mismatch(caplog: pytest.LogCaptureFixture) -> None:
     Since the PR #153 review neither key is repeated, only the shape of
     what arrived, so the event's name is what says which kind of miss
     this was."""
-    client = TestClient(create_app(banner_config()))
-
-    with caplog.at_level("WARNING"):
+    with entered_client(banner_config()) as client, caplog.at_level("WARNING"):
         assert client.get(f"/x/{PINNED_KEY[:-1]}X/").status_code == 404
 
     assert pinned(only(caplog, "onboarding_key_mismatch")) == {
@@ -877,9 +873,7 @@ def test_onboarding_key_unshaped(caplog: pytest.LogCaptureFixture) -> None:
     """An attempt nothing a person types could have produced: counted
     rather than quoted, which is what keeps a chosen string out of the
     log entirely."""
-    client = TestClient(create_app(banner_config()))
-
-    with caplog.at_level("WARNING"):
+    with entered_client(banner_config()) as client, caplog.at_level("WARNING"):
         assert client.get(f"/x/{'A' * 500}/").status_code == 404
 
     assert pinned(only(caplog, "onboarding_key_unshaped")) == {
@@ -1183,8 +1177,10 @@ CAPTURE_DIR = "/var/lib/samtal/captures"
 def test_capture_enabled(caplog: pytest.LogCaptureFixture) -> None:
     config = config_with_agent(server={"capture": {"enabled": True, "dir": CAPTURE_DIR}})
 
-    with caplog.at_level("INFO"):
-        create_app(config)
+    # Said by the build, which is the lifespan's (#142): the store this
+    # warns about is one of the things it builds.
+    with caplog.at_level("INFO"), entered_client(config):
+        pass
 
     assert pinned(only(caplog, "capture_enabled")) == {
         "logger": "samtal_server.app",
@@ -1205,8 +1201,8 @@ def test_capture_enabled(caplog: pytest.LogCaptureFixture) -> None:
 def test_capture_disabled(caplog: pytest.LogCaptureFixture) -> None:
     config = config_with_agent(server={"capture": {"enabled": False, "dir": CAPTURE_DIR}})
 
-    with caplog.at_level("INFO"):
-        create_app(config)
+    with caplog.at_level("INFO"), entered_client(config):
+        pass
 
     assert pinned(only(caplog, "capture_disabled")) == {
         "logger": "samtal_server.app",

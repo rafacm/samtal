@@ -20,7 +20,7 @@ from dotenv import find_dotenv, load_dotenv
 from fastapi import FastAPI
 
 from samtal_server import logs, onboarding
-from samtal_server.app import create_app
+from samtal_server.app import create_app, startup_failure
 from samtal_server.composition import Composition
 from samtal_server.config import Config, ConfigError
 from samtal_server.config.boot import load_boot_config
@@ -201,20 +201,33 @@ def main() -> None:
         # Pass the app object rather than an import string: the config just
         # read (from --config, which reaches nothing else) has to be the one
         # the app serves from.
-        app = create_app(config, booted.secrets)
-        # The URL to type into a device's captive portal, said out loud
-        # once the app is built and before it serves. Here rather than
-        # inside create_app, because an app built for a test lane or an
-        # external ASGI server has no operator reading its startup
-        # output, and inside this block rather than after it, so that a
-        # configuration problem reaching it is one printed sentence like
-        # every other, never a traceback.
-        onboarding.log_banner(config.server)
+        #
+        # The URL to type into a device's captive portal goes in as the
+        # started callback rather than being printed here: the app is
+        # described at this line and built inside `serve` below, and a
+        # line announcing where to point a device must not be printed by
+        # a server that then fails to start (#142). It stays the CLI's,
+        # because an app built for a test lane or an external ASGI server
+        # has no operator reading its startup output.
+        app = create_app(
+            config, booted.secrets, on_started=lambda: onboarding.log_banner(config.server)
+        )
     except (ConfigError, EventEnforcementError, ProviderError) as exc:
         print(exc, file=sys.stderr)
         raise SystemExit(1) from None
 
     serve(app, config)
+
+    # A startup that refused says so here rather than through a
+    # traceback. Construction is the lifespan's now, so a boot failure
+    # happens inside uvicorn: the lifespan records its sanitized sentence
+    # and raises `StartupFailed`, uvicorn stops, `serve` returns, and the
+    # sentence is printed and the exit code set exactly as they were when
+    # this failed in front of `serve`.
+    failure = startup_failure(app)
+    if failure is not None:
+        print(failure, file=sys.stderr)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

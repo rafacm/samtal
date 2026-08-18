@@ -91,20 +91,21 @@ def test_an_empty_start_is_configured_over_http_and_serves_after_a_restart(
     booted = load_boot_config()
     restarted = create_app(booted.config, booted.secrets)
 
-    composition = restarted.state.composition
-    assert composition.config.agents_for_device("aa:bb:cc:dd:ee:ff") == ["assistant"]
-    # And the pipeline resolves for that agent, which is what "serves the
-    # conversation configuration" means: every stage built at boot, which
-    # is also the check the first application could not have passed.
-    providers = composition.agent_providers["assistant"]
-    assert composition.config.prompt_for_agent("assistant") == "You are an assistant."
-    assert providers.llm is not None
-    assert providers.asr is not None
-    assert providers.tts is not None
-    assert providers.vad is not None
-
-    # It serves, too, through its own lifespan.
+    # Read through its own lifespan, which is what builds them (#142):
+    # the pipeline resolving for that agent is what "serves the
+    # conversation configuration" means, every stage built at boot, and
+    # it is also the check the first application could not have passed.
     with TestClient(restarted) as serving:
+        composition = restarted.state.composition
+        assert composition.config.agents_for_device("aa:bb:cc:dd:ee:ff") == ["assistant"]
+        providers = composition.agent_providers["assistant"]
+        assert composition.config.prompt_for_agent("assistant") == "You are an assistant."
+        assert providers.llm is not None
+        assert providers.asr is not None
+        assert providers.tts is not None
+        assert providers.vad is not None
+
+        # It serves, too.
         assert serving.get("/healthz").status_code == 200
         agents = serving.get(
             "/api/agents", headers={"Authorization": f"Bearer {_token()}"}

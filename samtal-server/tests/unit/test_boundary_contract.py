@@ -18,9 +18,10 @@ the wire is involved, so what the assertions see is the runtime alone.
 """
 
 import asyncio
+import contextlib
 import json
 import time
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Iterator, Sequence
 from typing import Any, cast
 
 import pytest
@@ -51,21 +52,32 @@ from tests.support.sessions import device_session
 from tests.support.wire import connect, send_pcm, shake_hands, speech_pcm
 
 
-def app_with_a_stub(built: list[StubRuntime], config: Config | None = None) -> Any:
-    """The app, with the composition root's factory swapped for one that
-    builds stubs. This is the whole of what plugging in a second runtime
-    takes."""
+@contextlib.contextmanager
+def client_with_a_stub(
+    built: list[StubRuntime], config: Config | None = None
+) -> Iterator[TestClient]:
+    """A served app, with the composition root's factory swapped for one
+    that builds stubs. This is the whole of what plugging in a second
+    runtime takes.
+
+    The swap happens inside the entered lifespan, because that is where
+    the composition now exists: construction is the lifespan's (#142),
+    and this is the one write to a built composition the codebase
+    sanctions. It lands before any connection, and the endpoint reads the
+    factory per connection, so what every socket below gets is the
+    stub."""
     app = create_app(config if config is not None else config_with_agent())
+    with TestClient(app) as client:
 
-    def factory(
-        output: DeviceOutput, events: SessionEvents, agents: Sequence[str]
-    ) -> SessionInput:
-        runtime = StubRuntime(output, events, agents)
-        built.append(runtime)
-        return cast(SessionInput, runtime)
+        def factory(
+            output: DeviceOutput, events: SessionEvents, agents: Sequence[str]
+        ) -> SessionInput:
+            runtime = StubRuntime(output, events, agents)
+            built.append(runtime)
+            return cast(SessionInput, runtime)
 
-    app.state.composition.runtime_factory = factory
-    return app
+        app.state.composition.runtime_factory = factory
+        yield client
 
 
 def test_a_stub_runtime_holds_a_turn_over_the_real_wire() -> None:
@@ -74,7 +86,7 @@ def test_a_stub_runtime_holds_a_turn_over_the_real_wire() -> None:
     produced by the edge, on the runtime's instruction."""
     built: list[StubRuntime] = []
     received: list[Any] = []
-    with TestClient(app_with_a_stub(built)) as client:
+    with client_with_a_stub(built) as client:
         with connect(client) as websocket:
             shake_hands(websocket)
             websocket.send_text(json.dumps({"type": "listen", "state": "start", "mode": "manual"}))
@@ -107,7 +119,7 @@ def test_the_factory_is_handed_the_device_it_speaks_for() -> None:
     session's observability with its identity already on it, and the
     agents this device is bound to. Nothing else."""
     built: list[StubRuntime] = []
-    with TestClient(app_with_a_stub(built)) as client:
+    with client_with_a_stub(built) as client:
         with connect(client) as websocket:
             hello = shake_hands(websocket)
 
@@ -129,7 +141,7 @@ def test_frames_that_arrive_before_a_listen_never_reach_the_runtime() -> None:
     """The mic guards stay on the edge, before the decode, because the
     frames they drop are the evidence a capture exists for."""
     built: list[StubRuntime] = []
-    with TestClient(app_with_a_stub(built)) as client:
+    with client_with_a_stub(built) as client:
         with connect(client) as websocket:
             shake_hands(websocket)
             send_pcm(websocket, speech_pcm(200), OpusEncoder())

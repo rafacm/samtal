@@ -1,8 +1,8 @@
 """What a boot does about the conversation store, and what it does not.
 
 Three states, and the difference between them is the whole of acceptance
-criterion 1. An enabled section opens and migrates `conversations.db` at
-`create_app` and starts the writer in the lifespan. A disabled or absent
+criterion 1. An enabled section opens and migrates `conversations.db` in
+the lifespan and starts the writer there too. A disabled or absent
 section starts nothing and creates nothing, and the proof that it also
 *changes* nothing is the rest of the unit lane passing unmodified beside
 this file. And a store that is already there is migrated either way,
@@ -21,6 +21,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import inspect, text
 
+import samtal_server.app as app_module
 from samtal_server.app import create_app
 from samtal_server.config import Config
 from samtal_server.conversations import store as store_module
@@ -109,18 +110,22 @@ def test_an_enabled_boot_says_it_is_recording(
     assert enabled.path == str(tmp_path / DATABASE_FILENAME)
 
 
-def test_the_file_is_open_before_the_lifespan_runs(tmp_path: Path) -> None:
-    """Built cold at create_app: the file is opened and migrated where a
-    boot failure is a boot failure, and only the thread waits for the
-    lifespan. An app that is never entered therefore also leaks no
-    thread, which is what makes `stop()` safe to call from anywhere."""
+def test_nothing_is_opened_before_the_lifespan_runs(tmp_path: Path) -> None:
+    """The store is the lifespan's, file and thread alike (#142): an app
+    that is described and never served opens nothing, so a test lane or
+    an import that builds one leaves no database behind and no thread
+    running. The file is opened and migrated inside the lifespan, which
+    is still boot, so a directory the server cannot write still fails the
+    boot rather than the first conversation."""
     app = create_app(recording_config(tmp_path))
 
-    assert (tmp_path / DATABASE_FILENAME).is_file()
-    store = app.state.composition.conversations
-    assert store is not None
-    assert store._thread is None
-    store.stop()
+    assert not (tmp_path / DATABASE_FILENAME).exists()
+
+    with TestClient(app):
+        store = app.state.composition.conversations
+        assert store is not None
+        assert (tmp_path / DATABASE_FILENAME).is_file()
+        assert store._thread is not None and store._thread.is_alive()
 
 
 @pytest.mark.parametrize(
@@ -197,16 +202,23 @@ def test_a_writer_that_cannot_start_leaves_stop_harmless(
     store.stop()
 
 
-def test_a_start_failure_in_the_lifespan_still_stops_the_store(tmp_path: Path) -> None:
-    """The start is inside the lifespan's guarded region, so the writer
-    that failed to start is stopped by the same `finally` that stops one
-    that did."""
-    app = create_app(recording_config(tmp_path))
-    built = app.state.composition.conversations
-    assert built is not None
+def test_a_start_failure_in_the_lifespan_still_stops_the_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The stop is registered on the lifespan's exit stack the moment the
+    store is constructed and before it is started, so the writer that
+    failed to start is released by the same unwinding that releases one
+    that did.
+
+    The store is replaced at its constructor rather than on the built
+    composition, because the composition only exists once the build that
+    would fail has already run (the plan review's finding 8)."""
 
     class Failing:
         stopped = False
+
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            return None
 
         def start(self) -> None:
             raise RuntimeError("the writer would not start")
@@ -214,13 +226,11 @@ def test_a_start_failure_in_the_lifespan_still_stops_the_store(tmp_path: Path) -
         def stop(self) -> None:
             Failing.stopped = True
 
-    app.state.composition.conversations = Failing()
-    try:
-        with pytest.raises(RuntimeError):
-            with TestClient(app):
-                pass
-    finally:
-        built.stop()
+    monkeypatch.setattr(app_module, "ConversationStore", Failing)
+
+    with pytest.raises(RuntimeError):
+        with TestClient(create_app(recording_config(tmp_path))):
+            pass
 
     assert Failing.stopped, "a start that failed was never stopped"
 
@@ -228,23 +238,34 @@ def test_a_start_failure_in_the_lifespan_still_stops_the_store(tmp_path: Path) -
 def test_a_startup_failure_after_the_writer_started_still_stops_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The writer starts first inside the lifespan's guarded region, so
+    """The writer is started first among the things a startup starts, so
     anything that fails after it (filler synthesis, the MCP connects)
     still reaches the stop rather than leaving a thread behind a boot
-    that never finished."""
-    import samtal_server.app as app_module
+    that never finished.
+
+    The store this asserts on is caught at its constructor, which is the
+    only way to hold a reference to one built inside a lifespan that
+    then refused."""
 
     async def refuse(*args: object, **kwargs: object) -> dict[str, Any]:
         raise RuntimeError("the fillers would not synthesize")
 
     monkeypatch.setattr(app_module, "build_agent_fillers", refuse)
-    app = create_app(recording_config(tmp_path))
-    store = app.state.composition.conversations
-    assert store is not None
+
+    built: list[ConversationStore] = []
+    real = app_module.ConversationStore
+
+    def recording(*args: object, **kwargs: object) -> ConversationStore:
+        store = real(*args, **kwargs)
+        built.append(store)
+        return store
+
+    monkeypatch.setattr(app_module, "ConversationStore", recording)
 
     with pytest.raises(RuntimeError):
-        with TestClient(app):
+        with TestClient(create_app(recording_config(tmp_path))):
             pass
 
+    (store,) = built
     assert store._stopped
     assert store._thread is not None and not store._thread.is_alive()
