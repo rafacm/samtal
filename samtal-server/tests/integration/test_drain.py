@@ -96,7 +96,7 @@ async def test_a_drain_lets_the_reply_finish_then_closes_going_away() -> None:
         await socket.send(json.dumps({"type": "listen", "state": "stop"}))
         await asyncio.sleep(0.05)
 
-        await app.state.sessions.drain(timeout_s=20)
+        await app.state.composition.sessions.drain(timeout_s=20)
         texts, code = await messages_until_close(socket)
 
     spoken = [
@@ -112,7 +112,7 @@ async def test_a_draining_server_refuses_a_new_conversation() -> None:
     config = drain_config()
     async with running_app(config) as (port, app):
         socket = await connect(port, config)
-        await app.state.sessions.drain(timeout_s=5)
+        await app.state.composition.sessions.drain(timeout_s=5)
         with pytest.raises(websockets.InvalidStatus) as excinfo:
             await connect(port, config)
         await socket.close()

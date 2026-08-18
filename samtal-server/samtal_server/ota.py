@@ -60,6 +60,12 @@ if TYPE_CHECKING:
     # Names only, and quoted where they are used: the onboarding module
     # imports this one to serve its handlers, so a module-scope import
     # in this direction would not load. Nothing here runs at runtime.
+    #
+    # The composition is here for the same reason and one of its own: it
+    # names the pending table, so it reaches this module through the
+    # onboarding import above and would not load in this direction
+    # either. What a handler needs from it is four fields.
+    from samtal_server.composition import Composition
     from samtal_server.onboarding import PendingDevice, PendingDevices
 
 events = ServerEvents(__name__)
@@ -207,7 +213,8 @@ def spellings(path: str) -> tuple[str, ...]:
 
 
 async def check_version(request: Request) -> Response:
-    config: Config = request.app.state.config
+    comp: Composition = request.app.state.composition
+    config: Config = comp.config
 
     device_id = request.headers.get("device-id", "").strip()
     client_id = request.headers.get("client-id", "").strip()
@@ -227,7 +234,7 @@ async def check_version(request: Request) -> Response:
     # check-in rather than after a restart. What it resolves to is the
     # allowlist this endpoint is stingy by, so the answer decides both
     # the token below and what is said about the device here.
-    bindings: DeviceBindings = request.app.state.bindings
+    bindings: DeviceBindings = comp.bindings
     resolution = await bindings.resolve(mac)
     agents = list(resolution.agents)
 
@@ -238,7 +245,7 @@ async def check_version(request: Request) -> Response:
     # the websocket handshake does not carry it. Kept so the session
     # about to open can name it, which a capture manifest needs, since
     # echo cancellation is firmware-side.
-    request.app.state.device_facts.record(mac, version, board)
+    comp.device_facts.record(mac, version, board)
     # What the event says about the board and the firmware, which is not
     # what the reply and the recorded facts above say about them.
     #
@@ -358,7 +365,7 @@ async def check_version(request: Request) -> Response:
                 # firmware persists what it is handed, so an empty string
                 # clears one another server left in NVS.
                 "url": websocket_url_for(config, request),
-                "token": token_for(request.app.state.device_auth, client_id, mac, agents),
+                "token": token_for(comp.device_auth, client_id, mac, agents),
                 "version": config.server.protocol_version,
             },
         }
@@ -419,7 +426,7 @@ def _activation(
     # onboarding module serves these handlers, so it imports this one.
     from samtal_server.onboarding import activation_object
 
-    offer = request.app.state.pending.observe(mac, client_id, board, firmware)
+    offer = request.app.state.composition.pending.observe(mac, client_id, board, firmware)
     if offer.device is None:
         events.warning(
             "device %s is unbound but was offered no activation code: %s. It is "
@@ -470,7 +477,8 @@ async def activate(request: Request) -> Response:
         # what it refused: see DEVICE_ID_PROBLEM.
         return _bad_request(DEVICE_ID_PROBLEM)
 
-    bindings: DeviceBindings = request.app.state.bindings
+    comp: Composition = request.app.state.composition
+    bindings: DeviceBindings = comp.bindings
     resolution = await bindings.resolve(mac)
     if resolution.agents:
         events.info(
@@ -482,7 +490,7 @@ async def activate(request: Request) -> Response:
         )
         return Response(status_code=200)
 
-    pending = request.app.state.pending
+    pending = comp.pending
     waiting = pending.waiting_for(mac)
     if waiting is not None:
         await _version_two(request, pending, waiting)
@@ -554,7 +562,7 @@ async def describe(request: Request) -> Response:
     # one, and the pair would not load in that order.
     from samtal_server.onboarding import portal_url_line
 
-    config: Config = request.app.state.config
+    config: Config = request.app.state.composition.config
     return PlainTextResponse(
         f"samtal-server {__version__} (revision {revision()}) OTA endpoint.\n"
         f"Devices are sent to {websocket_url_for(config, request)} "

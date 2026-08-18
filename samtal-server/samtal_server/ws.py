@@ -16,6 +16,8 @@ tell it is what is wrong with its configuration.
 """
 
 
+from typing import TYPE_CHECKING
+
 from fastapi import APIRouter
 from starlette.websockets import WebSocket
 
@@ -23,6 +25,13 @@ from samtal_server.auth import DeviceAuth
 from samtal_server.config.models import normalize_mac
 from samtal_server.device.session import DeviceSession
 from samtal_server.events import ServerEvents
+
+if TYPE_CHECKING:
+    # The name only, for the annotation below: the composition names the
+    # pending table, whose module imports the OTA endpoint, which imports
+    # this one, so a module-scope import in this direction would not
+    # load. Nothing here runs at runtime.
+    from samtal_server.composition import Composition
 
 events = ServerEvents(__name__)
 
@@ -97,9 +106,9 @@ def refusal_reason(device_auth: DeviceAuth | None, websocket: WebSocket) -> str 
 
 @router.websocket(WEBSOCKET_PATH)
 async def conversation(websocket: WebSocket) -> None:
-    state = websocket.app.state
+    comp: Composition = websocket.app.state.composition
 
-    refusal = refusal_reason(state.device_auth, websocket)
+    refusal = refusal_reason(comp.device_auth, websocket)
     if refusal is not None:
         # A fixed sentence and a null device, deliberately (the PR #153
         # review). Nothing is authenticated at this point: the Device-Id
@@ -127,16 +136,16 @@ async def conversation(websocket: WebSocket) -> None:
 
     session = DeviceSession(
         websocket,
-        state.config,
-        state.runtime_factory,
-        state.capture,
-        state.device_facts,
-        state.bindings,
-        state.conversations,
+        comp.config,
+        comp.runtime_factory,
+        comp.capture,
+        comp.device_facts,
+        comp.bindings,
+        comp.conversations,
     )
     # Capacity is checked after the token, so a full server still answers a
     # bad token with a refusal about the token.
-    if not state.sessions.try_add(session):
+    if not comp.sessions.try_add(session):
         # The MAC this server recognizes, or nothing.
         #
         # "Past the refusal above the token verified against this
@@ -164,4 +173,4 @@ async def conversation(websocket: WebSocket) -> None:
     try:
         await session.run()
     finally:
-        state.sessions.remove(session)
+        comp.sessions.remove(session)

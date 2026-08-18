@@ -463,7 +463,7 @@ async def reconnect(app, shipping: str) -> None:
     the same one the running session's agent was activated against.
     """
     os.environ[SHIPPED_TEXT_ENV] = shipping
-    manager = app.state.mcp_servers.manager_of(ENTRY)
+    manager = app.state.composition.mcp_servers.manager_of(ENTRY)
     await manager.stop()
     manager.ensure_reconnecting()
     async with asyncio.timeout(30):
@@ -519,7 +519,7 @@ async def test_one_session_across_a_reload_a_switch_and_a_memory_write(
             # what a concurrent session would do, a second reload gamma
             # must not see, and a reconnect capturing something else,
             # which gamma must not see either.
-            await app.state.memory.remember("gamma", fact)
+            await app.state.composition.memory.remember("gamma", fact)
             await rewrite_guidance(control, "Ask three times.")
             await reconnect(app, SECOND_SHIPPED)
 
@@ -542,7 +542,7 @@ async def test_one_session_across_a_reload_a_switch_and_a_memory_write(
             # One socket and one session throughout: the switches were
             # handovers inside this conversation, not reconnections.
             assert device.client.session_id == session
-            assert len(app.state.sessions) == 1
+            assert len(app.state.composition.sessions) == 1
         finally:
             await device.close()
 

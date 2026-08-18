@@ -1,9 +1,9 @@
 """What the server knows about the conversations it is holding.
 
-One registry per app, on `app.state`. It exists for what a per-session
-object cannot do: refuse the next connection when the server is already
-at capacity, and (from the drain onwards) reach every live session at
-once when the process is asked to stop.
+One registry per app, held by its composition. It exists for what a
+per-session object cannot do: refuse the next connection when the
+server is already at capacity, and (from the drain onwards) reach every
+live session at once when the process is asked to stop.
 
 Capacity is a count, not a queue. A device that is refused reconnects on
 its next wake word, where a conversation waiting in line for a slot

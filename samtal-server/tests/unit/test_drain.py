@@ -143,7 +143,10 @@ async def test_the_drain_reports_a_clean_finish(caplog: pytest.LogCaptureFixture
 
 class FakeApp:
     def __init__(self, registry: SessionRegistry) -> None:
-        self.state = type("State", (), {"sessions": registry})()
+        # The registry where the drain reads it: on the composition, which
+        # is the one thing a served app's state carries.
+        composition = type("Composition", (), {"sessions": registry})()
+        self.state = type("State", (), {"composition": composition})()
 
 
 def draining_server(registry: SessionRegistry, drain_s: float = 5.0) -> DrainingServer:

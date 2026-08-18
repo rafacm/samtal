@@ -96,7 +96,7 @@ def test_a_bind_is_seen_by_the_next_connection_with_no_restart(tmp_path: Path) -
         # question. Before the bind the socket is accepted and then
         # closed, because a device that has proved who it is deserves to
         # be told what is wrong.
-        token = client.app.state.device_auth.issue(DEVICE_UUID, DEVICE_MAC)
+        token = client.app.state.composition.device_auth.issue(DEVICE_UUID, DEVICE_MAC)
         with connect(client, token) as websocket:
             with pytest.raises(WebSocketDisconnect) as refusal:
                 websocket.receive_text()
@@ -153,7 +153,7 @@ def test_a_deleted_binding_does_not_reach_a_conversation_in_flight(
             # Still a conversation: the session resolved at connect and
             # nothing reaches back into it.
             websocket.send_text(json.dumps({"type": "listen", "state": "start"}))
-            assert len(client.app.state.sessions) == 1
+            assert len(client.app.state.composition.sessions) == 1
 
         # And the next connection is the one that is refused.
         assert token_of(client) == ""
@@ -231,7 +231,7 @@ def test_a_loaded_name_beside_an_unloaded_one_still_answers(tmp_path: Path) -> N
             store.bind_device(DEVICE_MAC, ["assistant", "poet"])
 
         assert token_of(client) != ""
-        assert client.app.state.bindings.agents_for(DEVICE_MAC).agents == ("assistant",)
+        assert client.app.state.composition.bindings.agents_for(DEVICE_MAC).agents == ("assistant",)
 
 
 # When the database cannot be read

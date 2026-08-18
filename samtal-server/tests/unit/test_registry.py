@@ -62,7 +62,7 @@ def test_the_same_session_does_not_take_two_slots() -> None:
 
 def test_a_conversation_takes_a_slot_and_gives_it_back() -> None:
     with TestClient(create_app(config_with_agent())) as client:
-        registry = client.app.state.sessions
+        registry = client.app.state.composition.sessions
         assert len(registry) == 0
         with connect(client) as websocket:
             shake_hands(websocket)
@@ -134,4 +134,4 @@ def test_the_cap_is_configurable() -> None:
     config = config_with_agent()
     config.server.limits.max_sessions = 3
     app = create_app(config)
-    assert app.state.sessions._max_sessions == 3
+    assert app.state.composition.sessions._max_sessions == 3

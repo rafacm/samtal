@@ -68,7 +68,7 @@ def connect(client: TestClient, device_id: str | None = DEVICE_MAC, version: int
 def token_for(client: TestClient, device_id: str | None) -> str:
     """A token the app under test accepts for this device id, signed for
     the same form the handshake will present it in."""
-    device_auth = client.app.state.device_auth
+    device_auth = client.app.state.composition.device_auth
     if device_auth is None:
         return ""
     return device_auth.issue(DEVICE_UUID, signed_device_id(device_id or ""))

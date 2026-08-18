@@ -141,7 +141,7 @@ async def test_a_written_and_granted_server_is_usable_without_a_restart(
         device = Device(port)
         await device.connect()
         session = device.client.session_id
-        assert len(app.state.sessions) == 1
+        assert len(app.state.composition.sessions) == 1
         try:
             # The tool the model is scripted to call does not exist yet,
             # so the reply carries the loop's own refusal. That is what
@@ -182,7 +182,7 @@ async def test_a_written_and_granted_server_is_usable_without_a_restart(
             # spoken in is the one the first was, on the socket that was
             # never closed, and the server saw one session throughout.
             assert device.client.session_id == session
-            assert len(app.state.sessions) == 1
+            assert len(app.state.composition.sessions) == 1
             assert not [
                 event for event in device.events if event.get("type") == "websocket"
             ]

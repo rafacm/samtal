@@ -19,7 +19,7 @@ from tests.support.wire import device_headers, handshake, shake_hands
 
 
 def issued_for(client: TestClient, device_id: str = DEVICE_MAC.lower()) -> str:
-    return client.app.state.device_auth.issue(DEVICE_UUID, device_id)
+    return client.app.state.composition.device_auth.issue(DEVICE_UUID, device_id)
 
 
 def test_a_valid_token_gets_a_conversation() -> None:
@@ -50,7 +50,7 @@ def test_a_missing_or_bad_token_never_reaches_the_accept(token: str | None) -> N
 
 def test_an_expired_token_is_refused() -> None:
     with TestClient(create_app(config_with_agent())) as client:
-        auth = client.app.state.device_auth
+        auth = client.app.state.composition.device_auth
         old = 1700000000
         expired = f"{auth._sign(DEVICE_UUID, DEVICE_MAC.lower(), old)}.{old}"
         with pytest.raises(WebSocketDisconnect):
@@ -140,7 +140,7 @@ def test_the_gate_is_a_no_op_when_auth_is_off(monkeypatch: pytest.MonkeyPatch) -
     config = config_with_agent()
     config.server.auth.enabled = False
     with TestClient(create_app(config)) as client:
-        assert client.app.state.device_auth is None
+        assert client.app.state.composition.device_auth is None
         headers = {"Device-Id": DEVICE_MAC, "Client-Id": DEVICE_UUID}
         with handshake(client, headers) as websocket:
             assert shake_hands(websocket)["type"] == "hello"

@@ -122,7 +122,8 @@ async def test_a_held_write_lock_stops_neither_a_lookup_nor_a_conversation(
             assert holder.in_transaction
 
             conversation = asyncio.create_task(simulate(port, BOUND_MAC))
-            resolved = await asyncio.wait_for(app.state.bindings.resolve(BOUND_MAC), timeout=10)
+            bindings = app.state.composition.bindings
+            resolved = await asyncio.wait_for(bindings.resolve(BOUND_MAC), timeout=10)
             events, _ = await asyncio.wait_for(conversation, timeout=60)
 
             # The whole of it happened while the writer sat on the lock.

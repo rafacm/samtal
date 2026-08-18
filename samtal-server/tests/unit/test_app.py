@@ -9,7 +9,7 @@ from samtal_server.config import Config
 def test_given_config_is_the_one_the_app_serves() -> None:
     config = Config(server={"port": 9999})
     app = create_app(config)
-    assert app.state.config is config
+    assert app.state.composition.config is config
 
 
 def test_app_without_a_config_loads_one(
@@ -19,7 +19,7 @@ def test_app_without_a_config_loads_one(
     half from the database it names."""
     monkeypatch.setenv("SAMTAL_SERVER__DATABASE__DIR", str(tmp_path / "db"))
     app = create_app()
-    assert isinstance(app.state.config, Config)
+    assert isinstance(app.state.composition.config, Config)
 
 
 @pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])

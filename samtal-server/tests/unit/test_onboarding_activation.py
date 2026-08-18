@@ -57,7 +57,7 @@ def _secret(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def short_path(client: TestClient) -> str:
-    return onboarding_path(onboarding_key(client.app.state.config.server))
+    return onboarding_path(onboarding_key(client.app.state.composition.config.server))
 
 
 # What an unbound device receives
@@ -449,7 +449,7 @@ def test_a_version_two_bodys_serial_number_is_recorded_as_an_observed_fact() -> 
         version="2",
     )
 
-    assert client.app.state.pending.waiting_for(NORMALIZED).serial_number == "SN-0001"
+    assert client.app.state.composition.pending.waiting_for(NORMALIZED).serial_number == "SN-0001"
 
 
 def test_a_refused_version_two_body_records_no_serial_number() -> None:
@@ -462,7 +462,7 @@ def test_a_refused_version_two_body_records_no_serial_number() -> None:
         version="2",
     )
 
-    assert client.app.state.pending.waiting_for(NORMALIZED).serial_number is None
+    assert client.app.state.composition.pending.waiting_for(NORMALIZED).serial_number is None
 
 
 def test_nothing_of_a_refused_body_is_repeated_into_a_log(

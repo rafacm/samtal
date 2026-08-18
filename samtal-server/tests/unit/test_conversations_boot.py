@@ -117,7 +117,7 @@ def test_the_file_is_open_before_the_lifespan_runs(tmp_path: Path) -> None:
     app = create_app(recording_config(tmp_path))
 
     assert (tmp_path / DATABASE_FILENAME).is_file()
-    store = app.state.conversations
+    store = app.state.composition.conversations
     assert store is not None
     assert store._thread is None
     store.stop()
@@ -133,7 +133,7 @@ def test_recording_off_creates_nothing(
     # was, which starts with leaving no database behind.
     with caplog.at_level("INFO"):
         with TestClient(create_app(quiet_config(tmp_path, section))) as client:
-            assert client.app.state.conversations is None
+            assert client.app.state.composition.conversations is None
 
     assert not conversations_path(tmp_path).exists()
     # And says nothing about it. There is deliberately no disabled-mode
@@ -202,7 +202,7 @@ def test_a_start_failure_in_the_lifespan_still_stops_the_store(tmp_path: Path) -
     that failed to start is stopped by the same `finally` that stops one
     that did."""
     app = create_app(recording_config(tmp_path))
-    built = app.state.conversations
+    built = app.state.composition.conversations
     assert built is not None
 
     class Failing:
@@ -214,7 +214,7 @@ def test_a_start_failure_in_the_lifespan_still_stops_the_store(tmp_path: Path) -
         def stop(self) -> None:
             Failing.stopped = True
 
-    app.state.conversations = Failing()
+    app.state.composition.conversations = Failing()
     try:
         with pytest.raises(RuntimeError):
             with TestClient(app):
@@ -239,7 +239,7 @@ def test_a_startup_failure_after_the_writer_started_still_stops_it(
 
     monkeypatch.setattr(app_module, "build_agent_fillers", refuse)
     app = create_app(recording_config(tmp_path))
-    store = app.state.conversations
+    store = app.state.composition.conversations
     assert store is not None
 
     with pytest.raises(RuntimeError):
