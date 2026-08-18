@@ -217,3 +217,146 @@ External review of PR #184 (codex-cli 0.147.0, gpt-5.6-sol,
    transcript while the gate inspects the confirmation text.**
    Fixed in 45e1a3a: the docstring now claims what is true
    (nothing retained, nothing orchestrated, inspection happens).
+
+## M2: the filler runner
+
+`samtal_server/runtime/filler_runner.py` (277 lines) holds `FillerRunner`
+and the `TurnView` Protocol. What moved, verbatim: `_arm_filler` (now
+`arm`), `_run_filler` (now the private `_fire`), `_filler_tail` (now
+`tail`), `_settle_filler` (now `settle`), and the four state fields
+`_fillers`, `_filler_task`, `_filler_sounding`, `_filler_fires` with the
+constructor comment that explains them. The clip send still goes
+straight to `output.send_audio` rather than through the runtime's
+`_send_reply_audio`, which is what keeps the arbitration from waiting on
+itself, and the batch is still encoded whole in one synchronous
+expression before the first await.
+
+`TurnView` is the `_output_paused` mirror settled inside the runtime:
+`speech_ms()` and a read-only `output_paused`, which the M1 `TurnTaking`
+satisfies structurally and which the runner may only ask, never answer.
+The two stand-down reads M1 had already adapted in place moved without
+further change.
+
+`PipelineRuntime` is 1,484 lines and 38 methods, against 1,820 at
+3837753 and the ~1,450 the issue's 2026-08-18 amendment predicted. Its
+four call sites are `self._filler.arm()` in `_reply`,
+`await self._filler.tail()` in `_send_reply_audio`,
+`await self._filler.settle()` in `_reply`'s `finally`, and
+`self._filler.abandon()` in the `CancelledError` arm, which replaces the
+two-line reach into the task field. The class docstring now carries the
+inventory the amended acceptance criterion asks for: the two clusters
+that left, and the seven pieces of state that still cross what stayed
+(`_reply_task`, `_providers` and `_know_how`, `_asr_language`, `_turn`,
+`_turns`, `_llm_round`, and the `_agent` property over the events
+object).
+
+The moved `except (DeviceGone, RuntimeError)` arm is byte-identical
+except for its comment's last sentence, which pointed at "#141 rather
+than #137" and now points at #182, where narrowing the tuple is decided.
+
+### Conformance keys relocated
+
+Four keys, all named by the suite's own exhaustive assertions rather
+than by a hand count.
+
+| Key after M1 | Key after M2 |
+| --- | --- |
+| `("filler_skipped", "reason")` → `…pipeline`, scope `PipelineRuntime._run_filler` (TOKEN_SOURCES) | `…filler_runner`, scope `FillerRunner._fire` |
+| `(…pipeline, PipelineRuntime._run_filler, 1..3)` | `(…filler_runner, FillerRunner._fire, 1..3)` |
+
+Three sidecar identities and one `TOKEN_SOURCES` entry. No spread key is
+involved: none of the three filler emissions spreads anything.
+`samtal_server/events_schema.py` was not touched, and no assertion in
+`test_event_surface_pins.py` was touched. Its three filler tests needed
+no relocation either: they reach into `_reply_task` and `_turntaking`,
+which do not move in this milestone.
+
+### Scenario mapping
+
+`test_session_filler.py` has thirteen tests. Eight touch no moved member
+and are byte-unchanged; the five below reached into
+`_filler_task`/`_filler_sounding`/`_filler_fires` and were rewritten in
+place through the observation properties. None was deleted and none lost
+an assertion, so each maps to itself.
+
+| Test after M1 | After M2 | How it changed |
+| --- | --- | --- |
+| `test_a_fast_reply_plays_no_filler` | same name, same assertions | `_filler_task is None` becomes `_filler.armed is False` |
+| `test_a_fire_on_an_agent_without_clips_quietly_plays_nothing` | same name, same assertions | the same, plus `_filler_sounding` and `_filler_fires` becoming `_filler.sounding` and `_filler.fires` |
+| `test_a_fire_into_live_user_speech_is_skipped` | same name, same assertions | `_filler_task` and `_filler_fires` become the properties; the `_turntaking` seeding M1 relocated stays as it is |
+| `test_a_fire_during_a_barge_in_confirmation_is_skipped` | same name, same assertions | as above, with M1's `_turntaking._pause_output()` setup unchanged |
+| `test_the_filler_composes_with_the_first_token_watchdog` | same name, same assertions | `_filler_task is None` becomes `_filler.armed is False` |
+
+Ten scenarios in the new `tests/unit/test_filler_runner.py` drive the
+runner with no `PipelineRuntime` constructed at all: the fire that masks
+a slow reply, the reply that spoke first, a session bound only to
+filler-less agents, an agent bound but with no clip of its own, both
+stand-downs, an unfired timer the reply's own audio stands down, a
+sounding clip that audio waits out, an abandoned filler, and the phrase
+rotation. The seventh and eighth are new coverage in kind: the
+session-level suite can see that a clip played, but not that a clip
+mid-flight was waited out rather than cancelled.
+
+### Deviations from the plan
+
+Four, three cosmetic and one a naming decision the plan left open.
+
+1. **`FillerRunner` keeps a public `session_id`**, for the same reason
+   `TurnTaking` does (M1's deviation 1): every moved log line and event
+   renders `self.session_id` as its first argument, and the conformance
+   walk reads argument expressions from the source.
+2. **The moved private method is `_fire`, not `_run_filler`.** The plan
+   names the public four and calls the private one "fire" in prose; a
+   `_run_filler` inside a class called `FillerRunner` says the word
+   twice. The four state fields keep their `_filler_` prefix, because
+   the plan lists them as moving verbatim and their names are what the
+   rewritten suite's mapping is read against. The conformance identities
+   therefore read `FillerRunner._fire`.
+3. **One inline comment identifier was updated rather than moved
+   verbatim**, the same class of change as M1's deviation 2: the
+   claimed-synchronously comment said `_filler_tail` waits for the
+   clip's tail, and now names `tail`. The `_run_filler` docstring's
+   `_begin_speaking` reference was already stale before this milestone
+   and was left alone.
+4. **The runner is handed the constructor's `agents` parameter**, not
+   the runtime's `self._agents` list, which is built from it two lines
+   later. Equal by construction, and it keeps the construction free of
+   an ordering constraint between two fields.
+
+The plan's "considered and declined" items stayed declined: no
+forwarding shim was added to `PipelineRuntime`.
+
+### Discoveries
+
+- **The `agent=` field needed no shim.** M1 kept a `session_id`
+  attribute so a moved argument expression stayed identical; the
+  parallel worry here was `agent=self._agent`, which is a property on
+  the runtime. The walk classifies an emission by its receiver
+  expression and reads keyword expressions only where a field is a
+  closed token set, and `agent` is neither, so the runner reads
+  `self._events.agent` directly as the plan specified. Checked in the
+  walk rather than assumed, and the suite agrees.
+- **`FakeDevice` needed one subclass to make the arbitration
+  observable.** The recording device from `tests/support/boundary.py`
+  serves the runner as it served `TurnTaking`, but its send returns
+  immediately, so a clip is never in flight long enough to catch. A
+  ten-line `HeldDevice` that holds one send open until the test releases
+  it is what turns "waited out rather than cancelled" into an assertion.
+- **`armed` is exactly what the five relocated assertions meant.** Each
+  of them read `_filler_task is None` to mean "no filler left over",
+  which is what the property answers, so the rewrite is a rename and not
+  a weakening.
+
+### Verification
+
+All from `samtal-server/`.
+
+- `uv run ruff check .`: passed.
+- `uv run pytest tests/unit -q`: 2,967 passed, 16 skipped.
+- `uv run pytest tests/integration -q`: 55 passed.
+- `uv run samtal-server events reference` diffed against
+  `docs/reference/events.md`: empty, as the channel invariance
+  predicted.
+- `test_boundary_contract.py` and `test_session_characterization.py`
+  passed byte-unmodified against the M1 branch, confirmed with an empty
+  `git diff --stat feature/turn-taking-split-m1` over both files.
