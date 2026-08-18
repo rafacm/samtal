@@ -28,6 +28,7 @@ from fastapi.testclient import TestClient
 
 from samtal_server.app import create_app
 from samtal_server.config import Config
+from samtal_server.config.api import mount_api
 from samtal_server.config.secrets import SecretStore
 
 
@@ -58,3 +59,21 @@ def entered_client(
     makes requests."""
     with entered_app(config, secrets, **client_options) as (_, client):
         yield client
+
+
+def mounted(api: FastAPI) -> FastAPI:
+    """A host for the configuration API, mounted where a server mounts
+    it, and lent the API's own lifespan.
+
+    A test that wants the mount prefix without a whole server builds a
+    bare `FastAPI` and mounts the API on it. Starlette runs no lifespan
+    for a mounted application, so that host leaves the API with the one
+    thing it cannot serve requests without: the database engine its
+    lifespan opens (#142). A real server has a lifespan of its own and
+    installs it from there; a host that exists only to provide the prefix
+    has nothing else to do, so the API's lifespan becomes its whole
+    lifespan and the engine is opened and disposed with the client.
+    """
+    host = FastAPI(lifespan=api.router.lifespan_context)
+    mount_api(host, api)
+    return host

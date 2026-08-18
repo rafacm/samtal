@@ -375,28 +375,51 @@ def test_a_write_that_cannot_take_the_lock_prints_the_retryable_refusal(
     sentence the operator can act on, and a client-side timeout at five
     seconds would replace it with one that says nothing.
 
-    Both sides are taken under the same held lock, so what is asserted is
-    that the CLI printed what the API answered, whatever that turns out
-    to be: the API opens the database per request, so a held lock is met
-    by the open-and-migrate step and the sentence is that one rather than
-    the repository's own."""
+    Both sides are taken under the same held lock and in the same phase,
+    which is what makes the printed sentence and the answered one
+    comparable. That phase is the repository's own transaction: since
+    #142 an application opens the configuration database once, when its
+    lifespan starts, so contention on a deployment is what it is here,
+    a server that is already up meeting a second writer. Hence the
+    ordering below, which is the whole of the setup: both applications
+    are up before the lock exists, and the lock arrives while the CLI's
+    command is in flight."""
+    monkeypatch.setattr(db_module, "BUSY_TIMEOUT_MS", SHORT_BUSY_MS)
     run("set", "agent", "sam", "-f", "-", stdin="prompt: You are Sam.\n")
     capsys.readouterr()
-    monkeypatch.setattr(db_module, "BUSY_TIMEOUT_MS", SHORT_BUSY_MS)
     directory = tmp_path / "db"
-    holder = sqlite3.connect(directory / DATABASE_FILENAME, isolation_level=None)
-    holder.execute("BEGIN IMMEDIATE")
-    try:
-        over_http = TestClient(
-            build_api(TOKEN, directory), headers={"Authorization": f"Bearer {TOKEN}"}
-        ).put("/agents/sam", json={"prompt": "Still Sam."})
-        assert run("set", "agent", "sam", "-f", "-", stdin="prompt: Still Sam.\n") == 1
-    finally:
-        holder.close()
+    holder: sqlite3.Connection | None = None
+    built = cli.build_client
 
-    assert over_http.status_code == 409
-    captured = capsys.readouterr()
-    assert captured.err.rstrip("\n") == over_http.json()["detail"]
-    assert captured.out == ""
-    # And with the lock let go, the same command is answered.
-    assert run("set", "agent", "sam", "-f", "-", stdin="prompt: Still Sam.\n") == 0
+    def build_then_hold_the_lock(base_url: str, token: str) -> TestClient:
+        """The command's client, and then a writer nobody expected.
+
+        Wrapped rather than locked in advance because the CLI builds its
+        application inside the command: a lock taken before that would be
+        met while the application was opening its engine, which is a
+        different refusal in different words, and the other side of this
+        assertion would have nothing to equal."""
+        nonlocal holder
+        client = built(base_url, token)
+        holder = sqlite3.connect(directory / DATABASE_FILENAME, isolation_level=None)
+        holder.execute("BEGIN IMMEDIATE")
+        return client
+
+    monkeypatch.setattr(cli, "build_client", build_then_hold_the_lock)
+    with TestClient(
+        build_api(TOKEN, directory), headers={"Authorization": f"Bearer {TOKEN}"}
+    ) as served:
+        assert run("set", "agent", "sam", "-f", "-", stdin="prompt: Still Sam.\n") == 1
+        assert holder is not None
+        try:
+            over_http = served.put("/agents/sam", json={"prompt": "Still Sam."})
+        finally:
+            holder.close()
+
+        assert over_http.status_code == 409
+        captured = capsys.readouterr()
+        assert captured.err.rstrip("\n") == over_http.json()["detail"]
+        assert captured.out == ""
+        # And with the lock let go, the same command is answered.
+        monkeypatch.setattr(cli, "build_client", built)
+        assert run("set", "agent", "sam", "-f", "-", stdin="prompt: Still Sam.\n") == 0

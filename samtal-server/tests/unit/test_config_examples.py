@@ -20,6 +20,7 @@ So the last test here walks `ServerConfig` and insists the example
 mentions every field of it.
 """
 
+import contextlib
 import io
 import re
 import sys
@@ -27,15 +28,15 @@ import typing
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pydantic import BaseModel
 
 from samtal_server.config import cli
-from samtal_server.config.api import build_api, mount_api
+from samtal_server.config.api import build_api
 from samtal_server.config.loader import load_file_config
 from samtal_server.config.models import ServerConfig
 from samtal_server.config.secrets import MASTER_KEY_ENV, generate_key
+from tests.support.apps import mounted
 
 SERVER = Path(__file__).resolve().parents[2]
 EXAMPLES = SERVER / "examples"
@@ -91,20 +92,30 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
 
+    # What holds each command's application open. Since #142 the API's
+    # engine is its lifespan's, and `TestClient` enters a lifespan only
+    # as a context manager, so the client the entry point is handed is
+    # entered here and released when the command that asked for it ends.
+    lifespans = contextlib.ExitStack()
+
     def factory(base_url: str, token: str) -> TestClient:
         directory = load_file_config(None).server.database.dir
         # Mounted where the server mounts it, since that prefix is part
         # of the address the CLI resolves on its own.
-        served = FastAPI()
-        mount_api(served, build_api(token, directory))
-        return TestClient(
-            served, base_url=base_url, headers={"Authorization": f"Bearer {token}"}
+        served = mounted(build_api(token, directory))
+        return lifespans.enter_context(
+            TestClient(
+                served, base_url=base_url, headers={"Authorization": f"Bearer {token}"}
+            )
         )
 
     monkeypatch.setattr(cli, "build_client", factory)
 
     def _run(*argv: str) -> int:
-        return cli.main(list(argv))
+        nonlocal lifespans
+        with contextlib.ExitStack() as this_command:
+            lifespans = this_command
+            return cli.main(list(argv))
 
     return _run
 

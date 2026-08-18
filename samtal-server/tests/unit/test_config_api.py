@@ -13,6 +13,7 @@ smallest thing that reaches it.
 """
 
 import logging
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -28,12 +29,17 @@ from samtal_server.config.api import (
     MOUNT_PATH,
     UNAUTHORIZED,
     UNEXPECTED,
+    ApiRuntime,
+    StoreHandle,
     api_token,
     build_api,
+    build_api_runtime,
+    open_store,
     store_dependency,
 )
 from samtal_server.config.loader import DatabaseBusyError, StorageError, UnknownEntityError
 from samtal_server.config.store import ConfigStore
+from tests.support.apps import entered_client
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 
@@ -278,46 +284,71 @@ def test_a_body_that_is_not_the_expected_shape_is_not_quoted_back(api: FastAPI) 
 # The store dependency
 
 
-def test_the_store_dependency_opens_and_disposes_one_database(tmp_path: Path) -> None:
-    """The CLI's `_store` in dependency form: nothing holds an engine
-    between requests."""
+def test_the_store_dependency_serves_the_engine_it_was_given(tmp_path: Path) -> None:
+    """One engine per process, opened by a lifespan and handed to every
+    request (#142). What a request gets is a view over it, so there is
+    nothing to dispose when the request ends, and the next request reads
+    what the last one wrote through the engine that is still open."""
     directory = tmp_path / "db"
-    dependency = store_dependency(directory)
+    runtime = build_api_runtime(directory)
+    with open_store(directory) as handle:
+        runtime.store = handle
 
-    generator = dependency()
-    store = next(generator)
-    assert isinstance(store, ConfigStore)
-    store.set_agent("sam", {"prompt": "hello"})
-    engine = store._engine
-    with pytest.raises(StopIteration):
-        next(generator)
+        generator = store_dependency(runtime)
+        store = next(generator)
+        assert isinstance(store, ConfigStore)
+        store.set_agent("sam", {"prompt": "hello"})
+        with pytest.raises(StopIteration):
+            next(generator)
 
-    assert engine.pool.checkedin() == 0
-    # A second request opens the same database again and reads what the
-    # first one wrote.
-    second = dependency()
-    try:
-        assert "sam" in next(second).load().domain.agents
-    finally:
-        second.close()
+        assert store._engine is handle.engine
+        assert "sam" in next(store_dependency(runtime)).load().domain.agents
+
+    # And the engine goes when the lifespan that opened it goes.
+    assert handle.engine.pool.checkedin() == 0
 
 
-def test_the_application_carries_the_dependency(api: FastAPI) -> None:
-    assert callable(api.state.api_runtime.store)
+def test_a_request_with_no_engine_is_a_programming_error(tmp_path: Path) -> None:
+    """An application whose lifespan never ran has no engine, and saying
+    so is the whole answer: opening one here would be an engine nothing
+    disposes, on an application nobody may serve requests from."""
+    runtime = build_api_runtime(tmp_path / "db")
+
+    with pytest.raises(RuntimeError, match="no database engine"):
+        next(store_dependency(runtime))
+
+
+def test_the_application_has_no_engine_until_its_lifespan_runs(api: FastAPI) -> None:
+    """The standalone owner: `build_api` gives the application a lifespan
+    of its own, which opens the engine on the way in and lets it go on
+    the way out."""
+    runtime: ApiRuntime = api.state.api_runtime
+    assert runtime.store is None
+
+    with TestClient(api):
+        held: ApiRuntime = api.state.api_runtime
+        assert isinstance(held.store, StoreHandle)
+
+    assert runtime.store is None
 
 
 # The mount
 
 
 @pytest.fixture
-def served(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> TestClient:
+def served(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[TestClient]:
     """The whole server, with the API mounted on it the way a
-    deployment gets it."""
+    deployment gets it.
+
+    The lifespan is entered, because that is where the mounted API's
+    database engine comes from (#142): Starlette runs no lifespan for a
+    mounted application, so the server's own is what installs it, and a
+    read through the mount is the thing that proves it.
+    """
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
     config = Config(server={"database": {"dir": str(tmp_path / "db")}})
-    # No lifespan: nothing under test here starts an MCP server or
-    # synthesizes a filler clip.
-    return TestClient(create_app(config), follow_redirects=False)
+    with entered_client(config, follow_redirects=False) as client:
+        yield client
 
 
 @pytest.mark.parametrize("path", [MOUNT_PATH, f"{MOUNT_PATH}/", f"{MOUNT_PATH}/config"])
