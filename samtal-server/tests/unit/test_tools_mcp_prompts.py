@@ -203,7 +203,7 @@ async def test_a_connection_dropped_after_a_failed_call_forgets_them_too(
         async def refuse(*_args: object, **_kwargs: object) -> None:
             raise RuntimeError("the transport, from under the call")
 
-        monkeypatch.setattr(manager._session, "call_tool", refuse)
+        monkeypatch.setattr(manager.session, "call_tool", refuse)
         with pytest.raises(RuntimeError):
             await manager.call("tools__secret_word", {})
 

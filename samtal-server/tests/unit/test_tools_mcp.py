@@ -254,7 +254,7 @@ async def test_a_connection_dropped_after_a_failed_call_carries_a_fixed_token(
         async def refuse(*_args: object, **_kwargs: object) -> None:
             raise RuntimeError("a message from nowhere near this token")
 
-        monkeypatch.setattr(manager._session, "call_tool", refuse)
+        monkeypatch.setattr(manager.session, "call_tool", refuse)
         with pytest.raises(RuntimeError):
             await manager.call("tools__secret_word", {})
 
@@ -1167,7 +1167,7 @@ async def test_a_failed_call_drops_the_call_and_then_the_connection(
         async def refuse(*_args: object, **_kwargs: object) -> None:
             raise RuntimeError("a message from nowhere near this token")
 
-        monkeypatch.setattr(manager._session, "call_tool", refuse)
+        monkeypatch.setattr(manager.session, "call_tool", refuse)
         with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
             with pytest.raises(RuntimeError):
                 await manager.call("tools__secret_word", {})
@@ -1220,7 +1220,7 @@ async def test_a_failed_call_raises_this_servers_own_words_and_nothing_else(
         async def refuse(*_args: object, **_kwargs: object) -> None:
             raise RuntimeError(f"the far side said {CREDENTIAL} while answering")
 
-        monkeypatch.setattr(manager._session, "call_tool", refuse)
+        monkeypatch.setattr(manager.session, "call_tool", refuse)
         with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
             with pytest.raises(McpCallFailed) as caught:
                 await manager.call("tools__secret_word", {})
