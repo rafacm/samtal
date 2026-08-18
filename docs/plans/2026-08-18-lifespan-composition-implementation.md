@@ -163,3 +163,24 @@ From `samtal-server/`:
   the three readers) and `state.api_runtime` (the write in `build_api`,
   the six dependencies and the conversations reader), both typed, with
   no exemption.
+
+### The PR review round (M1)
+
+External review of PR #187 (codex-cli 0.147.0, gpt-5.6-sol,
+2026-08-18, diff main...3d47b62): three findings, verdict
+"mergeable after the listed fixes". All three fixed.
+
+1. **P2: state reads still typed as Any.** Starlette's
+   `State.__getattr__` defeats the typed-fields requirement
+   unless every boundary binds an annotated local. Fixed in
+   d0cae9c: `comp: Composition` / `runtime: ApiRuntime` bound at
+   every read site, with `TYPE_CHECKING` imports where needed;
+   the drain's binding sits inside its `try` so a broken state
+   still reaches `super().handle_exit`.
+2. **P3: the composition docstring denied M1's second writer.**
+   Fixed in 9b0e7e6: both writers named, the conversations one
+   marked temporary until M2's constructor-patch conversion.
+3. **P3: the lifespan-to-cache wiring was untested.** Fixed in
+   367bf43 with a pin that fails if the build result is
+   discarded instead of filled (verified by mutation before
+   committing the passing form).
