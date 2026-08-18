@@ -1088,10 +1088,10 @@ TOKEN_SOURCES: dict[tuple[str, str], tuple[Decides, ...]] = {
     ),
     ("filler_skipped", "reason"): (
         Decides(
-            "samtal_server.runtime.pipeline",
+            "samtal_server.runtime.filler_runner",
             KEYWORD,
             "reason",
-            scope="PipelineRuntime._run_filler",
+            scope="FillerRunner._fire",
         ),
     ),
     ("asr_prompt_echo", "outcome"): (
@@ -1379,13 +1379,13 @@ PINNED_BY: dict[tuple[str, str, int], tuple[str, ...]] = {
         f"{SURFACE_PINS}::test_tool_call_for_a_name_nobody_publishes",
         f"{SURFACE_PINS}::test_tool_call_for_an_mcp_tool",
     ),
-    ("samtal_server.runtime.pipeline", "PipelineRuntime._run_filler", 1): (
+    ("samtal_server.runtime.filler_runner", "FillerRunner._fire", 1): (
         f"{SURFACE_PINS}::test_filler_skipped_for_a_user_still_speaking",
     ),
-    ("samtal_server.runtime.pipeline", "PipelineRuntime._run_filler", 2): (
+    ("samtal_server.runtime.filler_runner", "FillerRunner._fire", 2): (
         f"{SURFACE_PINS}::test_filler_skipped_while_a_barge_in_is_confirmed",
     ),
-    ("samtal_server.runtime.pipeline", "PipelineRuntime._run_filler", 3): (
+    ("samtal_server.runtime.filler_runner", "FillerRunner._fire", 3): (
         f"{SURFACE_PINS}::test_filler_played",
     ),
     ("samtal_server.runtime.turntaking", "TurnTaking.finish_utterance", 1): (

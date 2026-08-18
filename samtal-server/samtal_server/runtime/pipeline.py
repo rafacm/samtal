@@ -73,6 +73,7 @@ from samtal_server.providers import (
     Usage,
 )
 from samtal_server.runtime import prompt
+from samtal_server.runtime.filler_runner import FillerRunner
 from samtal_server.runtime.speech import _Synthesis, speak_after
 from samtal_server.runtime.turns import BUILTIN, MCP, TurnUnderway, tool_source
 from samtal_server.runtime.turntaking import TurnTaking
@@ -182,6 +183,40 @@ class PipelineRuntime:
     what this runtime knows about the far end: no socket, no protocol,
     no codec. Built by `bespoke_runtime_factory` below, which is what
     the composition root hands the device edge.
+
+    Two of the things it used to do are now modules of their own. Who
+    holds the floor is `TurnTaking` ([turntaking.py](turntaking.py)),
+    which reaches back through `ReplyControl`, a Protocol this class
+    satisfies structurally; the latency mask is `FillerRunner`
+    ([filler_runner.py](filler_runner.py)), which reads the floor
+    through `TurnView` and never writes it. What stays here is the
+    orchestration: the reply task, the conversation history, the tool
+    loop, agent handover, and the provider observability.
+
+    The mutable state that crosses those responsibilities, listed
+    because it is what a reader has to hold in mind at once (#141):
+
+    - `_reply_task`: created by `start_reply`, read by `replying` and
+      `drain`, cleared by `cancel_reply`. The turn-taking side and the
+      device edge both ask about the reply in flight, and both ask
+      through those methods, so the field itself keeps one owner.
+    - `_providers` and `_know_how`: written by `_activate_agent` alone,
+      at connect and at a handover, and read by every leg of the reply
+      that follows, `confirm_transcript` included.
+    - `_asr_language`: written where the reply's own ASR answers, read
+      by that call and by the confirmation the gate ladder asks for, so
+      the session's language lock survives an interruption.
+    - `_turn`: the record being assembled, replaced at the start of each
+      reply, written from half a dozen places in the loop, and read once
+      at the end by `_record_turn`.
+    - `_turns`: the conversation history, appended by the reply path and
+      by each agent leg, read wherever a round is built.
+    - `_llm_round`: reset per reply, counted up per round, read by the
+      watchdog's retry line and by `llm_round`, which is what makes the
+      generation after a handover a round of its own.
+    - `_agent`: a property over `self._events.agent` rather than a field,
+      because both sides of the boundary attribute events to whoever is
+      talking, so the events object is the one place it can live.
     """
 
     def __init__(
@@ -243,16 +278,18 @@ class PipelineRuntime:
         # the conversation history stay on this side of the seam.
         self._turntaking = TurnTaking(events, output, config.server, self)
         self._reply_task: asyncio.Task[None] | None = None
-        # The pre-synthesized filler clips, keyed by agent; empty means
-        # no agent masks its latency. One timer per turn, armed at the
-        # transcription: `_filler_sounding` flips the moment it fires,
-        # which is what lets the real reply's audio queue behind the
-        # clip's tail rather than interleave with it, and the fire
-        # counter is what rotates the phrase variants.
-        self._fillers = fillers if fillers is not None else {}
-        self._filler_task: asyncio.Task[None] | None = None
-        self._filler_sounding = False
-        self._filler_fires = 0
+        # This turn's latency mask, if any agent this device is bound to
+        # has one. It reads the floor through `TurnView`, which the
+        # turn-taking side satisfies structurally, so the one field the
+        # two clusters share (whether the outgoing frames are paused)
+        # has one writer and one reader and crosses as a question.
+        self._filler = FillerRunner(
+            events,
+            output,
+            fillers if fillers is not None else {},
+            agents,
+            self._turntaking,
+        )
         self._agents = list(agents)
         # The three places a tool can come from, asked in the order the
         # namespace gives them: builtins are bare, the device's tools
@@ -350,7 +387,7 @@ class PipelineRuntime:
         keeps this from waiting on itself."""
         if not batch:
             return
-        await self._filler_tail()
+        await self._filler.tail()
         await self._output.send_audio(batch)
 
     @contextlib.asynccontextmanager
@@ -741,7 +778,7 @@ class PipelineRuntime:
                 logger.info("session %s: nothing transcribed", self.session_id)
             if transcript:
                 self._turns.append(Turn("user", transcript))
-                self._arm_filler()
+                self._filler.arm()
                 await self._speak_reply(transcript, spoken)
         except DeviceGone:
             # The device went away mid-reply. Only this type: the edge
@@ -756,8 +793,7 @@ class PipelineRuntime:
             # filler is reply audio: it dies with the reply rather than
             # being waited out. The settle below still awaits the
             # cancellation through.
-            if self._filler_task is not None:
-                self._filler_task.cancel()
+            self._filler.abandon()
             raise
         except Exception as exc:
             # The class name, and nothing else. No `exc_info`, and no
@@ -779,7 +815,7 @@ class PipelineRuntime:
             # Before the closing tts stop: an unfired timer is stood
             # down, and a clip already sounding finishes rather than
             # being cut mid-word by the stop.
-            await self._settle_filler()
+            await self._filler.settle()
             self._turntaking.clear_pending()
             # The other end the idle timeout counts from. In the finally,
             # so a reply that failed or was cancelled still resets the
@@ -1400,174 +1436,6 @@ class PipelineRuntime:
             return await self._providers.asr.transcribe(
                 pcm, PIPELINE_SAMPLE_RATE, language_hint=self._asr_language
             )
-
-    def _arm_filler(self) -> None:
-        """Start this turn's latency mask, when any agent this session
-        could become has one: a timer from the transcription that plays
-        a cached filler clip if the reply's first audio has not started
-        in time.
-
-        Any bound agent, not just the active one, because a handover
-        mid-turn can move the conversation to an agent with fillers
-        before the reply first speaks: armed only for the starting
-        agent, a filler-less receptionist handing over to a masked
-        specialist would leave the specialist's slow greeting unmasked
-        even though the fire-time lookup already resolves the active
-        agent. The delay is the active agent's own where it has one,
-        and the earliest configured among the bound agents otherwise;
-        at fire time an active agent with no clip quietly plays
-        nothing. A session bound only to filler-less agents still
-        skips the timer entirely.
-
-        Armed once per turn and never re-armed, so a first-token
-        watchdog retry does not earn a second filler: the filler is the
-        soft early threshold, the watchdog the hard late one, and a
-        stalled round hears one "let me see" before the watchdog gives
-        the round up."""
-        reachable = [self._fillers[name] for name in self._agents if name in self._fillers]
-        if not reachable:
-            return
-        own = self._fillers.get(self._agent or "")
-        delay_ms = own.delay_ms if own is not None else min(c.delay_ms for c in reachable)
-        self._filler_sounding = False
-        armed_at = asyncio.get_running_loop().time()
-        self._filler_task = asyncio.create_task(
-            self._run_filler(delay_ms / 1000, armed_at)
-        )
-
-    async def _run_filler(self, delay_s: float, armed_at: float) -> None:
-        """Wait out the delay, then mask the silence, unless the reply's
-        first audio arrived first.
-
-        The clip is chosen from the agent active at fire time, so a
-        handover already made is spoken in the voice now talking, and
-        an active agent with no clips of its own plays nothing,
-        quietly: no event, no state, the turn proceeds unmasked. It
-        goes out through the normal paced path: `_begin_speaking` moves
-        the device into its speaking state (once per reply, so the real
-        sentence that follows sends no second one), the frames land on
-        capture channel 1, and `speaking_started` fires on the clip's
-        first frame and counts as the turn's. No `sentence_start` is
-        sent: the filler is a noise that buys time, not a sentence of
-        the reply, and it stays out of the transcript everywhere.
-
-        A device that went away mid-clip ends the clip, not the
-        session; anything else unexpected is logged and swallowed,
-        because a broken mask must never break the reply it masks.
-
-        The mask yields to the user. A fire-time check skips the clip
-        when the endpointer holds unresolved speech (the user is
-        talking, or just trailed off into silence the endpointer has
-        not yet resolved) and when a barge-in confirmation has the
-        outgoing frames paused. Both mean the silence the timer set
-        out to mask is not silence: the turn it would mask belongs to
-        a premature endpoint, the reply in flight is about to be
-        cancelled, and a clip played now talks over the user's own
-        continuation. Field round 2 measured exactly this: 4 of 20
-        fires landed 1.4 to 1.8 s into speech already underway, all
-        in dictation-style turns. Skipped, not deferred: one filler
-        per turn stays the rule, and the cancelled reply's successor
-        arms its own timer."""
-        await asyncio.sleep(delay_s)
-        if self._output.speaking_started_at() is not None:
-            return
-        speech_ms = self._turntaking.speech_ms()
-        if speech_ms > 0:
-            self._events.info(
-                "session %s: filler skipped, the user is speaking (%d ms heard)",
-                self.session_id,
-                speech_ms,
-                event="filler_skipped",
-                agent=self._agent,
-                reason="user_speaking",
-                speech_ms=speech_ms,
-            )
-            return
-        if self._turntaking.output_paused:
-            self._events.info(
-                "session %s: filler skipped, a barge-in is being confirmed",
-                self.session_id,
-                event="filler_skipped",
-                agent=self._agent,
-                reason="barge_in_pending",
-            )
-            return
-        clips = self._fillers.get(self._agent or "")
-        if clips is None:
-            return
-        # Claimed synchronously between the checks above and the first
-        # await below: from here `_filler_tail` waits for the clip's
-        # tail instead of cancelling the timer.
-        self._filler_sounding = True
-        index = self._filler_fires % len(clips.clips)
-        self._filler_fires += 1
-        elapsed_ms = round((asyncio.get_running_loop().time() - armed_at) * 1000)
-        self._events.info(
-            "session %s: no reply audio after %d ms, playing filler %d",
-            self.session_id,
-            elapsed_ms,
-            index,
-            event="filler_played",
-            agent=self._agent,
-            delay_ms=elapsed_ms,
-            phrase_index=index,
-        )
-        try:
-            await self._output.begin_speaking()
-            resampler = Resampler(clips.sample_rate, self._output.output_sample_rate)
-            # Encoded whole before the first await, and sent once. The
-            # reply task feeds the same encoder between its own awaits,
-            # so a flush split off after an await could carry out audio
-            # that belongs to the reply.
-            batch = (
-                self._output.encode_audio(resampler.process(clips.clips[index]))
-                + self._output.encode_audio(resampler.flush())
-                + self._output.flush_encoder()
-            )
-            await self._output.send_audio(batch)
-        except (DeviceGone, RuntimeError):
-            # Broader than the reply body's, and knowingly so. The `try`
-            # above covers resampling, encoding and the encoder flush as
-            # well as the send, so the `RuntimeError` half can still be
-            # a local bug swallowed as a disconnect. Narrowing it means
-            # deciding what a filler that fails to encode should do,
-            # which is the filler path's own question and belongs to
-            # #141 rather than to #137.
-            return
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("session %s: filler playback failed", self.session_id)
-
-    async def _filler_tail(self) -> None:
-        """The reply's own audio is ready: an unfired timer loses (the
-        silence it was going to mask is over), and a clip already
-        sounding is waited out, so the first real sentence queues
-        behind its tail rather than interleaving with it or cutting it
-        mid-word."""
-        task = self._filler_task
-        if task is None or task.done():
-            return
-        if not self._filler_sounding:
-            task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
-
-    async def _settle_filler(self) -> None:
-        """End-of-reply cleanup, whatever path ended it: stand down an
-        unfired timer, wait out a clip still sounding (a reply that
-        failed silently still finishes its "let me see" before the
-        closing tts stop), and see a cancellation through so nothing
-        of this turn's filler outlives the turn."""
-        task = self._filler_task
-        self._filler_task = None
-        if task is None:
-            return
-        if not self._filler_sounding:
-            task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
-        self._filler_sounding = False
 
 
 def bespoke_runtime_factory(
