@@ -227,11 +227,30 @@ Two consequences the inventory forces:
 - **Providers off the event loop.** `build_agent_providers` loads
   models for seconds to minutes; in the async lifespan it runs
   under `asyncio.to_thread`, matching `build_agent_fillers`'
-  existing await. Same work, same order, same failure surface
-  (`ProviderError` out of startup aborts the boot exactly as it
-  aborts `create_app` today; `main()` already catches it around
-  `serve` startup via uvicorn's startup failure path, and the
-  plan verifies the exit path prints the same sentence).
+  existing await. Same work, same order.
+- **The sanitized startup-failure bridge.** Today `create_app`
+  raises before `serve`, inside `main()`'s except arm, which
+  prints one sanitized sentence and exits 1; after the move,
+  construction fails inside the lifespan, `main()`'s arm ends
+  before `serve()`, and uvicorn renders lifespan exceptions as
+  tracebacks, which loses the sentence and would render a
+  provider exception's chain onto stderr. The bridge: the
+  lifespan catches the boot failure taxonomy (`ConfigError`,
+  `ProviderError`, `EventEnforcementError`, the database busy
+  refusal), records the already-sanitized one-line sentence on
+  the seed, and re-raises `StartupFailed(sentence)` **`from
+  None`**, so the only traceback uvicorn can render carries the
+  sanitized sentence and no chain; `serve()` returns, `main()`
+  sees the recorded failure and prints the sentence to stderr and
+  exits 1, exactly today's surface. Anything outside the taxonomy
+  propagates as the bug it is, unchanged. Verified against real
+  uvicorn startup (the integration lane's serving helper) with a
+  provider failure whose exception chain carries a
+  credential-shaped sentinel: the sentence appears once, the
+  sentinel appears nowhere in stderr or the logs, and the process
+  exits 1. The module entry point (`uvicorn samtal_server.app:app`)
+  gets the same `from None` discipline; uvicorn's own startup
+  failure handling is its operator surface there.
 
 The capture events move into the lifespan function: their sidecar
 identities become `("samtal_server.app", "lifespan", 1|2)`; the
@@ -425,13 +444,12 @@ existing fakes.
   attributes are set before yield, so no request can see a
   half-attached API. The standalone `build_api` path sets them at
   build time as today.
-- **`to_thread` provider construction changes failure timing.** A
-  `ProviderError` now surfaces as a lifespan startup failure;
-  `main()` must print the same sentence and exit 1. One unit test
-  drives `create_app` + lifespan enter with a failing provider
-  config and asserts the surfaced error type; the `main()` except
-  arm is extended to catch it out of `serve` if uvicorn wraps it
-  (verified, not assumed, in the milestone).
+- **`to_thread` provider construction changes failure timing.**
+  Handled by the sanitized startup-failure bridge above, with its
+  real-uvicorn sentinel verification; a unit test additionally
+  drives lifespan entry with a failing provider config and
+  asserts `StartupFailed` carries the sentence and no
+  `__cause__`/`__context__`.
 - **The 29-file fixture migration is wide but shallow.** It is
   mechanical (context-manager adoption), split across milestones
   so each PR's test diff stays reviewable, and the grep
@@ -535,6 +553,13 @@ P1/P2 amendments". All eleven adopted.
    exception chains. A sanitized lifespan-to-entrypoint bridge is
    required, verified against real uvicorn startup with a
    sentinel-bearing chained failure.
+
+   *Resolution*: the design now specifies the bridge: the
+   lifespan catches the boot taxonomy, records the sanitized
+   sentence on the seed, raises `StartupFailed(sentence)` from
+   None, and `main()` prints the recorded sentence and exits 1
+   after `serve()` returns; verified with real uvicorn and a
+   sentinel-bearing chain in the milestone.
 
 5. **P1: the no-migration engine breaks API-first fresh
    deployments.** The integration API-first path builds
