@@ -47,7 +47,12 @@ NetLoc = str | tuple[str, int | None]
 def assemble(scheme: str, netloc: NetLoc, path: str = "") -> str:
     """One URL, from the three pieces every caller here has.
 
-    The only place in this codebase that writes `scheme://authority`.
+    The only place that writes `scheme://authority` for an address a
+    DEVICE is told about, which is the set this module is responsible
+    for. (`config/cli.py` writes one more, the loopback address of this
+    machine's own API, which no device ever hears and which resolves
+    from a port rather than from anything a request carried.)
+
     Which mode a caller is in is which type it passes, and the two are
     documented in this module's own docstring: verbatim for the wire,
     rebuilt for anything retained.
