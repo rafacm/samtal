@@ -207,6 +207,22 @@ class McpServerManager:
         return self._session is not None
 
     @property
+    def session(self) -> ClientSession | None:
+        """The SDK session this manager's calls go over, or None while
+        this server is down.
+
+        The live object rather than a copy of what it holds, because
+        what reads it is a suite standing in the way of one of its
+        methods: a far side that stops answering mid-call is a thing
+        this manager has to behave around, and there is no configuration
+        that produces one on demand. Read-only, since which session a
+        manager has is its run's own business: one is opened by the task
+        that connects and dropped by the one that unwinds, and a session
+        assigned from outside would belong to neither.
+        """
+        return self._session
+
+    @property
     def state(self) -> str:
         """`connected` or `down`, as the status surface says it."""
         return self._state
