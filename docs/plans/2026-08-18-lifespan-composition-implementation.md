@@ -184,3 +184,204 @@ External review of PR #187 (codex-cli 0.147.0, gpt-5.6-sol,
    367bf43 with a pin that fails if the build result is
    discarded instead of filled (verified by mutation before
    committing the passing form).
+
+## M2: the lifespan owns construction
+
+Four commits. The describe/build split with the test-lane migration that
+has to land with it; the leak tests; the shutdown signal guard pulled
+forward from M4; and the exit-code fix the real-uvicorn verification
+turned up.
+
+### What was written
+
+**The describe phase.** `create_app(config, secrets, on_started=None)`
+resolves enforcement, resolves the configuration when none was passed,
+reads the device-auth secret and throws the issuer away (the refusal is
+what stays at describe time, not the object), resolves the API token
+into a local and passes it into the gate, builds the API shell with
+`build_api(token, database_dir)`, registers `/healthz` and the routers,
+mounts the API, and stashes a `_CompositionSeed`. It opens nothing.
+
+**The build phase.** `lifespan` binds the seed, opens an
+`AsyncExitStack`, and calls `_build_composition`, which builds what
+`create_app` used to build, in the same order and with the same
+comments, registering each release as it acquires: `bindings.dispose`
+the moment the pool is open, `conversations.stop` the moment the store
+is constructed and before it is started, `mcp_servers.stop_all` in front
+of `start_all`. `build_agent_providers` runs under `asyncio.to_thread`.
+Then the API's live pieces are installed on the mounted sub-application,
+the composition is set on `app.state`, the writer is started, the
+fillers are synthesized and filled, the MCP servers are connected,
+`on_started()` is called, and the generator yields.
+
+**The failure bridge.** `BOOT_FAILURES` is `(ConfigError,
+EventEnforcementError, ProviderError)`; the database busy refusal is a
+`ConfigError` subclass, so the tuple is the whole taxonomy the plan
+names. The lifespan catches it, records the sentence on the seed, and
+raises `StartupFailed(sentence)` **outside** the `except` block, which
+leaves the replacement with `__cause__` and `__context__` both None
+rather than merely suppressed. `startup_failure(app)` is how `main()`
+asks; it prints and exits 1.
+
+**`build_api_runtime`** in `config/api.py` assembles the `ApiRuntime`
+that `build_api` used to assemble inline. `build_api` calls it with what
+it was given, so the standalone path is unchanged; the parent lifespan
+calls it with the live objects and installs the result on the mounted
+application's state. The store handle is still `store_dependency`, still
+per request: that lifetime is M3's.
+
+**`tests/support/apps.py`**: `entered_app(config, secrets, **options)`
+yielding `(app, client)`, and `entered_client` for the common case.
+
+### Deviations from the plan
+
+- **The seed carries the mounted API application, and the device auth
+  issuer is built in the lifespan rather than carried.** The plan says
+  the seed holds "config and secrets only", which is finding 10's rule
+  about the token; it also requires the lifespan to attach the API's
+  live pieces to the mounted sub-application, and a lifespan that
+  receives only `app` has no other way to reach it. So the seed is
+  config, secrets, the mounted application, `on_started` and the
+  recorded failure sentence. It holds no credential: the token is inside
+  the gate middleware, where `create_app` passed it. `device_auth` is
+  built where everything else is, and `create_app` calls
+  `build_device_auth` only for the refusal.
+- **The capture events' identity keys are
+  `("samtal_server.app", "_build_composition", 1|2)`, not
+  `(..., "lifespan", 1|2)`.** The build is a named function rather than
+  200 lines inside an async generator with a `try`/`except`/`yield`
+  around them; the channel is unchanged, which is what the plan's
+  constraint was about. The conformance suite's exhaustive map named
+  both halves of the change and was updated to match.
+- **The signal guard was pulled forward from M4**, as the milestone
+  brief asked: `handle_exit` delegates straight through when
+  `app.state` has no composition. Without it this merge would be
+  releasable with a shutdown path that raises inside a signal handler
+  during any startup long enough to be signalled, which is exactly the
+  startup this milestone makes long. The task ownership and the bounded
+  settle stay M4's.
+- **Teardown order between the bindings pool and the conversation store
+  is reversed from today's.** Today the lifespan disposes the bindings
+  inside the inner `finally` and stops the store in the outer one; under
+  the exit stack the store is released before the pool, because it was
+  acquired after it. Nothing depends on the order: the store's writer
+  drains its own queue and the pool serves device lookups, and every
+  session has stopped before either runs.
+- **A failed MCP `start_all` now releases everything.** Today it would
+  leave the bindings pool open and the MCP managers unstopped, because
+  `start_all` sits outside the inner `try`. The exit stack has no such
+  gap. `start_all` is documented never to raise, so this is a latent
+  case rather than an observed one.
+- **`serve()` swallows `SystemExit` on a recorded boot failure.** See
+  the discovery below; without it the plan's "serve() returns and
+  main() prints" does not happen at all.
+- **The sanitized sentence appears twice on a refused startup, not
+  once.** Uvicorn logs the whole formatted traceback of a failed
+  lifespan (Starlette sends it as the `lifespan.startup.failed`
+  message), and that traceback ends with `StartupFailed: <sentence>`;
+  `main()` then prints the sentence as its own line. The plan's
+  no-leak requirement holds exactly: the traceback has no chain to walk
+  into, and the integration test hunts the sentinel through both
+  streams. The traceback itself is uvicorn's operator surface, which
+  the plan already accepted for the module entry point.
+
+### Discoveries
+
+- **Uvicorn ends the process itself when a lifespan startup fails.**
+  `uvicorn.Server.startup` calls `sys.exit(STARTUP_FAILURE)`, which is
+  3, from inside the coroutine `Server.run` is driving. `serve()`
+  therefore never returned and `main()`'s reporting never ran: the exit
+  code was 3 and the only surface was uvicorn's traceback. `serve()`
+  now catches `SystemExit` and swallows it exactly when the lifespan
+  recorded a boot failure, so the entry point's own sentence and exit
+  code of 1 survive; any other `SystemExit` from in there propagates.
+  This is the one thing in this milestone that a test entering an
+  application by hand could not have found, which is what the plan's
+  real-uvicorn verification existed for.
+- **`test_conversations_boot`'s store injections both had to move to
+  the constructor**, not just the one finding 8 names. The store is
+  built inside the lifespan now, so a test that wants to hold the
+  instance the build made has to catch it at
+  `monkeypatch.setattr(app_module, "ConversationStore", ...)`; a test
+  that wants the writer's start to fail replaces the class with one that
+  refuses. `test_the_file_is_open_before_the_lifespan_runs` inverted
+  into `test_nothing_is_opened_before_the_lifespan_runs`, which is the
+  leak claim in the suite that owns the store.
+- **Three `test_config_api_runtime` tests documented "no lifespan, so
+  nothing is connected"** and used that to assert a `DOWN` MCP status
+  through the mount. Entering the lifespan connects the stdio server
+  they configure, so they now configure a command that does not exist:
+  the managers are down for a reason the test states rather than for the
+  absence of a startup, and the assertions are unchanged.
+- **The remaining unentered `TestClient` sites are honest ones.** After
+  the migration, 36 no-`with` constructions remain: 33 are the
+  standalone `build_api(...)` suites the plan defers to M3, and three
+  drive routes that read nothing the lifespan builds (two on `/healthz`,
+  one on the docs 404).
+
+### The fixture migration inventory
+
+Taken by grep at branch time, then by running the lanes. The plan's
+figures (53 no-`with` `TestClient` sites across 21 files, 30 bare
+`create_app` sites in 15 files, a union of 29 files) were the inventory
+of what *could* need the lifespan. What actually needed it is what
+failed: **116 unit tests across 14 files, and 2 integration tests across
+2 files**, all of them the same `AttributeError: 'State' object has no
+attribute 'composition'`.
+
+Sixteen files changed, plus the new support module:
+
+| File | Sites | Shape of the change |
+| --- | --- | --- |
+| `tests/support/apps.py` | new | `entered_app`, `entered_client` |
+| `tests/support/checkin.py` | 2 | `ota_client`/`activation_client` became context managers |
+| `tests/unit/test_ota.py` | 24 | every check-in through the entered client |
+| `tests/unit/test_onboarding_activation.py` | 30 | the ceremony inside one entered client per test |
+| `tests/unit/test_onboarding.py` | 19 | local `client_for` became a context manager |
+| `tests/unit/test_server_event_pins.py` | 17 | the OTA and onboarding pins, and the two capture pins |
+| `tests/unit/test_event_descriptor_sanitization.py` | 13 | local `ota_client` became a context manager |
+| `tests/unit/test_config_api_runtime.py` | 4 | the three mounted-API wiring tests |
+| `tests/unit/test_app.py` | 3 | the two composition reads |
+| `tests/unit/test_auth_boot.py` | 3 | the two issuer reads; the refusals stayed bare |
+| `tests/unit/test_onboarding_banner.py` | 3 | the two describe-line reads |
+| `tests/unit/test_ota_tokens.py` | 3 | the two token issuers |
+| `tests/unit/test_registry.py` | 2 | the cap read |
+| `tests/unit/test_boundary_contract.py` | 3 | the factory injection moved inside the entered context |
+| `tests/unit/test_conversations_boot.py` | 3 | the store injections moved to the constructor |
+| `tests/integration/test_config_api.py` | 1 | the restart's composition read moved inside its client |
+| `tests/integration/test_activation.py` | 1 | the same, for the derived onboarding key |
+
+Two new test files: `tests/unit/test_app_lifespan.py` (the leak,
+teardown, partial-startup, bridge and banner claims) and
+`tests/integration/test_startup_failure.py` (the real entry point in a
+process of its own, with the credential-shaped sentinel).
+`tests/unit/test_drain.py` gained the blocked-startup signal test, and
+`tests/unit/test_event_schema_conformance.py` the two moved keys.
+
+### Verification
+
+From `samtal-server/`:
+
+- `uv run ruff check .`: all checks passed.
+- `uv run pytest tests/unit -q`: 2,980 passed, 16 skipped (2,972 before
+  this milestone; the eight are the seven in `test_app_lifespan.py` and
+  the drain's signal test).
+- `uv run pytest tests/integration -q`: 57 passed (55 before; the two
+  are the startup-failure pair).
+- The four generated references CI diffs (domain configuration,
+  conversations schema, events, API OpenAPI): regenerated and diffed
+  clean. The capture events moved function without changing channel,
+  message, level or fields, which is what the events reference being
+  byte-identical says.
+- The conformance suite specifically
+  (`tests/unit/test_event_schema_conformance.py`): 485 passed. Its
+  exhaustive sidecar named the two moved paths in both directions and
+  was updated to `("samtal_server.app", "_build_composition", 1|2)`.
+- The acceptance grep, `grep -rn '\.state\.'
+  samtal-server/samtal_server`: `state.composition` (the lifespan's
+  write, the three readers), `state.api_runtime` (the write in
+  `build_api`, the lifespan's install, the six dependencies and the
+  conversations reader) and `state.seed` (the describe phase's write,
+  the lifespan's read, and `startup_failure`'s). All three are declared
+  dataclasses; the third is the private build seed the split requires,
+  which no handler reads.

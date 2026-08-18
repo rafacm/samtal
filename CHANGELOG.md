@@ -9,6 +9,28 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **A server acquires what it is made of when it starts serving, and
+  lets go of it when it stops** (#142, M2). `create_app` built
+  everything: an application that was built and never served held a
+  connection pool on the configuration database, a migrated
+  conversation store and every provider model its agents named. It now
+  describes the application (its routes, its mounted configuration API
+  with the gate armed, and the refusals a deployment missing a secret
+  must meet whatever launched it) and builds nothing; the lifespan
+  builds, in the order the old function documented, registering every
+  acquisition for release as it makes it, so a startup that fails part
+  way through leaves nothing open. The provider build, which loads
+  models for seconds to minutes, runs on a worker thread instead of the
+  event loop. A boot failure is still one sanitized sentence on stderr
+  and an exit code of 1: the lifespan records it and raises
+  `StartupFailed` with nothing chained to it, and the entry point
+  prints it. The captive-portal banner is now said after a successful
+  startup rather than before one, so a server that fails to start
+  announces nothing, and a signal arriving before the composition
+  exists goes straight to uvicorn's shutdown rather than to a drain
+  with nothing to drain. Nothing on the wire changed, and all four
+  generated references regenerate identical.
+
 - **What a running server is made of is one typed object** (#142, M1).
   The composition root hung thirteen untyped attributes on `app.state`,
   and the mounted configuration API kept a seven-attribute bag of its
