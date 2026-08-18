@@ -20,6 +20,8 @@ import sys
 import threading
 import time
 import traceback
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 
 import pytest
@@ -58,6 +60,7 @@ from samtal_server.tools.mcp import (
     McpServers,
     McpSlice,
     McpToolNotGranted,
+    transport,
 )
 from samtal_server.tools.mcp import manager as manager_module
 from tests.support.events import fields_of
@@ -708,26 +711,36 @@ async def test_an_agent_the_slice_does_not_know_reaches_nothing() -> None:
 # the outcome, not the wall clock of the production constants.
 
 
-class StubbornManager(McpServerManager):
-    """A manager whose task swallows its cancellation and goes on
-    unwinding, which is what an exit stack awaiting a far side that has
-    stopped answering looks like from here."""
+def stubbornly_unwinding(holding_s: float) -> Callable[..., AbstractAsyncContextManager]:
+    """The stdio transport that ships, with an exit that swallows its
+    cancellation and goes on unwinding.
 
-    def __init__(self, name: str, config: object, holding_s: float) -> None:
-        super().__init__(name, config)
-        self._holding_s = holding_s
+    Which is what an exit stack awaiting a far side that has stopped
+    answering looks like from the manager's side, and the only way to
+    have one: suppressing a cancellation is something code inside the
+    task does, so no configuration and no unhelpful server produces
+    this. Patched over the name `_connect` reads the transport by, so
+    the connection, the handshake and the listing are the ones that
+    ship and the only thing standing in is the way out.
+    """
+    real = transport.stdio_client
 
-    async def _run(self) -> None:
-        self._became(CONNECTED, None)
-        self._settled.set()
-        try:
-            await self._stop.wait()
-            await asyncio.sleep(self._holding_s)
-        except asyncio.CancelledError:
-            # Suppressed on purpose, and then some.
-            await asyncio.sleep(self._holding_s)
-        finally:
-            self._became(DOWN, None)
+    def holding(*args: object, **kwargs: object) -> AbstractAsyncContextManager:
+        @asynccontextmanager
+        async def unwinding() -> AsyncIterator[object]:
+            async with real(*args, **kwargs) as streams:
+                try:
+                    yield streams
+                finally:
+                    try:
+                        await asyncio.sleep(holding_s)
+                    except asyncio.CancelledError:
+                        # Suppressed on purpose, and then some.
+                        await asyncio.sleep(holding_s)
+
+        return unwinding()
+
+    return holding
 
 
 async def test_a_manager_that_will_not_stop_is_left_behind_inside_the_bound(
@@ -740,28 +753,29 @@ async def test_a_manager_that_will_not_stop_is_left_behind_inside_the_bound(
     caller gets its answer."""
     monkeypatch.setattr(manager_module, "CANCEL_TIMEOUT_S", 0.05)
     holding = 3.0
-    manager = StubbornManager("tools", stdio_entry(), holding)
+    monkeypatch.setattr(transport, "stdio_client", stubbornly_unwinding(holding))
+    manager = McpServerManager("tools", stdio_entry())
     await manager.start()
-    task = manager._task
-    assert task is not None
+    assert manager.up
 
     began = asyncio.get_running_loop().time()
     await manager.stop(0.05)
     elapsed = asyncio.get_running_loop().time() - began
 
-    # Well inside the two bounds, and nowhere near what the task is
-    # holding out for.
+    # Well inside the two bounds, and nowhere near what the connection
+    # is holding out for.
     assert elapsed < holding / 2
-    assert not task.done()
-    # Held rather than dropped: the loop keeps only a weak reference to
-    # a task nobody awaits, and one ending in an exception nobody took
+    # Exactly one task was left behind, and it is still going. Held
+    # rather than dropped: the loop keeps only a weak reference to a
+    # task nobody awaits, and one ending in an exception nobody took
     # prints about it at shutdown.
-    assert task in manager_module.abandoned
+    (left,) = manager_module.abandoned
+    assert not left.done()
 
     # And once it does finish, nothing of it is held: the callback that
     # consumes what it ended with drops it too.
-    await asyncio.wait_for(task, timeout=holding * 2)
-    assert task not in manager_module.abandoned
+    await asyncio.wait_for(left, timeout=holding * 2)
+    assert manager_module.abandoned == set()
 
 
 # A caller that goes away mid-apply
