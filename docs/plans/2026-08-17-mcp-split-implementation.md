@@ -735,9 +735,11 @@ From `samtal-server/`, `uv` throughout, `PYTHONDONTWRITEBYTECODE=1`
 outside pytest.
 
 - `uv run ruff check .`: **All checks passed!**
-- `uv run pytest tests/unit -q`: **2945 passed, 16 skipped**, 2961
-  collected, unchanged from before the milestone: the seam adds no test
-  of its own because the tests that drove the four conventions drive
+- `uv run pytest tests/unit -q`: **2947 passed, 16 skipped**, 2963
+  collected on the cascaded branch (the two additions are M2's review
+  round's regression and planted cases, which this branch carries):
+  the seam adds no test of its own because the tests that drove the
+  four conventions drive
   the one interface unmodified.
 - `uv run pytest tests/integration -q`: **55 passed**, unchanged.
 - `uv run samtal-server config openapi` and
@@ -746,3 +748,16 @@ outside pytest.
 - `git diff --stat` over `test_server_event_pins.py` and
   `test_event_surface_pins.py`: empty, the two contract pin suites
   byte-unchanged.
+
+### The PR review round (M3)
+
+External review of PR #180 (diff main...d8ad2eb) by codex 0.147.0
+(model gpt-5.6-sol), 2026-08-18. Three findings, all documentation:
+the rebase had left M3 listed both unchecked and checked in the
+plan (the artifact deleted); the M3 verification block recorded the
+pre-cascade counts as unchanged (rerun and corrected to 2947 passed
+and 2963 collected on the cascaded branch); and the never-resolves-
+twice claim in the module docstring and CHANGELOG overstated the
+device source's deliberate live-scan (both narrowed to MCP routing
+with the edge behavior named). Verdict as posted: mergeable after
+the listed fixes.

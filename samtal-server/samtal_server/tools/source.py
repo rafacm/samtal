@@ -16,8 +16,9 @@ tool loop rather than producing a result the model reads.
 
 Routing is decided once and then carried. Every question below is asked
 about the same CLAIM, the classification the runtime reserved on the
-turn's record before anything ran, so a source never resolves a name a
-second time. An MCP reload landing between the reservation and the call
+turn's record before anything ran, so MCP routing never resolves a name
+a second time (the device source deliberately re-scans its live tool
+list at ownership, the recorded edge behavior it inherited). An MCP reload landing between the reservation and the call
 can move a published name to a more specific entry, and a source that
 re-read the name would run one server's tool under another server's
 timeout and then record the entry that did not run it. The claim is

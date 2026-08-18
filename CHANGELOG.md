@@ -19,7 +19,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   timeout are one loop over the three sources it is built with.
   Every question a source is asked is asked about the same claim, the
   classification reserved on the turn's record before anything ran, so
-  no source is ever in a position to resolve a name a second time and a
+  MCP routing is never in a position to resolve a name a second time
+  (the device source deliberately keeps its live-list ownership scan,
+  the recorded edge behavior) and a
   reload cannot reroute a call in flight. What no source can answer
   stays with the runtime: arguments a model never closed, a name nobody
   publishes, and the handover, which ends the tool loop rather than
