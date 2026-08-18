@@ -43,6 +43,57 @@ class FillerClips:
     sample_rate: int
 
 
+class AgentFillers:
+    """The clip cache the whole server shares, keyed by agent.
+
+    Built empty and handed to everything that will read it, because the
+    synthesis it holds is async and the readers are assembled before the
+    startup that runs it. Filled once, when it has run.
+
+    A lookup before the fill answers exactly as an empty cache does, and
+    after it exactly as the filled one: a clip nobody has synthesized yet
+    is not reachable, and the session's mask stands down for it the way
+    it stands down for an agent that configured none. That is the
+    fire-time behavior, and it is deliberately unchanged.
+
+    What is new is that the two cases are no longer the same answer to a
+    caller that asks: `ready` says whether the synthesis has run at all,
+    so "this agent has no fillers" and "no agent has any yet" can be
+    told apart by anything that ever needs to. Nothing does yet.
+    """
+
+    def __init__(self) -> None:
+        self._clips: dict[str, FillerClips] = {}
+        self._ready = False
+
+    def __contains__(self, name: object) -> bool:
+        return name in self._clips
+
+    def __getitem__(self, name: str) -> FillerClips:
+        return self._clips[name]
+
+    def get(self, name: str, default: FillerClips | None = None) -> FillerClips | None:
+        return self._clips.get(name, default)
+
+    @property
+    def ready(self) -> bool:
+        """Whether the boot-time synthesis has run. False means every
+        lookup is answering "not yet" rather than "never"."""
+        return self._ready
+
+    def fill(self, clips: dict[str, FillerClips]) -> None:
+        """Take the synthesized clips, once, at startup.
+
+        Asserted rather than tolerated: this cache is filled by the one
+        lifespan that owns it, and a second fill would mean two boots
+        share one server's clips or that a caller is using this as a
+        mutable dictionary. Neither is a thing to absorb quietly.
+        """
+        assert not self._ready, "the filler cache is filled once, at startup"
+        self._clips.update(clips)
+        self._ready = True
+
+
 async def build_agent_fillers(
     config: Config, agent_providers: dict[str, AgentProviders]
 ) -> dict[str, FillerClips]:

@@ -58,7 +58,6 @@ from samtal_server.device.boundary import (
     SessionInput,
 )
 from samtal_server.events import SessionEvents, logger
-from samtal_server.filler import FillerClips
 from samtal_server.providers import (
     AgentProviders,
     AsrResult,
@@ -73,7 +72,7 @@ from samtal_server.providers import (
     Usage,
 )
 from samtal_server.runtime import prompt
-from samtal_server.runtime.filler_runner import FillerRunner
+from samtal_server.runtime.filler_runner import FillerCache, FillerRunner
 from samtal_server.runtime.speech import _Synthesis, speak_after
 from samtal_server.runtime.turns import BUILTIN, MCP, TurnUnderway, tool_source
 from samtal_server.runtime.turntaking import TurnTaking
@@ -227,7 +226,7 @@ class PipelineRuntime:
         agent_providers: dict[str, AgentProviders],
         mcp_servers: McpServers,
         memory: MemoryStore | None,
-        fillers: dict[str, FillerClips] | None,
+        fillers: FillerCache | None,
         agents: Sequence[str],
         recorder: TurnRecorder | None = None,
     ) -> None:
@@ -1443,7 +1442,7 @@ def bespoke_runtime_factory(
     agent_providers: dict[str, AgentProviders],
     mcp_servers: McpServers,
     memory: MemoryStore | None,
-    fillers: dict[str, FillerClips],
+    fillers: FillerCache,
     conversations: TurnStore | None = None,
 ) -> RuntimeFactory:
     """The composition root's half of the seam: everything this runtime
@@ -1451,9 +1450,9 @@ def bespoke_runtime_factory(
 
     The device edge calls what comes back with a device to speak
     through, the session's observability, and the agents the device is
-    bound to, and never learns what an LLM is. `fillers` is the mutable
-    dict the boot fills once synthesis has run, so a factory built
-    before the clips exist still sees them.
+    bound to, and never learns what an LLM is. `fillers` is the clip
+    cache the boot fills once synthesis has run, held by reference so a
+    factory built before the clips exist still sees them.
 
     `conversations` is closed over the same way, and is the reason the
     recorder reaches a runtime without the `RuntimeFactory` type moving:
