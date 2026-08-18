@@ -426,3 +426,58 @@ Each milestone is a stacked branch off the previous one
 `-m1`), merged to `main` by rebase via its own PR after its own
 external review round; every merge leaves `main` releasable
 because every milestone is behavior-preserving and fully tested.
+
+## Plan review round
+
+External review: codex-cli 0.147.0, model gpt-5.6-sol, 2026-08-18,
+against commit ea5d34e. Six findings; verdict "not ready" pending
+the amendments below.
+
+1. **P1: the plan unilaterally drops an acceptance criterion.**
+   The issue requires pipeline.py below roughly 900 lines; the
+   plan substitutes a ~1,450 target on its own authority. The two
+   requirements cannot both hold, but a plan cannot silently
+   redefine an acceptance criterion; #141 itself must be amended
+   explicitly before implementation.
+
+2. **P1: M1 removes state the still-in-place filler uses.** M1
+   moves `_endpointer` and `_output_paused` into `TurnTaking`
+   while the filler stays in `PipelineRuntime` until M2 and reads
+   both directly (pipeline.py:1678, 1690); M1 also leaves
+   `test_session_filler.py`'s setup reach-ins to those fields
+   unrelocated. M1 as written raises `AttributeError` in
+   filler-enabled deployments and fails the unit suite,
+   contradicting per-milestone releasability. M1 must adapt the
+   in-place filler reads to `self._turntaking.speech_ms()` and
+   `.output_paused` and relocate those filler-test setup sites; M2
+   then moves already-adapted code.
+
+3. **P2: the conformance inventory omits the TOKEN_SOURCES map.**
+   Beyond the sidecar identities and the spread key,
+   `test_event_schema_conformance.py:1081-1095` pins the
+   closed-token decision sources for `barge_in_suppressed.reason`
+   and `filler_skipped.reason` to the old module and scopes; both
+   entries go stale (one in M1, one in M2) and belong in the named
+   inventory.
+
+4. **P2: the ordinary-log channel claim is factually wrong.**
+   pipeline.py imports `logger` from `samtal_server.events`
+   (pipeline.py:60), so the moved diagnostics already ride the
+   fixed `samtal_server.session` channel; the plan's plan to give
+   the new modules `getLogger(__name__)` loggers would be the
+   behavior change, not the preservation. The new modules must
+   import the same shared logger.
+
+5. **P2: the no-leak claim overstates coverage.** The
+   confirmation-failure catch (`logger.exception`,
+   pipeline.py:1534-1536) retains the provider exception's text
+   and chain; the failed-confirmation test raises a message-free
+   `TimeoutError` and searches no sentinel, and the #144 sentinel
+   suites exercise `_reply`'s separate class-name-only arm. This
+   is a pre-existing gap to track in its own issue and move
+   verbatim, not a surface the plan may claim proven safe.
+
+6. **P3: `ScriptedEndpointer`'s docstring becomes false.** It
+   says feeding is never exercised; the rewritten suites and the
+   new direct tests drive `feed`. The mechanical docstring update
+   belongs in the plan.
