@@ -223,10 +223,15 @@ changes):
   its ASR returns, and in the `finally`).
 - `speech_ms() -> int`: the rounded, None-safe endpointer read
   used by `finish_utterance` today and by the filler's stand-down
-  check tomorrow.
+  check. From M1 the still-in-place `_run_filler` reads
+  `self._turntaking.speech_ms()` here instead of reaching
+  `self._endpointer` (which no longer exists on the runtime), so
+  the filler works between the milestones; M2 then moves the
+  already-adapted code.
 - `output_paused -> bool` (read-only property): the pause mirror,
   written only by the ladder's own pause/resume, read by the
-  filler.
+  filler. Same M1 adaptation: the in-place `_run_filler` reads
+  `self._turntaking.output_paused` the day the field moves.
 
 Private and moving whole: `_gate_barge_in`, `_speaking_ms_field`,
 `_trimmed_utterance`, `_pause_output`, `_resume_output`.
@@ -319,7 +324,11 @@ diffed empty; the channel invariant predicts zero drift).
   (`runtime._turns`, event records) at full strength.
 - `test_session_filler.py`: same treatment; task-state assertions
   move from `_filler_task`/`_filler_sounding`/`_filler_fires`
-  reach-ins to the `armed`/`sounding`/`fires` properties.
+  reach-ins to the `armed`/`sounding`/`fires` properties. The
+  rewrite happens in M2, but M1 already relocates its setup
+  reach-ins into moved state (`_endpointer` seeding,
+  `_pause_output`/`_resume_output`) so the suite stays green at
+  the M1 merge.
 - New `tests/unit/test_turntaking.py`: the gate ladder driven
   directly, no PipelineRuntime constructed, with a fake
   `ReplyControl` and `ScriptedEndpointer`; one scenario per rung
@@ -406,15 +415,23 @@ the endpointer shape structurally and needs no registration.
   (state, feed, tail cap, gate ladder, merge, trim, pause mirror,
   `ReplyControl`), delegate from `PipelineRuntime`
   (`start_reply`/`cancel_reply`/`confirm_transcript` seams,
-  SessionInput one-liners), update the conformance sidecar
-  identities and the `_speaking_ms_field` spread key, rewrite
+  SessionInput one-liners), adapt the still-in-place filler's two
+  stand-down reads to `self._turntaking.speech_ms()` and
+  `.output_paused` so a filler-enabled deployment works between
+  the milestones, update the conformance sidecar identities, the
+  `_speaking_ms_field` spread key, and the `barge_in_suppressed`
+  reason entry in `TOKEN_SOURCES`, rewrite
   `test_session_barge_in.py`'s private-access tests through the
   new interface, add `tests/unit/test_turntaking.py`, relocate
   setup reach-ins in `test_event_surface_pins.py`,
   `test_session.py`, `test_session_watchdog.py`,
-  `test_session_record.py`, regenerate the events reference
-  expecting an empty diff, CHANGELOG entry, implementation-doc
-  section with the M1 half of the scenario-mapping table.
+  `test_session_record.py`, and `test_session_filler.py` (its
+  `_endpointer` seeding and `_pause_output`/`_resume_output`
+  sites; its real rewrite waits for M2), update
+  `ScriptedEndpointer`'s docstring for the feed-driven tests,
+  regenerate the events reference expecting an empty diff,
+  CHANGELOG entry, implementation-doc section with the M1 half of
+  the scenario-mapping table.
 - [ ] **M2: the filler runner.** Add `runtime/filler_runner.py`
   (`FillerRunner`, `TurnView`, the observation properties),
   delegate from `PipelineRuntime` (`arm`/`tail`/`settle`/
@@ -461,6 +478,13 @@ the amendments below.
    in-place filler reads to `self._turntaking.speech_ms()` and
    `.output_paused` and relocate those filler-test setup sites; M2
    then moves already-adapted code.
+
+   *Resolution*: exactly that. The M1 milestone now names the two
+   stand-down read adaptations and the filler-test setup
+   relocation; the `TurnTaking` interface section documents that
+   `speech_ms()`/`output_paused` serve the in-place filler from M1
+   on; the M2 rewrite note in Tests says why the file was already
+   touched in M1.
 
 3. **P2: the conformance inventory omits the TOKEN_SOURCES map.**
    Beyond the sidecar identities and the spread key,
