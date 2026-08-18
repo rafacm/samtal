@@ -635,11 +635,19 @@ inspected rather than driven.
 
 From `samtal-server/`:
 
+Rerun on the final tree, after the PR review round below. The figures
+first recorded here were taken before the rebase onto merged main and
+cited a 2,980 / 57 baseline that no longer existed: M2 finished at
+2,981 unit and 58 integration once its own review round had added the
+MCP refusal test.
+
 - `uv run ruff check .`: all checks passed.
-- `uv run pytest tests/unit -q`: 2,982 passed, 16 skipped (2,980 before
-  this milestone; the two are the net of three new store-dependency
-  claims and one retired).
-- `uv run pytest tests/integration -q`: 57 passed.
+- `uv run pytest tests/unit -q`: 2,984 passed, 16 skipped (2,981 after
+  M2's review round; the three are the two new store-dependency claims
+  net of one retired, plus the mounted-handle and check-in pins the
+  review round below added).
+- `uv run pytest tests/integration -q`: 58 passed, unchanged by this
+  milestone.
 - The four generated references CI diffs (domain configuration,
   conversations schema, events, API OpenAPI): regenerated and diffed
   clean. The engine's lifetime is not part of the contract, which is
@@ -652,3 +660,93 @@ From `samtal-server/`:
   `test_config_api_reads.py`, `test_config_api_writes.py`,
   `test_config_api_pending.py`, `test_config_api_runtime.py`,
   `test_conversations_api.py`): all passed.
+
+### The PR review round (M3)
+
+External review of PR #189: three findings, all accepted by the
+coordinator. Two are fixed as written. The first is not, and the reason
+is recorded here in full rather than in a commit message, because what
+it turned up is a property of the design and the next reader deserves
+to meet it before proposing the same change again.
+
+1. **P1: `DeviceBindings` is opened before the store creates the
+   database.** `_build_composition` opened the bindings view and then
+   `open_store`, so on a directory with no database the view selected
+   snapshot-only mode permanently while the open created the file a
+   moment later. An API binding write would then be acknowledged as live
+   while every device path answered from the boot snapshot until a
+   restart. The proposed fix was to open the store first.
+
+   *Not implemented, deliberately.* The reordering was written, tested
+   and reverted; the reasoning, in the order it was established:
+
+   - **The hazard is unreachable from either production entry point.**
+     Both compose their configuration out of the database:
+     `main()` calls `load_boot_config` and passes the result to
+     `create_app`, and `create_app(None)` calls it itself. That function
+     is `open_database` plus a read, so the file always exists before
+     the build begins and `DeviceBindings.open` always takes the live
+     branch. The shape the finding describes needs a caller that hands
+     `create_app` a configuration it did not get from boot, over an
+     unmigrated directory, which is the test lane and an embedded
+     caller.
+   - **That shape is the mode `bindings.py` documents and designs for**:
+     "a configuration with no database behind it is authoritative: the
+     snapshot is then the whole truth there is, which is what a test lane
+     and an embedded server have". `DeviceAgents.authoritative` exists to
+     carry that distinction to the activation ceremony, which reads an
+     empty resolution as "no operator has bound this" and must not read a
+     failed one that way. Reordering deletes the mode, because the server
+     then always creates the file.
+   - **It costs 118 unit tests across 19 files.** With the reorder, the
+     lane's in-memory configurations are shadowed by the empty database
+     the build now creates: `agents_for` reads the `devices` rows and
+     `default_agent` from it and never falls back, so every session, OTA,
+     capture and onboarding test whose device is bound in the
+     configuration resolves to nothing ("no agent is configured for this
+     device"). The failures are not incidental; they are the lane
+     asserting the documented mode.
+   - **The repairs all cost more than the hazard.** Seeding each test's
+     domain half into its database (what the integration lane's `booted`
+     does) would work and is the honest end state, but it is ~33 inline
+     `Config(...)` sites plus the shared factories, an added
+     `open_database` per configuration, and a change to what the unit
+     lane means, landed in a review round. Falling back to the snapshot
+     when the database has nothing to say would let a deleted binding go
+     on resolving until a restart, which is a device-authorization path.
+     Passing the composition root a flag for "there was a database before
+     this build" reintroduces the finding exactly.
+
+   *What was done instead.* The end-to-end claim the finding is really
+   about is now pinned, in the shape production has:
+   `test_a_binding_written_through_the_api_is_live_at_the_next_check_in`
+   migrates the database the way boot leaves it, sends an unclaimed
+   board round the activation ceremony, binds it through the mounted
+   API, and requires the next check-in to resolve it. Nothing pinned
+   that before: the write path asserted its own acknowledgement and the
+   OTA suites asserted resolution against configurations they composed
+   themselves. The comment at `DeviceBindings.open` in
+   `_build_composition` now names which of the two modes is selected and
+   why a server always gets the live one.
+
+   *What is left open.* Moving the unit lane onto seeded databases, and
+   with it deciding whether the snapshot-authoritative mode is still
+   worth keeping now that the API is the configuration surface. That is
+   its own issue, not a milestone fix.
+
+2. **P2: the mounted runtime kept its store handle after teardown.** The
+   parent lifespan installed it and never cleared it, and `dispose()`
+   replaces an engine's pool rather than closing the engine, so a request
+   after teardown would have opened connections no owner would close.
+
+   *Fixed.* Both owners install through one context manager, `installed`,
+   which the mounted owner enters after the open and therefore unwinds
+   before the disposal. A late request meets `store_dependency`'s refusal
+   instead, sanitized into the same 500 body as any other unexpected
+   failure. Pinned across all three states (none before entry, present
+   during, none after), and verified by leaving the handle installed.
+
+3. **P3: the recorded test counts contradicted M2's.** Corrected in the
+   verification section above, from a rerun on the final tree: the
+   baseline was M2's post-review 2,981 unit and 58 integration, not the
+   2,980 / 57 taken before the rebase onto merged main.
