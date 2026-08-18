@@ -56,8 +56,13 @@ def api(tmp_path: Path) -> FastAPI:
 
 
 @pytest.fixture
-def client(api: FastAPI) -> TestClient:
-    return TestClient(api)
+def client(api: FastAPI) -> Iterator[TestClient]:
+    """Entered, so that a request the gate lets through reaches a real
+    read rather than an application with no engine (#142). The tests
+    below that register a throwaway route build their own client and do
+    not need one, since a route that raises reaches no database."""
+    with TestClient(api) as client:
+        yield client
 
 
 def _bearer(token: str) -> dict[str, str]:
@@ -153,9 +158,8 @@ def test_the_token_reaches_no_log_record(
     """Whether the request carried it, got it wrong, or failed after it:
     the token is never logged, at any level."""
     _route(api, "/boom", RuntimeError("nothing to do with the token"))
-    client = TestClient(api)
 
-    with caplog.at_level(logging.DEBUG):
+    with TestClient(api) as client, caplog.at_level(logging.DEBUG):
         client.get("/config")
         client.get("/config", headers=_bearer(TOKEN))
         client.get("/boom", headers=_bearer(TOKEN))
