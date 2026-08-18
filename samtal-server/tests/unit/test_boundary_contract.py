@@ -64,7 +64,7 @@ def app_with_a_stub(built: list[StubRuntime], config: Config | None = None) -> A
         built.append(runtime)
         return cast(SessionInput, runtime)
 
-    app.state.runtime_factory = factory
+    app.state.composition.runtime_factory = factory
     return app
 
 

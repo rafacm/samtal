@@ -270,7 +270,7 @@ def test_a_store_that_records_nothing_today_still_serves_what_it_recorded(
             f"{MOUNT_PATH}/conversations", headers={"Authorization": f"Bearer {TOKEN}"}
         ).json()
 
-    assert app.state.conversations is None, "this server records nothing"
+    assert app.state.composition.conversations is None, "this server records nothing"
     assert [item["session"] for item in listing["items"]] == ["session-01", "session-00"]
 
 

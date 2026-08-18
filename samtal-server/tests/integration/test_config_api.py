@@ -91,12 +91,13 @@ def test_an_empty_start_is_configured_over_http_and_serves_after_a_restart(
     booted = load_boot_config()
     restarted = create_app(booted.config, booted.secrets)
 
-    assert restarted.state.config.agents_for_device("aa:bb:cc:dd:ee:ff") == ["assistant"]
+    composition = restarted.state.composition
+    assert composition.config.agents_for_device("aa:bb:cc:dd:ee:ff") == ["assistant"]
     # And the pipeline resolves for that agent, which is what "serves the
     # conversation configuration" means: every stage built at boot, which
     # is also the check the first application could not have passed.
-    providers = restarted.state.agent_providers["assistant"]
-    assert restarted.state.config.prompt_for_agent("assistant") == "You are an assistant."
+    providers = composition.agent_providers["assistant"]
+    assert composition.config.prompt_for_agent("assistant") == "You are an assistant."
     assert providers.llm is not None
     assert providers.asr is not None
     assert providers.tts is not None

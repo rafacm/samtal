@@ -64,7 +64,7 @@ def test_disabled_auth_boots_with_no_secret_at_all(
     monkeypatch.delenv(SECRET_ENV, raising=False)
     config = Config(server={"auth": {"enabled": False}})
     assert build_device_auth(config) is None
-    assert create_app(config).state.device_auth is None
+    assert create_app(config).state.composition.device_auth is None
 
 
 def test_auth_can_be_turned_off_through_the_environment(
@@ -87,7 +87,7 @@ def test_the_issuer_is_built_once_and_hangs_on_the_app(
 ) -> None:
     monkeypatch.setenv(SECRET_ENV, "c" * 64)
     app = create_app(Config())
-    assert isinstance(app.state.device_auth, DeviceAuth)
+    assert isinstance(app.state.composition.device_auth, DeviceAuth)
 
 
 def test_the_token_lifetime_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -247,7 +247,7 @@ def test_the_ota_reply_and_the_recorded_facts_are_untouched(
         )
 
     assert response.json()["firmware"]["version"] == HOSTILE_VERSION
-    assert client.app.state.device_facts.get(NORMALIZED) == {
+    assert client.app.state.composition.device_facts.get(NORMALIZED) == {
         "firmware": HOSTILE_VERSION,
         "board": HOSTILE_BOARD,
     }
@@ -383,7 +383,7 @@ def open_a_session(client: TestClient, client_id: str) -> None:
     """One handshake presenting the given Client-Id, with a token signed
     for that same header, which is the identity pair the OTA reply would
     have issued for."""
-    device_auth = client.app.state.device_auth
+    device_auth = client.app.state.composition.device_auth
     token = "" if device_auth is None else device_auth.issue(client_id, NORMALIZED)
     headers = {
         "Authorization": f"Bearer {token}",
@@ -459,7 +459,7 @@ def full_server(**auth: object) -> Config:
 def refused_at_capacity(client: TestClient, device_id: str) -> None:
     """One handshake past the capacity ceiling, presenting the given
     Device-Id."""
-    device_auth = client.app.state.device_auth
+    device_auth = client.app.state.composition.device_auth
     headers = {"Protocol-Version": "1", "Client-Id": DEVICE_UUID, "Device-Id": device_id}
     if device_auth is not None:
         headers["Authorization"] = f"Bearer {device_auth.issue(DEVICE_UUID, device_id)}"
@@ -498,15 +498,14 @@ def test_the_capacity_refusal_still_names_a_device_it_recognizes(
     """The lawful value the contract pin plants, in the form it pins it:
     a header that normalizes to a MAC reads exactly as it did before."""
     with TestClient(create_app(full_server())) as client:
+        device_auth = client.app.state.composition.device_auth
         with handshake(
             client,
             {
                 "Protocol-Version": "1",
                 "Client-Id": DEVICE_UUID,
                 "Device-Id": DEVICE_MAC,
-                "Authorization": (
-                    f"Bearer {client.app.state.device_auth.issue(DEVICE_UUID, NORMALIZED)}"
-                ),
+                "Authorization": (f"Bearer {device_auth.issue(DEVICE_UUID, NORMALIZED)}"),
             },
         ) as held:
             shake_hands(held)

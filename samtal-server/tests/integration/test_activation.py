@@ -89,7 +89,7 @@ async def test_a_board_is_onboarded_by_the_code_it_shows(
         # The URL an operator reads off the startup banner and types
         # into the board's captive portal. Everything below is what the
         # board does with it.
-        short = onboarding_path(onboarding_key(app.state.config.server))
+        short = onboarding_path(onboarding_key(app.state.composition.config.server))
         base = f"http://127.0.0.1:{port}"
         async with httpx.AsyncClient(base_url=base, timeout=30) as client:
             body = await _check_in(client, short)
@@ -141,7 +141,7 @@ async def test_a_board_is_onboarded_by_the_code_it_shows(
     # directory hands the board its token straight away, at the same
     # onboarding URL, because the key is derived from the same secret.
     restarted = booted_in(directory, CONFIG)
-    assert onboarding_path(onboarding_key(restarted.state.config.server)) == short
+    assert onboarding_path(onboarding_key(restarted.state.composition.config.server)) == short
     with TestClient(restarted) as client:
         after = client.post(short, json=SYSTEM_INFO, headers=HEADERS).json()
     assert after["websocket"]["token"] != ""
@@ -156,7 +156,7 @@ async def test_a_stale_code_is_refused_by_the_running_server(
     that is no longer the one on the screen, and is told so rather than
     binding something."""
     async with serve_app_in(tmp_path / "db", CONFIG) as (port, app):
-        short = onboarding_path(onboarding_key(app.state.config.server))
+        short = onboarding_path(onboarding_key(app.state.composition.config.server))
         async with httpx.AsyncClient(base_url=f"http://127.0.0.1:{port}", timeout=30) as client:
             code = (await _check_in(client, short))["activation"]["code"]
 

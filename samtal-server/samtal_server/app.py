@@ -8,6 +8,7 @@ from samtal_server import __version__, onboarding, ota, ws
 from samtal_server.auth import build_device_auth
 from samtal_server.build_info import revision
 from samtal_server.capture import CaptureStore, DeviceFacts
+from samtal_server.composition import Composition
 from samtal_server.config import Config
 from samtal_server.config.api import api_token, build_api, mount_api
 from samtal_server.config.boot import load_boot_config, reload_domain_config
@@ -16,7 +17,7 @@ from samtal_server.config.secrets import SecretStore
 from samtal_server.conversations import ConversationStore, migrate_existing
 from samtal_server.device.bindings import DeviceBindings
 from samtal_server.events import ServerEvents, resolve_enforcement
-from samtal_server.filler import build_agent_fillers
+from samtal_server.filler import AgentFillers, build_agent_fillers
 from samtal_server.providers import build_agent_providers
 from samtal_server.registry import SessionRegistry
 from samtal_server.runtime import prompt
@@ -50,8 +51,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     The way out also disposes the device bindings' read engine, the one
     thing on a running server that still holds the configuration
-    database open."""
-    conversations = app.state.conversations
+    database open.
+
+    What this starts and stops is bound once from the composition
+    `create_app` built, so the startup reads the same declared fields
+    every handler does."""
+    comp = app.state.composition
+    conversations = comp.conversations
     try:
         # Inside the guard rather than in front of it: a writer whose
         # thread will not start is exactly the case where the stop below
@@ -59,18 +65,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # cover it as covers everything after it.
         if conversations is not None:
             conversations.start()
-        app.state.agent_fillers.update(
-            await build_agent_fillers(app.state.config, app.state.agent_providers)
-        )
-        await app.state.mcp_servers.start_all()
+        comp.agent_fillers.fill(await build_agent_fillers(comp.config, comp.agent_providers))
+        await comp.mcp_servers.start_all()
         try:
             yield
         finally:
-            await app.state.mcp_servers.stop_all()
+            await comp.mcp_servers.stop_all()
             # The one database connection pool a running server holds,
             # let go here so a process on its way out leaves no handle on
             # the data volume.
-            app.state.bindings.dispose()
+            comp.bindings.dispose()
     finally:
         if conversations is not None:
             conversations.stop()
@@ -172,23 +176,27 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     if config is None:
         booted = load_boot_config()
         config, secrets = booted.config, booted.secrets
-    app.state.config = config
+    # Everything below is built into a local and assembled into one
+    # `Composition` at the end: what a running server is made of is a
+    # declared object (`composition.py`), and `app.state` carries that
+    # one attribute rather than an attribute per resource.
+    #
     # Auth is resolved first and fails the boot when it is enabled with no
     # secret in the environment, so a deployment that forgot one never
     # comes up serving every device that connects.
-    app.state.device_auth = build_device_auth(app.state.config)
+    device_auth = build_device_auth(config)
     # Which agents a device may talk to, and the only thing this server
     # re-reads while it runs: an operator binds a board with the board
     # in front of them, and its next check-in is seconds away. Built
     # here because boot has already migrated the database, so nothing on
     # a device path ever has to; disposed in the lifespan above.
-    app.state.bindings = DeviceBindings.open(app.state.config)
+    bindings = DeviceBindings.open(config)
     # The devices waiting to be claimed, and the codes they are showing.
     # Runtime state owned by this app and shared with the configuration
     # API below, which is where a code becomes a binding. Always built,
     # even with onboarding off, so no handler needs a branch for its
     # absence; with onboarding off nothing ever puts anything in it.
-    app.state.pending = onboarding.PendingDevices()
+    pending = onboarding.PendingDevices()
     # The configuration API's token, resolved here rather than at the
     # call below and for the reason it always was: the API is always
     # mounted, so a deployment that forgot the variable must be refused
@@ -198,20 +206,20 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     # which failure such a deployment reads. Held in a local, passed
     # straight into the gate, and kept nowhere else, least of all on
     # app.state, and never logged.
-    token = api_token(app.state.config)
+    token = api_token(config)
     # Built before the API rather than beside the providers below,
     # because the API's status read reports these managers and they have
     # to exist to be handed over. An unknown reference or an unset
     # secret is still a boot failure here, exactly as it was; being
     # unreachable is still not one.
-    app.state.mcp_servers = McpServers.build(app.state.config, secrets)
+    mcp_servers = McpServers.build(config, secrets)
     # Absent memory configuration means no remember tool and no
     # injection; the directory itself is created on the first write.
     # Built before the API rather than beside the runtime below, because
     # the API's prompt read reports what a session would be sent and
     # memory is part of that.
-    memory = app.state.config.memory
-    app.state.memory = None if memory is None else MemoryStore(memory.dir)
+    memory_section = config.memory
+    memory = None if memory_section is None else MemoryStore(memory_section.dir)
     # The agents go with the token because a device write's
     # acknowledgement says whether the device can reach what it was just
     # bound to, and only this server knows what it loaded; the pending
@@ -225,24 +233,26 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     # answers is what a session opening now would be sent.
     api = build_api(
         token,
-        app.state.config.server.database.dir,
-        app.state.config.agents,
-        app.state.pending,
-        app.state.mcp_servers,
-        _mcp_reloader(app.state.config, app.state.mcp_servers),
-        _prompt_preview(app.state.config, app.state.mcp_servers, app.state.memory),
+        config.server.database.dir,
+        config.agents,
+        pending,
+        mcp_servers,
+        _mcp_reloader(config, mcp_servers),
+        _prompt_preview(config, mcp_servers, memory),
     )
     # One registry per app: what decides whether there is room for the
     # next conversation, and what the drain reaches the live ones through.
-    app.state.sessions = SessionRegistry(app.state.config.server.limits.max_sessions)
+    sessions = SessionRegistry(config.server.limits.max_sessions)
     # Built here so a bad provider configuration (unknown type, bad option,
     # missing extra, agent without a full pipeline) fails the boot rather
     # than the first conversation. The MCP servers are built above, for
     # the same reason and one of their own.
-    app.state.agent_providers = build_agent_providers(app.state.config, secrets)
+    agent_providers = build_agent_providers(config, secrets)
     # Filled at startup by the lifespan above, since synthesis is async;
-    # empty means no agent masks its latency, which is the default.
-    app.state.agent_fillers = {}
+    # empty means no agent masks its latency, which is the default. The
+    # cache is handed out here and filled there, and answers "nothing for
+    # this agent" the whole time in between.
+    agent_fillers = AgentFillers()
     # What was said, kept where it can be queried. Absent unless the
     # section exists and says so, which is what keeps recording a
     # conversation something an operator asks for.
@@ -252,19 +262,19 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     # first conversation, and the writer thread is the lifespan's to
     # start and stop. Built before the runtime factory below, because
     # that closure is how a turn's record reaches it.
-    conversations = app.state.config.server.conversations
-    database_dir = app.state.config.server.database.dir
-    app.state.conversations = (
+    conversations_section = config.server.conversations
+    database_dir = config.server.database.dir
+    conversations = (
         None
-        if conversations is None or not conversations.enabled
+        if conversations_section is None or not conversations_section.enabled
         else ConversationStore(
             database_dir,
-            metrics=conversations.metrics,
-            text=conversations.text,
-            retention_days=conversations.retention_days,
+            metrics=conversations_section.metrics,
+            text=conversations_section.text,
+            retention_days=conversations_section.retention_days,
         )
     )
-    if app.state.conversations is None:
+    if conversations is None:
         # Recording off still leaves what was recorded readable: an
         # upgraded deployment that recorded last month serves its history
         # against the schema this server reads with. Migration is
@@ -279,29 +289,32 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     # the lifespan fills at startup and this closure sees fill. The
     # store goes with them for the same reason: it outlives every
     # connection, and the per-session recorder is derived from it here.
-    app.state.runtime_factory = bespoke_runtime_factory(
-        app.state.config,
-        app.state.agent_providers,
-        app.state.mcp_servers,
-        app.state.memory,
-        app.state.agent_fillers,
-        app.state.conversations,
+    runtime_factory = bespoke_runtime_factory(
+        config,
+        agent_providers,
+        mcp_servers,
+        memory,
+        agent_fillers,
+        conversations,
     )
     # What a device says about itself at OTA check-in, kept for the
     # session that follows: a capture manifest needs the firmware
     # version, and the websocket handshake never carries it.
-    app.state.device_facts = DeviceFacts()
+    device_facts = DeviceFacts()
     # Absent unless capture is configured and switched on, which is what
     # keeps recording something an operator has to ask for.
-    capture = app.state.config.server.capture
-    app.state.capture = (
+    capture_section = config.server.capture
+    capture = (
         None
-        if capture is None or not capture.enabled
+        if capture_section is None or not capture_section.enabled
         else CaptureStore(
-            capture.dir, capture.max_session_s, capture.max_total_mb, capture.min_free_mb
+            capture_section.dir,
+            capture_section.max_session_s,
+            capture_section.max_total_mb,
+            capture_section.min_free_mb,
         )
     )
-    if app.state.capture is not None:
+    if capture is not None:
         # Room audio is the whole of what makes this a recording, and the
         # decision track beside it is what the events already are. It
         # used to say "transcripts", which was true while the events
@@ -311,20 +324,42 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
         events.warning(
             "session capture is on: room audio and a track of the session's events "
             "are being written to %s",
-            capture.dir,
+            capture_section.dir,
             event="capture_enabled",
-            path=str(capture.dir),
+            path=str(capture_section.dir),
         )
-    elif capture is not None:
+    elif capture_section is not None:
         # Said out loud, because a configured section that records
         # nothing is otherwise a silence an operator has to debug.
         events.info(
             "session capture is configured but off; set server.capture.enabled "
             "to record to %s",
-            capture.dir,
+            capture_section.dir,
             event="capture_disabled",
-            path=str(capture.dir),
+            path=str(capture_section.dir),
         )
+    # The one thing on this app's state, and the whole of what a handler
+    # reads back: the fields are declared and typed in `composition.py`,
+    # and the API's own request-time pieces ride along as the object the
+    # sub-application already carries. The token is the standing
+    # exception and is not here: it was passed into the gate above and is
+    # held nowhere.
+    app.state.composition = Composition(
+        config=config,
+        device_auth=device_auth,
+        bindings=bindings,
+        pending=pending,
+        mcp_servers=mcp_servers,
+        memory=memory,
+        sessions=sessions,
+        agent_providers=agent_providers,
+        agent_fillers=agent_fillers,
+        conversations=conversations,
+        runtime_factory=runtime_factory,
+        device_facts=device_facts,
+        capture=capture,
+        api=api.state.api_runtime,
+    )
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
@@ -338,14 +373,14 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     # decided before the config was read. A null path unmounts it, which
     # is how a deployment retires it once every board it serves has been
     # moved to the onboarding path below.
-    if app.state.config.server.ota_path is not None:
-        app.include_router(ota.build_router(app.state.config.server.ota_path))
+    if config.server.ota_path is not None:
+        app.include_router(ota.build_router(config.server.ota_path))
     # The same handlers at the short alias an operator types into a
     # captive portal. Its key is derived from the device-auth secret, so
     # there is nothing to configure and nothing to store; with auth off
     # there is no secret and the route mounts keyless.
-    if app.state.config.server.onboarding.enabled:
-        key = onboarding.onboarding_key(app.state.config.server)
+    if config.server.onboarding.enabled:
+        key = onboarding.onboarding_key(config.server)
         app.include_router(onboarding.build_router(key))
     app.include_router(ws.router)
 

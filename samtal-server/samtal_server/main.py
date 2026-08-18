@@ -85,7 +85,7 @@ class DrainingServer(uvicorn.Server):
 
     async def _drain(self, sig: int, frame: FrameType | None) -> None:
         try:
-            await self._app.state.sessions.drain(self._drain_s)
+            await self._app.state.composition.sessions.drain(self._drain_s)
         finally:
             # Whatever the drain did or did not manage, the process is
             # going: uvicorn's own shutdown, and the 1012 fail-close it
