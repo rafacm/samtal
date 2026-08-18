@@ -20,7 +20,11 @@ place before pytest imports the first test module.
 import os
 import shutil
 import sys
+import tempfile
+from collections.abc import Iterator
 from pathlib import Path
+
+import pytest
 
 # A cached `.pyc` records the source's size and its mtime in whole
 # seconds, and CPython accepts the cache when both are *equal* to the
@@ -103,3 +107,76 @@ os.environ.setdefault(API_SECRET_ENV, TEST_API_SECRET)
 ENFORCEMENT_ENV = "SAMTAL_EVENTS_ENFORCEMENT"
 
 os.environ[ENFORCEMENT_ENV] = "strict"
+
+# Where a database goes when nobody said.
+#
+# Most of both lanes composes a `Config` in memory and names no
+# directory, so `server.database.dir` falls to the packaged default,
+# which no development machine or runner can write. That used to be
+# harmless: nothing on the serving path opened the configuration
+# database, and the one thing that looked at it tolerated its absence.
+# Since #142 the lifespan opens and migrates it once at startup, so every
+# app a test enters needs a directory it can create, and a lane that
+# wrote to the packaged one would be writing to a deployment's data
+# volume.
+#
+# So the default is moved, in two steps. Here, once, for the whole run,
+# because a test module that composes its `Config` at import time (two
+# integration suites do) has it before any fixture could run; and again
+# per test in the fixture below, so that a test which does reach a
+# database gets one of its own.
+#
+# On the model rather than through the environment, because a
+# `Config(...)` built in Python reads no environment:
+# `SAMTAL_SERVER__DATABASE__DIR` is the deployment's way in and reaches
+# only configuration loaded from a file.
+PACKAGED_DATABASE_DIR = Path("/var/lib/samtal")
+
+SHARED_DATABASE_DIR = Path(tempfile.mkdtemp(prefix="samtal-tests-"))
+
+
+def _database_default(directory: Path) -> None:
+    """Point `server.database.dir`'s default at `directory`.
+
+    The model is imported here and not at module scope because
+    everything above has to run before the first import of anything
+    under test, which is what the bytecode note and the two secrets are
+    about. The rebuild is not optional: pydantic bakes a default into
+    the validator it builds at class creation, so the field alone is not
+    where the answer comes from.
+    """
+    from samtal_server.config.models import DatabaseConfig
+
+    DatabaseConfig.model_fields["dir"].default = directory
+    DatabaseConfig.model_rebuild(force=True)
+
+
+_database_default(SHARED_DATABASE_DIR)
+
+
+@pytest.fixture(autouse=True)
+def writable_database_dir(tmp_path: Path) -> Iterator[Path]:
+    """Somewhere this test may keep a database of its own.
+
+    Autouse and per-test, so the isolation is the same as `tmp_path`'s: a
+    test that names its own directory is unaffected, and one that does
+    not gets a fresh empty one rather than sharing the run's.
+
+    Ask for `packaged_database_dir` to get the shipped default back.
+    """
+    directory = tmp_path / "samtal-db"
+    _database_default(directory)
+    yield directory
+    _database_default(SHARED_DATABASE_DIR)
+
+
+@pytest.fixture
+def packaged_database_dir() -> Iterator[Path]:
+    """Undo the fixture above, for a test about what a deployment gets.
+
+    Autouse fixtures are set up before the ones a test asks for by name,
+    so this runs second and has something to put back, and the teardown
+    order is the mirror of that.
+    """
+    _database_default(PACKAGED_DATABASE_DIR)
+    yield PACKAGED_DATABASE_DIR

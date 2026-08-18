@@ -253,10 +253,14 @@ def test_config_path_from_environment(
 
 
 def test_the_database_directory_defaults_and_is_overridable(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, packaged_database_dir: Path
 ) -> None:
     """The CLI reads this key through the same settings machinery the
-    server does, so a deployment names its database directory once."""
+    server does, so a deployment names its database directory once.
+
+    `packaged_database_dir` is what the rest of the lane runs without:
+    every other test is moved onto a temporary directory, and this is the
+    one that asks what a deployment is shipped pointing at."""
     assert load_file_config().server.database.dir == Path("/var/lib/samtal")
 
     path = write_config(tmp_path, "server:\n  database:\n    dir: /data/db\n")
