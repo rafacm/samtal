@@ -303,7 +303,7 @@ def test_the_store_dependency_opens_and_disposes_one_database(tmp_path: Path) ->
 
 
 def test_the_application_carries_the_dependency(api: FastAPI) -> None:
-    assert callable(api.state.store)
+    assert callable(api.state.api_runtime.store)
 
 
 # The mount

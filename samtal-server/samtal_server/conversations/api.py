@@ -606,7 +606,7 @@ def _reader(request: Request) -> Iterator[Connection]:
     a database directory: `build_api` attaches the dependency and
     `document()` never resolves it.
     """
-    yield from request.app.state.conversations()
+    yield from request.app.state.api_runtime.conversations()
 
 
 ReaderDep = Annotated[Connection, Depends(_reader)]
