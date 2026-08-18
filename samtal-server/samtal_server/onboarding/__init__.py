@@ -12,9 +12,12 @@ reply that puts the code on a screen.
 A file each, under this one:
 
 - `keys` derives the key, says what path it is served on, guards the
-  handlers behind it and reports a miss without quoting either key.
+  handlers behind it and reports a miss without quoting either key. The
+  router that mounts those guarded handlers lives beside the handlers,
+  in `ota.router`, because the guard is a dependency of it and not the
+  other way round.
 - `origin` answers what address the outside world reaches this server
-  on, and logs the startup banner that says it.
+  on, retained or on the wire, and logs the startup banner that says it.
 - `pending` is the table of waiting devices, its bounds and its claim
   lifecycle. It imports nothing device-facing, which is what lets the
   configuration API and `samtal-server config` read it.
@@ -42,10 +45,6 @@ siblings directly and take nothing else from here, so only this file
 aggregates.
 """
 
-from fastapi import APIRouter
-
-from samtal_server import ota
-from samtal_server.config.models import ONBOARDING_MOUNT_PATH
 from samtal_server.events import ServerEvents
 
 events = ServerEvents(__name__)
@@ -116,6 +115,7 @@ from .origin import (  # noqa: E402
     log_banner,
     portal_url_line,
     public_origin,
+    websocket_url_for,
 )
 from .pending import (  # noqa: E402
     BUDGET_SPENT,
@@ -141,9 +141,6 @@ from .unbound import (  # noqa: E402
 # The underscored names are here for that reason and not as an
 # invitation: the suites and the neighbouring modules read some of them
 # off this module.
-#
-# `build_router` is deliberately absent: it is a construction-only
-# factory this file still defines, and M2 of issue #143 retires it.
 __all__ = [
     "ACTIVATION_ALGORITHMS",
     "ACTIVATION_TIMEOUT_MS",
@@ -183,41 +180,5 @@ __all__ = [
     "onboarding_path",
     "portal_url_line",
     "public_origin",
+    "websocket_url_for",
 ]
-
-
-def build_router(key: str | None) -> APIRouter:
-    """The short-path router, delegating to the OTA handlers.
-
-    Built per app rather than at import time, for the reason the OTA
-    router is: the key is derived from configuration that has not been
-    read when this module is imported.
-
-    Temporary, and the one edge from this package to `ota` that is left
-    (issue #143). A router over ota's handlers belongs beside them, with
-    the guard as an ordinary dependency; it stays here only until M2
-    moves it to `ota.router.build_alias_router` and `app.py` calls that
-    instead, at which point this function and the import above it go.
-    """
-    router = APIRouter()
-    if key is None:
-        base = onboarding_path(None)
-        for path in ota.spellings(base):
-            router.post(path)(ota.check_version)
-            router.get(path)(ota.describe)
-        # Where a waiting device polls, which is its OTA URL with
-        # `activate` after it. Both spellings answer directly, like
-        # every other device-facing route: the firmware is not a
-        # browser, and a portal that dropped the trailing slash from the
-        # endpoint dropped it from this too.
-        for path in ota.spellings(f"{base}{ota.ACTIVATE_SEGMENT}/"):
-            router.post(path)(ota.activate)
-        return router
-    for path in ota.spellings(f"{ONBOARDING_MOUNT_PATH}/{{key}}/"):
-        router.post(path)(_guarded(key, ota.check_version))
-        router.get(path)(_guarded(key, ota.describe))
-    # Guarded like everything else on this path: a wrong key must meet
-    # the same 404 here as at the endpoint itself, on either spelling.
-    for path in ota.spellings(f"{ONBOARDING_MOUNT_PATH}/{{key}}/{ota.ACTIVATE_SEGMENT}/"):
-        router.post(path)(_guarded(key, ota.activate))
-    return router

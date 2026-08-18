@@ -1,27 +1,53 @@
 """What address the outside world reaches this server on, and the
 startup line that says it.
 
-One question, asked in three places: the banner below, the line
-`samtal-server config ota-url` and `config doctor` print, and the
-`message` an activating device shows on its screen. All three call
-`public_origin`, so a deployment names itself the same way wherever it
-is named, and the provenance travels with the value because two of the
-three sources it resolves are inferences.
+One question, asked in four places: the banner below, the line
+`samtal-server config ota-url` and `config doctor` print, the `message`
+an activating device shows on its screen, and the websocket URL the OTA
+reply hands every board. The first three call `public_origin`, so a
+deployment names itself the same way wherever it is named, and the
+provenance travels with the value because two of the three sources it
+resolves are inferences. The fourth calls `websocket_url_for`.
 
-An address assembled here is rebuilt from a parsed hostname and port
-rather than copied out of a raw netloc, which is what keeps a
-`user:password@host` out of a log line. The reply's own websocket URL
-is the other case, taken from the request verbatim, and it still lives
-in `ota`; the two become one assembler in M2 (issue #143).
+Both live here (issue #143), so there is one place to read to know what
+address a device is told about.
+
+The two modes are a real distinction and not a convenience. An address
+this server RETAINS (a banner, a screen, a log line, a printed URL) is
+rebuilt from a parsed hostname and port, which is what keeps a
+`user:password@host` out of it. An address that goes back out on the
+WIRE, to the board that just reached us, is the request's own netloc
+verbatim: it is the address that demonstrably works, this server trusts
+no forwarded header to improve on it, and a rebuild could only make it
+different from what arrived.
 """
 
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
+from fastapi import Request
+
+from samtal_server.config import Config
 from samtal_server.config.models import ServerConfig
+from samtal_server.device.boundary import WEBSOCKET_PATH
 
 from . import events
 from .keys import onboarding_key
+
+
+def websocket_url_for(config: Config, request: Request) -> str:
+    """The websocket URL to hand this device: the configured one, or the
+    address it just reached the OTA endpoint on.
+
+    The wire mode: what goes into the reply is the netloc the request
+    arrived with, exactly as it arrived. Cannot fail, and trusts no
+    forwarded header.
+    """
+    configured = config.server.websocket_url
+    if configured:
+        return configured
+    scheme = "wss" if request.url.scheme == "https" else "ws"
+    return f"{scheme}://{request.url.netloc}{WEBSOCKET_PATH}"
 
 
 @dataclass(frozen=True)
@@ -89,13 +115,13 @@ def _origin_of(websocket_url: str) -> str | None:
     """The http origin behind a `ws://` or `wss://` URL, or None when
     there is none to take.
 
-    Built from the parsed hostname and port, never from the raw netloc,
-    so a `user:password@host` cannot ride into a log line through the
-    banner. Both of the parse steps that raise are caught: `urlsplit`
-    itself for a malformed IPv6 host, and `.port` for one that is not a
-    number in range. The configuration validator refuses both, and this
-    is what keeps a configuration built in code from crashing a startup
-    the validator would have refused.
+    The retained mode: built from the parsed hostname and port, never
+    from the raw netloc, so a `user:password@host` cannot ride into a
+    log line through the banner. Both of the parse steps
+    that raise are caught: `urlsplit` itself for a malformed IPv6 host,
+    and `.port` for one that is not a number in range. The configuration
+    validator refuses both, and this is what keeps a configuration built
+    in code from crashing a startup the validator would have refused.
     """
     try:
         parts = urlsplit(websocket_url)

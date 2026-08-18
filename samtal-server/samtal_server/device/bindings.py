@@ -75,9 +75,13 @@ class DeviceAgents:
     # difference matters to exactly one caller: an empty resolution is
     # what the activation ceremony reads as "no operator has bound this
     # device", and from a fallback it means "this server could not
-    # find out". Issuing a token off a stale answer only ever repeats
-    # what boot already decided; minting a code off one would offer a
-    # stranger a claim ticket for somebody's bound board.
+    # find out". That caller is `onboarding.unbound.activation_for`,
+    # which is where the whole question of what an unbound device gets
+    # is decided (issue #143); the activation poll re-reads this view
+    # and deliberately ignores this flag. Issuing a token off a stale
+    # answer only ever repeats what boot already decided; minting a code
+    # off one would offer a stranger a claim ticket for somebody's bound
+    # board.
     #
     # A configuration with no database behind it is authoritative: the
     # snapshot is then the whole truth there is, which is what a test

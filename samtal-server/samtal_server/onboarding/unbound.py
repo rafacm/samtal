@@ -14,10 +14,9 @@ provenance check, the table's own bounds, and the reply section, in
 that order, each outcome tagged rather than narrated. The narration is
 the caller's, which is what keeps the two `activation_not_offered`
 warnings on the channel they have always been emitted on: this package
-never emits about a decision the OTA endpoint is answering.
-
-Nothing here is called by `ota` yet; M2 of issue #143 points its reply
-wrapper at it and retires the three-way split.
+never emits about a decision the OTA endpoint is answering. The caller
+is `ota.reply._activation`, a wrapper whose whole body is that
+narration.
 """
 
 from dataclasses import dataclass

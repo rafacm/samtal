@@ -560,7 +560,7 @@ def create_app(
     # there is no secret and the route mounts keyless.
     if config.server.onboarding.enabled:
         key = onboarding.onboarding_key(config.server)
-        app.include_router(onboarding.build_router(key))
+        app.include_router(ota.build_alias_router(key))
     app.include_router(ws.router)
 
     # Mounted last, so the device-facing routes are what this app is
