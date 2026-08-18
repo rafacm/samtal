@@ -27,11 +27,14 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import Engine
+from sqlalchemy.pool import Pool
 
 import samtal_server.app as app_module
 from samtal_server.app import StartupFailed, create_app, startup_failure
 from samtal_server.config import Config
 from samtal_server.conversations.store import DATABASE_FILENAME
+from samtal_server.db import open_database
 from samtal_server.device.bindings import DeviceBindings
 from samtal_server.providers import ProviderError
 from samtal_server.providers import registry as provider_registry
@@ -53,18 +56,54 @@ def recording_config(tmp_path: Path) -> Config:
     )
 
 
-def opened_bindings(monkeypatch: pytest.MonkeyPatch) -> list[DeviceBindings]:
-    """Every bindings view this run opens, in order."""
+def migrated(tmp_path: Path) -> None:
+    """The configuration database, where a boot leaves it.
+
+    Load bearing for every disposal assertion here: `DeviceBindings.open`
+    creates no database and opens no engine when there is no file, and
+    answers from the boot snapshot instead, so a test that asserts a pool
+    was let go without this has asserted `dispose()` on an object holding
+    nothing. Boot migrates this database before the app is built, which
+    is what this stands in for.
+    """
+    open_database(tmp_path).dispose()
+
+
+def engine_of(view: DeviceBindings) -> Engine:
+    """The connection pool a bindings view is holding, and the check that
+    it is holding one at all."""
+    engine = view._engine
+    assert engine is not None, (
+        "the bindings view opened no engine, so nothing below proves a disposal: "
+        "the configuration database has to exist before the app is built"
+    )
+    return engine
+
+
+def opened_bindings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[list[DeviceBindings], list[Pool]]:
+    """Every bindings view this run opens, in order, and the connection
+    pool each one was holding at the moment it was opened.
+
+    The pool is captured here because a build that fails has already
+    disposed by the time the test looks, and disposing an engine replaces
+    its pool: holding the one that existed during the build is what lets
+    a test tell a pool that was let go from one that was never there.
+    """
     opened: list[DeviceBindings] = []
+    pools: list[Pool] = []
     real = DeviceBindings.open.__func__  # type: ignore[attr-defined]
 
     def spy(cls: type[DeviceBindings], config: Config) -> DeviceBindings:
         view = real(cls, config)
         opened.append(view)
+        if view._engine is not None:
+            pools.append(view._engine.pool)
         return view
 
     monkeypatch.setattr(DeviceBindings, "open", classmethod(spy))
-    return opened
+    return opened, pools
 
 
 def disposed_bindings(monkeypatch: pytest.MonkeyPatch) -> list[DeviceBindings]:
@@ -109,7 +148,7 @@ def test_a_described_app_acquires_nothing(
 ) -> None:
     """The whole of acceptance criterion 6: build the app, never enter
     its lifespan, and nothing was opened, migrated, threaded or loaded."""
-    opened = opened_bindings(monkeypatch)
+    opened, _ = opened_bindings(monkeypatch)
     built = built_providers(monkeypatch)
 
     app = create_app(recording_config(tmp_path))
@@ -128,6 +167,8 @@ def test_entering_and_leaving_releases_everything(
 ) -> None:
     """The other end of the same claim: what the lifespan took, it gives
     back, in the reverse of the order it took it."""
+    migrated(tmp_path)
+    opened, pools = opened_bindings(monkeypatch)
     disposed = disposed_bindings(monkeypatch)
     stopped: list[str] = []
     real_stop_all = McpServers.stop_all
@@ -145,8 +186,19 @@ def test_entering_and_leaving_releases_everything(
         assert store is not None
         assert store._thread is not None and store._thread.is_alive()
         assert disposed == [], "the bindings pool went while the server was serving"
+        # Held open while it serves, and reading: a lookup is what the
+        # OTA endpoint does on every check-in.
+        engine = engine_of(composition.bindings)
+        with engine.connect():
+            pass
+        assert engine.pool is pools[0]
 
     assert disposed == [composition.bindings]
+    assert opened == [composition.bindings]
+    # Disposing an engine replaces the pool it was holding, which is the
+    # observable that separates a call to `dispose()` from the
+    # connections actually being let go.
+    assert engine.pool is not pools[0], "the connection pool outlived the server"
     assert stopped == ["mcp"]
     assert store._stopped
     assert not store._thread.is_alive()
@@ -159,7 +211,8 @@ def test_a_build_that_fails_part_way_releases_what_it_took(
     bindings pool is opened before the providers are built, so a provider
     failure has to unwind it: a boot that refused must not leave a
     connection pool behind on the way out."""
-    opened = opened_bindings(monkeypatch)
+    migrated(tmp_path)
+    opened, pools = opened_bindings(monkeypatch)
     disposed = disposed_bindings(monkeypatch)
     refusing_providers(monkeypatch)
 
@@ -170,6 +223,11 @@ def test_a_build_that_fails_part_way_releases_what_it_took(
 
     assert len(opened) == 1, "the bindings pool was never opened, so this proves nothing"
     assert disposed == opened
+    # And a pool that was really there and really let go, rather than a
+    # `dispose()` on a view holding nothing: the engine the build
+    # acquired is not holding the pool it acquired it with.
+    engine = engine_of(opened[0])
+    assert engine.pool is not pools[0], "a refused boot left its connection pool open"
 
 
 def test_a_boot_failure_is_carried_out_as_one_sentence(
