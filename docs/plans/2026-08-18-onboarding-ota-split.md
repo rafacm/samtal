@@ -136,13 +136,13 @@ where they correct or extend the issue:
   byte-identity, and docs/xiaozhi-notes.md's ceremony section
   (190-254) records the hardware-verified behaviors, including
   the redirect intolerance that `spellings` exists for.
-- **#96/#40 seams**: `DeviceFacts.record` at ota.py:248 and the
-  facts handed to `observe` at 288/430 are the same observation
-  made twice; `PendingDevice.first_seen`/`last_seen` exist only
-  for unbound devices, in RAM. The natural attachment point for
-  #96's record and #40's last-seen is a single observed-facts
-  call site in the new unbound-decision home, beside the
-  composition's existing `device_facts` field.
+- **#96/#40 seams are two, not one**: `DeviceFacts.record` at
+  ota.py:248 runs for EVERY valid check-in (bound and unbound),
+  while `PendingDevice.first_seen`/`last_seen` exist only for
+  unbound devices, in RAM. The two attachment points therefore
+  stay distinct: #96's all-device record grows where
+  `device_facts.record` already runs in `check_version`, and the
+  unbound-only last-seen stays with `activation_for`/`observe`.
 - `#142` already typed both modules' state reads
   (`comp: Composition` bindings), so the issue's untyped-state
   evidence is resolved; nothing in this plan touches the
@@ -318,11 +318,13 @@ function answers what an unbound device gets; `activate`'s
 deliberate authoritative-blind re-read is untouched and its
 rationale comment gains a pointer to the new home.
 
-The #96/#40 seam: `activation_for`'s call site in
-`check_version` is immediately after today's
-`device_facts.record` line; the plan leaves them adjacent with a
-short comment naming #96 (one observation, two writers today,
-one recorder later). No new machinery.
+The #96/#40 seams, two of them: observed facts remain at
+`check_version` for every device (`device_facts.record` is where
+#96's record grows), and the unbound-only pending `last_seen`
+remains at `activation_for`/`observe`. The two sites stay
+adjacent in `check_version` with a short comment naming #96 at
+the first and the unbound-only scope at the second. No new
+recorder and no new machinery.
 
 ### Origin assembly, unified
 
@@ -565,3 +567,6 @@ P1/P2 amendments". All seven adopted.
    at `check_version` for every device; pending `last_seen`
    stays at `activation_for`/`observe` for unbound ones. No new
    recorder.
+
+   *Resolution*: the evidence bullet and the design's seam
+   paragraph now name the two distinct seams and their scopes.
