@@ -228,8 +228,12 @@ and the `TurnView` Protocol. What moved, verbatim: `_arm_filler` (now
 constructor comment that explains them. The clip send still goes
 straight to `output.send_audio` rather than through the runtime's
 `_send_reply_audio`, which is what keeps the arbitration from waiting on
-itself, and the batch is still encoded whole in one synchronous
-expression before the first await.
+itself, and the batch is still built by three contiguous encoder calls
+with no await between them, all of them finished before the send is
+awaited. That, rather than "before the first await", is the invariant:
+`begin_speaking` is awaited before the encoding starts, in the moved
+code as in the original, and what the reply's own encoder feed must not
+be able to land in the middle of is the batch.
 
 `TurnView` is the `_output_paused` mirror settled inside the runtime:
 `speech_ms()` and a read-only `output_paused`, which the M1 `TurnTaking`

@@ -214,10 +214,11 @@ class FillerRunner:
         try:
             await self._output.begin_speaking()
             resampler = Resampler(clips.sample_rate, self._output.output_sample_rate)
-            # Encoded whole before the first await, and sent once. The
-            # reply task feeds the same encoder between its own awaits,
-            # so a flush split off after an await could carry out audio
-            # that belongs to the reply.
+            # Three encoder calls with no await between them, all of
+            # them done before the send below is awaited, and sent once.
+            # The reply task feeds the same encoder between its own
+            # awaits, so a flush split off after an await could carry
+            # out audio that belongs to the reply.
             batch = (
                 self._output.encode_audio(resampler.process(clips.clips[index]))
                 + self._output.encode_audio(resampler.flush())

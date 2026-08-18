@@ -284,8 +284,9 @@ methods:
 
 The clip send keeps going straight to `_output.send_audio` (not
 through the runtime's `_send_reply_audio`), preserving the
-does-not-wait-on-itself arbitration, and the
-batch-built-whole-before-the-first-await invariant moves verbatim;
+does-not-wait-on-itself arbitration, and the invariant that the
+three encoder calls are contiguous and all finish before the send
+is awaited moves verbatim;
 `test_session_characterization.py` pins both and passes
 unmodified. The `except (DeviceGone, RuntimeError)` arm moves
 byte-identical; its comment's deferral now points at #182, filed
