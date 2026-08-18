@@ -11,6 +11,7 @@ anything the drain could not finish.
 import asyncio
 import gc
 import signal
+import time
 import weakref
 from typing import Any, cast
 
@@ -365,24 +366,49 @@ async def test_a_drain_that_outlives_its_bound_is_abandoned(
 ) -> None:
     """A drain that cannot end must not be able to wedge the exit: the
     bound is the drain budget plus the registry's close margin, and past
-    it the process goes anyway, saying so."""
+    it the process goes anyway, saying so.
 
-    class StuckRegistry:
+    The drain here does not cooperate with being cancelled, which is the
+    case a bound has to survive to be one: a `finally` doing cleanup of
+    its own, or a client that swallows the cancellation, decides for
+    itself when it is done, and serving must not be waiting on that
+    decision."""
+
+    class UncooperativeRegistry:
+        def __init__(self) -> None:
+            self.released = asyncio.Event()
+
         async def drain(self, timeout_s: float) -> None:
-            await asyncio.sleep(60)
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                await self.released.wait()
 
     uvicorn_that_stops_mid_drain(monkeypatch)
     monkeypatch.setattr(main, "CLOSE_MARGIN_S", 0.05)
-    server = draining_server(cast(Any, StuckRegistry()), drain_s=0.05)
+    registry = UncooperativeRegistry()
+    server = draining_server(cast(Any, registry), drain_s=0.05)
 
+    started = time.monotonic()
     with caplog.at_level("WARNING"):
+        # The outer bound is the test's backstop; the assertion below is
+        # what says the server's own bound is what let go.
         await asyncio.wait_for(server._serve(), timeout=5)
+    elapsed = time.monotonic() - started
 
+    assert elapsed < 1
     assert any("drain did not finish" in record.getMessage() for record in caplog.records)
-    assert server._drain_task is not None
-    assert server._drain_task.done()
-    # And the exit still happened: the drain's finally delivers it even
-    # when the drain itself is cut off.
+    task = server._drain_task
+    assert task is not None
+    # Serving let go while the drain was still going, rather than waiting
+    # to see what it made of the cancellation.
+    assert not task.done()
+
+    # And when it does end, it still delivers the exit, and what it ended
+    # with is still taken off it.
+    registry.released.set()
+    await asyncio.wait({task}, timeout=1)
+    assert task.done()
     assert server.should_exit
 
 
