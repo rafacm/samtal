@@ -154,8 +154,9 @@ class DrainingServer(uvicorn.Server):
         by itself (a second signal, forced) while the drain is still in
         flight. The bound is the drain's own budget plus the margin the
         registry holds back for the closes, which is the longest a drain
-        that is working can take; past it the task is abandoned and said
-        so, because a shutdown that cannot end is worse than a
+        that is working can take; past it the task is cancelled, said so
+        and left, without waiting to see what it makes of being
+        cancelled, because a shutdown that cannot end is worse than a
         conversation that is cut off.
 
         Either way the task is asked what it ended with, including when
@@ -168,18 +169,25 @@ class DrainingServer(uvicorn.Server):
         task = self._drain_task
         if task is None:
             return
+        bound = self._drain_s + CLOSE_MARGIN_S
         if not task.done():
-            bound = self._drain_s + CLOSE_MARGIN_S
-            try:
-                await asyncio.wait_for(task, bound)
-            except TimeoutError:
-                logger.warning("drain did not finish within %.1f s; exiting anyway", bound)
-                return
-            except Exception:
-                # Not reported from here, where it arrives with its
-                # message and its chain. It is taken off the task below.
-                pass
-        _report_drain(task)
+            # `asyncio.wait` rather than `wait_for`, which cancels what it
+            # gave up on and then waits for that cancellation to land.
+            # What a drain does with a cancellation is the drain's own
+            # business (a `finally` closing sockets, a client that
+            # swallows it), so waiting for it would make the bound no
+            # bound at all. This one only waits.
+            await asyncio.wait({task}, timeout=bound)
+        if task.done():
+            _report_drain(task)
+            return
+        logger.warning("drain did not finish within %.1f s; exiting anyway", bound)
+        # Asked to stop, reported whenever it does stop, and not waited
+        # for. The callback is what takes the result off it, and the task
+        # holds its callbacks and is itself still held here, so neither
+        # goes when this frame does.
+        task.add_done_callback(_report_drain)
+        task.cancel()
 
 
 def _report_drain(task: "asyncio.Task[None]") -> None:
