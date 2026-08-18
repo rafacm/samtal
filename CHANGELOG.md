@@ -9,6 +9,28 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The OTA endpoint is a package too, and the import cycle between it
+  and onboarding is gone** (#143, M2). `ota.py` held the check-in reply
+  and the activation poll in one file and reached the onboarding module
+  through three function-body imports, each with a comment apologizing
+  for itself, because that module imported this one to serve its
+  handlers. The handlers now have a file each and the router that
+  mounts them at the short onboarding alias lives beside them, so
+  nothing in the onboarding package imports the OTA endpoint and
+  nothing in either package defers an import to a function body. Three
+  things follow that a reader will notice: one function answers what a
+  device with no agent gets, one helper assembles every address this
+  server names itself by (verbatim for the wire, rebuilt for anything
+  retained), and `samtal-server config` and the configuration API's
+  document render no longer load a conversation's machinery to read the
+  pending table or the origin, which a test now holds them to. Nothing
+  a device or an operator sees changed: every route, both of their
+  spellings, the activation ceremony, the 404, the banner and every
+  event's channel, sentence and fields are byte for byte what they
+  were, checked by driving both before and after and diffing the
+  responses, with the whole onboarding and OTA test surface passing
+  unmodified.
+
 - **Device onboarding is a package with a file per responsibility**
   (#143, M1). `onboarding.py` held two halves its own docstring
   declared: the short `/x/<key>/` path with its key derivation and its
