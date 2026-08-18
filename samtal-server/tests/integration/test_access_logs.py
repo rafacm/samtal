@@ -15,6 +15,7 @@ what uvicorn writes, which needs uvicorn to have served something.
 
 import asyncio
 import logging
+import tempfile
 
 import httpx
 import pytest
@@ -38,11 +39,18 @@ OTA_PATH = f"/xiaozhi/ota/{SECRET_SEGMENT}/"
 DEVICE_MAC = "aa:bb:cc:dd:ee:ff"
 DEVICE_UUID = "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
 
+# A database directory of this module's own. The configuration below is
+# composed while this file is being imported, before any fixture could
+# point it anywhere, so it falls to the lane-wide default in
+# `tests/conftest.py`; two modules that both did that would seed one
+# database between them and read each other's device bindings.
+DATABASE_DIR = tempfile.mkdtemp(prefix="samtal-access-logs-")
+
 CONFIG = Config(
     providers=MOCK_PROVIDERS,
     agents={"assistant": MOCK_AGENT},
     devices={"11:22:33:44:55:01": "assistant"},
-    server={"ota_path": OTA_PATH},
+    server={"ota_path": OTA_PATH, "database": {"dir": DATABASE_DIR}},
 )
 
 

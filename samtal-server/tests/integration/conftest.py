@@ -17,7 +17,6 @@ import asyncio
 import contextlib
 import math
 import struct
-import tempfile
 import threading
 import time
 from collections.abc import Sequence
@@ -56,34 +55,33 @@ def booted(config: Config):
 
     The fragments are the entities the test wrote, dumped as the fields
     it set, which is exactly what a fragment is. The order is the one
-    the write-time reference checks require. The database is gone by the
-    time the app exists, which is true of a real boot too: the
-    configuration is read once and the file is not consulted again."""
-    with tempfile.TemporaryDirectory() as directory:
-        engine = open_database(directory)
-        try:
-            snapshot = _seeded(ConfigStore(engine), config)
-        finally:
-            engine.dispose()
-    composed = compose_config(
-        FileConfig(server=config.server, memory=config.memory),
-        domain_fields(snapshot.domain),
-        "the test's scratch database",
-    )
-    return create_app(composed, snapshot.secrets)
+    the write-time reference checks require.
+
+    This used to seed a scratch database, throw the directory away, and
+    compose the snapshot onto a configuration still naming the packaged
+    default, on the grounds that a boot reads the configuration once and
+    does not consult the file again. That stopped being a true picture
+    of a boot at #142: the server now opens the configuration database
+    at startup and holds it, so an app pointed at a directory with no
+    database creates an empty one and then reads device bindings out of
+    it, which is the wrong answer given to the right question.
+
+    So the seeding directory stays, which is what a deployment has
+    anyway, and this is `booted_in` over the directory the configuration
+    already names. Every configuration names one: the lane's own
+    conftest points the default at a directory of the test's own.
+    """
+    return booted_in(config.server.database.dir, config)
 
 
 def booted_in(directory, config: Config):
-    """`booted`, with the database left where the app can reach it.
+    """`booted`, over a directory the caller names.
 
-    The difference is the whole point: `booted` seeds a scratch database
-    and lets it go, which is a true picture of a boot and a false one for
-    anything that writes while the server runs. That write would land in
-    a database at `server.database.dir`, which for a composed test config
-    is the packaged default rather than the directory the seeding used.
-    So this one takes the directory, composes it onto the file half, and
-    leaves it standing: what the app reads afterwards is what a write
-    through its own API wrote.
+    Seeding and serving are the same directory, composed onto the file
+    half so the app reads and writes where the seeding went: what the app
+    reads afterwards is what a write through its own API wrote. The
+    caller names it when it wants to read the database itself, or to
+    start a second server on what the first one left.
     """
     directory = Path(directory)
     engine = open_database(directory)
