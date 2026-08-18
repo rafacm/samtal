@@ -200,7 +200,9 @@ what it opens), resolve the API token, validate `device_auth`
 are pure config reads that open nothing), register the routers
 and the health endpoint, mount the API shell, and stash the
 build inputs on the app (a small private `_CompositionSeed`:
-config, secrets, token). The lifespan becomes the build phase:
+config and secrets only; the token is resolved and consumed in
+the describe phase, passed directly into the API gate as today,
+and stored nowhere, preserving the existing exception verbatim). The lifespan becomes the build phase:
 construct everything else in today's documented order, set
 `app.state.composition`, attach the config API's runtime pieces
 to the mounted sub-app (below), start the store writer and MCP,
@@ -644,6 +646,9 @@ P1/P2 amendments". All eleven adopted.
     token.** The token is resolved and consumed in the describe
     phase (passed into the API gate) and never stored on the
     seed.
+
+    *Resolution*: the seed now carries config and secrets only,
+    with the token consumed at describe time.
 
 11. **P2: the CLI banner would announce a server that later fails
     startup.** The banner becomes a post-startup emission: main
