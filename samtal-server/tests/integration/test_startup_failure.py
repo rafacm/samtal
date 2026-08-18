@@ -27,6 +27,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+from samtal_server.config.store import ConfigStore
+from samtal_server.db import open_database
+
+STAGES = ("llm", "asr", "tts", "vad")
+
 # Not a credential: a fixed string shaped like one, and shaped so a
 # substring hunt for it cannot match by accident. It rides in on the
 # `__cause__` of the refusal, which is where a real one would be.
@@ -62,6 +67,48 @@ main.main()
 """
 
 
+# A boot that reads its domain half and nothing else: what refuses is in
+# the database this seeds.
+PLAIN_ENTRYPOINT = """
+import sys
+
+import samtal_server.main as main
+
+sys.argv = ["samtal-server"]
+main.main()
+"""
+
+# An environment variable nothing sets, named so that nothing else can
+# have set it either.
+UNSET_VARIABLE = "SAMTAL_STARTUP_FAILURE_TEST_TOKEN"
+
+MCP_SENTENCE = (
+    f"mcp_servers.tools: mcp_servers.tools.env.API_TOKEN: references ${UNSET_VARIABLE}, "
+    f"but it is not set in the environment"
+)
+
+
+def seed_domain(directory: Path, entry: dict[str, object]) -> None:
+    """A database holding one agent that reaches one MCP server.
+
+    The domain half of a configuration lives in the database, and the
+    entry point reads it there, so a refusal that is about an MCP entry
+    has to be written where a deployment writes one. Only a referenced
+    entry is built at boot, which is why the agent names it.
+    """
+    engine = open_database(directory)
+    try:
+        store = ConfigStore(engine)
+        for stage in STAGES:
+            store.set_provider(stage, "mock", {"type": "mock"})
+        store.set_agent_defaults(dict.fromkeys(STAGES, "mock"))
+        store.set_mcp_server("tools", entry)
+        store.set_agent("assistant", {"prompt": "A", "mcp": ["tools"]})
+        store.set_default_agent("assistant")
+    finally:
+        engine.dispose()
+
+
 def run_entrypoint(script: str, tmp_path: Path) -> subprocess.CompletedProcess[str]:
     """One server process, on a configuration whose startup refuses.
 
@@ -72,6 +119,7 @@ def run_entrypoint(script: str, tmp_path: Path) -> subprocess.CompletedProcess[s
     environment = dict(os.environ)
     environment["SAMTAL_SERVER__DATABASE__DIR"] = str(tmp_path / "db")
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    environment.pop(UNSET_VARIABLE, None)
     return subprocess.run(
         [sys.executable, "-c", script],
         cwd=tmp_path,
@@ -104,6 +152,23 @@ def refused(finished: subprocess.CompletedProcess[str], sentence: str) -> str:
 
 def test_a_refused_provider_build_says_one_sentence_and_exits_one(tmp_path: Path) -> None:
     refused(run_entrypoint(PROVIDER_REFUSAL, tmp_path), SENTENCE)
+
+
+def test_a_refused_mcp_entry_says_one_sentence_and_exits_one(tmp_path: Path) -> None:
+    """An MCP entry naming an environment variable nothing sets is a
+    boot refusal like a bad provider, and reached the operator as a bug
+    until it was classified as one (`McpConfigError` is a `ValueError`,
+    so nothing in the taxonomy caught it): uvicorn's traceback, and exit
+    code 3 rather than 1. The message was written to be read as it is,
+    and now it is."""
+    entry: dict[str, object] = {
+        "transport": "stdio",
+        "command": "/usr/bin/true",
+        "env": {"API_TOKEN": f"${UNSET_VARIABLE}"},
+    }
+    seed_domain(tmp_path / "db", entry)
+
+    refused(run_entrypoint(PLAIN_ENTRYPOINT, tmp_path), MCP_SENTENCE)
 
 
 def test_nothing_the_refusal_was_chained_from_reaches_either_stream(
