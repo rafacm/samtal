@@ -210,6 +210,32 @@ which is the proof the plan's fourth review finding asked M1 for: M2
 may retire the symbol when `app.py` switches to the alias router
 without touching a suite.
 
+### The PR review round (M1)
+
+External review of PR #197. One finding, P2, accepted.
+
+**`activation_for`'s four-outcome contract had no test coverage.** Only
+its definition existed: nothing called it, so a wrong outcome tag or a
+dropped refusal string would have passed CI and surfaced in M2 as a
+warning naming the wrong reason, or as none at all. The typed result
+was written precisely so the wrapper's two emissions could be driven
+from it, and an untested tag is a contract in name only.
+
+*Fix*: `tests/unit/test_unbound.py`, seven cases driving
+`activation_for` directly with a real `PendingDevices` on the support
+clock and hand-built `DeviceAgents` resolutions, in the
+direct-construction style of `test_onboarding_pending.py`. One offer
+(the whole reply section compared as a dict against the minted entry),
+the three not-applicable gates (onboarding off, bound, waiting on a
+restart), the unreadable resolution, and both refusals asserted as the
+table's own sentences (`CAPACITY_REACHED`, `BUDGET_SPENT`), which is
+what the caller renders into `activation_not_offered.reason`. Every
+case that is not an offer also asserts the table was left alone, which
+is the half of the contract the return value does not state. Checked to
+bite rather than assumed to: with the `unreadable` tag flipped to
+`not_applicable` and `offer.refused` dropped from the refusal, three of
+the seven fail.
+
 ### Left for M2
 
 The `config/api.py` and `config/cli.py` deferrals and their apology
