@@ -118,11 +118,21 @@ from samtal_server.db import open_database
 from samtal_server.events import ServerEvents
 
 # The pending table, imported like anything else since issue #143 split
-# the onboarding package: `onboarding.pending` imports nothing but the
-# standard library, so naming it here costs a document renderer nothing.
-# It used to be a forward reference, because the module that held the
-# table also held a router over the OTA handlers and so pulled the
-# websocket session and everything a conversation needs.
+# the onboarding package. It used to be a forward reference, because the
+# module that held the table also held a router over the OTA handlers,
+# and so pulled the websocket session and everything a conversation
+# needs.
+#
+# What naming it costs now, stated exactly rather than as "nothing":
+# `pending.py` itself reads only the standard library, but reaching it
+# runs the package's `__init__`, which also loads `keys`, `origin` and
+# `unbound`, and `unbound` names the device bindings view, which brings
+# SQLAlchemy and the configuration store. Accepted, and cheaply: this
+# module imports `open_database` just above, so SQLAlchemy is already
+# here whatever the pending table does. The line that matters
+# is the conversation stack, and that is the line
+# `tests/unit/test_onboarding_import_weight.py` holds, against
+# `document()` itself rather than against the import alone.
 #
 # The MCP registry was deferred here too, for the same reason and with
 # more force: it imports the SDK's clients and this project's provider
