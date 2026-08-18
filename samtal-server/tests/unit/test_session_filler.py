@@ -68,7 +68,7 @@ async def test_a_fast_reply_plays_no_filler(caplog: pytest.LogCaptureFixture) ->
     only(caplog, "speaking_started")
     assert session.runtime._turns[-1].content == "POET heard hello."
     # The timer was stood down with the reply, not left running.
-    assert session.runtime._filler_task is None
+    assert session.runtime._filler.armed is False
 
 
 async def test_one_filler_per_turn_and_the_variants_rotate(
@@ -178,9 +178,9 @@ async def test_a_fire_on_an_agent_without_clips_quietly_plays_nothing(
     assert events(caplog, "filler_played") == []
     only(caplog, "speaking_started")
     assert session.runtime._turns[-1].content == "Recovered now."
-    assert session.runtime._filler_task is None
-    assert session.runtime._filler_sounding is False
-    assert session.runtime._filler_fires == 0
+    assert session.runtime._filler.armed is False
+    assert session.runtime._filler.sounding is False
+    assert session.runtime._filler.fires == 0
 
 
 async def test_a_fire_into_live_user_speech_is_skipped(
@@ -205,8 +205,8 @@ async def test_a_fire_into_live_user_speech_is_skipped(
     assert events(caplog, "filler_played") == []
     assert session.runtime._turns[-1].content == "Recovered now."
     # The skip consumed no phrase and left no state behind.
-    assert session.runtime._filler_task is None
-    assert session.runtime._filler_fires == 0
+    assert session.runtime._filler.armed is False
+    assert session.runtime._filler.fires == 0
 
 
 async def test_a_fire_during_a_barge_in_confirmation_is_skipped(
@@ -229,8 +229,8 @@ async def test_a_fire_during_a_barge_in_confirmation_is_skipped(
     assert skipped.reason == "barge_in_pending"
     assert events(caplog, "filler_played") == []
     assert session.runtime._turns[-1].content == "Recovered now."
-    assert session.runtime._filler_task is None
-    assert session.runtime._filler_fires == 0
+    assert session.runtime._filler.armed is False
+    assert session.runtime._filler.fires == 0
 
 
 async def test_the_feature_is_off_by_default(caplog: pytest.LogCaptureFixture) -> None:
@@ -300,7 +300,7 @@ async def test_the_filler_composes_with_the_first_token_watchdog(
     assert session.listening is True
     socket = cast(Any, session.websocket)
     assert '"stop"' in socket.texts[-1]
-    assert session.runtime._filler_task is None
+    assert session.runtime._filler.armed is False
 
 
 def test_an_enabled_filler_with_no_phrases_is_refused() -> None:
