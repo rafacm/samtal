@@ -158,9 +158,12 @@ class ConfirmingAsr:
 
 
 class ScriptedEndpointer:
-    """An endpointer whose answers the test writes down. The session
-    reads speech_ms before resetting and these tests call
-    _finish_utterance directly, so feeding is never exercised."""
+    """An endpointer whose answers the test writes down. `feed()` is
+    exercised, by the suites that seed an utterance the way the device
+    does, and answers the scripted non-endpointing result: what a test
+    controls is `speech_ms()`, so a scenario says how much speech the
+    endpointer holds and then decides for itself when the utterance
+    ends."""
 
     def __init__(self, speech_ms: float) -> None:
         self._speech_ms = speech_ms
