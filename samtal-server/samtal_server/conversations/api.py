@@ -38,7 +38,7 @@ lock, and nothing created when the file is not there.
 
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import Depends, FastAPI, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -55,6 +55,13 @@ from samtal_server.conversations.schema import (
     tool_invocations,
     turns,
 )
+
+if TYPE_CHECKING:
+    # The name only, for the annotation in `_reader`: the configuration
+    # API imports this module to mount these reads, so a module-scope
+    # import in this direction would not load. Nothing here runs at
+    # runtime.
+    from samtal_server.config.api import ApiRuntime
 
 # The two closed sets, in the document, built from the tuples the schema
 # already declares rather than written out again here. A token added to
@@ -606,7 +613,8 @@ def _reader(request: Request) -> Iterator[Connection]:
     a database directory: `build_api` attaches the dependency and
     `document()` never resolves it.
     """
-    yield from request.app.state.api_runtime.conversations()
+    runtime: ApiRuntime = request.app.state.api_runtime
+    yield from runtime.conversations()
 
 
 ReaderDep = Annotated[Connection, Depends(_reader)]

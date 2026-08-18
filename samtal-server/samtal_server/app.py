@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     What this starts and stops is bound once from the composition
     `create_app` built, so the startup reads the same declared fields
     every handler does."""
-    comp = app.state.composition
+    comp: Composition = app.state.composition
     conversations = comp.conversations
     try:
         # Inside the guard rather than in front of it: a writer whose

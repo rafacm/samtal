@@ -612,7 +612,8 @@ def _store(request: Request) -> Iterator[ConfigStore]:
     a database directory: `build_api` attaches the dependency and
     `document()` never resolves it.
     """
-    yield from request.app.state.api_runtime.store()
+    runtime: ApiRuntime = request.app.state.api_runtime
+    yield from runtime.store()
 
 
 StoreDep = Annotated[ConfigStore, Depends(_store)]
@@ -625,7 +626,8 @@ def _loaded_agents(request: Request) -> frozenset[str]:
     is rendered from an application built without a server, and nothing
     a route declares may depend on there being one.
     """
-    return request.app.state.api_runtime.loaded_agents
+    runtime: ApiRuntime = request.app.state.api_runtime
+    return runtime.loaded_agents
 
 
 LoadedAgentsDep = Annotated[frozenset[str], Depends(_loaded_agents)]
@@ -635,7 +637,8 @@ def _pending(request: Request) -> "PendingDevices":
     """The devices waiting to be claimed, from the server this
     application is mounted on. Taken from the application for the reason
     the store is."""
-    return request.app.state.api_runtime.pending
+    runtime: ApiRuntime = request.app.state.api_runtime
+    return runtime.pending
 
 
 # Annotated `Any` rather than the real type on purpose: FastAPI resolves
@@ -649,7 +652,8 @@ def _mcp_servers(request: Request) -> McpStatusSource | None:
     """The running server's MCP managers, or None for an application
     built without a server around it. Taken from the application for the
     reason the store is."""
-    return request.app.state.api_runtime.mcp_servers
+    runtime: ApiRuntime = request.app.state.api_runtime
+    return runtime.mcp_servers
 
 
 # `Any` stood here for the reason PendingDep's does: FastAPI resolves a
@@ -665,7 +669,8 @@ def _mcp_reload(request: Request) -> McpReloader | None:
     """What applies a re-read of the stored configuration to the running
     MCP managers, or None for an application built without a server.
     Taken from the application for the reason the store is."""
-    return request.app.state.api_runtime.mcp_reload
+    runtime: ApiRuntime = request.app.state.api_runtime
+    return runtime.mcp_reload
 
 
 McpReloadDep = Annotated[McpReloader | None, Depends(_mcp_reload)]
@@ -675,7 +680,8 @@ def _agent_prompt(request: Request) -> Callable[[str], Awaitable[Any]] | None:
     """What assembles one agent's prompt from the running server, or
     None for an application built without one. Taken from the
     application for the reason the store is."""
-    return request.app.state.api_runtime.agent_prompt
+    runtime: ApiRuntime = request.app.state.api_runtime
+    return runtime.agent_prompt
 
 
 AgentPromptDep = Annotated[Any, Depends(_agent_prompt)]
