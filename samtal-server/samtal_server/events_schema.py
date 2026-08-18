@@ -386,7 +386,7 @@ REACHING_HOST = Grammar(
 ORIGIN_PROVENANCE = Grammar(
     "origin_provenance",
     r"(?:from|guessed from) [\s\S]+",
-    ("samtal_server.onboarding:Origin.provenance",),
+    ("samtal_server.onboarding.origin:Origin.provenance",),
     "Which configuration key the banner's origin came out of, and "
     "whether it was read or inferred.",
 )
