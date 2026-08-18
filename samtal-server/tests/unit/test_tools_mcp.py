@@ -8,11 +8,11 @@ deterministic.
 import asyncio
 import logging
 import re
-import socket
 import time
 import traceback
 from collections.abc import Iterator
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import pytest
 from mcp import ClientSession
@@ -47,6 +47,7 @@ from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
 from tests.support.tools_mcp import (
     MANAGER_LOGGER,
     SHADOWED_POSITION,
+    command_arrives,
     config_granting,
     entry_data,
     running,
@@ -111,13 +112,21 @@ async def test_a_dead_server_does_not_fail_the_start() -> None:
         await manager.stop()
 
 
-async def test_a_server_that_came_back_is_reconnected_in_the_background() -> None:
-    manager = McpServerManager("tools", stdio_entry())
-    manager._config = stdio_entry(command="/nonexistent/mcp-server", args=[])
+async def test_a_server_that_came_back_is_reconnected_in_the_background(
+    tmp_path: Path,
+) -> None:
+    """What moves between the failed start and the reconnect is the
+    world rather than the entry: nothing is at the path the
+    configuration names, and then the box that was rebooting is back.
+    Which is the whole of what a background reconnect is for, and the
+    only thing that ever changes a running manager's configuration is a
+    reload, which does it by replacing the manager."""
+    command = tmp_path / "mcp-server"
+    manager = McpServerManager("tools", stdio_entry(command=str(command)))
     await manager.start()
     assert not manager.up
 
-    manager._config = stdio_entry()
+    command_arrives(command)
     manager.ensure_reconnecting()
     try:
         async with asyncio.timeout(20):
@@ -274,25 +283,22 @@ async def test_a_server_stopped_on_purpose_is_down_with_nothing_wrong() -> None:
     assert manager.reason is None
 
 
-async def test_a_new_reason_for_staying_down_is_a_new_instant() -> None:
+async def test_a_new_reason_for_staying_down_is_a_new_instant(tmp_path: Path) -> None:
     """The state alone would not have moved it, and it has to move: a
     server that goes on being down for a different reason has failed
     again, and an instant that stayed put would date the new reason to
     the old failure."""
-    manager = McpServerManager("tools", stdio_entry(command="/nonexistent/one", args=[]))
+    command = tmp_path / "mcp-server"
+    manager = McpServerManager("tools", stdio_entry(command=str(command)))
     await manager.start()
     first_reason, first_since = manager.reason, manager.since
     assert manager.state == DOWN
 
-    # A second failure of another kind, still without ever connecting:
-    # a URL on a port that was free a moment ago and nothing of ours
-    # took.
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        port = probe.getsockname()[1]
-    manager._config = McpServerConfig.model_validate(
-        {"transport": "streamable_http", "url": f"http://127.0.0.1:{port}/mcp"}
-    )
+    # A second failure of another kind, still without ever connecting
+    # and still under the entry it was built with: something is at the
+    # path now, and it is not something this process may execute.
+    command.write_text("#!/bin/sh\nexec true\n")
+    command.chmod(0o644)
     await manager.start()
     try:
         assert manager.state == DOWN
@@ -302,14 +308,14 @@ async def test_a_new_reason_for_staying_down_is_a_new_instant() -> None:
         await manager.stop()
 
 
-async def test_the_instant_moves_when_the_state_does() -> None:
-    manager = McpServerManager("tools", stdio_entry())
-    manager._config = stdio_entry(command="/nonexistent/mcp-server", args=[])
+async def test_the_instant_moves_when_the_state_does(tmp_path: Path) -> None:
+    command = tmp_path / "mcp-server"
+    manager = McpServerManager("tools", stdio_entry(command=str(command)))
     await manager.start()
     went_down = manager.since
     assert manager.state == DOWN
 
-    manager._config = stdio_entry()
+    command_arrives(command)
     manager.ensure_reconnecting()
     try:
         async with asyncio.timeout(20):

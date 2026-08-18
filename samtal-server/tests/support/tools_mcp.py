@@ -29,6 +29,7 @@ import gc
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import uvicorn
 from mcp.server.fastmcp import FastMCP
@@ -69,6 +70,26 @@ def entry_data(**overrides: object) -> dict[str, object]:
         "command": sys.executable,
         "args": [str(STDIO_SERVER)],
     } | overrides
+
+
+def command_arrives(command: Path) -> None:
+    """Put this suite's stdio server behind a path that had nothing at
+    it, which is what a box that was rebooting coming back looks like
+    from here.
+
+    For the tests about a server that was down and is not any more. The
+    entry is written once and never touched again: what moves is the
+    world it names, which is the difference the manager is actually
+    about, since a configuration that changed under a running manager is
+    a reload and reaches it another way entirely.
+
+    A shell script rather than a symlink to this interpreter. A
+    symlinked interpreter resolves its prefix to the base installation
+    rather than to the environment the tests run in, and would find none
+    of the packages the server imports.
+    """
+    command.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    command.chmod(0o755)
 
 
 # --- the configurations that grant it ---------------------------------

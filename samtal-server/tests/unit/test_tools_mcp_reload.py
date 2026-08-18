@@ -62,7 +62,12 @@ from samtal_server.tools.mcp import manager as manager_module
 from tests.support.events import fields_of
 from tests.support.events import only as one_event
 from tests.support.mcp_stdio_server import SHIPPED_INSTRUCTIONS
-from tests.support.tools_mcp import MANAGER_LOGGER, reading, started
+from tests.support.tools_mcp import (
+    MANAGER_LOGGER,
+    command_arrives,
+    reading,
+    started,
+)
 from tests.support.tools_mcp import reload_config as config_with
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
@@ -535,13 +540,16 @@ async def test_an_egress_declaration_local_only_forbids_changes_nothing() -> Non
 # What is not a preparation failure
 
 
-async def test_a_candidate_that_cannot_connect_applies_as_down_and_revives() -> None:
+async def test_a_candidate_that_cannot_connect_applies_as_down_and_revives(
+    tmp_path: Path,
+) -> None:
     """The boot's rule carried over: a configuration error refuses, a
     dead box does not. It applies, says why it is down, and comes back
     the way a server that was down at boot comes back."""
+    command = tmp_path / "mcp-server"
     before = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
     after = config_with(
-        {"tools": entry_data(), "extra": entry_data(command="/nonexistent/mcp", args=[])},
+        {"tools": entry_data(), "extra": entry_data(command=str(command))},
         {"assistant": ["tools", "extra"]},
     )
     servers = await started(before)
@@ -555,8 +563,9 @@ async def test_a_candidate_that_cannot_connect_applies_as_down_and_revives() -> 
 
         # And it is revivable, the way any down server is: the box comes
         # back, a session opens, and the tools arrive with no reload and
-        # no restart.
-        servers.manager_of("extra")._config = servers._managers["tools"]._config
+        # no restart. What comes back is the world the applied entry
+        # names, so nothing about the manager the reload installed moves.
+        command_arrives(command)
         servers.revive_for_agents(["assistant"])
         async with asyncio.timeout(20):
             while servers.status()["extra"]["state"] != CONNECTED:
