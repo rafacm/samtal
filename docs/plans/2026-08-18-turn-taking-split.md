@@ -64,19 +64,24 @@ where they correct the issue:
   through `_cancel_reply` at 1410-1606, with the gate ladder proper
   at 1469-1561. The filler runner is 168 lines at 1608-1775,
   essentially the size the issue measured.
-- **The "drops below roughly 900 lines" criterion is stale.** It
-  was derived from the 1,442-line file at the pin; the file has
-  since grown 378 lines from work the issue itself sequenced after
-  it (#120's recorder, #140's tool-source loop, #155's event
-  conformance). Removing both clusters whole lands pipeline.py
-  around 1,450 lines. The criterion this plan holds itself to is
-  the one the number was standing in for: both clusters leave
-  entirely, the gate ladder is testable without a PipelineRuntime,
-  and the cross-cutting fields that remain are documented in the
-  class docstring. The tool loop (945-1295, ~350 lines, freshly
-  seamed by #140) is the natural next extraction if the number
-  itself matters; that is outside this issue's settled two-cluster
-  scope and is not done here.
+- **The "drops below roughly 900 lines" criterion was stale, and
+  the issue has been amended.** It was derived from the 1,442-line
+  file at the pin; the file has since grown 378 lines from work
+  the issue itself sequenced after it (#120's recorder, #140's
+  tool-source loop, #155's event conformance), so the number and
+  the settled two-extraction decision could no longer both hold.
+  The plan review round ruled that a plan cannot redefine an
+  acceptance criterion on its own authority, so issue #141 now
+  carries a dated amendment (2026-08-18) re-baselining the
+  criterion to what the number stood in for: both clusters leave
+  pipeline.py entirely (landing around 1,450 lines), the gate
+  ladder is testable without a PipelineRuntime, and the
+  cross-cutting fields that remain are documented in the class
+  docstring. This plan implements the amended criterion. The tool
+  loop (945-1295, ~350 lines, freshly seamed by #140) is named in
+  the amendment as the natural next extraction if the absolute
+  count matters on its own; that is outside this issue's settled
+  two-cluster scope and is not done here.
 - **The session event channel cannot move.** `SessionEvents`
   dispatches through the module-level logger named by the literal
   constant `SESSION_LOGGER = "samtal_server.session"`
@@ -439,6 +444,11 @@ the amendments below.
    requirements cannot both hold, but a plan cannot silently
    redefine an acceptance criterion; #141 itself must be amended
    explicitly before implementation.
+
+   *Resolution*: issue #141 now carries a dated 2026-08-18
+   amendment re-baselining the criterion (and its acceptance
+   checkbox points at it); the plan's evidence section cites the
+   amendment instead of redefining the number itself.
 
 2. **P1: M1 removes state the still-in-place filler uses.** M1
    moves `_endpointer` and `_output_paused` into `TurnTaking`
