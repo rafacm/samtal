@@ -215,9 +215,9 @@ fillers are synthesized and filled, the MCP servers are connected,
 `on_started()` is called, and the generator yields.
 
 **The failure bridge.** `BOOT_FAILURES` is `(ConfigError,
-EventEnforcementError, ProviderError)`; the database busy refusal is a
-`ConfigError` subclass, so the tuple is the whole taxonomy the plan
-names. The lifespan catches it, records the sentence on the seed, and
+EventEnforcementError, McpConfigError, ProviderError)`; the database busy
+refusal is a `ConfigError` subclass, and `McpConfigError` joined in the
+review round below. The lifespan catches it, records the sentence on the seed, and
 raises `StartupFailed(sentence)` **outside** the `except` block, which
 leaves the replacement with `__cause__` and `__context__` both None
 rather than merely suppressed. `startup_failure(app)` is how `main()`
@@ -275,15 +275,14 @@ yielding `(app, client)`, and `entered_client` for the common case.
 - **`serve()` swallows `SystemExit` on a recorded boot failure.** See
   the discovery below; without it the plan's "serve() returns and
   main() prints" does not happen at all.
-- **The sanitized sentence appears twice on a refused startup, not
-  once.** Uvicorn logs the whole formatted traceback of a failed
-  lifespan (Starlette sends it as the `lifespan.startup.failed`
-  message), and that traceback ends with `StartupFailed: <sentence>`;
-  `main()` then prints the sentence as its own line. The plan's
-  no-leak requirement holds exactly: the traceback has no chain to walk
-  into, and the integration test hunts the sentinel through both
-  streams. The traceback itself is uvicorn's operator surface, which
-  the plan already accepted for the module entry point.
+- **The command line quiets uvicorn's rendering of a refused startup.**
+  Starlette sends uvicorn the whole formatted traceback of whatever a
+  lifespan raised, so the first shape of this milestone answered a
+  mistyped provider option with a stack of frames and the sentence
+  twice. `serve()` filters that one record out while the lifespan has
+  recorded a boot failure, leaving `main()` as the single emitter (the
+  PR review's finding 1). The module entry point keeps uvicorn's own
+  startup-failure surface, which is what the plan records for it.
 
 ### Discoveries
 
@@ -385,3 +384,71 @@ From `samtal-server/`:
   the lifespan's read, and `startup_failure`'s). All three are declared
   dataclasses; the third is the private build seed the split requires,
   which no handler reads.
+
+### The PR #188 review round
+
+External review of the milestone diff: four findings, verdict not
+mergeable, all four accepted and fixed here. One commit each.
+
+1. **P1: a handled refusal still printed a traceback, and the sentence
+   twice.** The bridge kept the exit code and the sentence but not the
+   surface around them: Starlette hands uvicorn the formatted traceback
+   of the `StartupFailed` the lifespan raises, and `main()` then printed
+   the same sentence again.
+
+   *Resolution*: `serve()` installs a filter on uvicorn's error logger
+   for as long as it runs, dropping that record while the seed records a
+   boot failure, and only then; a lifespan exception that is not a boot
+   failure keeps its traceback, which is the whole of what a bug leaves
+   behind. The integration suite asserts absence rather than presence:
+   the sentence exactly once across both streams, no traceback marker,
+   no frame line, and not the class name the refusal travels under.
+
+2. **P1: `McpConfigError` was outside the taxonomy.** It is a
+   `ValueError`, so an entry missing its egress declaration under
+   `server.local_only`, or naming an environment variable nothing sets,
+   was answered with uvicorn's traceback and exit code 3 rather than the
+   sentence and exit code 1 its message was written for.
+
+   *Resolution*: named in `BOOT_FAILURES` rather than re-parented under
+   `ConfigError`, because the reload path catches it beside `ConfigError`
+   by name and re-parenting would change what a `ValueError` means to
+   every caller of the MCP layer. The integration suite grows the case
+   through the real entry point, on a domain half seeded into a database
+   the way a deployment writes one.
+
+3. **P1: the provider wrapper copied a library's words into the
+   sanitized sentence.** `providers/registry.py` composed its message
+   with `str(exc)` from whatever a third-party client raised while being
+   handed an entry's options, and the bridge prints that message as it
+   is. The sentinel test did not see it because it constructed a clean
+   `ProviderError` by hand rather than going through the wrapper.
+
+   *Resolution*: the wrapper composes the sentence from what this
+   codebase knows (the entry, the type, the exception's class name) and
+   attaches the original as the cause, which is the rule the device
+   bindings' failed reads already follow. Nothing is lost on the common
+   case: options are validated by our own reader, which raises a
+   `ProviderError` that passes through untouched. The integration
+   sentinel now runs through the real wrapper, and the unit test that
+   pinned the old behaviour states the new contract with a sentinel of
+   its own.
+
+4. **P2: the leak tests disposed an object that held nothing.** Their
+   configuration named a directory with no `samtal.db`, and
+   `DeviceBindings.open` opens no engine when there is no file, so both
+   the teardown and the partial-startup assertions passed against an
+   inert view.
+
+   *Resolution*: both migrate the database first, the way boot leaves
+   it, and both check the pool rather than the call: the pool the view
+   held when it was opened is captured there, and disposing an engine
+   replaces it. `engine_of` refuses outright when there is no engine, so
+   this cannot quietly go back to proving nothing. Verified in both
+   directions, by removing the migration and by unregistering the
+   disposal.
+
+Verification after the round, from `samtal-server/`: `uv run ruff check
+.` clean; `uv run pytest tests/unit -q` 2,981 passed, 16 skipped; `uv
+run pytest tests/integration -q` 58 passed; all four generated
+references regenerated and diffed clean.
