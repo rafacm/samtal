@@ -45,10 +45,15 @@ how they are read back.
 **`samtal_server/composition.py`**: the `Composition` dataclass, the
 fourteen fields the plan's Design section lists, `api: ApiRuntime`
 included (the plan review's finding 2). It imports only downward and
-names neither `ws`, `ota` nor `app`; its class docstring names the one
-sanctioned writer outside the composition root,
+names neither `ws`, `ota` nor `app`; its class docstring names the
+sanctioned writers outside the composition root, starting with
 `tests/unit/test_boundary_contract.py`'s runtime-factory injection
-(finding 8), which is why the dataclass is plain rather than frozen.
+(finding 8), which is why the dataclass is plain rather than frozen. The
+PR review round corrected that claim: it said "the one sanctioned
+exception" while `test_conversations_boot.py` still replaces
+`conversations` on a built composition in M1, so the docstring now names
+both and marks the second as standing only until M2 converts it to the
+constructor patch plan review finding 8 asks for.
 
 **`ApiRuntime`**, declared beside `build_api` in `config/api.py`: the
 seven request-time dependencies as typed fields, filled by `build_api`
