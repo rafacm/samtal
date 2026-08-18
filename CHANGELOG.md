@@ -9,6 +9,22 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **Who holds the floor is its own module** (#141, M1). The
+  conversation runtime kept the turn-taking core alongside everything
+  else it does: the utterance buffer and the tail cap that bounds it,
+  the endpointer feed, the pre-roll trim, and the gate ladder that
+  decides whether speech arriving mid-reply may cancel that reply.
+  `runtime/turntaking.py` holds that cluster as `TurnTaking`, reaching
+  the rest of the runtime through one narrow `ReplyControl` interface,
+  and the runtime's device-facing methods are one-line delegations to
+  it. Nothing an operator sees changed: every decision event keeps its
+  message, its fields and its firing conditions, both halves of the
+  log still ride the one session channel, and the generated events
+  reference regenerates byte-identical. What did change is that the
+  gate ladder can now be driven onto each of its five decisions
+  without building a session around it, and that the tail cap and the
+  trim arithmetic have tests of their own for the first time.
+
 - **The MCP subsystem answers for itself** (#140, M4, which closes the
   issue). The last of the four milestones is about what the tests are
   allowed to know: a registry says which manager an entry has and
