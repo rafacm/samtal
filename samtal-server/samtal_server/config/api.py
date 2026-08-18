@@ -42,6 +42,7 @@ Nothing logs the token, a request body, or an Authorization header.
 import hmac
 import os
 from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from inspect import Parameter, Signature
 from pathlib import Path
@@ -52,6 +53,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sqlalchemy import Connection
 from starlette.routing import Route
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -422,6 +424,39 @@ RELOAD_REFUSED_DESCRIPTION = (
 )
 
 
+@dataclass
+class ApiRuntime:
+    """Everything a request to this application resolves out of the
+    server around it, as one typed object.
+
+    The sub-application carries exactly this, under `state.api_runtime`,
+    and every dependency below reads a field of it. It used to be seven
+    loose attributes on the same state bag, which meant the reader of any
+    one of them had to know what the composition root had happened to
+    attach and what its type was; a dataclass says both in one place, and
+    is what the whole-server composition carries as its `api` field
+    (#142).
+
+    `store` and `conversations` are the two per-request database handles,
+    callables rather than open engines for the reason their factories
+    document. The other five are the live objects the server shares with
+    this application, or the honest empties an application built without
+    a server around it gets.
+    """
+
+    store: Callable[[], Iterator[ConfigStore]]
+    conversations: Callable[[], Iterator[Connection]]
+    loaded_agents: frozenset[str]
+    # Quoted, and the field never annotated with anything this module
+    # imports at runtime: the pending table is a device concern whose
+    # module pulls in the whole conversation stack, and `document()`
+    # renders this application with none of it loaded.
+    pending: "PendingDevices"
+    mcp_servers: McpStatusSource | None
+    mcp_reload: McpReloader | None
+    agent_prompt: Callable[[str], Awaitable[Any]] | None
+
+
 def build_api(
     token: str,
     database_dir: Path,
@@ -476,20 +511,24 @@ def build_api(
     """
     api = _application()
     # Attached rather than closed over: the read and write routes take
-    # it with Depends(...), and milestone 1 has none of them yet.
-    api.state.store = store_dependency(database_dir)
-    # The same directory, read for the other database in it. The
-    # conversation reads need no more runtime fact than this: whether
-    # there is a store to read is whether the file is there, which
-    # `enabled` decides at boot and cannot be asked again here, since a
-    # deployment that has switched recording off still serves what it
-    # recorded.
-    api.state.conversations = conversations.reader(database_dir)
-    api.state.loaded_agents = frozenset(loaded_agents)
-    api.state.pending = pending if pending is not None else _empty_pending()
-    api.state.mcp_servers = mcp_servers
-    api.state.mcp_reload = mcp_reload
-    api.state.agent_prompt = agent_prompt
+    # the pieces of it with Depends(...), and milestone 1 had none of
+    # them yet. One object rather than one attribute each, so what a
+    # route resolves is a field of a declared type.
+    api.state.api_runtime = ApiRuntime(
+        store=store_dependency(database_dir),
+        # The same directory, read for the other database in it. The
+        # conversation reads need no more runtime fact than this: whether
+        # there is a store to read is whether the file is there, which
+        # `enabled` decides at boot and cannot be asked again here, since
+        # a deployment that has switched recording off still serves what
+        # it recorded.
+        conversations=conversations.reader(database_dir),
+        loaded_agents=frozenset(loaded_agents),
+        pending=pending if pending is not None else _empty_pending(),
+        mcp_servers=mcp_servers,
+        mcp_reload=mcp_reload,
+        agent_prompt=agent_prompt,
+    )
     # Added last is outermost, so a failure inside the gate itself
     # answers as sanitized as one inside a handler.
     api.add_middleware(_BearerGate, token=token)
@@ -573,7 +612,7 @@ def _store(request: Request) -> Iterator[ConfigStore]:
     a database directory: `build_api` attaches the dependency and
     `document()` never resolves it.
     """
-    yield from request.app.state.store()
+    yield from request.app.state.api_runtime.store()
 
 
 StoreDep = Annotated[ConfigStore, Depends(_store)]
@@ -586,7 +625,7 @@ def _loaded_agents(request: Request) -> frozenset[str]:
     is rendered from an application built without a server, and nothing
     a route declares may depend on there being one.
     """
-    return request.app.state.loaded_agents
+    return request.app.state.api_runtime.loaded_agents
 
 
 LoadedAgentsDep = Annotated[frozenset[str], Depends(_loaded_agents)]
@@ -596,7 +635,7 @@ def _pending(request: Request) -> "PendingDevices":
     """The devices waiting to be claimed, from the server this
     application is mounted on. Taken from the application for the reason
     the store is."""
-    return request.app.state.pending
+    return request.app.state.api_runtime.pending
 
 
 # Annotated `Any` rather than the real type on purpose: FastAPI resolves
@@ -610,7 +649,7 @@ def _mcp_servers(request: Request) -> McpStatusSource | None:
     """The running server's MCP managers, or None for an application
     built without a server around it. Taken from the application for the
     reason the store is."""
-    return request.app.state.mcp_servers
+    return request.app.state.api_runtime.mcp_servers
 
 
 # `Any` stood here for the reason PendingDep's does: FastAPI resolves a
@@ -626,7 +665,7 @@ def _mcp_reload(request: Request) -> McpReloader | None:
     """What applies a re-read of the stored configuration to the running
     MCP managers, or None for an application built without a server.
     Taken from the application for the reason the store is."""
-    return request.app.state.mcp_reload
+    return request.app.state.api_runtime.mcp_reload
 
 
 McpReloadDep = Annotated[McpReloader | None, Depends(_mcp_reload)]
@@ -636,7 +675,7 @@ def _agent_prompt(request: Request) -> Callable[[str], Awaitable[Any]] | None:
     """What assembles one agent's prompt from the running server, or
     None for an application built without one. Taken from the
     application for the reason the store is."""
-    return request.app.state.agent_prompt
+    return request.app.state.api_runtime.agent_prompt
 
 
 AgentPromptDep = Annotated[Any, Depends(_agent_prompt)]
