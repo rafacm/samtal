@@ -426,7 +426,8 @@ def _activation(
     # onboarding module serves these handlers, so it imports this one.
     from samtal_server.onboarding import activation_object
 
-    offer = request.app.state.composition.pending.observe(mac, client_id, board, firmware)
+    comp: Composition = request.app.state.composition
+    offer = comp.pending.observe(mac, client_id, board, firmware)
     if offer.device is None:
         events.warning(
             "device %s is unbound but was offered no activation code: %s. It is "
@@ -562,7 +563,8 @@ async def describe(request: Request) -> Response:
     # one, and the pair would not load in that order.
     from samtal_server.onboarding import portal_url_line
 
-    config: Config = request.app.state.composition.config
+    comp: Composition = request.app.state.composition
+    config: Config = comp.config
     return PlainTextResponse(
         f"samtal-server {__version__} (revision {revision()}) OTA endpoint.\n"
         f"Devices are sent to {websocket_url_for(config, request)} "

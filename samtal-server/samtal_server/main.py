@@ -21,6 +21,7 @@ from fastapi import FastAPI
 
 from samtal_server import logs, onboarding
 from samtal_server.app import create_app
+from samtal_server.composition import Composition
 from samtal_server.config import Config, ConfigError
 from samtal_server.config.boot import load_boot_config
 from samtal_server.config.loader import CONFIG_ENV_VAR
@@ -85,7 +86,13 @@ class DrainingServer(uvicorn.Server):
 
     async def _drain(self, sig: int, frame: FrameType | None) -> None:
         try:
-            await self._app.state.composition.sessions.drain(self._drain_s)
+            # Annotated at the boundary, and inside the guard rather than
+            # in front of it: `app.state` answers Any, so the annotation
+            # is what makes this a typed read, and a state that cannot
+            # answer is exactly the case where the exit below still has
+            # to run.
+            composition: Composition = self._app.state.composition
+            await composition.sessions.drain(self._drain_s)
         finally:
             # Whatever the drain did or did not manage, the process is
             # going: uvicorn's own shutdown, and the 1012 fail-close it
