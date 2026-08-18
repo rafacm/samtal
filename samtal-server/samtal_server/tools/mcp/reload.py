@@ -43,7 +43,7 @@ from samtal_server.config.responses import McpReloadResult
 from samtal_server.config.secrets import SecretStore
 
 from . import events
-from .manager import McpConfigError, McpServerManager, _managers_for, _stopped
+from .manager import McpConfigError, McpManager, McpServerManager, _managers_for, _stopped
 from .slice import McpSlice
 
 if TYPE_CHECKING:
@@ -403,12 +403,12 @@ async def _apply(
     out a connect timeout, and a number that covered only the second
     would call a reload fast on exactly the days it was not.
     """
-    keep: dict[str, McpServerManager] = {}
+    keep: dict[str, McpManager] = {}
     started: list[str] = []
     restarted: list[str] = []
     unchanged: list[str] = []
-    going: list[McpServerManager] = []
-    arriving: list[McpServerManager] = []
+    going: list[McpManager] = []
+    arriving: list[McpManager] = []
     for name, candidate in candidates.items():
         running = servers._managers.get(name)
         if running is not None and running.same_as(candidate):
