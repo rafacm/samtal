@@ -294,9 +294,13 @@ async def _activation(
     answers with a tagged outcome and warns about nothing. The narration
     is here because these two warnings are this endpoint's: they are
     emitted on the `samtal_server.ota` channel, in this module's words,
-    about a device that is being answered by this handler. The match is
-    exhaustive over the outcome literal, so a fifth outcome cannot be
-    added upstream and go silent here.
+    about a device that is being answered by this handler.
+
+    The match names all four outcomes, including the two with nothing to
+    say, so a fifth added upstream is visible as an outcome nothing here
+    handles. What actually fails on a drift is the conformance suite:
+    `activation_not_offered.reason` is a closed set asserted both ways
+    against what this function writes into it.
     """
     unbound = await activation_for(
         comp.pending, config.server, resolution, mac, client_id, board, firmware

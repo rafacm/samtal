@@ -55,16 +55,16 @@ from samtal_server.events import ServerEvents
 
 events = ServerEvents(__name__)
 
-# And the submodules, imported after the emitter rather than above it:
-# each of them reads it out of this module, so it has to be here before
-# the first of them is read.
+# And the gathering, which happens after the emitter rather than above
+# it: each submodule reads the emitter out of this module, so it has to
+# be here before the first of them is read.
 #
-# `websocket_url_for` is among them because it is not defined in this
-# package any more: it is one of the two modes of
+# The first name is not a submodule's. `websocket_url_for` is not
+# defined in this package any more: it is one of the two modes of
 # `onboarding.origin.assemble` (issue #143), and the module that answers
-# "what address does the outside world use" answers this too. Named here
-# because it was importable from `samtal_server.ota` before the split
-# and nothing about the reply body changed.
+# "what address does the outside world use" answers this too. It is
+# named here because it was importable from `samtal_server.ota` before
+# the split and nothing about the reply body changed.
 from samtal_server.onboarding.origin import websocket_url_for  # noqa: E402
 
 from .poll import ACTIVATION_VERSION_HEADER, _version_two, activate  # noqa: E402
