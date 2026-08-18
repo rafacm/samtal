@@ -393,7 +393,12 @@ descriptor open, and no provider construction ran (the mock
 providers record instantiation). A second test enters and exits
 the lifespan and asserts every disposal ran (bindings disposed,
 engines disposed, writer stopped, MCP stopped), using the
-existing fakes.
+existing fakes. A third covers partial startup: the build
+registers each acquisition on an `AsyncExitStack` the moment it
+is acquired (bindings before providers, the config engine before
+the store), so a failure anywhere later unwinds everything
+already opened; the test acquires the bindings engine, fails the
+provider build, and asserts the engine was disposed.
 
 ### Considered and declined
 
@@ -585,6 +590,11 @@ P1/P2 amendments". All eleven adopted.
    Cleanup must be registered per acquisition (exit-stack
    discipline), with a startup-failure test proving an engine
    acquired before a later failure is disposed.
+
+   *Resolution*: the build now registers every acquisition on an
+   `AsyncExitStack` as it happens, and the leak-test section
+   gains the partial-startup case (bindings acquired, providers
+   fail, engine disposed).
 
 7. **P2: the proposed startup contention re-scope cannot reach a
    lock.** A bare `write_engine` touches no lock at entry. With
