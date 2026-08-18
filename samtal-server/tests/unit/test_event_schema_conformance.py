@@ -442,7 +442,7 @@ SPREAD_INVENTORY: dict[str, Spread] = {
     # `ota_check`: the whole payload, assembled once and spread into
     # whichever of the four sentences the resolution chose. The code is
     # there exactly when an activation was offered.
-    "samtal_server.ota:check_version.fields": Spread(
+    "samtal_server.ota.reply:check_version.fields": Spread(
         LOCAL,
         alternatives=sets(
             "device client board firmware agents unloaded",
@@ -450,7 +450,7 @@ SPREAD_INVENTORY: dict[str, Spread] = {
         ),
     ),
     # `activation_refused`: what all three refusals name.
-    "samtal_server.ota:_version_two.refusal": Spread(
+    "samtal_server.ota.poll:_version_two.refusal": Spread(
         LOCAL, local="refusal", alternatives=sets("device code")
     ),
     # `heard`: only engines that detected carry these, and the two are
@@ -532,16 +532,16 @@ SPREAD_INVENTORY: dict[str, Spread] = {
 # builder's own alternatives, and that the calls sharing a builder cover
 # all of them between them, so a branch cannot be dropped everywhere.
 CALL_ALTERNATIVES: dict[tuple[str, str, int], tuple[frozenset[str], ...]] = {
-    ("samtal_server.ota", "check_version", 1): sets(
+    ("samtal_server.ota.reply", "check_version", 1): sets(
         "device client board firmware agents unloaded code"
     ),
-    ("samtal_server.ota", "check_version", 2): sets(
+    ("samtal_server.ota.reply", "check_version", 2): sets(
         "device client board firmware agents unloaded"
     ),
-    ("samtal_server.ota", "check_version", 3): sets(
+    ("samtal_server.ota.reply", "check_version", 3): sets(
         "device client board firmware agents unloaded"
     ),
-    ("samtal_server.ota", "check_version", 4): sets(
+    ("samtal_server.ota.reply", "check_version", 4): sets(
         "device client board firmware agents unloaded"
     ),
     ("samtal_server.providers.openai_asr", "OpenAiAsr._retry_without_prompt", 1): sets(
@@ -971,7 +971,7 @@ def agrees(signature: Signature, declared: schema.EventField | schema.ArgSpec) -
 # names the function or the constant that decides one, module-qualified
 # and following production across modules where it goes there:
 # `activation_not_offered`'s refusal reasons are produced in
-# `onboarding/pending.py`, not in `ota.py` where the emit sits.
+# `onboarding/pending.py`, not in `ota/reply.py` where the emit sits.
 
 CONSTANT = "constant"
 RETURNED = "returned"
@@ -1022,7 +1022,7 @@ TOKEN_SOURCES: dict[tuple[str, str], tuple[Decides, ...]] = {
         Decides("samtal_server.ws", RETURNED, "refusal_reason"),
     ),
     ("activation_not_offered", "reason"): (
-        Decides("samtal_server.ota", KEYWORD, "reason", scope="_activation"),
+        Decides("samtal_server.ota.reply", KEYWORD, "reason", scope="_activation"),
         Decides(
             "samtal_server.onboarding.pending",
             KEYWORD,
@@ -1041,10 +1041,10 @@ TOKEN_SOURCES: dict[tuple[str, str], tuple[Decides, ...]] = {
         ),
     ),
     ("activation_refused", "reason"): (
-        Decides("samtal_server.ota", KEYWORD, "reason", scope="_version_two"),
+        Decides("samtal_server.ota.poll", KEYWORD, "reason", scope="_version_two"),
     ),
     ("ota_request_rejected", "arg:0"): (
-        Decides("samtal_server.ota", ARGUMENT, "_bad_request:0"),
+        Decides("samtal_server.ota.reply", ARGUMENT, "_bad_request:0"),
     ),
     ("onboarding_banner", "origin_source"): (
         Decides(
@@ -1295,36 +1295,36 @@ PINNED_BY: dict[tuple[str, str, int], tuple[str, ...]] = {
     ("samtal_server.onboarding.origin", "log_banner", 2): (
         f"{SERVER_PINS}::test_onboarding_banner_with_onboarding_on",
     ),
-    ("samtal_server.ota", "check_version", 1): (
+    ("samtal_server.ota.reply", "check_version", 1): (
         f"{SERVER_PINS}::test_ota_check_offering_an_activation_code",
     ),
-    ("samtal_server.ota", "check_version", 2): (
+    ("samtal_server.ota.reply", "check_version", 2): (
         f"{SERVER_PINS}::test_ota_check_naming_an_agent_this_server_never_loaded",
     ),
-    ("samtal_server.ota", "check_version", 3): (
+    ("samtal_server.ota.reply", "check_version", 3): (
         f"{SERVER_PINS}::test_ota_check_with_no_agent_at_all",
     ),
-    ("samtal_server.ota", "check_version", 4): (
+    ("samtal_server.ota.reply", "check_version", 4): (
         f"{SERVER_PINS}::test_ota_check_resolving_to_an_agent",
     ),
-    ("samtal_server.ota", "_activation", 1): (
+    ("samtal_server.ota.reply", "_activation", 1): (
         f"{SERVER_PINS}::test_activation_not_offered_because_the_database_could_not_be_read",
     ),
-    ("samtal_server.ota", "_activation", 2): (
+    ("samtal_server.ota.reply", "_activation", 2): (
         f"{SERVER_PINS}::test_activation_not_offered_because_the_mint_budget_is_spent",
     ),
-    ("samtal_server.ota", "activate", 1): (f"{SERVER_PINS}::test_activation_complete",),
-    ("samtal_server.ota", "activate", 2): (f"{SERVER_PINS}::test_activation_pending",),
-    ("samtal_server.ota", "_version_two", 1): (
+    ("samtal_server.ota.poll", "activate", 1): (f"{SERVER_PINS}::test_activation_complete",),
+    ("samtal_server.ota.poll", "activate", 2): (f"{SERVER_PINS}::test_activation_pending",),
+    ("samtal_server.ota.poll", "_version_two", 1): (
         f"{SERVER_PINS}::test_activation_refused_by_an_unreadable_body",
     ),
-    ("samtal_server.ota", "_version_two", 2): (
+    ("samtal_server.ota.poll", "_version_two", 2): (
         f"{SERVER_PINS}::test_activation_refused_by_an_unknown_algorithm",
     ),
-    ("samtal_server.ota", "_version_two", 3): (
+    ("samtal_server.ota.poll", "_version_two", 3): (
         f"{SERVER_PINS}::test_activation_refused_by_a_challenge_mismatch",
     ),
-    ("samtal_server.ota", "_bad_request", 1): (
+    ("samtal_server.ota.reply", "_bad_request", 1): (
         f"{SERVER_PINS}::test_ota_request_rejected",
     ),
     ("samtal_server.providers.openai_asr", "OpenAiAsr._retry_without_prompt", 1): (
@@ -1822,7 +1822,7 @@ def test_the_narrowings_are_the_two_the_source_hides() -> None:
     is the condition selecting the call, which no reading of the builder
     alone can see. A third would want the same explanation."""
     assert {identity[:2] for identity in CALL_ALTERNATIVES} == {
-        ("samtal_server.ota", "check_version"),
+        ("samtal_server.ota.reply", "check_version"),
         ("samtal_server.providers.openai_asr", "OpenAiAsr._retry_without_prompt"),
     }
     assert set(CALL_ALTERNATIVES) <= {site.identity for site in emit_sites()}

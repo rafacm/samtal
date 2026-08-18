@@ -16,23 +16,15 @@ tell it is what is wrong with its configuration.
 """
 
 
-from typing import TYPE_CHECKING
-
 from fastapi import APIRouter
 from starlette.websockets import WebSocket
 
 from samtal_server.auth import DeviceAuth
+from samtal_server.composition import Composition
 from samtal_server.config.models import normalize_mac
 from samtal_server.device.boundary import WEBSOCKET_PATH
 from samtal_server.device.session import DeviceSession
 from samtal_server.events import ServerEvents
-
-if TYPE_CHECKING:
-    # The name only, for the annotation below: the composition names the
-    # pending table, whose module imports the OTA endpoint, which imports
-    # this one, so a module-scope import in this direction would not
-    # load. Nothing here runs at runtime.
-    from samtal_server.composition import Composition
 
 events = ServerEvents(__name__)
 

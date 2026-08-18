@@ -316,7 +316,7 @@ ALSO_BOUND_TO = Grammar(
     "also_bound_to",
     rf"(?: \(also bound to {_NAME}\))?",
     (
-        "samtal_server.ota:check_version",
+        "samtal_server.ota.reply:check_version",
         "samtal_server.device.session:DeviceSession.run",
     ),
     "The tail naming the agents a device is bound to beside the one "
@@ -331,7 +331,7 @@ AGENT_LIST = Grammar(
     "agent_list",
     _NAME,
     (
-        "samtal_server.ota:check_version",
+        "samtal_server.ota.reply:check_version",
         "samtal_server.device.session:DeviceSession.run",
     ),
     "The configured agent names a device is bound to, comma-joined. "
@@ -691,7 +691,7 @@ SOURCE_KEY_PATTERN = (
 
 
 _SPECS: list[EventSpec] = [
-    # --- ota.py: the configuration check and the activation ceremony --
+    # --- ota: the configuration check and the activation ceremony ----
     EventSpec(
         "ota_check",
         note=(
@@ -952,7 +952,7 @@ _SPECS: list[EventSpec] = [
             ),
         ),
     ),
-    # --- onboarding.py: the banner and the short path ----------------
+    # --- onboarding: the banner and the short path -------------------
     EventSpec(
         "onboarding_banner",
         note="Where devices are configured, said once at startup.",
