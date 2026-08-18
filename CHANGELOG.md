@@ -9,6 +9,22 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **Device onboarding is a package with a file per responsibility**
+  (#143, M1). `onboarding.py` held two halves its own docstring
+  declared: the short `/x/<key>/` path with its key derivation and its
+  hint-free 404, and the activation ceremony with the table of devices
+  waiting to be claimed. They are now a file each (the key and its
+  guard, the origin and the startup banner, the pending table, and the
+  unbound-device decision) behind a facade that answers to the name
+  every caller already imports. Nothing an operator sees changed: the
+  routes, both of their spellings, the 404, the activation ceremony,
+  the banner and every event's channel, sentence and fields are what
+  they were, and the whole onboarding and OTA test surface passes
+  unmodified. The one home of "what does a device with no agent get"
+  now exists beside the table it asks; the OTA endpoint starts calling
+  it in the next step, which is what ends the import cycle between the
+  two modules.
+
 - **A shutdown waits for the drain it started** (#142, M4). The task
   that lets conversations finish their sentence was created and
   forgotten: nothing held a reference to it, so the event loop was free
