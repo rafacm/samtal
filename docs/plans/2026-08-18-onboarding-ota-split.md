@@ -430,7 +430,8 @@ outside world use".
 
 ## Milestones
 
-- [ ] **M1: the onboarding package.** Convert `onboarding.py` to
+- [x] **[M1: the onboarding package](2026-08-18-onboarding-ota-split-implementation.md#m1-the-onboarding-package).**
+  (PR TBD) Convert `onboarding.py` to
   the four-module package plus facade `__init__` (keys, origin,
   pending, unbound with `activation_for` not yet called by ota;
   the tunable bounds defined in the facade ahead of the submodule
