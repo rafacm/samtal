@@ -11,7 +11,13 @@ from samtal_server.build_info import revision
 from samtal_server.capture import CaptureStore, DeviceFacts
 from samtal_server.composition import Composition
 from samtal_server.config import Config, ConfigError
-from samtal_server.config.api import api_token, build_api, build_api_runtime, mount_api
+from samtal_server.config.api import (
+    api_token,
+    build_api,
+    build_api_runtime,
+    mount_api,
+    open_store,
+)
 from samtal_server.config.boot import load_boot_config, reload_domain_config
 from samtal_server.config.responses import McpReloader, McpReloadResult
 from samtal_server.config.secrets import SecretStore
@@ -325,6 +331,20 @@ async def _build_composition(
         _mcp_reloader(config, mcp_servers),
         _prompt_preview(config, mcp_servers, memory),
     )
+    # The configuration database, opened once here rather than on every
+    # request (#142), and migrated in the same call because nothing may
+    # assume boot ran: an API-first deployment builds this application
+    # over a directory that has no schema yet, and the check is a cheap
+    # no-op for one that has. The keys the store decrypts with are
+    # derived in the same breath, inside the handle. A directory another
+    # writer is holding refuses here, as the retryable database refusal,
+    # which is part of the boot taxonomy the lifespan above turns into
+    # one sentence.
+    #
+    # This is the mounted owner. Starlette runs no lifespan for a mounted
+    # application, so the one `build_api` gave that application never
+    # runs and there is no second engine to collide with.
+    api_runtime.store = stack.enter_context(open_store(database_dir))
     seed.api.state.api_runtime = api_runtime
     # The one thing on this app's state a handler reads back: the fields
     # are declared and typed in `composition.py`, and the API's own

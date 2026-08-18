@@ -66,11 +66,23 @@ def directory(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def store(directory: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[ConfigStore]:
-    """The repository the test writes through, on the database the API
-    reads. The API opens its own connection per request, so what is
-    written here is what a request finds."""
+def keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The master key, in the environment before anything opens the
+    database.
+
+    Requested by the store and by the application alike, because since
+    #142 the API derives its keys once, when its lifespan opens the
+    engine, rather than on every request: a key exported after that has
+    happened is a key the API does not have.
+    """
     monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
+
+
+@pytest.fixture
+def store(directory: Path, keys: None) -> Iterator[ConfigStore]:
+    """The repository the test writes through, on the database the API
+    reads. A second engine on the same file, so what is written here is
+    what a request finds."""
     engine = open_database(directory)
     try:
         yield ConfigStore(engine, load_keys())
@@ -79,13 +91,16 @@ def store(directory: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[ConfigSt
 
 
 @pytest.fixture
-def api(directory: Path) -> FastAPI:
+def api(directory: Path, keys: None) -> FastAPI:
     return build_api(TOKEN, directory)
 
 
 @pytest.fixture
-def client(api: FastAPI) -> TestClient:
-    return TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"})
+def client(api: FastAPI) -> Iterator[TestClient]:
+    """Entered, and not merely constructed: the API's engine is opened by
+    the lifespan a `TestClient` runs only as a context manager (#142)."""
+    with TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"}) as client:
+        yield client
 
 
 def _populate(store: ConfigStore) -> None:
@@ -469,26 +484,34 @@ def test_a_stored_number_that_is_not_finite_is_500(
 
 
 def test_a_read_that_cannot_take_the_lock_is_409(
-    client: TestClient, store: ConfigStore, directory: Path, monkeypatch: pytest.MonkeyPatch
+    api: FastAPI, store: ConfigStore, directory: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The API opens the database per request, so a held lock is met by
-    the open-and-migrate step before a handler runs; a read takes the
-    same lock after that. Both are the retryable refusal, forced here by
-    holding a real lock rather than hoped for, and asserted by status
-    code so that no wording becomes load-bearing."""
+    """A read takes the write lock before it reads, so a lock somebody
+    else is holding is met inside the request. That is the retryable
+    refusal, forced here by holding a real lock rather than hoped for,
+    and asserted by status code so that no wording becomes load-bearing.
+
+    The client is built here rather than taken from the fixture because
+    the short busy timeout has to be in place before the engine opens:
+    the API's engine is its lifespan's since #142, its connections are
+    pooled, and a connection made under the packaged ten seconds keeps
+    them. So the order is the scenario: shorten the timeout, open the
+    application, then hold the lock.
+    """
     _populate(store)
     monkeypatch.setattr(db_module, "BUSY_TIMEOUT_MS", SHORT_BUSY_MS)
-    holder = sqlite3.connect(directory / DATABASE_FILENAME, isolation_level=None)
-    holder.execute("BEGIN IMMEDIATE")
-    try:
-        response = client.get("/config")
-    finally:
-        holder.close()
+    with TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"}) as client:
+        holder = sqlite3.connect(directory / DATABASE_FILENAME, isolation_level=None)
+        holder.execute("BEGIN IMMEDIATE")
+        try:
+            response = client.get("/config")
+        finally:
+            holder.close()
 
-    assert response.status_code == 409
-    assert set(response.json()) == {"detail"}
-    # And the lock let go, the same request answers.
-    assert client.get("/config").status_code == 200
+        assert response.status_code == 409
+        assert set(response.json()) == {"detail"}
+        # And the lock let go, the same request answers.
+        assert client.get("/config").status_code == 200
 
 
 # What a read never shows

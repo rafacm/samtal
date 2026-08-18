@@ -39,23 +39,33 @@ document below rather than falling out of a security dependency.
 Nothing logs the token, a request body, or an Authorization header.
 """
 
+import contextlib
 import hmac
 import os
-from collections.abc import Awaitable, Callable, Collection, Iterator, Mapping, Sequence
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Collection,
+    Iterator,
+    Mapping,
+    Sequence,
+)
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from inspect import Parameter, Signature
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
+from cryptography.fernet import MultiFernet
 from fastapi import Body, Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import Connection
+from sqlalchemy import Connection, Engine
 from starlette.routing import Route
-from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from starlette.types import ASGIApp, Lifespan, Message, Receive, Scope, Send
 
 from samtal_server.config import entities, views
 from samtal_server.config.docgen import API_OPTIONS_NOTE
@@ -425,6 +435,81 @@ RELOAD_REFUSED_DESCRIPTION = (
 
 
 @dataclass
+class StoreHandle:
+    """The one engine a process opens for the configuration database, and
+    the keys derived beside it.
+
+    Both are process-wide rather than per-request (#142): the engine is
+    opened and migrated once by whichever lifespan owns this application,
+    and `SAMTAL_MASTER_KEY` is parsed once in the same breath. A request
+    wraps them in a `ConfigStore` and disposes nothing, because it opened
+    nothing.
+
+    The keys are what a stored credential decrypts under. They are held
+    here for exactly as long as the engine they configure, they reach no
+    log and no response, and `None` is the legitimate state of a
+    deployment whose credentials are all environment references.
+    """
+
+    engine: Engine
+    keys: MultiFernet | None
+
+
+@contextlib.contextmanager
+def open_store(directory: Path) -> Iterator[StoreHandle]:
+    """Open the configuration database in `directory` and hold it.
+
+    `open_database` rather than a bare engine, and deliberately: this is
+    the only place the schema is brought up to date on the API's path,
+    and an application built over a directory nothing has migrated (a
+    fresh deployment whose first act is an API write, which is what the
+    integration lane's API-first path is) has to come up with a schema.
+    `upgrade_to_head` is idempotent and cheap when the database is
+    current, so a server that migrated at boot pays one no-op check.
+
+    A directory held by another writer refuses here, as
+    `DatabaseBusyError`, which is a `ConfigError` and therefore part of
+    the boot failure taxonomy: a locked database at startup is a boot
+    that refused with a sentence, not a traceback.
+    """
+    engine = open_database(directory)
+    try:
+        yield StoreHandle(engine, load_keys())
+    finally:
+        engine.dispose()
+
+
+def engine_lifespan(runtime: "ApiRuntime", directory: Path) -> Lifespan[FastAPI]:
+    """The standalone owner of the engine: this application's own
+    lifespan.
+
+    There are two ways this application runs and therefore two possible
+    owners, never both at once. Mounted on a server, the parent lifespan
+    opens the engine and installs it here, because Starlette runs no
+    lifespan for a mounted application. Run as the top-level application
+    (which is what the configuration API's own suites do), this is what
+    opens it, and the handle is cleared on the way out so that a request
+    after shutdown refuses rather than reaching a disposed engine.
+
+    The application argument is ignored: what this installs into is the
+    runtime object it was built beside, so a test that mounts this
+    application on a host of its own and lends it this lifespan installs
+    into the right place.
+    """
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        with open_store(directory) as handle:
+            runtime.store = handle
+            try:
+                yield
+            finally:
+                runtime.store = None
+
+    return lifespan
+
+
+@dataclass
 class ApiRuntime:
     """Everything a request to this application resolves out of the
     server around it, as one typed object.
@@ -437,14 +522,15 @@ class ApiRuntime:
     is what the whole-server composition carries as its `api` field
     (#142).
 
-    `store` and `conversations` are the two per-request database handles,
-    callables rather than open engines for the reason their factories
-    document. The other five are the live objects the server shares with
-    this application, or the honest empties an application built without
-    a server around it gets.
+    `store` is the configuration database's one engine, installed by
+    whichever lifespan owns it and None until then; `conversations` is
+    still a per-request open, which is a property that store documents
+    for itself. The other five are the live objects the server shares
+    with this application, or the honest empties an application built
+    without a server around it gets.
     """
 
-    store: Callable[[], Iterator[ConfigStore]]
+    store: StoreHandle | None
     conversations: Callable[[], Iterator[Connection]]
     loaded_agents: frozenset[str]
     # Quoted, and the field never annotated with anything this module
@@ -509,14 +595,20 @@ def build_api(
     application must not learn what a prompt is made of. None is the
     honest answer without a server, and the route answers 503.
     """
-    api = _application()
+    runtime = build_api_runtime(
+        database_dir, loaded_agents, pending, mcp_servers, mcp_reload, agent_prompt
+    )
+    # A lifespan of its own, which runs only when this application is the
+    # top-level one: it opens the configuration database and installs the
+    # handle on the runtime above. Mounted on a server, Starlette runs no
+    # lifespan here and the parent's does the installing instead, so the
+    # engine has exactly one owner either way (#142).
+    api = _application(engine_lifespan(runtime, database_dir))
     # Attached rather than closed over: the read and write routes take
     # the pieces of it with Depends(...), and milestone 1 had none of
     # them yet. One object rather than one attribute each, so what a
     # route resolves is a field of a declared type.
-    api.state.api_runtime = build_api_runtime(
-        database_dir, loaded_agents, pending, mcp_servers, mcp_reload, agent_prompt
-    )
+    api.state.api_runtime = runtime
     # Added last is outermost, so a failure inside the gate itself
     # answers as sanitized as one inside a handler.
     api.add_middleware(_BearerGate, token=token)
@@ -543,9 +635,14 @@ def build_api_runtime(
     calls it with whatever it was given, which for an application built
     without a server around it is the honest empties its own docstring
     describes.
+
+    The store handle is not among them. It is the one field a lifespan
+    installs rather than a builder fills, because it is the one field
+    that is an open resource: whoever opens it is whoever will dispose
+    it, and neither of those is this function.
     """
     return ApiRuntime(
-        store=store_dependency(database_dir),
+        store=None,
         # The same directory, read for the other database in it. The
         # conversation reads need no more runtime fact than this: whether
         # there is a store to read is whether the file is there, which
@@ -606,27 +703,35 @@ def api_token(config: Config) -> str:
     return token
 
 
-def store_dependency(directory: Path) -> Callable[[], Iterator[ConfigStore]]:
-    """Per-request access to the repository: open the database, yield
-    the store, dispose the engine.
+NO_ENGINE = (
+    "the configuration API has no database engine: its lifespan was never entered. "
+    "Mounted on a server, the parent lifespan installs one; standalone, this "
+    "application's own does."
+)
 
-    The CLI's `_store` in dependency form, and deliberately the same
-    lifetime rather than one engine held for the app's life: `boot.py`'s
-    contract is that nothing after boot reads the database, and an
-    engine opened eagerly would also make every `create_app(...)` in the
-    test suites open a database again. The cost is one Alembic
-    up-to-dateness check per request, which an admin surface with one
-    operator and one front-end can pay.
+
+def store_dependency(runtime: ApiRuntime) -> Iterator[ConfigStore]:
+    """The repository, for the length of one request, over the engine
+    this process already owns.
+
+    It used to open and migrate a database of its own on every request
+    and re-parse `SAMTAL_MASTER_KEY` with it. Both are now done once, by
+    the lifespan that owns them (#142), and what is left here is the
+    wrapping: a `ConfigStore` is a view over an engine and holds nothing
+    to release, so there is nothing to dispose on the way out.
+
+    A missing handle is a programming error, not a state to recover
+    from, and it raises rather than quietly opening a second engine: an
+    application whose lifespan never ran is one nobody may serve
+    requests from, and the honest answer is to say so at the first
+    request rather than to run on with an owner nothing will dispose.
+    `is None` and not a truthiness test, because a handle is an object
+    with no falsehood to speak of.
     """
-
-    def store() -> Iterator[ConfigStore]:
-        engine = open_database(directory)
-        try:
-            yield ConfigStore(engine, load_keys())
-        finally:
-            engine.dispose()
-
-    return store
+    handle = runtime.store
+    if handle is None:
+        raise RuntimeError(NO_ENGINE)
+    yield ConfigStore(handle.engine, handle.keys)
 
 
 def _store(request: Request) -> Iterator[ConfigStore]:
@@ -634,11 +739,11 @@ def _store(request: Request) -> Iterator[ConfigStore]:
 
     Taken from the application rather than closed over by the routes, so
     that the document can be rendered from an application built without
-    a database directory: `build_api` attaches the dependency and
+    a database directory: `build_api` attaches the runtime and
     `document()` never resolves it.
     """
     runtime: ApiRuntime = request.app.state.api_runtime
-    yield from runtime.store()
+    yield from store_dependency(runtime)
 
 
 StoreDep = Annotated[ConfigStore, Depends(_store)]
@@ -1615,14 +1720,20 @@ class _SanitizedErrors:
             await JSONResponse({"detail": UNEXPECTED}, status_code=500)(scope, receive, send)
 
 
-def _application() -> FastAPI:
+def _application(lifespan: Lifespan[FastAPI] | None = None) -> FastAPI:
     """The sub-application without its gate: what the server mounts and
     what the document is rendered from, so the two cannot disagree about
-    the routes."""
+    the routes.
+
+    `lifespan` is how the standalone path owns its engine, and is None
+    for the document, which is rendered from an application nobody
+    serves and which therefore opens nothing.
+    """
     api = FastAPI(
         title=API_TITLE,
         version=API_VERSION,
         description=API_DESCRIPTION,
+        lifespan=lifespan,
         # The committed document is the contract. Serving it live, and
         # serving interactive docs, is an additive change the moment a
         # front-end wants it, and until then it is surface with no

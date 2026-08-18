@@ -19,6 +19,7 @@ one the command was given, and six copies of a constant is six chances
 for that.
 """
 
+import contextlib
 import io
 import sys
 from pathlib import Path
@@ -26,14 +27,14 @@ from urllib.parse import urlsplit
 
 import pytest
 import yaml
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from samtal_server.config import cli
-from samtal_server.config.api import MOUNT_PATH, build_api, mount_api
+from samtal_server.config.api import MOUNT_PATH, build_api
 from samtal_server.config.loader import load_file_config
 from samtal_server.config.secrets import MASTER_KEY_ENV, generate_key
 from samtal_server.onboarding import PendingDevices
+from tests.support.apps import mounted
 
 # Not real credentials, and shaped so a substring check for one cannot
 # match by accident.
@@ -65,6 +66,13 @@ def runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     is what a deployment's server does too: the CLI and the server read
     `server.database.dir` through the same machinery and cannot disagree
     about it.
+
+    Each application is served for exactly the length of one command:
+    since #142 the configuration API owns a database engine, opened by
+    the lifespan `TestClient` enters as a context manager and disposed
+    when it leaves, so a client built and never entered would meet the
+    API with no engine at all. One command is the right length because it
+    is how long the application itself lasts here.
     """
     monkeypatch.delenv("SAMTAL_CONFIG", raising=False)
     monkeypatch.delenv(cli.API_URL_ENV, raising=False)
@@ -90,6 +98,9 @@ def runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # Every client the entry point built, kept so a test can read the
     # timeouts a command chose after it has run.
     clients: list[TestClient] = []
+    # What holds the clients one command builds open, replaced by `_run`
+    # with a fresh one per command and closed when that command ends.
+    lifespans = contextlib.ExitStack()
 
     def factory(base_url: str, token: str) -> TestClient:
         reached.append(base_url)
@@ -111,15 +122,16 @@ def runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         # sub-application is mounted on the server's own port, so the
         # fixture mounts it exactly where the server does rather than
         # serving it at the root and letting the prefix go nowhere.
-        served: object = api
+        served = api
         if urlsplit(base_url).path.rstrip("/"):
             assert urlsplit(base_url).path.rstrip("/") == MOUNT_PATH
-            served = FastAPI()
-            mount_api(served, api)
-        client = TestClient(
-            served,
-            base_url=base_url,
-            headers={"Authorization": f"Bearer {token}"},
+            served = mounted(api)
+        client = lifespans.enter_context(
+            TestClient(
+                served,
+                base_url=base_url,
+                headers={"Authorization": f"Bearer {token}"},
+            )
         )
         clients.append(client)
         return client
@@ -127,9 +139,12 @@ def runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(cli, "build_client", factory)
 
     def _run(*argv: str, stdin: str | None = None) -> int:
+        nonlocal lifespans
         if stdin is not None:
             monkeypatch.setattr(sys, "stdin", io.StringIO(stdin))
-        return cli.main(list(argv))
+        with contextlib.ExitStack() as this_command:
+            lifespans = this_command
+            return cli.main(list(argv))
 
     _run.reached = reached
     _run.pending = pending

@@ -60,11 +60,23 @@ def directory(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def store(directory: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[ConfigStore]:
-    """A second view of the same database, for reading back what a
-    request wrote. The API opens its own connection per request, so what
-    it wrote is what this finds."""
+def keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The master key, in the environment before anything opens the
+    database.
+
+    Requested by the store and by the application alike, because since
+    #142 the API derives its keys once, when its lifespan opens the
+    engine, rather than on every request: a key exported after that has
+    happened is a key the API does not have.
+    """
     monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
+
+
+@pytest.fixture
+def store(directory: Path, keys: None) -> Iterator[ConfigStore]:
+    """A second view of the same database, for reading back what a
+    request wrote. A second engine on the same file, so what a request
+    committed is what this finds."""
     engine = open_database(directory)
     try:
         yield ConfigStore(engine, load_keys())
@@ -73,13 +85,16 @@ def store(directory: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[ConfigSt
 
 
 @pytest.fixture
-def api(directory: Path) -> FastAPI:
+def api(directory: Path, keys: None) -> FastAPI:
     return build_api(TOKEN, directory)
 
 
 @pytest.fixture
-def client(api: FastAPI) -> TestClient:
-    return TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"})
+def client(api: FastAPI) -> Iterator[TestClient]:
+    """Entered, and not merely constructed: the API's engine is opened by
+    the lifespan a `TestClient` runs only as a context manager (#142)."""
+    with TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"}) as client:
+        yield client
 
 
 def _pipeline(client: TestClient) -> None:
@@ -170,11 +185,12 @@ def _expected_notice(method: str, path: str) -> str:
 
 
 @pytest.fixture
-def serving_client(directory: Path) -> TestClient:
+def serving_client(directory: Path) -> Iterator[TestClient]:
     """A client of an API told which agents its server loaded, which is
     what the server passes at build."""
     api = build_api(TOKEN, directory, {"sam"})
-    return TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"})
+    with TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"}) as client:
+        yield client
 
 
 def test_a_binding_to_a_loaded_agent_needs_no_restart(serving_client: TestClient) -> None:
@@ -621,23 +637,32 @@ def test_an_identity_that_cannot_be_addressed_at_all_is_422(client: TestClient) 
 
 
 def test_a_write_that_cannot_take_the_lock_is_409(
-    client: TestClient, store: ConfigStore, directory: Path, monkeypatch: pytest.MonkeyPatch
+    api: FastAPI, store: ConfigStore, directory: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The retryable refusal, forced by holding a real lock rather than
     hoped for, and asserted by status code so that no wording becomes
-    load-bearing."""
-    monkeypatch.setattr(db_module, "BUSY_TIMEOUT_MS", SHORT_BUSY_MS)
-    holder = sqlite3.connect(directory / DATABASE_FILENAME, isolation_level=None)
-    holder.execute("BEGIN IMMEDIATE")
-    try:
-        response = client.put("/agents/sam", json={"prompt": "You are Sam."})
-    finally:
-        holder.close()
+    load-bearing.
 
-    assert response.status_code == 409
-    assert set(response.json()) == {"detail"}
-    # And with the lock let go, the same request is answered.
-    assert client.put("/agents/sam", json={"prompt": "You are Sam."}).status_code == 200
+    The client is built here rather than taken from the fixture because
+    the short busy timeout has to be in place before the engine opens:
+    the API's engine is its lifespan's since #142, its connections are
+    pooled, and a connection made under the packaged ten seconds keeps
+    them. So the order is the scenario: shorten the timeout, open the
+    application, then hold the lock.
+    """
+    monkeypatch.setattr(db_module, "BUSY_TIMEOUT_MS", SHORT_BUSY_MS)
+    with TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"}) as client:
+        holder = sqlite3.connect(directory / DATABASE_FILENAME, isolation_level=None)
+        holder.execute("BEGIN IMMEDIATE")
+        try:
+            response = client.put("/agents/sam", json={"prompt": "You are Sam."})
+        finally:
+            holder.close()
+
+        assert response.status_code == 409
+        assert set(response.json()) == {"detail"}
+        # And with the lock let go, the same request is answered.
+        assert client.put("/agents/sam", json={"prompt": "You are Sam."}).status_code == 200
 
 
 # The argument-shaped bodies
