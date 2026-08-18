@@ -326,15 +326,29 @@ one recorder later). No new machinery.
 
 ### Origin assembly, unified
 
-`websocket_url_for` moves to `onboarding/origin.py` beside
-`public_origin`, byte-preserving both behaviors: the
-request-derived case keeps its raw netloc and scheme mapping
-exactly (the reply's `websocket.url` is wire surface), the
-config-derived case keeps its rebuilt-host discipline, and the
-shared scheme-mapping fragment is the one helper they now share.
-`ota.__init__` re-exports `websocket_url_for` for compatibility.
-One helper, two documented cases, one module answering "what
-address does the outside world use".
+`origin.py` gains ONE assembly helper that both existing names
+become compatibility wrappers over, neither assembling an
+address on its own:
+
+```python
+def assemble(scheme: str, netloc: NetLoc, path: str = "") -> str
+```
+
+where `NetLoc` is either the raw request netloc taken verbatim
+(the wire mode: the reply's `websocket.url` must keep its exact
+bytes, forwarded headers stay untrusted) or the parsed-and-rebuilt
+hostname/port pair with IPv6 re-bracketing (the retained mode:
+credentials can never ride into a log, provenance carried on the
+`Origin` the wrapper builds). `websocket_url_for(config, request)`
+resolves the configured override or calls `assemble` in wire mode
+with `WEBSOCKET_PATH`; `public_origin(server)` resolves its
+three-step priority and calls `assemble` in retained mode,
+keeping `Origin.provenance` exactly as today. Both wrappers'
+outputs are byte-identical to today's, which the wire baseline
+(below) and the banner/CLI tests prove. `ota.__init__` re-exports
+`websocket_url_for` for compatibility. One assembler, two
+documented modes, one module answering "what address does the
+outside world use".
 
 ### Considered and declined
 
