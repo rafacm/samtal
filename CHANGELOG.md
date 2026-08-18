@@ -9,6 +9,25 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The latency mask is its own module** (#141, M2). The second of the
+  two clusters the conversation runtime was carrying: the filler timer
+  armed at the transcription, the fire-time checks that stand it down
+  when the user is still speaking or a barge-in is being confirmed, the
+  cached clip that goes out when neither does, and the arbitration that
+  makes the reply's first real sentence queue behind a clip's tail
+  rather than cut it mid-word. `runtime/filler_runner.py` holds it as
+  `FillerRunner`, which asks whoever holds the floor two questions
+  through a `TurnView` interface and tells it nothing, so the one piece
+  of state the two clusters share crosses as a read-only property.
+  Nothing an operator sees changed: `filler_played` and
+  `filler_skipped` keep their messages, their fields and their firing
+  conditions, the clip is still encoded whole before the first byte
+  goes out, and the generated events reference regenerates identical.
+  What did change is that the mask can be driven onto each of its
+  outcomes without a session, a socket or a synthesis behind it, and
+  that the runtime is 1,484 lines against the 1,820 it started at, with
+  the responsibilities it kept named in its own class docstring.
+
 - **Who holds the floor is its own module** (#141, M1). The
   conversation runtime kept the turn-taking core alongside everything
   else it does: the utterance buffer and the tail cap that bounds it,
