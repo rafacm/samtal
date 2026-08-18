@@ -296,10 +296,12 @@ class ConversationStore:
     """The conversation record: one database, one writer thread.
 
     Built cold. The constructor opens and migrates the database, which
-    is work the caller wants to fail at boot; `start()` begins the
-    thread, and `stop()` ends it. Both are idempotent, so an app built
-    without ever entering its lifespan leaks nothing and a teardown path
-    may call `stop()` freely.
+    is work the caller wants to fail at startup; `start()` begins the
+    thread, and `stop()` ends it. Both are idempotent, so a teardown may
+    call `stop()` whether or not `start()` ran, which is what the
+    lifespan's exit stack does: it registers the stop the moment the
+    store is constructed, in front of starting it. An app that never
+    enters its lifespan builds no store at all (#142).
 
     The seams are for the tests that cannot otherwise pin what this
     promises, and each is compared `is not None` rather than by

@@ -53,12 +53,16 @@ def open_database(directory: str | Path) -> Engine:
     ConfigError naming `server.database.dir`, because the answer to all
     of them is to point that key somewhere writable.
 
-    Which ConfigError matters to one caller only: the API opens the
-    database on every request, so a lock timeout that happens here
-    rather than inside a repository write must still be the retryable
-    refusal, and a directory the server cannot write is still the
-    server's problem and not the request's. The messages are the same
-    ones this has always raised."""
+    Which ConfigError matters to the callers that open at startup: boot,
+    the CLI per command, and the lifespan that owns the configuration
+    API's engine (the server's when the API is mounted, the API's own
+    when it runs standalone, once each since #142). A lock another
+    writer is holding is met here rather than inside a repository write,
+    and must still be the retryable refusal, because that is what makes
+    a locked database a startup that refused with a sentence; a
+    directory the server cannot write is the server's problem wherever
+    it is found. The messages are the same ones this has always
+    raised."""
     return open_at(directory, DATABASE_FILENAME, _MIGRATIONS_DIR)
 
 
