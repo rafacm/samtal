@@ -161,7 +161,21 @@ class Composition:
     runtime_factory: RuntimeFactory
     device_facts: DeviceFacts
     capture: CaptureStore | None
+    api: ApiRuntime
 ```
+
+`ApiRuntime` is the config API's request-time dependencies as one
+typed dataclass (declared beside `build_api` in `config/api.py`):
+the store handle (the lifespan-owned engine plus the once-derived
+keys, yielding a `ConfigStore` per request), `conversations`,
+`loaded_agents`, `pending`, `mcp_servers`, `mcp_reload`, and
+`agent_prompt`. The mounted sub-app's state carries exactly one
+attribute, `api_runtime`, replacing today's seven-field bag; the
+sub-app dependencies and `conversations/api.py`'s state read go
+through its typed fields. So the whole application carries two
+typed state objects, `composition` on the app and `api_runtime`
+on the mounted API, and the acceptance grep covers both with no
+exemption.
 
 The module imports only downward (config, providers, registry,
 bindings, onboarding's `PendingDevices`, capture, conversations,
@@ -381,9 +395,8 @@ existing fakes.
   open); `AgentFillers.fill` is called once and asserts it.
 - **Inventories by tooling.** The `app.state.` migration is
   verified by `grep -rn "app\.state\." samtal-server/samtal_server`
-  finding only the composition attribute (and the sub-app's own
-  bag inside `config/api.py`/`conversations/api.py`, which the
-  acceptance criterion's grep note covers), and
+  finding only `state.composition` and the sub-app's
+  `state.api_runtime`, both typed, and
   `grep -rn "state\.composition"` for the readers; the test-file
   migration list (29 files) is re-verified by grepping
   `TestClient(` without `with` and bare `create_app(` at each
@@ -485,6 +498,11 @@ P1/P2 amendments". All eleven adopted.
    the API to read typed fields. The API runtime dependencies
    must become a typed object carried by the composition and
    attached to the sub-app, and the grep exemption goes.
+
+   *Resolution*: `ApiRuntime` (declared beside `build_api`) is now
+   a field of `Composition` and the single `api_runtime` attribute
+   on the sub-app; the lens paragraph's grep covers both typed
+   objects with no exemption.
 
 3. **P1: the standalone `build_api` path has no engine owner.**
    The config-API suites run `build_api(...)` as a top-level app
