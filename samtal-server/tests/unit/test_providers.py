@@ -49,22 +49,40 @@ def test_a_provider_that_fails_to_construct_names_the_entry(
     full volume or a name the hub does not have, and each arrived as a
     traceback from inside somebody else's library. With one entry per
     stage there was only one candidate; a configuration with several
-    entries of a type left the operator to work out which."""
+    entries of a type left the operator to work out which.
+
+    What the library said is deliberately not repeated. This message is
+    printed to an operator as it is, since a provider that will not build
+    is a boot failure and the entry point answers one with a single line,
+    and the text arriving here is whatever a third-party client raised
+    while being handed this entry's options: an SDK that cannot reach its
+    endpoint quotes the URL, one that will not authenticate quotes what
+    it was given. So the class name is said, the message is not, and the
+    exception itself is the cause for whoever has a debugger. The same
+    rule the device bindings' failed reads follow."""
     from samtal_server.providers import registry
 
+    # Not a credential: a fixed string shaped like one, riding in a
+    # library's own message the way a real one would.
+    sentinel = "sk-live-84c1f0a2-never-a-real-credential"
+
     def explode(label: str, config: ProviderConfig) -> object:
-        raise OSError("no space left on device")
+        raise OSError(f"no space left on device while writing {sentinel}")
 
     monkeypatch.setattr(
         registry, "_factories", lambda: {"asr": {"faster_whisper": explode}}
     )
     with pytest.raises(ProviderError) as excinfo:
         build_provider("asr", "swedish", provider_config(type="faster_whisper"))
-    assert "providers.asr.swedish" in str(excinfo.value)
-    assert "faster_whisper" in str(excinfo.value)
-    # The reason survives in the message, and the original in the chain,
-    # so the traceback is not lost.
-    assert "no space left on device" in str(excinfo.value)
+    message = str(excinfo.value)
+    assert "providers.asr.swedish" in message
+    assert "faster_whisper" in message
+    # The kind of failure is named, so the message is still a
+    # diagnostic; what the library said is nowhere in it, and the
+    # original is in the chain, so the traceback is not lost.
+    assert "OSError" in message
+    assert "no space left on device" not in message
+    assert sentinel not in message
     assert isinstance(excinfo.value.__cause__, OSError)
 
 

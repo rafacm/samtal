@@ -37,28 +37,28 @@ STAGES = ("llm", "asr", "tts", "vad")
 # `__cause__` of the refusal, which is where a real one would be.
 SENTINEL = "sk-live-2f8c41d7-never-a-real-credential"
 
-SENTENCE = "agents.assistant: the llm provider 'openai' could not be built"
+# What the registry composes when a provider factory raises something of
+# its own: the entry, the type and the exception's class, and nothing the
+# library said. Matched as a fragment, since counting a distinctive one
+# is what "said once" means here.
+PROVIDER_SENTENCE = "providers.llm.mock: the mock provider would not build (ValueError)"
 
-# The real entry point, with the provider build refusing the way a
-# misconfigured deployment's does: a sanitized sentence of its own, and a
-# cause that carries what the library was configured with.
+# The real entry point, with one provider factory raising the way a
+# third-party client does when it cannot start: a message quoting the
+# endpoint and the key it was handed. The factory is replaced rather than
+# the whole build, so what composes the operator's sentence is the
+# registry's own wrapper, which is the thing under test.
 PROVIDER_REFUSAL = f"""
 import sys
 
-from samtal_server import app as app_module
-from samtal_server.providers import ProviderError
+from samtal_server.providers import mock
 
 
-def refuse(*args, **kwargs):
-    try:
-        raise ValueError(
-            "POST https://api.example/v1/chat failed for key {SENTINEL}"
-        )
-    except ValueError as cause:
-        raise ProviderError({SENTENCE!r}) from cause
+def refuse(label, config):
+    raise ValueError("POST https://api.example/v1/chat failed for key {SENTINEL}")
 
 
-app_module.build_agent_providers = refuse
+mock.build_llm = refuse
 
 import samtal_server.main as main
 
@@ -88,22 +88,28 @@ MCP_SENTENCE = (
 )
 
 
-def seed_domain(directory: Path, entry: dict[str, object]) -> None:
-    """A database holding one agent that reaches one MCP server.
+def seed_domain(directory: Path, entry: dict[str, object] | None = None) -> None:
+    """A database holding one agent on the mock providers, and one MCP
+    server for it to reach when the caller wants one.
 
-    The domain half of a configuration lives in the database, and the
-    entry point reads it there, so a refusal that is about an MCP entry
-    has to be written where a deployment writes one. Only a referenced
-    entry is built at boot, which is why the agent names it.
+    The domain half of a configuration lives in the database and the
+    entry point reads it there, so a boot that has to get as far as
+    building something needs one written where a deployment writes it.
+    Only a referenced MCP entry is built at boot, which is why the agent
+    names it.
     """
+    agent: dict[str, object] = {"prompt": "A"}
+    if entry is not None:
+        agent["mcp"] = ["tools"]
     engine = open_database(directory)
     try:
         store = ConfigStore(engine)
         for stage in STAGES:
             store.set_provider(stage, "mock", {"type": "mock"})
         store.set_agent_defaults(dict.fromkeys(STAGES, "mock"))
-        store.set_mcp_server("tools", entry)
-        store.set_agent("assistant", {"prompt": "A", "mcp": ["tools"]})
+        if entry is not None:
+            store.set_mcp_server("tools", entry)
+        store.set_agent("assistant", agent)
         store.set_default_agent("assistant")
     finally:
         engine.dispose()
@@ -151,7 +157,9 @@ def refused(finished: subprocess.CompletedProcess[str], sentence: str) -> str:
 
 
 def test_a_refused_provider_build_says_one_sentence_and_exits_one(tmp_path: Path) -> None:
-    refused(run_entrypoint(PROVIDER_REFUSAL, tmp_path), SENTENCE)
+    seed_domain(tmp_path / "db")
+
+    refused(run_entrypoint(PROVIDER_REFUSAL, tmp_path), PROVIDER_SENTENCE)
 
 
 def test_a_refused_mcp_entry_says_one_sentence_and_exits_one(tmp_path: Path) -> None:
@@ -171,13 +179,18 @@ def test_a_refused_mcp_entry_says_one_sentence_and_exits_one(tmp_path: Path) -> 
     refused(run_entrypoint(PLAIN_ENTRYPOINT, tmp_path), MCP_SENTENCE)
 
 
-def test_nothing_the_refusal_was_chained_from_reaches_either_stream(
-    tmp_path: Path,
-) -> None:
-    """The whole point of raising the replacement outside the `except`
-    that caught the original: with no `__cause__` and no `__context__`,
-    there is nothing for a renderer to walk into even where one runs."""
-    written = refused(run_entrypoint(PROVIDER_REFUSAL, tmp_path), SENTENCE)
+def test_nothing_a_provider_library_said_reaches_either_stream(tmp_path: Path) -> None:
+    """Two guards, and the sentinel goes past both or neither.
+
+    The registry composes the sentence rather than copying the library's,
+    so what is printed cannot hold what the library was configured with;
+    and the bridge raises its replacement outside the `except` that
+    caught the refusal, so there is no `__cause__` or `__context__` for a
+    renderer to walk into where one runs.
+    """
+    seed_domain(tmp_path / "db")
+
+    written = refused(run_entrypoint(PROVIDER_REFUSAL, tmp_path), PROVIDER_SENTENCE)
 
     assert SENTINEL not in written, written
     assert "api.example" not in written, written
