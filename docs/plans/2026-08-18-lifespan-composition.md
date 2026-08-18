@@ -544,7 +544,7 @@ provider build, and asserts the engine was disposed.
   task reference, `serve()` settles it under the bound, the new
   drain test, the no-unreferenced-`create_task` grep in the
   milestone verification; CHANGELOG; implementation-doc section
-  and the closing acceptance sweep (all six criteria mapped). (PR TBD)
+  and the closing acceptance sweep (all six criteria mapped). (PR #196)
 
 Each milestone is a stacked branch off the previous one
 (`feature/lifespan-composition-m1` off this plan's branch, and so
