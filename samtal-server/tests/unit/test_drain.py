@@ -15,6 +15,7 @@ from typing import Any, cast
 import pytest
 import uvicorn
 
+from samtal_server import main
 from samtal_server.config import Config
 from samtal_server.main import (
     PING_INTERVAL_S,
@@ -202,6 +203,67 @@ async def test_a_signal_before_the_composition_exists_is_passed_straight_through
 
     server.handle_exit(signal.SIGTERM, None)
 
+    assert server.should_exit
+
+
+def uvicorn_that_stops_mid_drain(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stand in for uvicorn's own serving, in the shape that makes the
+    settle matter: a signal arrives, the drain is scheduled, and serving
+    ends while the drain is still in flight, which is what an operator's
+    second signal does to it.
+    """
+
+    async def _serve(server: uvicorn.Server, sockets: Any = None) -> None:
+        server.handle_exit(signal.SIGTERM, None)
+        # One turn of the loop is what the scheduled `_start_drain` needs
+        # to run and create the task.
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(uvicorn.Server, "_serve", _serve)
+
+
+async def test_the_drain_task_is_owned_and_finished_before_serving_ends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The task used to be created and dropped (#142), so nothing held
+    it, nothing joined it and whatever it raised went to the collector.
+    Serving now ends after it, not alongside it."""
+    uvicorn_that_stops_mid_drain(monkeypatch)
+    session = FakeSession(speaking_for=0.1)
+    server = draining_server(registry_with(session))
+
+    await server._serve()
+
+    assert server._drain_task is not None
+    assert server._drain_task.done()
+    # Nothing else drove the loop, so the conversation reached its end
+    # because serving waited for it.
+    assert session.shutdown == (1001, "server shutting down")
+
+
+async def test_a_drain_that_outlives_its_bound_is_abandoned(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A drain that cannot end must not be able to wedge the exit: the
+    bound is the drain budget plus the registry's close margin, and past
+    it the process goes anyway, saying so."""
+
+    class StuckRegistry:
+        async def drain(self, timeout_s: float) -> None:
+            await asyncio.sleep(60)
+
+    uvicorn_that_stops_mid_drain(monkeypatch)
+    monkeypatch.setattr(main, "CLOSE_MARGIN_S", 0.05)
+    server = draining_server(cast(Any, StuckRegistry()), drain_s=0.05)
+
+    with caplog.at_level("WARNING"):
+        await asyncio.wait_for(server._serve(), timeout=5)
+
+    assert any("drain did not finish" in record.getMessage() for record in caplog.records)
+    assert server._drain_task is not None
+    assert server._drain_task.done()
+    # And the exit still happened: the drain's finally delivers it even
+    # when the drain itself is cut off.
     assert server.should_exit
 
 
