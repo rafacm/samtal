@@ -41,19 +41,12 @@ class Composition:
     handler reads and which holds no resource.
 
     Mutable in the language and immutable by convention: it is written
-    where it is built, and outside that by two tests only. The standing
-    one is the runtime-factory injection in
+    where it is built, and outside that by one test only, the
+    runtime-factory injection in
     `tests/unit/test_boundary_contract.py`, which replaces
     `runtime_factory` on the composition inside an entered lifespan, to
     drive the device boundary against a scripted runtime. That seam is
     why this is a plain dataclass rather than a frozen one.
-
-    The second is temporary: `tests/unit/test_conversations_boot.py`
-    replaces `conversations` with a store whose `start()` fails, to prove
-    the lifespan's teardown still runs. It writes here only while
-    construction is still synchronous; once the store is built inside the
-    lifespan it patches the constructor instead, and this paragraph goes
-    with it.
 
     Every optional field means the same thing it meant as an attribute:
     None is a deployment that did not ask for the thing. `device_auth` is
