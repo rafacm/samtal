@@ -148,32 +148,63 @@ class DrainingServer(uvicorn.Server):
     async def _settle_drain(self) -> None:
         """Join the drain task, under a bound.
 
-        Usually there is nothing to do: the drain ends by asking uvicorn
-        to exit, so by the time uvicorn has, its task is done. What this
-        is for is the other order, an exit uvicorn reached by itself
-        (a second signal, forced) while the drain is still in flight.
-        The bound is the drain's own budget plus the margin the registry
-        holds back for the closes, which is the longest a drain that is
-        working can take; past it the task is abandoned and said so,
-        because a shutdown that cannot end is worse than a conversation
-        that is cut off.
+        Usually there is nothing to wait for: the drain ends by asking
+        uvicorn to exit, so by the time uvicorn has, its task is done.
+        What the wait is for is the other order, an exit uvicorn reached
+        by itself (a second signal, forced) while the drain is still in
+        flight. The bound is the drain's own budget plus the margin the
+        registry holds back for the closes, which is the longest a drain
+        that is working can take; past it the task is abandoned and said
+        so, because a shutdown that cannot end is worse than a
+        conversation that is cut off.
+
+        Either way the task is asked what it ended with, including when
+        it had already ended before this ran: a task nobody asks reports
+        whatever it raised through the loop's default handler when the
+        collector reaches it, which prints the exception in full. What
+        this server says about a failed drain is `_report_drain`'s one
+        sentence and nothing else.
         """
         task = self._drain_task
-        if task is None or task.done():
+        if task is None:
             return
-        bound = self._drain_s + CLOSE_MARGIN_S
-        try:
-            await asyncio.wait_for(task, bound)
-        except TimeoutError:
-            logger.warning("drain did not finish within %.1f s; exiting anyway", bound)
-        except Exception:
-            # Reported here rather than left to the collector: owning the
-            # task is what makes a drain that broke something a line in
-            # this shutdown's log instead of a stray "Task exception was
-            # never retrieved" after it. The exit is already under way
-            # (`_drain` delivers it in a finally), so there is nothing to
-            # re-raise it into.
-            logger.exception("the drain failed")
+        if not task.done():
+            bound = self._drain_s + CLOSE_MARGIN_S
+            try:
+                await asyncio.wait_for(task, bound)
+            except TimeoutError:
+                logger.warning("drain did not finish within %.1f s; exiting anyway", bound)
+                return
+            except Exception:
+                # Not reported from here, where it arrives with its
+                # message and its chain. It is taken off the task below.
+                pass
+        _report_drain(task)
+
+
+def _report_drain(task: "asyncio.Task[None]") -> None:
+    """Take what the drain ended with off its task, and say only what may
+    be said about it.
+
+    Retrieving it is the point: an exception nobody takes off a task is
+    reported by the loop's default handler when the collector gets there,
+    which renders the exception and its chain, and a drain runs through
+    provider clients and a database. So the failure is reported the way
+    a provider that would not build is (`providers/registry.py`): the
+    class name is said, the message is not, and no traceback is
+    attached. The exit is already under way, since `_drain` delivers it
+    in a `finally`, so there is nothing to raise this into either.
+    """
+    if task.cancelled():
+        return
+    failure = task.exception()
+    if failure is not None:
+        logger.warning(
+            "the drain failed (%s). What it said is not repeated here, because a "
+            "client failing on its way out can quote the endpoint or the credential "
+            "its entry names",
+            type(failure).__name__,
+        )
 
 
 def uvicorn_config(app: FastAPI, config: Config) -> uvicorn.Config:
