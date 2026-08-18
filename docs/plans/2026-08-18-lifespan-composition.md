@@ -527,7 +527,9 @@ provider build, and asserts the engine was disposed.
   and full-teardown tests, verify the `ProviderError` startup
   path, CHANGELOG; implementation-doc section with the fixture
   migration inventory. (PR #188)
-- [ ] **M3: the config API's lifespan-owned engine.** Parent
+- [x] **[M3: the config API's lifespan-owned
+  engine](2026-08-18-lifespan-composition-implementation.md#m3-the-config-apis-lifespan-owned-engine)**.
+  Parent
   lifespan opens the engine once (no per-request migrations) and
   derives keys once; `store_dependency` serves from state;
   the open-phase contention test stays untouched (it pins
@@ -535,7 +537,7 @@ provider build, and asserts the engine was disposed.
   amendment note in docs/plans/2026-08-11-rest-api.md recording
   the retirement of the per-request rationale; the conversations
   reader's per-request property recorded as deliberately kept;
-  CHANGELOG; implementation-doc section.
+  CHANGELOG; implementation-doc section. (PR TBD)
 - [ ] **M4: the drain task is owned.** `DrainingServer` keeps the
   task reference, `serve()` settles it under the bound, the new
   drain test, the no-unreferenced-`create_task` grep in the

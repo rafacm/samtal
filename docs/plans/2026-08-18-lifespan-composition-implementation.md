@@ -452,3 +452,203 @@ Verification after the round, from `samtal-server/`: `uv run ruff check
 .` clean; `uv run pytest tests/unit -q` 2,981 passed, 16 skipped; `uv
 run pytest tests/integration -q` 58 passed; all four generated
 references regenerated and diffed clean.
+
+## M3: the config API's lifespan-owned engine
+
+Two commits. The lane's writable database directory first, because
+without it the second one refuses to boot every application the suites
+enter; the engine's ownership second, with the suites that pin it.
+
+### What was written
+
+**`StoreHandle`** in `config/api.py`: the engine and the keys derived
+beside it, as one object. `ApiRuntime.store` is now `StoreHandle | None`
+rather than a callable, which is the one field a lifespan installs
+rather than a builder fills, because it is the one field that is an open
+resource.
+
+**`open_store(directory)`**, a context manager: `open_database` (never a
+bare `write_engine`, per the plan's fresh-deployment note), `load_keys()`
+once, dispose on the way out. Both owners are it.
+
+**The mounted owner** is `_build_composition`, which enters
+`open_store(database_dir)` on the exit stack it already holds and
+installs the handle on the runtime it already builds, one line above the
+existing install of the API's live pieces. A locked directory therefore
+refuses as `DatabaseBusyError`, which is a `ConfigError` and so already
+inside M2's `BOOT_FAILURES`: a locked database at startup is one
+sanitized sentence and an exit code of 1, with no new wiring.
+
+**The standalone owner** is `engine_lifespan(runtime, directory)`, which
+`build_api` hands to `_application(...)` as the sub-application's own
+lifespan. It closes over the runtime object rather than reading it back
+off `app.state`, so it installs into the right place whichever
+application Starlette passes it, and it clears the handle on the way out
+so a request after shutdown refuses rather than reaching a disposed
+engine. Starlette runs no lifespan for a mounted application, so the two
+owners never collide.
+
+**`store_dependency`** is now the per-request wrapping and nothing else:
+it takes an `ApiRuntime`, and yields `ConfigStore(handle.engine,
+handle.keys)`. No open, no dispose, no `load_keys()`. A missing handle
+raises with `NO_ENGINE`, tested by `is None` and not by truthiness.
+
+### Deviations from the plan
+
+- **The lane needed a writable database directory before any of this
+  could run, which the plan did not anticipate.** 461 unit tests and 5
+  integration tests failed on `cannot create the database directory
+  /var/lib/samtal`. Most of both lanes composes a `Config` in memory and
+  names no directory, so `server.database.dir` falls to the packaged
+  default; that was harmless while nothing on the serving path opened
+  the configuration database (`DeviceBindings` tolerates its absence by
+  design, which #113's implementation doc records as accepted), and it
+  stops being harmless the moment a lifespan opens it. `tests/conftest.py`
+  now moves the default, twice: once at import, for the two integration
+  modules that compose their configuration while they are being
+  imported, and again per test from an autouse fixture, so a test that
+  does reach a database gets one of its own. It moves on the model
+  (`DatabaseConfig.model_fields["dir"].default` plus
+  `model_rebuild(force=True)`, which is not optional: pydantic bakes the
+  default into the validator it builds at class creation) rather than
+  through `SAMTAL_SERVER__DATABASE__DIR`, because a `Config(...)` built
+  in Python reads no environment. `packaged_database_dir` is the one
+  fixture that puts the shipped default back, for the one test that
+  asserts what a deployment gets.
+
+- **The integration lane's `booted` had to keep its seeding directory.**
+  It seeded a scratch database, threw the directory away and composed
+  the snapshot onto a configuration still naming the default, on the
+  grounds that a boot reads the configuration once and does not consult
+  the file again. That is no longer a true picture of a boot: the server
+  opens the database at startup, so an app pointed at a directory with
+  no database creates an empty one and then reads device bindings out of
+  it, which is the wrong answer to the right question (it cost
+  `test_device_gets_a_complete_configuration`, whose bound device came
+  back unbound and showing an activation code). `booted` is now
+  `booted_in` over the directory the configuration names, which the
+  conftest guarantees is one of the test's own; the two integration
+  modules that compose a module-level `Config` name a directory of their
+  own explicitly, since both would otherwise share the run's and seed
+  one database between them.
+
+- **Two contention tests had their setup reworked** (below). A third,
+  `test_config_refusals.py::test_an_open_that_cannot_take_the_lock_is_a_busy_error`,
+  is byte-untouched as plan review finding 7 requires: it pins
+  `open_database` directly, and that function is now called at lifespan
+  enter rather than per request.
+
+- **The reads and writes suites needed a `keys` fixture.** Their `store`
+  fixture exported `SAMTAL_MASTER_KEY` in its own body, which worked
+  while the API re-parsed the environment on every request. It does not
+  now: the application's lifespan derives the keys when it opens the
+  engine, and pytest sets up `client` before `store` when the test lists
+  them in that order, so four secret-writing tests met an API with no
+  keys and answered 422. The environment variable moved into a `keys`
+  fixture that both the store and the application request, which says
+  the ordering rather than relying on it.
+
+- **`_application()` takes a lifespan.** `document()` still calls it with
+  none, so rendering the committed contract still opens nothing.
+
+### The two 409 setups, and why they were reworked
+
+Both keep their name, their scenario and the refusal they assert. What
+changed in each is when the lock is taken relative to when the
+application opens its engine, and the reason is the same in both: the
+engine's connections are pooled, `BUSY_TIMEOUT_MS` is read in the
+`connect` listener, and a connection made under the packaged ten seconds
+keeps them. A test that shortened the timeout after the client fixture
+had already entered the lifespan would still have passed, ten seconds
+later, which is a passing test that says nothing.
+
+- **`test_config_api_reads.py::test_a_read_that_cannot_take_the_lock_is_409`**
+  and
+  **`test_config_api_writes.py::test_a_write_that_cannot_take_the_lock_is_409`**
+  build their client inside the test rather than taking the fixture's, so
+  the order is the scenario: shorten the timeout, open the application,
+  then hold the lock. The read one also loses the docstring sentence
+  naming the per-request open, which no longer describes anything. Both
+  now contend on the repository's transaction, which is where
+  `BEGIN IMMEDIATE` has always been taken and has not moved.
+
+- **`test_config_cli_transport.py::test_a_write_that_cannot_take_the_lock_prints_the_retryable_refusal`**
+  asserts an equality across two paths: the CLI printed what the API
+  answered. That only holds if both meet the lock in the same phase. The
+  CLI builds its application inside the command, so a lock taken before
+  the command would be met while that application was opening its engine,
+  which is `migration_failure`'s sentence rather than the repository's,
+  and the other side of the equality would have nothing to equal. The
+  test now wraps `cli.build_client` so the lock is taken once the
+  command's client exists, which is what contention looks like on a
+  deployment: the server is up, and a second writer arrives.
+
+### The standalone-suite migration
+
+Seven files, on top of the five the lane precondition touched. The
+count the plan deferred to M3 was "the ~33 no-`with` sites"; what
+actually needed the lifespan is what failed, which was **227 unit tests
+across 8 files**, all of them the API answering 500 because
+`store_dependency` found no engine.
+
+| File | Shape of the change |
+| --- | --- |
+| `tests/support/apps.py` | new `mounted(api)`: a host for the API with the API's own lifespan, since a bare `FastAPI` host runs none |
+| `tests/support/config_cli.py` | each command's client entered for the length of that command |
+| `tests/unit/test_config_api.py` | `client` and `served` fixtures entered; the three store-dependency tests rewritten for the new shape |
+| `tests/unit/test_config_api_reads.py` | `keys` fixture; `client` entered; the 409 setup |
+| `tests/unit/test_config_api_writes.py` | `keys` fixture; `client` and `serving_client` entered; the 409 setup |
+| `tests/unit/test_config_cli_transport.py` | the 409 setup |
+| `tests/unit/test_config_examples.py` | the CLI factory, through `mounted` |
+
+Three test claims are new, in `test_config_api.py`: the dependency serves
+the engine it was given and disposes nothing; a runtime with no handle
+raises rather than opening one; and the standalone application has no
+engine before its lifespan and none after it.
+
+After the migration, 27 no-`with` `TestClient` constructions remain and
+all are honest: throwaway routes that raise before any database, the
+conversation reads (whose per-request open is deliberately kept), the
+`cli doctor` and health suites, and two client factories that are
+inspected rather than driven.
+
+### Discoveries
+
+- **A lifespan-owned engine makes the master key a startup fact.** The
+  API used to re-read `SAMTAL_MASTER_KEY` on every request, so a
+  deployment could rotate it under a running server and the next request
+  would use the new one. It cannot now, which is the same property the
+  rest of the configuration already has (read once at boot) and is what
+  `verify_secrets` at startup is written against. No documented promise
+  changes; it is worth naming because the four tests it broke broke by
+  setting the variable after the application was up.
+
+- **The one behaviour that genuinely changes is what an unmigrated
+  directory gets.** Before, an app whose `server.database.dir` had no
+  database left it that way until somebody called `/api`. Now startup
+  creates and migrates it. That is the plan's fresh-deployment note
+  working as intended, and it is also what forced both test-lane
+  deviations above: two fixtures were quietly relying on the file not
+  being there.
+
+### Verification
+
+From `samtal-server/`:
+
+- `uv run ruff check .`: all checks passed.
+- `uv run pytest tests/unit -q`: 2,982 passed, 16 skipped (2,980 before
+  this milestone; the two are the net of three new store-dependency
+  claims and one retired).
+- `uv run pytest tests/integration -q`: 57 passed.
+- The four generated references CI diffs (domain configuration,
+  conversations schema, events, API OpenAPI): regenerated and diffed
+  clean. The engine's lifetime is not part of the contract, which is
+  what the OpenAPI document being byte-identical says.
+- The refusals suite specifically
+  (`tests/unit/test_config_refusals.py`): passed, with the file
+  byte-untouched (`git diff HEAD -- tests/unit/test_config_refusals.py`
+  is empty).
+- The configuration API suites specifically (`test_config_api.py`,
+  `test_config_api_reads.py`, `test_config_api_writes.py`,
+  `test_config_api_pending.py`, `test_config_api_runtime.py`,
+  `test_conversations_api.py`): all passed.

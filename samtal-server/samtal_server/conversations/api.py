@@ -579,11 +579,16 @@ def reader(directory: Path) -> Callable[[], Iterator[Connection]]:
     """Per-request access to the store: open the file, yield a
     connection, dispose the engine.
 
-    The shape `store_dependency` has for the configuration database, and
-    the same lifetime for the same reason: nothing holds an engine
-    between requests, so a store that was purged, moved or restored
-    under a running server is met as it is now rather than through a
-    connection pooled before it moved.
+    Nothing holds an engine between requests, so a store that was
+    purged, moved or restored under a running server is met as it is now
+    rather than through a connection pooled before it moved.
+
+    This was the shape the configuration database's dependency had too,
+    until #142 gave that one a single lifespan-owned engine. This one is
+    deliberately left as it is, which that plan records as considered
+    and declined: the property above is this store's own, and a
+    configuration row is not restored from a backup underneath a running
+    server the way a month of conversations might be.
 
     The existence check is here rather than in each handler because it
     is the same answer for all three, and because a reader that reached
