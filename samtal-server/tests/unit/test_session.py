@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 import samtal_server.device.session as session_module
-import samtal_server.runtime.pipeline as pipeline_module
+import samtal_server.runtime.turntaking as turntaking_module
 from samtal_server.app import create_app
 from samtal_server.audio import rms
 from samtal_server.audio.opus import OpusEncoder
@@ -468,7 +468,7 @@ async def test_the_utterance_buffer_keeps_only_a_bounded_tail(
     # Always listening means buffering the silences too, so the buffer
     # keeps a bounded tail of recent audio rather than the whole session.
     cap = SAMPLE_RATE * 2 * 2  # two seconds
-    monkeypatch.setattr(pipeline_module, "UTTERANCE_TAIL_BYTES", cap)
+    monkeypatch.setattr(turntaking_module, "UTTERANCE_TAIL_BYTES", cap)
     config = two_persona_config()
     session = device_session(config, TUTOR_MAC)
     session._listen_mode = "realtime"
@@ -480,7 +480,7 @@ async def test_the_utterance_buffer_keeps_only_a_bounded_tail(
 
     # Trimmed to the cap, give or take the frame that crossed it, and
     # the quiet room never looked like an utterance.
-    assert cap - FRAME_BYTES <= len(session.runtime._utterance) <= cap + FRAME_BYTES
+    assert cap - FRAME_BYTES <= len(session.runtime._turntaking._utterance) <= cap + FRAME_BYTES
 
 
 def test_version_2_framing_round_trips() -> None:

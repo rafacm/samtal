@@ -530,7 +530,7 @@ async def test_a_cancelled_reply_records_what_its_finally_saw() -> None:
 
     start_reply(session, UTTERANCE)
     await asyncio.wait_for(llm.hanging.wait(), 5)
-    await session.runtime._cancel_reply()
+    await session.runtime.cancel_reply()
 
     record = only_record(spy)
     assert record.reply == "First sentence."
@@ -563,7 +563,7 @@ async def test_a_call_cancelled_while_it_ran_is_recorded_unexecuted() -> None:
 
     start_reply(session, UTTERANCE)
     await asyncio.wait_for(memory.running.wait(), 5)
-    await session.runtime._cancel_reply()
+    await session.runtime.cancel_reply()
 
     (invocation,) = only_record(spy).tools
     assert (invocation.position, invocation.source) == (0, "builtin")

@@ -195,7 +195,7 @@ async def test_a_cancel_during_the_watchdog_window_still_lands(
     with caplog.at_level("INFO"):
         session.runtime._reply_task = asyncio.create_task(session.runtime._reply(b"\x00\x00" * 320))
         await asyncio.sleep(0.05)
-        await session.runtime._cancel_reply()
+        await session.runtime.cancel_reply()
 
     assert llm.calls == 1
     assert not session.runtime.replying()
