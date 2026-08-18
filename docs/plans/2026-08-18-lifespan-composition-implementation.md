@@ -753,11 +753,16 @@ to meet it before proposing the same change again.
 
 ## M4: the drain task is owned
 
-Three commits: the ownership with the two tests that pin it, the
-changelog entry, and this section with the closing sweep. The signal
-guard the plan lists under "the drain task" is not here: it landed in M2,
-with its own test, because that milestone is what made startup long
-enough to be signalled in the middle of.
+Three commits, and three more from the review round below: the ownership
+with the two tests that pin it, the changelog entry, and this section
+with the closing sweep. The signal guard the plan lists under "the drain
+task" is not here: it landed in M2, with its own test, because that
+milestone is what made startup long enough to be signalled in the middle
+of.
+
+What follows describes the milestone as it ended, after the review round;
+where the round changed a shape, the round's own entry says what it was
+before.
 
 ### What was written
 
@@ -768,34 +773,52 @@ unheld one can be collected while it is still asking conversations to
 finish, and whatever it raises is reported by the garbage collector
 rather than by the shutdown that started it.
 
-**The settle.** `_settle_drain` returns at once when there is no task or
-the task is done, and otherwise awaits it under
-`asyncio.wait_for(task, self._drain_s + CLOSE_MARGIN_S)`. The margin is
-imported from `registry.py`, where the drain already holds it back for
-the closes, so the bound is the longest a drain that is working can take
-rather than a second number to keep in step with the first. Past it the
-task is abandoned (`wait_for` cancels what it bounds) with a warning, and
-the process goes: a shutdown that cannot end is worse than a conversation
-that is cut off. A drain that raised is logged here too, which the plan
-did not ask for and holding the reference is what makes possible.
+**The settle.** `_settle_drain` waits for the task, when there is one
+still running, with `asyncio.wait({task}, timeout=self._drain_s +
+CLOSE_MARGIN_S)`. The margin is imported from `registry.py`, where the
+drain already holds it back for the closes, so the bound is the longest
+a drain that is working can take rather than a second number to keep in
+step with the first. Past it the task is cancelled, the warning is
+logged, a done callback is attached, and the settle returns without
+waiting to see what the drain makes of the cancellation: what a drain
+does with one is its own business, and waiting on that would leave the
+bound bounding nothing (review finding 2).
+
+**The report.** `_report_drain` takes the result off the task, on every
+path including the one where the task had already ended, and reports a
+failure the way `providers/registry.py` reports a provider that would
+not build: one sentence and the exception's class name, with no message,
+no traceback and no chain. An exception nobody takes off a task is
+printed in full by the loop's default handler when the collector reaches
+it, and a drain runs through provider clients and a database (review
+finding 1).
 
 **Where the settle runs**: in a `_serve` override, not a `serve` one.
 The reason is a deviation and is recorded below.
 
-**The tests**, both in `tests/unit/test_drain.py` in that file's shape
-(a fake app carrying a composition stub, the registry fakes from
-`tests/support/registry.py`):
-`test_the_drain_task_is_owned_and_finished_before_serving_ends` drives
-serving in the shape that makes the settle matter (uvicorn's own
-`_serve` replaced by one that takes the signal and returns while the
-drain is still in flight, which is what an operator's second signal does
-to it) and asserts the conversation reached its end, which nothing else
-on that loop could have driven; and
-`test_a_drain_that_outlives_its_bound_is_abandoned` gives the server a
-registry whose drain never finishes, shortens both halves of the bound,
-and asserts the warning, the finished task and the exit that happened
-anyway. Both were verified by mutation: with the settle removed they
-fail, and with it they pass.
+**The tests**, four of them in `tests/unit/test_drain.py` in that file's
+shape (a fake app carrying a composition stub, the registry fakes from
+`tests/support/registry.py`, uvicorn's own `_serve` replaced by one that
+takes the signal and gives serving back at a chosen moment):
+
+- `test_the_drain_task_is_owned_and_finished_before_serving_ends`:
+  serving returns while the drain is still in flight, which is what an
+  operator's second signal does to it, and the conversation still
+  reached its end, which nothing else on that loop could have driven.
+- `test_a_drain_that_outlives_its_bound_is_abandoned`: a drain that
+  catches its cancellation and goes on waiting, and serving that came
+  back inside the bound all the same.
+- `test_a_drain_that_failed_before_the_settle_says_only_its_class` and
+  `test_a_drain_that_fails_during_the_settle_says_only_its_class`: a
+  credential-shaped sentinel in the message of what the drain raised,
+  the class name said, the sentinel in neither the log nor stderr, no
+  `exc_info` on any record, and the task collected without the loop's
+  own handler ever being called.
+
+Every one of them was verified by mutation before it was committed:
+removing the settle fails the first two, removing the retrieval fails
+the last two (and their collector check), and waiting for the
+cancellation fails the bound one.
 
 ### Deviations from the plan
 
@@ -815,16 +838,22 @@ fail, and with it they pass.
   the settle is still inside the same coroutine and on the same loop the
   task was created on, and it is ahead of the re-raise. The cost is that
   `_serve` is uvicorn's private name: if it is renamed, our override
-  stops being called. What catches that is the two tests, which
+  stops being called. What catches that is the tests, which
   `monkeypatch.setattr(uvicorn.Server, "_serve", ...)`, and monkeypatch
   refuses to set an attribute that is not there.
 
-- **The settle logs a drain that failed, as well as one that overran.**
-  The plan specifies only the warning on the bound. Letting the
-  exception out of `_serve` instead would turn a bug in the drain into a
-  traceback in place of the shutdown, and swallowing it would leave
-  exactly the "Task exception was never retrieved" this milestone exists
-  to end. It is logged, and the exit is already under way when it is.
+- **The settle reports a drain that failed, as well as one that
+  overran.** The plan specifies only the warning on the bound. Letting
+  the exception out of `_serve` instead would turn a bug in the drain
+  into a traceback in place of the shutdown, and leaving it on the task
+  is exactly the "Task exception was never retrieved" this milestone
+  exists to end. It is reported by class name only, which is the review
+  round's finding 1.
+
+- **The bound waits without cancelling, rather than under
+  `asyncio.wait_for`.** The plan names `wait_for`; `wait_for` waits for
+  the cancellation it starts, which a drain is free to take as long as
+  it likes over. The review round's finding 2, below.
 
 ### Discoveries
 
@@ -842,18 +871,28 @@ fail, and with it they pass.
   reached by a startup that refused (which captures no signal) and why
   the settle had to move one level in.
 
-- **Cancelling the drain does not cost the exit.** `wait_for` cancels
-  the task it gives up on, and `_drain`'s `finally` runs under that
-  cancellation, so uvicorn is still told to exit by the drain that was
-  abandoned. The bound test asserts `should_exit` for that reason.
+- **Cancelling the drain does not cost the exit, when the drain takes
+  the cancellation.** `_drain`'s `finally` runs under it, so uvicorn is
+  still told to exit by the drain that was abandoned. A drain that
+  swallows the cancellation delivers that exit whenever it does end,
+  which is what the bound test asserts after releasing it, and until
+  then uvicorn's own shutdown has already run.
+
+- **A task whose exception nobody retrieves is not collected at all.**
+  Written into the sentinel tests' proof: they drop every reference and
+  collect, then assert both that the task really went and that the
+  loop's exception handler was never called. With the retrieval removed
+  the task survives the collection, which is the same defect seen from
+  the other side.
 
 ### Verification
 
-From `samtal-server/`:
+From `samtal-server/`, rerun on the final tree after the review round
+below:
 
 - `uv run ruff check .`: all checks passed.
-- `uv run pytest tests/unit -q`: 2,986 passed, 16 skipped (2,984 after
-  M3; the two are this milestone's).
+- `uv run pytest tests/unit -q`: 2,988 passed, 16 skipped (2,984 after
+  M3; the four are this milestone's).
 - `uv run pytest tests/integration -q`: 58 passed, unchanged by this
   milestone.
 - The four generated references CI diffs (domain configuration,
@@ -865,6 +904,62 @@ From `samtal-server/`:
   ```
   113:        self._drain_task = asyncio.get_running_loop().create_task(self._drain(sig, frame))
   ```
+
+### The PR review round (M4)
+
+External review of PR #196: three findings, verdict not mergeable, all
+three accepted and fixed. One commit each.
+
+1. **P1: a failed drain could still leak what it was told.** Owning the
+   task fixed who holds it, not what is said about it. The settle
+   returned early when the task was already done, so a drain that failed
+   before it ran kept its exception, and the loop's default handler
+   printed that exception in full when the collector reached it; the
+   waited path logged it with `exc_info`, which prints the message and
+   the chain. A drain runs through provider clients and a database, so
+   either surface can carry the endpoint or the credential an entry
+   names.
+
+   *Fixed in 7bc51da.* `_report_drain` takes the result off the task on
+   every path, and a failure is reported the way a provider that would
+   not build is: one sentence and the class name, no message, no
+   traceback, no chain. Two sentinel tests, for a drain that failed
+   before the settle and one that fails during it, assert the class name
+   is said, the credential-shaped sentinel reaches neither the log nor
+   stderr, no record carries `exc_info`, and the task is collected
+   without the loop's handler ever being called. Verified in both
+   directions: with the retrieval removed, the class name is not said
+   and the task is not collected either.
+
+2. **P1: the bound was not a bound.** `asyncio.wait_for` cancels what it
+   gives up on and then waits for that cancellation to complete, and
+   what a drain does with a cancellation is the drain's own business: a
+   `finally` closing sockets, or a client that swallows it, could hold
+   serving open indefinitely. The old bound test only slept, so it
+   cooperated with its own cancellation and could not see this.
+
+   *Fixed in 9c6db8d.* The settle waits with `asyncio.wait`, which
+   cancels nothing; on the bound expiring it cancels the task, logs the
+   abandonment, attaches `_report_drain` as a done callback so whatever
+   the task ends with is still taken off it, and returns without
+   waiting. The task stays referenced. The bound test now uses a drain
+   that catches `CancelledError` and goes on waiting, asserts serving
+   came back inside the bound, and then releases the drain to show the
+   exit is still delivered when it does end. Verified by waiting for the
+   cancellation instead, which hangs the test.
+
+3. **P3: three docstrings described lifetimes this issue retired.**
+   `db/__init__.py` said the API opens the database on every request,
+   `conversations/__init__.py` said `create_app` builds the store and
+   the lifespan owns only the writer thread, and
+   `ConversationStore` justified its idempotent `stop()` by an app built
+   without ever entering a lifespan.
+
+   *Fixed in daffd6e*, each in its own docstring's voice: the engine is
+   opened once by whichever lifespan owns it, the lifespan builds and
+   releases the store, and an app that never enters one builds no store
+   to leak. `conversations/api.py`'s per-request reader is untouched,
+   since that lifetime is deliberately the one it describes.
 
 ### The closing acceptance sweep
 

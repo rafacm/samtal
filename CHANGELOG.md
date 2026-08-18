@@ -18,8 +18,12 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   has finished, or until its bound expires (the drain budget plus the
   margin the registry holds back for the closes), in which case the
   drain is abandoned with a warning rather than allowed to hold the
-  process up. What an operator sees on a redeploy is unchanged: the
-  first signal drains, a second one still forces the exit on the spot,
+  process up, whatever it makes of being cancelled. A drain that failed
+  is reported in one line naming the class of what went wrong and not
+  what it said, since a client failing on its way out can quote the
+  endpoint or the credential it was given. What an operator sees on a
+  redeploy is otherwise unchanged: the first signal drains, a second one
+  still forces the exit on the spot,
   and a signal arriving before there is anything to drain still passes
   straight through.
 
