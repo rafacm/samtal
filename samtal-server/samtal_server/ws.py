@@ -23,6 +23,7 @@ from starlette.websockets import WebSocket
 
 from samtal_server.auth import DeviceAuth
 from samtal_server.config.models import normalize_mac
+from samtal_server.device.boundary import WEBSOCKET_PATH
 from samtal_server.device.session import DeviceSession
 from samtal_server.events import ServerEvents
 
@@ -35,7 +36,12 @@ if TYPE_CHECKING:
 
 events = ServerEvents(__name__)
 
-WEBSOCKET_PATH = "/xiaozhi/v1/"
+# `WEBSOCKET_PATH` is imported above rather than defined here: the path
+# is a term of the device boundary now, since the module that assembles
+# the URL a device is handed needs it too and must not reach this one,
+# and everything this one holds, for it (issue #143). It stays readable
+# off this module, which is where the suites and `tests/support/wire.py`
+# have always named it.
 
 # The scheme both the firmware and xiaozhi-sdk send the token under.
 BEARER = "bearer "

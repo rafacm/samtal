@@ -53,8 +53,8 @@ from samtal_server.config.models import (
     normalize_mac,
 )
 from samtal_server.device.bindings import DeviceAgents, DeviceBindings
+from samtal_server.device.boundary import WEBSOCKET_PATH
 from samtal_server.events import ServerEvents
-from samtal_server.ws import WEBSOCKET_PATH
 
 if TYPE_CHECKING:
     # Names only, and quoted where they are used: the onboarding module
