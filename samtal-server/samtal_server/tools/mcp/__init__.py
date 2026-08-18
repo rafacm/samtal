@@ -78,10 +78,10 @@ from .manager import (  # noqa: E402
     McpServerDown,
     McpServerManager,
     _abandon,
-    _abandoned,
     _forget,
     _managers_for,
     _stopped,
+    abandoned,
 )
 from .prompts import (  # noqa: E402
     DISCOVERY_DEADLINE,
@@ -212,7 +212,6 @@ __all__ = [
     "TRANSPORT_FAILED",
     "UNUSED",
     "_abandon",
-    "_abandoned",
     "_allowed",
     "_carries",
     "_connect",
@@ -232,6 +231,7 @@ __all__ = [
     "_result_text",
     "_shadowed",
     "_stopped",
+    "abandoned",
     "events",
     "logger",
     "quiet_sdk_loggers",

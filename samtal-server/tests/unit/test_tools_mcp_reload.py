@@ -25,7 +25,6 @@ from pathlib import Path
 import pytest
 from cryptography.fernet import Fernet, MultiFernet
 
-import samtal_server.tools.mcp as mcp_module
 from samtal_server.config import Config
 from samtal_server.config.loader import (
     ConfigError,
@@ -747,12 +746,12 @@ async def test_a_manager_that_will_not_stop_is_left_behind_inside_the_bound(
     # Held rather than dropped: the loop keeps only a weak reference to
     # a task nobody awaits, and one ending in an exception nobody took
     # prints about it at shutdown.
-    assert task in mcp_module._abandoned
+    assert task in manager_module.abandoned
 
     # And once it does finish, nothing of it is held: the callback that
     # consumes what it ended with drops it too.
     await asyncio.wait_for(task, timeout=holding * 2)
-    assert task not in mcp_module._abandoned
+    assert task not in manager_module.abandoned
 
 
 # A caller that goes away mid-apply
@@ -808,7 +807,7 @@ async def test_a_caller_that_goes_away_during_the_stops_leaves_one_world() -> No
         assert servers.tools_for_agent("assistant")
         # And nothing of the old world is still running.
         assert going._task is None or going._task.done()
-        assert mcp_module._abandoned == set()
+        assert manager_module.abandoned == set()
         # The exclusion was held until the apply was over, so the next
         # reload is answered rather than refused.
         assert (await servers.reload(reading(after))).unchanged == ("extra",)
