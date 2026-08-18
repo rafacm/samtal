@@ -15,6 +15,7 @@ from samtal_server.config.api import (
     api_token,
     build_api,
     build_api_runtime,
+    installed,
     mount_api,
     open_store,
 )
@@ -179,6 +180,16 @@ async def _build_composition(
     # a device path ever has to, and registered for disposal in the same
     # breath: it is the first pool this build acquires and therefore the
     # last one released.
+    #
+    # It decides once, and for the life of the process, whether there is
+    # a database to read at all: a configuration whose domain half came
+    # from one is served live, and one composed without a database is
+    # served from itself, authoritatively (see `bindings.py`). Both
+    # production entry points compose from the database, `main()`
+    # through `load_boot_config` and the ASGI one through `create_app`,
+    # so a server always gets the live view; the other shape is the test
+    # lane's and an embedded caller's, and it is deliberately not
+    # changed by the open below happening later in this build.
     bindings = DeviceBindings.open(config)
     stack.callback(bindings.dispose)
     # The devices waiting to be claimed, and the codes they are showing.
@@ -344,7 +355,13 @@ async def _build_composition(
     # This is the mounted owner. Starlette runs no lifespan for a mounted
     # application, so the one `build_api` gave that application never
     # runs and there is no second engine to collide with.
-    api_runtime.store = stack.enter_context(open_store(database_dir))
+    #
+    # The handle is installed through `installed`, registered after the
+    # open and therefore unwound before it, which is what keeps a request
+    # arriving after teardown from finding a handle whose engine would
+    # open fresh connections nobody owns.
+    store = stack.enter_context(open_store(database_dir))
+    stack.enter_context(installed(api_runtime, store))
     seed.api.state.api_runtime = api_runtime
     # The one thing on this app's state a handler reads back: the fields
     # are declared and typed in `composition.py`, and the API's own
