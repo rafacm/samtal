@@ -32,15 +32,19 @@ from sqlalchemy.pool import Pool
 
 import samtal_server.app as app_module
 from samtal_server.app import StartupFailed, create_app, startup_failure
+from samtal_server.composition import Composition
 from samtal_server.config import Config
 from samtal_server.config.api import UNEXPECTED, ApiRuntime
 from samtal_server.config.models import API_MOUNT_PATH
+from samtal_server.config.writes import BINDING_NOTICE
 from samtal_server.conversations.store import DATABASE_FILENAME
 from samtal_server.db import open_database
 from samtal_server.device.bindings import DeviceBindings
 from samtal_server.providers import ProviderError
 from samtal_server.providers import registry as provider_registry
 from samtal_server.tools.mcp import McpServers
+from tests.support.apps import entered_app
+from tests.support.checkin import NORMALIZED, check_in, unbound_config
 from tests.support.configs import config_with_agent
 
 SENTENCE = "the llm provider 'mock' could not be built"
@@ -322,6 +326,86 @@ def test_the_api_gets_its_live_pieces_before_the_first_request(tmp_path: Path) -
         assert mounted.pending is composition.pending
         assert mounted.mcp_servers is composition.mcp_servers
         assert mounted.loaded_agents == frozenset({"assistant"})
+
+
+# --- the database this build brings into existence --------------------
+#
+# A deployment whose configuration database is not there yet is an
+# ordinary first boot, and the whole of what makes it interesting is
+# that two things in this build look at that file: the engine the
+# configuration API is served over and written through, and the bindings
+# view every device path resolves through. What binds them is a promise
+# the API makes in words: a device binding is the one write it says takes
+# effect without a restart. The test below is that promise, driven end to
+# end rather than read off the acknowledgement.
+
+
+def _wrote(client: TestClient, path: str, body: object) -> None:
+    response = client.put(f"{API_MOUNT_PATH}{path}", json=body, headers=BEARER)
+    assert response.status_code == 200, response.text
+
+
+def test_a_binding_written_through_the_api_is_live_at_the_next_check_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An operator binds a board through the API, and the board's next
+    check-in resolves it: no restart, and nothing to do but ask again.
+
+    Driven end to end because that is the only way it is worth pinning.
+    The API writes to the configuration database and says the write is
+    live; the OTA endpoint resolves through the bindings view, which is a
+    second engine on the same file, opened at startup. Nothing in either
+    half asserts the other, so an unclaimed board checks in and is sent
+    round the ceremony, the binding is written, and the same board checks
+    in again.
+
+    `migrated` first, because that is the shape a server has: both
+    production entry points compose their configuration out of this
+    database, so the file is always there before the app is built. A
+    build over a directory with no database is the test lane's shape and
+    an embedded caller's, where the snapshot is the whole truth and the
+    view says so authoritatively.
+
+    The configuration deliberately names no default agent. With one, an
+    unbound device resolves to it and the second check-in answers the
+    same either way, which would make the whole end of this test agree
+    with a bindings view that never read the database.
+    """
+    monkeypatch.setenv(API_SECRET_ENV, TOKEN)
+    migrated(tmp_path)
+
+    with entered_app(unbound_config(database={"dir": str(tmp_path)})) as (app, client):
+        # There is a database behind the view, so what follows is about
+        # resolution and not about the fallback.
+        composition: Composition = app.state.composition
+        assert composition.bindings._engine is not None
+
+        # Nobody has claimed this board yet, which is what makes the
+        # absence of a code below mean something.
+        assert "activation" in check_in(client, mac=NORMALIZED)
+
+        # A deployment configuring itself through its own API, in the
+        # order the write-time reference checks require.
+        for stage in ("llm", "asr", "tts", "vad"):
+            _wrote(client, f"/providers/{stage}/mock", {"type": "mock"})
+        _wrote(client, "/agent-defaults", dict.fromkeys(("llm", "asr", "tts", "vad"), "mock"))
+        _wrote(client, "/agents/assistant", {"prompt": "You are the assistant."})
+
+        answer = client.put(
+            f"{API_MOUNT_PATH}/devices/{NORMALIZED}",
+            json={"agents": ["assistant"]},
+            headers=BEARER,
+        )
+        assert answer.status_code == 200, answer.text
+        # The acknowledgement claims the write is live rather than
+        # waiting for a restart, which is the promise the check-in below
+        # either keeps or breaks.
+        assert answer.json()["notice"] == BINDING_NOTICE
+
+        body = check_in(client, mac=NORMALIZED)
+
+    assert "activation" not in body, "the bound device was sent round the ceremony again"
+    assert body["websocket"]["token"]
 
 
 def test_the_mounted_api_holds_the_engine_only_while_the_server_serves(
