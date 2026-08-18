@@ -22,10 +22,10 @@ from samtal_server.runtime.prompt import Guidance, GuidanceBlock
 from samtal_server.tools import names
 
 if TYPE_CHECKING:
-    from .manager import McpServerManager
+    from .manager import McpManager
 
 
-def _shadowed(managers: Mapping[str, "McpServerManager"]) -> frozenset[str]:
+def _shadowed(managers: Mapping[str, "McpManager"]) -> frozenset[str]:
     """Which of these entries have another entry inside their namespace.
 
     A configuration property rather than a published-tool one: `home` is

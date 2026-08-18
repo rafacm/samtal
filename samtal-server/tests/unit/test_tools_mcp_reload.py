@@ -39,7 +39,8 @@ from samtal_server.config.secrets import (
     encrypt,
     generate_key,
 )
-from samtal_server.runtime.prompt import Guidance, ServerInstructions
+from samtal_server.providers import ToolDef
+from samtal_server.runtime.prompt import Guidance, ServerInstructions, ServerPrompt
 from samtal_server.tools.mcp import (
     APPLIED,
     CONNECTED,
@@ -779,22 +780,91 @@ async def settled(servers: McpServers) -> None:
             await asyncio.sleep(0.01)
 
 
-class SlowStopManager(McpServerManager):
+class SlowStopManager:
     """A manager that takes its time going away, so a reload can be
-    cancelled while it is being stopped."""
+    cancelled while it is being stopped.
 
-    async def _run(self) -> None:
-        self._became(CONNECTED, None)
-        self._settled.set()
-        await self._stop.wait()
-        await asyncio.sleep(0.2)
-        self._became(DOWN, None)
+    Everything `McpManager` asks of a manager and nothing else, because
+    what this test is about is what the reload does around a stop that
+    is still running. The stop is the only member that has to behave;
+    the rest answer the way a connected server that published nothing
+    would. It is a stand-in rather than a subclass for the same reason:
+    one that inherited the real stop would be asserting on that stop's
+    own bound, which has a test of its own, instead of on the reload
+    seeing a slow one out after its caller has gone.
+    """
+
+    def __init__(self, holding_s: float = 0.2) -> None:
+        self._holding_s = holding_s
+        self._state = DOWN
+        self._since = time.time()
+        # What the reload asked of this, and whether what it asked for
+        # ran to its end.
+        self.stops: list[float | None] = []
+        self.finished = False
+
+    @property
+    def state(self) -> str:
+        return self._state
+
+    @property
+    def reason(self) -> str | None:
+        return None
+
+    @property
+    def since(self) -> float:
+        return self._since
+
+    @property
+    def tool_timeout_s(self) -> float:
+        return 15.0
+
+    @property
+    def shipped_instructions(self) -> str | None:
+        return None
+
+    @property
+    def shipped_prompts(self) -> tuple[ServerPrompt, ...]:
+        return ()
+
+    def tools(self) -> list[ToolDef]:
+        return []
+
+    def listed_at(self, published: str) -> int | None:
+        return None
+
+    def expect(self, allowed: frozenset[str]) -> None:
+        return None
+
+    def same_as(self, other: object) -> bool:
+        # Nothing a reload builds is the world this was built from, so
+        # an entry it is serving is restarted rather than kept.
+        return False
+
+    def ensure_reconnecting(self) -> None:
+        return None
+
+    async def start(self) -> None:
+        self._state = CONNECTED
+        self._since = time.time()
+
+    async def stop(self, timeout: float | None = None) -> None:
+        self.stops.append(timeout)
+        await asyncio.sleep(self._holding_s)
+        self._state = DOWN
+        self._since = time.time()
+        self.finished = True
+
+    async def call(
+        self, published: str, arguments: dict[str, object]
+    ) -> tuple[str, bool]:
+        raise AssertionError("this server published nothing to call")
 
 
 async def test_a_caller_that_goes_away_during_the_stops_leaves_one_world() -> None:
     config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
     after = config_with({"extra": entry_data()}, {"assistant": ["extra"]})
-    going = SlowStopManager("tools", stdio_entry())
+    going = SlowStopManager()
     servers = McpServers({"tools": going}, McpSlice.of(config))
     await going.start()
 
@@ -814,8 +884,11 @@ async def test_a_caller_that_goes_away_during_the_stops_leaves_one_world() -> No
         assert set(servers.status()) == {"extra"}
         assert servers.status()["extra"]["state"] == CONNECTED
         assert servers.tools_for_agent("assistant")
-        # And nothing of the old world is still running.
-        assert going._task is None or going._task.done()
+        # And nothing of the old world is still running: the stop the
+        # apply asked for was asked under the reload's own bound, and it
+        # ran to its end behind the shield rather than with the caller.
+        assert going.stops == [manager_module.STOP_TIMEOUT_S]
+        assert going.finished
         assert manager_module.abandoned == set()
         # The exclusion was held until the apply was over, so the next
         # reload is answered rather than refused.
@@ -1069,7 +1142,7 @@ async def test_an_apply_whose_caller_went_away_is_still_reported_once(
     not anybody is left to be told about it."""
     config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
     after = config_with({"extra": entry_data()}, {"assistant": ["extra"]})
-    going = SlowStopManager("tools", stdio_entry())
+    going = SlowStopManager()
     servers = McpServers({"tools": going}, McpSlice.of(config))
     await going.start()
 

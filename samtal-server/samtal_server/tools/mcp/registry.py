@@ -29,7 +29,7 @@ from samtal_server.tools import names
 
 from . import events
 from . import reload as reloading
-from .manager import UNUSED, McpServerDown, McpServerManager, _managers_for
+from .manager import UNUSED, McpManager, McpServerDown, _managers_for
 from .reload import McpReload, _Preparation
 from .slice import McpSlice, _allowed, _shadowed
 
@@ -55,7 +55,7 @@ class McpServers:
     """Every MCP server some agent references, built at startup."""
 
     def __init__(
-        self, managers: dict[str, McpServerManager], configured: McpSlice | None = None
+        self, managers: dict[str, McpManager], configured: McpSlice | None = None
     ) -> None:
         self._managers = managers
         self._configured = configured if configured is not None else McpSlice()
@@ -107,7 +107,7 @@ class McpServers:
     def __contains__(self, entry: object) -> bool:
         return entry in self._managers
 
-    def manager_of(self, entry: str) -> McpServerManager:
+    def manager_of(self, entry: str) -> McpManager:
         """The manager behind one entry, or a KeyError for an entry that
         has none.
 
@@ -384,7 +384,7 @@ class McpServers:
             with contextlib.suppress(Exception, asyncio.CancelledError):
                 finished.exception()
 
-    def _install(self, keep: dict[str, McpServerManager], configured: McpSlice) -> None:
+    def _install(self, keep: dict[str, McpManager], configured: McpSlice) -> None:
         """The swap, and everything it decides at once: which managers a
         tool snapshot reaches, and which entries an agent's grant
         names. Assigned rather than mutated, and with no await between
