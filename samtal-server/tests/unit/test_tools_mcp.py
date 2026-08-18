@@ -1281,7 +1281,7 @@ async def test_a_shadowed_tool_is_reported_by_position_and_owner(
             "owner": "home__inside",
         }
         # And it really is the listing's, not the published list's.
-        assert [tool.name for tool in servers._managers["home"].tools()].index(
+        assert [tool.name for tool in servers.manager_of("home").tools()].index(
             "home__inside__secret_word"
         ) + 1 < SHADOWED_POSITION
     finally:

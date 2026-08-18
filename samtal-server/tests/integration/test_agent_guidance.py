@@ -463,7 +463,7 @@ async def reconnect(app, shipping: str) -> None:
     the same one the running session's agent was activated against.
     """
     os.environ[SHIPPED_TEXT_ENV] = shipping
-    manager = app.state.mcp_servers._managers[ENTRY]
+    manager = app.state.mcp_servers.manager_of(ENTRY)
     await manager.stop()
     manager.ensure_reconnecting()
     async with asyncio.timeout(30):
