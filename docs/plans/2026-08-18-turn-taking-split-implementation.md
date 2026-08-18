@@ -364,3 +364,35 @@ All from `samtal-server/`.
 - `test_boundary_contract.py` and `test_session_characterization.py`
   passed byte-unmodified against the M1 branch, confirmed with an empty
   `git diff --stat feature/turn-taking-split-m1` over both files.
+
+### The PR review round (M2)
+
+External review of PR #186 (codex-cli 0.147.0, gpt-5.6-sol,
+2026-08-18, diff main...cee10a2): three findings, verdict
+"mergeable after the listed fixes".
+
+1. **P1: the catch-all filler failure arm leaks exception text**
+   (the moved `logger.exception`). Declined here, same
+   classification as the M1 round's pair: pre-existing behavior
+   moved verbatim under the issue's contract. Recorded as a third
+   facet on #182 (the filler path touches no provider, so the
+   exposure is in-process text rather than wire bytes, and the
+   classification decision there should settle what this arm may
+   render, with a sentinel pin).
+2. **P2: the abandonment test passed with `abandon()` removed**,
+   because `settle()` stands an unfired timer down on its own.
+   Fixed in f6c225a: the test now holds a clip mid-send, abandons
+   while sounding, and asserts the settle finished without
+   waiting for the held send, no audio delivered, no state left.
+   Verified to fail without the `abandon()` call. Discovery kept
+   in the commit: a `wait_for(settle(), ...)` phrasing also
+   passes without `abandon()`, because `settle()` suppresses the
+   `CancelledError` that `wait_for` delivers, which is why the
+   assertion reads "already finished" rather than "did not time
+   out".
+3. **P3: "encoded whole before the first await" was imprecise**
+   (in the moved code as in the original: `begin_speaking()` is
+   awaited first). Fixed in 1d73b9c: comment, plan phrase, and
+   implementation-doc sentence now state the actual invariant,
+   three contiguous encoder calls completing before the send is
+   awaited.
