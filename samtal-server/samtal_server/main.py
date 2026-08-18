@@ -139,9 +139,25 @@ def uvicorn_config(app: FastAPI, config: Config) -> uvicorn.Config:
 
 
 def serve(app: FastAPI, config: Config) -> None:
-    """Run the server until it is signalled to stop."""
+    """Run the server until it is signalled to stop, or until its startup
+    refuses.
+
+    A refused startup is caught here rather than allowed out: uvicorn
+    ends the process itself when a lifespan startup fails
+    (`uvicorn.Server.startup` calls `sys.exit(3)`), and that would put
+    uvicorn's exit code and its rendered traceback in place of the one
+    sentence and the exit code of 1 this entry point has always answered
+    a boot failure with. So a `SystemExit` is swallowed exactly when the
+    lifespan recorded a boot failure, and `main()` reports it; anything
+    else that raises `SystemExit` in there is not ours to interpret and
+    goes on out.
+    """
     server = DrainingServer(uvicorn_config(app, config), app, config.server.drain_s)
-    server.run()
+    try:
+        server.run()
+    except SystemExit:
+        if startup_failure(app) is None:
+            raise
 
 
 def main() -> None:
