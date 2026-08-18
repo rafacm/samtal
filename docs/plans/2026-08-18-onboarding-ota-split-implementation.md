@@ -248,8 +248,10 @@ still in it, `WEBSOCKET_PATH` is still in `ws.py`, and the unified
 ## M2: the ota package and the cycle's end
 
 `samtal_server/ota.py` became `samtal_server/ota/`: `__init__.py` (119
-lines), `reply.py` (389), `poll.py` (134) and `router.py` (111). Four
-commits, in the order a reader can follow:
+lines), `reply.py` (393), `poll.py` (134) and `router.py` (111). Four
+commits carry the change, in the order a reader can follow (three more
+correct comments that this milestone made stale or that claimed more
+than they deliver):
 
 1. **`WEBSOCKET_PATH` re-homes to `device/boundary.py`**, with `ws.py`
    importing it back so every suite and `tests/support/wire.py` keep
