@@ -193,3 +193,27 @@ All from `samtal-server/`.
   predicted.
 - `test_boundary_contract.py` and `test_session_characterization.py`
   passed byte-unmodified, confirmed with `git diff --stat`.
+
+### The PR review round (M1)
+
+External review of PR #184 (codex-cli 0.147.0, gpt-5.6-sol,
+2026-08-18, diff main...9425f5e): three findings, verdict
+"mergeable after the listed fixes".
+
+1. **P1: confirmation failures leak provider text and tracebacks**
+   (the moved `logger.exception` in the gate ladder). Declined as
+   a change to this PR, with the plan's own review round as the
+   reason: the leak is pre-existing, the issue's settled contract
+   is strictly behavior-preserving, and the arm moves verbatim
+   with the fix and its sentinel pin tracked as #183. The plan's
+   no-leak lens paragraph and the finding agree on the eventual
+   fix shape.
+2. **P1: the abort path logs a device-supplied `reason`
+   unrestricted.** Same classification, newly discovered: the
+   line is pre-existing and moved as is; filed as #185 (allowlist
+   the reason tokens at the decision site, coarsen the rest,
+   sentinel pin), same family as #183 and possibly one PR with it.
+3. **P3: the module docstring said nothing here reads a
+   transcript while the gate inspects the confirmation text.**
+   Fixed in 45e1a3a: the docstring now claims what is true
+   (nothing retained, nothing orchestrated, inspection happens).
