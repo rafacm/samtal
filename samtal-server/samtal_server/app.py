@@ -23,18 +23,28 @@ from samtal_server.providers import ProviderError, build_agent_providers
 from samtal_server.registry import SessionRegistry
 from samtal_server.runtime import prompt
 from samtal_server.runtime.pipeline import bespoke_runtime_factory
-from samtal_server.tools.mcp import McpServers
+from samtal_server.tools.mcp import McpConfigError, McpServers
 from samtal_server.tools.memory import MemoryStore
 
 events = ServerEvents(__name__)
 
 # What a boot that refused looks like from the outside, and the whole of
 # what may be said about it. `DatabaseBusyError` is a `ConfigError`, so
-# the three names below are the boot failure taxonomy in full: every one
+# the four names below are the boot failure taxonomy in full: every one
 # of them carries a message written to be printed as it is, which is what
 # lets the bridge below hand one sentence to an operator and nothing
 # else.
-BOOT_FAILURES = (ConfigError, EventEnforcementError, ProviderError)
+#
+# `McpConfigError` is here because it is a boot refusal like the others
+# and was reaching the operator like a bug: an entry missing its egress
+# declaration under `server.local_only`, or naming an environment
+# variable nothing sets, answered with uvicorn's traceback and exit code
+# 3 rather than the sentence and exit code 1 its message was written for.
+# It is a `ValueError` rather than a `ConfigError` and stays one, since
+# the reload path catches it beside `ConfigError` by name and re-parenting
+# it would change what a `ValueError` means to every caller of the MCP
+# layer; naming it here is the smaller and more honest change.
+BOOT_FAILURES = (ConfigError, EventEnforcementError, McpConfigError, ProviderError)
 
 
 class StartupFailed(RuntimeError):
