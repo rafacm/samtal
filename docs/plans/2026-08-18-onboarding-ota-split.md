@@ -169,10 +169,10 @@ samtal_server/onboarding/
                      # _bracketed, portal_url_line, log_banner,
                      # and the unified request-derived helper
                      # (below)
-    pending.py       # code/capacity/budget constants,
-                     # FACT_LENGTH, _fact, PendingDevice, Offer,
+    pending.py       # FACT_LENGTH, _fact, PendingDevice, Offer,
                      # Claim, CAPACITY_REACHED, BUDGET_SPENT,
-                     # PendingDevices, _drawn
+                     # PendingDevices, _drawn; reads the tunable
+                     # bounds late through the package (below)
     unbound.py       # the one home of the unbound-device
                      # decision (below), plus activation_object
                      # and ACTIVATION_TIMEOUT_MS /
@@ -215,6 +215,23 @@ a dependency, which is what "routers compose them without
 back-references" means once the guard and the handlers have
 separate homes. `app.py` registers both routers from
 `ota.router`; `main.py` keeps `onboarding.log_banner`.
+
+**The tunable-bounds write-through.** Tests monkeypatch bounds on
+the module they always lived on (`samtal_server.onboarding
+.MINT_BUDGET` in four tests, and siblings like
+`PENDING_CAPACITY` and `CODE_TTL_S` elsewhere), and a re-exported
+integer is a snapshot: rebinding the package attribute would
+leave the submodule's global, and the decision it feeds,
+unchanged. So the tunable bounds stay DEFINED at the top of
+`onboarding/__init__.py`, before the submodule imports, and
+`pending.py` binds the package module once at import
+(`import samtal_server.onboarding as onboarding`, safe because
+the constants precede the submodule imports during
+initialization) and reads each bound at decision time
+(`onboarding.MINT_BUDGET` in `_affordable`, and likewise for
+capacity, TTL, mint window, and released grace), with a comment
+naming the monkeypatch contract as the reason. The four existing
+tests are the verification and stay unmodified.
 
 Two knock-on re-homes that make the direction clean:
 
@@ -451,6 +468,11 @@ P1/P2 amendments". All seven adopted.
    exercising the wrong bound. Write-through compatibility must
    be preserved, with the existing four tests as the
    verification.
+
+   *Resolution*: the design gains a tunable-bounds write-through
+   section: bounds defined in the facade before submodule
+   imports, `pending.py` reading them at decision time through
+   the package module, the four tests unchanged as proof.
 
 3. **P2: M1 retires the lightweight-import deferrals too
    early.** Importing any onboarding submodule executes the
