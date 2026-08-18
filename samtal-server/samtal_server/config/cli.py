@@ -53,7 +53,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NoReturn, get_args, get_origin
+from typing import Any, NoReturn, get_args, get_origin
 from urllib.parse import SplitResult, quote, urlsplit, urlunsplit
 
 import httpx
@@ -94,13 +94,15 @@ from samtal_server.config.writes import (
 )
 from samtal_server.db import open_database
 
-if TYPE_CHECKING:
-    # Names only. The onboarding module serves the OTA handlers, so
-    # importing it pulls in a whole conversation's worth of machinery;
-    # the two commands that need it import it in their own bodies, and
-    # `config reference` and `config openapi` keep loading nothing but
-    # the models and the routes.
-    from samtal_server.onboarding import Origin
+# Imported like anything else since issue #143 split the onboarding
+# package. These two modules read the configuration models and the
+# standard library and nothing else, so `config reference` and `config
+# openapi` still load nothing but the models and the routes. Both were
+# deferred until then, because the module that held them also held a
+# router over the OTA handlers and so pulled in a whole conversation's
+# worth of machinery.
+from samtal_server.onboarding.keys import onboarding_key, onboarding_path
+from samtal_server.onboarding.origin import Origin, public_origin
 
 # Where the API is, when nothing says otherwise: the loopback address of
 # this machine, on the port the server half of the configuration names,
@@ -783,7 +785,7 @@ def _server_config(args: argparse.Namespace) -> ServerConfig:
     return load_file_config(args.config).server
 
 
-def _onboarding_url(server: ServerConfig, fix: str) -> tuple[str, "Origin"]:
+def _onboarding_url(server: ServerConfig, fix: str) -> tuple[str, Origin]:
     """The short URL this configuration serves, and where its origin
     came from.
 
@@ -793,19 +795,12 @@ def _onboarding_url(server: ServerConfig, fix: str) -> tuple[str, "Origin"]:
     route with and what the startup banner prints. `fix` is what to do
     when onboarding is off, which differs by the command that asked.
     """
-    # Imported in the body rather than at module scope: the onboarding
-    # module serves the OTA handlers, so it imports `ota` and everything
-    # a conversation needs, and `config reference` and `config openapi`
-    # are rendered from the models and the routes with none of that
-    # loaded.
-    from samtal_server import onboarding
-
-    origin = onboarding.public_origin(server)
+    origin = public_origin(server)
     if not server.onboarding.enabled:
         raise ConfigError(
             ONBOARDING_OFF.format(origin=origin.url, provenance=origin.provenance, fix=fix)
         )
-    key = onboarding.onboarding_key(server)
+    key = onboarding_key(server)
     # The one state the server itself cannot be in, since it refuses the
     # boot: auth is on, no key is pinned, and the variable the secret
     # would come from holds nothing. It is told apart from the keyless
@@ -818,7 +813,7 @@ def _onboarding_url(server: ServerConfig, fix: str) -> tuple[str, "Origin"]:
             f"export it here. A deployment that pinned a key under "
             f"server.onboarding.key needs no secret to print its URL."
         )
-    return f"{origin.url}{onboarding.onboarding_path(key)}", origin
+    return f"{origin.url}{onboarding_path(key)}", origin
 
 
 def _device_url(url: str, source: str) -> str:

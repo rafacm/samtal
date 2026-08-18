@@ -55,7 +55,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from inspect import Parameter, Signature
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated, Any
 
 from cryptography.fernet import MultiFernet
 from fastapi import Body, Depends, FastAPI, Request
@@ -117,26 +117,23 @@ from samtal_server.conversations import api as conversations
 from samtal_server.db import open_database
 from samtal_server.events import ServerEvents
 
-if TYPE_CHECKING:
-    # For the reader, never at runtime. The pending table is a device
-    # concern, and its module imports the OTA endpoint, which imports
-    # the websocket session and everything a conversation needs; this
-    # application is also what `config openapi` renders a document from,
-    # with no server anywhere, and it must not have to load any of that
-    # to do it. The table arrives as an argument and is used through the
-    # small surface named here.
-    from samtal_server.onboarding import PendingDevice as PendingRecord
-    from samtal_server.onboarding import PendingDevices
-
-    # The MCP registry was named here too, for the same reason and with
-    # more force: it imports the SDK's clients and this project's
-    # provider layer, none of which rendering a document has any
-    # business loading. It is not named anywhere any more. What the
-    # routes are handed is `McpStatusSource` and `McpReloader` from
-    # `responses.py`, which say what this application asks of a running
-    # server out of typing and the response models, so the annotations
-    # resolve at import and the constraint holds by construction rather
-    # than by a forward reference nobody may resolve.
+# The pending table, imported like anything else since issue #143 split
+# the onboarding package: `onboarding.pending` imports nothing but the
+# standard library, so naming it here costs a document renderer nothing.
+# It used to be a forward reference, because the module that held the
+# table also held a router over the OTA handlers and so pulled the
+# websocket session and everything a conversation needs.
+#
+# The MCP registry was deferred here too, for the same reason and with
+# more force: it imports the SDK's clients and this project's provider
+# layer, none of which rendering a document has any business loading. It
+# is not named anywhere any more. What the routes are handed is
+# `McpStatusSource` and `McpReloader` from `responses.py`, which say what
+# this application asks of a running server out of typing and the
+# response models, so the annotations resolve at import and the
+# constraint holds by construction.
+from samtal_server.onboarding.pending import PendingDevice as PendingRecord
+from samtal_server.onboarding.pending import PendingDevices
 
 events = ServerEvents(__name__)
 
@@ -553,11 +550,7 @@ class ApiRuntime:
     store: StoreHandle | None
     conversations: Callable[[], Iterator[Connection]]
     loaded_agents: frozenset[str]
-    # Quoted, and the field never annotated with anything this module
-    # imports at runtime: the pending table is a device concern whose
-    # module pulls in the whole conversation stack, and `document()`
-    # renders this application with none of it loaded.
-    pending: "PendingDevices"
+    pending: PendingDevices
     mcp_servers: McpStatusSource | None
     mcp_reload: McpReloader | None
     agent_prompt: Callable[[str], Awaitable[Any]] | None
@@ -567,7 +560,7 @@ def build_api(
     token: str,
     database_dir: Path,
     loaded_agents: Collection[str] = (),
-    pending: "PendingDevices | None" = None,
+    pending: PendingDevices | None = None,
     mcp_servers: McpStatusSource | None = None,
     mcp_reload: McpReloader | None = None,
     agent_prompt: Callable[[str], Awaitable[Any]] | None = None,
@@ -639,7 +632,7 @@ def build_api(
 def build_api_runtime(
     database_dir: Path,
     loaded_agents: Collection[str] = (),
-    pending: "PendingDevices | None" = None,
+    pending: PendingDevices | None = None,
     mcp_servers: McpStatusSource | None = None,
     mcp_reload: McpReloader | None = None,
     agent_prompt: Callable[[str], Awaitable[Any]] | None = None,
@@ -678,15 +671,8 @@ def build_api_runtime(
     )
 
 
-def _empty_pending() -> "PendingDevices":
-    """A table for an application built without a server around it.
-
-    Imported here rather than at module scope, which is the point of the
-    seam: `document()` never calls this, so rendering the contract still
-    loads nothing of the device stack.
-    """
-    from samtal_server.onboarding import PendingDevices
-
+def _empty_pending() -> PendingDevices:
+    """A table for an application built without a server around it."""
     return PendingDevices()
 
 
@@ -783,7 +769,7 @@ def _loaded_agents(request: Request) -> frozenset[str]:
 LoadedAgentsDep = Annotated[frozenset[str], Depends(_loaded_agents)]
 
 
-def _pending(request: Request) -> "PendingDevices":
+def _pending(request: Request) -> PendingDevices:
     """The devices waiting to be claimed, from the server this
     application is mounted on. Taken from the application for the reason
     the store is."""
@@ -837,7 +823,7 @@ def _agent_prompt(request: Request) -> Callable[[str], Awaitable[Any]] | None:
 AgentPromptDep = Annotated[Any, Depends(_agent_prompt)]
 
 
-def _pending_view(device: "PendingRecord") -> dict[str, Any]:
+def _pending_view(device: PendingRecord) -> dict[str, Any]:
     """One waiting device as the listing shows it. The code is the key
     it is filed under and is deliberately not repeated inside."""
     return {
