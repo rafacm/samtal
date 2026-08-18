@@ -241,10 +241,11 @@ SUPPLIED_ENDPOINT = "the supplied OTA endpoint"
 # What `doctor` reaches may be a proxy, a captive portal or anything
 # else that answers, so the version it claims and the URL it names are
 # attacker-controlled text: bounded and printable, or not printed. The
-# rule is the one `onboarding._fact` applies to what a device says about
-# itself, kept here rather than imported for the reason the onboarding
-# import is in a function body. The body itself is never repeated at
-# all, bounded or otherwise.
+# rule is the one `onboarding.pending._fact` applies to what a device
+# says about itself; the bound is its own, because what a stranger's
+# server claims about itself is not what a board waiting to be claimed
+# says, and the two have never had a reason to move together. The body
+# itself is never repeated at all, bounded or otherwise.
 GLIMPSE_LENGTH = 120
 
 # How many redirects `doctor` follows. One, and one is already more
