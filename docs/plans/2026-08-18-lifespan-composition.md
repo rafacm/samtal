@@ -537,7 +537,7 @@ provider build, and asserts the engine was disposed.
   amendment note in docs/plans/2026-08-11-rest-api.md recording
   the retirement of the per-request rationale; the conversations
   reader's per-request property recorded as deliberately kept;
-  CHANGELOG; implementation-doc section. (PR TBD)
+  CHANGELOG; implementation-doc section. (PR #189)
 - [ ] **M4: the drain task is owned.** `DrainingServer` keeps the
   task reference, `serve()` settles it under the bound, the new
   drain test, the no-unreferenced-`create_task` grep in the
