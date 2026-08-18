@@ -24,13 +24,13 @@ what builds any of this: absent or off, nothing here is constructed, no
 file is created and no server behaviour changes, which is the whole of
 what an operator who wants none of it has to know.
 
-Enabled, the composition happens in two places and nowhere else.
-`create_app` builds the store cold, so opening and migrating the file
-fails the boot rather than the first conversation, and hands it to the
-runtime factory, which is how a turn's record reaches it. The lifespan
-owns the writer thread: started first inside its guarded region and
-stopped last, with the drain of what is queued happening after every
-session has stopped producing. A session opens its row after the hello
+Enabled, the composition happens in one place and nowhere else: the
+lifespan (#142). It builds the store cold, so opening and migrating the
+file fails the startup rather than the first conversation, and hands it
+to the runtime factory, which is how a turn's record reaches it; and it
+owns the writer thread, started once the store is built and stopped when
+the lifespan unwinds, with the drain of what is queued happening after
+every session has stopped producing. A session opens its row after the hello
 with the same manifest the capture is given, attaches a `SessionSink`
 after the capture's tap, and closes the row after `session_closed`, so
 what is recorded is the decision track and the turns beside it.
