@@ -362,12 +362,16 @@ the endpointer shape structurally and needs no registration.
 ## The standing review lenses, answered
 
 - **No-leak.** No new retained surface is created and no message
-  text changes. The moved `except Exception` arms keep their
-  exact shape (the confirmation-failure line logs no exception
-  text beyond `logger.exception`'s existing traceback on an
-  in-process failure, unchanged from today; the reply path's
-  class-name-only discipline is untouched). The sentinel suites
-  from #144 pass unmodified.
+  text changes; the reply path's class-name-only discipline is
+  untouched and the sentinel suites from #144 pass unmodified.
+  One pre-existing gap sits inside the moved code and is not
+  claimed covered: the confirmation-failure catch in
+  `_gate_barge_in` logs with `logger.exception`, retaining the
+  provider exception's text and chain on the retained surface,
+  and no sentinel test exercises that path (the existing
+  failed-confirmation test raises a message-free `TimeoutError`).
+  Fixing it is a behavior change, so it is tracked as issue #183
+  and the arm moves verbatim here.
 - **Pin before reshaping.** The surface is already pinned by the
   #144/#155 machinery: every moved decision event has a named pin
   in `test_event_surface_pins.py` (asserting `record.msg` and
@@ -523,6 +527,12 @@ the amendments below.
    suites exercise `_reply`'s separate class-name-only arm. This
    is a pre-existing gap to track in its own issue and move
    verbatim, not a surface the plan may claim proven safe.
+
+   *Resolution*: filed as issue #183 (class-name-only or the
+   provider-failure taxonomy, plus a sentinel pin, decided there
+   against the post-M1 module); the no-leak lens paragraph now
+   names the gap and the verbatim move instead of claiming
+   coverage.
 
 6. **P3: `ScriptedEndpointer`'s docstring becomes false.** It
    says feeding is never exercised; the rewritten suites and the
