@@ -94,11 +94,15 @@ where they correct the issue:
   consequences bind the design: the new modules MUST store the
   events object under the attribute name `self._events`, and the
   conformance sidecar identities (module, enclosing function,
-  ordinal) for the nine moved emit sites plus the
-  `_speaking_ms_field` spread key must be updated. The suite
-  asserts both maps exhaustively in both directions, so it names
-  every stale key itself; that assertion, not a hand count, is the
-  migration inventory.
+  ordinal) for the nine moved emit sites, the
+  `_speaking_ms_field` spread key, and the two `TOKEN_SOURCES`
+  entries that pin the closed reason sets to their decision sites
+  (`barge_in_suppressed.reason` scoped to `_gate_barge_in`, moving
+  in M1; `filler_skipped.reason` scoped to `_run_filler`, moving
+  in M2; `test_event_schema_conformance.py:1081-1095`) must be
+  updated. The suite asserts its maps exhaustively in both
+  directions, so it names every stale key itself; that assertion,
+  not a hand count, is the migration inventory.
 - **Cross-cutting fields beyond the four the issue names.** The
   issue lists `_reply_pcm`, `_output_paused`, `_filler_sounding`,
   `_asr_language`. Also crossing clusters today: `_endpointer`
@@ -435,7 +439,9 @@ the endpointer shape structurally and needs no registration.
 - [ ] **M2: the filler runner.** Add `runtime/filler_runner.py`
   (`FillerRunner`, `TurnView`, the observation properties),
   delegate from `PipelineRuntime` (`arm`/`tail`/`settle`/
-  `abandon` call sites), point the moved exception-arm comment at
+  `abandon` call sites), relocate the `filler_skipped` reason
+  entry in `TOKEN_SOURCES` and the filler sidecar identities,
+  point the moved exception-arm comment at
   #182, rewrite `test_session_filler.py`, add
   `tests/unit/test_filler_runner.py`, write the class docstring's
   cross-cutting-field inventory for what remains in
@@ -493,6 +499,10 @@ the amendments below.
    and `filler_skipped.reason` to the old module and scopes; both
    entries go stale (one in M1, one in M2) and belong in the named
    inventory.
+
+   *Resolution*: the channel-invariance bullet and both milestones
+   now name the two `TOKEN_SOURCES` relocations alongside the
+   sidecar identities and the spread key.
 
 4. **P2: the ordinary-log channel claim is factually wrong.**
    pipeline.py imports `logger` from `samtal_server.events`
