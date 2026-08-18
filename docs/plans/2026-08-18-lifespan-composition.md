@@ -376,11 +376,18 @@ that stay in the describe phase: enforcement, auth config, token)
 or enter the lifespan when they inspect built state. The
 config-API suites that run `build_api(...)` standalone are
 untouched except where they lacked `with` and read state the
-lifespan now attaches. The two post-hoc injection tests move
-their overwrite inside the entered context
+lifespan now attaches. The runtime-factory injection test moves
+its overwrite inside the entered context
 (`composition.runtime_factory = ...` on the dataclass instance),
 which the composition object's mutability exists for, and the
-class docstring names those two tests as the sanctioned writers.
+class docstring names it as the sanctioned writer. The
+conversation-store injection test cannot move that way: it
+replaces the store so that `start()` fails inside the lifespan
+and the teardown still runs, which only means anything before
+entry. It patches the store constructor
+(`monkeypatch.setattr(app_module, "ConversationStore", ...)` or
+the open helper) before building the app instead, exercising the
+same failure inside the lifespan build.
 
 ### The leak-checking test
 
@@ -611,6 +618,10 @@ P1/P2 amendments". All eleven adopted.
    store before entry so `start()` fails inside the lifespan.
    That test patches the constructor instead; only the
    runtime-factory injection moves inside the entered context.
+
+   *Resolution*: the fixture section now splits the two injectors
+   accordingly, and the composition docstring names only the
+   runtime-factory test as the sanctioned writer.
 
 9. **P2: shutdown has no path before the composition exists.** A
    SIGTERM during a minutes-long provider build reaches missing
