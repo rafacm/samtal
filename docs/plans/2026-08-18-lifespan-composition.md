@@ -332,10 +332,17 @@ and is not done, await it under `asyncio.wait_for` with
 bound fires (today the task is fire-and-forget into uvicorn's own
 shutdown; the bound makes the ownership honest without letting a
 hung drain wedge the exit). `handle_exit`'s
-second-signal-passes-through behavior is untouched. The unit
-drain suite gains one test: the task reference exists and is
-awaited; no unreferenced `create_task` remains in `main.py`
-(grep-verified in the milestone).
+second-signal-passes-through behavior is untouched. A signal that
+arrives before the composition exists (startup can spend minutes
+in the provider build) must not reach a drain that reads missing
+state: `handle_exit` passes straight through to uvicorn's own
+shutdown when `app.state` has no composition yet, the same way it
+passes through on a second signal. The unit drain suite gains two
+tests: the task reference exists and is awaited, and a signal
+delivered while startup is blocked (a lifespan held on an event)
+delegates straight through with no drain attempted; no
+unreferenced `create_task` remains in `main.py` (grep-verified in
+the milestone).
 
 ### AgentFillers
 
@@ -628,6 +635,10 @@ P1/P2 amendments". All eleven adopted.
    state. A signal before composition installation bypasses the
    drain and delegates straight to uvicorn shutdown, with a test
    driving a signal while startup is blocked.
+
+   *Resolution*: the drain section now specifies the
+   no-composition pass-through in `handle_exit` and the
+   blocked-startup signal test.
 
 10. **P2: `_CompositionSeed` retains a second copy of the API
     token.** The token is resolved and consumed in the describe
