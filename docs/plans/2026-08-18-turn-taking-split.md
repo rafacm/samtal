@@ -424,7 +424,7 @@ non-endpointing result while `speech_ms()` stays test-controlled.
 ## Milestones
 
 - [x] **[M1: the turn-taking core](2026-08-18-turn-taking-split-implementation.md#m1-the-turn-taking-core).**
-  (PR TBD) Add `runtime/turntaking.py`
+  (PR #184) Add `runtime/turntaking.py`
   (state, feed, tail cap, gate ladder, merge, trim, pause mirror,
   `ReplyControl`), delegate from `PipelineRuntime`
   (`start_reply`/`cancel_reply`/`confirm_transcript` seams,
