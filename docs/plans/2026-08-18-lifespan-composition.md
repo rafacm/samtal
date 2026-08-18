@@ -516,7 +516,7 @@ provider build, and asserts the engine was disposed.
   untouched would fail at startup); grep proves `app.state.` is
   only the two typed objects; CHANGELOG; implementation-doc
   section. Construction still synchronous in `create_app` this
-  milestone, so no fixture migration yet. (PR TBD.)
+  milestone, so no fixture migration yet. (PR #187)
 - [ ] **M2: the lifespan owns construction.** Move the build into
   the lifespan (describe/build split, `_CompositionSeed`,
   providers under `to_thread`, capture events with their identity
