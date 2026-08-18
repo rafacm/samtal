@@ -750,3 +750,206 @@ to meet it before proposing the same change again.
    verification section above, from a rerun on the final tree: the
    baseline was M2's post-review 2,981 unit and 58 integration, not the
    2,980 / 57 taken before the rebase onto merged main.
+
+## M4: the drain task is owned
+
+Three commits: the ownership with the two tests that pin it, the
+changelog entry, and this section with the closing sweep. The signal
+guard the plan lists under "the drain task" is not here: it landed in M2,
+with its own test, because that milestone is what made startup long
+enough to be signalled in the middle of.
+
+### What was written
+
+**The reference.** `_start_drain` assigns what it creates to
+`self._drain_task` instead of dropping it. That alone is the criterion:
+the event loop keeps only a weak reference to a running task, so an
+unheld one can be collected while it is still asking conversations to
+finish, and whatever it raises is reported by the garbage collector
+rather than by the shutdown that started it.
+
+**The settle.** `_settle_drain` returns at once when there is no task or
+the task is done, and otherwise awaits it under
+`asyncio.wait_for(task, self._drain_s + CLOSE_MARGIN_S)`. The margin is
+imported from `registry.py`, where the drain already holds it back for
+the closes, so the bound is the longest a drain that is working can take
+rather than a second number to keep in step with the first. Past it the
+task is abandoned (`wait_for` cancels what it bounds) with a warning, and
+the process goes: a shutdown that cannot end is worse than a conversation
+that is cut off. A drain that raised is logged here too, which the plan
+did not ask for and holding the reference is what makes possible.
+
+**Where the settle runs**: in a `_serve` override, not a `serve` one.
+The reason is a deviation and is recorded below.
+
+**The tests**, both in `tests/unit/test_drain.py` in that file's shape
+(a fake app carrying a composition stub, the registry fakes from
+`tests/support/registry.py`):
+`test_the_drain_task_is_owned_and_finished_before_serving_ends` drives
+serving in the shape that makes the settle matter (uvicorn's own
+`_serve` replaced by one that takes the signal and returns while the
+drain is still in flight, which is what an operator's second signal does
+to it) and asserts the conversation reached its end, which nothing else
+on that loop could have driven; and
+`test_a_drain_that_outlives_its_bound_is_abandoned` gives the server a
+registry whose drain never finishes, shortens both halves of the bound,
+and asserts the warning, the finished task and the exit that happened
+anyway. Both were verified by mutation: with the settle removed they
+fail, and with it they pass.
+
+### Deviations from the plan
+
+- **The settle overrides `_serve`, not `serve`.** The plan says
+  "`serve()` gains a bounded settle after uvicorn's serve returns", and
+  after uvicorn's `serve` returns is a place nothing runs on the path
+  that creates a drain task. `Server.serve` is
+  `with self.capture_signals(): await self._serve(sockets)`, and that
+  context manager, on the way out, puts the original handlers back and
+  then re-raises every signal it captured. Our drain's `finally` calls
+  uvicorn's own `handle_exit`, which is what records the signal, so by
+  the time serving is over there is a SIGTERM to re-raise and the
+  original handler for it is the default one. Probed against real
+  uvicorn before choosing: a settle written after `super().serve()` does
+  not execute and the process exits 143, while the same settle in a
+  `_serve` override runs and then the process exits 143. Inside `_serve`
+  the settle is still inside the same coroutine and on the same loop the
+  task was created on, and it is ahead of the re-raise. The cost is that
+  `_serve` is uvicorn's private name: if it is renamed, our override
+  stops being called. What catches that is the two tests, which
+  `monkeypatch.setattr(uvicorn.Server, "_serve", ...)`, and monkeypatch
+  refuses to set an attribute that is not there.
+
+- **The settle logs a drain that failed, as well as one that overran.**
+  The plan specifies only the warning on the bound. Letting the
+  exception out of `_serve` instead would turn a bug in the drain into a
+  traceback in place of the shutdown, and swallowing it would leave
+  exactly the "Task exception was never retrieved" this milestone exists
+  to end. It is logged, and the exit is already under way when it is.
+
+### Discoveries
+
+- **The ordinary path never waits.** The drain ends by calling uvicorn's
+  `handle_exit`, so uvicorn's serving cannot finish before the task
+  does: `_settle_drain` finds it done and returns. What the settle is
+  for is the other order, an exit uvicorn reached by itself (the second
+  signal, forced) while the drain is still speaking. Ownership of the
+  reference is the part that pays on every path.
+
+- **A signalled shutdown ends the process from inside uvicorn's
+  `serve`,** by the signal it captured, with exit code 143 for SIGTERM.
+  That predates this issue and nothing here changes it; it is worth
+  naming because it is why `main()`'s post-serve reporting is only ever
+  reached by a startup that refused (which captures no signal) and why
+  the settle had to move one level in.
+
+- **Cancelling the drain does not cost the exit.** `wait_for` cancels
+  the task it gives up on, and `_drain`'s `finally` runs under that
+  cancellation, so uvicorn is still told to exit by the drain that was
+  abandoned. The bound test asserts `should_exit` for that reason.
+
+### Verification
+
+From `samtal-server/`:
+
+- `uv run ruff check .`: all checks passed.
+- `uv run pytest tests/unit -q`: 2,986 passed, 16 skipped (2,984 after
+  M3; the two are this milestone's).
+- `uv run pytest tests/integration -q`: 58 passed, unchanged by this
+  milestone.
+- The four generated references CI diffs (domain configuration,
+  conversations schema, events, API OpenAPI): regenerated and diffed
+  clean. Nothing this milestone touches is in any of them.
+- The milestone's own grep, `grep -n "create_task" samtal_server/main.py`,
+  one line and it is the assignment:
+
+  ```
+  113:        self._drain_task = asyncio.get_running_loop().create_task(self._drain(sig, frame))
+  ```
+
+### The closing acceptance sweep
+
+Issue #142's six acceptance criteria, in the issue's order, each with
+what proves it and where. Where a plan review round amended a criterion's
+shape, the amended form is what is checked.
+
+1. **"Lifespan owns construction and release; `create_app` without
+   entering the lifespan no longer opens engines or pools, proven by a
+   leak-checking test."** Met in M2. `create_app` resolves the
+   configuration, the enforcement mode, the API token and the device-auth
+   refusal, registers routes and mounts the API shell, and stashes a
+   `_CompositionSeed`; `_build_composition` runs in the lifespan and
+   registers every acquisition on an `AsyncExitStack` as it makes it.
+   Proof: `tests/unit/test_app_lifespan.py` with
+   `test_a_described_app_acquires_nothing`,
+   `test_entering_and_leaving_releases_everything` and
+   `test_a_build_that_fails_part_way_releases_what_it_took` (plan review
+   finding 6's partial-startup case), all three checking the pool an
+   engine holds rather than a call that was made, after the M2 review
+   round's finding 4; and
+   `tests/unit/test_conversations_boot.py::test_nothing_is_opened_before_the_lifespan_runs`
+   for the store.
+
+2. **"`app.state` attribute soup is gone; grep for `app.state.` finds
+   only the composition object (plus the documented token exception)."**
+   Met across M1 to M3, in the amended form plan review finding 2
+   requires: the configuration API's own seven-attribute bag was not
+   exempted but typed, so the grep covers both applications. The answer
+   today, from `grep -rn '\.state\.' samtal-server/samtal_server`, is
+   three names: `state.composition` (`Composition`, written by the
+   lifespan, read by `ws.py`, `ota.py` and `main.py`),
+   `state.api_runtime` (`ApiRuntime`, written by `build_api` and by the
+   parent lifespan, read by the six configuration-API dependencies and
+   `conversations/api.py`), and `state.seed` (`_CompositionSeed`, the
+   private handover from the describe phase to the build, which no
+   handler reads). All three are declared dataclasses. The token
+   exception is stronger than documented: it is not on the state bag at
+   all, resolved into a local in `create_app` and passed into the gate.
+
+3. **"The config API serves requests from a lifespan-owned engine; no
+   per-request Alembic; concurrency behavior under `BEGIN IMMEDIATE`
+   unchanged (existing busy/contention tests pass)."** Met in M3.
+   `open_store` is entered by whichever lifespan owns the application
+   (the server's when mounted, the API's own when standalone, never
+   both), and `store_dependency` wraps the handle it finds and refuses
+   when there is none. Proof: `tests/unit/test_config_api.py`'s
+   `test_the_store_dependency_serves_the_engine_it_was_given`,
+   `test_a_request_with_no_engine_is_a_programming_error` and
+   `test_the_application_has_no_engine_until_its_lifespan_runs`, plus
+   `tests/unit/test_app_lifespan.py::test_the_mounted_api_holds_the_engine_only_while_the_server_serves`
+   from the M3 review round. `BEGIN IMMEDIATE` did not move: it is taken
+   per transaction in the store. `tests/unit/test_config_refusals.py` is
+   byte-untouched, as plan review finding 7 requires; the two 409 setups
+   were reworked (not their names, scenarios or assertions) because the
+   phase the lock has to be taken in moved, which the M3 section records
+   in full.
+
+4. **"The shutdown drain task is owned; no unreferenced `create_task`
+   remains in `main.py`."** Met in this milestone: the reference, the
+   bounded settle, the two tests, and the grep above whose one hit is
+   the assignment.
+
+5. **"Unit and integration lanes green."** 2,986 unit passed with 16
+   skipped, 58 integration passed, on the tree this milestone ends with,
+   plus ruff and the four generated references. The no-behavior-change
+   contract held in the shape the issue wrote it: no integration test
+   changed except the two whose applications had to enter a lifespan and
+   the lane's own boot helper (M2 and M3 record both), and the unit
+   changes are the fixture migration and the state relocation.
+
+6. **"CHANGELOG entry."** Four, one per milestone, all under
+   `## 2026-08-18` / `### Changed`.
+
+Two settled decisions carry no criterion of their own and are recorded
+here so the sweep is the whole contract. `agent_fillers` distinguishing
+pending from absent is M1's `AgentFillers` with
+`tests/unit/test_filler_cache.py`, including
+`test_ready_is_what_tells_pending_from_absent` and the lifespan wiring
+pin the M1 review round added. The `uvicorn samtal_server.app:app` entry
+point keeps working: `app.py`'s `__getattr__` is unchanged, and what it
+builds is now a described application whose construction happens when
+uvicorn enters its lifespan, which is the direction the issue asked for.
+
+What is left open is M3's, not this milestone's: moving the unit lane
+onto seeded databases, and deciding with it whether `DeviceBindings`'
+snapshot-authoritative mode is still worth keeping. The M3 review round
+records why that is its own issue.
