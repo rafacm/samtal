@@ -120,18 +120,17 @@ where they correct the issue:
   confirmation call as one seam; the cluster itself does not move.
 - **The recorder does not couple.** #120's `TurnUnderway` is fed
   exclusively from the reply path; neither extraction touches it.
-- **Ordinary (non-event) log lines move logger channel.** The
-  moved code's `logger.info`/`logger.warning`/`logger.exception`
-  lines (the utterance-length line, the barge-in-off drop warning,
-  the confirmation-failed line, the filler-playback-failed line)
-  ride each new module's own `logging.getLogger(__name__)`, so
-  their channel becomes `samtal_server.runtime.turntaking` or
-  `.filler_runner`. Grep at plan time found no test or reference
-  pinning these channels (the events reference covers declared
-  events only, and every decision event rides the invariant
-  `samtal_server.session` channel). Recorded here as the one
-  observable-surface change this refactor makes, deliberate and
-  bounded to ordinary diagnostics.
+- **Ordinary (non-event) log lines do not move channel either.**
+  pipeline.py imports `logger` from `samtal_server.events`
+  (pipeline.py:60), the module-level logger on the fixed
+  `samtal_server.session` channel, so the moved diagnostics (the
+  utterance-length line, the barge-in-off drop warning, the
+  confirmation-failed line, the filler-playback-failed line)
+  already ride the same constant channel as the events. The new
+  modules import that same shared `logger`; giving them
+  `getLogger(__name__)` loggers would be the behavior change, not
+  the preservation. With this, the extraction changes no
+  observable logging surface at all.
 
 ## Design
 
@@ -511,6 +510,10 @@ the amendments below.
    the new modules `getLogger(__name__)` loggers would be the
    behavior change, not the preservation. The new modules must
    import the same shared logger.
+
+   *Resolution*: the evidence bullet is corrected; both new
+   modules import `logger` from `samtal_server.events`, and the
+   extraction now changes no logging surface at all.
 
 5. **P2: the no-leak claim overstates coverage.** The
    confirmation-failure catch (`logger.exception`,
