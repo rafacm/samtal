@@ -91,8 +91,10 @@ def test_startup_fills_the_cache_the_composition_holds(
     monkeypatch.setattr(app_module, "build_agent_fillers", synthesized)
 
     app = create_app(config_with_agent())
-    # Handed out cold, which is the state every reader is built against.
-    assert not app.state.composition.agent_fillers.ready
+    # Before the lifespan there is no composition at all: the build owns
+    # the cache along with everything else, so the cold state a reader
+    # could ever see is the one inside an entered lifespan.
+    assert getattr(app.state, "composition", None) is None
 
     with TestClient(app):
         fillers = app.state.composition.agent_fillers
