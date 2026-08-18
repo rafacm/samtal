@@ -49,6 +49,22 @@ class TurnView(Protocol):
     def output_paused(self) -> bool: ...
 
 
+class FillerCache(Protocol):
+    """What this runner asks of the boot-time clip cache: is there one
+    for this agent, give me that one, give me this one or nothing.
+
+    Three reads and no writes, declared as the surface rather than as a
+    type, so the server's own `AgentFillers` and a plain dictionary of
+    clips are equally what this runner takes. A test that hands it two
+    entries should not have to build the server's cache to do it."""
+
+    def __contains__(self, name: object, /) -> bool: ...
+
+    def __getitem__(self, name: str, /) -> FillerClips: ...
+
+    def get(self, name: str, /) -> FillerClips | None: ...
+
+
 class FillerRunner:
     """One turn's latency mask at a time, for the life of one connection.
 
@@ -63,7 +79,7 @@ class FillerRunner:
         self,
         events: SessionEvents,
         output: DeviceOutput,
-        fillers: dict[str, FillerClips],
+        fillers: FillerCache,
         agents: Sequence[str],
         turn: TurnView,
     ) -> None:
