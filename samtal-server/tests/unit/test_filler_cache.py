@@ -8,8 +8,14 @@ which is what makes the mask stand down rather than wait.
 """
 
 import pytest
+from fastapi.testclient import TestClient
 
+from samtal_server import app as app_module
+from samtal_server.app import create_app
+from samtal_server.config import Config
 from samtal_server.filler import AgentFillers, FillerClips
+from samtal_server.providers import AgentProviders
+from tests.support.configs import config_with_agent
 
 CLIP = FillerClips(delay_ms=800.0, phrases=("hmm",), clips=(b"\x00\x00",), sample_rate=16000)
 
@@ -65,3 +71,30 @@ def test_a_reference_taken_before_the_fill_sees_the_clips() -> None:
     fillers.fill({"assistant": CLIP})
 
     assert held.get("assistant") is CLIP
+
+
+def test_startup_fills_the_cache_the_composition_holds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The wiring, end to end: the cache `create_app` hands out is the
+    one the lifespan fills, and what it fills it with is what the boot
+    synthesized. Without this, a startup that dropped the synthesis
+    result on the floor would pass every other test here, because a cache
+    that was never filled answers exactly as one with nothing for this
+    agent."""
+
+    async def synthesized(
+        config: Config, agent_providers: dict[str, AgentProviders]
+    ) -> dict[str, FillerClips]:
+        return {"assistant": CLIP}
+
+    monkeypatch.setattr(app_module, "build_agent_fillers", synthesized)
+
+    app = create_app(config_with_agent())
+    # Handed out cold, which is the state every reader is built against.
+    assert not app.state.composition.agent_fillers.ready
+
+    with TestClient(app):
+        fillers = app.state.composition.agent_fillers
+        assert fillers.ready
+        assert fillers.get("assistant") is CLIP
