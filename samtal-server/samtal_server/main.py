@@ -12,6 +12,7 @@ and uvicorn's shutdown is what happens after it.
 import argparse
 import asyncio
 import logging
+import socket
 import sys
 from types import FrameType
 
@@ -27,6 +28,7 @@ from samtal_server.config.boot import load_boot_config
 from samtal_server.config.loader import CONFIG_ENV_VAR
 from samtal_server.events import EventEnforcementError, resolve_enforcement
 from samtal_server.providers import ProviderError
+from samtal_server.registry import CLOSE_MARGIN_S
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +64,10 @@ class DrainingServer(uvicorn.Server):
     The first signal starts the drain and lets uvicorn exit when it
     completes; a second one is passed straight through, which is how an
     operator in a hurry forces the issue.
+
+    The drain runs in a task this server owns: it holds the reference,
+    and its serving does not finish before that task has, or before the
+    bound on it expires (#142).
     """
 
     def __init__(self, config: uvicorn.Config, app: FastAPI, drain_s: float) -> None:
@@ -69,6 +75,7 @@ class DrainingServer(uvicorn.Server):
         self._app = app
         self._drain_s = drain_s
         self._draining = False
+        self._drain_task: asyncio.Task[None] | None = None
 
     def handle_exit(self, sig: int, frame: FrameType | None) -> None:
         if self._draining or self._drain_s <= 0:
@@ -98,7 +105,12 @@ class DrainingServer(uvicorn.Server):
         loop.call_soon_threadsafe(self._start_drain, sig, frame)
 
     def _start_drain(self, sig: int, frame: FrameType | None) -> None:
-        asyncio.get_running_loop().create_task(self._drain(sig, frame))
+        # Kept rather than discarded (#142). The loop holds only a weak
+        # reference to a running task, so an unheld one can be collected
+        # mid-drain; and a task nobody awaits reports whatever it raises
+        # through the garbage collector, long after the line that would
+        # explain it. `_settle_drain` below is where it is joined.
+        self._drain_task = asyncio.get_running_loop().create_task(self._drain(sig, frame))
 
     async def _drain(self, sig: int, frame: FrameType | None) -> None:
         try:
@@ -114,6 +126,54 @@ class DrainingServer(uvicorn.Server):
             # going: uvicorn's own shutdown, and the 1012 fail-close it
             # begins with, are the backstop for anything still holding on.
             super().handle_exit(sig, frame)
+
+    async def _serve(self, sockets: list[socket.socket] | None = None) -> None:
+        """Uvicorn's serving, with the drain settled before it lets go.
+
+        This overrides `_serve` rather than `serve` because `serve` is
+        `with self.capture_signals(): await self._serve(...)`, and that
+        context manager re-raises the signal it captured, with the
+        original handler back in place, on the way out. For SIGTERM that
+        handler is the default one, so the process ends inside `serve`
+        and anything written after it never runs (verified: a settle
+        placed there does not execute, and the process exits 143). Inside
+        `_serve` the settle is still on the loop the drain task was
+        created on, and it is ahead of the re-raise.
+        """
+        try:
+            await super()._serve(sockets)
+        finally:
+            await self._settle_drain()
+
+    async def _settle_drain(self) -> None:
+        """Join the drain task, under a bound.
+
+        Usually there is nothing to do: the drain ends by asking uvicorn
+        to exit, so by the time uvicorn has, its task is done. What this
+        is for is the other order, an exit uvicorn reached by itself
+        (a second signal, forced) while the drain is still in flight.
+        The bound is the drain's own budget plus the margin the registry
+        holds back for the closes, which is the longest a drain that is
+        working can take; past it the task is abandoned and said so,
+        because a shutdown that cannot end is worse than a conversation
+        that is cut off.
+        """
+        task = self._drain_task
+        if task is None or task.done():
+            return
+        bound = self._drain_s + CLOSE_MARGIN_S
+        try:
+            await asyncio.wait_for(task, bound)
+        except TimeoutError:
+            logger.warning("drain did not finish within %.1f s; exiting anyway", bound)
+        except Exception:
+            # Reported here rather than left to the collector: owning the
+            # task is what makes a drain that broke something a line in
+            # this shutdown's log instead of a stray "Task exception was
+            # never retrieved" after it. The exit is already under way
+            # (`_drain` delivers it in a finally), so there is nothing to
+            # re-raise it into.
+            logger.exception("the drain failed")
 
 
 def uvicorn_config(app: FastAPI, config: Config) -> uvicorn.Config:
