@@ -316,11 +316,11 @@ Contention coverage: the write-path and read-path 409 tests pass
 unchanged (the lock is taken per transaction, as today). The
 open-phase test
 (`test_config_refusals.py::test_an_open_that_cannot_take_the_lock_is_a_busy_error`)
-pins a phase that now happens once at startup: it is re-scoped to
-assert that a locked database at lifespan enter surfaces as the
-same typed refusal out of startup (the sentence unchanged), which
-is the honest equivalent of what it pins today, and the
-implementation doc records the re-scope.
+pins `open_database` itself with a real held lock and stays
+exactly as it is: the function it pins is now called at lifespan
+enter instead of per request, and the busy refusal it proves is
+what the startup-failure bridge carries out of a locked startup.
+No re-scope, no new test.
 
 ### The drain task
 
@@ -502,7 +502,8 @@ provider build, and asserts the engine was disposed.
 - [ ] **M3: the config API's lifespan-owned engine.** Parent
   lifespan opens the engine once (no per-request migrations) and
   derives keys once; `store_dependency` serves from state;
-  re-scope the open-phase contention test to startup; dated
+  the open-phase contention test stays untouched (it pins
+  `open_database`, now a startup call); dated
   amendment note in docs/plans/2026-08-11-rest-api.md recording
   the retirement of the per-request rationale; the conversations
   reader's per-request property recorded as deliberately kept;
@@ -601,6 +602,9 @@ P1/P2 amendments". All eleven adopted.
    amendment 5 the lifespan opens via `open_database`, and the
    existing open-phase held-lock test stays exactly as it is,
    pinning `open_database` directly; no re-scope.
+
+   *Resolution*: the contention paragraph now says exactly that,
+   and the milestone's re-scope task is gone.
 
 8. **P2: moving the conversation-store injection after entry
    destroys its test.** `test_conversations_boot` replaces the
