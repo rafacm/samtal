@@ -285,9 +285,12 @@ onboarding bounds have.
 `activation_for` and matches on the outcome literal, emitting the
 `unreadable` and `refused` warnings with the sentences, arguments and
 fields they always had, and returning `unbound.activation`. The match
-is exhaustive over the four outcomes with `offered` and
-`not_applicable` sharing an explicit do-nothing arm, so a fifth outcome
-added in `unbound.py` cannot go silent here. It takes the composition
+names all four outcomes, with `offered` and `not_applicable` sharing an
+explicit do-nothing arm, so a fifth added in `unbound.py` is visible as
+an outcome nothing here handles. That visibility is for a reader, not a
+tool: no type checker runs in this repository, so what actually fails on
+a drift is the conformance suite's two-way closed set on
+`activation_not_offered.reason`. It takes the composition
 rather than the request, since the wrapper no longer needs anything of
 the request that the caller has not already read.
 
