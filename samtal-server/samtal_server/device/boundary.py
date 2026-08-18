@@ -26,16 +26,35 @@ All PCM crossing it is s16le mono.
 """
 
 from collections.abc import Callable, Sequence
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from samtal_server.events import SessionEvents
-from samtal_server.providers.base import ToolDef
+
+if TYPE_CHECKING:
+    # The name only, for the one annotation below. `providers/__init__`
+    # re-exports the provider registry, which builds every configured
+    # engine's client, so reaching `providers.base` (which imports
+    # nothing but the standard library) executes the whole provider
+    # layer on the way. This module is a vocabulary of terms, and the
+    # two readers that want the terms without the layer are the ones
+    # this deferral exists for: `onboarding.origin` takes
+    # `WEBSOCKET_PATH` from here and is imported by `samtal-server
+    # config`, which renders its reference and its OpenAPI document
+    # with no provider loaded (issue #143).
+    from samtal_server.providers.base import ToolDef
 
 # The rate the input side of the pipeline runs at: what devices send,
 # and what a runtime is fed. Here rather than with the codecs because it
 # is a term of the boundary: `SessionInput.audio` promises PCM at this
 # rate, and both sides read the promise from one place.
 PIPELINE_SAMPLE_RATE = 16000
+
+# Where devices are served their conversation, which is the path the OTA
+# reply sends them to and the path the websocket edge mounts on. A term
+# of this boundary rather than of either side of it: the module that
+# assembles the URL a device is handed and the module that answers on it
+# have to agree, and neither owns the other.
+WEBSOCKET_PATH = "/xiaozhi/v1/"
 
 
 class DeviceGone(RuntimeError):
@@ -216,7 +235,7 @@ class DeviceOutput(Protocol):
         re-arms, realtime keeps listening. The runtime never learns the
         mode names."""
 
-    def device_tools(self) -> Sequence[ToolDef]:
+    def device_tools(self) -> "Sequence[ToolDef]":
         """The device's discovered MCP tools, possibly empty."""
 
     async def call_device_tool(
