@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass
 
 from fastapi import FastAPI
 
@@ -9,16 +10,16 @@ from samtal_server.auth import build_device_auth
 from samtal_server.build_info import revision
 from samtal_server.capture import CaptureStore, DeviceFacts
 from samtal_server.composition import Composition
-from samtal_server.config import Config
-from samtal_server.config.api import api_token, build_api, mount_api
+from samtal_server.config import Config, ConfigError
+from samtal_server.config.api import api_token, build_api, build_api_runtime, mount_api
 from samtal_server.config.boot import load_boot_config, reload_domain_config
 from samtal_server.config.responses import McpReloader, McpReloadResult
 from samtal_server.config.secrets import SecretStore
 from samtal_server.conversations import ConversationStore, migrate_existing
 from samtal_server.device.bindings import DeviceBindings
-from samtal_server.events import ServerEvents, resolve_enforcement
+from samtal_server.events import EventEnforcementError, ServerEvents, resolve_enforcement
 from samtal_server.filler import AgentFillers, build_agent_fillers
-from samtal_server.providers import build_agent_providers
+from samtal_server.providers import ProviderError, build_agent_providers
 from samtal_server.registry import SessionRegistry
 from samtal_server.runtime import prompt
 from samtal_server.runtime.pipeline import bespoke_runtime_factory
@@ -27,57 +28,334 @@ from samtal_server.tools.memory import MemoryStore
 
 events = ServerEvents(__name__)
 
+# What a boot that refused looks like from the outside, and the whole of
+# what may be said about it. `DatabaseBusyError` is a `ConfigError`, so
+# the three names below are the boot failure taxonomy in full: every one
+# of them carries a message written to be printed as it is, which is what
+# lets the bridge below hand one sentence to an operator and nothing
+# else.
+BOOT_FAILURES = (ConfigError, EventEnforcementError, ProviderError)
+
+
+class StartupFailed(RuntimeError):
+    """A boot that refused, carried out of the lifespan as one sentence.
+
+    Construction happens inside the lifespan (#142), which puts it inside
+    uvicorn rather than in front of it, and uvicorn renders a lifespan
+    exception as a traceback. A provider or configuration failure raised
+    as itself would therefore print its exception chain to stderr, and a
+    chain from this depth can carry a credential: a driver's message
+    quotes the URL it could not reach, a client library's quotes what it
+    was configured with.
+
+    So the taxonomy is caught, its already-sanitized sentence is recorded
+    on the seed for `main()` to print, and this is raised in its place,
+    outside the `except` that caught it so that nothing is chained to it
+    at all. What uvicorn can render is then this class and this sentence.
+    Anything outside the taxonomy propagates as the bug it is.
+    """
+
+
+@dataclass
+class _CompositionSeed:
+    """What the describe phase leaves for the build phase.
+
+    `create_app` describes the application (routes, the mounted API
+    shell, the gate) and builds none of its resources; the lifespan
+    builds them. This carries what the build needs across, and is
+    deliberately the smallest thing that works: the configuration and the
+    stored credentials it was loaded with, the mounted API application
+    whose request-time pieces the build attaches, and the callback the
+    CLI passes to say the server is up.
+
+    The configuration API's token is NOT here. It is resolved in the
+    describe phase and passed straight into the gate, which is the
+    standing exception this project already made for it, and a copy on
+    this object would be a second place it lives (the plan review's
+    finding 10).
+
+    `failure` is written by the lifespan when the build refuses: the
+    sanitized sentence, for `main()` to print after `serve()` returns.
+    """
+
+    config: Config
+    secrets: SecretStore | None
+    api: FastAPI
+    on_started: Callable[[], None] | None
+    failure: str | None = None
+
+
+def startup_failure(app: FastAPI) -> str | None:
+    """The sentence a refused startup left behind, if it refused.
+
+    `main()`'s way of asking, after `serve()` has returned, whether the
+    server ever came up. None means it did, or that whatever stopped it
+    was not a boot failure and has already been raised as itself.
+    """
+    seed: _CompositionSeed | None = getattr(app.state, "seed", None)
+    return None if seed is None else seed.failure
+
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Connect the configured MCP servers while the app runs, and close
-    them on the way out so stdio child processes do not outlive the
-    server. A server that will not connect only logs a warning.
+    """Build what this server is made of, hold it while it serves, and
+    release it in reverse on the way out (#142).
 
-    The filler clips are synthesized here rather than in create_app
-    because synthesis is async and create_app is not: startup is still
-    before the first conversation, which is what "at boot" is for. An
-    agent whose synthesis fails runs with the feature off rather than
-    failing the boot.
+    The build is here rather than in `create_app` because a resource
+    should be acquired by the thing that will release it: an app that is
+    described and never served now opens no database, starts no thread
+    and loads no model, and every acquisition below is registered for
+    release the moment it is made, so a failure part way through unwinds
+    exactly what got as far as existing.
 
-    The conversation store's writer thread lives exactly as long as this:
-    `create_app` built the store cold (the file open and migrated, no
-    thread), and it is started first and stopped last. First because
-    everything after it is startup work that can fail, and the writer
-    must not be left running behind a boot that never finished; last
-    because the drain of what is queued belongs after every session has
-    stopped producing. `stop()` is idempotent, so an app that never
-    entered this leaks nothing either.
+    Startup work that can fail is what makes that discipline load
+    bearing: the providers load models, the MCP servers connect, and the
+    filler clips are synthesized. A boot failure is caught here and
+    carried out as `StartupFailed` with its sanitized sentence, so that
+    an operator reads the same line they read when this ran in front of
+    uvicorn.
 
-    The way out also disposes the device bindings' read engine, the one
-    thing on a running server that still holds the configuration
-    database open.
-
-    What this starts and stops is bound once from the composition
-    `create_app` built, so the startup reads the same declared fields
-    every handler does."""
-    comp: Composition = app.state.composition
-    conversations = comp.conversations
-    try:
-        # Inside the guard rather than in front of it: a writer whose
-        # thread will not start is exactly the case where the stop below
-        # has to run anyway, and it is one line to let the same `finally`
-        # cover it as covers everything after it.
-        if conversations is not None:
-            conversations.start()
-        comp.agent_fillers.fill(await build_agent_fillers(comp.config, comp.agent_providers))
-        await comp.mcp_servers.start_all()
+    `on_started` is the CLI's banner, invoked once the build has
+    succeeded and before the first request can arrive: a line announcing
+    where to point a device must not be printed by a server that then
+    fails to start.
+    """
+    seed: _CompositionSeed = app.state.seed
+    async with contextlib.AsyncExitStack() as stack:
+        failure: str | None = None
         try:
-            yield
-        finally:
-            await comp.mcp_servers.stop_all()
-            # The one database connection pool a running server holds,
-            # let go here so a process on its way out leaves no handle on
-            # the data volume.
-            comp.bindings.dispose()
-    finally:
-        if conversations is not None:
-            conversations.stop()
+            await _build_composition(app, seed, stack)
+        except BOOT_FAILURES as exc:
+            # Recorded rather than re-raised from here: raising below,
+            # with the `except` block already left, is what leaves the
+            # replacement exception with no `__context__` to render.
+            failure = str(exc)
+        if failure is not None:
+            seed.failure = failure
+            raise StartupFailed(failure) from None
+        if seed.on_started is not None:
+            seed.on_started()
+        yield
+
+
+async def _build_composition(
+    app: FastAPI, seed: _CompositionSeed, stack: contextlib.AsyncExitStack
+) -> Composition:
+    """Everything one running server is made of, built in order.
+
+    The order is the one `create_app` documented when it did this work,
+    and the comments came with it. What is new is the exit stack: each
+    acquisition registers its release as it is made, so the unwinding is
+    the reverse of the building and a partial startup leaves nothing
+    open (the plan review's finding 6).
+    """
+    config, secrets = seed.config, seed.secrets
+    # Auth is resolved first and fails the boot when it is enabled with no
+    # secret in the environment, so a deployment that forgot one never
+    # comes up serving every device that connects. `create_app` already
+    # read it once for exactly that refusal; this is the issuer itself,
+    # which belongs to the composition that holds it.
+    device_auth = build_device_auth(config)
+    # Which agents a device may talk to, and the only thing this server
+    # re-reads while it runs: an operator binds a board with the board
+    # in front of them, and its next check-in is seconds away. Opened
+    # here because boot has already migrated the database, so nothing on
+    # a device path ever has to, and registered for disposal in the same
+    # breath: it is the first pool this build acquires and therefore the
+    # last one released.
+    bindings = DeviceBindings.open(config)
+    stack.callback(bindings.dispose)
+    # The devices waiting to be claimed, and the codes they are showing.
+    # Runtime state owned by this app and shared with the configuration
+    # API below, which is where a code becomes a binding. Always built,
+    # even with onboarding off, so no handler needs a branch for its
+    # absence; with onboarding off nothing ever puts anything in it.
+    pending = onboarding.PendingDevices()
+    # Built before the API's runtime rather than beside the providers
+    # below, because the API's status read reports these managers and
+    # they have to exist to be handed over. An unknown reference or an
+    # unset secret is still a boot failure here, exactly as it was; being
+    # unreachable is still not one.
+    mcp_servers = McpServers.build(config, secrets)
+    # Absent memory configuration means no remember tool and no
+    # injection; the directory itself is created on the first write.
+    # Built before the API's runtime rather than beside the runtime
+    # below, because the API's prompt read reports what a session would
+    # be sent and memory is part of that.
+    memory_section = config.memory
+    memory = None if memory_section is None else MemoryStore(memory_section.dir)
+    # One registry per app: what decides whether there is room for the
+    # next conversation, and what the drain reaches the live ones through.
+    sessions = SessionRegistry(config.server.limits.max_sessions)
+    # Built here so a bad provider configuration (unknown type, bad option,
+    # missing extra, agent without a full pipeline) fails the boot rather
+    # than the first conversation. The MCP servers are built above, for
+    # the same reason and one of their own.
+    #
+    # On a worker thread, because this is where a boot spends its time:
+    # an ASR or VAD provider loads a model, which is seconds to minutes
+    # of blocking work, and the loop this now runs on is the one uvicorn
+    # is waiting on.
+    agent_providers = await asyncio.to_thread(build_agent_providers, config, secrets)
+    # Filled below, once the providers exist, since synthesis is async;
+    # empty means no agent masks its latency, which is the default. The
+    # cache is handed to the runtime factory here and filled there, and
+    # answers "nothing for this agent" the whole time in between.
+    agent_fillers = AgentFillers()
+    # What was said, kept where it can be queried. Absent unless the
+    # section exists and says so, which is what keeps recording a
+    # conversation something an operator asks for.
+    #
+    # The constructor opens and migrates the file, so a directory the
+    # server cannot write fails the boot rather than the first
+    # conversation. The writer thread is started below rather than here,
+    # and the stop is registered before the start: a writer whose thread
+    # will not start is exactly the case where the stop has to run
+    # anyway.
+    conversations_section = config.server.conversations
+    database_dir = config.server.database.dir
+    conversations = (
+        None
+        if conversations_section is None or not conversations_section.enabled
+        else ConversationStore(
+            database_dir,
+            metrics=conversations_section.metrics,
+            text=conversations_section.text,
+            retention_days=conversations_section.retention_days,
+        )
+    )
+    if conversations is None:
+        # Recording off still leaves what was recorded readable: an
+        # upgraded deployment that recorded last month serves its history
+        # against the schema this server reads with. Migration is
+        # maintenance of what exists and never creation, so a server that
+        # was not asked for a store still leaves no file behind.
+        migrate_existing(database_dir)
+    else:
+        stack.callback(conversations.stop)
+    # How one conversation is built for one connection, closed over
+    # once here: the providers, the MCP servers, the memory store and
+    # the filler clips all outlive any single websocket, and a device
+    # session should not have to name them to get a conversation. Built
+    # after all four exist, and after the filler cache, which is filled
+    # at startup and which this closure sees fill. The store goes with
+    # them for the same reason: it outlives every connection, and the
+    # per-session recorder is derived from it here.
+    runtime_factory = bespoke_runtime_factory(
+        config,
+        agent_providers,
+        mcp_servers,
+        memory,
+        agent_fillers,
+        conversations,
+    )
+    # What a device says about itself at OTA check-in, kept for the
+    # session that follows: a capture manifest needs the firmware
+    # version, and the websocket handshake never carries it.
+    device_facts = DeviceFacts()
+    # Absent unless capture is configured and switched on, which is what
+    # keeps recording something an operator has to ask for.
+    capture_section = config.server.capture
+    capture = (
+        None
+        if capture_section is None or not capture_section.enabled
+        else CaptureStore(
+            capture_section.dir,
+            capture_section.max_session_s,
+            capture_section.max_total_mb,
+            capture_section.min_free_mb,
+        )
+    )
+    if capture is not None:
+        # Room audio is the whole of what makes this a recording, and the
+        # decision track beside it is what the events already are. It
+        # used to say "transcripts", which was true while the events
+        # carried them; the narrowing (#120) left that half of the
+        # sentence describing nothing the capture writes, and a warning
+        # about what reaches a disk has to be exact in both directions.
+        events.warning(
+            "session capture is on: room audio and a track of the session's events "
+            "are being written to %s",
+            capture_section.dir,
+            event="capture_enabled",
+            path=str(capture_section.dir),
+        )
+    elif capture_section is not None:
+        # Said out loud, because a configured section that records
+        # nothing is otherwise a silence an operator has to debug.
+        events.info(
+            "session capture is configured but off; set server.capture.enabled "
+            "to record to %s",
+            capture_section.dir,
+            event="capture_disabled",
+            path=str(capture_section.dir),
+        )
+    # The live half of the configuration API, attached to the shell
+    # `create_app` mounted. Starlette runs no lifespan for a mounted
+    # application, so the objects its requests resolve are installed from
+    # here: the agents this server loaded, because a device write's
+    # acknowledgement says whether the device can reach what it was just
+    # bound to; the pending table, because claiming a code is how a
+    # device is bound; the MCP managers, because the status read reports
+    # what they are doing, and passing the same object is what makes that
+    # a report rather than a snapshot of what was true when the API was
+    # built. The reload goes with them, because applying a fresh read to
+    # those managers is the one action that namespace serves, and the
+    # prompt assembly goes with them because what it answers is what a
+    # session opening now would be sent.
+    #
+    # Before the yield and therefore before any request: uvicorn serves
+    # nothing until this generator has yielded, so no request can see a
+    # half-attached API.
+    api_runtime = build_api_runtime(
+        database_dir,
+        config.agents,
+        pending,
+        mcp_servers,
+        _mcp_reloader(config, mcp_servers),
+        _prompt_preview(config, mcp_servers, memory),
+    )
+    seed.api.state.api_runtime = api_runtime
+    # The one thing on this app's state a handler reads back: the fields
+    # are declared and typed in `composition.py`, and the API's own
+    # request-time pieces ride along as the object the sub-application
+    # already carries. The token is the standing exception and is not
+    # here: it was passed into the gate in `create_app` and is held
+    # nowhere.
+    composition = Composition(
+        config=config,
+        device_auth=device_auth,
+        bindings=bindings,
+        pending=pending,
+        mcp_servers=mcp_servers,
+        memory=memory,
+        sessions=sessions,
+        agent_providers=agent_providers,
+        agent_fillers=agent_fillers,
+        conversations=conversations,
+        runtime_factory=runtime_factory,
+        device_facts=device_facts,
+        capture=capture,
+        api=api_runtime,
+    )
+    app.state.composition = composition
+    # Started once everything it records for exists, and stopped by the
+    # callback registered at its construction above.
+    if conversations is not None:
+        conversations.start()
+    # Synthesized here rather than beside the providers because synthesis
+    # is async: startup is still before the first conversation, which is
+    # what "at boot" is for. An agent whose synthesis fails runs with the
+    # feature off rather than failing the boot.
+    agent_fillers.fill(await build_agent_fillers(config, agent_providers))
+    # Connected last, and closed first on the way out so stdio child
+    # processes do not outlive the server. A server that will not connect
+    # only logs a warning. The stop is registered in front of the start
+    # for the reason the store's is: what a start got part way through is
+    # what a stop is for.
+    stack.push_async_callback(mcp_servers.stop_all)
+    await mcp_servers.start_all()
+    return composition
 
 
 def _mcp_reloader(config: Config, servers: McpServers) -> McpReloader:
@@ -142,16 +420,32 @@ def _prompt_preview(
     return assemble
 
 
-def create_app(config: Config | None = None, secrets: SecretStore | None = None) -> FastAPI:
-    """Build the ASGI app. Without a config the whole boot configuration is
-    read here (the file named by SAMTAL_CONFIG plus the domain half from the
-    database), which is what an external ASGI server gets; the CLI reads it
-    itself (it also honours --config) and passes both halves in.
+def create_app(
+    config: Config | None = None,
+    secrets: SecretStore | None = None,
+    on_started: Callable[[], None] | None = None,
+) -> FastAPI:
+    """Describe the ASGI app: its routes, its gate, and what its lifespan
+    will build. Without a config the whole boot configuration is read here
+    (the file named by SAMTAL_CONFIG plus the domain half from the
+    database), which is what an external ASGI server gets; the CLI reads
+    it itself (it also honours --config) and passes both halves in.
 
     `secrets` are the stored credentials the snapshot was loaded with,
     None for a configuration whose credentials are all environment
     references. They reach exactly the two places a credential is
-    materialized: building a provider, and connecting an MCP server."""
+    materialized: building a provider, and connecting an MCP server.
+
+    `on_started` is called once the lifespan has built everything and
+    before the first request, and is how the CLI says out loud where to
+    point a device. None for an app built by a test lane or an external
+    ASGI runner, which has no operator reading its startup output.
+
+    Nothing here opens a database, starts a thread or loads a model: an
+    app that is described and never served holds nothing (#142). What it
+    does do is refuse a deployment that cannot work at all, which stays
+    here because a configuration that is missing a secret should be
+    refused by whatever built the app, however it was launched."""
     # How strictly this process holds its events to their declarations
     # (#155), resolved here rather than at import because a running
     # server is a deployment whatever launched it: a production process
@@ -176,190 +470,28 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     if config is None:
         booted = load_boot_config()
         config, secrets = booted.config, booted.secrets
-    # Everything below is built into a local and assembled into one
-    # `Composition` at the end: what a running server is made of is a
-    # declared object (`composition.py`), and `app.state` carries that
-    # one attribute rather than an attribute per resource.
-    #
-    # Auth is resolved first and fails the boot when it is enabled with no
-    # secret in the environment, so a deployment that forgot one never
-    # comes up serving every device that connects.
-    device_auth = build_device_auth(config)
-    # Which agents a device may talk to, and the only thing this server
-    # re-reads while it runs: an operator binds a board with the board
-    # in front of them, and its next check-in is seconds away. Built
-    # here because boot has already migrated the database, so nothing on
-    # a device path ever has to; disposed in the lifespan above.
-    bindings = DeviceBindings.open(config)
-    # The devices waiting to be claimed, and the codes they are showing.
-    # Runtime state owned by this app and shared with the configuration
-    # API below, which is where a code becomes a binding. Always built,
-    # even with onboarding off, so no handler needs a branch for its
-    # absence; with onboarding off nothing ever puts anything in it.
-    pending = onboarding.PendingDevices()
+    # Read here and thrown away: this is the refusal, not the issuer.
+    # Enabled authentication with no secret in the environment is a
+    # deployment that would come up serving every device that connects,
+    # and it must be refused by whatever built the app rather than
+    # minutes later inside a lifespan. The issuer itself is built where
+    # everything else is, and belongs to the composition that holds it.
+    build_device_auth(config)
     # The configuration API's token, resolved here rather than at the
     # call below and for the reason it always was: the API is always
     # mounted, so a deployment that forgot the variable must be refused
     # before anything else is built rather than serve an admin surface
-    # its own operator cannot reach. Resolving it inside the call would
-    # have put the MCP servers' own refusals in front of it and changed
-    # which failure such a deployment reads. Held in a local, passed
-    # straight into the gate, and kept nowhere else, least of all on
-    # app.state, and never logged.
+    # its own operator cannot reach. Held in a local, passed straight
+    # into the gate, and kept nowhere else, least of all on app.state or
+    # the seed below, and never logged.
     token = api_token(config)
-    # Built before the API rather than beside the providers below,
-    # because the API's status read reports these managers and they have
-    # to exist to be handed over. An unknown reference or an unset
-    # secret is still a boot failure here, exactly as it was; being
-    # unreachable is still not one.
-    mcp_servers = McpServers.build(config, secrets)
-    # Absent memory configuration means no remember tool and no
-    # injection; the directory itself is created on the first write.
-    # Built before the API rather than beside the runtime below, because
-    # the API's prompt read reports what a session would be sent and
-    # memory is part of that.
-    memory_section = config.memory
-    memory = None if memory_section is None else MemoryStore(memory_section.dir)
-    # The agents go with the token because a device write's
-    # acknowledgement says whether the device can reach what it was just
-    # bound to, and only this server knows what it loaded; the pending
-    # table goes with it because claiming a code is how a device is
-    # bound; and the MCP managers go with it because the status read
-    # reports what they are doing, and passing the same object is what
-    # makes that a report rather than a snapshot of what was true when
-    # the API was built. The reload goes with them, because applying a
-    # fresh read to those managers is the one action that namespace
-    # serves, and the prompt assembly goes with them because what it
-    # answers is what a session opening now would be sent.
-    api = build_api(
-        token,
-        config.server.database.dir,
-        config.agents,
-        pending,
-        mcp_servers,
-        _mcp_reloader(config, mcp_servers),
-        _prompt_preview(config, mcp_servers, memory),
-    )
-    # One registry per app: what decides whether there is room for the
-    # next conversation, and what the drain reaches the live ones through.
-    sessions = SessionRegistry(config.server.limits.max_sessions)
-    # Built here so a bad provider configuration (unknown type, bad option,
-    # missing extra, agent without a full pipeline) fails the boot rather
-    # than the first conversation. The MCP servers are built above, for
-    # the same reason and one of their own.
-    agent_providers = build_agent_providers(config, secrets)
-    # Filled at startup by the lifespan above, since synthesis is async;
-    # empty means no agent masks its latency, which is the default. The
-    # cache is handed out here and filled there, and answers "nothing for
-    # this agent" the whole time in between.
-    agent_fillers = AgentFillers()
-    # What was said, kept where it can be queried. Absent unless the
-    # section exists and says so, which is what keeps recording a
-    # conversation something an operator asks for.
-    #
-    # Built cold: the constructor opens and migrates the file, so a
-    # directory the server cannot write fails the boot rather than the
-    # first conversation, and the writer thread is the lifespan's to
-    # start and stop. Built before the runtime factory below, because
-    # that closure is how a turn's record reaches it.
-    conversations_section = config.server.conversations
-    database_dir = config.server.database.dir
-    conversations = (
-        None
-        if conversations_section is None or not conversations_section.enabled
-        else ConversationStore(
-            database_dir,
-            metrics=conversations_section.metrics,
-            text=conversations_section.text,
-            retention_days=conversations_section.retention_days,
-        )
-    )
-    if conversations is None:
-        # Recording off still leaves what was recorded readable: an
-        # upgraded deployment that recorded last month serves its history
-        # against the schema this server reads with. Migration is
-        # maintenance of what exists and never creation, so a server that
-        # was not asked for a store still leaves no file behind.
-        migrate_existing(database_dir)
-    # How one conversation is built for one connection, closed over
-    # once here: the providers, the MCP servers, the memory store and
-    # the filler clips all outlive any single websocket, and a device
-    # session should not have to name them to get a conversation. Built
-    # after all four exist, and after the mutable fillers dict, which
-    # the lifespan fills at startup and this closure sees fill. The
-    # store goes with them for the same reason: it outlives every
-    # connection, and the per-session recorder is derived from it here.
-    runtime_factory = bespoke_runtime_factory(
-        config,
-        agent_providers,
-        mcp_servers,
-        memory,
-        agent_fillers,
-        conversations,
-    )
-    # What a device says about itself at OTA check-in, kept for the
-    # session that follows: a capture manifest needs the firmware
-    # version, and the websocket handshake never carries it.
-    device_facts = DeviceFacts()
-    # Absent unless capture is configured and switched on, which is what
-    # keeps recording something an operator has to ask for.
-    capture_section = config.server.capture
-    capture = (
-        None
-        if capture_section is None or not capture_section.enabled
-        else CaptureStore(
-            capture_section.dir,
-            capture_section.max_session_s,
-            capture_section.max_total_mb,
-            capture_section.min_free_mb,
-        )
-    )
-    if capture is not None:
-        # Room audio is the whole of what makes this a recording, and the
-        # decision track beside it is what the events already are. It
-        # used to say "transcripts", which was true while the events
-        # carried them; the narrowing (#120) left that half of the
-        # sentence describing nothing the capture writes, and a warning
-        # about what reaches a disk has to be exact in both directions.
-        events.warning(
-            "session capture is on: room audio and a track of the session's events "
-            "are being written to %s",
-            capture_section.dir,
-            event="capture_enabled",
-            path=str(capture_section.dir),
-        )
-    elif capture_section is not None:
-        # Said out loud, because a configured section that records
-        # nothing is otherwise a silence an operator has to debug.
-        events.info(
-            "session capture is configured but off; set server.capture.enabled "
-            "to record to %s",
-            capture_section.dir,
-            event="capture_disabled",
-            path=str(capture_section.dir),
-        )
-    # The one thing on this app's state, and the whole of what a handler
-    # reads back: the fields are declared and typed in `composition.py`,
-    # and the API's own request-time pieces ride along as the object the
-    # sub-application already carries. The token is the standing
-    # exception and is not here: it was passed into the gate above and is
-    # held nowhere.
-    app.state.composition = Composition(
-        config=config,
-        device_auth=device_auth,
-        bindings=bindings,
-        pending=pending,
-        mcp_servers=mcp_servers,
-        memory=memory,
-        sessions=sessions,
-        agent_providers=agent_providers,
-        agent_fillers=agent_fillers,
-        conversations=conversations,
-        runtime_factory=runtime_factory,
-        device_facts=device_facts,
-        capture=capture,
-        api=api.state.api_runtime,
-    )
+    # The API as a shell: its routes, and the gate armed with the token.
+    # What its requests resolve out of the server around it is attached
+    # by the lifespan, because those are live objects and this function
+    # builds none. Until then it answers as an application built without
+    # a server around it, which is what `build_api` has always meant by
+    # its own defaults.
+    api = build_api(token, config.server.database.dir)
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
@@ -389,6 +521,15 @@ def create_app(config: Config | None = None, secrets: SecretStore | None = None)
     # is control plane: it accepts inbound requests and sends nothing
     # anywhere, so server.local_only has nothing to say about it.
     mount_api(app, api)
+
+    # What the lifespan builds from. The mounted application is on it
+    # because Starlette runs no lifespan for a mounted app, so the parent
+    # is what installs its request-time pieces and has to be handed it;
+    # the token is not, and is now held only by the gate it was passed
+    # to.
+    app.state.seed = _CompositionSeed(
+        config=config, secrets=secrets, api=api, on_started=on_started
+    )
 
     return app
 

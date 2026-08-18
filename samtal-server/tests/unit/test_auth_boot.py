@@ -11,6 +11,7 @@ import pytest
 from samtal_server.app import create_app
 from samtal_server.auth import DeviceAuth, build_device_auth
 from samtal_server.config import Config, ConfigError
+from tests.support.apps import entered_app
 
 SECRET_ENV = "SAMTAL_AUTH_SECRET"
 
@@ -64,7 +65,8 @@ def test_disabled_auth_boots_with_no_secret_at_all(
     monkeypatch.delenv(SECRET_ENV, raising=False)
     config = Config(server={"auth": {"enabled": False}})
     assert build_device_auth(config) is None
-    assert create_app(config).state.composition.device_auth is None
+    with entered_app(config) as (app, _):
+        assert app.state.composition.device_auth is None
 
 
 def test_auth_can_be_turned_off_through_the_environment(
@@ -85,9 +87,14 @@ def test_auth_can_be_turned_off_through_the_environment(
 def test_the_issuer_is_built_once_and_hangs_on_the_app(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """One issuer per server, on the composition the lifespan builds.
+
+    `create_app` reads the secret too, and throws what it read away: that
+    read is the refusal above, and this one is the issuer every OTA reply
+    signs with."""
     monkeypatch.setenv(SECRET_ENV, "c" * 64)
-    app = create_app(Config())
-    assert isinstance(app.state.composition.device_auth, DeviceAuth)
+    with entered_app(Config()) as (app, _):
+        assert isinstance(app.state.composition.device_auth, DeviceAuth)
 
 
 def test_the_token_lifetime_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -514,7 +514,37 @@ def build_api(
     # the pieces of it with Depends(...), and milestone 1 had none of
     # them yet. One object rather than one attribute each, so what a
     # route resolves is a field of a declared type.
-    api.state.api_runtime = ApiRuntime(
+    api.state.api_runtime = build_api_runtime(
+        database_dir, loaded_agents, pending, mcp_servers, mcp_reload, agent_prompt
+    )
+    # Added last is outermost, so a failure inside the gate itself
+    # answers as sanitized as one inside a handler.
+    api.add_middleware(_BearerGate, token=token)
+    api.add_middleware(_SanitizedErrors)
+    return api
+
+
+def build_api_runtime(
+    database_dir: Path,
+    loaded_agents: Collection[str] = (),
+    pending: "PendingDevices | None" = None,
+    mcp_servers: McpStatusSource | None = None,
+    mcp_reload: McpReloader | None = None,
+    agent_prompt: Callable[[str], Awaitable[Any]] | None = None,
+) -> ApiRuntime:
+    """What a request to this application resolves out of the server
+    around it, assembled.
+
+    Separate from `build_api` because the two happen at different times
+    on the serving path: the application is described when the server is
+    described, and the live objects it shares only exist once the
+    lifespan has built them (#142). The server's composition root calls
+    this and installs the result on the mounted application; `build_api`
+    calls it with whatever it was given, which for an application built
+    without a server around it is the honest empties its own docstring
+    describes.
+    """
+    return ApiRuntime(
         store=store_dependency(database_dir),
         # The same directory, read for the other database in it. The
         # conversation reads need no more runtime fact than this: whether
@@ -529,11 +559,6 @@ def build_api(
         mcp_reload=mcp_reload,
         agent_prompt=agent_prompt,
     )
-    # Added last is outermost, so a failure inside the gate itself
-    # answers as sanitized as one inside a handler.
-    api.add_middleware(_BearerGate, token=token)
-    api.add_middleware(_SanitizedErrors)
-    return api
 
 
 def _empty_pending() -> "PendingDevices":

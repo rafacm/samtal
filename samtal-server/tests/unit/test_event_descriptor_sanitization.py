@@ -33,6 +33,7 @@ a formality.
 import json
 import logging
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +48,7 @@ from samtal_server.config.models import BOARD_LIMIT, CLIENT_ID_LIMIT, FIRMWARE_L
 from samtal_server.events import Emission, attach_server_tap, detach_server_tap
 from samtal_server.logs import JsonFormatter
 from samtal_server.ota import OTA_PATH
+from tests.support.apps import entered_client
 from tests.support.checkin import MOCK_AGENT, MOCK_PROVIDERS, NORMALIZED, SYSTEM_INFO
 from tests.support.configs import DEVICE_MAC, DEVICE_UUID, config_with_agent
 from tests.support.events import fields_of, only
@@ -118,19 +120,19 @@ def carrying(caplog: pytest.LogCaptureFixture, value: str) -> set[tuple[str, str
 # --- ota.py: the board and the firmware a device reports --------------
 
 
-def ota_client() -> TestClient:
+@contextmanager
+def ota_client() -> Iterator[TestClient]:
     """A server every device resolves to an agent on, so a check-in
     takes the ordinary resolved branch rather than the activation one.
     The same shape the contract pin for that branch builds."""
-    return TestClient(
-        create_app(
-            Config(
-                providers=MOCK_PROVIDERS,
-                agents={"assistant": MOCK_AGENT},
-                default_agent="assistant",
-            )
+    with entered_client(
+        Config(
+            providers=MOCK_PROVIDERS,
+            agents={"assistant": MOCK_AGENT},
+            default_agent="assistant",
         )
-    )
+    ) as client:
+        yield client
 
 
 def system_info(**replaced: Any) -> dict[str, Any]:
@@ -160,9 +162,9 @@ def test_ota_check_bounds_the_board_and_the_firmware_it_was_told(
     """The event carries a bounded copy: printable characters only, cut
     to the declared maximum, in the payload and in the sentence's
     arguments alike."""
-    with caplog.at_level(logging.INFO):
+    with ota_client() as client, caplog.at_level(logging.INFO):
         response = check_in(
-            ota_client(),
+            client,
             system_info(
                 board={"type": HOSTILE_BOARD},
                 application={"name": "xiaozhi", "version": HOSTILE_VERSION},
@@ -191,8 +193,8 @@ def test_an_admissible_descriptor_lands_in_its_declared_places_only(
     """The positive half. A credential-shaped board the bound lets
     through is on the board field and on the board argument, on the
     record, in both formats and on the tap, and on nothing else."""
-    with caplog.at_level(logging.INFO):
-        check_in(ota_client(), system_info(board={"type": ADMISSIBLE}))
+    with ota_client() as client, caplog.at_level(logging.INFO):
+        check_in(client, system_info(board={"type": ADMISSIBLE}))
 
     record = only(caplog, "ota_check")
     assert fields_of(record)["board"] == ADMISSIBLE
@@ -210,9 +212,9 @@ def test_a_rejected_descriptor_reaches_no_retained_surface(
 ) -> None:
     """The negative half. What the bound cut away is on no surface at
     all."""
-    with caplog.at_level(logging.INFO):
+    with ota_client() as client, caplog.at_level(logging.INFO):
         check_in(
-            ota_client(),
+            client,
             system_info(
                 board={"type": HOSTILE_BOARD},
                 application={"name": "xiaozhi", "version": HOSTILE_VERSION},
@@ -235,22 +237,21 @@ def test_the_ota_reply_and_the_recorded_facts_are_untouched(
     up to date by comparing the version it sent with the one it is
     answered, and the capture manifest is built from the recorded facts,
     so both keep the bytes the device sent."""
-    client = ota_client()
+    with ota_client() as client:
+        with caplog.at_level(logging.INFO):
+            response = check_in(
+                client,
+                system_info(
+                    board={"type": HOSTILE_BOARD},
+                    application={"name": "xiaozhi", "version": HOSTILE_VERSION},
+                ),
+            )
 
-    with caplog.at_level(logging.INFO):
-        response = check_in(
-            client,
-            system_info(
-                board={"type": HOSTILE_BOARD},
-                application={"name": "xiaozhi", "version": HOSTILE_VERSION},
-            ),
-        )
-
-    assert response.json()["firmware"]["version"] == HOSTILE_VERSION
-    assert client.app.state.composition.device_facts.get(NORMALIZED) == {
-        "firmware": HOSTILE_VERSION,
-        "board": HOSTILE_BOARD,
-    }
+        assert response.json()["firmware"]["version"] == HOSTILE_VERSION
+        assert client.app.state.composition.device_facts.get(NORMALIZED) == {
+            "firmware": HOSTILE_VERSION,
+            "board": HOSTILE_BOARD,
+        }
 
 
 def test_a_board_of_nothing_but_unprintables_reads_as_unknown(
@@ -259,9 +260,9 @@ def test_a_board_of_nothing_but_unprintables_reads_as_unknown(
     """A descriptor the bound empties is not an empty field: it says the
     same thing an absent one says, which is that the device told us
     nothing usable."""
-    with caplog.at_level(logging.INFO):
+    with ota_client() as client, caplog.at_level(logging.INFO):
         check_in(
-            ota_client(),
+            client,
             system_info(
                 board={"type": "\x00\x07\x1b"},
                 application={"name": "xiaozhi", "version": "\x00\x07\x1b"},
@@ -277,8 +278,8 @@ def test_a_board_a_real_device_reports_is_carried_unchanged(
 ) -> None:
     """The bound is invisible to lawful traffic, which is why no pin
     moves: these are the values the contract pin suite asserts."""
-    with caplog.at_level(logging.INFO):
-        check_in(ota_client(), SYSTEM_INFO)
+    with ota_client() as client, caplog.at_level(logging.INFO):
+        check_in(client, SYSTEM_INFO)
 
     fields = fields_of(only(caplog, "ota_check"))
     assert fields["board"] == SYSTEM_INFO["board"]["type"]
@@ -291,8 +292,8 @@ def test_the_json_record_carries_the_bounded_copy_and_nothing_else(
     """The JSON record is what a collector keeps, so it is read back as
     a parsed object rather than as a string that happens not to
     match."""
-    with caplog.at_level(logging.INFO):
-        check_in(ota_client(), system_info(board={"type": HOSTILE_BOARD}))
+    with ota_client() as client, caplog.at_level(logging.INFO):
+        check_in(client, system_info(board={"type": HOSTILE_BOARD}))
 
     written = json.loads(JsonFormatter().format(only(caplog, "ota_check")))
     assert written["board"].isprintable()
@@ -311,8 +312,8 @@ def test_ota_check_bounds_the_client_id_it_was_sent(
 ) -> None:
     """The Client-Id header is required but nothing bounds it, and this
     endpoint is unauthenticated, so the event carries a bounded copy."""
-    with caplog.at_level(logging.INFO):
-        response = ota_client().post(
+    with ota_client() as client, caplog.at_level(logging.INFO):
+        response = client.post(
             OTA_PATH,
             json=SYSTEM_INFO,
             headers={"Device-Id": DEVICE_MAC, "Client-Id": HOSTILE_CLIENT},
@@ -332,8 +333,8 @@ def test_a_client_id_of_nothing_but_unprintables_is_null(
 ) -> None:
     """A field that says nothing is more honest than one that says the
     empty string."""
-    with caplog.at_level(logging.INFO):
-        ota_client().post(
+    with ota_client() as client, caplog.at_level(logging.INFO):
+        client.post(
             OTA_PATH,
             json=SYSTEM_INFO,
             headers={"Device-Id": DEVICE_MAC, "Client-Id": "\x07\x1b\x00"},
@@ -353,9 +354,7 @@ def test_the_token_is_still_signed_for_the_header_as_it_arrived(
         agents={"assistant": MOCK_AGENT},
         devices={NORMALIZED: "assistant"},
     )
-    client = TestClient(create_app(config))
-
-    with caplog.at_level(logging.INFO):
+    with entered_client(config) as client, caplog.at_level(logging.INFO):
         answered = client.post(
             OTA_PATH,
             json=SYSTEM_INFO,

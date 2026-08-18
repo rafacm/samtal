@@ -16,16 +16,20 @@ handshake presents have one definition between them.
 Two clients live here because the two seams disagree about what an
 unconfigured server is: the OTA suite wants a plain `Config()` and the
 activation suite wants a configuration where the device under test is
-deliberately unbound.
+deliberately unbound. Both are context managers, because a check-in
+resolves the device through the bindings view and the pending table,
+which are built by the lifespan (#142) and released when it leaves.
 """
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 from fastapi.testclient import TestClient
 
-from samtal_server.app import create_app
 from samtal_server.config import Config
 from samtal_server.ota import ACTIVATE_SEGMENT, OTA_PATH
+from tests.support.apps import entered_client
 from tests.support.configs import BOUND_MAC, DEVICE_MAC, DEVICE_UUID
 
 # --- what a board says about itself -----------------------------------
@@ -57,8 +61,10 @@ NORMALIZED = DEVICE_MAC.lower()
 # --- the servers it checks in against ---------------------------------
 
 
-def ota_client(config: Config | None = None) -> TestClient:
-    return TestClient(create_app(config if config is not None else Config()))
+@contextmanager
+def ota_client(config: Config | None = None) -> Iterator[TestClient]:
+    with entered_client(config if config is not None else Config()) as client:
+        yield client
 
 
 def unbound_config(**server) -> Config:
@@ -70,8 +76,10 @@ def unbound_config(**server) -> Config:
     )
 
 
-def activation_client(config: Config | None = None) -> TestClient:
-    return TestClient(create_app(config if config is not None else unbound_config()))
+@contextmanager
+def activation_client(config: Config | None = None) -> Iterator[TestClient]:
+    with entered_client(config if config is not None else unbound_config()) as client:
+        yield client
 
 
 # --- the requests a board makes ---------------------------------------

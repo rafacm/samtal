@@ -5,6 +5,7 @@ The request shapes here mirror `Board::GetSystemInfoJson` and the headers
 """
 
 import logging
+from contextlib import AbstractContextManager
 from datetime import datetime
 
 import pytest
@@ -25,7 +26,8 @@ from tests.support.configs import DEVICE_MAC, DEVICE_UUID
 
 
 def test_reply_carries_the_websocket_url_the_device_needs() -> None:
-    response = post_system_info(client_for())
+    with client_for() as client:
+        response = post_system_info(client)
     assert response.status_code == 200
     websocket = response.json()["websocket"]
     assert websocket["url"] == "ws://testserver/xiaozhi/v1/"
@@ -37,25 +39,29 @@ def test_reply_carries_the_websocket_url_the_device_needs() -> None:
 
 def test_configured_websocket_url_wins_over_the_request_address() -> None:
     config = Config(server={"websocket_url": "wss://voice.example/xiaozhi/v1/"})
-    response = post_system_info(client_for(config))
+    with client_for(config) as client:
+        response = post_system_info(client)
     assert response.json()["websocket"]["url"] == "wss://voice.example/xiaozhi/v1/"
 
 
 def test_configured_protocol_version_is_advertised() -> None:
     config = Config(server={"protocol_version": 3})
-    response = post_system_info(client_for(config))
+    with client_for(config) as client:
+        response = post_system_info(client)
     assert response.json()["websocket"]["version"] == 3
 
 
 def test_firmware_section_says_up_to_date() -> None:
-    response = post_system_info(client_for())
+    with client_for() as client:
+        response = post_system_info(client)
     # The firmware only updates for a strictly newer version, so echoing the
     # reported one back with no URL is how it reads "nothing to do".
     assert response.json()["firmware"] == {"version": "2.4.0", "url": ""}
 
 
 def test_device_hiding_its_version_is_offered_no_update() -> None:
-    response = post_system_info(client_for(), payload={"mac_address": DEVICE_MAC})
+    with client_for() as client:
+        response = post_system_info(client, payload={"mac_address": DEVICE_MAC})
     assert response.json()["firmware"] == {"version": "0.0.0", "url": ""}
 
 
@@ -68,7 +74,8 @@ def test_reply_names_the_server_build_the_device_will_talk_to(
     revision.cache_clear()
     monkeypatch.setenv(REVISION_ENV, "1a2b3c4d")
     try:
-        body = post_system_info(client_for()).json()
+        with client_for() as client:
+            body = post_system_info(client).json()
     finally:
         revision.cache_clear()
     assert body["server"] == {
@@ -85,19 +92,22 @@ def test_a_device_the_configuration_covers_is_never_asked_to_activate() -> None:
     config = Config(
         providers=MOCK_PROVIDERS, agents={"assistant": MOCK_AGENT}, default_agent="assistant"
     )
-    response = post_system_info(client_for(config))
+    with client_for(config) as client:
+        response = post_system_info(client)
     assert "activation" not in response.json()
 
 
 def test_activation_is_not_asked_for_with_onboarding_off() -> None:
     config = Config(server={"onboarding": {"enabled": False}})
-    response = post_system_info(client_for(config))
+    with client_for(config) as client:
+        response = post_system_info(client)
     assert "activation" not in response.json()
 
 
 def test_server_time_is_sent_in_milliseconds_with_an_offset() -> None:
     config = Config(server={"timezone_offset_minutes": 120})
-    response = post_system_info(client_for(config))
+    with client_for(config) as client:
+        response = post_system_info(client)
     server_time = response.json()["server_time"]
     assert server_time["timezone_offset"] == 120
     # Milliseconds since the epoch, not seconds.
@@ -106,7 +116,8 @@ def test_server_time_is_sent_in_milliseconds_with_an_offset() -> None:
 
 def test_server_time_offset_defaults_to_the_hosts_own() -> None:
     expected = datetime.now().astimezone().utcoffset()
-    response = post_system_info(client_for())
+    with client_for() as client:
+        response = post_system_info(client)
     assert response.json()["server_time"]["timezone_offset"] == round(
         expected.total_seconds() / 60
     )
@@ -122,7 +133,8 @@ def test_unknown_device_falls_back_to_the_default_agent(
         default_agent="assistant",
     )
     with caplog.at_level("INFO"):
-        response = post_system_info(client_for(config))
+        with client_for(config) as client:
+            response = post_system_info(client)
     assert response.status_code == 200
     assert "resolved to agent assistant" in caplog.text
 
@@ -137,7 +149,8 @@ def test_bound_device_resolves_to_its_own_agent(
         default_agent="assistant",
     )
     with caplog.at_level("INFO"):
-        post_system_info(client_for(config))
+        with client_for(config) as client:
+            post_system_info(client)
     assert "resolved to agent kitchen" in caplog.text
 
 
@@ -145,7 +158,8 @@ def test_device_with_no_agent_at_all_is_still_answered(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     with caplog.at_level("WARNING"):
-        response = post_system_info(client_for())
+        with client_for() as client:
+            response = post_system_info(client)
     assert response.status_code == 200
     assert "has no agent" in caplog.text
 
@@ -162,13 +176,15 @@ def test_device_with_no_agent_at_all_is_still_answered(
 def test_missing_identity_headers_are_rejected(
     device_id: str | None, client_id: str | None, expected: str
 ) -> None:
-    response = post_system_info(client_for(), device_id=device_id, client_id=client_id)
+    with client_for() as client:
+        response = post_system_info(client, device_id=device_id, client_id=client_id)
     assert response.status_code == 400
     assert expected in response.json()["error"]
 
 
 def test_device_id_that_is_not_a_mac_is_rejected() -> None:
-    response = post_system_info(client_for(), device_id="not-a-mac")
+    with client_for() as client:
+        response = post_system_info(client, device_id="not-a-mac")
     assert response.status_code == 400
     assert "does not hold a MAC address" in response.json()["error"]
 
@@ -183,22 +199,23 @@ def test_dashed_and_uppercase_macs_resolve_the_same_device(
         default_agent="kitchen",
     )
     with caplog.at_level("INFO"):
-        post_system_info(client_for(config), device_id="AA-BB-CC-DD-EE-FF")
+        with client_for(config) as client:
+            post_system_info(client, device_id="AA-BB-CC-DD-EE-FF")
     assert "resolved to agent kitchen" in caplog.text
 
 
 @pytest.mark.parametrize("body", [b"", b"not json", b"[1, 2, 3]"])
 def test_unparseable_body_still_gets_a_usable_reply(body: bytes) -> None:
-    client = client_for()
-    response = client.post(
-        OTA_PATH,
-        content=body,
-        headers={
-            "Device-Id": DEVICE_MAC,
-            "Client-Id": DEVICE_UUID,
-            "Content-Type": "application/json",
-        },
-    )
+    with client_for() as client:
+        response = client.post(
+            OTA_PATH,
+            content=body,
+            headers={
+                "Device-Id": DEVICE_MAC,
+                "Client-Id": DEVICE_UUID,
+                "Content-Type": "application/json",
+            },
+        )
     assert response.status_code == 200
     assert response.json()["websocket"]["url"] == "ws://testserver/xiaozhi/v1/"
     assert response.json()["firmware"]["version"] == "0.0.0"
@@ -209,36 +226,38 @@ def test_a_configured_ota_path_is_where_the_endpoint_serves() -> None:
     behind a long random segment is what an operator exposing the server
     publicly has instead."""
     secret_path = "/xiaozhi/ota/8f3a9c2b1d4e/"
-    client = client_for(Config(server={"ota_path": secret_path}))
+    with client_for(Config(server={"ota_path": secret_path})) as client:
+        response = client.post(
+            secret_path,
+            json=SYSTEM_INFO,
+            headers={"Device-Id": DEVICE_MAC, "Client-Id": DEVICE_UUID},
+        )
+        assert response.status_code == 200
+        assert response.json()["websocket"]["url"] == "ws://testserver/xiaozhi/v1/"
+        assert client.get(secret_path).status_code == 200
 
-    response = client.post(
-        secret_path, json=SYSTEM_INFO, headers={"Device-Id": DEVICE_MAC, "Client-Id": DEVICE_UUID}
-    )
-    assert response.status_code == 200
-    assert response.json()["websocket"]["url"] == "ws://testserver/xiaozhi/v1/"
-    assert client.get(secret_path).status_code == 200
-
-    # And the default path is gone, which is the whole point of moving it.
-    assert client.post(OTA_PATH, json=SYSTEM_INFO).status_code == 404
-    assert client.get(OTA_PATH).status_code == 404
+        # And the default path is gone, which is the whole point of moving it.
+        assert client.post(OTA_PATH, json=SYSTEM_INFO).status_code == 404
+        assert client.get(OTA_PATH).status_code == 404
 
 
 def test_the_websocket_path_does_not_move_with_it() -> None:
     """Only the OTA path is configurable: the websocket is protected by
     the token, so hiding it would buy nothing and cost a device that
     holds an old URL."""
-    client = client_for(Config(server={"ota_path": "/somewhere/else/"}))
-    response = client.post(
-        "/somewhere/else/",
-        json=SYSTEM_INFO,
-        headers={"Device-Id": DEVICE_MAC, "Client-Id": DEVICE_UUID},
-    )
+    with client_for(Config(server={"ota_path": "/somewhere/else/"})) as client:
+        response = client.post(
+            "/somewhere/else/",
+            json=SYSTEM_INFO,
+            headers={"Device-Id": DEVICE_MAC, "Client-Id": DEVICE_UUID},
+        )
     assert response.json()["websocket"]["url"].endswith("/xiaozhi/v1/")
 
 
 def test_get_describes_where_devices_are_sent() -> None:
     config = Config(server={"websocket_url": "ws://192.168.1.10:8003/xiaozhi/v1/"})
-    response = client_for(config).get(OTA_PATH)
+    with client_for(config) as client:
+        response = client.get(OTA_PATH)
     assert response.status_code == 200
     assert "ws://192.168.1.10:8003/xiaozhi/v1/" in response.text
     # A human checking the endpoint is reachable is also a human who
@@ -254,7 +273,7 @@ SECRET_SEGMENT = "3f9a1c7e-never-a-real-ota-segment"
 SECRET_PATH = f"/xiaozhi/ota/{SECRET_SEGMENT}/"
 
 
-def _secret_client() -> TestClient:
+def _secret_client() -> AbstractContextManager[TestClient]:
     return client_for(Config(server={"ota_path": SECRET_PATH}))
 
 
@@ -274,12 +293,12 @@ def test_a_slash_that_is_off_by_one_is_answered_not_redirected(
     secret path: a request that had only guessed at the segment would
     have been handed the whole of it in a header. Both spellings are
     registered instead, so there is no redirect to carry it."""
-    client = _secret_client()
     headers = {"Device-Id": DEVICE_MAC, "Client-Id": DEVICE_UUID}
 
     body = {"json": SYSTEM_INFO} if method == "post" else {}
 
-    answer = getattr(client, method)(path, headers=headers, follow_redirects=False, **body)
+    with _secret_client() as client:
+        answer = getattr(client, method)(path, headers=headers, follow_redirects=False, **body)
 
     assert answer.status_code == expected
     assert "location" not in answer.headers
@@ -289,11 +308,10 @@ def test_a_slash_that_is_off_by_one_is_answered_not_redirected(
 def test_a_path_that_was_never_served_still_answers_404() -> None:
     """The corollary: dispatching both spellings must not turn the
     router into one that answers anything."""
-    client = _secret_client()
-
-    assert client.post("/xiaozhi/ota/wrong-segment/", json=SYSTEM_INFO).status_code == 404
-    assert client.post("/xiaozhi/ota/wrong-segment", json=SYSTEM_INFO).status_code == 404
-    assert client.post(f"{SECRET_PATH}activate/x", json={}).status_code == 404
+    with _secret_client() as client:
+        assert client.post("/xiaozhi/ota/wrong-segment/", json=SYSTEM_INFO).status_code == 404
+        assert client.post("/xiaozhi/ota/wrong-segment", json=SYSTEM_INFO).status_code == 404
+        assert client.post(f"{SECRET_PATH}activate/x", json={}).status_code == 404
 
 
 # A rejected Device-Id is text a stranger chose
@@ -311,9 +329,7 @@ def test_a_device_id_that_is_not_a_mac_is_never_quoted_back(
     validator's own sentence quotes what it refused, which would put a
     chosen string into a response body, into the log, and into whatever
     ships the log."""
-    client = client_for()
-
-    with caplog.at_level(logging.DEBUG):
+    with client_for() as client, caplog.at_level(logging.DEBUG):
         refused = client.post(
             path,
             json=SYSTEM_INFO,
@@ -336,9 +352,10 @@ def test_a_device_id_that_is_not_a_mac_is_never_quoted_back(
 
 
 def test_a_device_id_that_is_not_a_mac_still_says_what_is_expected() -> None:
-    refused = client_for().post(
-        OTA_PATH, json=SYSTEM_INFO, headers={"Device-Id": "nope", "Client-Id": DEVICE_UUID}
-    )
+    with client_for() as client:
+        refused = client.post(
+            OTA_PATH, json=SYSTEM_INFO, headers={"Device-Id": "nope", "Client-Id": DEVICE_UUID}
+        )
 
     assert "six colon-separated hex pairs" in refused.json()["error"]
     assert "aa:bb:cc:dd:ee:ff" in refused.json()["error"]
@@ -348,9 +365,9 @@ def test_the_root_ota_path_has_only_one_spelling() -> None:
     """An `ota_path` of "/" is a path the validator permits and whose
     slashless spelling is the empty string, which is not a route. The
     endpoint still answers, on the one spelling it has."""
-    client = client_for(Config(server={"ota_path": "/"}))
     headers = {"Device-Id": DEVICE_MAC, "Client-Id": DEVICE_UUID}
 
-    assert client.post("/", json=SYSTEM_INFO, headers=headers).status_code == 200
-    assert client.post("/activate", json={}, headers=headers).status_code == 202
-    assert client.post("/activate/", json={}, headers=headers).status_code == 202
+    with client_for(Config(server={"ota_path": "/"})) as client:
+        assert client.post("/", json=SYSTEM_INFO, headers=headers).status_code == 200
+        assert client.post("/activate", json={}, headers=headers).status_code == 202
+        assert client.post("/activate/", json={}, headers=headers).status_code == 202

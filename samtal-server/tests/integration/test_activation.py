@@ -141,8 +141,9 @@ async def test_a_board_is_onboarded_by_the_code_it_shows(
     # directory hands the board its token straight away, at the same
     # onboarding URL, because the key is derived from the same secret.
     restarted = booted_in(directory, CONFIG)
-    assert onboarding_path(onboarding_key(restarted.state.composition.config.server)) == short
     with TestClient(restarted) as client:
+        server = restarted.state.composition.config.server
+        assert onboarding_path(onboarding_key(server)) == short
         after = client.post(short, json=SYSTEM_INFO, headers=HEADERS).json()
     assert after["websocket"]["token"] != ""
     assert "activation" not in after

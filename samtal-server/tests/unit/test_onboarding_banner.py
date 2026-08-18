@@ -19,13 +19,12 @@ only to whoever already reached the path it names.
 import logging
 
 import pytest
-from fastapi.testclient import TestClient
 
 from samtal_server import onboarding
-from samtal_server.app import create_app
 from samtal_server.config import Config
 from samtal_server.config.models import ServerConfig
 from samtal_server.ota import OTA_PATH
+from tests.support.apps import entered_client
 
 AUTH_SECRET_ENV = "SAMTAL_AUTH_SECRET"
 
@@ -201,17 +200,16 @@ def test_the_describe_line_names_the_path_it_was_reached_on(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = Config(server={"public_url": "https://voice.example"})
-    client = TestClient(create_app(config))
+    with entered_client(config) as client:
+        short = client.get(f"/x/{KEY}/")
+        assert short.status_code == 200
+        assert f"https://voice.example/x/{KEY}/" in short.text
+        assert "from server.public_url" in short.text
 
-    short = client.get(f"/x/{KEY}/")
-    assert short.status_code == 200
-    assert f"https://voice.example/x/{KEY}/" in short.text
-    assert "from server.public_url" in short.text
-
-    # Reached on the legacy path, the line is that path: the URL that
-    # works for whoever is holding it, not the one this server prefers.
-    legacy = client.get(OTA_PATH)
-    assert f"https://voice.example{OTA_PATH}" in legacy.text
+        # Reached on the legacy path, the line is that path: the URL that
+        # works for whoever is holding it, not the one this server prefers.
+        legacy = client.get(OTA_PATH)
+        assert f"https://voice.example{OTA_PATH}" in legacy.text
 
 
 @pytest.mark.parametrize(
@@ -242,7 +240,8 @@ def test_an_unreadable_websocket_url_falls_back_instead_of_raising(
 
 
 def test_the_describe_portal_line_carries_no_userinfo_either() -> None:
-    response = TestClient(create_app(credentialed_config())).get(f"/x/{KEY}/")
+    with entered_client(credentialed_config()) as client:
+        response = client.get(f"/x/{KEY}/")
 
     portal = [
         line for line in response.text.splitlines() if line.startswith("Type this into")

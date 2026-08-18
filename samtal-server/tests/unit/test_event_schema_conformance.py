@@ -1201,8 +1201,8 @@ MCP = "tests/unit/test_tools_mcp.py"
 MCP_RELOAD = "tests/unit/test_tools_mcp_reload.py"
 
 PINNED_BY: dict[tuple[str, str, int], tuple[str, ...]] = {
-    ("samtal_server.app", "create_app", 1): (f"{SERVER_PINS}::test_capture_enabled",),
-    ("samtal_server.app", "create_app", 2): (f"{SERVER_PINS}::test_capture_disabled",),
+    ("samtal_server.app", "_build_composition", 1): (f"{SERVER_PINS}::test_capture_enabled",),
+    ("samtal_server.app", "_build_composition", 2): (f"{SERVER_PINS}::test_capture_disabled",),
     ("samtal_server.capture", "SessionCapture._disable", 1): (
         f"{SERVER_PINS}::test_capture_failed",
     ),

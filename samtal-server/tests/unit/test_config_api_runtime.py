@@ -18,7 +18,6 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from samtal_server.app import create_app
 from samtal_server.config import Config
 from samtal_server.config.api import (
     MALFORMED_REQUEST_DESCRIPTION,
@@ -51,6 +50,7 @@ from samtal_server.tools.mcp import (
     McpReload,
     McpServers,
 )
+from tests.support.apps import entered_client
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 
@@ -204,20 +204,20 @@ def test_a_running_server_hands_its_own_managers_to_the_api(
 ) -> None:
     """The wiring, through the mount a deployment gets.
 
-    No lifespan, so nothing is connected and everything referenced is
-    down: what this shows is that the mounted API reports this server's
-    own entries rather than the empty answer an application built
-    without one gives.
+    The entries name a command that does not exist, so everything
+    referenced is down: what this shows is that the mounted API reports
+    this server's own entries rather than the empty answer an application
+    built without one gives. The lifespan is entered, because the
+    managers the API reports are what it builds and connects (#142).
     """
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
-    config = config_with(
-        {"tools": entry_data(), "shelved": entry_data()}, ["tools"], directory
-    )
-    served = TestClient(create_app(config))
+    unreachable = entry_data(command="/nonexistent/mcp-server", args=[])
+    config = config_with({"tools": unreachable, "shelved": unreachable}, ["tools"], directory)
 
-    answered = served.get(
-        f"{MOUNT_PATH}{STATUS_PATH}", headers={"Authorization": f"Bearer {TOKEN}"}
-    )
+    with entered_client(config) as served:
+        answered = served.get(
+            f"{MOUNT_PATH}{STATUS_PATH}", headers={"Authorization": f"Bearer {TOKEN}"}
+        )
 
     assert answered.status_code == 200
     assert answered.json()["tools"]["state"] == DOWN
@@ -426,16 +426,18 @@ def test_a_running_server_hands_its_own_reload_to_the_api(
 ) -> None:
     """The wiring, through the mount a deployment gets: the route is
     served, and it is not the 503 an application without a server
-    answers. No lifespan, so nothing is connected and the reload applies
-    an unchanged configuration to a registry of down managers."""
+    answers. The entry names a command that does not exist, so the reload
+    applies an unchanged configuration to a registry of down
+    managers."""
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
-    config = config_with({"tools": entry_data()}, ["tools"], directory)
+    unreachable = entry_data(command="/nonexistent/mcp-server", args=[])
+    config = config_with({"tools": unreachable}, ["tools"], directory)
     seed(directory, config)
-    served = TestClient(create_app(config))
 
-    answered = served.post(
-        f"{MOUNT_PATH}{RELOAD_PATH}", headers={"Authorization": f"Bearer {TOKEN}"}
-    )
+    with entered_client(config) as served:
+        answered = served.post(
+            f"{MOUNT_PATH}{RELOAD_PATH}", headers={"Authorization": f"Bearer {TOKEN}"}
+        )
 
     assert answered.status_code == 200, answered.text
     assert answered.json()["unchanged"] == ["tools"]
@@ -691,26 +693,27 @@ def test_a_running_server_hands_its_own_assembly_to_the_api(
     monkeypatch.setenv(API_SECRET_ENV, TOKEN)
     config = config_with({"tools": entry_data(instructions="Ask first.")}, ["tools"], directory)
     config = config.model_copy(update={"memory": MemoryConfig(dir=tmp_path / "memory")})
-    served = TestClient(create_app(config))
 
-    answered = served.get(
-        f"{MOUNT_PATH}{PROMPT_PATH}", headers={"Authorization": f"Bearer {TOKEN}"}
-    )
+    with entered_client(config) as served:
+        answered = served.get(
+            f"{MOUNT_PATH}{PROMPT_PATH}", headers={"Authorization": f"Bearer {TOKEN}"}
+        )
 
-    assert answered.status_code == 200, answered.text
-    body = answered.json()
-    assert [block["provenance"] for block in body["blocks"]] == [
-        "persona",
-        "instructions:tools",
-    ]
-    assert body["blocks"][0]["text"] == "A"
-    assert "Ask first." in body["blocks"][1]["text"]
-    assert body["characters"] == len(
-        "\n\n".join(block["text"] for block in body["blocks"])
-    )
-    # And an agent nothing loaded is the 404, through the same mount.
-    missing = served.get(
-        f"{MOUNT_PATH}/runtime/agents/stranger/prompt",
-        headers={"Authorization": f"Bearer {TOKEN}"},
-    )
+        assert answered.status_code == 200, answered.text
+        body = answered.json()
+        assert [block["provenance"] for block in body["blocks"]] == [
+            "persona",
+            "instructions:tools",
+        ]
+        assert body["blocks"][0]["text"] == "A"
+        assert "Ask first." in body["blocks"][1]["text"]
+        assert body["characters"] == len(
+            "\n\n".join(block["text"] for block in body["blocks"])
+        )
+        # And an agent nothing loaded is the 404, through the same mount.
+        missing = served.get(
+            f"{MOUNT_PATH}/runtime/agents/stranger/prompt",
+            headers={"Authorization": f"Bearer {TOKEN}"},
+        )
+
     assert missing.status_code == 404

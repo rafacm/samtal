@@ -8,12 +8,11 @@ anyway, so it gets nothing to try with, and the `devices` map plus
 """
 
 import pytest
-from fastapi.testclient import TestClient
 
-from samtal_server.app import create_app
 from samtal_server.auth import DeviceAuth, build_device_auth
 from samtal_server.config import Config
 from samtal_server.ota import OTA_PATH
+from tests.support.apps import entered_client
 from tests.support.checkin import MOCK_AGENT, MOCK_PROVIDERS, SYSTEM_INFO
 from tests.support.configs import DEVICE_MAC, DEVICE_UUID
 
@@ -32,12 +31,12 @@ def bound_config(**overrides: object) -> Config:
 
 
 def issued_token(config: Config, device_id: str = DEVICE_MAC) -> str:
-    client = TestClient(create_app(config))
-    response = client.post(
-        OTA_PATH,
-        json=SYSTEM_INFO,
-        headers={"Device-Id": device_id, "Client-Id": DEVICE_UUID},
-    )
+    with entered_client(config) as client:
+        response = client.post(
+            OTA_PATH,
+            json=SYSTEM_INFO,
+            headers={"Device-Id": device_id, "Client-Id": DEVICE_UUID},
+        )
     assert response.status_code == 200
     return response.json()["websocket"]["token"]
 
@@ -94,11 +93,12 @@ def test_disabled_auth_still_sends_an_empty_token(
     missing key would leave it in place."""
     monkeypatch.delenv("SAMTAL_AUTH_SECRET", raising=False)
     config = bound_config(server={"auth": {"enabled": False}})
-    body = TestClient(create_app(config)).post(
-        OTA_PATH,
-        json=SYSTEM_INFO,
-        headers={"Device-Id": DEVICE_MAC, "Client-Id": DEVICE_UUID},
-    )
+    with entered_client(config) as client:
+        body = client.post(
+            OTA_PATH,
+            json=SYSTEM_INFO,
+            headers={"Device-Id": DEVICE_MAC, "Client-Id": DEVICE_UUID},
+        )
     assert body.json()["websocket"]["token"] == ""
 
 

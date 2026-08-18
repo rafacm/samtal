@@ -14,6 +14,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from samtal_server.app import create_app
 from samtal_server.registry import SessionRegistry
+from tests.support.apps import entered_app
 from tests.support.configs import config_with_agent
 from tests.support.wire import connect, shake_hands
 
@@ -133,5 +134,5 @@ def test_a_bad_token_is_refused_before_capacity_is_even_considered(
 def test_the_cap_is_configurable() -> None:
     config = config_with_agent()
     config.server.limits.max_sessions = 3
-    app = create_app(config)
-    assert app.state.composition.sessions._max_sessions == 3
+    with entered_app(config) as (app, _):
+        assert app.state.composition.sessions._max_sessions == 3
