@@ -1880,6 +1880,70 @@ def test_every_token_set_matches_its_decision_site(key: tuple[str, str]) -> None
     assert produced == declared_tokens(*key)
 
 
+# The one place in this codebase where a closed set is answered by one
+# module and narrated by another. `onboarding.unbound.activation_for`
+# tags what an unbound device's check-in was answered with, and
+# `ota.reply._activation` turns two of those tags into the two
+# `activation_not_offered` warnings and the other two into silence
+# (issue #143). The test above holds the reasons the warnings carry; this
+# one holds the mapping that chooses between them, which nothing else
+# reaches: a fifth tag added upstream would fall out of the match with no
+# arm and no error, and the device it was about would be answered with
+# nothing said.
+OUTCOME_LITERAL = ("samtal_server.onboarding.unbound", "Unbound", "outcome")
+
+OUTCOME_NARRATOR = ("samtal_server.ota.reply", "_activation")
+
+
+def literal_members(module: str, owner: str, field: str) -> frozenset[str]:
+    """Every value one `Literal`-annotated dataclass field admits,
+    resolved rather than parsed, so a string that merely appears near the
+    annotation cannot satisfy it."""
+    owning = getattr(importlib.import_module(module), owner)
+    return frozenset(typing.get_args(typing.get_type_hints(owning)[field]))
+
+
+def match_arms(module: str, qualname: str) -> tuple[frozenset[str], bool]:
+    """The string values every `case` in one function names, and whether
+    any arm is a wildcard.
+
+    Or-patterns are flattened, since `case "a" | "b"` handles both. The
+    wildcard is reported rather than ignored because it is the one way
+    to make this mapping total without naming what it is total over,
+    which would leave the caller silently handling a tag nobody wrote a
+    sentence for.
+    """
+    named: set[str] = set()
+    wildcard = False
+    for node in ast.walk(scope_of(module, qualname)):
+        if not isinstance(node, ast.match_case):
+            continue
+        pattern = node.pattern
+        alternatives = pattern.patterns if isinstance(pattern, ast.MatchOr) else [pattern]
+        for one in alternatives:
+            if isinstance(one, ast.MatchValue) and isinstance(one.value, ast.Constant):
+                named.add(one.value.value)
+                continue
+            wildcard = True
+    return frozenset(named), wildcard
+
+
+def test_the_reply_narrates_every_outcome_the_decision_can_answer() -> None:
+    """Exact set equality, both ways, and no wildcard to blunt it.
+
+    An outcome named in the literal but not in the match is a tag the
+    reply falls through in silence; one named in the match but not in
+    the literal is an arm that can never run, which is the same drift
+    read from the other end. Python enforces neither, since nothing type
+    checks this repository, so the structure is asserted here instead.
+    """
+    admitted = literal_members(*OUTCOME_LITERAL)
+    narrated, wildcard = match_arms(*OUTCOME_NARRATOR)
+
+    assert not wildcard, f"{OUTCOME_NARRATOR}: a wildcard arm hides an unnarrated outcome"
+    assert narrated == admitted
+
+
 def test_every_token_field_names_its_decision_site() -> None:
     """A closed set is only closed if something closes it, so a TOKEN
     field with no decision site is a gap rather than a shortcut."""
