@@ -466,8 +466,17 @@ provider build, and asserts the engine was disposed.
 
 - **Startup-order regressions.** The build keeps today's
   comment-documented order inside the lifespan, and the comments
-  move with it; the integration boot tests and the banner test
-  pin observable order.
+  move with it; the integration boot tests pin observable order.
+  The CLI banner cannot keep its current position: today it
+  prints after construction succeeded and before serving, but
+  after M2 construction happens inside `serve()`. Printing it
+  before `serve()` would announce a server that later fails
+  startup, so `create_app` gains an optional `on_started`
+  callback (production: `main()` passes the banner emitter;
+  default None, so the module entry point and tests are
+  unchanged), invoked by the lifespan after a successful build
+  and before yield. The banner suite migrates with it and pins
+  the failure case: a failing startup prints no banner.
 - **Mounted sub-app state attachment races a request.** Uvicorn
   serves no request before the lifespan yields, and `TestClient`
   enters the lifespan before the first request; the sub-app
@@ -655,3 +664,8 @@ P1/P2 amendments". All eleven adopted.
     passes it as an `on_started` callback the lifespan invokes
     after a successful build, keeping it CLI-only; the banner
     tests migrate with it.
+
+    *Resolution*: the startup-order risk bullet now carries the
+    `on_started` design (default None, CLI passes the banner,
+    lifespan invokes after a successful build) and the
+    no-banner-on-failed-startup pin.
