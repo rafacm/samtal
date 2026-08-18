@@ -538,11 +538,13 @@ provider build, and asserts the engine was disposed.
   the retirement of the per-request rationale; the conversations
   reader's per-request property recorded as deliberately kept;
   CHANGELOG; implementation-doc section. (PR #189)
-- [ ] **M4: the drain task is owned.** `DrainingServer` keeps the
+- [x] **[M4: the drain task is
+  owned](2026-08-18-lifespan-composition-implementation.md#m4-the-drain-task-is-owned)**.
+  `DrainingServer` keeps the
   task reference, `serve()` settles it under the bound, the new
   drain test, the no-unreferenced-`create_task` grep in the
   milestone verification; CHANGELOG; implementation-doc section
-  and the closing acceptance sweep (all six criteria mapped).
+  and the closing acceptance sweep (all six criteria mapped). (PR TBD)
 
 Each milestone is a stacked branch off the previous one
 (`feature/lifespan-composition-m1` off this plan's branch, and so
