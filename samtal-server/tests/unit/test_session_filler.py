@@ -195,8 +195,8 @@ async def test_a_fire_into_live_user_speech_is_skipped(
     with caplog.at_level("INFO"):
         session.runtime._reply_task = asyncio.create_task(session.runtime._reply(UTTERANCE))
         await asyncio.sleep(DELAY_MS / 1000 / 3)
-        assert session.runtime._endpointer is not None
-        session.runtime._endpointer.feed(SPEECH)
+        assert session.runtime._turntaking.endpointer is not None
+        session.runtime._turntaking.endpointer.feed(SPEECH)
         await session.runtime._reply_task
 
     skipped = only(caplog, "filler_skipped")
@@ -220,9 +220,9 @@ async def test_a_fire_during_a_barge_in_confirmation_is_skipped(
     with caplog.at_level("INFO"):
         session.runtime._reply_task = asyncio.create_task(session.runtime._reply(UTTERANCE))
         await asyncio.sleep(DELAY_MS / 1000 / 3)
-        session.runtime._pause_output()
+        session.runtime._turntaking._pause_output()
         await asyncio.sleep(DELAY_MS / 1000)
-        session.runtime._resume_output()
+        session.runtime._turntaking._resume_output()
         await session.runtime._reply_task
 
     skipped = only(caplog, "filler_skipped")

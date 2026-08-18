@@ -512,7 +512,7 @@ SPREAD_INVENTORY: dict[str, Spread] = {
         RETURNS, alternatives=sets("tool", "entry", "")
     ),
     # `barge_in`: absent when the reply had not yet spoken.
-    "samtal_server.runtime.pipeline:PipelineRuntime._speaking_ms_field": Spread(
+    "samtal_server.runtime.turntaking:TurnTaking._speaking_ms_field": Spread(
         RETURNS, alternatives=sets("", "speaking_ms")
     ),
 }
@@ -1080,10 +1080,10 @@ TOKEN_SOURCES: dict[tuple[str, str], tuple[Decides, ...]] = {
     ),
     ("barge_in_suppressed", "reason"): (
         Decides(
-            "samtal_server.runtime.pipeline",
+            "samtal_server.runtime.turntaking",
             KEYWORD,
             "reason",
-            scope="PipelineRuntime._gate_barge_in",
+            scope="TurnTaking._gate_barge_in",
         ),
     ),
     ("filler_skipped", "reason"): (
@@ -1379,26 +1379,6 @@ PINNED_BY: dict[tuple[str, str, int], tuple[str, ...]] = {
         f"{SURFACE_PINS}::test_tool_call_for_a_name_nobody_publishes",
         f"{SURFACE_PINS}::test_tool_call_for_an_mcp_tool",
     ),
-    ("samtal_server.runtime.pipeline", "PipelineRuntime._finish_utterance", 1): (
-        f"{SURFACE_PINS}::test_barge_in_confirmed_by_a_transcript",
-        f"{SURFACE_PINS}::test_barge_in_on_a_manual_stop",
-    ),
-    ("samtal_server.runtime.pipeline", "PipelineRuntime._gate_barge_in", 1): (
-        f"{SURFACE_PINS}::test_barge_in_suppressed_under_the_speech_floor",
-    ),
-    ("samtal_server.runtime.pipeline", "PipelineRuntime._gate_barge_in", 2): (
-        f"{SURFACE_PINS}::test_barge_in_merged_mid_transcription",
-    ),
-    ("samtal_server.runtime.pipeline", "PipelineRuntime._gate_barge_in", 3): (
-        f"{SURFACE_PINS}::test_barge_in_suppressed_inside_the_refractory_window",
-    ),
-    ("samtal_server.runtime.pipeline", "PipelineRuntime._gate_barge_in", 4): (
-        f"{SURFACE_PINS}::test_barge_in_suppressed_with_nothing_transcribed",
-    ),
-    ("samtal_server.runtime.pipeline", "PipelineRuntime._gate_barge_in", 5): (
-        f"{SURFACE_PINS}::test_barge_in_confirmed_by_a_transcript",
-        f"{SURFACE_PINS}::test_barge_in_on_a_manual_stop",
-    ),
     ("samtal_server.runtime.pipeline", "PipelineRuntime._run_filler", 1): (
         f"{SURFACE_PINS}::test_filler_skipped_for_a_user_still_speaking",
     ),
@@ -1407,6 +1387,26 @@ PINNED_BY: dict[tuple[str, str, int], tuple[str, ...]] = {
     ),
     ("samtal_server.runtime.pipeline", "PipelineRuntime._run_filler", 3): (
         f"{SURFACE_PINS}::test_filler_played",
+    ),
+    ("samtal_server.runtime.turntaking", "TurnTaking.finish_utterance", 1): (
+        f"{SURFACE_PINS}::test_barge_in_confirmed_by_a_transcript",
+        f"{SURFACE_PINS}::test_barge_in_on_a_manual_stop",
+    ),
+    ("samtal_server.runtime.turntaking", "TurnTaking._gate_barge_in", 1): (
+        f"{SURFACE_PINS}::test_barge_in_suppressed_under_the_speech_floor",
+    ),
+    ("samtal_server.runtime.turntaking", "TurnTaking._gate_barge_in", 2): (
+        f"{SURFACE_PINS}::test_barge_in_merged_mid_transcription",
+    ),
+    ("samtal_server.runtime.turntaking", "TurnTaking._gate_barge_in", 3): (
+        f"{SURFACE_PINS}::test_barge_in_suppressed_inside_the_refractory_window",
+    ),
+    ("samtal_server.runtime.turntaking", "TurnTaking._gate_barge_in", 4): (
+        f"{SURFACE_PINS}::test_barge_in_suppressed_with_nothing_transcribed",
+    ),
+    ("samtal_server.runtime.turntaking", "TurnTaking._gate_barge_in", 5): (
+        f"{SURFACE_PINS}::test_barge_in_confirmed_by_a_transcript",
+        f"{SURFACE_PINS}::test_barge_in_on_a_manual_stop",
     ),
     ("samtal_server.tools.mcp.manager", "McpServerManager._run", 1): (
         f"{SERVER_PINS}::test_mcp_connected",

@@ -1097,18 +1097,18 @@ async def test_a_failing_providers_own_words_reach_no_record(
 
 
 async def test_barge_in_on_a_manual_stop(caplog: pytest.LogCaptureFixture) -> None:
-    """The unconditional cancel in `_finish_utterance`: no gate ran, and
+    """The unconditional cancel in `finish_utterance`: no gate ran, and
     the reply had not spoken, so no speaking_ms is carried."""
     asr = GatedAsr()
     session, _ = realtime_session(config_with_agent(), asr)
-    session.runtime._endpointer = ScriptedEndpointer(speech_ms=600)
+    session.runtime._turntaking.endpointer = ScriptedEndpointer(speech_ms=600)
 
     with caplog.at_level("INFO"):
-        session.runtime._utterance = bytearray(speech_pcm(320))
-        await session.runtime._finish_utterance(endpointed=True)
+        session.runtime._turntaking._utterance = bytearray(speech_pcm(320))
+        await session.runtime._turntaking.finish_utterance(endpointed=True)
         await asyncio.sleep(0.05)
-        session.runtime._utterance = bytearray(speech_pcm(320))
-        await session.runtime._finish_utterance()
+        session.runtime._turntaking._utterance = bytearray(speech_pcm(320))
+        await session.runtime._turntaking.finish_utterance()
         asr.release.set()
         assert session.runtime._reply_task is not None
         await session.runtime._reply_task
@@ -1133,15 +1133,15 @@ async def test_barge_in_suppressed_under_the_speech_floor(
 ) -> None:
     asr = GatedAsr()
     session, _ = realtime_session(config_with_agent(), asr)
-    session.runtime._endpointer = ScriptedEndpointer(speech_ms=600)
+    session.runtime._turntaking.endpointer = ScriptedEndpointer(speech_ms=600)
 
     with caplog.at_level("INFO"):
-        session.runtime._utterance = bytearray(speech_pcm(320))
-        await session.runtime._finish_utterance(endpointed=True)
+        session.runtime._turntaking._utterance = bytearray(speech_pcm(320))
+        await session.runtime._turntaking.finish_utterance(endpointed=True)
         await asyncio.sleep(0.05)
-        session.runtime._endpointer = ScriptedEndpointer(speech_ms=100)
-        session.runtime._utterance = bytearray(speech_pcm(320))
-        await session.runtime._finish_utterance(endpointed=True)
+        session.runtime._turntaking.endpointer = ScriptedEndpointer(speech_ms=100)
+        session.runtime._turntaking._utterance = bytearray(speech_pcm(320))
+        await session.runtime._turntaking.finish_utterance(endpointed=True)
         asr.release.set()
         assert session.runtime._reply_task is not None
         await session.runtime._reply_task
@@ -1171,14 +1171,14 @@ async def test_barge_in_suppressed_under_the_speech_floor(
 async def test_barge_in_merged_mid_transcription(caplog: pytest.LogCaptureFixture) -> None:
     asr = GatedAsr()
     session, _ = realtime_session(config_with_agent(), asr)
-    session.runtime._endpointer = ScriptedEndpointer(speech_ms=600)
+    session.runtime._turntaking.endpointer = ScriptedEndpointer(speech_ms=600)
 
     with caplog.at_level("INFO"):
-        session.runtime._utterance = bytearray(speech_pcm(320))
-        await session.runtime._finish_utterance(endpointed=True)
+        session.runtime._turntaking._utterance = bytearray(speech_pcm(320))
+        await session.runtime._turntaking.finish_utterance(endpointed=True)
         await asyncio.sleep(0.05)
-        session.runtime._utterance = bytearray(speech_pcm(480))
-        await session.runtime._finish_utterance(endpointed=True)
+        session.runtime._turntaking._utterance = bytearray(speech_pcm(480))
+        await session.runtime._turntaking.finish_utterance(endpointed=True)
         asr.release.set()
         assert session.runtime._reply_task is not None
         await session.runtime._reply_task
@@ -1202,7 +1202,7 @@ async def speaking_reply(config: Config, asr: Any):
     """A session whose reply is past its own ASR and already speaking,
     which is where the last two gates are reached from."""
     session, socket = realtime_session(config, asr)
-    session.runtime._endpointer = ScriptedEndpointer(speech_ms=600)
+    session.runtime._turntaking.endpointer = ScriptedEndpointer(speech_ms=600)
     session.runtime._reply_task = asyncio.create_task(
         session.runtime._reply(speech_pcm(600))
     )
@@ -1223,8 +1223,8 @@ async def test_barge_in_suppressed_inside_the_refractory_window(
     session = await speaking_reply(config, asr)
 
     with caplog.at_level("INFO"):
-        session.runtime._utterance = bytearray(speech_pcm(600))
-        await session.runtime._finish_utterance(endpointed=True)
+        session.runtime._turntaking._utterance = bytearray(speech_pcm(600))
+        await session.runtime._turntaking.finish_utterance(endpointed=True)
         assert session.runtime._reply_task is not None
         await session.runtime._reply_task
 
@@ -1256,8 +1256,8 @@ async def test_barge_in_suppressed_with_nothing_transcribed(
     session = await speaking_reply(config, asr)
 
     with caplog.at_level("INFO"):
-        session.runtime._utterance = bytearray(speech_pcm(600))
-        await session.runtime._finish_utterance(endpointed=True)
+        session.runtime._turntaking._utterance = bytearray(speech_pcm(600))
+        await session.runtime._turntaking.finish_utterance(endpointed=True)
         assert session.runtime._reply_task is not None
         await session.runtime._reply_task
 
@@ -1288,8 +1288,8 @@ async def test_barge_in_confirmed_by_a_transcript(caplog: pytest.LogCaptureFixtu
     session = await speaking_reply(config, asr)
 
     with caplog.at_level("INFO"):
-        session.runtime._utterance = bytearray(speech_pcm(600))
-        await session.runtime._finish_utterance(endpointed=True)
+        session.runtime._turntaking._utterance = bytearray(speech_pcm(600))
+        await session.runtime._turntaking.finish_utterance(endpointed=True)
         assert session.runtime._reply_task is not None
         await session.runtime._reply_task
 
@@ -1341,8 +1341,8 @@ async def test_filler_skipped_for_a_user_still_speaking(
     with caplog.at_level("INFO"):
         session.runtime._reply_task = asyncio.create_task(session.runtime._reply(UTTERANCE))
         await asyncio.sleep(DELAY_MS / 1000 / 3)
-        assert session.runtime._endpointer is not None
-        session.runtime._endpointer.feed(SPEECH)
+        assert session.runtime._turntaking.endpointer is not None
+        session.runtime._turntaking.endpointer.feed(SPEECH)
         await session.runtime._reply_task
 
     assert pinned(
@@ -1371,9 +1371,9 @@ async def test_filler_skipped_while_a_barge_in_is_confirmed(
     with caplog.at_level("INFO"):
         session.runtime._reply_task = asyncio.create_task(session.runtime._reply(UTTERANCE))
         await asyncio.sleep(DELAY_MS / 1000 / 3)
-        session.runtime._pause_output()
+        session.runtime._turntaking._pause_output()
         await asyncio.sleep(DELAY_MS / 1000)
-        session.runtime._resume_output()
+        session.runtime._turntaking._resume_output()
         await session.runtime._reply_task
 
     assert pinned(only(caplog, "filler_skipped")) == {

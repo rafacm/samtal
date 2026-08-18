@@ -1,5 +1,9 @@
 """One turn's record, assembled while the reply that produces it runs.
 
+The sibling of [`turntaking.py`](turntaking.py), and the two are told
+apart by what they are about: this module records what a turn
+contained, `turntaking.py` decides who is speaking.
+
 The pipeline holds the whole of a turn in hand exactly once, at the end
 of the reply: the transcript and its language fields, what each agent
 said, every call the model issued and what became of it, and the numbers
