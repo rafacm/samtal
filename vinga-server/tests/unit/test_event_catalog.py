@@ -50,8 +50,12 @@ from vinga_server.events.values import (
     Count,
     DeviceId,
     Identifier,
+    LanguageTag,
     Nothing,
     SessionId,
+    ToolSource,
+    ToolSourceToken,
+    UnnamedToolSource,
 )
 
 CHANNEL = "vinga_server.ota"
@@ -411,6 +415,98 @@ def test_a_fixed_token_narrows_the_declared_set_to_the_one_it_says() -> None:
     fields = descriptions()[-1].variants[0].fields
 
     assert fields["reason"].tokens == frozenset({"drain"})
+
+
+# --- and every value is the type its field declares -------------------
+#
+# The annotations are the contract and nothing enforces them where a
+# variant is built: mypy runs strict over the events package only, so
+# every emit site outside it is unchecked, and a frozen dataclass takes
+# whatever it is handed. `verify()` is what closes that, and the
+# emitter calls it inside the guard before anything is rendered.
+
+
+@dataclass(frozen=True)
+class Coded(Variant):
+    """A scratch variant whose one field declares a bounded machine
+    form, so a permissive value type handed to it is a mismatch and
+    nothing else is."""
+
+    CHANNEL: ClassVar[str] = CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "heard %s"
+    ARGS: ClassVar[tuple[str, ...]] = ("language",)
+
+    language: LanguageTag
+
+
+def test_a_variant_holding_the_type_it_declares_verifies() -> None:
+    declare("scratch_coded", variants=(Coded,))
+
+    Coded(language=LanguageTag("en-US")).verify()
+
+
+def test_a_value_type_the_field_did_not_declare_is_refused() -> None:
+    """A value type is only a claim about provenance while the field
+    holding it is the one that declared it. `Identifier` admits any
+    non-blank string, so one handed to a field declared `LanguageTag`
+    would put whatever an engine answered with onto the surface under a
+    name that promises a bounded code."""
+    declare("scratch_coded", variants=(Coded,))
+
+    with pytest.raises(CatalogError, match="Coded.language is a LanguageTag"):
+        Coded(language=Identifier("whatever the engine said")).verify()
+
+
+def test_a_refusal_names_the_field_and_the_type_and_not_the_value() -> None:
+    """By equality, because absence alone proves only that this
+    spelling did not appear. All three of the words it says are this
+    module's own."""
+    declare("scratch_coded", variants=(Coded,))
+
+    with pytest.raises(CatalogError) as raised:
+        Coded(language=Identifier(SENTINEL)).verify()
+
+    assert raised.value.args == ("Coded.language is a LanguageTag",)
+
+
+def test_a_null_in_a_field_that_is_not_nullable_is_refused() -> None:
+    declare("scratch_coded", variants=(Coded,))
+
+    with pytest.raises(CatalogError, match="not nullable"):
+        Coded(language=None).verify()  # type: ignore[arg-type]
+
+
+def test_an_absence_in_a_field_that_is_required_is_refused() -> None:
+    """`Absent` is a value like any other at runtime, so a site that
+    passed one where the declaration requires a value would otherwise
+    drop a key the golden inventory says is always there."""
+    declare("scratch_coded", variants=(Coded,))
+
+    with pytest.raises(CatalogError, match="is required"):
+        Coded(language=ABSENT).verify()  # type: ignore[arg-type]
+
+
+@dataclass(frozen=True)
+class Sourced(Variant):
+    """A scratch variant declaring the wider of a narrowing pair."""
+
+    CHANNEL: ClassVar[str] = CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "called %s"
+    ARGS: ClassVar[tuple[str, ...]] = ("source",)
+
+    source: ToolSourceToken
+
+
+def test_a_narrowed_value_type_still_satisfies_the_field_it_narrows() -> None:
+    """Subclasses pass, which is the point of narrowing: a field
+    declaring the wider type takes the narrower one, and the narrower
+    type refuses the members its own variant may not say."""
+    declare("scratch_sourced", variants=(Sourced,))
+
+    Sourced(source=UnnamedToolSource(ToolSource.DEVICE)).verify()
+    Sourced(source=ToolSourceToken(ToolSource.BUILTIN)).verify()
 
 
 # --- the declaration is what names the event --------------------------

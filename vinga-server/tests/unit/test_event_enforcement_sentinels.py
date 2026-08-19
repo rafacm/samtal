@@ -902,3 +902,81 @@ def test_forgiving_recovers_an_unusable_identity_without_repeating_it(
         assert planted not in consumer.rendered()
         assert planted not in repr(capture.payloads)
     assert capture.payloads, "the capture recorded nothing, so this proves nothing"
+
+# --- and a value in the wrong field -----------------------------------
+#
+# The gap a value type alone does not close. A value type is a claim
+# about provenance only while the field holding it is the one that
+# declared it, and nothing outside this package typechecks a
+# construction: mypy runs strict over `events/` and no further, and a
+# frozen dataclass takes whatever it is handed.
+#
+# `Identifier` is the permissive one, deliberately: it admits any
+# non-blank string, because a configured name may be anything at all. So
+# an `Identifier` handed to a field declared `LanguageTag` is a far
+# side's answer arriving under a name that promises a bounded code, and
+# `carried()` would have serialized it without a word. The emitter
+# verifies every value against its declared type inside the guard, and
+# this is the sentinel for it.
+
+
+def a_misplaced_value() -> Variant:
+    """The sentinel in a field that declares something else. Nothing
+    exotic: this is what one wrong import or one copied line looks
+    like."""
+    return Heard(
+        agent=Identifier("poet"),
+        duration_s=Real(0.5),
+        language=Identifier(SENTINEL),  # type: ignore[arg-type]
+    )
+
+
+def test_strict_refuses_a_misplaced_value_without_repeating_it(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    events.set_enforcement(events.STRICT)
+    emitter, consumer, capture = a_session()
+
+    with caplog.at_level("DEBUG"), pytest.raises(EventSchemaError) as raised:
+        emitter.emit(a_misplaced_value)
+
+    assert raised.value.args == (
+        "the event schema refused an emission of an event that could not "
+        "be built: construction_failed",
+    )
+    assert SENTINEL not in str(raised.value)
+    assert SENTINEL not in repr(raised.value)
+    assert SENTINEL not in repr(raised.value.args)
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    assert caplog.records == []
+    assert consumer.seen == []
+    assert capture.payloads == []
+
+
+def test_forgiving_recovers_a_misplaced_value_without_repeating_it(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """And the field it was misplaced into reaches nothing either: the
+    recovery carries the fixed token and the session's own identity, so
+    there is no `language` key for the value to have survived in."""
+    events.set_enforcement(events.FORGIVING)
+    emitter, consumer, capture = a_session()
+
+    with caplog.at_level("DEBUG"):
+        emitter.emit(a_misplaced_value)
+
+    said = [one for one in caplog.records if one.name == SESSION_LOGGER]
+    (complaint,) = [one for one in said if not hasattr(one, "event")]
+    assert complaint.args == (UNBUILT_LABEL, "construction_failed")
+    (recovered,) = [one for one in said if hasattr(one, "event")]
+    assert fields_of(recovered) == {
+        "event": SCHEMA_VIOLATION,
+        "session": "alpha",
+        "device": "aa:bb:cc:dd:ee:ff",
+    }
+    assert carrying(caplog, SENTINEL) == set()
+    assert SENTINEL not in both_formats(caplog)
+    assert SENTINEL not in consumer.rendered()
+    assert SENTINEL not in repr(capture.payloads)
+    assert capture.payloads, "the capture recorded nothing, so this proves nothing"
