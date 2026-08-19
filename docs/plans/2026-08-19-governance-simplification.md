@@ -219,18 +219,31 @@ cannot shift them.
 
 **What a caller looks like after the change.** Today's 15-line
 emit site (template, six positionals, name, nine keywords) becomes a
-typed construction the type checker can verify:
+typed construction deferred into the emitter's guard:
 
-    self._events.emit(LlmRound(
+    self._events.emit(lambda: LlmRound(
         session=self.session_id, agent=self._agent,
         round=self._llm_round, turns=len(working),
         duration_ms=round(elapsed * 1000), ...))
 
-The emitter reads channel and level off the value, renders the
-sentence through the declaration's own `render()`, and hands the
-payload to the taps. The interface a caller must know shrinks from
-"the whole registry entry, restated correctly" to "the one class
-named after the thing that happened".
+The thunk matters: construction, the value types' runtime validation
+(token coercion, descriptor bounds), rendering, and serialization
+all run inside the guarded boundary, so a construction failure on a
+reply path is telemetry's problem and never the reply's. In strict
+mode the guard re-raises; in forgiving mode it emits a fresh, safe
+`schema_violation` built from registry-owned identifiers only, never
+from caller-controlled names, values, exception messages, or
+partially rendered text, which is today's recovery posture kept.
+Because the repository runs no static type checker, the annotations
+alone prove nothing at runtime; M1 therefore adds a strict type-check
+CI step scoped to the events package (widening later is its own
+decision), and the value types keep explicit runtime validation of
+every untrusted input regardless. The emitter reads channel and
+level off the constructed variant, renders the sentence through the
+variant's own derivation, and hands the payload to the taps. The
+interface a caller must know shrinks from "the whole registry entry,
+restated correctly" to "the one variant named after the thing that
+happened".
 
 **The descriptor sheds behavior, keeps facts.** `EntityDescriptor`
 keeps its 20 data facts, `secret_key`, and loses all 11 hook fields,
@@ -509,6 +522,13 @@ declaration.
 boundary, so a construction failure escapes on a reply path; frozen
 dataclasses do not enforce annotations at runtime and the repo runs
 no static type checker in CI.
+
+*Resolution.* Adopted. Callers pass a construction thunk; building,
+validating, rendering, and serializing all happen inside the guarded
+emitter boundary. Strict re-raises; forgiving emits a fresh safe
+`schema_violation` carrying no caller-controlled content. M1 adds a
+strict type-check CI step scoped to the events package, and the
+value types keep explicit runtime validation of untrusted inputs.
 
 **4 (P2). Absent-versus-null semantics lost.** The current schema
 models `required` and `nullable` separately (`heard.language` is
