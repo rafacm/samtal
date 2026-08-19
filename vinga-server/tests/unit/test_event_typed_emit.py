@@ -1,12 +1,13 @@
 """What the typed emit path produces, and what its guard does.
 
-Two claims. The first is that a converted site produces the record its
-unconverted self produced: same channel, same level, same unrendered
-template, same arguments, same payload keys and values, on the log tap
-and on every attached tap. It is asserted here against the untyped call
-directly, side by side in one test, because the whole conversion rests
-on it and a claim that rests on a committed file alone is a claim that
-rests on the file having been generated correctly.
+Two claims. The first is that a typed emission IS the untyped one: same
+channel, same level, same unrendered template, same arguments, same
+payload keys and values, on the log tap and on every attached tap. It is
+asserted side by side in one process, on scratch declarations written
+into both sources, because the property belongs to the machinery rather
+than to any four events and because a claim resting on a committed file
+alone is a claim resting on that file having been generated correctly.
+What the store's own five paths produce is the record baseline's.
 
 The second is the construction guard's, and it needs its own pins
 because no caller can prove it: a site hands the emitter a thunk and
@@ -28,6 +29,7 @@ from typing import ClassVar
 import pytest
 
 from tests.support.catalog import scratch_catalog
+from tests.support.schema import scratch_registry
 from vinga_server import events as events_module
 from vinga_server.events import (
     UNBUILT_LABEL,
@@ -39,22 +41,29 @@ from vinga_server.events import (
 )
 from vinga_server.events.catalog import (
     ConversationsDropped,
-    ConversationsEnabled,
     ConversationsPruned,
     Variant,
-    WriteFailed,
     declare,
 )
-from vinga_server.events.values import (
-    ClassName,
-    ConfiguredPath,
-    Count,
-    Identifier,
-    SessionId,
+from vinga_server.events.values import ConfiguredPath, Count, Identifier, SessionId
+from vinga_server.events_schema import (
+    SCHEMA_VIOLATION,
+    SCHEMA_VIOLATION_MESSAGE,
+    EventSpec,
+    EventVariant,
+    arg_count,
+    arg_identifier,
+    arg_path,
+    count,
+    identifier,
+    server_payload,
 )
-from vinga_server.events_schema import SCHEMA_VIOLATION, SCHEMA_VIOLATION_MESSAGE
 
 CHANNEL = "vinga_server.conversations.store"
+
+# Where the scratch declarations below ride, so that neither half of the
+# equivalence borrows the store's own channel or its events.
+SCRATCH_CHANNEL = "vinga_server.ota"
 
 DIRECTORY = Path("/var/lib/vinga/conversations")
 
@@ -101,6 +110,8 @@ def _scratch() -> Iterator[None]:
     in a scratch catalog so it cannot reach the generated reference."""
     with scratch_catalog():
         declare("scratch_elsewhere", variants=(Elsewhere,))
+        declare("measured", variants=(Measured,))
+        declare("recording", variants=(Recording,))
         yield
 
 
@@ -123,63 +134,103 @@ def shape(emission: Emission) -> tuple[object, ...]:
 
 
 # --- the same record, either way --------------------------------------
+#
+# One scratch event, declared twice: once as a typed variant and once as
+# the registry declaration an unconverted site emits against. Scratch
+# rather than one of the store's own, because the store's have finished
+# converting and only one source declares them now, and because what is
+# under test is the machinery rather than those four events. Two of
+# them, so the asymmetric value type is covered: `ConfiguredPath` is the
+# one whose payload field and sentence argument differ.
 
 
-TYPED = (
-    (
-        "conversations_enabled",
-        lambda: ConversationsEnabled(path=ConfiguredPath(DIRECTORY)),
-        lambda one: one.warning(
-            "recording conversations to %s",
-            DIRECTORY,
-            event="conversations_enabled",
-            path=str(DIRECTORY),
+@dataclass(frozen=True)
+class Measured(Variant):
+    CHANNEL: ClassVar[str] = SCRATCH_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "measured %s in %d ms"
+    ARGS: ClassVar[tuple[str, ...]] = ("stage", "duration_ms")
+
+    stage: Identifier
+    duration_ms: Count
+
+
+@dataclass(frozen=True)
+class Recording(Variant):
+    CHANNEL: ClassVar[str] = SCRATCH_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = "recording to %s"
+    ARGS: ClassVar[tuple[str, ...]] = ("path",)
+
+    path: ConfiguredPath
+
+
+SPECS = (
+    EventSpec(
+        "measured",
+        variants=(
+            EventVariant(
+                channel=SCRATCH_CHANNEL,
+                level=logging.INFO,
+                message="measured %s in %d ms",
+                args=(arg_identifier(), arg_count()),
+                fields=server_payload(stage=identifier(), duration_ms=count()),
+            ),
         ),
     ),
-    (
-        "conversations_dropped",
-        lambda: ConversationsDropped(session=SessionId("alpha")),
-        lambda one: one.warning(
-            "session %s: the conversation store is behind, dropping events",
-            "alpha",
-            event="conversations_dropped",
-            session="alpha",
+    EventSpec(
+        "recording",
+        variants=(
+            EventVariant(
+                channel=SCRATCH_CHANNEL,
+                level=logging.WARNING,
+                message="recording to %s",
+                args=(arg_path(),),
+                fields=server_payload(path=identifier()),
+            ),
         ),
     ),
+)
+
+PAIRS = (
     (
-        "conversations_failed",
-        lambda: WriteFailed(failure=ClassName("RuntimeError")),
-        lambda one: one.warning(
-            "the conversation store dropped a batch after a write failed (%s)",
-            "RuntimeError",
-            event="conversations_failed",
-            failure="RuntimeError",
-        ),
-    ),
-    (
-        "conversations_pruned",
-        lambda: ConversationsPruned(sessions=Count(2), days=Count(90)),
+        "an identifier and a count",
+        lambda: Measured(stage=Identifier("asr"), duration_ms=Count(12)),
         lambda one: one.info(
-            "conversations: pruned %d session(s) older than %d days",
-            2,
-            90,
-            event="conversations_pruned",
-            sessions=2,
+            "measured %s in %d ms",
+            "asr",
+            12,
+            event="measured",
+            stage="asr",
+            duration_ms=12,
+        ),
+    ),
+    (
+        "a configured path",
+        lambda: Recording(path=ConfiguredPath(DIRECTORY)),
+        lambda one: one.warning(
+            "recording to %s",
+            DIRECTORY,
+            event="recording",
+            path=str(DIRECTORY),
         ),
     ),
 )
 
 
 @pytest.mark.parametrize(
-    "build, untyped", [(one, two) for _, one, two in TYPED], ids=[one for one, _, _ in TYPED]
+    "build, untyped", [(one, two) for _, one, two in PAIRS], ids=[one for one, _, _ in PAIRS]
 )
 def test_a_typed_emission_is_the_untyped_one(
-    build: object, untyped: object, emitter: ServerEvents, tap: Tap
+    build: object, untyped: object, tap: Tap
 ) -> None:
-    """Side by side, in one process, through one emitter: what the
-    conversion has to preserve, proved rather than committed."""
-    emitter.emit(build)  # type: ignore[arg-type]
-    untyped(emitter)  # type: ignore[operator]
+    """Side by side, in one process, through one emitter: what every
+    conversion has to preserve, proved on the machinery rather than
+    re-proved per event."""
+    with scratch_registry(SPECS):
+        emitter = ServerEvents(SCRATCH_CHANNEL)
+        emitter.emit(build)  # type: ignore[arg-type]
+        untyped(emitter)  # type: ignore[operator]
 
     typed_emission, untyped_emission = tap.seen
 
@@ -189,8 +240,8 @@ def test_a_typed_emission_is_the_untyped_one(
 def test_a_typed_emission_reaches_the_log_on_its_own_channel(
     emitter: ServerEvents, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The log tap is a consumer like any other, and the record it
-    writes is what a deployment keeps."""
+    """A converted path, all the way to the record a deployment keeps.
+    The log tap is a consumer like any other, and it is the last one."""
     with caplog.at_level(logging.INFO):
         emitter.emit(lambda: ConversationsPruned(sessions=Count(2), days=Count(90)))
 
@@ -210,7 +261,7 @@ class Elsewhere(Variant):
     """A variant declared on another channel, so that handing it to
     this emitter is the mismatch and nothing else is."""
 
-    CHANNEL: ClassVar[str] = "vinga_server.ota"
+    CHANNEL: ClassVar[str] = SCRATCH_CHANNEL
     LEVEL: ClassVar[int] = logging.INFO
     TEMPLATE: ClassVar[str] = "said %s"
     ARGS: ClassVar[tuple[str, ...]] = ("stage",)

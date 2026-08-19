@@ -32,12 +32,23 @@ from vinga_server import events_cli, events_docgen
 from vinga_server.events import ENFORCEMENT_ENV
 from vinga_server.events_schema import (
     GRAMMARS,
-    REGISTRY,
     SESSION_CHANNEL,
     SYNTAXES,
     ArgKind,
+    EventSpec,
     Kind,
 )
+
+
+def documented() -> dict[str, EventSpec]:
+    """Every event the reference describes.
+
+    Two sources while #210's conversion is in flight: the catalog's
+    typed declarations and the registry's remaining ones. The checks
+    below are about the document, so what they read is what the document
+    renders, which is neither source on its own.
+    """
+    return events_docgen.documented()
 
 README = Path(__file__).resolve().parents[2] / "README.md"
 
@@ -208,7 +219,7 @@ def check_constraint(rendered: str, declared: Any, kind: str, where: str) -> Non
 
 def test_every_declared_event_has_a_row() -> None:
     listed = [event for event, _ in index_rows()]
-    missing = sorted(set(REGISTRY) - set(listed))
+    missing = sorted(set(documented()) - set(listed))
     assert not missing, f"declared events with no row: {', '.join(missing)}"
 
 
@@ -217,7 +228,7 @@ def test_every_row_names_a_declared_event() -> None:
     row for an event that no longer exists is documentation of a surface
     this server does not have."""
     listed = [event for event, _ in index_rows()]
-    invented = sorted(set(listed) - set(REGISTRY))
+    invented = sorted(set(listed) - set(documented()))
     assert not invented, f"rows naming nothing declared: {', '.join(invented)}"
 
 
@@ -227,7 +238,7 @@ def test_no_event_is_listed_twice() -> None:
     listed = [event for event, _ in index_rows()]
     twice = sorted({event for event in listed if listed.count(event) > 1})
     assert not twice, f"events listed more than once: {', '.join(twice)}"
-    assert len(listed) == len(REGISTRY)
+    assert len(listed) == len(documented())
 
 
 def test_the_two_channel_event_is_one_row_naming_both() -> None:
@@ -274,7 +285,7 @@ def test_the_committed_reference_matches_the_registry() -> None:
 
 def test_the_reference_renders_every_event() -> None:
     rendered = events_docgen.reference()
-    for name in REGISTRY:
+    for name in documented():
         assert f"### `{name}`" in rendered, f"{name} has no section"
         assert f"| `{name}`" in rendered, f"{name} has no index row"
 
@@ -285,8 +296,8 @@ def test_every_event_renders_exactly_its_declared_variants() -> None:
     stopped at an event's first variant would produce a document CI
     diffs happily."""
     rendered = variant_sections()
-    assert set(rendered) == set(REGISTRY)
-    for name, spec in REGISTRY.items():
+    assert set(rendered) == set(documented())
+    for name, spec in documented().items():
         assert [heading for heading, _ in rendered[name]] == [
             f"#### Variant {position}: `{variant.channel}` at "
             f"{logging.getLevelName(variant.level)}"
@@ -298,7 +309,7 @@ def test_the_reference_carries_every_template_byte_for_byte() -> None:
     """The sentence is half the record, and the half a payload rule
     would leave undocumented."""
     rendered = variant_sections()
-    for name, spec in REGISTRY.items():
+    for name, spec in documented().items():
         for (heading, body), variant in zip(rendered[name], spec.variants, strict=True):
             assert body[body.index("```text") + 1] == variant.message, f"{name} {heading}"
 
@@ -310,7 +321,7 @@ def test_every_argument_row_matches_its_declaration() -> None:
     undocumented while the suite stayed green: every property it
     claimed was true of some other row."""
     rendered = variant_sections()
-    for name, spec in REGISTRY.items():
+    for name, spec in documented().items():
         for (heading, body), variant in zip(rendered[name], spec.variants, strict=True):
             where = f"{name} {heading}"
             if not variant.args:
@@ -333,7 +344,7 @@ def test_every_field_row_matches_its_declaration() -> None:
     declared order, with the kind, requiredness, nullability, constraint
     and note that field declares and nothing else."""
     rendered = variant_sections()
-    for name, spec in REGISTRY.items():
+    for name, spec in documented().items():
         for (heading, body), variant in zip(rendered[name], spec.variants, strict=True):
             where = f"{name} {heading}"
             rows = table(body, FIELD_HEADER)
@@ -352,7 +363,7 @@ def test_the_reference_renders_every_declared_prose_note() -> None:
     cells: the field and argument notes are asserted by the two row
     tests above, exactly rather than by presence."""
     rendered = flat(events_docgen.reference())
-    for name, spec in REGISTRY.items():
+    for name, spec in documented().items():
         notes = [spec.note, *[variant.note for variant in spec.variants]]
         for note in notes:
             if note:
@@ -396,7 +407,10 @@ def test_the_reference_says_it_is_generated_and_how() -> None:
     """The header every generated document in this repository carries,
     because the first thing a reader does with a wrong line is edit it."""
     rendered = flat(events_docgen.reference())
-    assert "Generated from the registry by `vinga-server events reference`" in rendered
+    assert (
+        "Generated from the declarations by `vinga-server events reference`"
+        in rendered
+    )
     assert "Do not edit this file by hand" in rendered
 
 

@@ -34,6 +34,14 @@ smoke lanes import their own, which is the other half of decision 2's
 "support or a conftest", and a fixture cannot be imported and used as a
 fixture, so a conftest is the only home some shared things can have.
 
+One deliberate exception, named rather than implied. The record
+baseline's exhaustiveness obligation is that every emit site the
+conformance suite's static walk finds must be driven, and the walk is
+that suite's (#210's plan says so in as many words). Extracting it into
+support would be a three-hundred-line move of code the last conversion
+milestone deletes outright, so the pair is exempted here, by both ends
+and by name, and the exemption goes when the walk does.
+
 Two deliberate limits, stated rather than discovered later:
 
 - An import naming a module this repository does not hold is not
@@ -58,6 +66,15 @@ ROOT = TESTS.parent
 # its directory is read, and only to anchor a relative import, so the
 # file itself does not have to exist.
 PLANTED = TESTS / "unit" / "planted.py"
+
+# Which test module may import which other one, and nothing wider: a
+# pair, not a file with a licence. See the exception in the docstring
+# above.
+TRANSITIONAL: dict[str, frozenset[str]] = {
+    "unit/test_event_baseline.py": frozenset(
+        {"unit/test_event_schema_conformance.py"}
+    ),
+}
 
 
 def sources() -> list[Path]:
@@ -105,23 +122,31 @@ def candidates(node: ast.Import | ast.ImportFrom, origin: Path) -> list[Path]:
     return [base, *(base / alias.name for alias in node.names)]
 
 
-def reaches_into_tests(tree: ast.AST, origin: Path = PLANTED) -> list[int]:
-    """The line of every import in `tree` that names a test module."""
+def reaches_into_tests(
+    tree: ast.AST, origin: Path = PLANTED, allowed: frozenset[str] = frozenset()
+) -> list[int]:
+    """The line of every import in `tree` that names a test module the
+    importer is not exempted for."""
     lines: set[int] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Import | ast.ImportFrom):
             continue
         for base in candidates(node, origin):
             found = resolved(base)
-            if found is not None and is_test_module(found):
-                lines.add(node.lineno)
+            if found is None or not is_test_module(found):
+                continue
+            if relative(found) in allowed:
+                continue
+            lines.add(node.lineno)
     return sorted(lines)
 
 
 def offenders(paths: list[Path]) -> dict[str, list[int]]:
     found = {
         relative(path): reaches_into_tests(
-            ast.parse(path.read_text(encoding="utf-8")), path
+            ast.parse(path.read_text(encoding="utf-8")),
+            path,
+            TRANSITIONAL.get(relative(path), frozenset()),
         )
         for path in paths
     }

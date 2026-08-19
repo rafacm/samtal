@@ -36,7 +36,6 @@ from vinga_server.events.catalog import (
     WriteFailed,
     declaration_of,
     declare,
-    described,
     payload_shape,
 )
 from vinga_server.events.values import (
@@ -48,7 +47,6 @@ from vinga_server.events.values import (
     Identifier,
     SessionId,
 )
-from vinga_server.events_schema import REGISTRY
 
 CHANNEL = "vinga_server.ota"
 
@@ -233,24 +231,3 @@ def test_a_variant_answers_which_event_it_is_a_shape_of() -> None:
 def test_a_type_that_is_not_a_declared_variant_is_refused() -> None:
     with pytest.raises(CatalogError):
         declaration_of(Variant)
-
-
-# --- and the catalog describes what the registry described ------------
-
-
-def test_the_catalog_describes_its_events_exactly_as_the_registry_does() -> None:
-    """The conversion's proof, for as long as both sources exist: every
-    declaration the catalog carries derives the same `EventSpec` the
-    untyped registry declares by hand, field notes and argument kinds
-    included. It retires with the registry entries themselves, at which
-    point the regenerated reference is what carries the claim."""
-    shared = {spec.name: spec for spec in described() if spec.name in REGISTRY}
-
-    assert set(shared) == {
-        "conversations_enabled",
-        "conversations_dropped",
-        "conversations_failed",
-        "conversations_pruned",
-    }
-    for name, spec in shared.items():
-        assert spec == REGISTRY[name], name

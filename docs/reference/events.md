@@ -1,9 +1,10 @@
 # Event schema reference
 
-Generated from the registry by `vinga-server events reference`. Do not
-edit this file by hand: CI regenerates it and fails on any difference, so
-an edit here is reverted by the next run. The declarations live in
-`vinga-server/vinga_server/events_schema.py`.
+Generated from the declarations by `vinga-server events reference`. Do
+not edit this file by hand: CI regenerates it and fails on any difference,
+so an edit here is reverted by the next run. The declarations live in
+`vinga-server/src/vinga_server/events/catalog.py` and, for the events not
+yet converted to it, in `vinga-server/src/vinga_server/events_schema.py`.
 
 The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
@@ -240,10 +241,6 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `capture_over_budget` | `vinga_server.capture` | WARNING | 1 |
 | `capture_enabled` | `vinga_server.app` | WARNING | 1 |
 | `capture_disabled` | `vinga_server.app` | INFO | 1 |
-| `conversations_enabled` | `vinga_server.conversations.store` | WARNING | 1 |
-| `conversations_dropped` | `vinga_server.conversations.store` | WARNING | 1 |
-| `conversations_failed` | `vinga_server.conversations.store` | WARNING | 2 |
-| `conversations_pruned` | `vinga_server.conversations.store` | INFO | 1 |
 | `drain_started` | `vinga_server.registry` | INFO | 1 |
 | `drain_finished` | `vinga_server.registry` | INFO | 1 |
 | `drain_incomplete` | `vinga_server.registry` | WARNING | 1 |
@@ -251,6 +248,10 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `device_bindings_unreadable` | `vinga_server.device.bindings` | WARNING | 1 |
 | `api_error` | `vinga_server.config.api` | ERROR | 1 |
 | `api_storage_error` | `vinga_server.config.api` | ERROR | 1 |
+| `conversations_enabled` | `vinga_server.conversations.store` | WARNING | 1 |
+| `conversations_dropped` | `vinga_server.conversations.store` | WARNING | 1 |
+| `conversations_failed` | `vinga_server.conversations.store` | WARNING | 2 |
+| `conversations_pruned` | `vinga_server.conversations.store` | INFO | 1 |
 | `schema_violation` (internal) | every channel (14) | ERROR | 14 |
 
 ### `ota_check`
@@ -1893,103 +1894,6 @@ session capture is configured but off; set server.capture.enabled to record to %
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 | `path` | `IDENTIFIER` | yes | no |  |  |
 
-### `conversations_enabled`
-
-The store opens at startup, which means this server is recording what is said
-to it. Said once, before anything connects, and at WARNING for the reason
-`capture_enabled` is.
-
-#### Variant 1: `vinga_server.conversations.store` at WARNING
-
-```text
-recording conversations to %s
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `PATHLIKE` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `path` | `IDENTIFIER` | yes | no |  |  |
-
-### `conversations_dropped`
-
-The store is behind and events for one session are being dropped. Said once
-per session at its first drop; the total lands on that session's row.
-
-#### Variant 1: `vinga_server.conversations.store` at WARNING
-
-```text
-session %s: the conversation store is behind, dropping events
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-
-### `conversations_failed`
-
-A write to the store failed and its batch was dropped, or a prune could not
-run.
-
-#### Variant 1: `vinga_server.conversations.store` at WARNING
-
-```text
-the conversation store dropped a batch after a write failed (%s)
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `CLASS_NAME` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `failure` | `CLASS_NAME` | yes | no |  | The exception's class name, never its message. |
-
-#### Variant 2: `vinga_server.conversations.store` at WARNING
-
-```text
-the conversation store could not prune (%s)
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `CLASS_NAME` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `failure` | `CLASS_NAME` | yes | no |  |  |
-
-### `conversations_pruned`
-
-Retention deleted sessions older than the window. At INFO: a policy doing its
-job.
-
-#### Variant 1: `vinga_server.conversations.store` at INFO
-
-```text
-conversations: pruned %d session(s) older than %d days
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `COUNT` | no |  |  |
-| 2 | `COUNT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `sessions` | `COUNT` | yes | no |  | A count, not a list. |
-
 ### `drain_started`
 
 A shutdown begins draining.
@@ -2127,6 +2031,103 @@ the configuration API met unreadable stored state (%s)
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
+
+### `conversations_enabled`
+
+The store opens at startup, which means this server is recording what is said
+to it. Said once, before anything connects, and at WARNING for the reason
+`capture_enabled` is.
+
+#### Variant 1: `vinga_server.conversations.store` at WARNING
+
+```text
+recording conversations to %s
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `PATHLIKE` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `path` | `IDENTIFIER` | yes | no |  |  |
+
+### `conversations_dropped`
+
+The store is behind and events for one session are being dropped. Said once
+per session at its first drop; the total lands on that session's row.
+
+#### Variant 1: `vinga_server.conversations.store` at WARNING
+
+```text
+session %s: the conversation store is behind, dropping events
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+
+### `conversations_failed`
+
+A write to the store failed and its batch was dropped, or a prune could not
+run.
+
+#### Variant 1: `vinga_server.conversations.store` at WARNING
+
+```text
+the conversation store dropped a batch after a write failed (%s)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `CLASS_NAME` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `failure` | `CLASS_NAME` | yes | no |  | The exception's class name, never its message. |
+
+#### Variant 2: `vinga_server.conversations.store` at WARNING
+
+```text
+the conversation store could not prune (%s)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `CLASS_NAME` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `failure` | `CLASS_NAME` | yes | no |  |  |
+
+### `conversations_pruned`
+
+Retention deleted sessions older than the window. At INFO: a policy doing its
+job.
+
+#### Variant 1: `vinga_server.conversations.store` at INFO
+
+```text
+conversations: pruned %d session(s) older than %d days
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `COUNT` | no |  |  |
+| 2 | `COUNT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `sessions` | `COUNT` | yes | no |  | A count, not a list. |
 
 ### `schema_violation`
 
