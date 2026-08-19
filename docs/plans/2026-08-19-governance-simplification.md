@@ -13,11 +13,19 @@ private implementation topology are classified and rewritten, kept, or
 deleted by class; and the database compatibility floor is written down
 as a decision rather than an assumption.
 
-Nothing here changes what the server says or serves. The metadata-only
-telemetry promise, the event identifiers and fields operators consume,
-the HTTP API's OpenAPI document, the CLI's rendered output, and the
-generated reference docs are all held byte-identical or
-golden-verified through every milestone.
+Nothing here changes what the server says or serves. The
+metadata-only telemetry promise, the event identifiers and fields
+operators consume, the HTTP API's OpenAPI document, and the CLI's
+rendered output are held byte-identical or golden-verified through
+every milestone. The `Emission` interface and `LogTap` are
+preserved: every typed variant derives its logging specification,
+the unrendered template and ordered args, from its own fields, so
+the record a tap or a log reader sees is baseline-proven identical.
+The one deliberate exception is the generated event reference,
+whose format may change when its source of truth becomes the
+catalog; it is regenerated, drift-checked as today, and held to a
+semantic-completeness test (every event, variant, field, token,
+bound, and note present), not to byte identity.
 
 The companion implementation doc,
 [`2026-08-19-governance-simplification-implementation.md`](2026-08-19-governance-simplification-implementation.md),
@@ -172,8 +180,13 @@ frozen dataclass owning its channel, level, exact payload shape, and
 rendering inputs, and a single-variant event declares exactly one.
 Callers construct a specific variant; documentation and the golden
 inventory derive from the enclosing declaration. The template and
-the argument order stop existing as separate structures because each
-variant derives them from its own fields. The shared vocabulary
+the argument order stop existing as caller-side structures because
+each variant derives its logging specification, the unrendered
+template and ordered args `Emission` carries today, from its own
+fields; `Emission` and `LogTap` are unchanged. The documentation
+facts the reference renders beyond fields (variant notes, syntaxes,
+bounds, token sets) are declaration metadata on the variant and the
+vocabulary, not lost to introspection. The shared vocabulary
 (token enums, syntaxes, the descriptor bound type) lives beside it
 once. The expectation, stated so the review can hold the plan to it:
 catalog plus vocabulary plus emitters plus docgen land at roughly half
@@ -550,6 +563,14 @@ the byte-identical reference claim.** `Emission` exposes unrendered
 `message` and `args` that `LogTap` consumes; the generated reference
 renders notes, constraints, requiredness and bounds that field
 introspection alone cannot supply.
+
+*Resolution.* Adopted, as the first offered contract: `Emission`
+and `LogTap` are preserved, every variant derives its (template,
+args) logging specification from its fields, and the record shape is
+baseline-proven. Documentation facts beyond fields live as
+declaration metadata. The generated reference is explicitly excepted
+from byte identity and held to a semantic-completeness test instead;
+the goal section now says so.
 
 **6 (P2). `EntityAccess` fails the deletion test.** `ConfigStore`
 already exposes typed public read/write/delete methods per kind;
