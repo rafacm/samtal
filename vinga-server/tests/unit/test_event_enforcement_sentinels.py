@@ -564,10 +564,18 @@ def test_strict_refuses_a_descriptor_past_its_declared_length() -> None:
 # The same rule, one layer earlier. A converted site hands the emitter a
 # thunk, so the value that would have been a field is now an argument to
 # a value type's constructor, and a refusal happens there rather than in
-# the validator above. Everything that reaches a surface from that
-# refusal is registry-owned: a fixed label, a fixed code, and the
-# exception's class name. Never its words, because a thunk that raised
-# may have raised holding exactly the bytes this suite hunts.
+# the validator above. What reaches a surface from that refusal is a
+# fixed label and a fixed code, and nothing else at all.
+#
+# Not even the exception's class name, which is the correction PR #217's
+# review forced and the case worth stating: a class name looks like the
+# safest string in Python, and `type(name, (Exception,), {})` accepts
+# any string as one, name validation included. So a thunk that builds
+# its exception out of far-side bytes carries them in its class name,
+# and a refusal naming the class would print exactly what this suite
+# hunts. Both branches below are driven twice for that reason: once with
+# the sentinel as a value the construction refuses, and once with the
+# sentinel as the NAME of the class the construction raises.
 
 STORE_CHANNEL = "vinga_server.conversations.store"
 
@@ -578,29 +586,56 @@ def a_refused_construction() -> Variant:
     return ConversationsDropped(session=SessionId(SENTINEL))
 
 
+def a_hostile_construction() -> Variant:
+    """The sentinel planted as the exception's own class name.
+
+    Nothing exotic is needed to reach this: `type()` does not validate
+    the name it is given, so any code that derives an exception class
+    from data it was handed produces one of these. A guard that reported
+    the class would report the data."""
+    raise type(SENTINEL, (Exception,), {})()
+
+
+CONSTRUCTIONS = (
+    ("the sentinel as a refused value", a_refused_construction),
+    ("the sentinel as the exception's class name", a_hostile_construction),
+)
+
+REFUSING_CONSTRUCTIONS = pytest.mark.parametrize(
+    "build", [one for _, one in CONSTRUCTIONS], ids=[one for one, _ in CONSTRUCTIONS]
+)
+
+
+@REFUSING_CONSTRUCTIONS
 def test_strict_refuses_a_construction_without_repeating_its_value(
-    caplog: pytest.LogCaptureFixture, tap: Tap
+    build: Callable[[], Variant], caplog: pytest.LogCaptureFixture, tap: Tap
 ) -> None:
     """`args` whole, so `str` and `repr` are pinned with it, and nothing
     written or dispatched on the way to the refusal."""
     events.set_enforcement(events.STRICT)
 
     with caplog.at_level("DEBUG"), pytest.raises(EventSchemaError) as raised:
-        ServerEvents(STORE_CHANNEL).emit(a_refused_construction)
+        ServerEvents(STORE_CHANNEL).emit(build)
 
     assert raised.value.args == (
         "the event schema refused an emission of an event that could not "
-        "be built: construction_failed (EventValueError)",
+        "be built: construction_failed",
     )
+    assert SENTINEL not in str(raised.value)
     assert SENTINEL not in repr(raised.value)
-    assert SENTINEL not in repr(raised.value.__cause__)
-    assert SENTINEL not in repr(raised.value.__context__)
+    assert SENTINEL not in repr(raised.value.args)
+    # The chains as well: an exception raised inside a handler carries
+    # the one it was handling, and the refusal is raised outside the
+    # handler for exactly this reason.
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
     assert caplog.records == []
     assert tap.seen == []
 
 
+@REFUSING_CONSTRUCTIONS
 def test_forgiving_recovers_a_construction_without_repeating_its_value(
-    caplog: pytest.LogCaptureFixture, tap: Tap
+    build: Callable[[], Variant], caplog: pytest.LogCaptureFixture, tap: Tap
 ) -> None:
     """The complaint by equality, then the sentinel hunted through every
     surface a value could reach: both shipped formats, the arguments
@@ -608,15 +643,12 @@ def test_forgiving_recovers_a_construction_without_repeating_its_value(
     events.set_enforcement(events.FORGIVING)
 
     with caplog.at_level("DEBUG"):
-        ServerEvents(STORE_CHANNEL).emit(a_refused_construction)
+        ServerEvents(STORE_CHANNEL).emit(build)
 
     (complaint,) = [one for one in caplog.records if not hasattr(one, "event")]
     assert complaint.levelno == logging.ERROR
     assert complaint.msg == REFUSAL_MESSAGE
-    assert complaint.args == (
-        UNBUILT_LABEL,
-        "construction_failed (EventValueError)",
-    )
+    assert complaint.args == (UNBUILT_LABEL, "construction_failed")
     # The declared recovery event rode in the emission's place, carrying
     # the fixed token and nothing the thunk was holding.
     (recovered,) = [one for one in caplog.records if hasattr(one, "event")]
