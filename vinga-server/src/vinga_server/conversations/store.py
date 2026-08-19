@@ -77,6 +77,14 @@ from vinga_server.conversations.schema import events as events_table
 from vinga_server.conversations.schema import sessions, tool_invocations, turns
 from vinga_server.db import BUSY_TIMEOUT_MS, existing_engine, open_at
 from vinga_server.events import Emission, ServerEvents
+from vinga_server.events.catalog import (
+    ConversationsDropped,
+    ConversationsEnabled,
+    ConversationsPruned,
+    PruneFailed,
+    WriteFailed,
+)
+from vinga_server.events.values import ClassName, ConfiguredPath, Count, SessionId
 
 events = ServerEvents(__name__)
 
@@ -373,12 +381,7 @@ class ConversationStore:
         # recording when it is not.
         thread.start()
         self._thread = thread
-        events.warning(
-            "recording conversations to %s",
-            self.path,
-            event="conversations_enabled",
-            path=str(self.path),
-        )
+        events.emit(lambda: ConversationsEnabled(path=ConfiguredPath(self.path)))
 
     def stop(self) -> None:
         """Accept nothing more, drain what is queued, and let go of the
@@ -434,11 +437,8 @@ class ConversationStore:
                 t_ms = self._offset(session_id, at)
         if t_ms is None:
             if first:
-                events.warning(
-                    "session %s: the conversation store is behind, dropping events",
-                    session_id,
-                    event="conversations_dropped",
-                    session=session_id,
+                events.emit(
+                    lambda: ConversationsDropped(session=SessionId(session_id))
                 )
             return
         self._queue.put_nowait(Event(session_id, t_ms, name, level, dict(fields)))
@@ -672,12 +672,7 @@ class ConversationStore:
         self._lost[session_id] = self._lost.get(session_id, 0) + len(batch.turns) + len(
             batch.events
         )
-        events.warning(
-            "the conversation store dropped a batch after a write failed (%s)",
-            type(exc).__name__,
-            event="conversations_failed",
-            failure=type(exc).__name__,
-        )
+        events.emit(lambda: WriteFailed(failure=ClassName.of(exc)))
 
     # --- rows, with both switches applied ------------------------------
 
@@ -817,20 +812,20 @@ class ConversationStore:
             if counts["sessions"]:
                 self._truncation_due = not _checkpoint(self._engine)
         except Exception as exc:  # noqa: BLE001 - retention never breaks a session
-            events.warning(
-                "the conversation store could not prune (%s)",
-                type(exc).__name__,
-                event="conversations_failed",
-                failure=type(exc).__name__,
-            )
+            # Bound to an ordinary local before the thunk closes over
+            # it: `except ... as` unbinds its own name when the block
+            # ends, and a closure reaching for it afterwards would find
+            # nothing. The construction still runs inside the emitter's
+            # guard, which is the whole reason it is a thunk.
+            failed: BaseException = exc
+            events.emit(lambda: PruneFailed(failure=ClassName.of(failed)))
             return
         if counts["sessions"]:
-            events.info(
-                "conversations: pruned %d session(s) older than %d days",
-                counts["sessions"],
-                self.retention_days,
-                event="conversations_pruned",
-                sessions=counts["sessions"],
+            events.emit(
+                lambda: ConversationsPruned(
+                    sessions=Count(counts["sessions"]),
+                    days=Count(self.retention_days),
+                )
             )
 
 

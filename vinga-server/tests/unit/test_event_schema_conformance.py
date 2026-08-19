@@ -62,6 +62,7 @@ import pytest
 import vinga_server
 from vinga_server import events_schema as schema
 from vinga_server.config.models import BOARD_LIMIT, CLIENT_ID_LIMIT, FIRMWARE_LIMIT
+from vinga_server.events.catalog import catalog
 from vinga_server.events_schema import REGISTRY, SESSION_CHANNEL, ArgKind, Kind
 
 PACKAGE = Path(vinga_server.__file__).parent
@@ -735,12 +736,13 @@ class Signature:
 INTEGRAL = frozenset({"int", "count"})
 LISTS = frozenset({"identifier_list", "id_list"})
 
-# How many field and argument positions across the whole surface the
-# classifier can speak about. Pinned, so that a classifier which
+# How many field and argument positions across the unconverted surface
+# the classifier can speak about. Pinned, so that a classifier which
 # stopped reading would fail here rather than turn every kind check
-# above into a pass over an empty set.
-FIELDS_READ = 72
-ARGUMENTS_READ = 49
+# above into a pass over an empty set. The numbers fall as the
+# conversion proceeds, because a converted site is not walked at all.
+FIELDS_READ = 70
+ARGUMENTS_READ = 47
 
 
 @cache
@@ -1189,16 +1191,22 @@ def decided_values(source: Decides) -> frozenset[str]:
 # by a line number.
 #
 # The two contract pin suites carry 76 expectations between them, which
-# cover 73 of the 81 paths: `tool_call` has one site and four pins, one
-# per classification, and `barge_in` has two sites sharing two pins. The
-# five conversation-store paths are covered by the pin file M1 adds. The
-# remaining three, the MCP paths the contract suites never reached, are
-# covered by field-exact assertions in the MCP suites, named here rather
-# than left as a silence.
+# cover 73 of the 76 paths that remain: `tool_call` has one site and
+# four pins, one per classification, and `barge_in` has two sites
+# sharing two pins. The remaining three, the MCP paths the contract
+# suites never reached, are covered by field-exact assertions in the MCP
+# suites, named here rather than left as a silence.
+#
+# The conversation store's five paths are not here any more, and their
+# absence is the point rather than a gap: they construct typed variants
+# through the catalog (#210's M1), so this walk cannot see them and has
+# nothing left to reconcile. What replaces them is the golden inventory
+# and the committed record baseline, both of which cover shapes rather
+# than call sites. The whole of this sidecar goes the same way as the
+# last conversion lands.
 
 SURFACE_PINS = "tests/unit/test_event_surface_pins.py"
 SERVER_PINS = "tests/unit/test_server_event_pins.py"
-STORE_PINS = "tests/unit/test_conversations_event_pins.py"
 MCP = "tests/unit/test_tools_mcp.py"
 MCP_RELOAD = "tests/unit/test_tools_mcp_reload.py"
 
@@ -1234,21 +1242,6 @@ PINNED_BY: dict[tuple[str, str, int], tuple[str, ...]] = {
     ),
     ("vinga_server.config.api", "_refusal.handler", 1): (
         f"{SERVER_PINS}::test_api_storage_error",
-    ),
-    ("vinga_server.conversations.store", "ConversationStore.start", 1): (
-        f"{STORE_PINS}::test_conversations_enabled",
-    ),
-    ("vinga_server.conversations.store", "ConversationStore.record_event", 1): (
-        f"{STORE_PINS}::test_conversations_dropped",
-    ),
-    ("vinga_server.conversations.store", "ConversationStore._failed", 1): (
-        f"{STORE_PINS}::test_conversations_failed_on_a_write",
-    ),
-    ("vinga_server.conversations.store", "ConversationStore._prune", 1): (
-        f"{STORE_PINS}::test_conversations_failed_on_a_prune",
-    ),
-    ("vinga_server.conversations.store", "ConversationStore._prune", 2): (
-        f"{STORE_PINS}::test_conversations_pruned",
     ),
     ("vinga_server.device.bindings", "DeviceBindings.open", 1): (
         f"{SERVER_PINS}::test_device_bindings_snapshot_only",
@@ -1515,11 +1508,17 @@ def admitted_by(site: Site) -> set[frozenset[str]]:
 
 def test_the_walk_finds_the_whole_surface() -> None:
     """The inventory's own size, so a site that stops being found is a
-    failure rather than a smaller silent pass."""
+    failure rather than a smaller silent pass.
+
+    76 sites across 53 events: the surface's 81 and 57 less the
+    conversation store's five paths and four events, which construct
+    typed variants and are therefore invisible to a walk that looks for
+    an `event=` keyword. Their coverage is the golden inventory's and
+    the record baseline's now."""
     sites = emit_sites()
 
-    assert len(sites) == 81
-    assert len({site.event for site in sites}) == 57
+    assert len(sites) == 76
+    assert len({site.event for site in sites}) == 53
     assert len({site.identity for site in sites}) == len(sites)
 
 
@@ -1775,7 +1774,14 @@ def test_every_module_that_emits_owns_the_channel_it_emits_on() -> None:
 
 
 def test_the_declared_channels_are_the_channels_that_exist() -> None:
-    emitting = {site.channel for site in emit_sites()}
+    """Both sources, because a channel exists as soon as something
+    emits on it: the walk sees the unconverted sites, and the catalog
+    declares the channel of every converted one."""
+    emitting = {site.channel for site in emit_sites()} | {
+        variant.CHANNEL
+        for declaration in catalog().values()
+        for variant in declaration.variants
+    }
 
     assert emitting == set(schema.CHANNELS)
     assert set(schema.SERVER_CHANNELS) == emitting - {SESSION_CHANNEL}
@@ -2024,23 +2030,24 @@ def test_every_pin_the_sidecar_names_exists() -> None:
 
 
 def test_the_two_contract_files_carry_the_pins_they_are_credited_with() -> None:
-    """76 expectations across the two files, covering 73 of the 81
-    paths: `tool_call` has four pins on one site and `barge_in` two pins
-    across two sites."""
+    """76 expectations across the two files, covering 73 of the 76
+    paths that remain: `tool_call` has four pins on one site and
+    `barge_in` two pins across two sites. The other three are the MCP
+    suites'.
+
+    The numbers move as the conversion does, which is expected
+    maintenance of transitional apparatus rather than drift: a converted
+    path leaves this sidecar because the walk stops seeing it, and its
+    coverage moves to the golden inventory and the record baseline in
+    the same change."""
     from_contracts = {
         identity
         for identity, pins in PINNED_BY.items()
         if all(node.startswith((SURFACE_PINS, SERVER_PINS)) for node in pins)
     }
-    from_store = {
-        identity
-        for identity, pins in PINNED_BY.items()
-        if all(node.startswith(STORE_PINS) for node in pins)
-    }
 
     assert len(from_contracts) == 73
-    assert len(from_store) == 5
-    assert len(PINNED_BY) - len(from_contracts) - len(from_store) == 3
+    assert len(PINNED_BY) - len(from_contracts) == 3
 
 
 # --- 4: the registry is coherent with itself --------------------------
@@ -2232,10 +2239,14 @@ def test_the_ambiguity_check_sees_a_duplicated_variant() -> None:
 
 
 def test_the_counts_every_document_repeats() -> None:
-    """57 production-source events plus one internal recovery event."""
-    assert len(schema.PRODUCTION_EVENTS) == 57
+    """53 production events still declared here, plus one internal
+    recovery event. Four more are declared in the catalog (#210's M1),
+    which is what makes the surface's own count 57 production events
+    where this module's is 53; the generated reference renders both and
+    prints the total."""
+    assert len(schema.PRODUCTION_EVENTS) == 53
     assert len(schema.INTERNAL_EVENTS) == 1
-    assert len(REGISTRY) == 58
+    assert len(REGISTRY) == 54
     # One variant per channel for the recovery event, which is every
     # channel this server speaks on.
     assert len(REGISTRY[schema.SCHEMA_VIOLATION].variants) == len(schema.CHANNELS) == 14

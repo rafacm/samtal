@@ -22,6 +22,8 @@ committed capture is a file that does not move when the sites do.
 """
 
 import json
+import logging
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -29,12 +31,16 @@ import pytest
 from tests.tools.event_baseline import (
     COMMITTED,
     DRIVERS,
+    NOW,
     SCOPE,
+    a_manifest,
+    a_turn,
     captured,
     committed,
     rendered,
 )
 from tests.unit.test_event_schema_conformance import emit_sites
+from vinga_server.conversations.store import ConversationStore
 from vinga_server.events.catalog import catalog
 
 REGENERATE = (
@@ -117,3 +123,30 @@ def test_the_baseline_records_shapes_rather_than_values() -> None:
                 "fields",
                 "event",
             }
+
+
+def test_the_store_says_nothing_else(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The count the drivers above are complete against, and the one
+    claim the retired pin suite made that neither the golden inventory
+    nor the baseline carries.
+
+    An ordinary session, start to close, emits no store event at all
+    beyond the opening line, which is what makes the four failure and
+    retention paths the whole of the rest. Kept here because it is
+    behavior rather than shape: a store that started saying something on
+    every turn would pass both files above and change what a deployment
+    keeps.
+    """
+    store = ConversationStore(tmp_path, retention_days=0)
+
+    with caplog.at_level(logging.DEBUG):
+        store.start()
+        store.open_session("alpha", 100.0, a_manifest(NOW))
+        store.record_turn("alpha", a_turn())
+        store.close_session("alpha", duration_s=5.0, reason="client")
+        store.stop()
+
+    said = [one for one in caplog.records if one.name in SCOPE]
+    assert [getattr(one, "event", None) for one in said] == ["conversations_enabled"]

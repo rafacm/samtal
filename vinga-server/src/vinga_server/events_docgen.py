@@ -1,11 +1,20 @@
-"""The event surface's documentation, rendered from the registry.
+"""The event surface's documentation, rendered from the declarations.
 
 One source, two renderings, the discipline the domain configuration and
-the conversation store already keep: `events_schema.py` declares every
-event once, and this reads it as the markdown reference committed at
+the conversation store already keep: every event is declared once, and
+this reads the declarations as the markdown reference committed at
 `docs/reference/events.md` and as what `vinga-server events reference`
 prints. CI regenerates the committed copy and diffs it byte for byte, so
-the document cannot say anything the registry does not.
+the document cannot say anything the declarations do not.
+
+There are two homes for those declarations while #210's conversion is in
+flight, and rendering both is what keeps the document whole rather than
+half a surface: `events/catalog.py` for the events already converted to
+typed variants, and `events_schema.py`'s registry for the rest. The
+catalog answers the same `EventSpec` shape through `described()`, so
+this module reads one sequence and neither source gets a rendering of
+its own. `documented()` is where the two meet, and it goes when the
+registry does.
 
 That is what makes this the place field and token facts belong. The
 README's event table used to carry them in prose nothing checked, which
@@ -27,12 +36,11 @@ machine whose server will not start.
 import logging
 import textwrap
 
+from vinga_server.events.catalog import described
 from vinga_server.events_schema import (
     CHANNELS,
     GRAMMARS,
     IDENTIFIER_DOMAIN,
-    INTERNAL_EVENTS,
-    PRODUCTION_EVENTS,
     REGISTRY,
     SERVER_CHANNELS,
     SESSION_CHANNEL,
@@ -46,6 +54,23 @@ from vinga_server.events_schema import (
     EventVariant,
     Kind,
 )
+
+
+def documented() -> dict[str, EventSpec]:
+    """Every event the reference describes, from both of its sources.
+
+    The order is the order a reader meets them: the registry's
+    unconverted production events in declaration order, then the
+    catalog's converted ones, then the internal recovery event last,
+    which is where it has always been. A converted event therefore moves
+    within the document and nothing else about it changes, which is what
+    the regenerated reference shows.
+    """
+    production = {
+        name: spec for name, spec in REGISTRY.items() if not spec.internal
+    }
+    internal = {name: spec for name, spec in REGISTRY.items() if spec.internal}
+    return {**production, **{spec.name: spec for spec in described()}, **internal}
 
 # Where the reference's prose wraps. The tables cannot wrap (a row is a
 # line), so only paragraphs go through this.
@@ -128,23 +153,27 @@ ARG_KIND_MEANING: dict[ArgKind, str] = {
 
 
 def reference() -> str:
-    """The whole reference document, rendered from the registry."""
-    variants = sum(len(spec.variants) for spec in REGISTRY.values())
+    """The whole reference document, rendered from the declarations."""
+    events = documented()
+    variants = sum(len(spec.variants) for spec in events.values())
+    production = [name for name, spec in events.items() if not spec.internal]
+    internal = [name for name, spec in events.items() if spec.internal]
     lines = [
         "# Event schema reference",
         "",
-        "Generated from the registry by `vinga-server events reference`. Do not",
-        "edit this file by hand: CI regenerates it and fails on any difference, so",
-        "an edit here is reverted by the next run. The declarations live in",
-        "`vinga-server/vinga_server/events_schema.py`.",
+        "Generated from the declarations by `vinga-server events reference`. Do",
+        "not edit this file by hand: CI regenerates it and fails on any difference,",
+        "so an edit here is reverted by the next run. The declarations live in",
+        "`vinga-server/src/vinga_server/events/catalog.py` and, for the events not",
+        "yet converted to it, in `vinga-server/src/vinga_server/events_schema.py`.",
         "",
         *_paragraph(
             f"The structured events are this server's observability surface "
             f"([ADR]({OBSERVABILITY_ADR})), and they carry metadata and nothing "
             f"else ([ADR]({CONTENT_ADR})). This document is that surface written "
-            f"down: {len(REGISTRY)} events in {variants} variants, "
-            f"{len(PRODUCTION_EVENTS)} of them emitted from ordinary sites and "
-            f"{len(INTERNAL_EVENTS)} internal. What was said in a conversation is "
+            f"down: {len(events)} events in {variants} variants, "
+            f"{len(production)} of them emitted from ordinary sites and "
+            f"{len(internal)} internal. What was said in a conversation is "
             f"in the conversation store instead, keyed by the same `session` "
             f"([its reference]({CONVERSATIONS_REFERENCE}))."
         ),
@@ -328,11 +357,11 @@ def reference() -> str:
         "",
         "| Event | Channels | Levels | Variants |",
         "| --- | --- | --- | --- |",
-        *[_index_row(spec) for spec in REGISTRY.values()],
+        *[_index_row(spec) for spec in events.values()],
         "",
     ]
 
-    for spec in REGISTRY.values():
+    for spec in events.values():
         lines += _event_section(spec)
 
     return "\n".join(lines).rstrip("\n") + "\n"
@@ -502,4 +531,4 @@ def _paragraph(prose: str) -> list[str]:
     return textwrap.wrap(prose, width=PROSE_WIDTH, break_long_words=False, break_on_hyphens=False)
 
 
-__all__ = ["ARG_KIND_MEANING", "KIND_MEANING", "reference"]
+__all__ = ["ARG_KIND_MEANING", "KIND_MEANING", "documented", "reference"]
