@@ -9,6 +9,28 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **Events are declared as types, starting with the conversation
+  store** (#210). `vinga_server/events.py` becomes a package, and
+  beside it a catalog declares one event per code holding a
+  discriminated set of typed variants: each variant a frozen dataclass
+  owning its channel, its level, its exact payload shape and its
+  rendering, written in a vocabulary of value types that refuse at
+  construction what the registry used to refuse at emit. An emit site
+  hands the emitter a construction thunk and names the variant and its
+  values, nothing else, and building, validating, rendering and
+  serializing all happen inside the guard, so a telemetry bug still
+  costs a log line rather than a reply. The conversation store's five
+  paths are converted; the other 76 are unchanged and their
+  declarations stay where they are. What operators consume is
+  unchanged: the same channels, levels, sentences, arguments and
+  fields, held by a committed record baseline that does not move across
+  the conversion, and by a committed golden inventory of every
+  declared event's structure asserted against the catalog both ways.
+  The generated event reference keeps its counts and its content; four
+  of its sections move within the document. mypy now runs strict over
+  the events package in CI, because annotations nothing checks would be
+  decoration.
+
 - **The project is now vinga** (#209). samtal collides with an
   existing Swedish commercial conversational-AI product, so every
   surface renames: the repository (`rafacm/vinga`, old URLs redirect),
