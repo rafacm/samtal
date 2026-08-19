@@ -326,8 +326,16 @@ def _child(*source: str, cwd: Path, **environment: str) -> subprocess.CompletedP
         text=True,
         cwd=cwd,
         env=env | environment,
+        # A guard, not a measurement: one of these children calls
+        # `main()`, and a `main()` that got further than it is meant to
+        # would sit on a socket forever rather than fail.
+        timeout=CHILD_TIMEOUT_S,
     )
 
+
+# How long a child may take before the test gives up on it. Generous:
+# it starts an interpreter and migrates a database.
+CHILD_TIMEOUT_S = 120.0
 
 # The three the child reports on: the one uvicorn turns up, the one
 # whose floor is not INFO, and one of the four that were already held.
