@@ -29,7 +29,7 @@ agents, devices, and default_agent last.
 
 import math
 import re
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 
@@ -75,7 +75,13 @@ from samtal_server.config.models import (
     safe_location,
     url_credential,
 )
-from samtal_server.config.secrets import EntityKind, SecretLocation, SecretStore, encrypt
+from samtal_server.config.secrets import (
+    MASK,
+    EntityKind,
+    SecretLocation,
+    SecretStore,
+    encrypt,
+)
 from samtal_server.db import schema
 
 # The two groups of an MCP server's dotted secret slots. A slot is
@@ -443,10 +449,16 @@ class ConfigStore:
 
         The order is every kind's: the name is made usable, then
         whatever the kind checks before a body is looked at, then the
-        body through the model that owns it, then whatever the kind
-        checks about the parsed entry. Only after all of that does the
-        transaction open, so nothing a caller got wrong costs a write
-        lock.
+        body read as a fragment, then the unchanged-value marker
+        resolved against what is stored, then the model that owns the
+        shape, then whatever the kind checks about the parsed entry.
+        Only after all of that does the write transaction open, so
+        nothing a caller got wrong costs a write lock.
+
+        The marker is what makes a read writable as it stands: a value
+        the display masked resubmits as itself, meaning keep what is
+        stored, and the fragment validates whole as if the operator had
+        retyped it.
 
         Inside it, the entry is put where the configuration would hold
         it and the reference pass runs against the state the write would
@@ -460,7 +472,9 @@ class ConfigStore:
         location = _location(descriptor, *identity)
         if descriptor.before_parse is not None:
             descriptor.before_parse(*identity)
-        entry = _parse(descriptor.model, location, fragment)
+        data = _readable(location, fragment)
+        kept = self._kept(descriptor, identity, location, data)
+        entry = _load(descriptor.model, location, kept)
         if descriptor.inside_write is not None:
             descriptor.inside_write(location, identity, entry)
         with self._transaction() as connection:
@@ -473,6 +487,48 @@ class ConfigStore:
                 _row_identity(descriptor, identity),
                 _to_row(descriptor, entry),
             )
+
+    def _kept(
+        self,
+        descriptor: EntityDescriptor,
+        identity: tuple[str, ...],
+        location: str,
+        fragment: dict[str, object],
+    ) -> dict[str, object]:
+        """The fragment with every unchanged-value marker resolved: the
+        mask replaced by what this entity already holds at the same path,
+        so that a read resubmitted whole validates exactly as if the
+        operator had retyped the value the display would not show them.
+
+        The row is read only when the fragment carries a mask at all,
+        which is the uncommon case: an ordinary edit resubmits references
+        and values as themselves and touches the database once. That read
+        is its own transaction, before the write's, so what it can be
+        stale by is the lost update a read-modify-write already has; what
+        it substitutes is the model-shaped half an earlier read showed
+        and never ciphertext, which no fragment can carry and no write
+        replaces.
+
+        A mask with nothing stored under it is refused. A PUT that
+        creates the entity is that case for every mask in it, since an
+        entity that is not there yet holds nothing to keep.
+        """
+        paths = tuple(_masked_paths(fragment, descriptor.secret_key))
+        if not paths:
+            return fragment
+        with self._transaction() as connection:
+            stored = _entry(_read_domain(connection), descriptor, identity)
+        kept = fragment
+        missing: list[tuple[object, ...]] = []
+        for path in paths:
+            held = _held(stored, path)
+            if held is _NOTHING:
+                missing.append(path)
+                continue
+            kept = _substituted(kept, path, held)
+        if missing:
+            raise ConfigError(*_mask_refusal(location, descriptor.model, missing))
+        return kept
 
     def _delete(self, descriptor: EntityDescriptor, *identity: str) -> None:
         """Remove one entity, by the identity that addresses it and
@@ -1633,10 +1689,18 @@ def _binding(mac: str, agents: Sequence[str]) -> dict[str, list[str]]:
     return {key: [str(agent).strip() for agent in bound] for key, bound in binding.items()}
 
 
-def _parse[Model: BaseModel](model: type[Model], location: str, fragment: object) -> Model:
-    """A fragment through the model that owns its shape. The same
-    validators guard it as guard the YAML file, so a plaintext secret
-    never enters through a file here either."""
+def _readable(location: str, fragment: object) -> dict[str, object]:
+    """A fragment as a mapping this repository can walk, or the refusal
+    for one that is not.
+
+    Everything before validation that is about the fragment being a
+    fragment at all: an omitted body is the empty one, a body that is not
+    a mapping of keys is refused naming its type and never its contents,
+    and what JSON cannot carry is refused here rather than by the
+    encoder. It runs before the unchanged-value marker below for a
+    reason the marker's walk depends on: what comes back is a finite
+    tree of string keys, so a walk over it terminates.
+    """
     if fragment is None:
         fragment = {}
     if not isinstance(fragment, Mapping):
@@ -1644,7 +1708,164 @@ def _parse[Model: BaseModel](model: type[Model], location: str, fragment: object
             f"invalid {location}: expected a mapping of keys, got {type(fragment).__name__}"
         )
     check_transportable(location, fragment)
-    return _load(model, location, dict(fragment))
+    return dict(fragment)
+
+
+# The unchanged-value marker
+#
+# A read masks whatever sits under a secret-shaped key, and not every
+# masked value is a stored secret. A lowercase environment name in an
+# `*_env` option and a whitespace-padded `$VAR` in an MCP server's env
+# both validate on the way in and fail the display's reference test on
+# the way out, so a read of such an entity shows the mask where a value
+# the operator wrote is stored. A resubmission of that read therefore
+# has to mean something, and it means: keep what is stored there (#192).
+#
+# The predicate is the kind's own `secret_key`, the descriptor fact the
+# display masks by (#207), asked at every depth the display walks and
+# stopping where the display stops. What a read hides and what a write
+# restores are then one rule rather than two that can come to disagree.
+#
+# A mask with nothing stored behind it is refused rather than written.
+# The mask is not a value: storing it would put eight asterisks in the
+# row and read them back as a credential that is not there.
+
+# What is looked up and not found, distinct from a stored null, which is
+# a field holding nothing and so is not a value to keep either.
+_NOTHING = object()
+
+
+def _masked_paths(
+    value: object, secret_key: Callable[[str], bool], segments: tuple[object, ...] = ()
+) -> Iterator[tuple[object, ...]]:
+    """Every path in a fragment where a secret-shaped key holds the mask
+    exactly.
+
+    The same walk the display makes, in the same order and to the same
+    depth: mappings and lists are walked into, and a secret-shaped key is
+    not, because the display displaces whatever such a key holds and so
+    nothing under one was ever shown to resubmit. A mask under a key the
+    predicate does not match is not a marker at all, and meets validation
+    as the string it is.
+    """
+    if isinstance(value, Mapping):
+        for key, nested in value.items():
+            if secret_key(str(key)):
+                if isinstance(nested, str) and nested == MASK:
+                    yield (*segments, key)
+                continue
+            yield from _masked_paths(nested, secret_key, (*segments, key))
+    elif isinstance(value, (list, tuple)):
+        for position, item in enumerate(value):
+            yield from _masked_paths(item, secret_key, (*segments, position))
+
+
+def _held(stored: object, path: Sequence[object]) -> object:
+    """What the stored entry holds at one path of a fragment, or
+    `_NOTHING` where it holds nothing at all.
+
+    The stored side is models where the fragment side is mappings, so
+    the walk asks each shape its own way: a declared field by attribute,
+    a pass-through model's extras and a mapping by key, a list by
+    position. A null anywhere along the path is nothing rather than
+    something, which is also why the display left the field out of the
+    read this fragment came from.
+    """
+    reached: object = stored
+    for segment in path:
+        if isinstance(reached, BaseModel):
+            fields = type(reached).model_fields
+            reached = (
+                getattr(reached, segment)
+                if isinstance(segment, str) and segment in fields
+                else (reached.model_extra or {}).get(segment, _NOTHING)
+            )
+        elif isinstance(reached, Mapping):
+            reached = reached.get(segment, _NOTHING)
+        elif isinstance(reached, (list, tuple)) and isinstance(segment, int):
+            reached = reached[segment] if segment < len(reached) else _NOTHING
+        else:
+            return _NOTHING
+        if reached is _NOTHING or reached is None:
+            return _NOTHING
+    return reached
+
+
+def _substituted(
+    fragment: Mapping[str, object], path: Sequence[object], kept: object
+) -> dict[str, object]:
+    """The fragment with `kept` where `path` reaches into it, copying
+    only the containers along the way and leaving everything beside them
+    the object it already was."""
+    head, rest = path[0], path[1:]
+    return {
+        key: _inside(value, rest, kept) if key == head else value
+        for key, value in fragment.items()
+    }
+
+
+def _inside(value: object, path: Sequence[object], kept: object) -> object:
+    """The same substitution one level down, and `kept` itself once the
+    path runs out."""
+    if not path:
+        return kept
+    if isinstance(value, Mapping):
+        return _substituted(value, path, kept)
+    if isinstance(value, (list, tuple)):
+        return [
+            _inside(item, path[1:], kept) if position == path[0] else item
+            for position, item in enumerate(value)
+        ]
+    return value
+
+
+def _mask_refusal(
+    location: str, model: type[BaseModel], paths: Sequence[Sequence[object]]
+) -> tuple[str, tuple[FieldProblem, ...]]:
+    """The refusal for a mask with nothing stored behind it, in both the
+    renderings a refusal needs.
+
+    What may be named is `safe_location`'s rule, the one every refusal
+    built from a validation error already goes through: a field this
+    repository declares is named, and a key the caller wrote is not, so
+    the sentence and the pointer stop at the nearest place that can be
+    named. A key holding the mask is as good a place to have pasted a
+    credential as a value is, and the value itself is never in either
+    rendering: there is nothing to say about it beyond that it is the
+    mask.
+
+    Two marks under one name are one problem, for the reason the MCP
+    secret rule gives: the entries would be indistinguishable, and a
+    refusal saying the same thing twice only suggests the second was
+    about something else.
+    """
+    problems: list[FieldProblem] = []
+    for path in paths:
+        safe, dropped = safe_location(model, path)
+        where = ".".join(str(part) for part in safe)
+        problem = FieldProblem(json_pointer(safe), _nothing_kept(where, dropped))
+        if problem not in problems:
+            problems.append(problem)
+    lines = [f"invalid {location}:"]
+    lines += [_refusal_line("", problem.message) for problem in problems]
+    return "\n".join(lines), tuple(problems)
+
+
+def _nothing_kept(where: str, dropped: bool) -> str:
+    """What one such mask is told, named as far as the rule above
+    allows."""
+    if dropped:
+        place = f" in {where}" if where else ""
+        return (
+            f"a key{place} holds the mask {MASK}, which a write reads as keep the "
+            f"stored value, and nothing is stored there; write the value it should "
+            f"hold, or leave the key out. The key is not quoted back"
+        )
+    return (
+        f'"{where}" holds the mask {MASK}, which a write reads as keep the stored '
+        f"value, and nothing is stored there; write the value it should hold, or "
+        f"leave the field out"
+    )
 
 
 def check_transportable(location: str, fragment: object) -> None:
@@ -1821,10 +2042,21 @@ def _validation_problems(
         where = ".".join(str(part) for part in location)
         prefix = json_pointer(location)
         for problem in _error_problems(error, dropped):
-            for line in problem.message.splitlines():
-                lines.append(f"  - {where}: {line}" if where else f"  - {line}")
+            lines += [_refusal_line(where, line) for line in problem.message.splitlines()]
             problems.append(FieldProblem(prefix + problem.path, problem.message))
     return "\n".join(lines), tuple(problems)
+
+
+def _refusal_line(where: str, line: str) -> str:
+    """One problem as a refusal prints it: an indented dash, and the
+    place in front of it when there is one this repository may name.
+
+    One home for the shape, because a refusal an operator reads is one
+    vocabulary however it was produced: the marker above builds its
+    sentence without a validation error behind it, and a second spelling
+    of the indentation would be a golden that moves for no reason.
+    """
+    return f"  - {where}: {line}" if where else f"  - {line}"
 
 
 def _error_problems(
