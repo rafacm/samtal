@@ -64,6 +64,7 @@ from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy import Connection, Engine
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.routing import Route
 from starlette.types import ASGIApp, Lifespan, Message, Receive, Scope, Send
 
@@ -80,6 +81,7 @@ from samtal_server.config.loader import (
 from samtal_server.config.models import (
     API_MOUNT_PATH,
     Config,
+    FieldProblem,
 )
 from samtal_server.config.responses import (
     Acknowledgement,
@@ -89,6 +91,7 @@ from samtal_server.config.responses import (
     DefaultAgentName,
     DeviceBinding,
     Envelope,
+    FieldError,
     McpReloader,
     McpReloadResult,
     McpServerStatus,
@@ -314,6 +317,12 @@ ENTITY_MODELS: tuple[type[BaseModel], ...] = tuple(
 # refused.
 REQUEST_MODELS: tuple[type[BaseModel], ...] = (DeviceBinding, DefaultAgentName, SecretValue)
 
+# And the refusal shape, injected for the same reason since the refusal
+# declarations stopped naming it as a response model: they name its
+# schema in `components` instead, so that each of them can carry exactly
+# one content type, the problem media type.
+PROBLEM_MODELS: tuple[type[BaseModel], ...] = (Problem, FieldError)
+
 # What each argument-shaped body must be, said as an expectation rather
 # than as a complaint about what arrived. The body is never quoted back,
 # and for the secret write that is not a nicety: the rejected value is a
@@ -370,6 +379,10 @@ CLAIM_REFUSED = (
 PROBLEM_DESCRIPTIONS: dict[int, str] = {
     401: "The request carried no bearer token, or not the one this server was given.",
     404: "Nothing of that identity exists.",
+    405: (
+        "That path is a route, but not for this method. The `Allow` header names the "
+        "methods it does serve."
+    ),
     409: (
         "Something this request needs is held by another one: the configuration "
         "database's write lock, the activation code a concurrent claim is already "
@@ -391,6 +404,70 @@ PROBLEM_DESCRIPTIONS: dict[int, str] = {
         "namespace emptily and refuses the actions."
     ),
 }
+
+# And what each of them is called: the status's standard HTTP reason
+# phrase, which is what RFC 9457 asks a problem with no `type` to carry.
+# Beside the descriptions and keyed by the same statuses, so the two
+# things this API says about a status live in one place; a test holds
+# the key sets equal.
+PROBLEM_TITLES: dict[int, str] = {
+    401: "Unauthorized",
+    404: "Not Found",
+    405: "Method Not Allowed",
+    409: "Conflict",
+    422: "Unprocessable Content",
+    500: "Internal Server Error",
+    503: "Service Unavailable",
+}
+
+# What a refusal is served as: RFC 9457's own media type, so a client
+# can tell a refusal this API wrote from a page a proxy in front of it
+# did without reading either.
+PROBLEM_MEDIA_TYPE = "application/problem+json"
+
+# Where the document says the shape of one is.
+PROBLEM_SCHEMA = {"$ref": "#/components/schemas/Problem"}
+
+
+def problem_response(
+    status: int,
+    detail: str,
+    errors: Sequence[FieldProblem] = (),
+    headers: Mapping[str, str] | None = None,
+) -> JSONResponse:
+    """One refusal, as bytes. The only place in this application a
+    refusal becomes any.
+
+    Five things can refuse a request here: a repository refusal reaching
+    its handler, the gate in front of routing, the last-resort
+    middleware, the sanitized replacement for the framework's body
+    validation, and the framework's own routing. Each of them used to
+    write a body, which is one shape held in five places and five
+    chances for it to drift. They call this instead, so a handler knows
+    what it is refusing and nothing about what a refusal looks like.
+
+    Built through the `Problem` model rather than as a dictionary, so
+    the shape the document declares and the shape the wire carries are
+    one declaration. `errors` is empty by default and stays a list in
+    the body either way: a member that disappears when it holds nothing
+    is a third state a client has to handle.
+
+    `headers` is for the protocol headers a status needs to be itself:
+    `WWW-Authenticate` on a 401, `Allow` on a 405. Nothing
+    request-derived belongs in it.
+    """
+    body = Problem(
+        title=PROBLEM_TITLES[status],
+        status=status,
+        detail=detail,
+        errors=[FieldError(path=problem.path, message=problem.message) for problem in errors],
+    )
+    return JSONResponse(
+        body.model_dump(),
+        status_code=status,
+        media_type=PROBLEM_MEDIA_TYPE,
+        headers=dict(headers) if headers is not None else None,
+    )
 
 # What a prompt read answers for an agent this server did not load. The
 # name is not quoted back: it arrived in the path, and what is worth
@@ -866,10 +943,22 @@ def _problems(
     the shared one cannot be true of. The descriptions say what a status
     means here, so a route whose 422 can only mean something else has to
     say that rather than inherit a sentence about addressing.
+
+    The content is written out rather than declared as `model: Problem`.
+    A model makes FastAPI generate `application/json` for the response
+    and then deep-merge whatever else is asked for beside it, which
+    would leave every refusal advertising a media type this API does not
+    send. The schema is a reference into `components`, where the
+    `Problem` schema is injected below, which is the same seam the write
+    routes' request bodies use.
     """
     described = {**PROBLEM_DESCRIPTIONS, **(instead or {})}
     return {
-        status: {"model": Problem, "description": described[status]} for status in statuses
+        status: {
+            "description": described[status],
+            "content": {PROBLEM_MEDIA_TYPE: {"schema": PROBLEM_SCHEMA}},
+        }
+        for status in statuses
     }
 
 
@@ -1663,10 +1752,8 @@ class _BearerGate:
             return
         # WWW-Authenticate is what makes this a 401 rather than a 403: it
         # names the scheme a client should have used.
-        response = JSONResponse(
-            {"detail": UNAUTHORIZED},
-            status_code=401,
-            headers={"WWW-Authenticate": "Bearer"},
+        response = problem_response(
+            401, UNAUTHORIZED, headers={"WWW-Authenticate": "Bearer"}
         )
         await response(scope, receive, send)
 
@@ -1733,7 +1820,7 @@ class _SanitizedErrors:
                 # outer logger, which would write the traceback this
                 # just took care not to.
                 return
-            await JSONResponse({"detail": UNEXPECTED}, status_code=500)(scope, receive, send)
+            await problem_response(500, UNEXPECTED)(scope, receive, send)
 
 
 def _application(lifespan: Lifespan[FastAPI] | None = None) -> FastAPI:
@@ -1781,6 +1868,11 @@ def _application(lifespan: Lifespan[FastAPI] | None = None) -> FastAPI:
     for refusal, status in REFUSAL_STATUS.items():
         api.add_exception_handler(refusal, _refusal(status))
     api.add_exception_handler(RequestValidationError, _malformed_request)
+    # The fifth emitter, which is the framework itself: an unmatched
+    # path and an unsupported method are refusals this application never
+    # wrote a line of, and without this they leave in a body of
+    # Starlette's own.
+    api.add_exception_handler(StarletteHTTPException, _routing_refusal)
     _reads(api)
     _writes(api)
     _runtime(api)
@@ -1798,7 +1890,8 @@ def _application(lifespan: Lifespan[FastAPI] | None = None) -> FastAPI:
 def _refusal(status: int) -> Callable[[Request, Exception], Any]:
     """One repository refusal, rendered. The message is the repository's
     own, unchanged from what the CLI prints, so an operator meets one
-    vocabulary whichever way they reached it."""
+    vocabulary whichever way they reached it, and the fields it names
+    travel beside it where the refusal named any."""
 
     async def handler(request: Request, exc: Exception) -> JSONResponse:
         if status >= 500:
@@ -1813,7 +1906,12 @@ def _refusal(status: int) -> Callable[[Request, Exception], Any]:
                 type(exc).__name__,
                 event="api_storage_error",
             )
-        return JSONResponse({"detail": str(exc)}, status_code=status)
+        # Every type this handler is registered for is a ConfigError, so
+        # the check is about typing rather than about doubt; an
+        # exception that arrived some other way has nothing structured
+        # to offer and says so.
+        problems = exc.problems if isinstance(exc, ConfigError) else ()
+        return problem_response(status, str(exc), problems)
 
     return handler
 
@@ -1822,8 +1920,31 @@ async def _malformed_request(request: Request, exc: Exception) -> JSONResponse:
     """FastAPI's own validation, sanitized. Its default 422 echoes the
     rejected input back per error, and a configuration fragment can
     carry a pasted credential, so the whole body is replaced by a
-    sentence describing the expectation."""
-    return JSONResponse({"detail": MALFORMED_REQUEST}, status_code=422)
+    sentence describing the expectation.
+
+    No `errors` either, for the same reason: the fields it would name
+    are the ones it read out of the body it refused to read."""
+    return problem_response(422, MALFORMED_REQUEST)
+
+
+async def _routing_refusal(request: Request, exc: Exception) -> JSONResponse:
+    """The framework's own refusals, in this API's shape.
+
+    Without this, an authenticated request to an unmatched path, or to a
+    route with the wrong method, is answered by Starlette in a body
+    nothing else here sends, which makes "every refusal is one shape" a
+    claim with a hole in it. What it renders is the exception's detail,
+    which for a routing 404 and a 405 is a fixed phrase of Starlette's
+    (`Not Found`, `Method Not Allowed`) and never anything the request
+    carried; the tests assert that rather than assume it.
+
+    The exception's headers are kept, because a 405 without its `Allow`
+    is not a 405. They are the framework's own and are not built from
+    the request.
+    """
+    if not isinstance(exc, StarletteHTTPException):  # pragma: no cover - registered by type
+        raise exc
+    return problem_response(exc.status_code, str(exc.detail), headers=exc.headers)
 
 
 def _openapi(api: FastAPI) -> Callable[[], dict[str, Any]]:
@@ -1890,7 +2011,7 @@ def _entity_schemas() -> dict[str, Any]:
     repository.
     """
     schemas: dict[str, Any] = {}
-    for model in ENTITY_MODELS + REQUEST_MODELS:
+    for model in ENTITY_MODELS + REQUEST_MODELS + PROBLEM_MODELS:
         schema = model.model_json_schema(ref_template="#/components/schemas/{model}")
         schemas.update(schema.pop("$defs", {}))
         schemas[model.__name__] = schema
@@ -1911,6 +2032,7 @@ __all__ = [
     "DefaultAgentName",
     "DeviceBinding",
     "Envelope",
+    "FieldError",
     "McpReloadResult",
     "McpServerStatus",
     "PendingDevice",

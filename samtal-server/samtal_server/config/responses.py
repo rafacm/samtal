@@ -413,17 +413,75 @@ class DefaultAgent(BaseModel):
     )
 
 
-class Problem(BaseModel):
-    """A refusal, in the repository's own words."""
+class FieldError(BaseModel):
+    """One field of the submitted body that a refusal names."""
 
     model_config = ConfigDict(extra="forbid")
 
+    path: str = Field(
+        description=(
+            "Which part of the submitted body this is about, as an RFC 6901 JSON "
+            "Pointer into it: `/connection/api_key_env` is that key of that object, "
+            "and the empty string is the body as a whole. A pointer rather than a "
+            "dotted path because a key may itself hold a dot, and `~` and `/` inside "
+            "a key are escaped as `~0` and `~1` the way the RFC says."
+        )
+    )
+    message: str = Field(
+        description=(
+            "What is wrong with it, in the same words the corresponding line of "
+            "`detail` uses: the two are rendered from one computation, so a client "
+            "showing this beside the field and one showing the whole sentence say the "
+            "same thing. Like `detail`, it names a rule and never quotes the value it "
+            "rejected."
+        )
+    )
+
+
+class Problem(BaseModel):
+    """A refusal, as RFC 9457 problem details.
+
+    Served as `application/problem+json`. `type` and `instance` are
+    deliberately absent: an absent `type` means `about:blank`, which is
+    the truth here, since these problems are described by their status
+    and their prose rather than by a URI registry nobody serves.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(
+        description=(
+            "The status code's standard HTTP reason phrase, such as `Not Found`. It is "
+            "the phrase and not a description of this API's own, because with `type` "
+            "absent the problem type is `about:blank`, whose title RFC 9457 says should "
+            "be the status's recommended phrase; a title of this server's own would "
+            "imply a problem type the body does not identify. What was actually refused "
+            "is `detail`."
+        )
+    )
+    status: int = Field(
+        description=(
+            "The HTTP status code, repeated in the body as the RFC describes, so that a "
+            "problem separated from its response (in a log, in a bug report) still says "
+            "what it was answered under."
+        )
+    )
     detail: str = Field(
         description=(
             "What was refused and why, the same sentence the `samtal-server config` "
             "command prints for it. It names the entity the request addressed and "
             "the rule that was broken; it never quotes a secret or a configuration "
             "value that was rejected."
+        )
+    )
+    errors: list[FieldError] = Field(
+        description=(
+            "The fields of the submitted body the refusal names, one entry each, for a "
+            "client that wants to mark the offending field rather than show a "
+            "paragraph. Present on every refusal and empty where there is no field to "
+            "name: a body whose whole shape was wrong, a reference to another entity, a "
+            "failure that was not the caller's. The entries are the same problems "
+            "`detail` lists, in the same order and the same words."
         )
     )
 

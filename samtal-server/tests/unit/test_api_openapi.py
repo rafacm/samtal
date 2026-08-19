@@ -21,7 +21,12 @@ from openapi_spec_validator import validate
 from openapi_spec_validator.readers import read_from_filename
 
 from samtal_server.config import cli, docgen
-from samtal_server.config.api import API_VERSION, BEARER_SCHEME, MOUNT_PATH
+from samtal_server.config.api import (
+    API_VERSION,
+    BEARER_SCHEME,
+    MOUNT_PATH,
+    PROBLEM_MEDIA_TYPE,
+)
 from samtal_server.config.secrets import MASTER_KEY_ENV
 
 COMMITTED = Path(__file__).resolve().parents[3] / "docs" / "reference" / "api-openapi.json"
@@ -249,8 +254,55 @@ def test_every_refusal_a_read_can_answer_with_is_described() -> None:
 
     assert set(read["responses"]) == {"200", "401", "404", "409", "422", "500"}
     for status in ("401", "404", "409", "422", "500"):
-        schema = read["responses"][status]["content"]["application/json"]["schema"]
+        schema = read["responses"][status]["content"][PROBLEM_MEDIA_TYPE]["schema"]
         assert schema == {"$ref": "#/components/schemas/Problem"}
+
+
+def test_every_refusal_in_the_document_offers_exactly_one_media_type() -> None:
+    """Mechanically, over every operation, because the way this goes
+    wrong is invisible in a review of the diff.
+
+    FastAPI generates a response's content from the model a route
+    declares and deep-merges anything declared beside it, so a refusal
+    that named both would advertise an `application/json` body this API
+    never sends, in a document a client generator would build against.
+    The refusals name a schema reference and no model for that reason,
+    and this is what holds it: one content key per refusal, the problem
+    media type, resolving to `Problem`.
+    """
+    document = json.loads(docgen.openapi())
+
+    refusals = [
+        (path, method, status, response)
+        for path, operations in document["paths"].items()
+        for method, operation in operations.items()
+        for status, response in operation["responses"].items()
+        if not status.startswith("2")
+    ]
+    assert refusals
+
+    for path, method, status, response in refusals:
+        where = (path, method, status)
+        assert set(response["content"]) == {PROBLEM_MEDIA_TYPE}, where
+        assert response["content"][PROBLEM_MEDIA_TYPE]["schema"] == {
+            "$ref": "#/components/schemas/Problem"
+        }, where
+
+
+def test_the_refusal_shape_is_required_whole_and_closed() -> None:
+    """Every member on every refusal, and nothing else on any of them.
+
+    The reason is the one the read shapes follow: a member that is
+    sometimes absent leaves a client telling "the server said none" from
+    "the server did not say", and `errors` is the member that would be
+    tempting to omit when a refusal names no field.
+    """
+    schemas = json.loads(docgen.openapi())["components"]["schemas"]
+
+    assert set(schemas["Problem"]["required"]) == {"title", "status", "detail", "errors"}
+    assert schemas["Problem"]["additionalProperties"] is False
+    assert set(schemas["FieldError"]["required"]) == {"path", "message"}
+    assert schemas["FieldError"]["additionalProperties"] is False
 
 
 def test_every_field_a_read_always_answers_with_is_required() -> None:

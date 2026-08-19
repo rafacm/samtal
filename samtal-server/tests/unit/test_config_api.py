@@ -2,9 +2,9 @@
 
 Two properties carry this file. Nothing inside /api answers anything
 but 401 without the right token, matched route or not, because the gate
-runs before routing. And every refusal leaves as `{"detail": ...}` with
-the repository's own sentence and the status code the plan fixes, with
-no traceback and no echo of what was sent.
+runs before routing. And every refusal leaves as one problem document
+carrying the repository's own sentence as `detail` and the status code
+the plan fixes, with no traceback and no echo of what was sent.
 
 Milestone 1 has no routes, so the mapping is exercised through
 throwaway routes registered on a test-built application: what is under
