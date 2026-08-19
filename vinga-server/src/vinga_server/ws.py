@@ -25,6 +25,8 @@ from vinga_server.config.models import normalize_mac
 from vinga_server.device.boundary import WEBSOCKET_PATH
 from vinga_server.device.session import DeviceSession
 from vinga_server.events import ServerEvents
+from vinga_server.events.catalog import RejectedAtCapacity
+from vinga_server.events.values import DeviceId, DeviceOrUnidentified, SessionId
 
 events = ServerEvents(__name__)
 
@@ -37,10 +39,6 @@ events = ServerEvents(__name__)
 
 # The scheme both the firmware and xiaozhi-sdk send the token under.
 BEARER = "bearer "
-
-# What a refusal says instead of naming a device, wherever there is no
-# device this server recognizes to name.
-UNIDENTIFIED_DEVICE = "an unidentified device"
 
 router = APIRouter()
 
@@ -157,13 +155,12 @@ async def conversation(websocket: WebSocket) -> None:
         # anything else becomes a null field beside the fixed phrase the
         # empty header already used.
         known = _known_device(device_id)
-        events.warning(
-            "refused a websocket handshake from %s: the server is at capacity",
-            known or UNIDENTIFIED_DEVICE,
-            event="session_rejected",
-            device=known,
-            session=session.session_id,
-            reason="capacity",
+        events.emit(
+            lambda: RejectedAtCapacity(
+                device=None if known is None else DeviceId(known),
+                session=SessionId(session.session_id),
+                shown=DeviceOrUnidentified.of(known),
+            )
         )
         await websocket.close()
         return

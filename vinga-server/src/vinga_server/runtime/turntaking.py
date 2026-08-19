@@ -33,6 +33,14 @@ from typing import Protocol
 from vinga_server.config import ServerConfig
 from vinga_server.device.boundary import PIPELINE_SAMPLE_RATE, DeviceOutput
 from vinga_server.events import SessionEvents, logger
+from vinga_server.events.catalog import (
+    BargeIn,
+    BargeInInRefractory,
+    BargeInMerged,
+    BargeInUnderFloor,
+    BargeInWithoutTranscript,
+)
+from vinga_server.events.values import ABSENT, Absent, Real, Whole
 from vinga_server.providers import AsrResult, Endpointer
 
 # How much recent mic audio the utterance buffer keeps. A realtime
@@ -198,12 +206,10 @@ class TurnTaking:
                     return
                 pcm, result = gated
             else:
-                self._events.info(
-                    "session %s: barge-in, cancelling the reply in flight",
-                    self.session_id,
-                    event="barge_in",
-                    speech_ms=speech_ms,
-                    **self._speaking_ms_field(),
+                self._events.emit(
+                    lambda: BargeIn(
+                        speech_ms=Whole(speech_ms), speaking_ms=self._speaking_ms()
+                    )
                 )
                 await self._reply.cancel_reply()
         logger.info(
@@ -235,25 +241,16 @@ class TurnTaking:
         stopped, so a wrong pause costs one ASR latency, not a reply."""
         server = self._server
         if speech_ms < server.barge_in_min_speech_ms:
-            self._events.info(
-                "session %s: barge-in suppressed, %d ms of speech is under the "
-                "%.0f ms floor",
-                self.session_id,
-                speech_ms,
-                server.barge_in_min_speech_ms,
-                event="barge_in_suppressed",
-                reason="min_speech",
-                speech_ms=speech_ms,
+            self._events.emit(
+                lambda: BargeInUnderFloor(
+                    speech_ms=Whole(speech_ms),
+                    floor_ms=Real(server.barge_in_min_speech_ms),
+                )
             )
             return None
         if self._reply_pcm is not None:
             head = self._reply_pcm
-            self._events.info(
-                "session %s: barge-in mid-transcription, merging the utterances",
-                self.session_id,
-                event="barge_in_merged",
-                speech_ms=speech_ms,
-            )
+            self._events.emit(lambda: BargeInMerged(speech_ms=Whole(speech_ms)))
             await self._reply.cancel_reply()
             return head + pcm, None
         loop = asyncio.get_running_loop()
@@ -262,12 +259,8 @@ class TurnTaking:
             and (loop.time() - self._output.speaking_started_at()) * 1000
             < server.barge_in_refractory_ms
         ):
-            self._events.info(
-                "session %s: barge-in suppressed inside the refractory window",
-                self.session_id,
-                event="barge_in_suppressed",
-                reason="refractory",
-                speech_ms=speech_ms,
+            self._events.emit(
+                lambda: BargeInInRefractory(speech_ms=Whole(speech_ms))
             )
             return None
         self._pause_output()
@@ -304,21 +297,13 @@ class TurnTaking:
             self._resume_output()
             return None
         if not result.text.strip():
-            self._events.info(
-                "session %s: barge-in suppressed, nothing transcribed",
-                self.session_id,
-                event="barge_in_suppressed",
-                reason="no_transcript",
-                speech_ms=speech_ms,
+            self._events.emit(
+                lambda: BargeInWithoutTranscript(speech_ms=Whole(speech_ms))
             )
             self._resume_output()
             return None
-        self._events.info(
-            "session %s: barge-in, cancelling the reply in flight",
-            self.session_id,
-            event="barge_in",
-            speech_ms=speech_ms,
-            **self._speaking_ms_field(),
+        self._events.emit(
+            lambda: BargeIn(speech_ms=Whole(speech_ms), speaking_ms=self._speaking_ms())
         )
         await self._reply.cancel_reply()
         # The pause belonged to the cancelled reply; the one about to
@@ -328,14 +313,18 @@ class TurnTaking:
         self._resume_output()
         return pcm, result
 
-    def _speaking_ms_field(self) -> dict[str, int]:
+    def _speaking_ms(self) -> Whole | Absent:
         """The barge_in event's speaking_ms: milliseconds from
         speaking_started to the cancel decision, absent when the reply
-        had not yet spoken."""
+        had not yet spoken.
+
+        Absent rather than null, and the two are different answers: a
+        reply that had not spoken has no such interval, so the record
+        carries no key rather than a key holding nothing."""
         if self._output.speaking_started_at() is None:
-            return {}
+            return ABSENT
         elapsed = asyncio.get_running_loop().time() - self._output.speaking_started_at()
-        return {"speaking_ms": round(elapsed * 1000)}
+        return Whole(round(elapsed * 1000))
 
     def _trimmed_utterance(self) -> bytes:
         """The buffered utterance, cut down to the speech plus a short

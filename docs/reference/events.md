@@ -155,16 +155,16 @@ never what an operator may have called something.
 
 | Grammar | Pattern | Built by | What it is |
 | --- | --- | --- | --- |
-| `empty_fragment` | `''` | `vinga_server.runtime.pipeline:_tool_named`, `vinga_server.runtime.pipeline:PipelineRuntime._provider_failed` | The nothing a site renders where it has nothing to add. Declared rather than left untyped, so a variant that may only say nothing says exactly that. |
-| `also_bound_to` | `'(?: \(also bound to [\s\S]+\))?'` | `vinga_server.ota.reply:check_version`, `vinga_server.device.session:DeviceSession.run` | The tail naming the agents a device is bound to beside the one that answered, empty for a device bound to exactly one. The names inside it are comma joined, and the grammar does not say so: a configured name may itself hold a comma, so the joined fragment cannot be parsed back into the names that made it, and a pattern claiming otherwise would refuse a lawful deployment. |
-| `agent_list` | `'[\s\S]+'` | `vinga_server.ota.reply:check_version`, `vinga_server.device.session:DeviceSession.run` | The configured agent names a device is bound to, comma-joined. Non-empty, and nothing further: see the tail grammar above for why the joining is not part of the claim. |
+| `empty_fragment` | `''` | `vinga_server.events.values:Nothing` | The nothing a site renders where it has nothing to add. Declared rather than left untyped, so a variant that may only say nothing says exactly that. |
+| `also_bound_to` | `'(?: \(also bound to [\s\S]+\))?'` | `vinga_server.ota.reply:check_version`, `vinga_server.events.values:AlsoBoundTo.of` | The tail naming the agents a device is bound to beside the one that answered, empty for a device bound to exactly one. The names inside it are comma joined, and the grammar does not say so: a configured name may itself hold a comma, so the joined fragment cannot be parsed back into the names that made it, and a pattern claiming otherwise would refuse a lawful deployment. |
+| `agent_list` | `'[\s\S]+'` | `vinga_server.ota.reply:check_version`, `vinga_server.events.values:AgentList.of` | The configured agent names a device is bound to, comma-joined. Non-empty, and nothing further: see the tail grammar above for why the joining is not part of the claim. |
 | `session_list` | `'[0-9A-Za-z_-]{1,64}(?:, [0-9A-Za-z_-]{1,64})*'` | `vinga_server.capture:CaptureStore.prune` | The session ids a prune removed, comma-joined. |
-| `quoted_tool_name` | `' "[\s\S]+"'` | `vinga_server.runtime.pipeline:_tool_named` | A builtin's name, which is this server's own word, bounded here by the quoting alone. A device tool's name is the board's vocabulary and an unknown one is whatever the model invented, so neither is ever rendered here. |
-| `from_entry` | `' from entry "[\s\S]+"'` | `vinga_server.runtime.pipeline:_tool_named` | The configured MCP entry a call reached, never the far side's own tool name. Entry names are separately held to `[A-Za-z0-9_-]+` by the configuration, which makes this grammar a floor rather than the whole truth; the floor is what the registry may claim, since the tighter rule is configuration's to keep and to change. |
-| `quoted_provider` | `' "[\s\S]+"'` | `vinga_server.runtime.pipeline:PipelineRuntime._provider_failed` | The configuration entry the failing provider is, bounded by the quoting alone. |
-| `reaching_host` | `'(?: reaching [\s\S]+)?'` | `vinga_server.runtime.pipeline:PipelineRuntime._provider_failed` | Where the call was going, empty for an engine that runs in this process. |
+| `quoted_tool_name` | `' "[\s\S]+"'` | `vinga_server.events.values:QuotedToolName.of` | A builtin's name, which is this server's own word, bounded here by the quoting alone. A device tool's name is the board's vocabulary and an unknown one is whatever the model invented, so neither is ever rendered here. |
+| `from_entry` | `' from entry "[\s\S]+"'` | `vinga_server.events.values:FromEntry.of` | The configured MCP entry a call reached, never the far side's own tool name. Entry names are separately held to `[A-Za-z0-9_-]+` by the configuration, which makes this grammar a floor rather than the whole truth; the floor is what the registry may claim, since the tighter rule is configuration's to keep and to change. |
+| `quoted_provider` | `' "[\s\S]+"'` | `vinga_server.events.values:QuotedProvider.of` | The configuration entry the failing provider is, bounded by the quoting alone. |
+| `reaching_host` | `'(?: reaching [\s\S]+)?'` | `vinga_server.events.values:ReachingHost.of` | Where the call was going, empty for an engine that runs in this process. |
 | `origin_provenance` | `'(?:from\|guessed from) [\s\S]+'` | `vinga_server.onboarding.origin:Origin.provenance` | Which configuration key the banner's origin came out of, and whether it was read or inferred. |
-| `device_or_unidentified` | `'[0-9a-f]{2}(?::[0-9a-f]{2}){5}\|an unidentified device'` | `vinga_server.ws:conversation` | The MAC behind a Device-Id header this server recognizes, or the fixed phrase. Nothing else: with device auth off nothing has verified that header, so an unrecognized one names no device at all. |
+| `device_or_unidentified` | `'[0-9a-f]{2}(?::[0-9a-f]{2}){5}\|an unidentified device'` | `vinga_server.events.values:DeviceOrUnidentified.of` | The MAC behind a Device-Id header this server recognizes, or the fixed phrase. Nothing else: with device auth off nothing has verified that header, so an unrecognized one names no device at all. |
 
 ## The prompt provenance grammar
 
@@ -205,26 +205,6 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `onboarding_key_mismatch` | `vinga_server.onboarding` | WARNING | 1 |
 | `onboarding_key_unshaped` | `vinga_server.onboarding` | WARNING | 1 |
 | `auth_rejected` | `vinga_server.ws` | WARNING | 1 |
-| `session_rejected` | `vinga_server.session`, `vinga_server.ws` | WARNING | 4 |
-| `session_open` | `vinga_server.session` | INFO | 1 |
-| `session_limit` | `vinga_server.session` | INFO | 1 |
-| `session_idle` | `vinga_server.session` | INFO | 1 |
-| `session_closed` | `vinga_server.session` | INFO | 1 |
-| `speaking_started` | `vinga_server.session` | INFO | 1 |
-| `heard` | `vinga_server.session` | INFO | 1 |
-| `replied` | `vinga_server.session` | INFO | 1 |
-| `agent_said` | `vinga_server.session` | INFO | 1 |
-| `handover` | `vinga_server.session` | INFO | 1 |
-| `prompt_assembled` | `vinga_server.session` | INFO | 1 |
-| `llm_retry` | `vinga_server.session` | WARNING | 2 |
-| `llm_round` | `vinga_server.session` | INFO | 2 |
-| `provider_failed` | `vinga_server.session` | WARNING | 2 |
-| `tool_call` | `vinga_server.session` | INFO | 3 |
-| `barge_in` | `vinga_server.session` | INFO | 1 |
-| `barge_in_suppressed` | `vinga_server.session` | INFO | 3 |
-| `barge_in_merged` | `vinga_server.session` | INFO | 1 |
-| `filler_skipped` | `vinga_server.session` | INFO | 2 |
-| `filler_played` | `vinga_server.session` | INFO | 1 |
 | `asr_prompt_echo` | `vinga_server.providers.openai_asr` | INFO, WARNING | 5 |
 | `mcp_connected` | `vinga_server.tools.mcp` | INFO | 1 |
 | `mcp_down` | `vinga_server.tools.mcp` | INFO, WARNING | 3 |
@@ -252,6 +232,26 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `conversations_dropped` | `vinga_server.conversations.store` | WARNING | 1 |
 | `conversations_failed` | `vinga_server.conversations.store` | WARNING | 2 |
 | `conversations_pruned` | `vinga_server.conversations.store` | INFO | 1 |
+| `session_rejected` | `vinga_server.session`, `vinga_server.ws` | WARNING | 4 |
+| `session_open` | `vinga_server.session` | INFO | 1 |
+| `session_limit` | `vinga_server.session` | INFO | 1 |
+| `session_idle` | `vinga_server.session` | INFO | 1 |
+| `session_closed` | `vinga_server.session` | INFO | 1 |
+| `speaking_started` | `vinga_server.session` | INFO | 1 |
+| `heard` | `vinga_server.session` | INFO | 1 |
+| `replied` | `vinga_server.session` | INFO | 1 |
+| `agent_said` | `vinga_server.session` | INFO | 1 |
+| `handover` | `vinga_server.session` | INFO | 1 |
+| `prompt_assembled` | `vinga_server.session` | INFO | 1 |
+| `llm_retry` | `vinga_server.session` | WARNING | 2 |
+| `llm_round` | `vinga_server.session` | INFO | 2 |
+| `provider_failed` | `vinga_server.session` | WARNING | 2 |
+| `tool_call` | `vinga_server.session` | INFO | 3 |
+| `barge_in` | `vinga_server.session` | INFO | 1 |
+| `barge_in_suppressed` | `vinga_server.session` | INFO | 3 |
+| `barge_in_merged` | `vinga_server.session` | INFO | 1 |
+| `filler_skipped` | `vinga_server.session` | INFO | 2 |
+| `filler_played` | `vinga_server.session` | INFO | 1 |
 | `schema_violation` (internal) | every channel (14) | ERROR | 14 |
 
 ### `ota_check`
@@ -610,6 +610,761 @@ refused a websocket handshake from an unidentified client: %s
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `reason` | `TOKEN` | yes | no | one of: `bad_token`, `no_token` |  |
+
+### `asr_prompt_echo`
+
+A transcript came back as the ASR prompt and the clip was retried once without
+it, on what the first request left of `timeout_s`. No session or device:
+providers are shared singletons that serve every conversation, so the event
+names the host instead.
+
+#### Variant 1: `vinga_server.providers.openai_asr` at WARNING
+
+```text
+openai asr: the transcript came back as the configured prompt with %.1f s of the timeout left, too little to retry, treating %.2f s of audio as nothing said
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `FLOAT` | no |  |  |
+| 2 | `FLOAT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `outcome` | `TOKEN` | yes | no | one of: `skipped` | Under a second of budget remained, so no retry was sent. |
+| `duration_s` | `FLOAT` | yes | no |  |  |
+| `host` | `IDENTIFIER` | yes | no |  |  |
+
+#### Variant 2: `vinga_server.providers.openai_asr` at WARNING
+
+```text
+openai asr: the retry outran the timeout's remaining %.1f s, treating %.2f s of audio as nothing said
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `FLOAT` | no |  |  |
+| 2 | `FLOAT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `outcome` | `TOKEN` | yes | no | one of: `timed_out` | The retry outran what the first request left of the budget. |
+| `duration_s` | `FLOAT` | yes | no |  |  |
+| `host` | `IDENTIFIER` | yes | no |  |  |
+| `retry_ms` | `INT` | yes | no |  |  |
+
+#### Variant 3: `vinga_server.providers.openai_asr` at WARNING
+
+```text
+openai asr: the retry came back as the prompt again, treating %.2f s of audio as nothing said
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `FLOAT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `outcome` | `TOKEN` | yes | no | one of: `confirmed_echo` | The retry came back as the configured prompt again. |
+| `duration_s` | `FLOAT` | yes | no |  |  |
+| `host` | `IDENTIFIER` | yes | no |  |  |
+| `retry_ms` | `INT` | yes | no |  |  |
+
+#### Variant 4: `vinga_server.providers.openai_asr` at WARNING
+
+```text
+openai asr: the retry came back empty, treating %.2f s of audio as nothing said
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `FLOAT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `outcome` | `TOKEN` | yes | no | one of: `confirmed_empty` | The retry heard nothing. |
+| `duration_s` | `FLOAT` | yes | no |  |  |
+| `host` | `IDENTIFIER` | yes | no |  |  |
+| `retry_ms` | `INT` | yes | no |  |  |
+
+#### Variant 5: `vinga_server.providers.openai_asr` at INFO
+
+```text
+openai asr: the retry recovered %.2f s of audio the echo guard would have discarded
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `FLOAT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `outcome` | `TOKEN` | yes | no | one of: `recovered` | The retry's transcript is heard. What was recovered is not in the sentence: conversation-derived text is banned on the events however it was recovered (#165). |
+| `duration_s` | `FLOAT` | yes | no |  |  |
+| `host` | `IDENTIFIER` | yes | no |  |  |
+| `retry_ms` | `INT` | yes | no |  |  |
+
+### `mcp_connected`
+
+An entry's connect finishes and its tools are published. No session or device:
+one entry serves every conversation, and the rest of this block is the same.
+
+#### Variant 1: `vinga_server.tools.mcp` at INFO
+
+```text
+mcp server %s connected with %d tool(s)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `IDENTIFIER` | no |  |  |
+| 2 | `COUNT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `entry` | `IDENTIFIER` | yes | no |  |  |
+| `transport` | `TOKEN` | yes | no | one of: `stdio`, `streamable_http` |  |
+| `tools` | `COUNT` | yes | no |  | A count, never a list. |
+| `duration_ms` | `INT` | yes | no |  |  |
+
+### `mcp_down`
+
+An entry fails to come up, or its connection is given up.
+
+#### Variant 1: `vinga_server.tools.mcp` at WARNING
+
+```text
+mcp server %s is unavailable, its tools are absent: %s
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `IDENTIFIER` | no |  |  |
+| 2 | `CLASS_NAME` | no | one name, or several joined with `, ` |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `entry` | `IDENTIFIER` | yes | no |  |  |
+| `reason` | `TOKEN` | yes | no | one of: `connect_timeout`, `discovery_failed`, `initialize_failed`, `transport_failed` |  |
+| `duration_ms` | `INT` | yes | no |  | How long the connect ran before it failed. |
+
+#### Variant 2: `vinga_server.tools.mcp` at INFO
+
+The intentional one, a shutdown or a reload, and the only `mcp_down` at INFO.
+No duration: how long a working connection lasted is a different number under
+the same name.
+
+```text
+mcp server %s is stopped and its tools are gone
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `IDENTIFIER` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `entry` | `IDENTIFIER` | yes | no |  |  |
+| `reason` | `TOKEN` | yes | no | one of: `stopped` |  |
+
+#### Variant 3: `vinga_server.tools.mcp` at WARNING
+
+Always beside an `mcp_call_dropped`, in that order.
+
+```text
+mcp server %s: dropping the connection after a failed call
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `IDENTIFIER` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `entry` | `IDENTIFIER` | yes | no |  |  |
+| `reason` | `TOKEN` | yes | no | one of: `call_failed` |  |
+
+### `mcp_call_dropped`
+
+A tool call failed and the connection was dropped because of it. The tool is
+said by its position in the far side's listing and never by its name: half a
+published name is what the far side called its tool.
+
+#### Variant 1: `vinga_server.tools.mcp` at WARNING
+
+```text
+mcp server %s: the call to published tool %s failed (%s), so its answer is lost
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `IDENTIFIER` | no |  |  |
+| 2 | `COUNT` | yes |  |  |
+| 3 | `CLASS_NAME` | no | one name, or several joined with `, ` |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `entry` | `IDENTIFIER` | yes | no |  |  |
+| `position` | `COUNT` | yes | yes |  | The tool's place in the far side's listing, counted from one. Null for a name this connection no longer knows. |
+| `error` | `CLASS_NAME` | yes | no | one name, or several joined with `, ` | The failure's class name, and for a group of them the sorted names joined with a comma. Never a message. |
+
+### `mcp_tool_shadowed`
+
+A published tool is dropped because a more specific entry owns its name.
+
+#### Variant 1: `vinga_server.tools.mcp` at WARNING
+
+```text
+mcp server %s: dropping published tool %d, its name is inside the namespace of the entry %s, which owns it
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `IDENTIFIER` | no |  |  |
+| 2 | `COUNT` | no |  |  |
+| 3 | `IDENTIFIER` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `entry` | `IDENTIFIER` | yes | no |  |  |
+| `position` | `COUNT` | yes | no |  | The tool's place in the far side's listing. |
+| `owner` | `IDENTIFIER` | yes | no |  |  |
+
+### `mcp_reload`
+
+A reload of the MCP servers finishes, whether or not the caller is still
+connected. Exactly one per reload, at whichever of the two phases ended it.
+
+#### Variant 1: `vinga_server.tools.mcp` at WARNING
+
+```text
+mcp servers were not reloaded and nothing was changed (%s)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `TOKEN` | no | one of: `database_busy`, `in_progress`, `invalid`, `unexpected`, `unreadable` |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `outcome` | `TOKEN` | yes | no | one of: `refused` |  |
+| `reason` | `TOKEN` | yes | no | one of: `database_busy`, `in_progress`, `invalid`, `unexpected`, `unreadable` | Chosen where the exception is classified and never built out of its message. |
+
+#### Variant 2: `vinga_server.tools.mcp` at INFO
+
+```text
+mcp servers reloaded: %d started, %d restarted, %d stopped, %d unchanged
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `COUNT` | no |  |  |
+| 2 | `COUNT` | no |  |  |
+| 3 | `COUNT` | no |  |  |
+| 4 | `COUNT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `outcome` | `TOKEN` | yes | no | one of: `applied` |  |
+| `started` | `COUNT` | yes | no |  |  |
+| `restarted` | `COUNT` | yes | no |  |  |
+| `stopped` | `COUNT` | yes | no |  |  |
+| `unchanged` | `COUNT` | yes | no |  |  |
+| `duration_ms` | `INT` | yes | no |  | Measured from when the request was accepted, so it covers the re-read as well as the apply. |
+
+### `memory_unreadable`
+
+An agent's memory could not be read; it remembers nothing this round.
+
+#### Variant 1: `vinga_server.tools.memory` at WARNING
+
+```text
+could not read memory for agent %s (%s); it remembers nothing this round
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `IDENTIFIER` | no |  |  |
+| 2 | `CLASS_NAME` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `error` | `CLASS_NAME` | yes | no |  |  |
+
+### `filler_disabled`
+
+Filler synthesis failed for one agent, so latency masking is off for it.
+
+#### Variant 1: `vinga_server.filler` at WARNING
+
+```text
+agent %s: filler synthesis failed, latency masking is off for this agent (%s)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `IDENTIFIER` | no |  |  |
+| 2 | `CLASS_NAME` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `error` | `CLASS_NAME` | yes | no |  |  |
+
+### `capture_started`
+
+A session is being recorded.
+
+#### Variant 1: `vinga_server.capture` at INFO
+
+```text
+session %s: capturing to %s
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `PATHLIKE` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `path` | `IDENTIFIER` | yes | no |  |  |
+
+### `capture_declined`
+
+A session is not being recorded, and why.
+
+#### Variant 1: `vinga_server.capture` at WARNING
+
+```text
+session %s: not capturing, %s is unusable (%s)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `PATHLIKE` | no |  |  |
+| 3 | `CLASS_NAME` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `unusable` |  |
+| `failure` | `CLASS_NAME` | yes | no |  |  |
+
+#### Variant 2: `vinga_server.capture` at WARNING
+
+```text
+session %s: not capturing, %.0f MB free is below the %.0f MB floor
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `FLOAT` | no |  |  |
+| 3 | `FLOAT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `min_free_mb` |  |
+| `free_mb` | `COUNT` | yes | no |  |  |
+
+#### Variant 3: `vinga_server.capture` at WARNING
+
+```text
+session %s: not capturing, could not open the files (%s)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `CLASS_NAME` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `open` |  |
+| `failure` | `CLASS_NAME` | yes | no |  |  |
+
+### `capture_limit`
+
+A recording reached its per-session ceiling.
+
+#### Variant 1: `vinga_server.capture` at INFO
+
+```text
+session %s: capture reached its %.0f s limit
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `FLOAT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+
+### `capture_failed`
+
+A recording stopped after a write failed.
+
+#### Variant 1: `vinga_server.capture` at WARNING
+
+```text
+session %s: capture stopped after failing to %s (%s)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `TOKEN` | no | one of: `write an event`, `write audio` |  |
+| 3 | `CLASS_NAME` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `write an event`, `write audio` | Which of the recording's two tracks the write was for. |
+| `failure` | `CLASS_NAME` | yes | no |  |  |
+
+### `capture_pruned`
+
+Old recordings were removed to stay inside the disk budget.
+
+#### Variant 1: `vinga_server.capture` at INFO
+
+```text
+capture: pruned %d session(s) to stay under %.0f MB: %s
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `COUNT` | no |  |  |
+| 2 | `FLOAT` | no |  |  |
+| 3 | `COMPOSED` | no | the `session_list` grammar |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `sessions` | `ID_LIST` | yes | no | each element: the `session_id` syntax | The ids themselves, not a count. |
+
+### `capture_over_budget`
+
+The disk budget is exceeded and nothing more can be pruned.
+
+#### Variant 1: `vinga_server.capture` at WARNING
+
+```text
+capture: %.0f MB on disk is over the %.0f MB budget and nothing more can be pruned; raise max_total_mb or lower max_session_s
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `FLOAT` | no |  |  |
+| 2 | `FLOAT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `total_mb` | `COUNT` | yes | no |  |  |
+
+### `capture_enabled`
+
+Said once at startup, at WARNING: recording room audio is a thing an operator
+should not discover by accident.
+
+#### Variant 1: `vinga_server.app` at WARNING
+
+```text
+session capture is on: room audio and a track of the session's events are being written to %s
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `PATHLIKE` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `path` | `IDENTIFIER` | yes | no |  |  |
+
+### `capture_disabled`
+
+Capture is configured but off.
+
+#### Variant 1: `vinga_server.app` at INFO
+
+```text
+session capture is configured but off; set server.capture.enabled to record to %s
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `PATHLIKE` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `path` | `IDENTIFIER` | yes | no |  |  |
+
+### `drain_started`
+
+A shutdown begins draining.
+
+#### Variant 1: `vinga_server.registry` at INFO
+
+```text
+draining %d session(s), up to %.0f s
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `COUNT` | no |  |  |
+| 2 | `FLOAT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `sessions` | `COUNT` | yes | no |  |  |
+| `timeout_s` | `FLOAT` | yes | no |  |  |
+
+### `drain_finished`
+
+Every reply finished speaking.
+
+#### Variant 1: `vinga_server.registry` at INFO
+
+```text
+every session drained
+```
+
+No arguments: the sentence is fixed.
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `sessions` | `COUNT` | yes | no |  |  |
+
+### `drain_incomplete`
+
+A reply was cut, or a session hung.
+
+#### Variant 1: `vinga_server.registry` at WARNING
+
+```text
+drained with %d session(s) cut mid-reply and %d that did not finish
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `COUNT` | no |  |  |
+| 2 | `COUNT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `sessions` | `COUNT` | yes | no |  |  |
+| `cut_mid_reply` | `COUNT` | yes | no |  |  |
+| `unfinished` | `COUNT` | yes | no |  |  |
+| `timeout_s` | `FLOAT` | yes | no |  |  |
+
+### `device_bindings_snapshot_only`
+
+There is no configuration database, so bindings resolve from the boot
+snapshot.
+
+#### Variant 1: `vinga_server.device.bindings` at DEBUG
+
+```text
+no configuration database at %s: device bindings resolve from the configuration this server was built with
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `PATHLIKE` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `path` | `IDENTIFIER` | yes | no |  |  |
+
+### `device_bindings_unreadable`
+
+The database could not be read, so the answer is the boot snapshot's.
+
+#### Variant 1: `vinga_server.device.bindings` at WARNING
+
+```text
+cannot read the device bindings for %s; answering from the configuration this server started with, which may be older than the database. The failure's kind is recorded beside this line
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `mac` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `device` | `ID` | yes | no | the `mac` syntax |  |
+| `failure` | `CLASS_NAME` | yes | no |  |  |
+
+### `api_error`
+
+The configuration API failed to handle a request. The class name and nothing
+else.
+
+#### Variant 1: `vinga_server.config.api` at ERROR
+
+```text
+the configuration API failed to handle a request (%s)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `CLASS_NAME` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+
+### `api_storage_error`
+
+The configuration API met unreadable stored state.
+
+#### Variant 1: `vinga_server.config.api` at ERROR
+
+```text
+the configuration API met unreadable stored state (%s)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `CLASS_NAME` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+
+### `conversations_enabled`
+
+The store opens at startup, which means this server is recording what is said
+to it. Said once, before anything connects, and at WARNING for the reason
+`capture_enabled` is.
+
+#### Variant 1: `vinga_server.conversations.store` at WARNING
+
+```text
+recording conversations to %s
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `PATHLIKE` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `path` | `IDENTIFIER` | yes | no |  |  |
+
+### `conversations_dropped`
+
+The store is behind and events for one session are being dropped. Said once
+per session at its first drop; the total lands on that session's row.
+
+#### Variant 1: `vinga_server.conversations.store` at WARNING
+
+```text
+session %s: the conversation store is behind, dropping events
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+
+### `conversations_failed`
+
+A write to the store failed and its batch was dropped, or a prune could not
+run.
+
+#### Variant 1: `vinga_server.conversations.store` at WARNING
+
+```text
+the conversation store dropped a batch after a write failed (%s)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `CLASS_NAME` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `failure` | `CLASS_NAME` | yes | no |  | The exception's class name, never its message. |
+
+#### Variant 2: `vinga_server.conversations.store` at WARNING
+
+```text
+the conversation store could not prune (%s)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `CLASS_NAME` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `failure` | `CLASS_NAME` | yes | no |  |  |
+
+### `conversations_pruned`
+
+Retention deleted sessions older than the window. At INFO: a policy doing its
+job.
+
+#### Variant 1: `vinga_server.conversations.store` at INFO
+
+```text
+conversations: pruned %d session(s) older than %d days
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `COUNT` | no |  |  |
+| 2 | `COUNT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `sessions` | `COUNT` | yes | no |  | A count, not a list. |
 
 ### `session_rejected`
 
@@ -1373,761 +2128,6 @@ session %s: no reply audio after %d ms, playing filler %d
 | `agent` | `IDENTIFIER` | yes | no |  |  |
 | `delay_ms` | `INT` | yes | no |  | Measured, from the transcription to the fire. |
 | `phrase_index` | `COUNT` | yes | no |  |  |
-
-### `asr_prompt_echo`
-
-A transcript came back as the ASR prompt and the clip was retried once without
-it, on what the first request left of `timeout_s`. No session or device:
-providers are shared singletons that serve every conversation, so the event
-names the host instead.
-
-#### Variant 1: `vinga_server.providers.openai_asr` at WARNING
-
-```text
-openai asr: the transcript came back as the configured prompt with %.1f s of the timeout left, too little to retry, treating %.2f s of audio as nothing said
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `FLOAT` | no |  |  |
-| 2 | `FLOAT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `outcome` | `TOKEN` | yes | no | one of: `skipped` | Under a second of budget remained, so no retry was sent. |
-| `duration_s` | `FLOAT` | yes | no |  |  |
-| `host` | `IDENTIFIER` | yes | no |  |  |
-
-#### Variant 2: `vinga_server.providers.openai_asr` at WARNING
-
-```text
-openai asr: the retry outran the timeout's remaining %.1f s, treating %.2f s of audio as nothing said
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `FLOAT` | no |  |  |
-| 2 | `FLOAT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `outcome` | `TOKEN` | yes | no | one of: `timed_out` | The retry outran what the first request left of the budget. |
-| `duration_s` | `FLOAT` | yes | no |  |  |
-| `host` | `IDENTIFIER` | yes | no |  |  |
-| `retry_ms` | `INT` | yes | no |  |  |
-
-#### Variant 3: `vinga_server.providers.openai_asr` at WARNING
-
-```text
-openai asr: the retry came back as the prompt again, treating %.2f s of audio as nothing said
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `FLOAT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `outcome` | `TOKEN` | yes | no | one of: `confirmed_echo` | The retry came back as the configured prompt again. |
-| `duration_s` | `FLOAT` | yes | no |  |  |
-| `host` | `IDENTIFIER` | yes | no |  |  |
-| `retry_ms` | `INT` | yes | no |  |  |
-
-#### Variant 4: `vinga_server.providers.openai_asr` at WARNING
-
-```text
-openai asr: the retry came back empty, treating %.2f s of audio as nothing said
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `FLOAT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `outcome` | `TOKEN` | yes | no | one of: `confirmed_empty` | The retry heard nothing. |
-| `duration_s` | `FLOAT` | yes | no |  |  |
-| `host` | `IDENTIFIER` | yes | no |  |  |
-| `retry_ms` | `INT` | yes | no |  |  |
-
-#### Variant 5: `vinga_server.providers.openai_asr` at INFO
-
-```text
-openai asr: the retry recovered %.2f s of audio the echo guard would have discarded
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `FLOAT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `outcome` | `TOKEN` | yes | no | one of: `recovered` | The retry's transcript is heard. What was recovered is not in the sentence: conversation-derived text is banned on the events however it was recovered (#165). |
-| `duration_s` | `FLOAT` | yes | no |  |  |
-| `host` | `IDENTIFIER` | yes | no |  |  |
-| `retry_ms` | `INT` | yes | no |  |  |
-
-### `mcp_connected`
-
-An entry's connect finishes and its tools are published. No session or device:
-one entry serves every conversation, and the rest of this block is the same.
-
-#### Variant 1: `vinga_server.tools.mcp` at INFO
-
-```text
-mcp server %s connected with %d tool(s)
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `IDENTIFIER` | no |  |  |
-| 2 | `COUNT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `entry` | `IDENTIFIER` | yes | no |  |  |
-| `transport` | `TOKEN` | yes | no | one of: `stdio`, `streamable_http` |  |
-| `tools` | `COUNT` | yes | no |  | A count, never a list. |
-| `duration_ms` | `INT` | yes | no |  |  |
-
-### `mcp_down`
-
-An entry fails to come up, or its connection is given up.
-
-#### Variant 1: `vinga_server.tools.mcp` at WARNING
-
-```text
-mcp server %s is unavailable, its tools are absent: %s
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `IDENTIFIER` | no |  |  |
-| 2 | `CLASS_NAME` | no | one name, or several joined with `, ` |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `entry` | `IDENTIFIER` | yes | no |  |  |
-| `reason` | `TOKEN` | yes | no | one of: `connect_timeout`, `discovery_failed`, `initialize_failed`, `transport_failed` |  |
-| `duration_ms` | `INT` | yes | no |  | How long the connect ran before it failed. |
-
-#### Variant 2: `vinga_server.tools.mcp` at INFO
-
-The intentional one, a shutdown or a reload, and the only `mcp_down` at INFO.
-No duration: how long a working connection lasted is a different number under
-the same name.
-
-```text
-mcp server %s is stopped and its tools are gone
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `IDENTIFIER` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `entry` | `IDENTIFIER` | yes | no |  |  |
-| `reason` | `TOKEN` | yes | no | one of: `stopped` |  |
-
-#### Variant 3: `vinga_server.tools.mcp` at WARNING
-
-Always beside an `mcp_call_dropped`, in that order.
-
-```text
-mcp server %s: dropping the connection after a failed call
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `IDENTIFIER` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `entry` | `IDENTIFIER` | yes | no |  |  |
-| `reason` | `TOKEN` | yes | no | one of: `call_failed` |  |
-
-### `mcp_call_dropped`
-
-A tool call failed and the connection was dropped because of it. The tool is
-said by its position in the far side's listing and never by its name: half a
-published name is what the far side called its tool.
-
-#### Variant 1: `vinga_server.tools.mcp` at WARNING
-
-```text
-mcp server %s: the call to published tool %s failed (%s), so its answer is lost
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `IDENTIFIER` | no |  |  |
-| 2 | `COUNT` | yes |  |  |
-| 3 | `CLASS_NAME` | no | one name, or several joined with `, ` |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `entry` | `IDENTIFIER` | yes | no |  |  |
-| `position` | `COUNT` | yes | yes |  | The tool's place in the far side's listing, counted from one. Null for a name this connection no longer knows. |
-| `error` | `CLASS_NAME` | yes | no | one name, or several joined with `, ` | The failure's class name, and for a group of them the sorted names joined with a comma. Never a message. |
-
-### `mcp_tool_shadowed`
-
-A published tool is dropped because a more specific entry owns its name.
-
-#### Variant 1: `vinga_server.tools.mcp` at WARNING
-
-```text
-mcp server %s: dropping published tool %d, its name is inside the namespace of the entry %s, which owns it
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `IDENTIFIER` | no |  |  |
-| 2 | `COUNT` | no |  |  |
-| 3 | `IDENTIFIER` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `entry` | `IDENTIFIER` | yes | no |  |  |
-| `position` | `COUNT` | yes | no |  | The tool's place in the far side's listing. |
-| `owner` | `IDENTIFIER` | yes | no |  |  |
-
-### `mcp_reload`
-
-A reload of the MCP servers finishes, whether or not the caller is still
-connected. Exactly one per reload, at whichever of the two phases ended it.
-
-#### Variant 1: `vinga_server.tools.mcp` at WARNING
-
-```text
-mcp servers were not reloaded and nothing was changed (%s)
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `TOKEN` | no | one of: `database_busy`, `in_progress`, `invalid`, `unexpected`, `unreadable` |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `outcome` | `TOKEN` | yes | no | one of: `refused` |  |
-| `reason` | `TOKEN` | yes | no | one of: `database_busy`, `in_progress`, `invalid`, `unexpected`, `unreadable` | Chosen where the exception is classified and never built out of its message. |
-
-#### Variant 2: `vinga_server.tools.mcp` at INFO
-
-```text
-mcp servers reloaded: %d started, %d restarted, %d stopped, %d unchanged
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `COUNT` | no |  |  |
-| 2 | `COUNT` | no |  |  |
-| 3 | `COUNT` | no |  |  |
-| 4 | `COUNT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `outcome` | `TOKEN` | yes | no | one of: `applied` |  |
-| `started` | `COUNT` | yes | no |  |  |
-| `restarted` | `COUNT` | yes | no |  |  |
-| `stopped` | `COUNT` | yes | no |  |  |
-| `unchanged` | `COUNT` | yes | no |  |  |
-| `duration_ms` | `INT` | yes | no |  | Measured from when the request was accepted, so it covers the re-read as well as the apply. |
-
-### `memory_unreadable`
-
-An agent's memory could not be read; it remembers nothing this round.
-
-#### Variant 1: `vinga_server.tools.memory` at WARNING
-
-```text
-could not read memory for agent %s (%s); it remembers nothing this round
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `IDENTIFIER` | no |  |  |
-| 2 | `CLASS_NAME` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `error` | `CLASS_NAME` | yes | no |  |  |
-
-### `filler_disabled`
-
-Filler synthesis failed for one agent, so latency masking is off for it.
-
-#### Variant 1: `vinga_server.filler` at WARNING
-
-```text
-agent %s: filler synthesis failed, latency masking is off for this agent (%s)
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `IDENTIFIER` | no |  |  |
-| 2 | `CLASS_NAME` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `error` | `CLASS_NAME` | yes | no |  |  |
-
-### `capture_started`
-
-A session is being recorded.
-
-#### Variant 1: `vinga_server.capture` at INFO
-
-```text
-session %s: capturing to %s
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `PATHLIKE` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `path` | `IDENTIFIER` | yes | no |  |  |
-
-### `capture_declined`
-
-A session is not being recorded, and why.
-
-#### Variant 1: `vinga_server.capture` at WARNING
-
-```text
-session %s: not capturing, %s is unusable (%s)
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `PATHLIKE` | no |  |  |
-| 3 | `CLASS_NAME` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `reason` | `TOKEN` | yes | no | one of: `unusable` |  |
-| `failure` | `CLASS_NAME` | yes | no |  |  |
-
-#### Variant 2: `vinga_server.capture` at WARNING
-
-```text
-session %s: not capturing, %.0f MB free is below the %.0f MB floor
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `FLOAT` | no |  |  |
-| 3 | `FLOAT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `reason` | `TOKEN` | yes | no | one of: `min_free_mb` |  |
-| `free_mb` | `COUNT` | yes | no |  |  |
-
-#### Variant 3: `vinga_server.capture` at WARNING
-
-```text
-session %s: not capturing, could not open the files (%s)
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `CLASS_NAME` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `reason` | `TOKEN` | yes | no | one of: `open` |  |
-| `failure` | `CLASS_NAME` | yes | no |  |  |
-
-### `capture_limit`
-
-A recording reached its per-session ceiling.
-
-#### Variant 1: `vinga_server.capture` at INFO
-
-```text
-session %s: capture reached its %.0f s limit
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `FLOAT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-
-### `capture_failed`
-
-A recording stopped after a write failed.
-
-#### Variant 1: `vinga_server.capture` at WARNING
-
-```text
-session %s: capture stopped after failing to %s (%s)
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `TOKEN` | no | one of: `write an event`, `write audio` |  |
-| 3 | `CLASS_NAME` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `reason` | `TOKEN` | yes | no | one of: `write an event`, `write audio` | Which of the recording's two tracks the write was for. |
-| `failure` | `CLASS_NAME` | yes | no |  |  |
-
-### `capture_pruned`
-
-Old recordings were removed to stay inside the disk budget.
-
-#### Variant 1: `vinga_server.capture` at INFO
-
-```text
-capture: pruned %d session(s) to stay under %.0f MB: %s
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `COUNT` | no |  |  |
-| 2 | `FLOAT` | no |  |  |
-| 3 | `COMPOSED` | no | the `session_list` grammar |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `sessions` | `ID_LIST` | yes | no | each element: the `session_id` syntax | The ids themselves, not a count. |
-
-### `capture_over_budget`
-
-The disk budget is exceeded and nothing more can be pruned.
-
-#### Variant 1: `vinga_server.capture` at WARNING
-
-```text
-capture: %.0f MB on disk is over the %.0f MB budget and nothing more can be pruned; raise max_total_mb or lower max_session_s
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `FLOAT` | no |  |  |
-| 2 | `FLOAT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `total_mb` | `COUNT` | yes | no |  |  |
-
-### `capture_enabled`
-
-Said once at startup, at WARNING: recording room audio is a thing an operator
-should not discover by accident.
-
-#### Variant 1: `vinga_server.app` at WARNING
-
-```text
-session capture is on: room audio and a track of the session's events are being written to %s
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `PATHLIKE` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `path` | `IDENTIFIER` | yes | no |  |  |
-
-### `capture_disabled`
-
-Capture is configured but off.
-
-#### Variant 1: `vinga_server.app` at INFO
-
-```text
-session capture is configured but off; set server.capture.enabled to record to %s
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `PATHLIKE` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `path` | `IDENTIFIER` | yes | no |  |  |
-
-### `drain_started`
-
-A shutdown begins draining.
-
-#### Variant 1: `vinga_server.registry` at INFO
-
-```text
-draining %d session(s), up to %.0f s
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `COUNT` | no |  |  |
-| 2 | `FLOAT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `sessions` | `COUNT` | yes | no |  |  |
-| `timeout_s` | `FLOAT` | yes | no |  |  |
-
-### `drain_finished`
-
-Every reply finished speaking.
-
-#### Variant 1: `vinga_server.registry` at INFO
-
-```text
-every session drained
-```
-
-No arguments: the sentence is fixed.
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `sessions` | `COUNT` | yes | no |  |  |
-
-### `drain_incomplete`
-
-A reply was cut, or a session hung.
-
-#### Variant 1: `vinga_server.registry` at WARNING
-
-```text
-drained with %d session(s) cut mid-reply and %d that did not finish
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `COUNT` | no |  |  |
-| 2 | `COUNT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `sessions` | `COUNT` | yes | no |  |  |
-| `cut_mid_reply` | `COUNT` | yes | no |  |  |
-| `unfinished` | `COUNT` | yes | no |  |  |
-| `timeout_s` | `FLOAT` | yes | no |  |  |
-
-### `device_bindings_snapshot_only`
-
-There is no configuration database, so bindings resolve from the boot
-snapshot.
-
-#### Variant 1: `vinga_server.device.bindings` at DEBUG
-
-```text
-no configuration database at %s: device bindings resolve from the configuration this server was built with
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `PATHLIKE` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `path` | `IDENTIFIER` | yes | no |  |  |
-
-### `device_bindings_unreadable`
-
-The database could not be read, so the answer is the boot snapshot's.
-
-#### Variant 1: `vinga_server.device.bindings` at WARNING
-
-```text
-cannot read the device bindings for %s; answering from the configuration this server started with, which may be older than the database. The failure's kind is recorded beside this line
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `mac` syntax |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `device` | `ID` | yes | no | the `mac` syntax |  |
-| `failure` | `CLASS_NAME` | yes | no |  |  |
-
-### `api_error`
-
-The configuration API failed to handle a request. The class name and nothing
-else.
-
-#### Variant 1: `vinga_server.config.api` at ERROR
-
-```text
-the configuration API failed to handle a request (%s)
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `CLASS_NAME` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-
-### `api_storage_error`
-
-The configuration API met unreadable stored state.
-
-#### Variant 1: `vinga_server.config.api` at ERROR
-
-```text
-the configuration API met unreadable stored state (%s)
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `CLASS_NAME` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-
-### `conversations_enabled`
-
-The store opens at startup, which means this server is recording what is said
-to it. Said once, before anything connects, and at WARNING for the reason
-`capture_enabled` is.
-
-#### Variant 1: `vinga_server.conversations.store` at WARNING
-
-```text
-recording conversations to %s
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `PATHLIKE` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `path` | `IDENTIFIER` | yes | no |  |  |
-
-### `conversations_dropped`
-
-The store is behind and events for one session are being dropped. Said once
-per session at its first drop; the total lands on that session's row.
-
-#### Variant 1: `vinga_server.conversations.store` at WARNING
-
-```text
-session %s: the conversation store is behind, dropping events
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-
-### `conversations_failed`
-
-A write to the store failed and its batch was dropped, or a prune could not
-run.
-
-#### Variant 1: `vinga_server.conversations.store` at WARNING
-
-```text
-the conversation store dropped a batch after a write failed (%s)
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `CLASS_NAME` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `failure` | `CLASS_NAME` | yes | no |  | The exception's class name, never its message. |
-
-#### Variant 2: `vinga_server.conversations.store` at WARNING
-
-```text
-the conversation store could not prune (%s)
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `CLASS_NAME` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `failure` | `CLASS_NAME` | yes | no |  |  |
-
-### `conversations_pruned`
-
-Retention deleted sessions older than the window. At INFO: a policy doing its
-job.
-
-#### Variant 1: `vinga_server.conversations.store` at INFO
-
-```text
-conversations: pruned %d session(s) older than %d days
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `COUNT` | no |  |  |
-| 2 | `COUNT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `sessions` | `COUNT` | yes | no |  | A count, not a list. |
 
 ### `schema_violation`
 
