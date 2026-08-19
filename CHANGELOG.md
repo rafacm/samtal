@@ -34,10 +34,21 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 - **A device's abort reason is reported from a closed set** (#185).
   `device aborted (...)` interpolated the abort message's `reason`, a
   free string the far side writes, straight into a retained line. The
-  firmware's own enum has exactly two members, so the line now names
-  `wake_word_detected` or `none` and reports anything else as `other`
-  without repeating it. An abort with no reason renders `none` where it
-  used to render `no reason`.
+  firmware's own enum has one spelling, so the line now names
+  `wake_word_detected`, says `none` when the abort carried no reason at
+  all, and reports anything else as `other` without repeating it. An
+  abort with no reason renders `none` where it used to render
+  `no reason`.
+
+- **A malformed control message is refused without being quoted**
+  (#185). The refusal wrapped pydantic's validation rendering, which
+  carries `input_value=`, and the session edge logs it verbatim, so an
+  abort whose `reason` was the wrong shape put the device's own bytes
+  on the retained log through a path the closed reason set never sees.
+  The refusal now names the message type, the field, and the rule it
+  broke, all of them this server's own vocabulary. A malformed hello
+  still closes the connection and any other malformed message is still
+  ignored, both unchanged.
 
 ### Added
 

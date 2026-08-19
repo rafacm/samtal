@@ -32,7 +32,9 @@ wrote.
    the far side writes, and the upstream protocol note is explicit that
    its values are implementation-defined, so a device (or anything
    speaking to this port) could put an arbitrary string on a kept
-   surface by aborting.
+   surface by aborting. The review round found the same leak one layer
+   earlier, through an abort whose `reason` is the wrong shape and so
+   never reaches the runtime at all.
 
 None of the three is an event, which is why the event registry (#155)
 does not reach them and why they survived the sweep that closed the
@@ -69,10 +71,34 @@ shared Opus encoder's feed order still passes byte-unmodified.
 `AbortReason` enum has exactly two members (`main/protocols/protocol.h`
 in 78/xiaozhi-esp32): `kAbortReasonNone`, which sends no `reason` field
 at all, and `kAbortReasonWakeWordDetected`, which sends the string
-`wake_word_detected`. The set is those two, with `none` as this side's
-name for the absent one; anything else renders as `other`, and its
-value is not repeated anywhere. The line keeps its shape,
-`device aborted (%s)`.
+`wake_word_detected`. The set holds the one spelling a device sends;
+an abort that carried no reason renders `none`, and anything else
+renders `other` without its value appearing anywhere. Absence is
+classified before the set is consulted, so an empty string is `other`
+(a device chose to send it) rather than `none`. The line keeps its
+shape, `device aborted (%s)`.
+
+**#185, the malformed path.** The closed set only covers an abort that
+parses. A `reason` of the wrong shape is refused one layer earlier, in
+`protocol/messages.py`, and that refusal wrapped pydantic's
+`ValidationError` rendering, which carries `input_value=`; the session
+edge logs the refusal verbatim, so `{"reason": ["sk-live-..."]}` put
+the device's bytes on the retained line through a path the reason set
+never sees. The refusal now names the message type, the field, and
+pydantic's fixed error slug, all of them this side's vocabulary. Field
+names are read from the model rather than from the error's `loc`, since
+a `loc` inside a nested value can hold a key the far side wrote.
+
+**Both arms report after the suite, not inside it.** Printing the class
+name is only half of not printing the message: inside an active
+`except` suite the caught exception is still the one being handled, so
+a second failure raised there (`resume_output` on a wedged pacing
+clock, or the logging call itself) escapes with the provider's
+exception attached as its `__context__` and hands the message to
+whoever catches it. Both sweep arms now capture the class name, leave
+the suite, and report and clean up after it, which is the discipline
+the device edge already follows where it builds `DeviceGone` inside the
+arm and raises it outside.
 
 ## The one deliberate behavior change
 
@@ -93,16 +119,24 @@ sessions saw and are left as they were.
 ## Key parameters
 
 - `DEVICE_ABORT_REASONS` (`samtal_server/runtime/pipeline.py`):
-  `frozenset({"wake_word_detected", "none"})`. Everything outside it
-  renders as `other`. A firmware that grows a third reason adds it
-  here, with the enum member as evidence.
+  `frozenset({"wake_word_detected"})`. An abort with no reason renders
+  `none`, classified before the set is consulted; everything else
+  renders `other`. A firmware that grows a second reason adds it here,
+  with the enum member as evidence.
 
 No configuration keys, no event fields, and no event sentence changed.
+
+One thing checked and deliberately left: the JSON-decode arm of
+`parse_message` still renders `str(exc)` and chains the decode error.
+`json.JSONDecodeError`'s message is a position report with no payload
+text in it, and nothing logs the chain, so there is no leak to fix;
+the exception's `doc` attribute does hold the whole frame, which is
+worth remembering if a future caller ever renders that chain.
 
 ## Verification
 
 - Lint: `uv run ruff check .` clean.
-- Unit: `uv run pytest tests/unit -q`, 3004 passed and 16 skipped.
+- Unit: `uv run pytest tests/unit -q`, 3008 passed and 16 skipped.
 - Integration: `uv run pytest tests/integration -q`, 58 passed.
 - The four committed-reference drift checks (domain config,
   conversations schema, events, OpenAPI) all diff empty, which is what
@@ -114,19 +148,60 @@ No configuration keys, no event fields, and no event sentence changed.
   appearing in the rendered traceback; the #182 encode test failed on
   the same; the #182 `RuntimeError` test failed on there being no
   record at all; the #185 test failed on the sentinel being rendered
-  verbatim into the abort line.
+  verbatim into the abort line. From the review round: the three
+  malformed-message tests failed on pydantic's `input_value=` rendering
+  reaching the sentence and the log; the escaping-chain test failed on
+  the sentinel being reachable through the second failure's
+  `__context__`; the abort-reason pin failed on the empty string
+  rendering as `none`.
 - The suites that pin the event surface and the boundary
   (`test_event_schema_conformance.py`, `test_event_surface_pins.py`,
   `test_server_event_pins.py`, `test_session_characterization.py`,
-  `test_boundary_contract.py`) pass unmodified.
+  `test_boundary_contract.py`) pass unmodified. `test_boundary_contract.py`
+  drives an abort of its own and is untouched by the reason
+  classification, since the reason it sends is not what it asserts on.
+
+## Review round, 2026-08-19
+
+The external review of the PR returned four findings, all accepted and
+all fixed here, one commit each.
+
+1. **P1: a malformed abort reason still leaked.** The closed set covers
+   an abort that parses, and `protocol/messages.py` refused the rest
+   with pydantic's own rendering, `input_value=` included, which
+   `device/session.py` logs verbatim. Fixed as described under "#185,
+   the malformed path" above. Every other behavior was checked and
+   kept: a malformed hello still closes with the same fixed reason, any
+   other malformed message is still ignored with the session up (the
+   new session-level test proves it by answering a turn afterwards),
+   and the existing refusal test still matches, since the sentence
+   still names the message type.
+2. **P1: the sanitized arms did their work inside the `except` suite.**
+   A second failure raised there escapes with the provider's exception
+   attached as `__context__`, so the message the line took care not to
+   print goes out anyway. Both arms now capture the class name, leave
+   the suite, and report and clean up after it. The new test drives a
+   secret-bearing confirmation failure into a device whose
+   `resume_output` raises, and walks the escaping exception's chain.
+3. **P2: `reason or "none"` folded the empty string into absence.**
+   Absence is now classified first, `DEVICE_ABORT_REASONS` holds only
+   what the firmware sends, and the test pins all four cases in order
+   rather than asserting substrings that survive a collapse.
+4. **P3: the `DeviceGone` docstring still claimed filler playback
+   suppresses `RuntimeError`.** It names the one remaining broad site,
+   the reply's closing `tts stop` pair, and records the filler's
+   narrowing beside it.
 
 ## Files modified
 
 - `samtal-server/samtal_server/runtime/turntaking.py`
 - `samtal-server/samtal_server/runtime/filler_runner.py`
 - `samtal-server/samtal_server/runtime/pipeline.py`
+- `samtal-server/samtal_server/protocol/messages.py`
+- `samtal-server/samtal_server/device/boundary.py`
 - `samtal-server/tests/support/events.py`
 - `samtal-server/tests/unit/test_turntaking.py`
 - `samtal-server/tests/unit/test_filler_runner.py`
 - `samtal-server/tests/unit/test_session.py`
+- `samtal-server/tests/unit/test_protocol_messages.py`
 - `CHANGELOG.md`
