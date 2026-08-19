@@ -31,6 +31,37 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Fixed
 
+- **DEBUG logging no longer puts the request line, a device's token or
+  a device frame back on the log** (#124). The vendor floor in
+  `logs.configure` covered the four libraries that speak to a provider
+  and left the two that carry this deployment's own bytes.
+  `uvicorn.error` is the HTTP server's trace: at debug it prints the
+  request line and every request header, so the OTA path's secret
+  segment and a device's bearer token came back on the surface the
+  access log is turned off to keep them off, and uvicorn hands that
+  same logger to the websockets protocol, so those records also
+  rendered every device frame's payload with the text decoded.
+  `sqlalchemy` is the same hole one level louder, since an engine whose
+  logger is enabled for INFO echoes every statement with the parameters
+  bound to it; its floor is WARNING for that reason. An operator who
+  genuinely wants a wire trace still raises the logger by name, which
+  no configuration key does for them.
+
+- **A read or a delete of something that is not there names its
+  section, not what was addressed** (#132). Four entity kinds and the
+  devices map answered with the identity that had been asked for
+  (`providers.llm.<name>: no such provider` and its siblings), and that
+  identity is a value nothing in this deployment has validated: it
+  arrived in a URL path or on a command line, and the sentence built
+  from it travels out as a 404 body, a printed line and a log record.
+  Every section now answers one fixed sentence, including the ones
+  whose identity has a rigid shape, and so do the two secret-slot
+  refusals. The sentences an operator reads change: `providers: no
+  provider of that name exists for that stage`, `mcp_servers: no MCP
+  server of that name exists`, `agents: no agent of that name exists`,
+  `devices: no device with that MAC is bound`, and `<section>: no
+  secret is stored for that slot`.
+
 - **A failed barge-in confirmation names the class it failed with, not
   what the provider said** (#183). The gate ladder's catch was a
   `logger.exception`, so an ASR failure put the provider's message, the
