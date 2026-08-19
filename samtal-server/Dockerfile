@@ -62,7 +62,7 @@ RUN set -eu; \
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project --no-dev --no-editable $(cat /tmp/extras)
 
-COPY samtal_server ./samtal_server
+COPY src ./src
 COPY README.md ./
 RUN uv sync --frozen --no-dev --no-editable $(cat /tmp/extras)
 
