@@ -32,10 +32,12 @@ from tests.support.catalog import scratch_catalog
 from tests.support.schema import scratch_registry
 from vinga_server import events as events_module
 from vinga_server.events import (
+    SESSION_LOGGER,
     UNBUILT_LABEL,
     Emission,
     EventSchemaError,
     ServerEvents,
+    SessionEvents,
     attach_server_tap,
     detach_server_tap,
 )
@@ -49,14 +51,17 @@ from vinga_server.events.values import ConfiguredPath, Count, Identifier, Sessio
 from vinga_server.events_schema import (
     SCHEMA_VIOLATION,
     SCHEMA_VIOLATION_MESSAGE,
+    SESSION_ID,
     EventSpec,
     EventVariant,
     arg_count,
+    arg_id,
     arg_identifier,
     arg_path,
     count,
     identifier,
     server_payload,
+    session_payload,
 )
 
 CHANNEL = "vinga_server.conversations.store"
@@ -112,6 +117,7 @@ def _scratch() -> Iterator[None]:
         declare("scratch_elsewhere", variants=(Elsewhere,))
         declare("measured", variants=(Measured,))
         declare("recording", variants=(Recording,))
+        declare("conversational", variants=(Conversational,))
         yield
 
 
@@ -251,6 +257,112 @@ def test_a_typed_emission_reaches_the_log_on_its_own_channel(
     assert record.args == (2, 90)
     assert record.event == "conversations_pruned"  # type: ignore[attr-defined]
     assert record.sessions == 2  # type: ignore[attr-defined]
+
+
+# --- the session emitter, whose base is an identity -------------------
+#
+# The difference the session channel makes: the emitter contributes two
+# values as well as the event's name, both of them value types, and the
+# sentence renders one of them. Both are built inside the guard, because
+# a session id is a value like any other and a malformed one has to
+# refuse where everything else refuses.
+
+
+@dataclass(frozen=True)
+class Conversational(Variant):
+    CHANNEL: ClassVar[str] = SESSION_LOGGER
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: measured %s"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "stage")
+
+    stage: Identifier
+
+
+CONVERSATIONAL_SPEC = (
+    EventSpec(
+        "conversational",
+        variants=(
+            EventVariant(
+                channel=SESSION_LOGGER,
+                level=logging.INFO,
+                message="session %s: measured %s",
+                args=(arg_id(SESSION_ID), arg_identifier()),
+                fields=session_payload(stage=identifier()),
+            ),
+        ),
+    ),
+)
+
+
+def test_a_typed_session_emission_is_the_untyped_one(caplog: pytest.LogCaptureFixture) -> None:
+    """Side by side through one emitter, the way the server half is
+    proved: the identity the emitter contributes reaches the payload and
+    the sentence exactly as the spelled-out call put it there."""
+    events = SessionEvents("alpha", clock=lambda: 1.0)
+    events.device = "aa:bb:cc:dd:ee:ff"
+    consumer = Tap()
+    events.attach(consumer)
+
+    with scratch_registry(CONVERSATIONAL_SPEC), caplog.at_level(logging.INFO):
+        events.emit(lambda: Conversational(stage=Identifier("asr")))
+        events.info(
+            "session %s: measured %s",
+            "alpha",
+            "asr",
+            event="conversational",
+            stage="asr",
+        )
+
+    typed, untyped = consumer.seen
+    assert shape(typed) == shape(untyped)
+    assert typed.payload == {
+        "event": "conversational",
+        "session": "alpha",
+        "device": "aa:bb:cc:dd:ee:ff",
+        "stage": "asr",
+    }
+    assert typed.args == ("alpha", "asr")
+
+
+def test_a_session_event_before_the_mac_is_known_names_no_device() -> None:
+    """The nullability of the base is a fact rather than a hedge: the
+    events a session emits before its Device-Id is normalized name no
+    device, and the record says so with a key rather than by dropping
+    one."""
+    events = SessionEvents("alpha", clock=lambda: 1.0)
+    consumer = Tap()
+    events.attach(consumer)
+
+    events.emit(lambda: Conversational(stage=Identifier("asr")))
+
+    assert only(consumer).payload["device"] is None
+
+
+def test_a_session_emission_answers_the_reading_it_was_stamped_with() -> None:
+    """The one caller that reads the answer is the turn record, whose
+    offset has to equal its event's rather than a second reading taken
+    beside it."""
+    events = SessionEvents("alpha", clock=lambda: 41.5)
+
+    assert events.emit(lambda: Conversational(stage=Identifier("asr"))) == 41.5
+
+
+def test_an_unusable_identity_is_refused_inside_the_guard() -> None:
+    """A session id is a value type, so constructing one can refuse, and
+    it must refuse where the variant's own values refuse rather than on
+    whatever path was emitting."""
+    events = SessionEvents("has a space", clock=lambda: 1.0)
+    consumer = Tap()
+    events.attach(consumer)
+    events_module.set_enforcement(events_module.FORGIVING)
+
+    events.emit(lambda: Conversational(stage=Identifier("asr")))
+
+    assert only(consumer).payload == {
+        "event": SCHEMA_VIOLATION,
+        "session": "has a space",
+        "device": None,
+    }
 
 
 # --- the guard, which no caller can prove -----------------------------
