@@ -323,8 +323,9 @@ def test_the_forgiving_complaint_names_the_fault_and_nothing_else(
     emitter: ServerEvents, caplog: pytest.LogCaptureFixture
 ) -> None:
     """Rendered by equality rather than hunted by substring: the
-    complaint's two halves are a fixed label and a fixed code with a
-    class name, and there is no third thing it may say."""
+    complaint's two halves are a fixed label and a fixed code, and there
+    is no third thing it may say. Not even the exception's class, which
+    `type()` lets a caller name whatever it likes."""
     events_module.set_enforcement(events_module.FORGIVING)
 
     with caplog.at_level(logging.INFO):
@@ -335,4 +336,4 @@ def test_the_forgiving_complaint_names_the_fault_and_nothing_else(
         for one in caplog.records
         if one.name == CHANNEL and getattr(one, "event", None) is None
     ]
-    assert complaint.args == (UNBUILT_LABEL, "construction_failed (EventValueError)")
+    assert complaint.args == (UNBUILT_LABEL, "construction_failed")

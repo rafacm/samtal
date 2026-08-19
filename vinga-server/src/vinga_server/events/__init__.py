@@ -444,8 +444,16 @@ BAD_SOURCE_VALUE = "bad_source_value"
 AMBIGUOUS_VARIANT = "ambiguous_variant"
 
 # The typed path's own code: a construction thunk that raised, so no
-# variant exists to judge. Its detail is the exception's class name and
-# never its words, the way a failed tap is reported.
+# variant exists to judge.
+#
+# It carries NO detail, and that is a decision rather than an omission.
+# The obvious detail would be the exception's class name, the way a
+# failed tap is reported, and a class name looks like the safest string
+# in Python. It is not: `type(name, (Exception,), {})` takes any string
+# at all, name validation included, so a thunk that builds its exception
+# out of far-side bytes can put those bytes in a class name and the
+# refusal would print them. What a caller supplies is a caller's, and
+# the surface says nothing about it.
 CONSTRUCTION_FAILED = "construction_failed"
 
 # What an event that is not in the registry is called in a diagnostic,
@@ -1030,10 +1038,12 @@ def _construct(
     was wrong with it.
 
     Nothing here raises, which is what lets the caller decide between
-    the two modes AFTER the handler has ended. The exception itself is
-    never carried out: only its class name is, so a lane's stderr
-    cannot receive what it was holding through `__cause__` or
-    `__context__` either.
+    the two modes AFTER the handler has ended, so a lane's stderr cannot
+    receive what the exception was holding through `__cause__` or
+    `__context__` either. Nothing about the exception leaves this
+    function at all, its class name included: a class name is an
+    ordinary string that `type()` accepts without validating, so an
+    exception built from far-side bytes carries them in its name.
     """
     try:
         variant = build()
@@ -1051,9 +1061,11 @@ def _construct(
             message=logged.template,
             args=logged.args,
         )
-    except Exception as exc:  # noqa: BLE001 - telemetry never costs a reply
-        failure = type(exc).__name__
-    return _Refusal(UNBUILT_LABEL, Fault(CONSTRUCTION_FAILED, failure))
+    except Exception:  # noqa: BLE001 - telemetry never costs a reply
+        # Deliberately unbound: the exception is not looked at, so there
+        # is nothing of it to leak by accident later.
+        pass
+    return _Refusal(UNBUILT_LABEL, Fault(CONSTRUCTION_FAILED))
 
 
 def _built(
@@ -1066,11 +1078,12 @@ def _built(
 
     Strict refuses, the way it refuses an untyped violation and with a
     sentence of the same shape. Forgiving says so once on the emitter's
-    own channel and dispatches the declared `schema_violation` instead,
-    built from registry-owned identifiers only: no caller-supplied
-    name, no field value, no exception message and no partially
-    rendered text, because a thunk that raised may have raised holding
-    exactly the bytes this surface exists to keep out.
+    own channel and dispatches the declared `schema_violation` instead.
+    Both sentences are built from registry-owned identifiers only: no
+    caller-supplied name, no field value, no exception message, no
+    exception CLASS name, and no partially rendered text, because a
+    thunk that raised may have raised holding exactly the bytes this
+    surface exists to keep out.
     """
     outcome = _construct(channel, base, build)
     if isinstance(outcome, Checked):
