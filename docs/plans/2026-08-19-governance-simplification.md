@@ -460,3 +460,63 @@ implementation doc; behavioral tests through public interfaces with
 documented white-box exceptions are M6's rule; the compatibility
 floor and reset policy are M7's ADR, documented with no pruning; and
 the milestone split above keeps every step independently reviewable.
+
+## Plan review round (2026-08-19)
+
+External review: codex-cli 0.147.0, model gpt-5.6-sol, read-only
+against commit ae18510a. Verdict: ready after the P1/P2 amendments.
+Findings condensed but faithful; each carries its resolution.
+
+**1 (P1). M1 cannot add an `events` package beside `events.py`.**
+Python resolves `vinga_server.events` to the package, making the
+module unreachable; the plan claimed the old machinery stays
+untouched while adding the package.
+
+**2 (P1). One class-level channel and level cannot represent the
+contract.** 99 variants exist and at least `session_rejected`
+crosses two channels; the plan's single-channel dataclass model
+contradicts its own risk section.
+
+**3 (P1). Typed construction happens before the proposed guard.**
+`emit(LlmRound(...))` evaluates the constructor outside the guarded
+boundary, so a construction failure escapes on a reply path; frozen
+dataclasses do not enforce annotations at runtime and the repo runs
+no static type checker in CI.
+
+**4 (P2). Absent-versus-null semantics lost.** The current schema
+models `required` and `nullable` separately (`heard.language` is
+conditionally absent); a `str | None` annotation says nothing about
+key omission, and the golden did not pin requiredness.
+
+**5 (P2). `render()` contradicts the preserved `EventTap` seam and
+the byte-identical reference claim.** `Emission` exposes unrendered
+`message` and `args` that `LogTap` consumes; the generated reference
+renders notes, constraints, requiredness and bounds that field
+introspection alone cannot supply.
+
+**6 (P2). `EntityAccess` fails the deletion test.** `ConfigStore`
+already exposes typed public read/write/delete methods per kind;
+the proposed surface would forward arguments to them.
+
+**7 (P2). Moving `notice` out of the spec contradicts the settled
+effect-timing decision.** The issue requires the immutable spec to
+retain effect timing; `notice` is static data-only timing prose.
+
+**8 (P2). M6 does not complete the classification it claims.** Only
+the support module and six files got dispositions; the rule allowed
+any helper to keep a reach-in with a docstring, where the issue
+permits that only for white-box safety invariants.
+
+**9 (P2). M3 omits tests that break when `events_schema.py` goes.**
+`tests/support/schema.py`, `test_events.py`, and
+`test_conversations_session.py` import the registry; the last
+derives permitted stored fields from it.
+
+**10 (P2). The record baseline has no stated proof of path
+exhaustiveness.** A runtime harness proves only paths it executes;
+completeness today comes from the static site inventory.
+
+**11 (P2). The OpenAPI spike can compile while producing an
+unusable client.** Compilation and stable names do not catch
+optional-versus-nullable handling, auth, problem responses, or the
+provider extension properties.
