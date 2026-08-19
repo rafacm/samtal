@@ -317,7 +317,7 @@ push, so each milestone ends with both suites, lint, and the four
 drift checks green, and any milestone that touches the event surface
 carries its baseline proof inside its own PR.
 
-- [x] **[M1: the typed event foundation inside the package move](2026-08-19-governance-simplification-implementation.md#m1-the-typed-event-foundation-inside-the-package-move).** (PR TBD)
+- [x] **[M1: the typed event foundation inside the package move](2026-08-19-governance-simplification-implementation.md#m1-the-typed-event-foundation-inside-the-package-move).** (PR #217)
   First, the mechanical move: `events.py` becomes
   `events/__init__.py` whole, no line changed beyond the move,
   proven by the still-alive pin suites and conformance walk passing
