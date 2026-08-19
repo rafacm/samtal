@@ -42,16 +42,18 @@ from vinga_server import events
 from vinga_server.events import (
     GUARD_MESSAGE,
     REFUSAL_MESSAGE,
+    SESSION_LOGGER,
     UNBUILT_LABEL,
     UNDECLARED_LABEL,
     Emission,
     EventSchemaError,
     ServerEvents,
+    SessionEvents,
     attach_server_tap,
     detach_server_tap,
 )
-from vinga_server.events.catalog import ConversationsDropped, Variant
-from vinga_server.events.values import SessionId
+from vinga_server.events.catalog import ConversationsDropped, Heard, Variant
+from vinga_server.events.values import Identifier, LanguageTag, Real, SessionId
 from vinga_server.events_schema import (
     MAC,
     REGISTRY,
@@ -657,3 +659,139 @@ def test_forgiving_recovers_a_construction_without_repeating_its_value(
     assert carrying(caplog, SENTINEL) == set()
     assert SENTINEL not in both_formats(caplog)
     assert SENTINEL not in tap.rendered()
+
+# --- the same guard on the session channel ----------------------------
+#
+# Where the far side is nearest the telemetry. A conversation's events
+# ride beside an utterance, a provider's answer and a device's own
+# bytes, and its emitter has two consumers no server channel has: taps a
+# session attaches for itself, and a capture writing the decision track
+# to disk beside the room audio. So the construction guard is driven
+# again here with both attached, because a value that reached either
+# would be a value written where nobody is looking for it.
+#
+# The two branches are the same two: the sentinel as a value a
+# construction refuses, and the sentinel as the NAME of the class a
+# construction raises.
+
+
+class Recording:
+    """A capture, as the emitter sees one: the three methods, and
+    everything the decision track was handed kept."""
+
+    def __init__(self) -> None:
+        self.payloads: list[dict[str, object]] = []
+
+    def event(self, payload: dict[str, object], now: float) -> None:
+        self.payloads.append(payload)
+
+    def vad(self, speech_ms: float, listening: bool, replying: bool, now: float) -> None:
+        return None
+
+    def dropped(self, reason: str, now: float) -> None:
+        return None
+
+
+def a_refused_conversation() -> Variant:
+    """The sentinel planted where an engine's detected language goes.
+
+    Far-side by provenance and bounded in shape, which is exactly the
+    combination a value type is for: what an ASR answers with is a code,
+    and `LanguageTag` admits nothing else.
+    """
+    return Heard(
+        agent=Identifier("poet"),
+        duration_s=Real(0.5),
+        language=LanguageTag(SENTINEL),
+    )
+
+
+def a_hostile_conversation() -> Variant:
+    """The sentinel as the exception's own class name, on the channel
+    where a provider's exception is one frame away."""
+    raise type(SENTINEL, (Exception,), {})()
+
+
+CONVERSATIONS = (
+    ("the sentinel as a refused value", a_refused_conversation),
+    ("the sentinel as the exception's class name", a_hostile_conversation),
+)
+
+REFUSING_CONVERSATIONS = pytest.mark.parametrize(
+    "build", [one for _, one in CONVERSATIONS], ids=[one for one, _ in CONVERSATIONS]
+)
+
+
+def a_session() -> tuple[SessionEvents, Tap, Recording]:
+    """One session's emitter with both of its consumers attached."""
+    emitter = SessionEvents("alpha", clock=lambda: 1.0)
+    emitter.device = "aa:bb:cc:dd:ee:ff"
+    consumer = Tap()
+    emitter.attach(consumer)
+    capture = Recording()
+    emitter.attach_capture(capture)
+    return emitter, consumer, capture
+
+
+@REFUSING_CONVERSATIONS
+def test_strict_refuses_a_conversation_construction_without_repeating_it(
+    build: Callable[[], Variant], caplog: pytest.LogCaptureFixture
+) -> None:
+    """`args` whole, so `str` and `repr` are pinned with it, and nothing
+    written, dispatched or recorded on the way to the refusal."""
+    events.set_enforcement(events.STRICT)
+    emitter, consumer, capture = a_session()
+
+    with caplog.at_level("DEBUG"), pytest.raises(EventSchemaError) as raised:
+        emitter.emit(build)
+
+    assert raised.value.args == (
+        "the event schema refused an emission of an event that could not "
+        "be built: construction_failed",
+    )
+    assert SENTINEL not in str(raised.value)
+    assert SENTINEL not in repr(raised.value)
+    assert SENTINEL not in repr(raised.value.args)
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    assert caplog.records == []
+    assert consumer.seen == []
+    assert capture.payloads == []
+
+
+@REFUSING_CONVERSATIONS
+def test_forgiving_recovers_a_conversation_construction_without_repeating_it(
+    build: Callable[[], Variant], caplog: pytest.LogCaptureFixture
+) -> None:
+    """The complaint by equality, then the sentinel hunted through every
+    surface it could reach: both shipped formats, the arguments behind
+    them, what the session's own tap was handed, and what the capture
+    wrote to the decision track.
+
+    The recovery keeps the session's identity, which is this server's
+    own minted value rather than anything a far side chose, and carries
+    nothing the thunk was holding.
+    """
+    events.set_enforcement(events.FORGIVING)
+    emitter, consumer, capture = a_session()
+
+    with caplog.at_level("DEBUG"):
+        emitter.emit(build)
+
+    said = [one for one in caplog.records if one.name == SESSION_LOGGER]
+    (complaint,) = [one for one in said if not hasattr(one, "event")]
+    assert complaint.levelno == logging.ERROR
+    assert complaint.msg == REFUSAL_MESSAGE
+    assert complaint.args == (UNBUILT_LABEL, "construction_failed")
+    (recovered,) = [one for one in said if hasattr(one, "event")]
+    assert fields_of(recovered) == {
+        "event": SCHEMA_VIOLATION,
+        "session": "alpha",
+        "device": "aa:bb:cc:dd:ee:ff",
+    }
+    assert recovered.args == ()
+    assert carrying(caplog, SENTINEL) == set()
+    assert SENTINEL not in both_formats(caplog)
+    assert SENTINEL not in consumer.rendered()
+    assert SENTINEL not in repr(capture.payloads)
+    assert capture.payloads, "the capture recorded nothing, so this proves nothing"
