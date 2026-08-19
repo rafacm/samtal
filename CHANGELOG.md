@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
+## 2026-08-19
+
+### Added
+
+- **The design method the architecture review used is written down**
+  (#145). `docs/architecture/design-guide.md` defines the vocabulary
+  the 2026-08-14 review judged plans and diffs by (module, interface,
+  depth, seam, adapter, locality, the composition root) against this
+  codebase rather than in the abstract, states the deletion test and
+  the rule that a test reaches the interface, and works through four
+  merged changes: the prompt assembler as deepening in place (#122),
+  the CLI's response frozensets as one shape encoded twice (#139),
+  `ReplyControl` and `TurnView` as seams a part can state about its
+  parent (#141), and `ToolSource` as one question three sources
+  answer (#140). A 29-line section of `AGENTS.md` carries the short
+  form into every session, since a criterion agents do not read
+  shapes only the code that was already written. The two process
+  skills carry it too: a plan names the modules each milestone
+  deepens and the seams it adds, and the external plan review applies
+  the deletion test to every new module a plan proposes.
+
 ## 2026-08-18
 
 ### Changed
