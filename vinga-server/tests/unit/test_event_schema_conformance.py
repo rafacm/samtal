@@ -454,68 +454,6 @@ SPREAD_INVENTORY: dict[str, Spread] = {
     "vinga_server.ota.poll:_version_two.refusal": Spread(
         LOCAL, local="refusal", alternatives=sets("device code")
     ),
-    # `heard`: only engines that detected carry these, and the two are
-    # independent, since a provider may report a language without a
-    # confidence.
-    "vinga_server.runtime.pipeline:PipelineRuntime._reply.language_fields": Spread(
-        LOCAL,
-        local="language_fields",
-        alternatives=sets(
-            "",
-            "language",
-            "language_confidence",
-            "language language_confidence",
-        ),
-    ),
-    # `llm_retry` and `llm_round`: which configuration entry a provider
-    # is. `provider` and `type` are ATOMIC, which is what the early
-    # return makes them: a provider the registry did not build names
-    # neither. `host` and `model` are independent of each other.
-    "vinga_server.runtime.pipeline:provider_fields": Spread(
-        LOCAL,
-        alternatives=sets(
-            "stage",
-            "stage provider type",
-            "stage provider type host",
-            "stage provider type model",
-            "stage provider type host model",
-        ),
-    ),
-    # `llm_round`: the GenAI usage vocabulary, present where the
-    # provider reported it. Three independent conditions, so eight
-    # shapes.
-    "vinga_server.runtime.pipeline:PipelineRuntime._llm_round_done.tokens": Spread(
-        LOCAL,
-        local="tokens",
-        alternatives=sets(
-            "",
-            "input_tokens",
-            "output_tokens",
-            "first_token_ms",
-            "input_tokens output_tokens",
-            "input_tokens first_token_ms",
-            "output_tokens first_token_ms",
-            "input_tokens output_tokens first_token_ms",
-        ),
-    ),
-    # `provider_failed`: the same provider identity, read once so the
-    # sentence's fragments and the fields cannot disagree.
-    "vinga_server.runtime.pipeline:PipelineRuntime._provider_failed.fields": Spread(
-        DELEGATES, to="vinga_server.runtime.pipeline:provider_fields"
-    ),
-    # `tool_call`: what a call may be named by, which is only ever what
-    # this application authored. Mutually exclusive by construction:
-    # `tool` and `entry` are two branches of one return.
-    "vinga_server.runtime.pipeline:PipelineRuntime._run_one.fields": Spread(
-        DELEGATES, to="vinga_server.runtime.pipeline:_tool_named"
-    ),
-    "vinga_server.runtime.pipeline:_tool_named": Spread(
-        RETURNS, alternatives=sets("tool", "entry", "")
-    ),
-    # `barge_in`: absent when the reply had not yet spoken.
-    "vinga_server.runtime.turntaking:TurnTaking._speaking_ms_field": Spread(
-        RETURNS, alternatives=sets("", "speaking_ms")
-    ),
 }
 
 
@@ -741,8 +679,8 @@ LISTS = frozenset({"identifier_list", "id_list"})
 # stopped reading would fail here rather than turn every kind check
 # above into a pass over an empty set. The numbers fall as the
 # conversion proceeds, because a converted site is not walked at all.
-FIELDS_READ = 70
-ARGUMENTS_READ = 47
+FIELDS_READ = 53
+ARGUMENTS_READ = 34
 
 
 @cache
@@ -1008,15 +946,6 @@ TOKEN_SOURCES: dict[tuple[str, str], tuple[Decides, ...]] = {
     ("capture_declined", "reason"): (
         Decides("vinga_server.capture", KEYWORD, "reason", scope="CaptureStore.open"),
     ),
-    ("session_rejected", "reason"): (
-        Decides(
-            "vinga_server.device.session", KEYWORD, "reason", scope="DeviceSession.run"
-        ),
-        Decides("vinga_server.ws", KEYWORD, "reason", scope="conversation"),
-    ),
-    ("session_closed", "reason"): (
-        Decides("vinga_server.device.session", CONSTANT, "CLOSE_REASONS"),
-    ),
     ("auth_rejected", "reason"): (
         Decides("vinga_server.ws", RETURNED, "refusal_reason"),
     ),
@@ -1082,22 +1011,6 @@ TOKEN_SOURCES: dict[tuple[str, str], tuple[Decides, ...]] = {
         Decides("vinga_server.tools.mcp.reload", RETURNED, "_refusal"),
         Decides("vinga_server.tools.mcp.reload", ARGUMENT, "_refused:0"),
     ),
-    ("barge_in_suppressed", "reason"): (
-        Decides(
-            "vinga_server.runtime.turntaking",
-            KEYWORD,
-            "reason",
-            scope="TurnTaking._gate_barge_in",
-        ),
-    ),
-    ("filler_skipped", "reason"): (
-        Decides(
-            "vinga_server.runtime.filler_runner",
-            KEYWORD,
-            "reason",
-            scope="FillerRunner._fire",
-        ),
-    ),
     ("asr_prompt_echo", "outcome"): (
         Decides(
             "vinga_server.providers.openai_asr",
@@ -1105,12 +1018,6 @@ TOKEN_SOURCES: dict[tuple[str, str], tuple[Decides, ...]] = {
             "_echo_fields:0",
             scope="OpenAiAsr._retry_without_prompt",
         ),
-    ),
-    ("tool_call", "source"): (
-        Decides("vinga_server.runtime.turns", RETURNED, "tool_source", position=0),
-    ),
-    ("tool_call", "arg:1"): (
-        Decides("vinga_server.runtime.turns", RETURNED, "tool_source", position=0),
     ),
 }
 
@@ -1190,20 +1097,19 @@ def decided_values(source: Decides) -> frozenset[str]:
 # Which test pins which emit path. Keyed by the stable identity, never
 # by a line number.
 #
-# The two contract pin suites carry 76 expectations between them, which
-# cover 73 of the 76 paths that remain: `tool_call` has one site and
-# four pins, one per classification, and `barge_in` has two sites
-# sharing two pins. The remaining three, the MCP paths the contract
-# suites never reached, are covered by field-exact assertions in the MCP
-# suites, named here rather than left as a silence.
+# The two contract pin suites cover 46 of the 49 paths that remain. The
+# other three, the MCP paths the contract suites never reached, are
+# covered by field-exact assertions in the MCP suites, named here rather
+# than left as a silence.
 #
-# The conversation store's five paths are not here any more, and their
-# absence is the point rather than a gap: they construct typed variants
-# through the catalog (#210's M1), so this walk cannot see them and has
-# nothing left to reconcile. What replaces them is the golden inventory
-# and the committed record baseline, both of which cover shapes rather
-# than call sites. The whole of this sidecar goes the same way as the
-# last conversion lands.
+# The conversation store's five paths and the session channel's
+# twenty-seven are not here any more, and their absence is the point
+# rather than a gap: they construct typed variants through the catalog
+# (#210's M1 and M2), so this walk cannot see them and has nothing left
+# to reconcile. What replaces them is the golden inventory and the
+# committed record baseline, both of which cover shapes rather than call
+# sites. The whole of this sidecar goes the same way as the last
+# conversion lands.
 
 SURFACE_PINS = "tests/unit/test_event_surface_pins.py"
 SERVER_PINS = "tests/unit/test_server_event_pins.py"
@@ -1248,30 +1154,6 @@ PINNED_BY: dict[tuple[str, str, int], tuple[str, ...]] = {
     ),
     ("vinga_server.device.bindings", "DeviceBindings._warn", 1): (
         f"{SERVER_PINS}::test_device_bindings_unreadable",
-    ),
-    ("vinga_server.device.session", "DeviceSession.run", 1): (
-        f"{SURFACE_PINS}::test_session_rejected_bad_device_id",
-    ),
-    ("vinga_server.device.session", "DeviceSession.run", 2): (
-        f"{SURFACE_PINS}::test_session_rejected_agent_not_loaded",
-    ),
-    ("vinga_server.device.session", "DeviceSession.run", 3): (
-        f"{SURFACE_PINS}::test_session_rejected_no_agent",
-    ),
-    ("vinga_server.device.session", "DeviceSession.run", 4): (
-        f"{SURFACE_PINS}::test_session_open",
-    ),
-    ("vinga_server.device.session", "DeviceSession.run", 5): (
-        f"{SURFACE_PINS}::test_session_limit",
-    ),
-    ("vinga_server.device.session", "DeviceSession.run", 6): (
-        f"{SURFACE_PINS}::test_session_closed",
-    ),
-    ("vinga_server.device.session", "DeviceSession._watch_for_idle", 1): (
-        f"{SURFACE_PINS}::test_session_idle",
-    ),
-    ("vinga_server.device.session", "DeviceSession.send_audio", 1): (
-        f"{SURFACE_PINS}::test_speaking_started",
     ),
     ("vinga_server.filler", "build_agent_fillers", 1): (
         f"{SERVER_PINS}::test_filler_disabled",
@@ -1344,65 +1226,6 @@ PINNED_BY: dict[tuple[str, str, int], tuple[str, ...]] = {
     ("vinga_server.registry", "SessionRegistry.drain", 3): (
         f"{SERVER_PINS}::test_drain_finished",
     ),
-    ("vinga_server.runtime.pipeline", "PipelineRuntime._watchdog_stream", 1): (
-        f"{SURFACE_PINS}::test_llm_retry",
-    ),
-    ("vinga_server.runtime.pipeline", "PipelineRuntime._llm_round_done", 1): (
-        f"{SURFACE_PINS}::test_llm_round",
-    ),
-    ("vinga_server.runtime.pipeline", "PipelineRuntime._provider_failed", 1): (
-        f"{SURFACE_PINS}::test_provider_failed",
-    ),
-    ("vinga_server.runtime.pipeline", "PipelineRuntime._prompt_assembled", 1): (
-        f"{SURFACE_PINS}::test_prompt_assembled",
-    ),
-    ("vinga_server.runtime.pipeline", "PipelineRuntime._reply", 1): (
-        f"{SURFACE_PINS}::test_heard",
-    ),
-    ("vinga_server.runtime.pipeline", "PipelineRuntime._reply", 2): (
-        f"{SURFACE_PINS}::test_replied",
-    ),
-    ("vinga_server.runtime.pipeline", "PipelineRuntime._speak_reply", 1): (
-        f"{SURFACE_PINS}::test_agent_said_and_handover",
-    ),
-    ("vinga_server.runtime.pipeline", "PipelineRuntime._speak_reply", 2): (
-        f"{SURFACE_PINS}::test_agent_said_and_handover",
-    ),
-    ("vinga_server.runtime.pipeline", "PipelineRuntime._run_one", 1): (
-        f"{SURFACE_PINS}::test_tool_call_for_a_builtin",
-        f"{SURFACE_PINS}::test_tool_call_for_a_device_tool",
-        f"{SURFACE_PINS}::test_tool_call_for_a_name_nobody_publishes",
-        f"{SURFACE_PINS}::test_tool_call_for_an_mcp_tool",
-    ),
-    ("vinga_server.runtime.filler_runner", "FillerRunner._fire", 1): (
-        f"{SURFACE_PINS}::test_filler_skipped_for_a_user_still_speaking",
-    ),
-    ("vinga_server.runtime.filler_runner", "FillerRunner._fire", 2): (
-        f"{SURFACE_PINS}::test_filler_skipped_while_a_barge_in_is_confirmed",
-    ),
-    ("vinga_server.runtime.filler_runner", "FillerRunner._fire", 3): (
-        f"{SURFACE_PINS}::test_filler_played",
-    ),
-    ("vinga_server.runtime.turntaking", "TurnTaking.finish_utterance", 1): (
-        f"{SURFACE_PINS}::test_barge_in_confirmed_by_a_transcript",
-        f"{SURFACE_PINS}::test_barge_in_on_a_manual_stop",
-    ),
-    ("vinga_server.runtime.turntaking", "TurnTaking._gate_barge_in", 1): (
-        f"{SURFACE_PINS}::test_barge_in_suppressed_under_the_speech_floor",
-    ),
-    ("vinga_server.runtime.turntaking", "TurnTaking._gate_barge_in", 2): (
-        f"{SURFACE_PINS}::test_barge_in_merged_mid_transcription",
-    ),
-    ("vinga_server.runtime.turntaking", "TurnTaking._gate_barge_in", 3): (
-        f"{SURFACE_PINS}::test_barge_in_suppressed_inside_the_refractory_window",
-    ),
-    ("vinga_server.runtime.turntaking", "TurnTaking._gate_barge_in", 4): (
-        f"{SURFACE_PINS}::test_barge_in_suppressed_with_nothing_transcribed",
-    ),
-    ("vinga_server.runtime.turntaking", "TurnTaking._gate_barge_in", 5): (
-        f"{SURFACE_PINS}::test_barge_in_confirmed_by_a_transcript",
-        f"{SURFACE_PINS}::test_barge_in_on_a_manual_stop",
-    ),
     ("vinga_server.tools.mcp.manager", "McpServerManager._run", 1): (
         f"{SERVER_PINS}::test_mcp_connected",
     ),
@@ -1431,9 +1254,6 @@ PINNED_BY: dict[tuple[str, str, int], tuple[str, ...]] = {
         f"{SERVER_PINS}::test_memory_unreadable",
     ),
     ("vinga_server.ws", "conversation", 1): (f"{SERVER_PINS}::test_auth_rejected",),
-    ("vinga_server.ws", "conversation", 2): (
-        f"{SERVER_PINS}::test_session_rejected_at_capacity",
-    ),
 }
 
 
@@ -1510,15 +1330,16 @@ def test_the_walk_finds_the_whole_surface() -> None:
     """The inventory's own size, so a site that stops being found is a
     failure rather than a smaller silent pass.
 
-    76 sites across 53 events: the surface's 81 and 57 less the
-    conversation store's five paths and four events, which construct
-    typed variants and are therefore invisible to a walk that looks for
-    an `event=` keyword. Their coverage is the golden inventory's and
-    the record baseline's now."""
+    49 sites across 33 events: the surface's 81 and 57 less the
+    conversation store's five paths and four events (#210's M1) and the
+    session channel's twenty-seven paths and twenty events (M2), all of
+    which construct typed variants and are therefore invisible to a walk
+    that looks for an `event=` keyword. Their coverage is the golden
+    inventory's and the record baseline's now."""
     sites = emit_sites()
 
-    assert len(sites) == 76
-    assert len({site.event for site in sites}) == 53
+    assert len(sites) == 49
+    assert len({site.event for site in sites}) == 33
     assert len({site.identity for site in sites}) == len(sites)
 
 
@@ -1645,10 +1466,14 @@ def test_the_classifier_still_reads_what_it_used_to_read() -> None:
     assert (fields, arguments) == (FIELDS_READ, ARGUMENTS_READ)
 
 
-def test_the_classifier_reads_the_four_descriptors_and_their_bounds() -> None:
-    """Named rather than counted, because these four are the whole of
-    what the ADR's amendment admits and the whole of what a wrong bound
-    would mangle."""
+def test_the_classifier_reads_the_descriptors_and_their_bounds() -> None:
+    """Named rather than counted, because these are the whole of what
+    the ADR's amendment admits on the paths this walk still sees and the
+    whole of what a wrong bound would mangle.
+
+    Three where there were four: `session_open`'s client id is the same
+    header bounded the same way, and it is the `ClientId` value type's
+    business now."""
     read = {}
     for site in emit_sites():
         for name, (module, scope, node) in field_producers(site).items():
@@ -1660,7 +1485,6 @@ def test_the_classifier_reads_the_four_descriptors_and_their_bounds() -> None:
         ("ota_check", "board"): (BOARD_LIMIT, False),
         ("ota_check", "firmware"): (FIRMWARE_LIMIT, False),
         ("ota_check", "client"): (CLIENT_ID_LIMIT, True),
-        ("session_open", "client"): (CLIENT_ID_LIMIT, True),
     }
 
 
@@ -1838,8 +1662,9 @@ def test_the_inventory_names_every_spread_the_surface_uses() -> None:
     used = {key for site in emit_sites() for key in site.spreads}
 
     assert used <= set(SPREAD_INVENTORY)
-    # Nine events take part of their payload from a spread.
-    assert len({site.event for site in emit_sites() if site.spreads}) == 9
+    # Three events take part of their payload from a spread; six of the
+    # nine builders were the session channel's and converted with it.
+    assert len({site.event for site in emit_sites() if site.spreads}) == 3
 
 
 def test_every_declared_field_is_produced_somewhere() -> None:
@@ -2030,10 +1855,8 @@ def test_every_pin_the_sidecar_names_exists() -> None:
 
 
 def test_the_two_contract_files_carry_the_pins_they_are_credited_with() -> None:
-    """76 expectations across the two files, covering 73 of the 76
-    paths that remain: `tool_call` has four pins on one site and
-    `barge_in` two pins across two sites. The other three are the MCP
-    suites'.
+    """46 of the 49 paths that remain are pinned by the two contract
+    files; the other three are the MCP suites'.
 
     The numbers move as the conversion does, which is expected
     maintenance of transitional apparatus rather than drift: a converted
@@ -2046,7 +1869,7 @@ def test_the_two_contract_files_carry_the_pins_they_are_credited_with() -> None:
         if all(node.startswith((SURFACE_PINS, SERVER_PINS)) for node in pins)
     }
 
-    assert len(from_contracts) == 73
+    assert len(from_contracts) == 46
     assert len(PINNED_BY) - len(from_contracts) == 3
 
 
@@ -2214,12 +2037,25 @@ def test_no_two_variants_of_an_event_admit_one_payload() -> None:
     assert found == {}
 
 
+PLANTED_VARIANT = schema.EventVariant(
+    channel="vinga_server.app",
+    level=logging.INFO,
+    message="planted %s",
+    args=(schema.arg_identifier(),),
+    fields=schema.server_payload(agent=schema.identifier()),
+)
+
+
 def test_the_ambiguity_check_sees_a_duplicated_variant() -> None:
     """The guard, on a planted registry, since a guard nobody has seen
     fail is a guard nobody has seen. Both spellings of the failure: the
     same variant twice, and one variant whose optional field makes its
-    shapes a superset of another's."""
-    variant = REGISTRY["speaking_started"].variants[0]
+    shapes a superset of another's.
+
+    Planted rather than borrowed from `speaking_started`, which used to
+    supply it: that event constructs a typed variant now, and what is
+    under test is the check rather than any one declaration."""
+    variant = PLANTED_VARIANT
     twice = schema.EventSpec("twice", variants=(variant, variant))
 
     optional = dataclasses.replace(
@@ -2239,14 +2075,17 @@ def test_the_ambiguity_check_sees_a_duplicated_variant() -> None:
 
 
 def test_the_counts_every_document_repeats() -> None:
-    """53 production events still declared here, plus one internal
-    recovery event. Four more are declared in the catalog (#210's M1),
-    which is what makes the surface's own count 57 production events
-    where this module's is 53; the generated reference renders both and
-    prints the total."""
-    assert len(schema.PRODUCTION_EVENTS) == 53
+    """33 production events still declared here, plus one internal
+    recovery event. Twenty-four more are declared in the catalog (#210's
+    M1 and M2), which is what makes the surface's own count 57
+    production events where this module's is 33; the generated reference
+    renders both and prints the total.
+
+    The numbers move as the conversion does, which is expected
+    maintenance of transitional apparatus rather than drift."""
+    assert len(schema.PRODUCTION_EVENTS) == 33
     assert len(schema.INTERNAL_EVENTS) == 1
-    assert len(REGISTRY) == 54
+    assert len(REGISTRY) == 34
     # One variant per channel for the recovery event, which is every
     # channel this server speaks on.
     assert len(REGISTRY[schema.SCHEMA_VIOLATION].variants) == len(schema.CHANNELS) == 14
@@ -2582,8 +2421,21 @@ def test_the_return_extraction_keeps_the_branches_apart() -> None:
 
 def test_the_expansion_of_a_variant_is_its_optional_powerset() -> None:
     """The other half of the equality: a variant with two optional
-    fields admits four shapes, which is exactly what `heard` is."""
-    variant = REGISTRY["heard"].variants[0]
+    fields admits four shapes.
+
+    Planted for the reason the ambiguity check above is: `heard`, whose
+    two language fields are exactly this shape, has converted."""
+    variant = schema.EventVariant(
+        channel="vinga_server.app",
+        level=logging.INFO,
+        message="planted",
+        fields=schema.server_payload(
+            agent=schema.identifier(),
+            duration_s=schema.real(),
+            language=schema.identifier(required=False),
+            language_confidence=schema.real(required=False),
+        ),
+    )
 
     assert expansions(variant) == {
         frozenset({"agent", "duration_s"}),

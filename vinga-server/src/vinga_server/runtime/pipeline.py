@@ -39,6 +39,7 @@ import asyncio
 import contextlib
 import functools
 from collections.abc import AsyncIterator, Callable, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from vinga_server.audio.resample import Resampler
@@ -58,6 +59,46 @@ from vinga_server.device.boundary import (
     SessionInput,
 )
 from vinga_server.events import SessionEvents, logger
+from vinga_server.events.catalog import (
+    AgentSaid,
+    BuiltinToolCall,
+    Handover,
+    Heard,
+    LlmRetry,
+    LlmRetryOfEntry,
+    LlmRound,
+    LlmRoundOfEntry,
+    McpToolCall,
+    PromptAssembled,
+    ProviderFailed,
+    ProviderOfEntryFailed,
+    Replied,
+    UnnamedToolCall,
+    Variant,
+)
+from vinga_server.events.values import (
+    ABSENT,
+    Absent,
+    ClassName,
+    Count,
+    Flag,
+    Fragment,
+    FromEntry,
+    Identifier,
+    LanguageTag,
+    Nothing,
+    PromptSources,
+    ProviderOutcome,
+    ProviderOutcomeToken,
+    QuotedProvider,
+    QuotedToolName,
+    ReachingHost,
+    Real,
+    ToolOutcome,
+    ToolOutcomeToken,
+    UnnamedToolSource,
+    Whole,
+)
 from vinga_server.providers import (
     AgentProviders,
     AsrResult,
@@ -122,52 +163,260 @@ SWITCH_GREETING = (
 DEVICE_ABORT_REASONS = frozenset({"wake_word_detected"})
 
 
-def _tool_named(classified: ToolInvocation) -> tuple[dict[str, str], str]:
-    """What a `tool_call` event may name about the call it describes, as
-    its fields and as the fragment its sentence renders.
+@dataclass(frozen=True)
+class _Entry:
+    """Which configuration entry a provider is, as the events that name
+    one carry it: the entry an operator wrote in the YAML, its type, the
+    host it reaches and the model it runs.
 
-    Only what this application authored. A builtin's name is this
-    server's own; an MCP entry's name is what the operator wrote in
-    their YAML. A device tool's name is the board's vocabulary and an
+    Answered whole or not at all, which is what makes `provider` and
+    `type` atomic: a provider the registry did not build (a test's, a
+    fixture's) has no identity, and an event that cannot name the entry
+    says less rather than guessing.
+
+    `host` is absent for an engine that runs in this process and `model`
+    for a type that has none to name. `model` is the GenAI conventions'
+    `gen_ai.request.model` (#120), which is what makes a round
+    attributable to the model that ran it rather than only to the entry
+    that pointed at one: two entries of a type can name different
+    models, and a turn's token totals blend the rounds of everything
+    that answered it.
+    """
+
+    provider: Identifier
+    type: Identifier
+    host: Identifier | Absent
+    model: Identifier | Absent
+
+
+def _entry_of(provider: object) -> _Entry | None:
+    """The configured entry behind one provider, or None where the
+    registry never built it.
+
+    Called inside a construction thunk, never beside one: every value it
+    builds is validated at construction, and a value that refuses has to
+    refuse where the emitter's guard is holding it.
+    """
+    identity = getattr(provider, "identity", None)
+    if identity is None:
+        return None
+    return _Entry(
+        provider=Identifier(identity.name),
+        type=Identifier(identity.type),
+        host=Identifier(identity.host) if identity.host is not None else ABSENT,
+        model=Identifier(identity.model) if identity.model is not None else ABSENT,
+    )
+
+
+def _tool_fragment(classified: ToolInvocation) -> Fragment:
+    """The fragment a sentence about one call renders where its name
+    would go, which is nothing at all for the two namespaces this
+    surface may not name.
+
+    One home for that decision, so the structured event and the plain
+    line about unparseable arguments cannot come to disagree about which
+    names are this application's to print.
+    """
+    if classified.source == BUILTIN:
+        return QuotedToolName.of(classified.name)
+    if classified.source == MCP and classified.entry is not None:
+        return FromEntry.of(classified.entry)
+    return Nothing("")
+
+
+def _tool_called(
+    classified: ToolInvocation,
+    agent: str,
+    duration_s: float,
+    is_error: bool,
+) -> Variant:
+    """Which `tool_call` shape describes this call.
+
+    Only what this application authored is ever named. A builtin's name
+    is this server's own; an MCP entry's name is what the operator wrote
+    in their YAML. A device tool's name is the board's vocabulary and an
     unknown name is whatever the model invented, and the retained
     surface admits no far-side bytes whichever peer sent them (#154, the
-    content-and-telemetry ADR). Those two events therefore name nothing:
+    content-and-telemetry ADR). The third shape therefore names nothing:
     `source` says which namespace was reached into, and the full name is
     on the store's `tool_invocations` row, where the text switch decides
-    whether it is kept."""
+    whether it is kept.
+    """
+    outcome = ToolOutcomeToken(ToolOutcome.FAILED if is_error else ToolOutcome.ANSWERED)
+    duration_ms = Whole(round(duration_s * 1000))
     if classified.source == BUILTIN:
-        return {"tool": classified.name}, f' "{classified.name}"'
+        return BuiltinToolCall(
+            agent=Identifier(agent),
+            tool=Identifier(classified.name),
+            duration_ms=duration_ms,
+            is_error=Flag(is_error),
+            named=QuotedToolName.of(classified.name),
+            duration_s=Real(duration_s),
+            outcome=outcome,
+        )
     if classified.source == MCP and classified.entry is not None:
-        return {"entry": classified.entry}, f' from entry "{classified.entry}"'
-    return {}, ""
+        return McpToolCall(
+            agent=Identifier(agent),
+            entry=Identifier(classified.entry),
+            duration_ms=duration_ms,
+            is_error=Flag(is_error),
+            named=FromEntry.of(classified.entry),
+            duration_s=Real(duration_s),
+            outcome=outcome,
+        )
+    return UnnamedToolCall(
+        agent=Identifier(agent),
+        source=UnnamedToolSource(classified.source),
+        duration_ms=duration_ms,
+        is_error=Flag(is_error),
+        named=Nothing(""),
+        duration_s=Real(duration_s),
+        outcome=outcome,
+    )
 
 
-def provider_fields(stage: str, provider: object) -> dict[str, Any]:
-    """Which configuration entry a provider is, for an event that names
-    it: the stage it serves, the entry an operator wrote in the YAML,
-    its type, the host it reaches, and the model it runs.
+def _llm_retried(
+    agent: str, stage: str, provider: object, round_: int, elapsed: float
+) -> Variant:
+    """Which `llm_retry` shape describes this stall."""
+    entry = _entry_of(provider)
+    if entry is None:
+        return LlmRetry(
+            agent=Identifier(agent),
+            round=Whole(round_),
+            duration_ms=Whole(round(elapsed * 1000)),
+            stage=Identifier(stage),
+            duration_s=Real(elapsed),
+        )
+    return LlmRetryOfEntry(
+        agent=Identifier(agent),
+        round=Whole(round_),
+        duration_ms=Whole(round(elapsed * 1000)),
+        stage=Identifier(stage),
+        provider=entry.provider,
+        type=entry.type,
+        duration_s=Real(elapsed),
+        host=entry.host,
+        model=entry.model,
+    )
 
-    `host` is omitted for an engine that runs in this process, `model`
-    for a type that has none to name, and the rest for a provider the
-    registry did not build (a test's, a fixture's): an event that cannot
-    name the entry says less rather than guessing.
 
-    `model` is the GenAI conventions' `gen_ai.request.model` (#120),
-    which is what makes a round attributable to the model that ran it
-    rather than only to the entry that pointed at one: two entries of a
-    type can name different models, and a turn's token totals blend the
-    rounds of everything that answered it."""
-    identity = getattr(provider, "identity", None)
-    fields: dict[str, Any] = {"stage": stage}
-    if identity is None:
-        return fields
-    fields["provider"] = identity.name
-    fields["type"] = identity.type
-    if identity.host is not None:
-        fields["host"] = identity.host
-    if identity.model is not None:
-        fields["model"] = identity.model
-    return fields
+def _reported(
+    usage: Usage | None, first_token_ms: int | None
+) -> tuple[Count | Absent, Count | Absent, Whole | Absent]:
+    """What a round says about its size and its first token.
+
+    Token counts appear where the provider reported them; their absence
+    is a fact about the endpoint rather than a zero. `first_token_ms`
+    times the first spoken token, so a round that only asked for a tool
+    carries none: there was no token, and timing the tool call instead
+    would report the whole generation as its own time to first token.
+    """
+    return (
+        Count(usage.prompt_tokens)
+        if usage is not None and usage.prompt_tokens is not None
+        else ABSENT,
+        Count(usage.completion_tokens)
+        if usage is not None and usage.completion_tokens is not None
+        else ABSENT,
+        Whole(first_token_ms) if first_token_ms is not None else ABSENT,
+    )
+
+
+def _llm_rounded(
+    agent: str,
+    stage: str,
+    provider: object,
+    round_: int,
+    turns: int,
+    elapsed: float,
+    usage: Usage | None,
+    first_token_ms: int | None,
+) -> Variant:
+    """Which `llm_round` shape describes this generation."""
+    inputs, outputs, first = _reported(usage, first_token_ms)
+    entry = _entry_of(provider)
+    if entry is None:
+        return LlmRound(
+            agent=Identifier(agent),
+            round=Whole(round_),
+            turns=Count(turns),
+            duration_ms=Whole(round(elapsed * 1000)),
+            stage=Identifier(stage),
+            duration_s=Real(elapsed),
+            input_tokens=inputs,
+            output_tokens=outputs,
+            first_token_ms=first,
+        )
+    return LlmRoundOfEntry(
+        agent=Identifier(agent),
+        round=Whole(round_),
+        turns=Count(turns),
+        duration_ms=Whole(round(elapsed * 1000)),
+        stage=Identifier(stage),
+        provider=entry.provider,
+        type=entry.type,
+        duration_s=Real(elapsed),
+        host=entry.host,
+        model=entry.model,
+        input_tokens=inputs,
+        output_tokens=outputs,
+        first_token_ms=first,
+    )
+
+
+def _provider_failure(
+    agent: str, stage: str, provider: object, failure: BaseException, elapsed: float
+) -> Variant:
+    """Which `provider_failed` shape describes this failure.
+
+    The class name is reported and the exception's message is not, which
+    the value types now make structural rather than careful: `ClassName`
+    is built from the exception itself, and there is no value in this
+    vocabulary a message could be constructed as.
+
+    Which failure is a wait is a question of type. Every provider raises
+    `ProviderCallTimeout` for its SDK's timeouts and that is a
+    `TimeoutError`, as are `asyncio.TimeoutError` and the watchdog's own
+    `FirstTokenTimeout`, so one `isinstance` covers the lot (#137). It
+    used to be decided by looking for "Timeout" in the class name,
+    because the SDKs' own classes agreed on nothing:
+    `openai.APITimeoutError` is an `APIConnectionError` and
+    `httpx.TimeoutException` inherits from neither.
+    """
+    outcome = ProviderOutcomeToken(
+        ProviderOutcome.TIMED_OUT
+        if isinstance(failure, TimeoutError)
+        else ProviderOutcome.FAILED
+    )
+    entry = _entry_of(provider)
+    if entry is None:
+        return ProviderFailed(
+            agent=Identifier(agent),
+            error=ClassName.of(failure),
+            duration_ms=Whole(round(elapsed * 1000)),
+            stage=Identifier(stage),
+            named=Nothing(""),
+            outcome=outcome,
+            duration_s=Real(elapsed),
+            where=Nothing(""),
+        )
+    return ProviderOfEntryFailed(
+        agent=Identifier(agent),
+        error=ClassName.of(failure),
+        duration_ms=Whole(round(elapsed * 1000)),
+        stage=Identifier(stage),
+        provider=entry.provider,
+        type=entry.type,
+        named=QuotedProvider.of(entry.provider.carried()),
+        outcome=outcome,
+        duration_s=Real(elapsed),
+        where=ReachingHost.of(
+            None if isinstance(entry.host, Absent) else entry.host.carried()
+        ),
+        host=entry.host,
+        model=entry.model,
+    )
 
 
 class FirstTokenTimeout(TimeoutError):
@@ -528,16 +777,17 @@ class PipelineRuntime:
                     )
                     self._provider_failed("llm", provider, failure, elapsed)
                     raise failure from exc
-                self._events.warning(
-                    "session %s: no first token after %.1f s, retrying round %d",
-                    self.session_id,
-                    elapsed,
-                    self._llm_round,
-                    event="llm_retry",
-                    agent=self._agent,
-                    round=self._llm_round,
-                    duration_ms=round(elapsed * 1000),
-                    **provider_fields("llm", provider),
+                # The loop variable is read by a thunk the emitter calls
+                # before this iteration ends, so there is no late binding
+                # for B023 to be about.
+                self._events.emit(
+                    lambda: _llm_retried(
+                        self._agent,
+                        "llm",
+                        provider,
+                        self._llm_round,
+                        elapsed,  # noqa: B023
+                    )
                 )
                 continue
             if not isinstance(first, StreamStarted):
@@ -582,27 +832,20 @@ class PipelineRuntime:
         calls after the stream has ended."""
         loop = asyncio.get_running_loop()
         elapsed = loop.time() - began
-        tokens: dict[str, Any] = {}
-        if usage is not None and usage.prompt_tokens is not None:
-            tokens["input_tokens"] = usage.prompt_tokens
-        if usage is not None and usage.completion_tokens is not None:
-            tokens["output_tokens"] = usage.completion_tokens
-        if first_token_at is not None:
-            tokens["first_token_ms"] = round((first_token_at - began) * 1000)
-        self._events.info(
-            "session %s: %s round %d took %.2f s over %d turns",
-            self.session_id,
-            self._agent,
-            self._llm_round,
-            elapsed,
-            len(working),
-            event="llm_round",
-            agent=self._agent,
-            round=self._llm_round,
-            turns=len(working),
-            duration_ms=round(elapsed * 1000),
-            **provider_fields("llm", provider),
-            **tokens,
+        first_token_ms = (
+            None if first_token_at is None else round((first_token_at - began) * 1000)
+        )
+        self._events.emit(
+            lambda: _llm_rounded(
+                self._agent,
+                "llm",
+                provider,
+                self._llm_round,
+                len(working),
+                elapsed,
+                usage,
+                first_token_ms,
+            )
         )
         # Counted here rather than where the round starts, so that the
         # turn's rounds, its summed duration and its token totals all
@@ -610,7 +853,7 @@ class PipelineRuntime:
         # the set an `llm_round` row exists for.
         self._turn.round_done(
             round(elapsed * 1000),
-            tokens.get("first_token_ms"),
+            first_token_ms,
             None if usage is None else usage.prompt_tokens,
             None if usage is None else usage.completion_tokens,
         )
@@ -644,23 +887,8 @@ class PipelineRuntime:
         else. What the class does not say, the fields do: the stage,
         the entry, its type, and the host.
         """
-        fields = provider_fields(stage, provider)
-        named = f' "{fields["provider"]}"' if "provider" in fields else ""
-        where = f" reaching {fields['host']}" if "host" in fields else ""
-        self._events.warning(
-            "session %s: %s provider%s %s after %.2f s%s: %s",
-            self.session_id,
-            stage,
-            named,
-            "timed out" if isinstance(exc, TimeoutError) else "failed",
-            elapsed,
-            where,
-            type(exc).__name__,
-            event="provider_failed",
-            agent=self._agent,
-            error=type(exc).__name__,
-            duration_ms=round(elapsed * 1000),
-            **fields,
+        self._events.emit(
+            lambda: _provider_failure(self._agent, stage, provider, exc, elapsed)
         )
 
     def _activate_agent(self, name: str) -> None:
@@ -718,15 +946,12 @@ class PipelineRuntime:
         inspection surface reads memory fresh and answers its size on
         demand.
         """
-        self._events.info(
-            "session %s: assembled %d characters of prompt for %s",
-            self.session_id,
-            half.characters,
-            agent,
-            event="prompt_assembled",
-            agent=agent,
-            characters=half.characters,
-            sources=half.sizes(),
+        self._events.emit(
+            lambda: PromptAssembled(
+                agent=Identifier(agent),
+                characters=Count(half.characters),
+                sources=PromptSources(half.sizes()),
+            )
         )
 
     async def _reply(self, pcm: bytes, result: AsrResult | None = None) -> None:
@@ -771,14 +996,11 @@ class PipelineRuntime:
             if transcript:
                 await self._output.show_transcript(transcript)
                 # Only engines that detected carry these; a mock or a
-                # pinned language adds no noise to the record.
-                language_fields: dict[str, Any] = {}
-                if result.language is not None:
-                    language_fields["language"] = result.language
-                if result.language_confidence is not None:
-                    language_fields["language_confidence"] = round(
-                        result.language_confidence, 2
-                    )
+                # pinned language adds no noise to the record. Absent
+                # rather than null, which are different answers: an
+                # engine that detected nothing leaves no key rather than
+                # a key holding nothing.
+                confidence = result.language_confidence
                 # What was heard, never the words: the utterance is
                 # content and the conversation store is where content
                 # lives (#120, the content-and-telemetry ADR). What the
@@ -786,14 +1008,19 @@ class PipelineRuntime:
                 # is how long the user spoke and what language the
                 # engine heard it in; the sentence renders exactly that,
                 # so the two halves of this record say the same thing.
-                heard_at = self._events.info(
-                    "session %s: heard %.2f s of speech",
-                    self.session_id,
-                    heard_s,
-                    event="heard",
-                    agent=self._agent,
-                    duration_s=heard_s,
-                    **language_fields,
+                heard_at = self._events.emit(
+                    lambda: Heard(
+                        agent=Identifier(self._agent),
+                        duration_s=Real(heard_s),
+                        language=(
+                            ABSENT
+                            if result.language is None
+                            else LanguageTag(result.language)
+                        ),
+                        language_confidence=(
+                            ABSENT if confidence is None else Real(round(confidence, 2))
+                        ),
+                    )
                 )
                 # The emission's own reading rather than a second one
                 # taken beside it: the store measures both offsets from
@@ -804,8 +1031,8 @@ class PipelineRuntime:
                     heard_at,
                     transcript,
                     heard_s,
-                    language_fields.get("language"),
-                    language_fields.get("language_confidence"),
+                    result.language,
+                    None if confidence is None else round(confidence, 2),
                 )
             else:
                 logger.info("session %s: nothing transcribed", self.session_id)
@@ -863,14 +1090,10 @@ class PipelineRuntime:
                 # heard rather than what was generated, and it is the
                 # one size on this event that is measured rather than
                 # inferred.
-                self._events.info(
-                    "session %s: %s replied in %d sentences",
-                    self.session_id,
-                    self._agent,
-                    len(spoken),
-                    event="replied",
-                    agent=self._agent,
-                    sentences=len(spoken),
+                self._events.emit(
+                    lambda: Replied(
+                        agent=Identifier(self._agent), sentences=Count(len(spoken))
+                    )
                 )
             # Beside `replied` and for the same reason: this is where a
             # reply ends however it ended, so a cancelled or a failed one
@@ -936,14 +1159,10 @@ class PipelineRuntime:
                 # `replied` reports the whole of it: which agent, and how
                 # many sentences of it the user heard. Never the words,
                 # which are the store's (#120).
-                self._events.info(
-                    "session %s: %s said %d sentences",
-                    self.session_id,
-                    self._agent,
-                    len(spoken),
-                    event="agent_said",
-                    agent=self._agent,
-                    sentences=len(spoken),
+                self._events.emit(
+                    lambda: AgentSaid(
+                        agent=Identifier(self._agent), sentences=Count(len(spoken))
+                    )
                 )
                 spoken.clear()
             previous = self._agent
@@ -954,14 +1173,13 @@ class PipelineRuntime:
             self._turn.leg_ended(previous, said)
             self._activate_agent(target)
             switches_left -= 1
-            self._events.info(
-                "session %s: handed over from agent %s to %s",
-                self.session_id,
-                previous,
-                target,
-                event="handover",
-                from_agent=previous,
-                to_agent=target,
+            # Read by a thunk the emitter calls before this iteration
+            # ends, the way the retry above is.
+            self._events.emit(
+                lambda: Handover(
+                    from_agent=Identifier(previous),  # noqa: B023
+                    to_agent=Identifier(target),  # noqa: B023
+                )
             )
             greeting = Turn("user", SWITCH_GREETING)
 
@@ -1211,20 +1429,8 @@ class PipelineRuntime:
         except Exception as exc:
             content, is_error = f'the tool "{call.name}" failed: {exc}', True
         elapsed = loop.time() - started
-        fields, named = _tool_named(classified)
-        self._events.info(
-            "session %s: %s tool%s took %.2f s%s",
-            self.session_id,
-            classified.source,
-            named,
-            elapsed,
-            " and failed" if is_error else "",
-            event="tool_call",
-            agent=self._agent,
-            source=classified.source,
-            **fields,
-            duration_ms=round(elapsed * 1000),
-            is_error=is_error,
+        self._events.emit(
+            lambda: _tool_called(classified, self._agent, elapsed, is_error)
         )
         self._turn.executed(slot, content, is_error, round(elapsed * 1000))
         return ToolResult(tool_call_id=call.id, content=content, is_error=is_error)
@@ -1287,7 +1493,7 @@ class PipelineRuntime:
             # is structured or not. The length is what tells a truncated
             # object from a model that answered in prose, and the record
             # carries the same fact as its `malformed` flag.
-            _, named = _tool_named(classified)
+            named = _tool_fragment(classified).carried()
             logger.warning(
                 "session %s: %s tool%s got %d characters of unparseable arguments",
                 self.session_id,

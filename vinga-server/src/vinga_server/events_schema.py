@@ -303,10 +303,7 @@ _NAME = r"[\s\S]+"
 EMPTY_FRAGMENT = Grammar(
     "empty_fragment",
     r"",
-    (
-        "vinga_server.runtime.pipeline:_tool_named",
-        "vinga_server.runtime.pipeline:PipelineRuntime._provider_failed",
-    ),
+    ("vinga_server.events.values:Nothing",),
     "The nothing a site renders where it has nothing to add. Declared "
     "rather than left untyped, so a variant that may only say nothing "
     "says exactly that.",
@@ -317,7 +314,7 @@ ALSO_BOUND_TO = Grammar(
     rf"(?: \(also bound to {_NAME}\))?",
     (
         "vinga_server.ota.reply:check_version",
-        "vinga_server.device.session:DeviceSession.run",
+        "vinga_server.events.values:AlsoBoundTo.of",
     ),
     "The tail naming the agents a device is bound to beside the one "
     "that answered, empty for a device bound to exactly one. The names "
@@ -332,7 +329,7 @@ AGENT_LIST = Grammar(
     _NAME,
     (
         "vinga_server.ota.reply:check_version",
-        "vinga_server.device.session:DeviceSession.run",
+        "vinga_server.events.values:AgentList.of",
     ),
     "The configured agent names a device is bound to, comma-joined. "
     "Non-empty, and nothing further: see the tail grammar above for why "
@@ -349,7 +346,7 @@ SESSION_LIST = Grammar(
 QUOTED_TOOL_NAME = Grammar(
     "quoted_tool_name",
     r' "[\s\S]+"',
-    ("vinga_server.runtime.pipeline:_tool_named",),
+    ("vinga_server.events.values:QuotedToolName.of",),
     "A builtin's name, which is this server's own word, bounded here by "
     "the quoting alone. A device tool's "
     "name is the board's vocabulary and an unknown one is whatever the "
@@ -359,7 +356,7 @@ QUOTED_TOOL_NAME = Grammar(
 FROM_ENTRY = Grammar(
     "from_entry",
     r' from entry "[\s\S]+"',
-    ("vinga_server.runtime.pipeline:_tool_named",),
+    ("vinga_server.events.values:FromEntry.of",),
     "The configured MCP entry a call reached, never the far side's own "
     "tool name. Entry names are separately held to `[A-Za-z0-9_-]+` by "
     "the configuration, which makes this grammar a floor rather than "
@@ -370,7 +367,7 @@ FROM_ENTRY = Grammar(
 QUOTED_PROVIDER = Grammar(
     "quoted_provider",
     r' "[\s\S]+"',
-    ("vinga_server.runtime.pipeline:PipelineRuntime._provider_failed",),
+    ("vinga_server.events.values:QuotedProvider.of",),
     "The configuration entry the failing provider is, bounded by the "
     "quoting alone.",
 )
@@ -378,7 +375,7 @@ QUOTED_PROVIDER = Grammar(
 REACHING_HOST = Grammar(
     "reaching_host",
     r"(?: reaching [\s\S]+)?",
-    ("vinga_server.runtime.pipeline:PipelineRuntime._provider_failed",),
+    ("vinga_server.events.values:ReachingHost.of",),
     "Where the call was going, empty for an engine that runs in this "
     "process.",
 )
@@ -394,7 +391,7 @@ ORIGIN_PROVENANCE = Grammar(
 DEVICE_OR_UNIDENTIFIED = Grammar(
     "device_or_unidentified",
     r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}|an unidentified device",
-    ("vinga_server.ws:conversation",),
+    ("vinga_server.events.values:DeviceOrUnidentified.of",),
     "The MAC behind a Device-Id header this server recognizes, or the "
     "fixed phrase. Nothing else: with device auth off nothing has "
     "verified that header, so an unrecognized one names no device at "
@@ -621,7 +618,6 @@ def server_payload(**own: EventField) -> dict[str, EventField]:
 
 # --- the token sets, spelled where they are read ----------------------
 
-CLOSE_REASONS = ("limit", "idle", "drain", "client", "error")
 MCP_CONNECT_REASONS = (
     "transport_failed",
     "initialize_failed",
@@ -629,7 +625,6 @@ MCP_CONNECT_REASONS = (
     "connect_timeout",
 )
 MCP_REFUSAL_REASONS = ("in_progress", "database_busy", "unreadable", "invalid", "unexpected")
-TOOL_SOURCES = ("builtin", "device", "mcp", "unknown")
 ORIGIN_SOURCES = (
     "server.public_url",
     "server.websocket_url",
@@ -1054,630 +1049,7 @@ _SPECS: list[EventSpec] = [
         ),
     ),
     # --- device/session.py: the conversation's own edge --------------
-    EventSpec(
-        "session_rejected",
-        note=(
-            "A device turned away. Emitted on both scopes: the session "
-            "channel for the refusals a session makes after the accept, "
-            "and `vinga_server.ws` for the one the endpoint makes before "
-            "a session can run at all."
-        ),
-        variants=(
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.WARNING,
-                message=(
-                    "session %s rejected: the Device-Id header is not a device MAC "
-                    "(six colon-separated hex pairs)"
-                ),
-                args=(arg_id(SESSION_ID),),
-                fields=session_payload(reason=token({"bad_device_id"})),
-            ),
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.WARNING,
-                message=(
-                    "session %s rejected: device %s is bound to agent %s, which this "
-                    "server has not loaded; restart to load it"
-                ),
-                args=(arg_id(SESSION_ID), arg_id(MAC), arg_composed(AGENT_LIST)),
-                fields=session_payload(reason=token({"agent_not_loaded"})),
-            ),
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.WARNING,
-                message=(
-                    "session %s rejected: device %s has no agent: bind it under devices "
-                    "or set default_agent"
-                ),
-                args=(arg_id(SESSION_ID), arg_id(MAC)),
-                fields=session_payload(reason=token({"no_agent"})),
-            ),
-            EventVariant(
-                channel="vinga_server.ws",
-                level=logging.WARNING,
-                message="refused a websocket handshake from %s: the server is at capacity",
-                args=(arg_composed(DEVICE_OR_UNIDENTIFIED),),
-                fields=server_payload(
-                    device=machine_id(MAC, nullable=True),
-                    session=machine_id(SESSION_ID),
-                    reason=token({"capacity"}),
-                ),
-            ),
-        ),
-    ),
-    EventSpec(
-        "session_open",
-        note="A conversation starts.",
-        variants=(
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message=(
-                    "session %s open: device %s (client %s) agent %s%s, protocol v%d, "
-                    "%d Hz %d ms frames in"
-                ),
-                args=(
-                    arg_id(SESSION_ID),
-                    arg_id(MAC),
-                    arg_descriptor(CLIENT_BOUNDS),
-                    arg_identifier(),
-                    arg_composed(ALSO_BOUND_TO),
-                    arg_whole(),
-                    arg_whole(),
-                    arg_whole(),
-                ),
-                fields=session_payload(
-                    client=descriptor(
-                        CLIENT_BOUNDS,
-                        nullable=True,
-                        note=(
-                            "The device UUID, bounded for the event only: the capture "
-                            "manifest and the conversation store keep the header as it "
-                            "arrived."
-                        ),
-                    ),
-                    agent=identifier(),
-                    agents=identifier_list(),
-                    protocol=whole(),
-                    revision=identifier(
-                        note=(
-                            "Which build this server is, so every session from here on "
-                            "is attributable to one."
-                        )
-                    ),
-                ),
-            ),
-        ),
-    ),
-    EventSpec(
-        "session_limit",
-        note="The duration cap fires.",
-        variants=(
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message="session %s reached the %.0f s time limit",
-                args=(arg_id(SESSION_ID), arg_real()),
-                fields=session_payload(duration_s=real()),
-            ),
-        ),
-    ),
-    EventSpec(
-        "session_idle",
-        note="The idle timeout hangs up on a realtime session.",
-        variants=(
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message="session %s idle for %.0f s, hanging up",
-                args=(arg_id(SESSION_ID), arg_real()),
-                fields=session_payload(idle_s=real(), duration_s=real()),
-            ),
-        ),
-    ),
-    EventSpec(
-        "session_closed",
-        note="A conversation ends.",
-        variants=(
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message="session %s closed (device %s)",
-                args=(arg_id(SESSION_ID), arg_id(MAC)),
-                fields=session_payload(
-                    duration_s=real(),
-                    reason=token(
-                        CLOSE_REASONS,
-                        note=(
-                            "The first cause to fire, so a drain closing a session an "
-                            "idle timer was about to hang up on reads `drain`."
-                        ),
-                    ),
-                ),
-            ),
-        ),
-    ),
-    EventSpec(
-        "speaking_started",
-        note="The reply's first audio frame goes out.",
-        variants=(
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message="session %s: speaking started",
-                args=(arg_id(SESSION_ID),),
-                fields=session_payload(agent=identifier()),
-            ),
-        ),
-    ),
     # --- runtime/pipeline.py: what happens inside a conversation -----
-    EventSpec(
-        "heard",
-        note=(
-            "An utterance is transcribed. No transcript: what was said is "
-            "the conversation store's, and what an operator measures with "
-            "is how long the user spoke."
-        ),
-        variants=(
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message="session %s: heard %.2f s of speech",
-                args=(arg_id(SESSION_ID), arg_real()),
-                fields=session_payload(
-                    agent=identifier(),
-                    duration_s=real(),
-                    language=machine_id(
-                        LANGUAGE,
-                        required=False,
-                        note="Only engines that detected carry this.",
-                    ),
-                    language_confidence=real(required=False),
-                ),
-            ),
-        ),
-    ),
-    EventSpec(
-        "replied",
-        note="A reply finishes.",
-        variants=(
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message="session %s: %s replied in %d sentences",
-                args=(arg_id(SESSION_ID), arg_identifier(), arg_count()),
-                fields=session_payload(
-                    agent=identifier(),
-                    sentences=count(
-                        note=(
-                            "How many of them the user heard, so a reply a barge-in cut "
-                            "short reports what went out."
-                        )
-                    ),
-                ),
-            ),
-        ),
-    ),
-    EventSpec(
-        "agent_said",
-        note="One agent's part of a reply.",
-        variants=(
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message="session %s: %s said %d sentences",
-                args=(arg_id(SESSION_ID), arg_identifier(), arg_count()),
-                fields=session_payload(agent=identifier(), sentences=count()),
-            ),
-        ),
-    ),
-    EventSpec(
-        "handover",
-        note="`switch_agent` succeeds.",
-        variants=(
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message="session %s: handed over from agent %s to %s",
-                args=(arg_id(SESSION_ID), arg_identifier(), arg_identifier()),
-                fields=session_payload(from_agent=identifier(), to_agent=identifier()),
-            ),
-        ),
-    ),
-    EventSpec(
-        "prompt_assembled",
-        note=(
-            "The know-how half of a prompt is assembled and cached. The "
-            "per-round memory read is deliberately not part of it, which "
-            "is why `memory` is not one of the provenance forms."
-        ),
-        variants=(
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message="session %s: assembled %d characters of prompt for %s",
-                args=(arg_id(SESSION_ID), arg_count(), arg_identifier()),
-                fields=session_payload(
-                    agent=identifier(),
-                    characters=count(),
-                    sources=sources(
-                        note=(
-                            "Each block's size by provenance: how much of the prompt "
-                            "came from where, never any of the prompt itself."
-                        )
-                    ),
-                ),
-            ),
-        ),
-    ),
-    EventSpec(
-        "llm_retry",
-        note="The first-token watchdog cancels a stalled generation and retries the round once.",
-        variants=(
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.WARNING,
-                message="session %s: no first token after %.1f s, retrying round %d",
-                args=(arg_id(SESSION_ID), arg_real(), arg_whole()),
-                fields=session_payload(
-                    agent=identifier(),
-                    round=whole(),
-                    duration_ms=whole(),
-                    stage=identifier(),
-                ),
-                note="A provider the registry did not build names no entry.",
-            ),
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.WARNING,
-                message="session %s: no first token after %.1f s, retrying round %d",
-                args=(arg_id(SESSION_ID), arg_real(), arg_whole()),
-                fields=session_payload(
-                    agent=identifier(),
-                    round=whole(),
-                    duration_ms=whole(),
-                    stage=identifier(),
-                    provider=identifier(),
-                    type=identifier(),
-                    host=identifier(required=False),
-                    model=identifier(
-                        required=False,
-                        note="The GenAI conventions' `gen_ai.request.model`.",
-                    ),
-                ),
-                note=(
-                    "`provider` and `type` are atomic: a provider with an identity "
-                    "carries both. `host` is absent for an engine that runs in this "
-                    "process and `model` for a type that has none to name."
-                ),
-            ),
-        ),
-    ),
-    EventSpec(
-        "llm_round",
-        note="A generation call finishes.",
-        variants=(
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message="session %s: %s round %d took %.2f s over %d turns",
-                args=(
-                    arg_id(SESSION_ID),
-                    arg_identifier(),
-                    arg_whole(),
-                    arg_real(),
-                    arg_count(),
-                ),
-                fields=session_payload(
-                    agent=identifier(),
-                    round=whole(
-                        note=(
-                            "Counts the whole reply rather than one agent's leg, so the "
-                            "generation after a handover is a round of its own."
-                        )
-                    ),
-                    turns=count(note="The cheap proxy for payload size."),
-                    duration_ms=whole(),
-                    stage=identifier(),
-                    input_tokens=count(required=False),
-                    output_tokens=count(required=False),
-                    first_token_ms=whole(
-                        required=False,
-                        note=(
-                            "Times the first spoken token, so a round that only asked "
-                            "for a tool carries none."
-                        ),
-                    ),
-                ),
-            ),
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message="session %s: %s round %d took %.2f s over %d turns",
-                args=(
-                    arg_id(SESSION_ID),
-                    arg_identifier(),
-                    arg_whole(),
-                    arg_real(),
-                    arg_count(),
-                ),
-                fields=session_payload(
-                    agent=identifier(),
-                    round=whole(),
-                    turns=count(),
-                    duration_ms=whole(),
-                    stage=identifier(),
-                    provider=identifier(),
-                    type=identifier(),
-                    host=identifier(required=False),
-                    model=identifier(
-                        required=False,
-                        note=(
-                            "Present where the configured entry names one. The GenAI "
-                            "conventions' `gen_ai.request.model`."
-                        ),
-                    ),
-                    input_tokens=count(
-                        required=False,
-                        note=(
-                            "Present where the provider reported usage; their "
-                            "absence is a fact about the endpoint."
-                        ),
-                    ),
-                    output_tokens=count(required=False),
-                    first_token_ms=whole(required=False),
-                ),
-            ),
-        ),
-    ),
-    EventSpec(
-        "provider_failed",
-        note=(
-            "An ASR, LLM or TTS call fails. The class name is reported and "
-            "the exception's message is not: a type name says what went "
-            "wrong, a message says what a stranger wrote."
-        ),
-        variants=(
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.WARNING,
-                message="session %s: %s provider%s %s after %.2f s%s: %s",
-                args=(
-                    arg_id(SESSION_ID),
-                    arg_identifier(),
-                    arg_composed(EMPTY_FRAGMENT),
-                    arg_token({"timed out", "failed"}),
-                    arg_real(),
-                    arg_composed(EMPTY_FRAGMENT),
-                    arg_class_name(),
-                ),
-                fields=session_payload(
-                    agent=identifier(),
-                    error=class_name(),
-                    duration_ms=whole(),
-                    stage=identifier(),
-                ),
-                note="A provider the registry did not build names no entry and no host.",
-            ),
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.WARNING,
-                message="session %s: %s provider%s %s after %.2f s%s: %s",
-                args=(
-                    arg_id(SESSION_ID),
-                    arg_identifier(),
-                    arg_composed(QUOTED_PROVIDER),
-                    arg_token({"timed out", "failed"}),
-                    arg_real(),
-                    arg_composed(REACHING_HOST),
-                    arg_class_name(),
-                ),
-                fields=session_payload(
-                    agent=identifier(),
-                    error=class_name(
-                        note=(
-                            "A round whose retry also stalled carries "
-                            "`FirstTokenTimeout`."
-                        )
-                    ),
-                    duration_ms=whole(),
-                    stage=identifier(),
-                    provider=identifier(),
-                    type=identifier(),
-                    host=identifier(required=False),
-                    model=identifier(required=False),
-                ),
-            ),
-        ),
-    ),
-    EventSpec(
-        "tool_call",
-        note=(
-            "A tool returns. `source` says which namespace the model "
-            "reached into; the name itself is only ever this server's own "
-            "word for it."
-        ),
-        variants=(
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message="session %s: %s tool%s took %.2f s%s",
-                args=(
-                    arg_id(SESSION_ID),
-                    arg_token({"builtin"}),
-                    arg_composed(QUOTED_TOOL_NAME),
-                    arg_real(),
-                    arg_token({"", " and failed"}),
-                ),
-                fields=session_payload(
-                    agent=identifier(),
-                    source=token({"builtin"}),
-                    tool=identifier(note="The only tool names this server authors."),
-                    duration_ms=whole(),
-                    is_error=flag(),
-                ),
-            ),
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message="session %s: %s tool%s took %.2f s%s",
-                args=(
-                    arg_id(SESSION_ID),
-                    arg_token({"mcp"}),
-                    arg_composed(FROM_ENTRY),
-                    arg_real(),
-                    arg_token({"", " and failed"}),
-                ),
-                fields=session_payload(
-                    agent=identifier(),
-                    source=token({"mcp"}),
-                    entry=identifier(
-                        note="The configured entry, never the far side's tool name."
-                    ),
-                    duration_ms=whole(),
-                    is_error=flag(),
-                ),
-            ),
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message="session %s: %s tool%s took %.2f s%s",
-                args=(
-                    arg_id(SESSION_ID),
-                    arg_token({"device", "unknown"}),
-                    arg_composed(EMPTY_FRAGMENT),
-                    arg_real(),
-                    arg_token({"", " and failed"}),
-                ),
-                fields=session_payload(
-                    agent=identifier(),
-                    source=token({"device", "unknown"}),
-                    duration_ms=whole(),
-                    is_error=flag(),
-                ),
-                note=(
-                    "A device tool's name is the board's vocabulary and an unknown "
-                    "one is whatever the model invented, so neither is named."
-                ),
-            ),
-        ),
-    ),
-    EventSpec(
-        "barge_in",
-        note="Speech cuts a reply short.",
-        variants=(
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message="session %s: barge-in, cancelling the reply in flight",
-                args=(arg_id(SESSION_ID),),
-                fields=session_payload(
-                    speech_ms=whole(),
-                    speaking_ms=whole(
-                        required=False,
-                        note=(
-                            "Milliseconds from `speaking_started` to the cancel "
-                            "decision, absent when the reply had not yet spoken."
-                        ),
-                    ),
-                ),
-            ),
-        ),
-    ),
-    EventSpec(
-        "barge_in_suppressed",
-        note="An interruption is dropped and the reply lives.",
-        variants=(
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message=(
-                    "session %s: barge-in suppressed, %d ms of speech is under the "
-                    "%.0f ms floor"
-                ),
-                args=(arg_id(SESSION_ID), arg_whole(), arg_real()),
-                fields=session_payload(reason=token({"min_speech"}), speech_ms=whole()),
-            ),
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message="session %s: barge-in suppressed inside the refractory window",
-                args=(arg_id(SESSION_ID),),
-                fields=session_payload(reason=token({"refractory"}), speech_ms=whole()),
-            ),
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message="session %s: barge-in suppressed, nothing transcribed",
-                args=(arg_id(SESSION_ID),),
-                fields=session_payload(
-                    reason=token({"no_transcript"}), speech_ms=whole()
-                ),
-            ),
-        ),
-    ),
-    EventSpec(
-        "barge_in_merged",
-        note="An interruption merges with the utterance the reply was transcribing.",
-        variants=(
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message="session %s: barge-in mid-transcription, merging the utterances",
-                args=(arg_id(SESSION_ID),),
-                fields=session_payload(speech_ms=whole()),
-            ),
-        ),
-    ),
-    EventSpec(
-        "filler_skipped",
-        note="The filler timer fired but the user was there first, so no clip played.",
-        variants=(
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message="session %s: filler skipped, the user is speaking (%d ms heard)",
-                args=(arg_id(SESSION_ID), arg_whole()),
-                fields=session_payload(
-                    agent=identifier(),
-                    reason=token({"user_speaking"}),
-                    speech_ms=whole(),
-                ),
-            ),
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message="session %s: filler skipped, a barge-in is being confirmed",
-                args=(arg_id(SESSION_ID),),
-                fields=session_payload(
-                    agent=identifier(), reason=token({"barge_in_pending"})
-                ),
-            ),
-        ),
-    ),
-    EventSpec(
-        "filler_played",
-        note=(
-            "The reply was slow, so a pre-synthesized clip masked the "
-            "wait. Its first frame is the turn's `speaking_started`."
-        ),
-        variants=(
-            EventVariant(
-                channel=SESSION_CHANNEL,
-                level=logging.INFO,
-                message="session %s: no reply audio after %d ms, playing filler %d",
-                args=(arg_id(SESSION_ID), arg_whole(), arg_count()),
-                fields=session_payload(
-                    agent=identifier(),
-                    delay_ms=whole(
-                        note="Measured, from the transcription to the fire."
-                    ),
-                    phrase_index=count(),
-                ),
-            ),
-        ),
-    ),
     # --- providers/openai_asr.py: the prompt-echo guard --------------
     EventSpec(
         "asr_prompt_echo",

@@ -53,7 +53,6 @@ from vinga_server.events.values import (
     Nothing,
     SessionId,
 )
-from vinga_server.events_schema import REGISTRY
 
 CHANNEL = "vinga_server.ota"
 
@@ -408,34 +407,10 @@ def test_a_fixed_token_narrows_the_declared_set_to_the_one_it_says() -> None:
     described = declaration_of(Latched)
 
     assert described is declaration
-    from vinga_server.events.catalog import described as descriptions
 
     fields = descriptions()[-1].variants[0].fields
 
     assert fields["reason"].tokens == frozenset({"drain"})
-
-
-# --- the transcription, held to what it transcribed -------------------
-
-
-def test_the_derived_description_is_the_registrys_own() -> None:
-    """Every event declared in both sources describes the same emission,
-    field notes and argument kinds included.
-
-    The transcription's proof, and deliberately temporary: it compares
-    against the untyped declarations the conversion is about to delete,
-    so it retires with them in the same change that removes the second
-    source. What outlives it is the golden inventory and the record
-    baseline, neither of which can say whether the transcription was
-    faithful, only whether it has moved since.
-    """
-    with scratch_catalog():
-        pass  # the production catalog, not this file's scratch one
-    described = {one.name: one for one in descriptions()}
-    shared = sorted(set(described) & set(REGISTRY))
-
-    assert shared, "nothing is declared in both sources, so this proves nothing"
-    assert [described[name] for name in shared] == [REGISTRY[name] for name in shared]
 
 
 # --- the declaration is what names the event --------------------------

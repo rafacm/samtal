@@ -72,6 +72,27 @@ from vinga_server.device.boundary import (
     SessionInput,
 )
 from vinga_server.events import SessionEvents, logger
+from vinga_server.events.catalog import (
+    RejectedAgentNotLoaded,
+    RejectedBadDeviceId,
+    RejectedNoAgent,
+    SessionClosed,
+    SessionIdle,
+    SessionLimit,
+    SessionOpen,
+    SpeakingStarted,
+)
+from vinga_server.events.values import (
+    AgentList,
+    AgentNames,
+    AlsoBoundTo,
+    ClientId,
+    CloseReasonToken,
+    DeviceId,
+    Identifier,
+    Real,
+    Whole,
+)
 from vinga_server.protocol import framing, messages
 from vinga_server.protocol import mcp as mcp_protocol
 from vinga_server.providers.base import ToolDef
@@ -295,13 +316,7 @@ class DeviceSession:
             # rejection this is, `device` is null because none was
             # understood, and the sentence still says what the header
             # has to hold.
-            self._events.warning(
-                "session %s rejected: the Device-Id header is not a device MAC "
-                "(six colon-separated hex pairs)",
-                self.session_id,
-                event="session_rejected",
-                reason="bad_device_id",
-            )
+            self._events.emit(lambda: RejectedBadDeviceId())
             await self._close(POLICY_VIOLATION, "Device-Id must be the device MAC")
             return
 
@@ -317,24 +332,14 @@ class DeviceSession:
         agents = list(resolution.agents)
         if not agents:
             if resolution.unloaded:
-                self._events.warning(
-                    "session %s rejected: device %s is bound to agent %s, which this "
-                    "server has not loaded; restart to load it",
-                    self.session_id,
-                    mac,
-                    ", ".join(resolution.unloaded),
-                    event="session_rejected",
-                    reason="agent_not_loaded",
+                self._events.emit(
+                    lambda: RejectedAgentNotLoaded(
+                        mac=DeviceId(mac),
+                        unloaded=AgentList.of(tuple(resolution.unloaded)),
+                    )
                 )
             else:
-                self._events.warning(
-                    "session %s rejected: device %s has no agent: bind it under devices "
-                    "or set default_agent",
-                    self.session_id,
-                    mac,
-                    event="session_rejected",
-                    reason="no_agent",
-                )
+                self._events.emit(lambda: RejectedNoAgent(mac=DeviceId(mac)))
             # One sentence for both: the difference is between two
             # things an operator does, and the device can act on
             # neither.
@@ -387,29 +392,23 @@ class DeviceSession:
             # sentence, since dropping a field would not un-render an
             # argument.
             said_client = bounded_descriptor(client_id, CLIENT_ID_LIMIT)
-            self._events.info(
-                "session %s open: device %s (client %s) agent %s%s, protocol v%d, "
-                "%d Hz %d ms frames in",
-                self.session_id,
-                mac,
-                said_client or "unknown",
-                self._agent,
-                f" (also bound to {', '.join(self._agents[1:])})"
-                if len(self._agents) > 1
-                else "",
-                self.protocol_version,
-                hello.audio_params.sample_rate,
-                hello.audio_params.frame_duration,
-                event="session_open",
-                client=said_client or None,
-                agent=self._agent,
-                agents=list(self._agents),
-                protocol=self.protocol_version,
-                # The widest payoff for one field: the JSON logs already
-                # ship to a collector, so every session from here on is
-                # attributable to a build, not only the ones somebody
-                # thought to investigate.
-                revision=revision(),
+            self._events.emit(
+                lambda: SessionOpen(
+                    client=ClientId(said_client) if said_client else None,
+                    agent=Identifier(self._agent),
+                    agents=AgentNames(tuple(self._agents)),
+                    protocol=Whole(self.protocol_version),
+                    # The widest payoff for one field: the JSON logs
+                    # already ship to a collector, so every session from
+                    # here on is attributable to a build, not only the
+                    # ones somebody thought to investigate.
+                    revision=Identifier(revision()),
+                    mac=DeviceId(mac),
+                    said_client=ClientId(said_client or "unknown"),
+                    bound_tail=AlsoBoundTo.of(tuple(self._agents[1:])),
+                    sample_rate=Whole(hello.audio_params.sample_rate),
+                    frame_ms=Whole(hello.audio_params.frame_duration),
+                )
             )
             self._start_device_discovery(hello)
             self._start_idle_watchdog()
@@ -428,12 +427,11 @@ class DeviceSession:
             # exactly what first-cause-wins is for.
             self._latch_close(DEFAULT_CLOSE_REASON)
         except TimeoutError:
-            self._events.info(
-                "session %s reached the %.0f s time limit",
-                self.session_id,
-                self.config.server.limits.max_session_s,
-                event="session_limit",
-                duration_s=self._open_duration_s(),
+            self._events.emit(
+                lambda: SessionLimit(
+                    duration_s=Real(self._open_duration_s()),
+                    limit_s=Real(self.config.server.limits.max_session_s),
+                )
             )
             # The firmware reads a close as the end of a conversation and
             # reconnects on the next wake word, so this is invisible in
@@ -463,13 +461,12 @@ class DeviceSession:
             if self.runtime is not None:
                 await self._cleanly("the conversation", self.runtime.close())
             await self._cleanly("device tool discovery", self._stop_device_discovery())
-            self._events.info(
-                "session %s closed (device %s)",
-                self.session_id,
-                mac,
-                event="session_closed",
-                duration_s=self._open_duration_s(),
-                reason=self._closed_reason(),
+            self._events.emit(
+                lambda: SessionClosed(
+                    duration_s=Real(self._open_duration_s()),
+                    reason=CloseReasonToken(self._closed_reason()),
+                    mac=DeviceId(mac),
+                )
             )
             # Both after session_closed, so that event is the last line
             # of the decision track, the last row of the record, and the
@@ -769,13 +766,10 @@ class DeviceSession:
             if remaining > 0:
                 await asyncio.sleep(remaining)
                 continue
-            self._events.info(
-                "session %s idle for %.0f s, hanging up",
-                self.session_id,
-                timeout,
-                event="session_idle",
-                idle_s=timeout,
-                duration_s=self._open_duration_s(),
+            self._events.emit(
+                lambda: SessionIdle(
+                    idle_s=Real(timeout), duration_s=Real(self._open_duration_s())
+                )
             )
             # A normal closure rather than going away: the server is
             # fine, this conversation is simply over. The firmware reads
@@ -1117,12 +1111,7 @@ class DeviceSession:
             # measurable (#22).
             self._speaking_started = True
             self._speaking_started_at = loop.time()
-            self._events.info(
-                "session %s: speaking started",
-                self.session_id,
-                event="speaking_started",
-                agent=self._agent,
-            )
+            self._events.emit(lambda: SpeakingStarted(agent=Identifier(self._agent)))
         frame_s = OUTPUT_AUDIO.frame_duration / 1000
         if self._pace_start is None:
             self._pace_start = loop.time()

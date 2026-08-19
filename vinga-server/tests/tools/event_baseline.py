@@ -221,14 +221,51 @@ def emitter_names(tree: ast.AST) -> frozenset[str]:
     return frozenset(names)
 
 
-def _event_of(module: str, enclosing: str, node: ast.Call) -> str:
+def _declared_by(name: str) -> str | None:
+    """The event a catalog variant belongs to, or None where the name is
+    not a variant at all."""
+    found = getattr(catalog_module, name, None)
+    if isinstance(found, type) and issubclass(found, catalog_module.Variant):
+        return declaration_of(found).name
+    return None
+
+
+def _chosen_in(tree: ast.AST, name: str) -> frozenset[str]:
+    """The events a variant-choosing function in this module can emit.
+
+    Some paths pick their shape rather than knowing it: `tool_call` says
+    one thing about a builtin, another about an MCP entry and a third
+    about a call this surface may not name, and the choice is a branch
+    the emitting module owns. So the thunk names a function, and the
+    function's own body is read for the variants it constructs.
+
+    One level and no further, deliberately: a chooser that reached
+    through another chooser would be a path whose event this walk could
+    only guess at, and guessing is what the assertion exists to
+    prevent.
+    """
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        if node.name != name:
+            continue
+        for inner in ast.walk(node):
+            if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name):
+                declared = _declared_by(inner.func.id)
+                if declared is not None:
+                    found.add(declared)
+    return frozenset(found)
+
+
+def _event_of(module: str, enclosing: str, tree: ast.AST, node: ast.Call) -> str:
     """Which event one call emits.
 
     An untyped call says so in its `event=` keyword. A typed one says so
-    by the variant it constructs, which is what the declaration behind
-    that variant is named. A shape neither of those reads is refused
-    rather than skipped: a path the walk cannot read is a path the
-    inventory would silently lose.
+    by the variant it constructs, or, where it constructs one of
+    several, by the function that chooses between them. A shape none of
+    those reads is refused rather than skipped: a path the walk cannot
+    read is a path the inventory would silently lose.
     """
     where = f"{module}:{enclosing}"
     named = [keyword for keyword in node.keywords if keyword.arg == "event"]
@@ -239,10 +276,15 @@ def _event_of(module: str, enclosing: str, node: ast.Call) -> str:
     body = node.args[0].body  # type: ignore[attr-defined]
     if not isinstance(body, ast.Call) or not isinstance(body.func, ast.Name):
         raise AssertionError(f"{where}: a thunk that does not construct one variant")
-    variant = getattr(catalog_module, body.func.id, None)
-    if variant is None:
-        raise AssertionError(f"{where}: {body.func.id} is not a catalog variant")
-    return declaration_of(variant).name
+    declared = _declared_by(body.func.id)
+    if declared is not None:
+        return declared
+    chosen = _chosen_in(tree, body.func.id)
+    if len(chosen) != 1:
+        raise AssertionError(
+            f"{where}: {body.func.id} constructs {len(chosen)} events rather than one"
+        )
+    return next(iter(chosen))
 
 
 class _Sites(ast.NodeVisitor):
@@ -256,6 +298,7 @@ class _Sites(ast.NodeVisitor):
 
     def __init__(self, module: str, tree: ast.AST) -> None:
         self.module = module
+        self.tree = tree
         self.receivers = emitter_names(tree)
         self.stack: list[str] = []
         self.ordinals: dict[str, int] = {}
@@ -279,7 +322,7 @@ class _Sites(ast.NodeVisitor):
                     module=self.module,
                     function=enclosing,
                     ordinal=self.ordinals[enclosing],
-                    event=_event_of(self.module, enclosing, node),
+                    event=_event_of(self.module, enclosing, self.tree, node),
                 )
             )
         self.generic_visit(node)

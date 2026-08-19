@@ -762,6 +762,13 @@ class ReachingHost(Fragment):
         return cls(f" reaching {host}" if host is not None else "")
 
 
+# What a refusal says instead of naming a device, wherever there is no
+# device this server recognizes to name. Here rather than at the site,
+# because the grammar below is what admits it and the two would
+# otherwise be a pair that has to agree.
+UNIDENTIFIED_DEVICE: Final = "an unidentified device"
+
+
 @dataclass(frozen=True)
 class DeviceOrUnidentified(Fragment):
     """The MAC behind a Device-Id header this server recognizes, or the
@@ -772,7 +779,7 @@ class DeviceOrUnidentified(Fragment):
 
     @classmethod
     def of(cls, mac: str | None) -> "DeviceOrUnidentified":
-        return cls(mac if mac is not None else "an unidentified device")
+        return cls(mac if mac is not None else UNIDENTIFIED_DEVICE)
 
 
 __all__ = [
@@ -821,6 +828,7 @@ __all__ = [
     "ToolOutcomeToken",
     "ToolSource",
     "ToolSourceToken",
+    "UNIDENTIFIED_DEVICE",
     "UnnamedToolSource",
     "Whole",
 ]

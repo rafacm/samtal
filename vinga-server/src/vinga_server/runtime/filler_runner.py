@@ -29,6 +29,12 @@ from typing import Protocol
 from vinga_server.audio.resample import Resampler
 from vinga_server.device.boundary import DeviceGone, DeviceOutput
 from vinga_server.events import SessionEvents, logger
+from vinga_server.events.catalog import (
+    FillerPlayed,
+    FillerSkippedForBargeIn,
+    FillerSkippedForSpeech,
+)
+from vinga_server.events.values import Count, Identifier, Whole
 from vinga_server.filler import FillerClips
 
 
@@ -188,23 +194,16 @@ class FillerRunner:
             return
         speech_ms = self._turn.speech_ms()
         if speech_ms > 0:
-            self._events.info(
-                "session %s: filler skipped, the user is speaking (%d ms heard)",
-                self.session_id,
-                speech_ms,
-                event="filler_skipped",
-                agent=self._events.agent,
-                reason="user_speaking",
-                speech_ms=speech_ms,
+            self._events.emit(
+                lambda: FillerSkippedForSpeech(
+                    agent=Identifier(self._events.agent),
+                    speech_ms=Whole(speech_ms),
+                )
             )
             return
         if self._turn.output_paused:
-            self._events.info(
-                "session %s: filler skipped, a barge-in is being confirmed",
-                self.session_id,
-                event="filler_skipped",
-                agent=self._events.agent,
-                reason="barge_in_pending",
+            self._events.emit(
+                lambda: FillerSkippedForBargeIn(agent=Identifier(self._events.agent))
             )
             return
         clips = self._fillers.get(self._events.agent or "")
@@ -217,15 +216,12 @@ class FillerRunner:
         index = self._filler_fires % len(clips.clips)
         self._filler_fires += 1
         elapsed_ms = round((asyncio.get_running_loop().time() - armed_at) * 1000)
-        self._events.info(
-            "session %s: no reply audio after %d ms, playing filler %d",
-            self.session_id,
-            elapsed_ms,
-            index,
-            event="filler_played",
-            agent=self._events.agent,
-            delay_ms=elapsed_ms,
-            phrase_index=index,
+        self._events.emit(
+            lambda: FillerPlayed(
+                agent=Identifier(self._events.agent),
+                delay_ms=Whole(elapsed_ms),
+                phrase_index=Count(index),
+            )
         )
         failed: str | None = None
         try:

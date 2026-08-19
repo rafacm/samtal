@@ -50,7 +50,7 @@ from vinga_server.conversations.store import (
 from vinga_server.device import session as session_module
 from vinga_server.device.session import DeviceSession
 from vinga_server.events import Emission
-from vinga_server.events_schema import REGISTRY
+from vinga_server.events_docgen import documented
 from vinga_server.providers import build_agent_providers
 from vinga_server.runtime.pipeline import bespoke_runtime_factory
 from vinga_server.tools.mcp import McpServers
@@ -80,15 +80,23 @@ def read(directory: Path, statement: str) -> list[dict[str, Any]]:
 
 
 def declared_fields() -> dict[str, set[str]]:
-    """Every event's declared field names, from the registry.
+    """Every event's declared field names, from its declaration.
 
-    The vocabulary's authority is the registry (#155): the generated
+    The vocabulary's authority is the declaration (#155): the generated
     reference and the README's index are both rendered from it, and the
     README's own table stopped naming fields when it became a
     name-and-when index. So what the stored field names are checked
     against is the declaration itself rather than a table of prose. The
     base fields are dropped here because the store keeps them on the row
     and on the session rather than in the payload column.
+
+    Read through the documentation generator's own sequence rather than
+    from either source directly, because while #210's conversion is in
+    flight there are two: the typed catalog for an event that has
+    converted and the registry for one that has not. `documented()` is
+    the one place that already answers both, and recreating that union
+    here is exactly the second structure the conversion exists to
+    remove.
     """
     return {
         name: {
@@ -97,7 +105,7 @@ def declared_fields() -> dict[str, set[str]]:
             for field in variant.fields
             if field not in {"event", "session", "device"}
         }
-        for name, spec in REGISTRY.items()
+        for name, spec in documented().items()
     }
 
 
