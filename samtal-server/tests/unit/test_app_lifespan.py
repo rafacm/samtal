@@ -46,6 +46,7 @@ from samtal_server.tools.mcp import McpServers
 from tests.support.apps import entered_app
 from tests.support.checkin import NORMALIZED, check_in, unbound_config
 from tests.support.configs import config_with_agent
+from tests.support.problems import problem
 
 SENTENCE = "the llm provider 'mock' could not be built"
 
@@ -448,4 +449,4 @@ def test_the_mounted_api_holds_the_engine_only_while_the_server_serves(
     late = TestClient(app).get(f"{API_MOUNT_PATH}/config", headers=BEARER)
 
     assert late.status_code == 500
-    assert late.json() == {"detail": UNEXPECTED}
+    assert late.json() == problem(500, UNEXPECTED)

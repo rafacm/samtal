@@ -41,6 +41,7 @@ from samtal_server.config.secrets import (
 )
 from samtal_server.config.store import NOT_A_STAGE, ConfigStore
 from samtal_server.db import DATABASE_FILENAME, open_database, schema
+from tests.support.problems import PROBLEM_KEYS, problem
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 
@@ -413,7 +414,7 @@ def test_a_missing_entity_is_404_in_the_repository_s_own_words(
     response = client.get(path)
 
     assert response.status_code == 404
-    assert response.json() == {"detail": detail}
+    assert response.json() == problem(404, detail)
 
 
 def test_an_identity_that_cannot_be_addressed_at_all_is_422(
@@ -538,7 +539,7 @@ def test_a_read_that_cannot_take_the_lock_is_409(
             holder.close()
 
         assert response.status_code == 409
-        assert set(response.json()) == {"detail"}
+        assert set(response.json()) == PROBLEM_KEYS
         # And the lock let go, the same request answers.
         assert client.get("/config").status_code == 200
 
