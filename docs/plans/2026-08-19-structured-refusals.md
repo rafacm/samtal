@@ -266,6 +266,16 @@ are committed bytes in the OpenAPI document:
 - An unchanged stored secret needs no action on resubmit: the slots in
   `secrets` are informational, and rotating a credential is the secret
   PUT, the only door plaintext enters by.
+- Everything else a read answers is display-only, said explicitly so
+  the writable category has a stated boundary: the envelope's
+  `secrets` mapping; the identity keys of every listing, which
+  address the target URL rather than belonging in a PUT body; both
+  fields of `ConfigDocument`, which has no whole-document PUT; the
+  pending listing, which is runtime state; and everything under
+  `/runtime` and `/conversations`, which is not stored configuration
+  at all. The one writable shape is the addressed entity envelope's
+  `entity`, plus the three argument-shaped bodies the document
+  already describes as arguments.
 
 No writable projection distinct from the display envelope: the marker
 makes the display envelope the writable projection, which is the
@@ -543,6 +553,13 @@ carries its resolution below it.
    conversation reads are not writable configuration. State that only
    the per-entity envelope's `entity` is resubmittable, mark the rest
    display-only, and explain that listing keys select the target URL.
+
+   *Resolution.* Adopted whole. The contract section now closes the
+   writable category explicitly: the addressed entity envelope's
+   `entity` plus the three argument-shaped bodies, and everything
+   else display-only by name, listing identity keys, both
+   `ConfigDocument` fields, pending, `/runtime` and
+   `/conversations`, with listing keys stated as addressing.
 
 7. **P2: custom titles conflict with omitting `type` under RFC
    9457.** With `type` absent (`about:blank`), the RFC says the title
