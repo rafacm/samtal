@@ -14,7 +14,7 @@ asserting it would be a suite that fails once a year for being right.
 
 import pytest
 
-from samtal_server.tools import names
+from samtal_server.tools import builtin, names
 from samtal_server.tools.builtin import (
     DEFAULT_MAXIMUM,
     DEFAULT_MINIMUM,
@@ -49,6 +49,41 @@ def test_a_drawn_number_is_a_whole_number_inside_the_range_asked_for() -> None:
     answer = random_number({"minimum": 1, "maximum": 6})
     assert answer.endswith("drawn at random between 1 and 6")
     assert 1 <= drawn(answer) <= 6
+
+
+def test_the_draw_asks_the_entropy_for_the_whole_width_and_keeps_both_ends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The arithmetic between the bounds and the entropy, which range
+    membership can only sample. `secrets.randbelow(n)` answers 0 through
+    n - 1, so the width it is asked for decides whether the top of the
+    range can ever come up: asking for `maximum - minimum` would make
+    the highest number unreachable, and a die that never rolls a six is
+    a bug nobody notices from inside a range assertion.
+
+    Driven from both ends of what the entropy may answer, which is also
+    what proves the range is inclusive at both ends.
+    """
+    asked: list[int] = []
+
+    def scripted(width: int) -> int:
+        asked.append(width)
+        return returns
+
+    monkeypatch.setattr(builtin.secrets, "randbelow", scripted)
+
+    returns = 0
+    assert drawn(random_number({"minimum": 3, "maximum": 8})) == 3
+    returns = 5
+    assert drawn(random_number({"minimum": 3, "maximum": 8})) == 8
+    assert asked == [6, 6]
+
+    # And the same for the die a call with no arguments gets.
+    returns = 0
+    assert drawn(random_number({})) == DEFAULT_MINIMUM
+    returns = 5
+    assert drawn(random_number({})) == DEFAULT_MAXIMUM
+    assert asked[2:] == [6, 6]
 
 
 def test_every_draw_of_many_stays_inside_the_range() -> None:
