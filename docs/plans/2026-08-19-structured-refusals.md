@@ -114,10 +114,10 @@ Every refusal this API answers becomes one shape, served as
 
 ```json
 {
-  "title": "refused",
+  "title": "Unprocessable Content",
   "status": 422,
   "detail": "invalid provider fragment llm.local:\n  - type: ...",
-  "errors": [{"path": "type", "message": "..."}]
+  "errors": [{"path": "/type", "message": "..."}]
 }
 ```
 
