@@ -25,7 +25,7 @@ from samtal_server.events import SessionEvents
 from samtal_server.providers import AsrResult
 from samtal_server.runtime.turntaking import TurnTaking
 from tests.support.boundary import FakeDevice
-from tests.support.events import events, only
+from tests.support.events import both_formats, events, only
 from tests.support.providers import ScriptedEndpointer
 
 SESSION = "turn-taking"
@@ -33,6 +33,11 @@ SESSION = "turn-taking"
 # A confirmation the ladder can act on, and one it cannot.
 HEARD = AsrResult(text="stop and listen")
 NOTHING = AsrResult(text="   ")
+
+# A credential-shaped value, planted in a failed confirmation's own
+# message and again in the failure behind it, because a rendered
+# traceback prints the whole chain and not just the exception caught.
+SENTINEL = "sk-live-3f0a91c4-never-a-real-credential"
 
 
 class FakeReply:
@@ -232,9 +237,9 @@ async def test_a_confirmed_barge_in_cancels_and_hands_its_transcript_on(
 async def test_a_confirmation_that_could_not_be_run_leaves_the_reply_alone(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """The pre-existing catch that keeps a broken ear from cancelling
-    replies: the frames resume and the utterance is dropped. What it
-    logs is tracked as #183 and not asserted here."""
+    """The catch that keeps a broken ear from cancelling replies: the
+    frames resume and the utterance is dropped. What it logs is the
+    next test's claim."""
     reply = FakeReply()
     reply.confirmation_fails = TimeoutError()
     taking, device = turn_taking(reply, ServerConfig(barge_in_refractory_ms=0))
@@ -249,6 +254,35 @@ async def test_a_confirmation_that_could_not_be_run_leaves_the_reply_alone(
     assert reply.cancels == 0
     assert len(reply.started) == 1
     assert device.paused is False
+    assert taking.output_paused is False
+
+
+async def test_a_failed_confirmation_names_its_class_and_not_what_it_said(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#183: this arm used to be a `logger.exception`, which put the
+    provider's own message, the chain behind it and a traceback of both
+    onto the retained log. What an ASR client raises is far-side text:
+    an SDK that cannot authenticate quotes what it was given, and one
+    that cannot reach its endpoint quotes the URL. The stage, the
+    provider and the host stay diagnosable through `provider_failed`,
+    which the runtime's own watch emits around this call."""
+    reply = FakeReply()
+    failure = TimeoutError(f"transcribe timed out, key {SENTINEL}")
+    failure.__cause__ = ConnectionError(f"401 from the endpoint, key {SENTINEL}")
+    reply.confirmation_fails = failure
+    taking, device = turn_taking(reply, ServerConfig(barge_in_refractory_ms=0))
+
+    with caplog.at_level("INFO"):
+        await replying_about(taking, reply, b"\x01\x02" * 800)
+        await taking.feed(b"\x03\x04" * 800)
+        await taking.finish_utterance(endpointed=True)
+
+    written = both_formats(caplog)
+    assert "barge-in confirmation failed: TimeoutError" in written
+    assert SENTINEL not in written
+    # And the resume-and-drop the line reports is still what happened.
+    assert reply.cancels == 0
     assert taking.output_paused is False
 
 
