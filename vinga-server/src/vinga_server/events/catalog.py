@@ -221,6 +221,45 @@ class Variant:
     ARGS: ClassVar[tuple[str, ...]] = ()
     NOTE: ClassVar[str] = ""
 
+    def verify(self) -> None:
+        """Every value this variant holds is the type its field
+        declares.
+
+        The annotations are the contract and nothing enforces them where
+        a variant is built. `mypy` runs strict over this package only,
+        so every emit site outside it is unchecked, and a frozen
+        dataclass takes whatever it is handed; the checks in
+        `declare()` read the ANNOTATIONS, which is a different question
+        from what a caller passed.
+
+        That gap is a leak rather than an untidiness. A value type is
+        only a claim about provenance while the field holding it is the
+        one that declared it: `Identifier` admits any non-blank string,
+        because a configured name may be anything, so an `Identifier`
+        handed to a field declared `LanguageTag` would put whatever an
+        engine answered with onto the surface under a name that promises
+        a bounded code. `carried()` would serialize it without a word.
+
+        Called inside the emitter's guard, before anything is rendered
+        or serialized, so a mismatch is refused exactly the way a
+        refused value is. The refusal names the variant, the field and
+        the declared type, all three of which are this module's own, and
+        never what it was holding.
+        """
+        for declared in declared_values(type(self)):
+            held = getattr(self, declared.name)
+            where = f"{type(self).__name__}.{declared.name}"
+            if held is None:
+                if not declared.nullable:
+                    raise CatalogError(f"{where} is not nullable")
+                continue
+            if isinstance(held, Absent):
+                if declared.required:
+                    raise CatalogError(f"{where} is required")
+                continue
+            if not isinstance(held, declared.type):
+                raise CatalogError(f"{where} is a {declared.type.__name__}")
+
     def payload(self) -> dict[str, Any]:
         """This variant's own fields, as the plain builtins a record
         carries. The emitter puts the base fields in front of them."""

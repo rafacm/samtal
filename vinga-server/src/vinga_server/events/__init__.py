@@ -1112,6 +1112,11 @@ def _construct(
     """
     try:
         variant = build()
+        # Before anything is rendered or serialized: a value in the
+        # wrong field is a value on the surface under a name that
+        # promises something else, and nothing outside this package
+        # typechecks a construction.
+        variant.verify()
         declaration = declaration_of(type(variant))
         if variant.CHANNEL != channel:
             # The one thing a variant cannot check for itself, and the
