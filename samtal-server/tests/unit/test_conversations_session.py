@@ -440,6 +440,78 @@ def test_a_credential_in_a_provider_url_reaches_no_record(
     assert SENTINEL not in printed.out + printed.err
 
 
+def test_a_rejected_tool_argument_is_kept_as_content_and_named_on_no_telemetry(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, spy: list[Emission]
+) -> None:
+    """Where the two surfaces part, driven with an argument a tool threw
+    away: the model asks `random_number` for a bound that is not a
+    number at all, and the value it sent is credential-shaped.
+
+    Both halves of the answer are the content-and-telemetry record
+    (`docs/adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md`).
+    The conversation store is the system of record for content, gated by
+    the API secret and by the deployment's own `text` switch, and what
+    the model actually passed is the whole point of it: an argument
+    redacted because the tool refused it would hide the evidence of why
+    the tool refused, which is the one question the record exists to
+    answer. Telemetry is metadata only, so the same value must appear on
+    no event field and in no log record, whatever the refusal path does
+    with it.
+
+    The value is recorded because the model wrote it, not because it was
+    accepted. A rejected argument is content exactly as an accepted one
+    is.
+    """
+    config = recording_config(
+        tmp_path,
+        asr_text="roll a die for me",
+        llm={
+            "type": "mock",
+            "reply": "That did not work: {tool_result}.",
+            "tool_when": "roll",
+            "tool_name": "random_number",
+            "tool_arguments": {"minimum": SENTINEL, "maximum": 6},
+        },
+    )
+
+    with caplog.at_level("DEBUG"):
+        with TestClient(create_app(config)) as client:
+            with connect(client) as websocket:
+                shake_hands(websocket)
+                say_something(websocket)
+
+    (call,) = read(tmp_path, "select * from tool_invocations")
+    events = read(tmp_path, "select * from events")
+
+    # The call happened, was this server's own builtin, and failed.
+    assert (call["source"], call["name"], call["is_error"]) == ("builtin", "random_number", 1)
+    # The content channel's contract: what the model passed, verbatim,
+    # rejected value included.
+    assert json.loads(call["arguments"]) == {"minimum": SENTINEL, "maximum": 6}
+    # The refusal the model was handed says what to send instead, and
+    # quotes no value: it travels back to the model and into this same
+    # record, and neither is a reason to echo bytes nobody needs.
+    assert "whole number" in call["result"]
+    assert SENTINEL not in call["result"]
+
+    # Telemetry, at the tap and on the file and in both formats. The
+    # emissions are what every consumer of the events is handed, before
+    # the store's own strip, so they are where "no event field" has to
+    # hold; the rows are what a deployment keeps; the records are the
+    # rendered sentence and the structured fields it carries.
+    assert [e for e in spy if e.payload["event"] == "tool_call"], "no call was recorded"
+    for emission in spy:
+        assert SENTINEL not in json.dumps(emission.payload, default=str)
+    assert events, "the events half of the record is what this claim is about"
+    for row in events:
+        assert SENTINEL not in row["fields"]
+        assert SENTINEL not in json.dumps(row, default=str)
+    for record in caplog.records:
+        rendered = record.getMessage() + repr(record.args) + repr(record.__dict__)
+        assert SENTINEL not in rendered
+    assert SENTINEL not in caplog.text
+
+
 def _bytes_of(directory: Path) -> bytes:
     """The database and its sidecars, which is where a switch saying text
     is not stored has to hold."""
