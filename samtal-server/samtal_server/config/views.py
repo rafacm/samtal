@@ -17,15 +17,35 @@ comments, so here it is structure:
 
 Nothing here decides anything. Existence and precedence are the
 repository's (`store.py`), the masking rule is `secrets.mask` plus the
-two secret-shaped-name predicates on the models, and this module is the
-one place that rule is applied to an entity. It fails closed: a value in
-a secret-bearing key that is not a syntactically valid environment
-reference is masked, whatever it is, because a value that got in another
-way may be a plaintext credential and the command an operator runs to
-find that mistake must not be the one that prints it.
+secret-shaped-name predicate each kind's descriptor names, and this
+module is the one place that rule is applied to an entity. It fails
+closed: a value in a secret-bearing key that is not a syntactically
+valid environment reference is masked, whatever it is, because a value
+that got in another way may be a plaintext credential and the command an
+operator runs to find that mistake must not be the one that prints it.
+
+What is displayed fails open, which is the other half of the same
+decision (#176). A body is derived from the entry's model rather than
+written key by key, so a field added to a model appears in `config show`
+and in the whole-configuration document with nothing here to edit, and
+appears masked if its name is secret-shaped. The alternative was
+measured: a scratch field added during the descriptor work reached the
+store, both APIs, the CLI and both generated references without anybody
+touching them, and was invisible on every read, with no test failing for
+it. Fail-open display and fail-closed masking are not in tension: the
+walk that finds the new field is the walk that masks it, at every depth,
+which is also how a nested credential inside an MCP server's env or
+headers came to be masked (#171).
+
+The record path is the opposite decision, deliberately, and
+`provider_record` below says why.
 """
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from functools import partial
+
+from pydantic import BaseModel
+from pydantic.fields import FieldInfo
 
 from samtal_server.config import entities
 from samtal_server.config.models import (
@@ -35,9 +55,7 @@ from samtal_server.config.models import (
     McpServerConfig,
     PromptFragmentConfig,
     ProviderConfig,
-    is_mcp_secret_key,
     is_secret_option,
-    mcp_entry_fragment,
     without_url_credential,
 )
 from samtal_server.config.secrets import mask
@@ -168,25 +186,115 @@ def devices(snapshot: Snapshot) -> dict[str, object]:
 # Entity bodies, as they may be displayed
 
 
-def provider_body(entry: ProviderConfig) -> dict[str, object]:
-    """One provider as it may be displayed. Whatever a secret-shaped key
-    holds goes through the mask, which passes an environment reference
-    through as itself and fails closed on everything else: nothing
-    validates the shape of an api_key_env value, so an operator who
-    pasted the key where its variable name belongs must not have it read
-    back out by the command they would run to find the mistake."""
-    data: dict[str, object] = {"type": entry.type}
-    if entry.api_key_env is not None:
-        data["api_key_env"] = mask(entry.api_key_env)
-    if entry.egress is not None:
-        data["egress"] = entry.egress
-    data.update(
-        {
-            key: mask(value) if is_secret_option(key) else masked_option(value)
-            for key, value in entry.options.items()
-        }
-    )
+def entity_body(descriptor: entities.EntityDescriptor, entry: object) -> dict[str, object]:
+    """One entry of one kind as it may be displayed: every field its
+    model declares, masked at every depth by the kind's own
+    secret-shaped-name rule.
+
+    One builder for the five kinds, specialized by the descriptor, in
+    place of the five that were written key by key. Which fields exist
+    is the model's to say and the registry's to point at, and a builder
+    that repeated the list was a second copy of it: the copy could only
+    ever fall behind, silently, since nothing reads a body to check that
+    it is whole.
+
+    Whatever a secret-shaped key holds goes through the mask, which
+    passes an environment reference through as itself and fails closed
+    on everything else: nothing validates the shape of an api_key_env
+    value, so an operator who pasted the key where its variable name
+    belongs must not have it read back out by the command they would run
+    to find the mistake.
+    """
+    return _declared(entry, descriptor.secret_key)
+
+
+def _declared(entry: object, secret_key: Callable[[str], bool]) -> dict[str, object]:
+    """Every field a model declares, in declaration order, and then
+    whatever a pass-through model was given beyond them (a provider's
+    options, which are the implementation's and so cannot be declared).
+    """
+    model = type(entry)
+    shown = entities.always_shown(model)
+    data: dict[str, object] = {}
+    for name, field in model.model_fields.items():
+        value = getattr(entry, name)
+        if name in shown or not _absent(field, value):
+            data[name] = _masked(name, value, secret_key)
+    for name, value in (getattr(entry, "model_extra", None) or {}).items():
+        data[name] = _masked(name, value, secret_key)
     return data
+
+
+def _masked(name: str, value: object, secret_key: Callable[[str], bool]) -> object:
+    """One key and what it holds, as they may be displayed.
+
+    A secret-shaped name displaces whatever it holds, structures
+    included, and anything else is walked for the secret-shaped names
+    inside it. The models refuse such a name below the top level now,
+    and this does not rely on that: it is the last thing standing
+    between a row that got its contents another way and a caller, so it
+    fails closed on its own.
+    """
+    return mask(value) if secret_key(name) else _shown(value, secret_key)
+
+
+def _shown(value: object, secret_key: Callable[[str], bool]) -> object:
+    """One displayed value, walked to the bottom.
+
+    Depth is the point, and it is why this is one walk rather than one
+    per field group. A provider option can be a structure, because
+    options are passed through to the provider implementation; a section
+    nested in an agent is a model of its own; and an MCP server's env
+    and headers are mappings whose values were once masked only at the
+    top (#171). All three are the same question asked at a different
+    depth, and a walk that stops anywhere answers it wrong there.
+    """
+    if isinstance(value, BaseModel):
+        return _declared(value, secret_key)
+    if isinstance(value, Mapping):
+        return {key: _masked(key, nested, secret_key) for key, nested in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_shown(item, secret_key) for item in value]
+    return value
+
+
+# The defaults that mean a field holds nothing rather than something.
+_ABSENCE = (None, [], {})
+
+
+def _absent(field: FieldInfo, value: object) -> bool:
+    """Whether a field is unwritten rather than written.
+
+    A field is shown at whatever it holds, its default included: what a
+    read answers about a decision should be the decision, and
+    `use_server_instructions: false` is one of its two states rather
+    than the absence of one. The exception is a default that means
+    absence, which is what a null, an empty list or an empty mapping
+    declared as the default says. Leaving those out is not decoration:
+    a read is a fragment a write of it accepts back, and an MCP server
+    is refused for naming a field of the other transport, so a stdio
+    entry that showed `url: null` and `headers: {}` could not be written
+    back at all.
+
+    A list or a mapping the operator wrote is not that absence, and is
+    shown: `prompt_includes: []` opts a layer out where an unset one
+    inherits, and the two must not read alike.
+    """
+    if field.is_required():
+        return False
+    default = field.get_default(call_default_factory=True)
+    return any(default is absence or default == absence for absence in _ABSENCE) and (
+        value is default or value == default
+    )
+
+
+# Which builder shows one entry of each kind. One builder for all five,
+# because what differs between them is the descriptor it is given rather
+# than the way an entry is shown. `provider_record` is deliberately not
+# among them: a record is not a display, and what it leaves out and why
+# is its own docstring's.
+for _kind in entities.ENTITIES:
+    entities.fill(_kind.name, body=partial(entity_body, _kind))
 
 
 def provider_record(entry: ProviderConfig) -> dict[str, object]:
@@ -207,9 +315,15 @@ def provider_record(entry: ProviderConfig) -> dict[str, object]:
     passed through a write at all, must not be able to put one in a file
     that outlives the conversation.
 
-    Built key by key rather than by dumping the model, so a field added
-    to `ProviderConfig` later is absent from every record until somebody
-    decides it belongs there.
+    Built key by key rather than derived from the model, which is the
+    half of the split policy that stays fail-closed. A display shows
+    every field the model declares, because a read that hides one is an
+    operator debugging with an incomplete answer, and a read is thrown
+    away as soon as it has been read. A record is kept: it is written
+    into a manifest and a session row that outlive the conversation, so
+    a field added to `ProviderConfig` later is absent from every record
+    until somebody decides it belongs there. Same question, opposite
+    answers, because the cost of being wrong points the other way.
     """
     data: dict[str, object] = {"type": entry.type}
     if entry.api_key_env is not None:
@@ -241,116 +355,10 @@ def recorded_option(value: object) -> object:
     return value
 
 
-def masked_option(value: object) -> object:
-    """One provider option, masked at every depth.
-
-    An option can be a structure, because options are passed through to
-    the provider implementation, so a secret-shaped key can be nested
-    inside one. The models refuse to accept such a key now, but the
-    display path does not rely on that: it is the last thing standing
-    between a row that got its contents another way and a caller, so it
-    fails closed on its own. A secret-shaped key masks whatever it
-    holds, structures included.
-    """
-    if isinstance(value, Mapping):
-        return {
-            key: mask(nested) if is_secret_option(key) else masked_option(nested)
-            for key, nested in value.items()
-        }
-    if isinstance(value, list):
-        return [masked_option(item) for item in value]
-    return value
-
-
-def mcp_server_body(entry: McpServerConfig) -> dict[str, object]:
-    data: dict[str, object] = {"transport": entry.transport}
-    if entry.command is not None:
-        data["command"] = entry.command
-    if entry.args:
-        data["args"] = list(entry.args)
-    if entry.env:
-        data["env"] = shown_values(entry.env)
-    if entry.url is not None:
-        data["url"] = entry.url
-    if entry.headers:
-        data["headers"] = shown_values(entry.headers)
-    if entry.egress is not None:
-        data["egress"] = entry.egress
-    data["tool_timeout_s"] = entry.tool_timeout_s
-    # Shown as written, and unmasked: it is guidance the operator wrote
-    # for the model to read, not a credential slot.
-    if entry.instructions is not None:
-        data["instructions"] = entry.instructions
-    # Always shown, like the timeout beside it: what a read of an entry
-    # answers about a trust decision should be the decision, and "off"
-    # is one of its two states rather than the absence of one.
-    data["use_server_instructions"] = entry.use_server_instructions
-    # Shown only when the operator named prompts, so an unset list reads
-    # as the "none" it is rather than as an emptied one. The names are
-    # the server's, and this is where operator-written configuration is
-    # echoed write-shaped, which is the one place they may appear.
-    if entry.inject_prompts is not None:
-        data["inject_prompts"] = list(entry.inject_prompts)
-    return data
-
-
-def prompt_fragment_body(entry: PromptFragmentConfig) -> dict[str, object]:
-    """One fragment as it may be displayed, which is as it was written:
-    it is prompt text for the model to read, and there is nothing in it
-    to mask."""
-    return {"text": entry.text}
-
-
-def agent_body(entry: AgentConfig) -> dict[str, object]:
-    return {"prompt": entry.prompt, **layer_body(entry)}
-
-
-def layer_body(entry: AgentDefaults) -> dict[str, object]:
-    """The override half an agent and the agent defaults share."""
-    data: dict[str, object] = {
-        stage: getattr(entry, stage)
-        for stage in PROVIDER_STAGES
-        if getattr(entry, stage) is not None
-    }
-    # Each entry in the form it was written in, so a read is a fragment
-    # a write of it accepts back: a plain name stays a name, and a grant
-    # stays {server, tools} rather than becoming one of them.
-    if entry.mcp is not None:
-        data["mcp"] = [mcp_entry_fragment(item) for item in entry.mcp]
-    if entry.filler is not None:
-        data["filler"] = entry.filler.model_dump()
-    # Shown only when the layer wrote one, so an unset list reads as the
-    # inherit it is rather than as an empty one, which means the
-    # opposite.
-    if entry.prompt_includes is not None:
-        data["prompt_includes"] = list(entry.prompt_includes)
-    return data
-
-
-# Which builder shows one entry of each kind. `provider_record` is
-# deliberately not among them: a record is not a display, and what it
-# leaves out and why is its own docstring's.
-entities.fill("provider", body=provider_body)
-entities.fill("mcp-server", body=mcp_server_body)
-entities.fill("prompt-fragment", body=prompt_fragment_body)
-entities.fill("agent", body=agent_body)
-entities.fill("agent-defaults", body=layer_body)
-
-
 def device_body(agents: Sequence[str]) -> dict[str, object]:
     """A binding is a list of agent names, in the shape a write of one
     takes, so what a read shows is what a write accepts back."""
     return {"agents": list(agents)}
-
-
-def shown_values(values: Mapping[str, str]) -> dict[str, object]:
-    """An MCP server's env or headers as they may be displayed. The
-    model already requires a $VAR for the secret-bearing keys, so this
-    changes nothing for a valid entry; it is what stops a value that got
-    in another way from being read back out."""
-    return {
-        key: mask(value) if is_mcp_secret_key(key) else value for key, value in values.items()
-    }
 
 
 def reference_value(body: Mapping[str, object], key: str) -> object:
@@ -410,7 +418,6 @@ def _by_entity(snapshot: Snapshot) -> dict[tuple[str, str], list[StoredSecret]]:
 
 __all__ = [
     "agent",
-    "agent_body",
     "agent_defaults",
     "agents",
     "config",
@@ -419,18 +426,15 @@ __all__ = [
     "device_body",
     "devices",
     "entity",
-    "layer_body",
+    "entity_body",
     "listing",
-    "masked_option",
     "mcp_server",
-    "mcp_server_body",
     "mcp_servers",
     "prompt_fragment",
-    "prompt_fragment_body",
     "prompt_fragments",
     "provider",
-    "provider_body",
+    "provider_record",
     "providers",
+    "recorded_option",
     "reference_value",
-    "shown_values",
 ]
