@@ -43,6 +43,7 @@ from tests.support.configs import (
     TUTOR_TONE,
     config_with_agent,
 )
+from tests.support.events import both_formats
 from tests.support.sessions import device_session
 from tests.support.sockets import RecordingSocket
 from tests.support.wire import (
@@ -69,6 +70,10 @@ TTS_MIN_MS = 240
 
 TUTOR_MAC = "aa:bb:cc:dd:ee:02"
 UNBOUND_MAC = "aa:bb:cc:dd:ee:04"
+
+# A credential-shaped abort reason, which is what an abort's `reason`
+# being a free string the far side writes makes possible.
+ABORT_SENTINEL = "sk-live-2a7c58d9-never-a-real-credential"
 
 
 def two_persona_config() -> Config:
@@ -205,6 +210,42 @@ def test_abort_discards_the_buffered_utterance() -> None:
             texts, _ = collect_reply(websocket)
     # Only the post-abort utterance was transcribed.
     assert 180 <= heard_ms(texts) <= 300
+
+
+def test_an_abort_names_only_a_reason_the_server_knows(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#185: `reason` is a free string the far side writes, and the line
+    that reports the abort is kept. The firmware's `AbortReason` enum
+    has one spelling and the upstream protocol note calls anything else
+    implementation-defined, so a value outside the closed set is
+    reported as `other` and never quoted."""
+    with caplog.at_level("INFO"):
+        with TestClient(create_app(config_with_agent(asr_text="{ms}"))) as client:
+            with connect(client) as websocket:
+                shake_hands(websocket)
+                encoder = OpusEncoder()
+                websocket.send_text(
+                    json.dumps({"type": "listen", "state": "start", "mode": "manual"})
+                )
+                send_pcm(websocket, speech_pcm(600), encoder)
+                websocket.send_text(json.dumps({"type": "abort", "reason": ABORT_SENTINEL}))
+                websocket.send_text(json.dumps({"type": "abort", "reason": "wake_word_detected"}))
+                # One ordinary turn after the two aborts, so both were
+                # handled before the socket closed.
+                websocket.send_text(
+                    json.dumps({"type": "listen", "state": "start", "mode": "manual"})
+                )
+                send_pcm(websocket, speech_pcm(240), encoder)
+                websocket.send_text(json.dumps({"type": "listen", "state": "stop"}))
+                collect_reply(websocket)
+
+    written = both_formats(caplog)
+    # The known spelling is still named, which is what keeps `other`
+    # from being the answer to everything.
+    assert "device aborted (wake_word_detected)" in written
+    assert "device aborted (other)" in written
+    assert ABORT_SENTINEL not in written
 
 
 def test_abort_during_a_streaming_reply_does_not_eat_the_next_utterance() -> None:

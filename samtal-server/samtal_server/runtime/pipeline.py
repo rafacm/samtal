@@ -102,6 +102,22 @@ SWITCH_GREETING = (
     "speaking, and carry on from what was said above."
 )
 
+# What an abort's `reason` may be called on the retained log. The
+# firmware's `AbortReason` enum has exactly two members
+# (`main/protocols/protocol.h` in 78/xiaozhi-esp32): `kAbortReasonNone`,
+# which sends no `reason` field at all, and
+# `kAbortReasonWakeWordDetected`, which sends the string below. `none`
+# is this side's name for the absent one, so the rendered line reads
+# from a closed set either way.
+#
+# Closed rather than passed through because the field is a string a
+# peer wrote, and the upstream protocol note says as much: "`reason`
+# may be `wake_word_detected` or other implementation-defined values"
+# (`docs/websocket.md`). Anything outside the set is logged as `other`
+# and its value is not repeated anywhere, which is the same rule the
+# tool-name events follow (#154, #185).
+DEVICE_ABORT_REASONS = frozenset({"wake_word_detected", "none"})
+
 
 def _tool_named(classified: ToolInvocation) -> tuple[dict[str, str], str]:
     """What a `tool_call` event may name about the call it describes, as
@@ -345,8 +361,17 @@ class PipelineRuntime:
 
     async def device_aborted(self, reason: str | None) -> None:
         """The device gave up on the answer: the reply in flight dies
-        and the utterance starts over."""
-        logger.info("session %s: device aborted (%s)", self.session_id, reason or "no reason")
+        and the utterance starts over.
+
+        The reason is named only when it is one this side knows
+        (`DEVICE_ABORT_REASONS`), because it arrives as a free string
+        from the far side of the wire and this line is kept."""
+        token = reason or "none"
+        logger.info(
+            "session %s: device aborted (%s)",
+            self.session_id,
+            token if token in DEVICE_ABORT_REASONS else "other",
+        )
         await self.cancel_reply()
         self._turntaking.restart()
 
