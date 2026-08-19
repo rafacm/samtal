@@ -102,13 +102,11 @@ SWITCH_GREETING = (
     "speaking, and carry on from what was said above."
 )
 
-# What an abort's `reason` may be called on the retained log. The
+# The abort reasons a device may send that this side knows by name. The
 # firmware's `AbortReason` enum has exactly two members
 # (`main/protocols/protocol.h` in 78/xiaozhi-esp32): `kAbortReasonNone`,
 # which sends no `reason` field at all, and
-# `kAbortReasonWakeWordDetected`, which sends the string below. `none`
-# is this side's name for the absent one, so the rendered line reads
-# from a closed set either way.
+# `kAbortReasonWakeWordDetected`, which sends the string below.
 #
 # Closed rather than passed through because the field is a string a
 # peer wrote, and the upstream protocol note says as much: "`reason`
@@ -116,7 +114,12 @@ SWITCH_GREETING = (
 # (`docs/websocket.md`). Anything outside the set is logged as `other`
 # and its value is not repeated anywhere, which is the same rule the
 # tool-name events follow (#154, #185).
-DEVICE_ABORT_REASONS = frozenset({"wake_word_detected", "none"})
+#
+# Absence is not a member. A device that sends no reason is reported as
+# `none`, and a device that sends the word "none" is a device sending a
+# reason the firmware has no member for, which is `other` like any
+# other unknown: the two facts stay distinguishable on the line.
+DEVICE_ABORT_REASONS = frozenset({"wake_word_detected"})
 
 
 def _tool_named(classified: ToolInvocation) -> tuple[dict[str, str], str]:
@@ -365,13 +368,19 @@ class PipelineRuntime:
 
         The reason is named only when it is one this side knows
         (`DEVICE_ABORT_REASONS`), because it arrives as a free string
-        from the far side of the wire and this line is kept."""
-        token = reason or "none"
-        logger.info(
-            "session %s: device aborted (%s)",
-            self.session_id,
-            token if token in DEVICE_ABORT_REASONS else "other",
-        )
+        from the far side of the wire and this line is kept. An abort
+        that carried no reason at all is `none`; anything else this
+        side does not know is `other`."""
+        # Absence is `none` and a value this side does not know is
+        # `other`, which are different facts: `reason or "none"` would
+        # report an abort carrying an empty string as though the field
+        # had not been sent, and an empty string is something a device
+        # chose to send.
+        if reason is None:
+            token = "none"
+        else:
+            token = reason if reason in DEVICE_ABORT_REASONS else "other"
+        logger.info("session %s: device aborted (%s)", self.session_id, token)
         await self.cancel_reply()
         self._turntaking.restart()
 
