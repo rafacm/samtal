@@ -78,6 +78,32 @@ from samtal_server.db import schema
 # been written as a $VAR reference.
 MCP_SECRET_GROUPS = ("env", "headers")
 
+# What a credential offered to something that is not a credential slot
+# is told, one fixed sentence per kind (#132). A slot is the second half
+# of a secret's address and arrives the same way the first half does, in
+# a URL path or on a command line, and the command that carries it is
+# the one an operator pastes a credential into: a slot that failed this
+# check is a value nothing here has validated, and it may be the
+# credential itself, typed one argument early.
+#
+# The rules can be stated without it. The groups are declared above, so
+# the MCP sentence is built from them and cannot come to disagree; a
+# provider's slot is any secret-shaped option name, which is a rule
+# rather than a list, so that sentence gives the rule and the usual
+# name.
+NOT_A_PROVIDER_SLOT = (
+    "providers: a credential slot is the option name the credential fills, such as "
+    "api_key. A name that is not secret-shaped is not one, and neither is a name "
+    "ending in _env, which is where an environment variable is named rather than a "
+    "credential stored"
+)
+NOT_AN_MCP_SLOT = (
+    "mcp_servers: a credential slot is "
+    + " or ".join(f"{group}.<KEY>" for group in MCP_SECRET_GROUPS)
+    + ", for example headers.Authorization, which is where the value would "
+    "otherwise have been written as a $VAR reference"
+)
+
 # What no identity may carry: the C0 and C1 control characters and DEL.
 # A slash is refused separately, because a slash is the one character
 # whose presence changes what a path means rather than what it looks
@@ -1351,10 +1377,7 @@ def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
         if _entry(domain, descriptor, (_stage(stage), name)) is None:
             raise UnknownEntityError(_missing(descriptor))
         if location.slot.lower().endswith("_env") or not is_secret_option(location.slot):
-            raise ConfigError(
-                f'"{location.slot}" is not a credential slot on a provider; a slot is '
-                f"the option name the credential fills, such as api_key"
-            )
+            raise ConfigError(NOT_A_PROVIDER_SLOT)
         # A slot is addressed in a path of its own, so it obeys the same
         # rule a name does.
         _check_addressable(f"providers.{stage}.{name}", "slot", location.slot)
@@ -1364,10 +1387,7 @@ def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
         raise UnknownEntityError(_missing(descriptor))
     group, _, key = location.slot.partition(".")
     if group not in MCP_SECRET_GROUPS or not key:
-        raise ConfigError(
-            f'"{location.slot}" is not a credential slot on an MCP server; a slot is '
-            f"env.<KEY> or headers.<KEY>, for example headers.Authorization"
-        )
+        raise ConfigError(NOT_AN_MCP_SLOT)
     # The key half names where the value would have been written as a
     # reference: a variable for env, a header for headers. Neither can
     # be spelled with a slash, so this is also what makes the dotted
