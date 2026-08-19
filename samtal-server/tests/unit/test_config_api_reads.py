@@ -25,6 +25,13 @@ from sqlalchemy import update
 
 from samtal_server import db as db_module
 from samtal_server.config.api import build_api
+from samtal_server.config.entities import (
+    NO_SUCH_AGENT,
+    NO_SUCH_DEVICE,
+    NO_SUCH_FRAGMENT,
+    NO_SUCH_MCP_SERVER,
+    NO_SUCH_PROVIDER,
+)
 from samtal_server.config.secrets import (
     MASK,
     MASTER_KEY_ENV,
@@ -366,10 +373,11 @@ def test_a_dotted_slot_reads_back_under_its_own_name(
 
 
 MISSING = [
-    ("/providers/llm/ghost", "providers.llm.ghost: no such provider"),
-    ("/mcp-servers/ghost", "mcp_servers.ghost: no such MCP server"),
-    ("/agents/ghost", "agents.ghost: no such agent"),
-    ("/devices/aa:bb:cc:dd:ee:ff", "devices.aa:bb:cc:dd:ee:ff: no such device"),
+    ("/providers/llm/ghost", NO_SUCH_PROVIDER),
+    ("/mcp-servers/ghost", NO_SUCH_MCP_SERVER),
+    ("/prompt-fragments/ghost", NO_SUCH_FRAGMENT),
+    ("/agents/ghost", NO_SUCH_AGENT),
+    ("/devices/aa:bb:cc:dd:ee:ff", NO_SUCH_DEVICE),
 ]
 
 
@@ -377,8 +385,9 @@ MISSING = [
 def test_a_missing_entity_is_404_in_the_repository_s_own_words(
     client: TestClient, store: ConfigStore, path: str, detail: str
 ) -> None:
-    """The same sentence the CLI prints, so an operator meets one
-    vocabulary whichever way they reached the read."""
+    """The same fixed sentence the CLI prints, so an operator meets one
+    vocabulary whichever way they reached the read, and the identity
+    they addressed is in none of them (#132)."""
     store.set_provider("llm", "claude", {"type": "anthropic", "model": "m"})
 
     response = client.get(path)

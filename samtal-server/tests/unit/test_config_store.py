@@ -15,10 +15,17 @@ from cryptography.fernet import Fernet, MultiFernet
 from sqlalchemy import select, update
 
 from samtal_server.config import ConfigError
+from samtal_server.config.entities import (
+    NO_SUCH_AGENT,
+    NO_SUCH_DEVICE,
+    NO_SUCH_FRAGMENT,
+    NO_SUCH_MCP_SERVER,
+    NO_SUCH_PROVIDER,
+)
 from samtal_server.config.loader import StorageError, UnknownEntityError
 from samtal_server.config.models import mcp_entry_fragment
 from samtal_server.config.secrets import SecretLocation, generate_key
-from samtal_server.config.store import NO_SUCH_FRAGMENT, ConfigStore, verify_secrets
+from samtal_server.config.store import ConfigStore, verify_secrets
 from samtal_server.db import open_database, schema
 
 # Not a real credential, and shaped so a substring check for it cannot
@@ -620,15 +627,20 @@ def test_deleting_the_default_agent_is_refused(store: ConfigStore) -> None:
     assert store.load().domain.agents == {}
 
 
-def test_an_unfreed_entity_is_named_when_it_does_not_exist(store: ConfigStore) -> None:
-    for call in (
-        lambda: store.delete_provider("llm", "ghost"),
-        lambda: store.delete_mcp_server("ghost"),
-        lambda: store.delete_agent("ghost"),
-        lambda: store.delete_device("aa:bb:cc:dd:ee:ff"),
+def test_an_unfreed_entity_is_refused_by_its_section(store: ConfigStore) -> None:
+    """A delete of something that is not there is refused in the
+    section's own fixed sentence, which never repeats the identity that
+    was asked for (#132)."""
+    for call, sentence in (
+        (lambda: store.delete_provider("llm", "ghost"), NO_SUCH_PROVIDER),
+        (lambda: store.delete_mcp_server("ghost"), NO_SUCH_MCP_SERVER),
+        (lambda: store.delete_prompt_fragment("ghost"), NO_SUCH_FRAGMENT),
+        (lambda: store.delete_agent("ghost"), NO_SUCH_AGENT),
+        (lambda: store.delete_device("aa:bb:cc:dd:ee:ff"), NO_SUCH_DEVICE),
     ):
-        with pytest.raises(ConfigError, match="no such"):
+        with pytest.raises(ConfigError) as caught:
             call()
+        assert str(caught.value) == sentence
 
 
 def test_an_invalid_fragment_is_refused_without_quoting_it(store: ConfigStore) -> None:

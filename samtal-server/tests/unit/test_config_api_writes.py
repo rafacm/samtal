@@ -26,13 +26,20 @@ from fastapi.testclient import TestClient
 
 from samtal_server import db as db_module
 from samtal_server.config.api import MALFORMED_REQUEST, build_api
+from samtal_server.config.entities import (
+    NO_SUCH_AGENT,
+    NO_SUCH_DEVICE,
+    NO_SUCH_FRAGMENT,
+    NO_SUCH_MCP_SERVER,
+    NO_SUCH_PROVIDER,
+)
 from samtal_server.config.secrets import (
     MASTER_KEY_ENV,
     SecretLocation,
     generate_key,
     load_keys,
 )
-from samtal_server.config.store import NO_SUCH_FRAGMENT, ConfigStore
+from samtal_server.config.store import ConfigStore
 from samtal_server.config.writes import (
     BINDING_NOTICE,
     MCP_RELOAD_NOTICE,
@@ -572,38 +579,64 @@ def test_a_refused_reference_is_422_in_the_repository_s_own_words(
 
 def test_deleting_something_that_is_not_there_is_404(client: TestClient) -> None:
     for path, detail in (
-        ("/providers/llm/ghost", "providers.llm.ghost: no such provider"),
-        ("/mcp-servers/ghost", "mcp_servers.ghost: no such MCP server"),
-        ("/agents/ghost", "agents.ghost: no such agent"),
-        ("/devices/aa:bb:cc:dd:ee:ff", "devices.aa:bb:cc:dd:ee:ff: no such device"),
+        ("/providers/llm/ghost", NO_SUCH_PROVIDER),
+        ("/mcp-servers/ghost", NO_SUCH_MCP_SERVER),
+        ("/prompt-fragments/ghost", NO_SUCH_FRAGMENT),
+        ("/agents/ghost", NO_SUCH_AGENT),
+        ("/devices/aa:bb:cc:dd:ee:ff", NO_SUCH_DEVICE),
     ):
         response = client.delete(path)
         assert response.status_code == 404, path
         assert response.json() == {"detail": detail}
 
 
-@pytest.mark.parametrize("name", [SECRET, f"{SECRET}.pasted"])
-def test_a_fragment_that_is_not_there_is_404_without_the_name(
-    client: TestClient, caplog: pytest.LogCaptureFixture, name: str
-) -> None:
-    """The read and the delete of a name nothing wrote. It arrived in the
-    path and was never validated by anything here, so the 404 names the
-    section and the fact and not what was typed."""
-    path = f"/prompt-fragments/{quote(name, safe='')}"
+# Every addressed section, as the path a read and a delete of something
+# nothing wrote go to, the sentence both answer with, and the value that
+# must not come back. The names are credential-shaped because a URL path
+# is where a paste lands; a device is addressed by a MAC, which cannot
+# be shaped like a credential, so its own identity is the sentinel.
+UNWRITTEN = [
+    (f"/providers/llm/{quote(SECRET, safe='')}", NO_SUCH_PROVIDER, SECRET),
+    (f"/providers/llm/{quote(f'{SECRET}.pasted', safe='')}", NO_SUCH_PROVIDER, SECRET),
+    (f"/mcp-servers/{quote(SECRET, safe='')}", NO_SUCH_MCP_SERVER, SECRET),
+    (f"/prompt-fragments/{quote(SECRET, safe='')}", NO_SUCH_FRAGMENT, SECRET),
+    (f"/prompt-fragments/{quote(f'{SECRET}.pasted', safe='')}", NO_SUCH_FRAGMENT, SECRET),
+    (f"/agents/{quote(SECRET, safe='')}", NO_SUCH_AGENT, SECRET),
+    ("/devices/aa:bb:cc:dd:ee:ff", NO_SUCH_DEVICE, "aa:bb:cc:dd:ee:ff"),
+]
 
+
+@pytest.mark.parametrize(("path", "detail", "sentinel"), UNWRITTEN)
+def test_an_entity_that_is_not_there_is_404_without_its_identity(
+    client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+    path: str,
+    detail: str,
+    sentinel: str,
+) -> None:
+    """The read and the delete of an identity nothing wrote, for every
+    section that has one (#132).
+
+    It arrived in the path and was never validated by anything here, so
+    the 404 names the section and the fact and not what was typed. The
+    three places it could still come out are all looked at: the body,
+    the headers, and every record this server retained while answering.
+    """
     with caplog.at_level(logging.DEBUG):
         read = client.get(path)
         removed = client.delete(path)
 
     for response in (read, removed):
         assert response.status_code == 404
-        assert response.json() == {"detail": NO_SUCH_FRAGMENT}
-        assert SECRET not in response.text
-        assert SECRET not in str(response.headers)
+        # The leak first and the wording after it, so a failure here
+        # says which of the two moved.
+        assert sentinel not in response.text
+        assert sentinel not in str(response.headers)
+        assert response.json() == {"detail": detail}
     served = [
         record for record in caplog.records if record.name.startswith("samtal_server")
     ]
-    assert all(SECRET not in str(record.__dict__) for record in served)
+    assert all(sentinel not in str(record.__dict__) for record in served)
 
 
 def test_a_secret_for_a_slot_holding_none_is_404(client: TestClient) -> None:
@@ -612,9 +645,31 @@ def test_a_secret_for_a_slot_holding_none_is_404(client: TestClient) -> None:
     response = client.delete("/providers/llm/claude/secrets/api_key")
 
     assert response.status_code == 404
-    assert response.json() == {
-        "detail": "provider llm.claude api_key: no secret is stored for this slot"
-    }
+    assert response.json() == {"detail": "providers: no secret is stored for that slot"}
+
+
+@pytest.mark.parametrize("slot", ["api_key", SECRET])
+def test_a_secret_on_an_entity_that_is_not_there_is_404_without_either_name(
+    client: TestClient, caplog: pytest.LogCaptureFixture, slot: str
+) -> None:
+    """The same rule one level in. Both halves of a secret's address are
+    typed rather than stored: the entity that would hold the credential
+    and the slot it would fill, so the refusal names neither."""
+    path = f"/providers/llm/{quote(SECRET, safe='')}/secrets/{quote(slot, safe='')}"
+
+    with caplog.at_level(logging.DEBUG):
+        written = client.put(path, json={"secret": OTHER_SECRET})
+        removed = client.delete(path)
+
+    for response in (written, removed):
+        assert response.status_code == 404
+        assert SECRET not in response.text
+        assert OTHER_SECRET not in response.text
+    served = [
+        record for record in caplog.records if record.name.startswith("samtal_server")
+    ]
+    assert all(SECRET not in str(record.__dict__) for record in served)
+    assert all(OTHER_SECRET not in str(record.__dict__) for record in served)
 
 
 def test_a_slot_that_is_not_a_credential_slot_is_422(client: TestClient) -> None:

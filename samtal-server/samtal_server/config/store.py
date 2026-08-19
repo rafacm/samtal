@@ -40,7 +40,7 @@ from sqlalchemy.exc import OperationalError, SQLAlchemyError
 from sqlalchemy.sql.elements import ColumnElement
 
 from samtal_server.config import entities
-from samtal_server.config.entities import NO_SUCH_FRAGMENT, EntityDescriptor
+from samtal_server.config.entities import EntityDescriptor
 from samtal_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
@@ -326,7 +326,7 @@ class ConfigStore:
         with self._transaction() as connection:
             entry = _entry(_read_domain(connection), descriptor, identity)
             if entry is None:
-                raise UnknownEntityError(descriptor.missing(*identity))
+                raise UnknownEntityError(_missing(descriptor))
             if descriptor.secret_slots is None:
                 return Entity(entry=entry, secrets=())
             return self._with_secrets(
@@ -340,7 +340,7 @@ class ConfigStore:
         with self._transaction() as connection:
             bound = _read_domain(connection).devices.get(normalized)
             if bound is None:
-                raise UnknownEntityError(f"devices.{normalized}: no such device")
+                raise UnknownEntityError(_NO_SUCH_DEVICE)
             return Entity(entry=list(bound), secrets=())
 
     def read_default_agent(self) -> str | None:
@@ -453,7 +453,7 @@ class ConfigStore:
             for column, value in _row_identity(descriptor, identity).items()
         ]
         with self._transaction() as connection:
-            _delete_row(connection, table, where, descriptor.missing(*identity))
+            _delete_row(connection, table, where, _missing(descriptor))
 
     # Devices and the default agent
 
@@ -536,7 +536,7 @@ class ConfigStore:
                 connection,
                 schema.devices,
                 (schema.devices.c.mac == normalized,),
-                f"devices.{normalized}: no such device",
+                _NO_SUCH_DEVICE,
             )
         return normalized
 
@@ -582,11 +582,18 @@ class ConfigStore:
             _write_secrets(connection, location, stored)
 
     def clear_secret(self, location: SecretLocation) -> None:
+        """Remove one stored credential.
+
+        A slot holding none is refused by the section, not by the
+        location: an entity name and a slot name both arrive from a URL
+        path or a command line, and this refusal travels out as a 404
+        body and a printed line (#132).
+        """
         with self._transaction() as connection:
             stored = dict(_stored_secrets(connection, location))
             if location.slot not in stored:
                 raise UnknownEntityError(
-                    f"{location.describe()}: no secret is stored for this slot"
+                    f"{_secret_section(location)}: no secret is stored for that slot"
                 )
             del stored[location.slot]
             _write_secrets(connection, location, stored)
@@ -814,6 +821,11 @@ _PROMPT_FRAGMENT = entities.descriptor("prompt-fragment")
 _AGENT = entities.descriptor("agent")
 _AGENT_DEFAULTS = entities.descriptor("agent-defaults")
 
+# The devices map is a setting rather than an entity, and its two
+# refusals read their sentence off its descriptor for the reason the
+# five kinds read theirs off theirs: one home per sentence.
+_NO_SUCH_DEVICE = entities.setting("devices").missing
+
 # The kinds a whole read walks one row per name. The provider is not one
 # of them, because its rows are grouped by stage and the group is
 # checked with a sentence of its own; neither is the singleton, which is
@@ -837,6 +849,20 @@ def _table(descriptor: EntityDescriptor) -> Table:
     than holding it, since the registry is read by a command that has no
     database to open."""
     return getattr(schema, descriptor.table)
+
+
+def _missing(descriptor: EntityDescriptor) -> str:
+    """How one kind refuses an entry that is not there.
+
+    Takes the descriptor and not the identity, which is the whole point
+    (#132): the sentence names the section and the fact, and never what
+    was addressed, because an identity that addresses nothing is a value
+    nothing in this deployment has validated. The one kind carrying no
+    sentence is the singleton, which has no missing case and never
+    reaches here.
+    """
+    assert descriptor.missing is not None, f"{descriptor.name} has no missing entry"
+    return descriptor.missing
 
 
 def _location(descriptor: EntityDescriptor, *identity: str) -> str:
@@ -1278,8 +1304,11 @@ def _write_secrets(
     table, where = _secret_row(location)
     result = connection.execute(update(table).where(*where).values(secrets=dict(stored)))
     if result.rowcount == 0:
+        # The kind's own missing sentence with the next step after it,
+        # so this and the check that runs before it say one thing about
+        # what is not there rather than two.
         raise UnknownEntityError(
-            f"{location.describe()}: no such entity; create it first with "
+            f"{_missing(_HOLDER_OF[location.kind])}; create it first with "
             f"samtal-server config set"
         )
 
@@ -1289,6 +1318,13 @@ def _secret_identity(descriptor: EntityDescriptor, location: SecretLocation) -> 
     addressed by. Split at the first separator only, so that a name
     holding one is still one name."""
     return location.identity.split(".", len(descriptor.addressing) - 1)
+
+
+def _secret_section(location: SecretLocation) -> str:
+    """The configuration section a stored secret hangs under, which is
+    what a refusal about a slot names. The entity it hangs on is not: a
+    location's identity is what the caller addressed."""
+    return _HOLDER_OF[location.kind].moved_key
 
 
 def _secret_row(location: SecretLocation) -> tuple[Table, list[ColumnElement[bool]]]:
@@ -1313,7 +1349,7 @@ def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
         # The stage is an argument here rather than a stored value, so
         # it meets the same refusal a caller's typo meets anywhere else.
         if _entry(domain, descriptor, (_stage(stage), name)) is None:
-            raise UnknownEntityError(descriptor.missing(stage, name))
+            raise UnknownEntityError(_missing(descriptor))
         if location.slot.lower().endswith("_env") or not is_secret_option(location.slot):
             raise ConfigError(
                 f'"{location.slot}" is not a credential slot on a provider; a slot is '
@@ -1325,7 +1361,7 @@ def _check_slot(domain: DomainConfig, location: SecretLocation) -> None:
         return
 
     if _entry(domain, descriptor, identity) is None:
-        raise UnknownEntityError(descriptor.missing(*identity))
+        raise UnknownEntityError(_missing(descriptor))
     group, _, key = location.slot.partition(".")
     if group not in MCP_SECRET_GROUPS or not key:
         raise ConfigError(
@@ -1735,7 +1771,6 @@ def _refuse_unresolved(domain: DomainConfig) -> None:
 
 
 __all__ = [
-    "NO_SUCH_FRAGMENT",
     "BoundDevice",
     "ConfigStore",
     "check_transportable",

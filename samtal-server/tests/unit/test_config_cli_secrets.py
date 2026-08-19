@@ -32,6 +32,7 @@ import pytest
 import yaml
 
 from samtal_server.config import cli
+from samtal_server.config.entities import NO_SUCH_PROVIDER
 from samtal_server.config.secrets import MASK, MASTER_KEY_ENV
 from tests.support.config_cli import OTHER_SECRET, SECRET, runner
 
@@ -219,7 +220,7 @@ def test_a_pasted_credential_in_a_reference_field_is_refused(
 
     # And nothing was written: the entity does not exist.
     assert run("show", "provider", "llm", "claude") == 1
-    assert "no such provider" in capsys.readouterr().err
+    assert NO_SUCH_PROVIDER in capsys.readouterr().err
 
 
 def test_an_mcp_reference_shows_and_anything_else_in_its_place_does_not(

@@ -25,6 +25,13 @@ from cryptography.fernet import Fernet, MultiFernet
 from sqlalchemy import update
 
 from samtal_server import db as db_module
+from samtal_server.config.entities import (
+    NO_SUCH_AGENT,
+    NO_SUCH_DEVICE,
+    NO_SUCH_FRAGMENT,
+    NO_SUCH_MCP_SERVER,
+    NO_SUCH_PROVIDER,
+)
 from samtal_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
@@ -63,33 +70,34 @@ def test_every_typed_refusal_is_still_a_config_error() -> None:
 
 
 def test_a_missing_entity_is_an_unknown_entity_error(store: ConfigStore) -> None:
-    """The 404 set. Each message is the one the CLI has always printed."""
+    """The 404 set, each in the fixed sentence its section answers with:
+    the section and the fact, and never the identity that was asked for
+    (#132). The two secret paths meet the same sentences, since what is
+    not there is the entity the slot would hang on."""
     _populate(store)
     cases = [
-        (lambda: store.delete_provider("llm", "gone"), "providers.llm.gone: no such provider"),
-        (lambda: store.delete_mcp_server("gone"), "mcp_servers.gone: no such MCP server"),
-        (lambda: store.delete_agent("gone"), "agents.gone: no such agent"),
-        (
-            lambda: store.delete_device("aa:bb:cc:dd:ee:ff"),
-            "devices.aa:bb:cc:dd:ee:ff: no such device",
-        ),
+        (lambda: store.delete_provider("llm", "gone"), NO_SUCH_PROVIDER),
+        (lambda: store.delete_mcp_server("gone"), NO_SUCH_MCP_SERVER),
+        (lambda: store.delete_prompt_fragment("gone"), NO_SUCH_FRAGMENT),
+        (lambda: store.delete_agent("gone"), NO_SUCH_AGENT),
+        (lambda: store.delete_device("aa:bb:cc:dd:ee:ff"), NO_SUCH_DEVICE),
         (
             lambda: store.clear_secret(CLAUDE),
-            "no secret is stored for this slot",
+            "providers: no secret is stored for that slot",
         ),
         (
             lambda: store.set_secret(SecretLocation.provider("llm", "gone", "api_key"), "x"),
-            "providers.llm.gone: no such provider",
+            NO_SUCH_PROVIDER,
         ),
         (
             lambda: store.set_secret(SecretLocation.mcp_server("gone", "env.TOKEN"), "x"),
-            "mcp_servers.gone: no such MCP server",
+            NO_SUCH_MCP_SERVER,
         ),
     ]
     for call, message in cases:
         with pytest.raises(UnknownEntityError) as caught:
             call()
-        assert message in str(caught.value)
+        assert str(caught.value) == message
 
 
 def test_a_refusal_that_is_not_about_a_missing_entity_stays_plain(store: ConfigStore) -> None:
