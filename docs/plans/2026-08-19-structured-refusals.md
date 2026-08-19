@@ -35,8 +35,11 @@ tests.
 
 The issue leaves one question open: whether the masked-values case can
 be made safe by contract alone, or needs a writable projection
-distinct from the display envelope. Resolved below: contract alone,
-with the proof as tests.
+distinct from the display envelope. Resolved below, corrected by the
+review round's first finding: contract alone is disproved by writes
+the API accepts today, so the display envelope is made writable by an
+unchanged-value marker with defined PUT semantics, rather than by a
+second projection shape.
 
 ## Evidence, verified at plan time
 
@@ -66,25 +69,36 @@ All at main `68d00ce`.
   of which the exact-body `== {"detail": ...}` pins are the ones this
   change reshapes; the substring assertions on `detail`'s sentence
   survive unchanged.
-- The masked-resubmit facts, which are what make the round trip
-  statable without a second projection:
-  - `models.check_no_inline_secrets` (`models.py:766`) refuses a
-    secret-shaped key at any depth of a provider's options, whatever
-    the value, naming the dotted path and never the value. A
-    resubmitted `********` is refused loudly, not stored.
-  - `McpServerConfig._secret_problems` (`models.py:1150`) requires a
-    `$VAR` reference for a secret-bearing `env` or `headers` key, so a
-    resubmitted mask is refused there too. The nested case is
-    unreachable through the store (both maps are typed
+- The masked-resubmit facts, corrected by the review round's first
+  finding:
+  - A validated write can read back masked. `_ENV_NAME_RE`
+    (`models.py:69`) accepts lowercase names, the display rule
+    (`secrets.py:157-173`) passes only `$NAME` or an uppercase bare
+    reference, and `tests/unit/test_config_reads.py:545` plus
+    `test_config_cli_secrets.py:83` already pin a validated
+    `connection.api_key_env: sk_test_...` reading back as the mask.
+    Deliberately so on the display side: a lowercase name in a secret
+    slot is credential-shaped often enough that passing it through
+    would make the display the leak. MCP references differ the same
+    way: `_env_reference` (`models.py:905`) strips whitespace where
+    `mask` does not, so an accepted padded reference also reads back
+    masked. So "masked values appear only for rows stored outside
+    validation" is false, and the round trip needs write-side
+    semantics, not only prose.
+  - What stays true, and keeps the fix small: resubmitting `********`
+    today is refused, never silently stored.
+    `models.check_no_inline_secrets` (`models.py:766`) refuses a
+    secret-shaped key at any depth of a provider's options naming the
+    path and never the value, and `McpServerConfig._secret_problems`
+    (`models.py:1150`) requires a `$VAR` reference for a
+    secret-bearing `env` or `headers` key. The nested `env`/`headers`
+    case is unreachable through the store (both maps are typed
     `dict[str, str]`), recorded in the #207 feature doc as the
     write-time depth question, and is not this plan's to move.
-  - `secrets.mask` (`secrets.py:161`) passes only syntactically valid
-    environment references through, and a reference resubmits as
-    itself. So for any row written through validation, the read body
-    is byte-for-byte the fragment a write accepts; `********` appears
-    only for rows stored outside validation, and PR #207's absence
-    rule already keeps every read write-shaped (its feature doc's own
-    sentence).
+  - `secrets.mask` passes a syntactically valid environment reference
+    through, so the common case resubmits as itself; PR #207's
+    absence rule keeps every read write-shaped in structure. The gap
+    is exactly the masked values, which the marker below closes.
 
 ## Design
 
@@ -172,7 +186,28 @@ Deliberately not filled anywhere else:
   expectation about a one-key body, which `detail` already states
   whole.
 
-### The round-trip contract
+### The round-trip contract, and the unchanged-value marker
+
+The behavior half first, because the review round's first finding
+disproved prose alone: a write the API accepts today (a lowercase
+bare reference, a whitespace-padded `$VAR`) reads back as `********`,
+so a read-modify-resubmit of such an entity would be refused with no
+way to say "keep what is there".
+
+**The marker.** On an entity PUT, before validation, the repository
+walks the incoming fragment with the kind's `secret_key` predicate,
+the same descriptor fact the display masks by (#207), at every depth
+the display walks. Where a value under a secret-shaped key equals the
+mask literal exactly, the value currently stored at the same path in
+that entity's row is substituted; the fragment then validates whole,
+exactly as if the operator had retyped the stored value. A mask with
+nothing stored at that path, or on a PUT that creates the entity, is
+refused with a sentence naming the path: the mask is not a value.
+One helper in `store.py` on the entity write path, so the CLI's
+`--local` writes inherit it, and the predicate being the descriptor's
+means what a read masks and what a write restores cannot come to
+disagree. A mask literal under a key the predicate does not match is
+not touched and meets validation as itself.
 
 Stated in `API_DESCRIPTION` (one new paragraph) and sharpened in
 `Envelope.entity`'s and `Envelope.secrets`' descriptions, all of which
@@ -183,16 +218,16 @@ are committed bytes in the OpenAPI document:
   resubmit whole; fields the read omitted (the absence rule) stay
   omitted and mean the same absence on the way back.
 - An environment reference reads back as itself and resubmits
-  harmlessly. `********` appears only for a value that entered storage
-  outside this API's validation, and resubmitting it is refused with a
-  sentence naming the field, never stored.
+  harmlessly. A value shown as `********` resubmits as "keep the
+  stored value", by the marker rule above; writing the mask where
+  nothing is stored is refused naming the field.
 - An unchanged stored secret needs no action on resubmit: the slots in
   `secrets` are informational, and rotating a credential is the secret
   PUT, the only door plaintext enters by.
 
-No writable projection distinct from the display envelope. The three
-facts above make the display envelope the writable projection, which
-is the resolution #194's per-entity export inherits.
+No writable projection distinct from the display envelope: the marker
+makes the display envelope the writable projection, which is the
+resolution #194's per-entity export inherits.
 
 `API_VERSION` stays `"1"`: the constant is deliberately not a release
 version, the project is pre-release, and the committed document is
@@ -241,10 +276,18 @@ CLI transport suite for the pass-through pins.
   example fragment, GET the envelope, PUT `entity` back unchanged,
   expect the acknowledgement, GET again and expect the same envelope.
   This is the contract's executable form.
-- The masked resubmit: a row planted with an inline secret through the
-  engine (the existing unreadable-row tests' technique), read back
-  masked, resubmitted, refused with the field named and the planted
-  value absent from the whole response.
+- The masked resubmit, starting from writes the API accepts, which is
+  what the engine-planted technique cannot cover: a provider whose
+  nested `*_env` option holds a lowercase reference, and an MCP server
+  whose `env` holds a whitespace-padded `$VAR`, each written over
+  HTTP, read back masked, resubmitted unchanged, accepted, and read
+  back identical, with the stored value proven untouched. Beside
+  them: the mask written where nothing is stored (a fresh entity, and
+  a fresh path on an existing one) refused naming the path; and a row
+  planted with an inline secret through the engine, read back masked,
+  resubmitted, round-tripping the planted row without the mask
+  becoming the stored value and without the planted value appearing
+  in any response.
 
 ## The standing review lenses, answered
 
@@ -296,16 +339,20 @@ CLI transport suite for the pass-through pins.
   caller has to build), `store._load` (one computation for prose and
   payload), and `api.py`'s refusal rendering, where one seam replaces
   four body-building sites; no new module.
-- [ ] **M2: the round-trip contract** (PR TBD). The
+- [ ] **M2: the writable round trip** (PR TBD). The unchanged-value
+  marker in the repository's entity write path, the
   `API_DESCRIPTION` paragraph and `Envelope` description sharpening,
   the regenerated document, the per-kind round-trip tests, the
-  masked-resubmit test, CHANGELOG. Design footprint: deepens the
-  document's prose surface and the API test suite; it adds no code
-  path, which is the point, and records in the implementation doc that
-  the issue's open question closed as contract-alone.
+  masked-resubmit tests from API-accepted writes, CHANGELOG. Design
+  footprint: deepens the repository's write path (a caller stops
+  having to know what the display masked) with the descriptor's
+  `secret_key` as the one predicate both directions share, and
+  records in the implementation doc that the issue's open question
+  closed as marker-plus-contract rather than contract-alone.
 
 Both milestones leave `main` releasable: M1 changes the refusal body
-shape in one merge with its document, and M2 is prose and tests.
+shape in one merge with its document, and M2 lands the marker with
+the contract that names it.
 
 ## Plan review round
 
@@ -326,6 +373,19 @@ carries its resolution below it.
    projection or an explicit unchanged-value marker, with defined PUT
    semantics and coverage starting from API-accepted writes, not only
    engine-planted rows.
+
+   *Resolution.* Adopted whole. The evidence section now records the
+   two validated-write counterexamples in place of the disproved
+   claim, the round-trip section defines the unchanged-value marker
+   (mask literal under a secret-shaped key on PUT means "keep the
+   stored value", substituted before validation by one `store.py`
+   helper walking the descriptor's `secret_key` predicate at display
+   depth; a mask with nothing stored refuses naming the path), M2 is
+   retitled "the writable round trip" and carries the marker, and the
+   masked-resubmit tests start from the lowercase and
+   whitespace-padded API-accepted writes the finding names. No
+   upgrade path is needed for already-stored values: they are real
+   values that read masked, and the marker keeps them.
 
 2. **P1: pydantic `loc` does not provide the field paths the feature
    promises.** `ProviderConfig._reject_inline_secrets`
