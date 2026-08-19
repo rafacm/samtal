@@ -1,12 +1,12 @@
 """What the server says about itself, in one place, to whoever is listening.
 
 The structured JSON records are the observability surface
-([ADR](../../docs/adr/2026-08-04-json-logs-are-the-observability-surface.md)),
+([ADR](../../../../docs/adr/2026-08-04-json-logs-are-the-observability-surface.md)),
 which makes them output rather than a debugging aid: their channel, their
 sentences, their levels and their field names are a compatibility surface.
 They are metadata and nothing else: the record of what was said is the
 conversation store (#120, and the [content and telemetry
-ADR](../../docs/adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)),
+ADR](../../../../docs/adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)),
 and these events are the operator's live view of the same conversation,
 correlated with it by session id.
 Yet the machinery serving them used to belong to one subsystem, sitting in

@@ -1,7 +1,7 @@
 """The vocabulary a typed event is written in.
 
 An event's payload is metadata and nothing else ([the content and
-telemetry ADR](../../../docs/adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)),
+telemetry ADR](../../../../docs/adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md)),
 and until now that was a claim the registry made ABOUT a value: a field
 said "this position holds a session id" and a validator read the value
 back at emit time to see whether it did. This module makes it a claim
