@@ -5,11 +5,14 @@ groups a deployment's own measurements by, so what a record carries is
 asserted field by field. The text format is the one the server has
 always printed, and the assertion here is that it did not change.
 
-The last section is about records this project does not write: the
+The last sections are about records this project does not write: the
 provider SDKs log response headers and caught tracebacks under DEBUG,
 which is a hole the providers' own sanitizing cannot reach, so those
 tests drive the real SDK client through a mock transport and look at
-what came out the other end (#137).
+what came out the other end (#137). The database library is the same
+shape one level lower, and its payload sits at INFO rather than DEBUG
+(#124); what serves a device is covered where a real server can be run,
+in `tests/integration/test_access_logs.py`.
 """
 
 import json
@@ -19,6 +22,7 @@ import sys
 import httpx
 import pytest
 from openai import AsyncOpenAI
+from sqlalchemy import create_engine, text
 
 from samtal_server import logs
 from samtal_server.config.models import ServerConfig
@@ -133,7 +137,7 @@ def test_configure_defaults_to_the_text_format(restore_root_logger) -> None:
 def restore_vendor_levels():
     """The floor is set on loggers this process shares with every other
     test, so put their levels back."""
-    levels = {name: logging.getLogger(name).level for name in logs.VENDOR_LOGGERS}
+    levels = {name: logging.getLogger(name).level for name in logs.VENDOR_LOG_FLOORS}
     yield
     for name, level in levels.items():
         logging.getLogger(name).setLevel(level)
@@ -178,7 +182,7 @@ async def test_without_the_floor_the_sdk_debug_records_do_arrive(
     """The guard below is load-bearing, and this is what says so: with
     the vendor loggers left alone, DEBUG puts the SDK's own records into
     the handler this project installs."""
-    for name in logs.VENDOR_LOGGERS:
+    for name in logs.VENDOR_LOG_FLOORS:
         logging.getLogger(name).setLevel(logging.NOTSET)
 
     with caplog.at_level(logging.DEBUG):
@@ -230,15 +234,61 @@ async def test_the_one_request_line_httpx_writes_survives(
 
 
 def test_the_floor_never_makes_a_quiet_server_louder(restore_vendor_levels) -> None:
-    """An operator running at WARNING asked for silence, and INFO is a
-    floor on the vendors rather than a level they are raised to."""
-    logs.quiet_vendor_libraries(logging.WARNING)
-    assert logging.getLogger("httpx").level == logging.WARNING
-    assert logging.getLogger("openai").level == logging.WARNING
+    """An operator running at ERROR asked for silence, and a floor is a
+    level none of these is let below rather than one they are raised
+    to."""
+    logs.quiet_vendor_libraries(logging.ERROR)
+    for name in logs.VENDOR_LOG_FLOORS:
+        assert logging.getLogger(name).level == logging.ERROR
 
 
 def test_configure_applies_the_floor(restore_root_logger, restore_vendor_levels) -> None:
     logs.configure(ServerConfig(log_level="DEBUG"))
     assert logging.getLogger().level == logging.DEBUG
-    for name in logs.VENDOR_LOGGERS:
-        assert logging.getLogger(name).level == logging.INFO
+    for name, floor in logs.VENDOR_LOG_FLOORS.items():
+        assert logging.getLogger(name).level == floor
+
+
+# --- what the database library is allowed to say (#124) --------------
+
+
+def test_a_statement_and_its_parameters_do_not_reach_a_debug_log(
+    caplog: pytest.LogCaptureFixture, restore_vendor_levels
+) -> None:
+    """SQLAlchemy's payload is not behind DEBUG the way the SDKs' is: an
+    engine whose logger is enabled for INFO echoes every statement with
+    the parameters bound to it, and those are the stored configuration.
+    So its floor is WARNING, and the sentinel here is a bound value.
+
+    The library pins its own logger at WARNING when it is imported, and
+    that pin is cleared first on purpose: what is under test is this
+    deployment's floor, and a test that let the library's own default
+    answer the question would pass with the floor gone."""
+    logging.getLogger("sqlalchemy").setLevel(logging.NOTSET)
+    logs.quiet_vendor_libraries(logging.DEBUG)
+    engine = create_engine("sqlite://")
+
+    with caplog.at_level(logging.DEBUG), engine.connect() as connection:
+        connection.execute(text("create table kept (secret text)"))
+        connection.execute(text("insert into kept values (:value)"), {"value": SENTINEL})
+        connection.execute(text("select * from kept where secret = :value"), {"value": SENTINEL})
+
+    assert SENTINEL not in caplog.text
+    assert all(SENTINEL not in str(record.__dict__) for record in caplog.records)
+    assert not [r for r in caplog.records if r.name.startswith("sqlalchemy")]
+
+
+def test_without_the_floor_the_engine_echoes_its_parameters(
+    caplog: pytest.LogCaptureFixture, restore_vendor_levels
+) -> None:
+    """And the load-bearing half: an engine logger left at the server's
+    level does put the statement and the value bound to it on the
+    record, which is what the floor above is holding back."""
+    logging.getLogger("sqlalchemy").setLevel(logging.NOTSET)
+    engine = create_engine("sqlite://")
+
+    with caplog.at_level(logging.DEBUG), engine.connect() as connection:
+        connection.execute(text("create table kept (secret text)"))
+        connection.execute(text("insert into kept values (:value)"), {"value": SENTINEL})
+
+    assert SENTINEL in caplog.text

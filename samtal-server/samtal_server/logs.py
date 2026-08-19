@@ -8,10 +8,11 @@ can group by session, so a deployment measures its own pipeline from
 what it retains. They carry metadata only; the record of what was said
 is the conversation store (#120).
 
-One thing is filtered rather than formatted: the vendor libraries that
-talk to providers are held at INFO whatever the server's level, because
-their debug records carry response headers and tracebacks nothing here
-has sanitized. See `quiet_vendor_libraries` below.
+One thing is filtered rather than formatted: the libraries that carry
+somebody else's bytes are held below the server's level, because their
+debug records carry response headers, request lines, frame payloads and
+tracebacks nothing here has sanitized. See `quiet_vendor_libraries`
+below.
 
 Call sites need no wrapper. Anything passed as `extra=` on an ordinary
 logging call becomes a top-level field of the JSON object, found by
@@ -26,6 +27,7 @@ structured-logging dependency would cost more than it saves.
 import datetime as dt
 import json
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 from samtal_server.config.models import ServerConfig
@@ -40,37 +42,77 @@ _STANDARD_ATTRIBUTES = frozenset(
     vars(logging.LogRecord("", logging.INFO, "", 0, "", None, None))
 ) | {"taskName", "message", "asctime"}
 
-# The libraries that speak to a provider on our behalf, and the level
-# below which none of them reaches this handler.
+# The libraries that render somebody else's bytes into a record of their
+# own, and the level below which each of them reaches this handler.
 #
-# Their debug records are the one surface the provider taxonomy cannot
-# reach. A provider sanitizes what it raises (providers/kit.py), but the
-# openai and anthropic clients log the request options, the response
-# headers verbatim and the traceback of anything they caught, with httpx
-# and httpcore tracing the connection underneath. A response header is
-# written by the far end, so a compatible endpoint can echo a credential
-# or the request's own content into one, and `server.log_level: DEBUG`
-# is a reasonable thing to turn on while diagnosing a provider: that is
-# all it would take to put the lot into the logs the observability ADR
-# makes the retained surface.
+# Their debug records are the one surface the taxonomies cannot reach. A
+# provider sanitizes what it raises (providers/kit.py) and this server's
+# own lines say only what their call site decided to say, but a library
+# in the middle narrates the wire, and `server.log_level: DEBUG` is a
+# reasonable thing to turn on while diagnosing one: that is all it would
+# take to put the lot into the logs the observability ADR makes the
+# retained surface.
 #
-# INFO rather than WARNING, because httpx's one line per request (the
-# method, the URL and the status, no headers and no body) is worth
-# keeping and is the only thing any of the four says at that level.
-VENDOR_LOGGERS = ("anthropic", "httpcore", "httpx", "openai")
-VENDOR_LOG_FLOOR = logging.INFO
+# What each of them narrates:
+#
+# - The far side of a provider call. The openai and anthropic clients
+#   log the request options, the response headers verbatim and the
+#   traceback of anything they caught, with httpx and httpcore tracing
+#   the connection underneath. A response header is written by the far
+#   end, so a compatible endpoint can echo a credential or the request's
+#   own content into one.
+# - The near side of every request served. `uvicorn.error` carries the
+#   HTTP server's trace, which at debug is the request line and every
+#   request header: the OTA path holds the deployment's secret segment
+#   and a device's handshake carries its bearer token, which is why the
+#   access log is off in the first place (`main.uvicorn_config` says
+#   so). uvicorn hands that same logger to the websockets protocol, so
+#   those records also render every device frame's payload, text
+#   decoded.
+#
+# The MCP SDK narrates its wire the same way, and is deliberately not
+# here: `tools/mcp/transport.py` takes its whole namespace off this
+# handler entirely (`quiet_sdk_loggers`), which is stronger than a
+# floor and is owned by the module that connects with it. A floor here
+# as well would be a second rule to keep in agreement with that one.
+#
+# INFO for these, because what each says at that level is worth keeping
+# and carries none of it: httpx's one line per request (the method, the
+# URL and the status, no headers and no body), uvicorn's startup and
+# per-connection lines.
+#
+# sqlalchemy is the exception, at WARNING, because INFO is where its
+# payload is: an engine whose logger is enabled for INFO echoes every
+# statement with the parameters bound to it, and those parameters are
+# the stored configuration and, once #120 lands, what was said. The
+# library pins its own logger at WARNING when it is imported, and this
+# is deliberately not a reliance on that.
+#
+# There is no configuration key to lift these, and deliberately so. A
+# diagnosis that genuinely needs one raises it by name in the process
+# that needs it (`logging.getLogger("httpx").setLevel(logging.DEBUG)`),
+# which is a deliberate act rather than a side effect of the server's
+# own level.
+VENDOR_LOG_FLOORS: Mapping[str, int] = {
+    "anthropic": logging.INFO,
+    "httpcore": logging.INFO,
+    "httpx": logging.INFO,
+    "openai": logging.INFO,
+    "sqlalchemy": logging.WARNING,
+    "uvicorn.error": logging.INFO,
+}
 
 
 def quiet_vendor_libraries(level: int) -> None:
-    """Hold the vendor libraries at the floor, or at the server's own
+    """Hold each of those libraries at its floor, or at the server's own
     level when that is higher.
 
     The maximum rather than the floor alone, so this only ever quietens:
     an operator running at WARNING keeps the silence they asked for, and
     one running at DEBUG gets their own modules' debug lines without the
-    vendors' request traces."""
-    for name in VENDOR_LOGGERS:
-        logging.getLogger(name).setLevel(max(level, VENDOR_LOG_FLOOR))
+    libraries' wire traces."""
+    for name, floor in VENDOR_LOG_FLOORS.items():
+        logging.getLogger(name).setLevel(max(level, floor))
 
 
 class JsonFormatter(logging.Formatter):
