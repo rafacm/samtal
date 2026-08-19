@@ -106,7 +106,7 @@ class ToolSource(Protocol):
 class BuiltinTools:
     """The tools the server implements itself.
 
-    Owns both builtin names whether or not either can run. Asking to
+    Owns every builtin name whether or not it can run. Asking to
     `remember` where no memory is configured is a builtin asked for, and
     what answers it is this source saying there is no such tool, in the
     same words the runtime uses for a name nobody publishes: the
@@ -134,6 +134,9 @@ class BuiltinTools:
             tools.append(builtin.switch_agent_tool(self._agents))
         if self._memory is not None:
             tools.append(builtin.remember_tool())
+        # No condition to put on this one: it is configured by nothing
+        # and reaches nothing, so every agent has it.
+        tools.append(builtin.random_number_tool())
         return tools
 
     def owns(self, claim: ToolClaim) -> bool:
@@ -142,6 +145,8 @@ class BuiltinTools:
     async def dispatch(self, claim: ToolClaim, agent: str) -> tuple[str, bool]:
         if claim.name == names.REMEMBER and self._memory is not None:
             return await builtin.remember(self._memory, agent, claim.arguments or {}), False
+        if claim.name == names.RANDOM_NUMBER:
+            return builtin.random_number(claim.arguments or {}), False
         return f'there is no tool called "{claim.name}"', True
 
     def timeout_for(self, claim: ToolClaim) -> float:
