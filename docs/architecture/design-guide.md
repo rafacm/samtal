@@ -133,35 +133,48 @@ around in a test.
 
 ### Deepening in place: the prompt assembler
 
-**Issue #122, PR #130.** `samtal-server/samtal_server/runtime/prompt.py`
+**Issue #122, PR #130**, extended by PRs #131 and #133.
+`samtal-server/samtal_server/runtime/prompt.py`
 
 Prompt text used to be glued together in exactly one place,
 `tools.builtin.with_memory`, which appended remembered facts to a
 persona string. That was fine while there was one thing to append.
-Per-server guidance was the second, and shared fragments the third,
-so the choice was between a second joiner beside the first or one
-module that owns joining.
+Per-server guidance was the second (PR #130), shared fragments the
+third (PR #131) and a connected server's own words the fourth
+(PR #133), so the choice was between a second joiner beside the first
+or one module that owns joining.
 
 What landed is the second option, and the reason it is the good
-pattern is not that a file was added. It is what the file made
-impossible. `know_how` and `with_memory` return an `Assembled`: the
-text to send and the ordered `Block`s it was made of, each with a
-provenance and a character count, produced together by one pure
-function. Three consumers ask the same question through it: the
+pattern is not that a file was added. `know_how` and `with_memory`
+return an `Assembled`: the text to send and the ordered `Block`s it
+was made of, each with a provenance and a character count, produced
+together by one pure function. Nothing else in the server joins
+prompt text or counts it. Three surfaces read what it produces: the
 pipeline sends the text to the model, the `prompt_assembled` event
-carries the sizes, and the inspection route behind
-`samtal-server config prompt <agent>` prints the blocks. Before, they
-would have had three ways to compute what the model received; now
-they cannot disagree, because there is nothing to disagree with.
+carries the block sizes, and the inspection route behind
+`samtal-server config prompt <agent>` prints the blocks whole.
 
-The interface is small (two functions and a handful of frozen
-dataclasses) and it hides a lot: the fixed block order and the
-reasons for it, the two clocks (know-how cached per activation,
-memory read per round), the provenance vocabulary, and the rule that
+What the module guarantees is worth stating precisely, because the
+tempting claim is larger than the truth. It does not make those three
+surfaces agree, and they are not meant to: the event fires once per
+activation and leaves memory out deliberately, since `llm_round`
+already carries a round's numbers, while the route assembles a fresh
+preview that reads memory as a new session would rather than
+reporting the half a live session has cached. Nor does the module own
+the two clocks. The pipeline caches the know-how half in
+`_activate_agent` and appends memory per round; the API's
+`_prompt_preview` builds both on the spot. What is centralized is the
+rule: for the same inputs, the block order, the joining and the
+accounting are computed in one place, so two surfaces that differ are
+showing different moments rather than different arithmetic.
+
+That is where the depth is. The interface is two functions and a
+handful of frozen dataclasses; behind it sit the fixed block order
+and the reasons for it, the provenance vocabulary, and the rule that
 the prompt is the blocks joined by blank lines and nothing else, so
 that a character reported against a block is a character the model
 receives. That last rule is what makes the accounting exact, and it
-is enforceable only because one module owns both halves.
+is enforceable only because one module owns the joining.
 
 Two details worth copying. The move was justified by a principle, not
 by taste: prompt assembly fails the telephone-call test on
