@@ -271,6 +271,7 @@ class TurnTaking:
             )
             return None
         self._pause_output()
+        failed: str | None = None
         try:
             # In the receive path on purpose: incoming frames buffer in
             # the socket for the duration, so ordering is unaffected.
@@ -287,10 +288,18 @@ class TurnTaking:
             # own message and the chain behind it onto the retained
             # log, which is what the observability ADR's no-leak
             # contract forbids (#183).
+            failed = type(exc).__name__
+        # Reported and cleaned up out here rather than in the arm, the
+        # way the device edge raises `DeviceGone` (`device/session.py`)
+        # and for the same reason read the other way round: inside the
+        # arm, the provider's exception is the active one, so anything
+        # that fails here (the resume, or the logging call itself)
+        # escapes with it attached as `__context__` and carries the
+        # message this line took care not to print out to whoever
+        # catches it.
+        if failed is not None:
             logger.error(
-                "session %s: barge-in confirmation failed: %s",
-                self.session_id,
-                type(exc).__name__,
+                "session %s: barge-in confirmation failed: %s", self.session_id, failed
             )
             self._resume_output()
             return None

@@ -227,6 +227,7 @@ class FillerRunner:
             delay_ms=elapsed_ms,
             phrase_index=index,
         )
+        failed: str | None = None
         try:
             await self._output.begin_speaking()
             resampler = Resampler(clips.sample_rate, self._output.output_sample_rate)
@@ -264,10 +265,14 @@ class FillerRunner:
             # traceback rendered onto the retained log prints the whole
             # chain behind it, and a failure anywhere near provider
             # bytes can carry them in its message (#182).
+            failed = type(exc).__name__
+        # Reported out here rather than in the arm: inside it the
+        # swallowed exception is still the active one, so a logging call
+        # that itself failed would escape carrying it as `__context__`,
+        # which is the message this line took care not to print.
+        if failed is not None:
             logger.error(
-                "session %s: filler playback failed: %s",
-                self.session_id,
-                type(exc).__name__,
+                "session %s: filler playback failed: %s", self.session_id, failed
             )
 
     async def tail(self) -> None:

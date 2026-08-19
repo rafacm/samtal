@@ -73,6 +73,14 @@ class FakeReply:
         return self._confirmation
 
 
+class UnresumableDevice(FakeDevice):
+    """A device whose `resume_output` fails, which is what puts a second
+    failure in front of the first one's cleanup."""
+
+    def resume_output(self) -> None:
+        raise RuntimeError("the pacing clock is wedged")
+
+
 class SpeechAt(ScriptedEndpointer):
     """A scripted endpointer that also says where in the fed stream the
     speech began, which is the one number the pre-roll trim is
@@ -86,14 +94,28 @@ class SpeechAt(ScriptedEndpointer):
         return self._speech_start
 
 
+def chained(exc: BaseException) -> str:
+    """Every exception reachable from one, rendered. A `raise` inside an
+    active `except` suite attaches the exception being handled as
+    `__context__`, so this is what an escaping failure hands to whoever
+    catches it, whatever the line that failed chose to print."""
+    seen: list[str] = []
+    current: BaseException | None = exc
+    while current is not None and len(seen) < 20:
+        seen.append(f"{type(current).__name__}: {current}")
+        current = current.__cause__ or current.__context__
+    return "\n".join(seen)
+
+
 def turn_taking(
     reply: FakeReply,
     server: ServerConfig | None = None,
     speech_ms: float = 600.0,
+    device: FakeDevice | None = None,
 ) -> tuple[TurnTaking, FakeDevice]:
     """One `TurnTaking` on a recording device, with the endpointer
     already seeded the way an activation seeds it."""
-    device = FakeDevice()
+    device = device if device is not None else FakeDevice()
     taking = TurnTaking(
         SessionEvents(SESSION),
         cast(DeviceOutput, device),
@@ -284,6 +306,35 @@ async def test_a_failed_confirmation_names_its_class_and_not_what_it_said(
     # And the resume-and-drop the line reports is still what happened.
     assert reply.cancels == 0
     assert taking.output_paused is False
+
+
+async def test_a_failure_during_the_cleanup_carries_nothing_of_the_first(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Printing the class name is only half of not printing the message.
+    Inside an active `except` suite the provider's exception is still
+    the one being handled, so a second failure raised there, from the
+    resume or from the logging call itself, escapes with the first
+    attached as its `__context__` and hands the message to whoever
+    catches it. The report and the cleanup therefore run after the
+    suite has been left, which is the discipline the device edge
+    follows when it raises `DeviceGone`."""
+    reply = FakeReply()
+    failure = TimeoutError(f"transcribe timed out, key {SENTINEL}")
+    failure.__cause__ = ConnectionError(f"401 from the endpoint, key {SENTINEL}")
+    reply.confirmation_fails = failure
+    taking, _ = turn_taking(
+        reply, ServerConfig(barge_in_refractory_ms=0), device=UnresumableDevice()
+    )
+
+    with caplog.at_level("INFO"):
+        await replying_about(taking, reply, b"\x01\x02" * 800)
+        await taking.feed(b"\x03\x04" * 800)
+        with pytest.raises(RuntimeError) as caught:
+            await taking.finish_utterance(endpointed=True)
+
+    assert SENTINEL not in chained(caught.value)
+    assert SENTINEL not in both_formats(caplog)
 
 
 # --- the arithmetic in front of them ----------------------------------
