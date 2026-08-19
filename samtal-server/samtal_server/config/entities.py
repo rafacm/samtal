@@ -59,6 +59,8 @@ from samtal_server.config.models import (
     McpServerConfig,
     PromptFragmentConfig,
     ProviderConfig,
+    is_mcp_secret_key,
+    is_secret_option,
 )
 from samtal_server.config.responses import Acknowledgement, Envelope
 
@@ -192,6 +194,17 @@ class DocumentedShape:
     purpose: str
     notes: tuple[str, ...] = ()
 
+    # Which of the model's fields a display shows even when they hold
+    # their declared default.
+    #
+    # Almost always empty, because the display rule already answers it:
+    # a field is shown at whatever it holds, and the only thing left out
+    # is a default that means absence (null, an empty list, an empty
+    # mapping), so a default that is a real value is shown at it. This
+    # is where a shape says it departs from that, and the departure has
+    # to earn its line.
+    always_shown: tuple[str, ...] = ()
+
 
 @dataclass(frozen=True, kw_only=True)
 class NestedShape(DocumentedShape):
@@ -283,6 +296,21 @@ class EntityDescriptor(DocumentedShape):
     read: Hook = None
     write: Hook = None
     delete: Hook = None
+
+    # Which of this kind's key names carry a credential, asked at every
+    # depth of an entry the display path walks. Data rather than a hook,
+    # and one rule per kind rather than one per surface: it is the same
+    # predicate the models refuse an inline value under, so what a write
+    # rejects and what a read masks cannot come to disagree.
+    #
+    # The wider reading is the default, because a kind that has not
+    # thought about the question should mask more rather than less: it
+    # counts `auth`, since the key holding an MCP server's credential is
+    # as often called Authorization as token. A provider takes the
+    # narrower one, and that is the deliberate part: its options are
+    # passed through to an implementation, where `auth_type: bearer` is
+    # configuration an operator reads back rather than a credential.
+    secret_key: Callable[[str], bool] = is_mcp_secret_key
 
     # View facts, filled by `views.py`: the body builder that masks one
     # entry for display. `views.provider_record` is deliberately not
@@ -398,6 +426,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         moved_key="providers",
         table="providers",
         secret_slots="provider",
+        secret_key=is_secret_option,
         missing=NO_SUCH_PROVIDER,
         endpoints=(
             Endpoint(
@@ -777,6 +806,13 @@ NESTED: tuple[NestedShape, ...] = (
             "voice at boot and cached, so the clip costs nothing at the moment it "
             "masks and keeps working when the TTS provider is the thing being slow."
         ),
+        # The phrase list is what the section is: an entry with none is
+        # a filler that plays nothing, which is a state to read off the
+        # section rather than to infer from a key that is not there. The
+        # empty list is also unreachable while the feature is on, since
+        # the model refuses `enabled` without phrases, so what this
+        # shows is the disabled entry as it stands.
+        always_shown=("phrases",),
     ),
 )
 
@@ -818,6 +854,10 @@ _BY_NAME: dict[str, EntityDescriptor] = {entry.name: entry for entry in ENTITIES
 
 _SETTINGS_BY_NAME: dict[str, Setting] = {entry.name: entry for entry in SETTINGS}
 
+_BY_MODEL: dict[type[BaseModel], DocumentedShape] = {
+    shape.model: shape for shape in (*ENTITIES, *NESTED)
+}
+
 
 def descriptor(name: str) -> EntityDescriptor:
     """One commanded kind, by the name its command, its route and its
@@ -834,6 +874,21 @@ def setting(name: str) -> Setting:
     fact for the rest.
     """
     return _SETTINGS_BY_NAME[name]
+
+
+def always_shown(model: type[BaseModel]) -> tuple[str, ...]:
+    """Which of one model's fields a display shows even when they hold
+    their declared default.
+
+    Addressed by the model rather than by a kind's name, because this is
+    what the display path asks as it walks into a section nested inside
+    an entry, where the name it came in under is the field's and not a
+    kind's. A model the registry does not carry answers with nothing,
+    which is the rule rather than an absence of one: the display rule
+    decides what a field shows, and a shape says only where it departs.
+    """
+    shape = _BY_MODEL.get(model)
+    return shape.always_shown if shape is not None else ()
 
 
 def fill(name: str, **facts: object) -> None:
@@ -896,6 +951,7 @@ __all__ = [
     "NestedShape",
     "Setting",
     "Verb",
+    "always_shown",
     "descriptor",
     "fill",
     "setting",
