@@ -24,13 +24,18 @@ from samtal_server.config.entities import (
 )
 from samtal_server.config.loader import StorageError, UnknownEntityError
 from samtal_server.config.models import mcp_entry_fragment
-from samtal_server.config.secrets import SecretLocation, generate_key
+from samtal_server.config.secrets import MASK, SecretLocation, generate_key
 from samtal_server.config.store import NOT_A_STAGE, ConfigStore, verify_secrets
 from samtal_server.db import open_database, schema
 
 # Not a real credential, and shaped so a substring check for it cannot
 # match by accident.
 SECRET = "sk-test-4f8b2c9e-never-a-real-credential"
+
+# The other shape a credential arrives in: one that reads like the name
+# of an environment variable, so a write accepts it and the display
+# refuses to show it, which is what makes a read of it carry the mask.
+PASTED = "sk_test_4f8b2c9e_never_a_real_credential"
 
 nan = float("nan")
 inf = float("inf")
@@ -1347,3 +1352,113 @@ def test_two_concurrent_writers_serialize(
         assert check_references(ConfigStore(engine, keys).load().domain) == []
     finally:
         engine.dispose()
+
+
+def test_a_marked_write_resolves_and_persists_under_one_lock(
+    tmp_path: Path, keys: MultiFernet, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One writer resubmits a read carrying the mask while the other
+    replaces the entry without the value the mask stands for.
+
+    Serially there are two outcomes and no third. The resubmission runs
+    first: it keeps the stored value, and the replacement then takes the
+    whole entry away. The replacement runs first: the path the mask
+    stands for is gone, so the resubmission is refused for a mask with
+    nothing behind it. Either way the value is not in the row at the end,
+    because the last write to run did not write it.
+
+    The third outcome is the one this pins against: the resubmission
+    resolves the mask, the replacement runs whole, and the resubmission
+    then persists what it resolved, putting back a value that was gone
+    when its own write ran. No serial order produces that, and it is what
+    resolving the marker outside the write transaction allowed.
+
+    The pacing makes it deterministic rather than a race that usually
+    does not happen: the resubmitting writer announces that it has looked
+    the stored value up and then waits for the other to finish.
+    Resolving inside the write transaction, that wait always times out,
+    because the other writer cannot begin while this one holds the lock
+    (the busy timeout is twenty times the wait, so it queues rather than
+    failing). Resolving outside it, the other writer runs to completion
+    inside the wait, and the resurrection follows.
+    """
+    from samtal_server.config import store as store_module
+
+    directory = tmp_path / "db"
+    setup = open_database(directory)
+    try:
+        ConfigStore(setup, keys).set_provider(
+            "llm",
+            "claude",
+            {"type": "anthropic", "connection": {"api_key_env": PASTED}},
+        )
+    finally:
+        setup.dispose()
+
+    replaced = threading.Event()
+    held = store_module._held
+
+    def paced(stored, path):
+        value = held(stored, path)
+        replaced.wait(timeout=0.5)
+        return value
+
+    monkeypatch.setattr(store_module, "_held", paced)
+
+    start = threading.Barrier(2)
+    outcomes: dict[str, BaseException | None] = {}
+    lock = threading.Lock()
+
+    def writer(name: str, change) -> None:
+        engine = open_database(directory)
+        store = ConfigStore(engine, keys)
+        try:
+            start.wait(timeout=10)
+            try:
+                change(store)
+                outcome: BaseException | None = None
+            except BaseException as exc:  # noqa: BLE001 - reported, not swallowed
+                outcome = exc
+            with lock:
+                outcomes[name] = outcome
+        finally:
+            if name == "replace":
+                replaced.set()
+            engine.dispose()
+
+    def resubmit(store: ConfigStore) -> None:
+        store.set_provider(
+            "llm",
+            "claude",
+            {"type": "anthropic", "connection": {"api_key_env": MASK}},
+        )
+
+    def replace(store: ConfigStore) -> None:
+        store.set_provider("llm", "claude", {"type": "anthropic", "model": "m"})
+
+    threads = [
+        threading.Thread(target=writer, args=(name, change), name=name)
+        for name, change in (("resubmit", resubmit), ("replace", replace))
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+
+    assert set(outcomes) == {"resubmit", "replace"}
+    # A lock this one waited twenty times as long for as the pacing holds
+    # it is not a legitimate outcome here, so a refusal can only be the
+    # marker's.
+    for name, outcome in outcomes.items():
+        assert outcome is None or isinstance(outcome, ConfigError), (name, outcome)
+    assert outcomes["replace"] is None, outcomes["replace"]
+    if outcomes["resubmit"] is not None:
+        assert "nothing is stored there" in str(outcomes["resubmit"])
+
+    engine = open_database(directory)
+    try:
+        entry = ConfigStore(engine, keys).read_provider("llm", "claude").entry
+    finally:
+        engine.dispose()
+    assert "connection" not in (entry.model_extra or {})
+    assert PASTED not in str(entry)
