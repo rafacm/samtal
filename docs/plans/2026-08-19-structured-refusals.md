@@ -127,12 +127,14 @@ Every refusal this API answers becomes one shape, served as
   was.
 - `detail` is exactly the sentence the API answers today, unchanged.
 - `errors` is the extension member: a list of `{path, message}`
-  objects, `path` the dotted location inside the submitted fragment
-  (empty string for a fragment-level problem), `message` the
-  same text the corresponding `detail` line carries. It is always
-  present and `[]` when the refusal has no field decomposition, so
-  every refusal has one shape, the rule the response models already
-  follow.
+  objects, `path` an RFC 6901 JSON Pointer into the submitted
+  fragment (`/connection/api_key_env`; the empty string is the whole
+  fragment, and `~`/`/` in a key are escaped as the RFC says, which
+  is why a dotted spelling was rejected: a dot in a key would be
+  indistinguishable from nesting). `message` is the same text the
+  corresponding `detail` line carries. The member is always present
+  and `[]` when the refusal has no field decomposition, so every
+  refusal has one shape, the rule the response models already follow.
 - `type` and `instance` are omitted. An absent `type` means
   `about:blank` per the RFC, which is the truth: these problems are
   described by their status and their prose, and a URI registry
@@ -160,8 +162,9 @@ entity models, so the committed document says what the wire does.
 `loader.ConfigError` gains an optional structured payload:
 `ConfigError(message, problems=(...))` with a `problems` attribute
 defaulting to `()`, each entry a `FieldProblem` named tuple (`path`,
-`message`) declared beside it in `loader.py`, which imports nothing
-new. Subclasses inherit it untouched, and every existing raise site
+`message`) declared in `models.py` beside the validators that produce
+them (loader already imports models, so no new import direction).
+Subclasses inherit it untouched, and every existing raise site
 compiles unchanged.
 
 Exactly one site fills it: `store._load`, where
@@ -169,6 +172,32 @@ Exactly one site fills it: `store._load`, where
 walk is refactored to produce the pairs once and render both the
 sentence and the payload from them, so the prose and the structure are
 one computation.
+
+The walk alone is not enough, the review round's second finding:
+the validators that know their semantic field are model-level
+(`ProviderConfig._reject_inline_secrets`,
+`McpServerConfig._check_transport_fields`,
+`FillerConfig._check_phrases`), so pydantic locates their errors at
+the model, not the field, and the transport validator joins several
+problems into one message. So `models.py` declares the structured
+form beside the validators that produce it: `FieldProblem(path,
+message)` and `FieldProblemsError(ValueError)` carrying a tuple of
+them, and those validators collect their problems as pairs and raise
+the one exception (`check_no_inline_secrets` keeps raising per path
+it finds; the transport validator's problems become one pair each).
+`_load`'s walk reads each pydantic error's original exception from
+`errors()`'s `ctx` and, where it is a `FieldProblemsError`, takes its
+pairs with the error's own `loc` as the pointer prefix; every other
+error keeps the `(loc, msg)` derivation. The pairs are still the one
+computation both prose and payload render from, which means the
+transport validator's sentence becomes one line per problem instead
+of one `; `-joined line: a deliberate, recorded prose change, same
+words per problem, pinned by the new goldens. M1's first commit
+verifies the `ctx` mechanism (pydantic carries the raised exception
+in the error's context for wrap/value errors) with a pin that fails
+loudly on a pydantic upgrade that drops it. `loader.ConfigError`
+carries the resulting pairs unchanged; loader already imports
+`models`, so the types have one home and no cycle.
 
 Deliberately not filled anywhere else:
 
@@ -263,6 +292,13 @@ CLI transport suite for the pass-through pins.
     `errors` entries whose paths and messages match the `detail`
     lines pairwise, which is the one-computation claim asserted from
     the outside.
+  - The model-level cases, one each: a provider inline secret nested
+    in an option answers the pointer to the nested key; an MCP
+    fragment breaking the transport rule and a secret rule at once
+    answers one entry per problem, each with its field's pointer; a
+    filler problem answers a pointer under the layer that holds it;
+    and a key containing a dot or a slash answers the escaped pointer
+    that distinguishes it from nesting.
   - The sentinel: a fragment planted with a credential-shaped value in
     a wrong-typed field is refused with the value absent from
     `detail`, from every `errors` message and path, and from the log,
@@ -400,6 +436,18 @@ carries its resolution below it.
    since dotted strings cannot distinguish a dot in a key from
    nesting), and tests for the provider inline-secret, MCP multi-rule,
    nested filler and arbitrary-key cases.
+
+   *Resolution.* Adopted whole. `path` is now an RFC 6901 JSON
+   Pointer. `models.py` declares `FieldProblem` and
+   `FieldProblemsError`, the three named validators raise their
+   problems as pairs, and `_load` reads the original exception from
+   the pydantic error's `ctx` (prefixing with the error's `loc`),
+   falling back to `(loc, msg)` everywhere else, so prose and
+   structure stay one computation. The transport sentence becoming
+   one line per problem is recorded as a deliberate prose change with
+   new goldens, and M1's first commit pins the `ctx` mechanism so a
+   pydantic upgrade that drops it fails loudly. The four test cases
+   the finding names are in the test plan verbatim.
 
 3. **P2: framework-generated 404 and 405 responses bypass the claimed
    single problem shape.** `_application` registers handlers only for
