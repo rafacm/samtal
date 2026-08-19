@@ -350,7 +350,7 @@ carries its baseline proof inside its own PR.
   inlining the catalog into the emitters would put 58 declarations
   back inside dispatch code, and inlining the emitters into callers
   would spread tap dispatch over 21 modules.
-- [x] **[M2: convert the session channel](2026-08-19-governance-simplification-implementation.md#m2-convert-the-session-channel).** (PR TBD)
+- [x] **[M2: convert the session channel](2026-08-19-governance-simplification-implementation.md#m2-convert-the-session-channel).** (PR #218)
   All session-scope emit
   sites (the pipeline, the device session, turn-taking, the filler
   runner) construct typed events;
