@@ -9,6 +9,18 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **samtal-server moved to the src layout** (#208). The import package
+  now lives at `samtal-server/src/samtal_server`, so a process started
+  from the project directory can no longer import it off the working
+  directory: what imports is what was installed, and a file missing
+  from the wheel fails at once instead of only inside the container.
+  The wheel's contents are unchanged (the same 107 entries as the flat
+  layout built). Checkout-relative paths moved with the tree: the
+  bytecode-cache clearing in `tests/conftest.py`, the integration
+  lane's leftover-cache guard (which now also asserts the package
+  directory exists, so a future move cannot make it pass vacuously),
+  the build-info checkout root, and the Dockerfile's source copy.
+
 - **CI's image lane skips pull requests for now** (#212). The image
   job (both variants, arm64 under QEMU, the whole smoke conversation)
   was the longest pole in every PR round-trip, and the upcoming
