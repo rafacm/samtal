@@ -16,6 +16,13 @@ They live in the integration lane because each script now starts a
 server of its own to write through, polls it, and stops it: that
 lifecycle is a large part of what is under test, so the scripts are run
 exactly as CI runs them, unmodified, with no fixture serving them.
+
+The environment they are handed is the harness's, and one thing in it is
+load-bearing beyond any single script: the children these scripts spawn
+write no bytecode because `script_environment` says so. The last test
+here is about that assignment rather than about a script, and the first
+one runs its script with the ambient flag stripped so that the
+assignment is what is holding.
 """
 
 import signal
@@ -29,7 +36,7 @@ import pytest
 
 from samtal_server.config.store import ConfigStore, DomainConfig
 from samtal_server.db import open_database
-from tests.integration.conftest import script_environment
+from tests.integration.conftest import BYTECODE_OFF, script_environment
 
 SMOKE = Path(__file__).resolve().parents[1] / "smoke"
 
@@ -75,7 +82,37 @@ def seeded(script: str, tmp_path: Path, environment: dict[str, str] | None = Non
     return _domain(directory)
 
 
-def test_the_smoke_conversation_runs_on_mock_providers(tmp_path: Path) -> None:
+@pytest.fixture
+def no_ambient_bytecode_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run this test's script with PYTHONDONTWRITEBYTECODE not already in
+    the environment, so the harness's own assignment is what stops the
+    subprocesses writing caches.
+
+    CI exports the variable for the whole job
+    (`.github/workflows/samtal-server.yml`), which is right for
+    everything that is not pytest and would make the lane's guard
+    vacuous there: a harness that stopped setting the flag would still
+    hand every child an environment carrying it, and the finalizer would
+    find nothing to catch. Stripping it before the script runs is what
+    makes the guard bite on a runner as well as on a laptop.
+
+    Deleting it from this process is enough, because
+    `script_environment` builds the child's environment by copying
+    `os.environ`. It does not make this process write bytecode:
+    `tests/conftest.py` sets `sys.dont_write_bytecode` rather than
+    relying on the variable.
+
+    One test is enough. The point is not to run the scripts in an
+    unusual environment, it is to have somewhere the assignment is
+    load-bearing, and seeding is seven CLI calls plus a server start, so
+    the caches would be plentiful and immediate.
+    """
+    monkeypatch.delenv(BYTECODE_OFF, raising=False)
+
+
+def test_the_smoke_conversation_runs_on_mock_providers(
+    no_ambient_bytecode_flag: None, tmp_path: Path
+) -> None:
     """No model downloads, no keys, no network: what the lane proves is
     that the image serves a conversation, not which engine speaks."""
     domain = seeded("seed.sh", tmp_path)
@@ -216,3 +253,33 @@ def test_a_seeding_script_reports_a_server_that_will_not_start(
     # And the server's own log is what says why, which is the whole point
     # of keeping it.
     assert "SAMTAL_API_SECRET" in finished.stderr
+
+
+def test_a_script_environment_writes_no_bytecode_whatever_it_is_asked_for(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The assignment on its own, with no script and no subprocess.
+
+    Every way the flag could come out of the helper wrong, in one place
+    and in a second rather than in a minute: absent from this process,
+    set to something falsy here, or overridden by a caller that names
+    the variable itself. Overrides are applied before the assignment
+    precisely so the last of those cannot happen, and `without` is
+    checked too, since a caller stripping the variable is asking for the
+    environment it names rather than for bytecode.
+
+    What CPython reads is whether the value is a non-empty string, so
+    "0" would stop the writes and an empty one would not stop anything:
+    the empty case is the real hole of the three, and the other two are
+    here because the reader cannot be expected to know which is which.
+    The helper answers "1" to all of them, which is the one spelling
+    every reader of this environment already understands.
+    """
+    monkeypatch.delenv(BYTECODE_OFF, raising=False)
+    assert script_environment()[BYTECODE_OFF] == "1"
+    assert script_environment(**{BYTECODE_OFF: "0"})[BYTECODE_OFF] == "1"
+    assert script_environment(**{BYTECODE_OFF: ""})[BYTECODE_OFF] == "1"
+    assert script_environment(without=[BYTECODE_OFF])[BYTECODE_OFF] == "1"
+
+    monkeypatch.setenv(BYTECODE_OFF, "0")
+    assert script_environment()[BYTECODE_OFF] == "1"
