@@ -110,12 +110,20 @@ and everything reads them there.
 
 - `VENDOR_LOG_FLOORS` (`samtal_server/logs.py`): `anthropic`,
   `httpcore`, `httpx`, `openai` and `uvicorn.error` at INFO,
-  `sqlalchemy` at WARNING. Applied as `max(server level, floor)`, so it
-  only ever quietens.
+  `sqlalchemy` at WARNING. Applied as `max(server level, floor)` by
+  `logs.configure`, and as `max(what it is already effectively at,
+  floor)` by the two boot paths that call it before there is a server
+  level to know. Either way it only ever quietens.
 - `NO_SUCH_PROVIDER`, `NO_SUCH_MCP_SERVER`, `NO_SUCH_FRAGMENT`,
   `NO_SUCH_AGENT`, `NO_SUCH_DEVICE`
   (`samtal_server/config/entities.py`): the five refusal sentences,
   each carried by its kind's descriptor.
+- `NOT_A_STAGE`, `NOT_A_PROVIDER_SLOT`, `NOT_AN_MCP_SLOT`
+  (`samtal_server/config/store.py`): the three that refuse a segment
+  for its shape rather than for addressing nothing, each beside the
+  check that raises it. The stage list and the MCP groups are built
+  from `PROVIDER_STAGES` and `MCP_SECRET_GROUPS`, so a sentence cannot
+  come to disagree with the rule it describes.
 
 No configuration keys, no event fields and no event sentences changed,
 and all four committed references regenerate byte-identical: no refusal
@@ -130,15 +138,16 @@ sentence is rendered into any of them.
   with `logger.exception`, and `Raw result: ...` at warning, both of
   which render what the far side sent. A level floor could not have
   closed either.
-- **The refusals that describe a shape rather than an absence.** `"..."
-  is not a MAC address`, `"..." is not a credential slot on a provider`
-  and the two dotted-slot rules quote what they refused, and the last
-  two are reached only after the entity was confirmed to exist, so what
-  they name is stored configuration rather than a caller's paste. The
-  MAC rule is not: it refuses the value it prints. That is a different
-  family from an entity miss, and the issue's boundary (the hint lists
-  in reference-check refusals are a separate surface) puts it outside
-  this change; it is worth its own look.
+- **The refusals that describe a shape rather than an absence.** These
+  were left here and then taken up by the review round below, which
+  found the reasoning wrong for two of them: the stage and the slot are
+  both segments a caller sends, and being reached only after the entity
+  exists says nothing about the value in them. What remains left is
+  `"..." is not a MAC address` (which refuses the value it prints) and
+  the two dotted-key rules, which name the entity they were given and
+  never the key. The MAC rule is the same shape as the stage one and is
+  worth the same fix; it is outside the issue's boundary and is left
+  named here rather than done quietly.
 - **The CLI's own HTTP client.** `samtal-server config` talks to the
   API over a socket, and httpx narrates the URL it requested, identity
   included, at INFO. That is the client saying what the operator just
@@ -149,10 +158,11 @@ sentence is rendered into any of them.
 ## Verification
 
 - Lint: `uv run ruff check .` clean.
-- Unit: `uv run pytest tests/unit -q`, 3028 passed and 16 skipped
-  (3008 before).
-- Integration: `uv run pytest tests/integration -q`, 59 passed (58
-  before).
+- Unit: `uv run pytest tests/unit -q`, 3038 passed and 16 skipped
+  (3008 before this change; 3028 before the review round).
+- Integration: `uv run pytest tests/integration -q`, 60 passed (58
+  before this change, plus one from this change and one that arrived on
+  main in between).
 - All four committed-reference drift checks (domain config,
   conversations schema, events, OpenAPI) diff empty.
 - Every sentinel was proven to bite, by reverting the fix in place,
@@ -173,9 +183,83 @@ sentence is rendered into any of them.
     leak is asserted before the wording in both, so the failure is the
     leak rather than a changed sentence.
 
+## Review round, 2026-08-19
+
+The external review of the PR returned three findings, all accepted and
+all fixed here, one commit each. Two of them are the same correction:
+the first round drew the line at "an entity that is not there" and left
+every other segment a caller sends still being quoted back.
+
+1. **P1: the floor went on late on one boot path and never on the
+   other.** `logs.configure` cannot run until the configuration has been
+   read, and reading it opens a database and migrates it, so a process
+   started with SQL echoing printed every statement of the boot,
+   parameters and all, before the floor arrived. An external ASGI runner
+   reaching `app.py:app` never calls `configure` at all, so `uvicorn
+   --log-level debug` left uvicorn's own logger tracing request lines,
+   request headers and every websocket frame's payload for the life of
+   the server.
+
+   Fixed by calling `quiet_vendor_libraries` where each path actually
+   begins: at the top of `create_app`, which both entry points execute
+   before serving, and at the top of `main()`, ahead of
+   `load_boot_config`. `configure` keeps calling it with the server's
+   own level once it knows it, and the call is idempotent. Neither of
+   the new callers knows that level, so the argument is now optional:
+   without one, each library is held against the level it is already
+   effectively at, which makes nothing louder than the process already
+   is and leaves nothing below its floor.
+
+   The review proposed a shared deployment bootstrap module. Two calls
+   at the two places they belong were preferred, and `create_app` was
+   already the place this argument had been settled once: it resolves
+   the event enforcement mode for exactly the same reason, in a comment
+   the new line sits beside.
+
+2. **P1: the stage refusal echoed the pasted value.** A provider is
+   addressed by a stage and a name together, and only the name had
+   stopped being repeated. The four stages are constants of this server,
+   so the sentence names them and not what was sent.
+
+3. **P1: the slot refusals echoed on entities that exist.** The first
+   round left them on the reasoning that they are reached only after the
+   entity was confirmed to exist, which says something about the entity
+   and nothing about the slot. A slot is the second half of a secret's
+   address, and `set-secret` is the command an operator pastes a
+   credential into: a credential typed one argument early landed in the
+   slot and came back out in the refusal. Both sentences now state the
+   rule, and the sentinel tests drive credential-shaped slots against
+   entities that exist, on the API and on both CLI paths, which is what
+   the round before could not do: the entity-miss refusal answered
+   first, so the slot check was never the one under test. They needed a
+   sentinel of their own, because this suite's usual ones carry the word
+   "credential" and are therefore secret-shaped enough to be accepted as
+   slots.
+
+The sentences this round changed:
+
+| Old | New |
+| --- | --- |
+| `"<stage>" is not a provider stage; expected one of: llm, asr, tts, vad` | `providers: the stage has to be one of asr, llm, tts, vad` |
+| `"<slot>" is not a credential slot on a provider; ...` | `providers: a credential slot is the option name the credential fills, such as api_key. ...` |
+| `"<slot>" is not a credential slot on an MCP server; ...` | `mcp_servers: a credential slot is env.<KEY> or headers.<KEY>, for example headers.Authorization, ...` |
+
+Every new sentinel was proven to bite the same way as the first round's:
+
+- The floor's two entry points, reverted together: the ASGI test read
+  back `uvicorn.error` at DEBUG, `sqlalchemy` at DEBUG and `httpx`
+  inheriting, and the boot test failed with `BEGIN IMMEDIATE`,
+  `SELECT 1` and `[generated in ...]` on the log.
+- The stage sentence, reverted: the API row and both CLI rows failed on
+  the credential inside the 422 body and on stderr.
+- The slot sentences, reverted: all four CLI cases and both API cases
+  failed on the pasted value inside the refusal.
+
 ## Files modified
 
 - `samtal-server/samtal_server/logs.py`
+- `samtal-server/samtal_server/app.py`
+- `samtal-server/samtal_server/main.py`
 - `samtal-server/samtal_server/config/entities.py`
 - `samtal-server/samtal_server/config/store.py`
 - `samtal-server/tests/unit/test_logs.py`
