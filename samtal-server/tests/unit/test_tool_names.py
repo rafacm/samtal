@@ -28,7 +28,10 @@ def test_a_usable_entry_name_is_accepted(name: str) -> None:
     assert names.is_valid_entry_name(name)
 
 
-@pytest.mark.parametrize("name", ["self", "switch_agent", "remember", "home.assistant", "a b", ""])
+@pytest.mark.parametrize(
+    "name",
+    ["self", "switch_agent", "remember", "random_number", "home.assistant", "a b", ""],
+)
 def test_a_reserved_or_unusable_entry_name_is_refused(name: str) -> None:
     # Reserved names are what makes collisions unrepresentable: an entry
     # called "self" could shadow a device tool, and one called

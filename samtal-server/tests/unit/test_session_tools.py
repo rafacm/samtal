@@ -109,11 +109,16 @@ async def test_history_keeps_the_speech_and_not_the_tool_exchange() -> None:
 async def test_switch_agent_is_offered_only_where_there_is_somewhere_to_go() -> None:
     one = session_for(base_config(), POET_MAC)
     both = session_for(base_config(), BOTH_MAC)
-    assert [tool.name for tool in one.runtime._tool_snapshot()] == []
-    assert [tool.name for tool in both.runtime._tool_snapshot()] == ["switch_agent"]
+    # `random_number` is in both snapshots, being the builtin under no
+    # condition at all; the conditional one is the difference.
+    assert [tool.name for tool in one.runtime._tool_snapshot()] == ["random_number"]
+    assert [tool.name for tool in both.runtime._tool_snapshot()] == [
+        "switch_agent",
+        "random_number",
+    ]
     # The enum carries the device's full bound list, which is what lets
     # the agent answer "who can I talk to?".
-    (tool,) = both.runtime._tool_snapshot()
+    (tool,) = [t for t in both.runtime._tool_snapshot() if t.name == "switch_agent"]
     assert tool.input_schema["properties"]["agent"]["enum"] == ["poet", "tutor"]
     assert switch_agent_tool(["poet", "tutor"]).description.count("poet") == 1
 
@@ -227,7 +232,10 @@ async def test_remembering_is_offered_and_executed_when_memory_is_configured(
     )
     session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
 
-    assert [tool.name for tool in session.runtime._tool_snapshot()] == ["remember"]
+    assert [tool.name for tool in session.runtime._tool_snapshot()] == [
+        "remember",
+        "random_number",
+    ]
     assert await run_reply(session, "remember I am vegetarian") == ["I will keep that in mind."]
     assert "the user is vegetarian" in store.read("poet")
 
@@ -235,6 +243,40 @@ async def test_remembering_is_offered_and_executed_when_memory_is_configured(
         result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
     ]
     assert not result.is_error
+
+
+async def test_a_random_number_is_offered_with_no_configuration_and_drawn_when_asked_for() -> None:
+    """The one builtin under no condition: a device bound to a single
+    agent, with no memory configured, still has it, because a die is
+    neither the deployment's business nor the board's."""
+    script = ScriptedLlm([[call("random_number", minimum=1, maximum=6)], "You got a four."])
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=None)
+
+    assert [tool.name for tool in session.runtime._tool_snapshot()] == ["random_number"]
+    assert await run_reply(session, "roll a die") == ["You got a four."]
+
+    (result,) = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert not result.is_error
+    assert 1 <= int(result.content.split(",")[0]) <= 6
+
+
+async def test_a_random_range_that_cannot_be_drawn_from_comes_back_as_an_error() -> None:
+    """The refusal as the model receives it, which is the shape any
+    builtin's bad arguments take: an error result it reads and can call
+    again from, rather than an ended reply."""
+    script = ScriptedLlm(
+        [[call("random_number", minimum=10, maximum=1)], "Let me try that the other way round."]
+    )
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=None)
+    await run_reply(session, "pick a number between ten and one")
+
+    (result,) = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert result.is_error
+    assert "no greater than" in result.content
 
 
 async def test_a_remembered_fact_is_in_the_next_replys_prompt(tmp_path: Path) -> None:

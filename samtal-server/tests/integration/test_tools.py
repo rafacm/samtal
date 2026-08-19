@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from samtal_server.config import Config
+from samtal_server.tools import names
 from tests.integration.conftest import dominant_hz, spoken
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
@@ -287,6 +288,9 @@ def granting_config(kids_grant: object) -> Config:
     )
 
 
+BUILTINS = set(names.BUILTIN_TOOL_NAMES)
+
+
 def offered(events: list[dict]) -> set[str]:
     """The tool names the reply said it was given."""
     return set(spoken(events).removeprefix("I have ").rstrip(".").split(", "))
@@ -302,7 +306,11 @@ async def test_a_restricted_agent_is_offered_exactly_its_subset(serve, simulate)
         restricted, _ = await simulate(port, RESTRICTED_MAC)
         whole, _ = await simulate(port, DEVICE_MAC)
 
-    assert offered(restricted) == {"tools__secret_word", "tools__add"}
+    # An unconditional builtin sits beside the granted tools in every
+    # snapshot, and is outside the grant model by design, so what the
+    # grant decides is the rest of the list.
+    assert "random_number" in offered(restricted)
+    assert offered(restricted) - BUILTINS == {"tools__secret_word", "tools__add"}
     # The sibling agent on the same server, so the subset is a
     # restriction rather than everything the server published.
     assert offered(whole) > offered(restricted)
