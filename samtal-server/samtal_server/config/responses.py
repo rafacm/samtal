@@ -64,11 +64,17 @@ class Envelope(BaseModel):
 
     entity: dict[str, Any] = Field(
         description=(
-            "The entity's body in the shape a write of it accepts, with every "
-            "secret-bearing value masked. Described rather than validated here: a "
-            "masked value is not one the entity model would accept back, so the "
-            "entity schemas under `components/schemas` are what say which keys a "
-            "write may carry."
+            "The entity's body, with every secret-bearing value masked, in the shape "
+            "a write of it accepts and resubmittable as it stands. A PUT of it "
+            "replaces the model-shaped half and never the credentials stored beside "
+            "it; a field this read leaves out is one whose absence is what it means, "
+            "and it means the same absence on the way back. An environment reference "
+            "reads back as itself; a value shown as the mask resubmits as keep the "
+            "stored value, which is substituted before the fragment is validated, "
+            "and the mask written where nothing is stored is refused. Described "
+            "rather than validated here, because the mask is not a value the entity "
+            "model would accept on its own: the entity schemas under "
+            "`components/schemas` are what say which keys a write may carry."
         )
     )
     secrets: dict[str, SecretSlot] = Field(
@@ -76,7 +82,10 @@ class Envelope(BaseModel):
             "The slots holding a secret stored in the database, by slot name, and "
             "never their values: reads are masked. Empty for the kinds that can hold "
             "no stored secret (prompt fragments, agents, agent defaults, devices), so "
-            "that every read has one shape."
+            "that every read has one shape. Display-only, and nothing to act on when "
+            "resubmitting the entity above: a stored secret is left exactly as it is "
+            "by a write of the entity, and rotating one is the secret PUT, which is "
+            "the one door a plaintext value enters by."
         )
     )
 
