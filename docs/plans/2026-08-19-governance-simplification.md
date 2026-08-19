@@ -413,6 +413,14 @@ carries its baseline proof inside its own PR.
   timing and lifecycle tests kept with their justification written
   where the reach-in happens (utterance planting, pace clocks, drain
   ownership, store thread joins, pre-migration row planting). The
+  classification is complete, not sampled: every one of the
+  inventoried sites, across all 51 files and 82 names, receives a
+  recorded disposition (behavioral rewrite, characterization
+  retirement, documented white-box safety invariant, or obsolete
+  guard deletion) in the implementation doc's inventory table, and
+  a reach-in survives only as a white-box safety invariant whose
+  justification states which property cannot be established through
+  public observation; a docstring alone is not a license. The
   after-inventory reruns the same tokenizer walk and is recorded
   beside the before numbers. No new production interface is added
   unless a rewrite genuinely needs one, and each such addition names
@@ -604,6 +612,11 @@ inline; only the behavioral `wrote`/`deleted` functions move to
 the support module and six files got dispositions; the rule allowed
 any helper to keep a reach-in with a docstring, where the issue
 permits that only for white-box safety invariants.
+
+*Resolution.* Adopted. M6 now requires a recorded disposition for
+every inventoried site across all 51 files and 82 names, and a
+surviving reach-in must state which safety property public
+observation cannot establish.
 
 **9 (P2). M3 omits tests that break when `events_schema.py` goes.**
 `tests/support/schema.py`, `test_events.py`, and
