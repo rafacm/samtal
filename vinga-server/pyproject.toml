@@ -1,0 +1,90 @@
+[project]
+name = "vinga-server"
+version = "0.1.0"
+description = "Vinga conversation server: OTA endpoint, device websocket protocol, and the VAD/ASR/LLM/TTS pipeline"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "alembic>=1.18.5",
+    "anthropic>=0.120.0",
+    "av>=18.0.0",
+    # Fernet, for the domain configuration's secrets at rest. Already
+    # arrived transitively; direct because the server now uses it.
+    "cryptography>=49.0.0",
+    "fastapi>=0.115",
+    # Direct because the cloud providers speak their APIs over it rather
+    # than pulling in a vendor SDK; it arrives with the LLM SDKs anyway.
+    "httpx>=0.28",
+    # 1.24 is the first release carrying streamable_http_client, the
+    # replacement for the deprecated wrapper the transport used to call.
+    # Capped below 2 because MCP 2 needs httpx 2 and yields a transport
+    # this client does not unpack; migrating to it is its own change.
+    "mcp>=1.24,<2",
+    "openai>=2.48.0",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "pysilero-vad>=3.4",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
+    "sqlalchemy>=2.0.51",
+    "uvicorn[standard]>=0.34",
+]
+
+[project.optional-dependencies]
+# Local ASR (MIT). Model weights download from Hugging Face at startup.
+faster-whisper = ["faster-whisper>=1.2"]
+# Local TTS. piper-tts is GPL-3.0, which is why it is an optional extra
+# and must never become a core dependency.
+piper = ["piper-tts>=1.6"]
+
+[project.scripts]
+vinga-server = "vinga_server.main:main"
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.9.1",
+    # Validates the committed OpenAPI document (Apache-2.0), so that
+    # "the API generates a document" means one a client generator will
+    # accept rather than one that happens to be JSON. Tests only: the
+    # server never validates its own document at runtime.
+    "openapi-spec-validator>=0.9.0",
+    "pytest>=8.3",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.9",
+    "xiaozhi-sdk>=0.5.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vinga_server"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The suites name their files for what they test at their own level, so
+# `test_ws_auth.py` and `test_drain.py` exist under both tests/unit and
+# tests/integration. pytest's default import mode registers a test
+# module by its bare basename, which makes that pair a collision and
+# breaks any run that collects both suites, `uv run pytest` included.
+# importlib mode imports each file by its full path instead, so the
+# names can stay descriptive and CI does not have to keep the suites in
+# separate commands to avoid it.
+addopts = ["--import-mode=importlib"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    "error",
+    # opuslib, the codec inside the xiaozhi-sdk test simulator (the server
+    # itself uses PyAV), compiles with an `is not 0` identity comparison.
+    # Unmaintained upstream, so the warning is not going away.
+    "ignore:\"is not\" with 'int' literal:SyntaxWarning",
+]

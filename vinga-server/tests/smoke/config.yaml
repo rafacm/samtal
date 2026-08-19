@@ -1,0 +1,17 @@
+# The server half of the configuration the smoke lane's server runs on.
+#
+# The domain half is seeded into the database by seed.sh, which runs the
+# shipped CLI from the image itself before the container starts: mock
+# providers throughout, so the smoke conversation needs no model
+# downloads, no API keys, and no network. What this lane proves is that
+# the image boots, serves both endpoints, issues a token the websocket
+# accepts back, and carries one conversation from audio in to audio out.
+# Which engine speaks is the device checkpoint's question, not this
+# lane's.
+
+server:
+  host: 0.0.0.0
+  port: 8003
+  # Device authentication stays on, as it is everywhere: the token round
+  # trip is part of what this lane checks. The secret comes from
+  # VINGA_AUTH_SECRET in the container's environment.

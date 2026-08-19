@@ -52,5 +52,5 @@ HEAD_SHA="$(git rev-parse --short HEAD)"
   cat "$OUT"
 } > "$WORK/comment.md"
 
-gh pr comment "$PR" --repo rafacm/samtal --body-file "$WORK/comment.md"
+gh pr comment "$PR" --repo rafacm/vinga --body-file "$WORK/comment.md"
 echo "posted review to PR #$PR (working files in $WORK)"

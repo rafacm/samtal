@@ -1,0 +1,26 @@
+# The LLM stage on Anthropic's API.
+#
+# One provider entry: a `type` and the options that type takes. Install
+# it under the name agents will reference it by:
+#
+#   vinga-server config set provider llm claude -f examples/llm-anthropic.yaml
+#
+# The conversation leaves the host for this type, which knows that about
+# itself: under server.local_only it is refused at boot, naming the
+# stage and the provider, and it rejects an `egress` key rather than
+# letting one assert otherwise.
+
+type: anthropic
+
+model: claude-sonnet-5
+
+# The environment variable holding the key, never the key itself.
+#
+# The alternative is to store the credential in the database, encrypted,
+# which never puts it in a file at all: leave this key out and run
+#
+#   vinga-server config set-secret provider llm claude api_key
+#
+# A stored secret wins over this reference when both exist, and `config
+# show` marks the reference it displaces.
+api_key_env: ANTHROPIC_API_KEY

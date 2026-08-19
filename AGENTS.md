@@ -1,16 +1,16 @@
-# Agent guidance for samtal
+# Agent guidance for vinga
 
-samtal is a self-hostable voice assistant: ESP32-S3 devices (mic, speaker,
+vinga is a self-hostable voice assistant: ESP32-S3 devices (mic, speaker,
 display) talk to a Python conversation server over WebSocket. It builds on
 78/xiaozhi-esp32 (device firmware) and xinnan-tech/xiaozhi-esp32-server
 (server), both MIT.
 
 ## Repository layout
 
-- `samtal-server/`: the conversation server (Python). OTA/config HTTP endpoint,
+- `vinga-server/`: the conversation server (Python). OTA/config HTTP endpoint,
   WebSocket audio channel, VAD → ASR → LLM → TTS pipeline with pluggable
   providers (LLM, voice, MCP tools).
-- `samtal-esp32/`: thin firmware customization on top of upstream
+- `vinga-esp32/`: thin firmware customization on top of upstream
   xiaozhi-esp32 (ESP-IDF v6.0.x, target `esp32s3`).
 - `docs/xiaozhi-notes.md`: research notes on the upstream architecture, the
   device↔server protocol, ports, configuration keys, and the validated
@@ -24,19 +24,19 @@ display) talk to a Python conversation server over WebSocket. It builds on
 
 ## Commands
 
-All samtal-server commands run from the `samtal-server/` directory. Use `uv`
+All vinga-server commands run from the `vinga-server/` directory. Use `uv`
 for Python; never `pip install` directly.
 
 ```bash
 uv sync                          # Install/update dependencies
-uv run samtal-server             # Run the server (--config or SAMTAL_CONFIG)
+uv run vinga-server             # Run the server (--config or VINGA_CONFIG)
 uv run pytest tests/unit -q      # Unit tests
 uv run pytest tests/integration -q  # Integration tests
 uv run ruff check .              # Lint
 ```
 
-CI (`.github/workflows/samtal-server.yml`) runs the same lint, unit, and
-integration steps, and only triggers on changes under `samtal-server/` or to
+CI (`.github/workflows/vinga-server.yml`) runs the same lint, unit, and
+integration steps, and only triggers on changes under `vinga-server/` or to
 the workflow file itself.
 
 ### Restoring a file mid-experiment
@@ -85,7 +85,7 @@ this before suspecting the code.
 ## Design conventions
 
 Modules are judged by depth: how much a caller gets for how little it has to
-know. The method and its worked examples from merged samtal code are in
+know. The method and its worked examples from merged vinga code are in
 [`docs/architecture/design-guide.md`](docs/architecture/design-guide.md).
 
 - **Module**: a file, or a package when its parts change for separate reasons.
@@ -114,10 +114,10 @@ know. The method and its worked examples from merged samtal code are in
 ## Documentation process
 
 - When a plan is accepted, commit it to `docs/plans/` as one Markdown file
-  with a `YYYY-MM-DD-` date prefix (e.g. `2026-08-02-samtal-server-v1.md`).
+  with a `YYYY-MM-DD-` date prefix (e.g. `2026-08-02-vinga-server-v1.md`).
 - Each plan has a companion implementation doc, same filename with an
   `-implementation` suffix (e.g.
-  `2026-08-02-samtal-server-v1-implementation.md`), with one section per
+  `2026-08-02-vinga-server-v1-implementation.md`), with one section per
   milestone appended in the same change that ticks the milestone checklist.
   It records deviations from the plan, resolutions of the plan's open
   questions, and discoveries; a milestone with no deviations says so
@@ -138,8 +138,8 @@ know. The method and its worked examples from merged samtal code are in
   short note when it cannot be verified yet. Unchecked boxes are
   information, never decoration.
 - Keep in sync: the hardware tables in `README.md` and
-  `samtal-esp32/README.md` list the same boards and must move together. When
-  the samtal-server config schema changes, update `config.example.yaml` in
+  `vinga-esp32/README.md` list the same boards and must move together. When
+  the vinga-server config schema changes, update `config.example.yaml` in
   the same change.
 
 ## Writing conventions
@@ -169,7 +169,7 @@ know. The method and its worked examples from merged samtal code are in
 
 ## GitHub API (`gh`) tips
 
-- **Always pass `--repo rafacm/samtal`.** `gh` infers the repository from
+- **Always pass `--repo rafacm/vinga`.** `gh` infers the repository from
   the working directory's git remote, and `vendor/` holds clones of the
   upstream projects, so a `gh` command run from `vendor/xiaozhi-esp32`
   targets `78/xiaozhi-esp32` instead. A `cd` into a vendor clone to read
@@ -178,7 +178,7 @@ know. The method and its worked examples from merged samtal code are in
   `issue edit` went to the upstream repository and failed only because
   the account has no write access there. A `gh issue comment` would have
   posted to a stranger's tracker instead of failing.
-  `export GH_REPO=rafacm/samtal` at the start of a session overrides the
+  `export GH_REPO=rafacm/vinga` at the start of a session overrides the
   inference for `issue`, `pr` and `api`, and is worth doing as well, not
   instead: the flag is what makes the intent visible in the command that
   gets reviewed. Do not check that it worked with `gh repo view`, which

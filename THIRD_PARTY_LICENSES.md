@@ -1,6 +1,6 @@
 # Third-party licenses
 
-Samtal builds on and derives from the following projects. Their license notices
+Vinga builds on and derives from the following projects. Their license notices
 are reproduced here as required by the MIT license; they also apply to any
 substantial portions of their code included in this repository.
 
@@ -67,13 +67,13 @@ SOFTWARE.
   chips.
 - ASR/VAD model weights (e.g. SenseVoiceSmall, Silero VAD) are downloaded at
   deploy time and carry their own licenses; they are not redistributed here.
-- The `edge-tts` Python package is GPL-3.0; Samtal treats TTS engines as
+- The `edge-tts` Python package is GPL-3.0; Vinga treats TTS engines as
   optional pluggable providers so that the core server does not depend on it.
 
 ## The published container image
 
-`ghcr.io/rafacm/samtal-server` is published in two variants. The
-**default** one (unsuffixed tags) bundles samtal-server with both of its
+`ghcr.io/rafacm/vinga-server` is published in two variants. The
+**default** one (unsuffixed tags) bundles vinga-server with both of its
 optional local engines, so that one `docker run` serves a conversation
 without a cloud account. Everything in this section describes that
 variant. The **slim** one (`-slim` tags) installs no optional extra, and
@@ -84,9 +84,9 @@ Two of the default variant's contents carry copyleft terms:
 
 - **piper-tts** (piper1-gpl) is **GPL-3.0**. It is installed in the
   default image as an independent, unmodified package that
-  samtal-server calls through
+  vinga-server calls through
   its ordinary Python API; the two are aggregated on one filesystem, not
-  combined into a derived work. samtal-server itself remains MIT and does
+  combined into a derived work. vinga-server itself remains MIT and does
   not depend on piper outside the optional `piper` extra. Corresponding
   source for piper-tts is available from
   <https://github.com/OHF-voice/piper1-gpl>.

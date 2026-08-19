@@ -1,0 +1,562 @@
+"""The session's tool loop, against scripted fake providers.
+
+The loop is what makes tools a conversation rather than a request: it
+speaks, executes, feeds results back, and speaks again, with a cap that
+guarantees the reply ends in speech. switch_agent is the case only the
+session can serve, because the round after it goes to a different
+provider entirely.
+"""
+
+import asyncio
+import json
+import logging
+import sys
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+import vinga_server.runtime.pipeline as pipeline_module
+from tests.support.configs import (
+    BOTH_MAC,
+    DEVICE_HELLO,
+    POET_MAC,
+    POET_TONE,
+    STDIO_SERVER,
+    TUTOR_TONE,
+    base_config,
+    registry_config,
+)
+from tests.support.mcp_stdio_server import SHADOWED_TOOL_ENV
+from tests.support.providers import ScriptedLlm
+from tests.support.sessions import call, run_reply, session_for
+from tests.support.wire import connect, say_something, sentences, shake_hands, tone_strength
+from vinga_server.app import create_app
+from vinga_server.config import Config
+from vinga_server.providers import ToolCall, Turn
+from vinga_server.tools.builtin import switch_agent_tool
+from vinga_server.tools.mcp import McpServers
+from vinga_server.tools.memory import MemoryStore
+
+
+async def test_a_reply_with_no_tool_calls_is_one_round() -> None:
+    script = ScriptedLlm(["Nothing to look up."])
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    assert await run_reply(session, "hello") == ["Nothing to look up."]
+    assert len(script.seen) == 1
+
+
+async def test_an_unknown_tool_comes_back_as_an_error_result() -> None:
+    script = ScriptedLlm([[call("ghost_tool")], "I could not do that."])
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    assert await run_reply(session, "do it") == ["I could not do that."]
+
+    (result,) = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert result.is_error
+    assert "no tool called" in result.content
+
+
+async def test_a_tool_that_never_answers_becomes_a_timeout_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pipeline_module, "DEFAULT_TOOL_TIMEOUT_S", 0.05)
+    script = ScriptedLlm([[call("remember", text="a fact")], "Sorry, that took too long."])
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=_HangingStore())
+    assert await run_reply(session, "remember this") == ["Sorry, that took too long."]
+
+    (result,) = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert result.is_error
+    assert "did not answer in time" in result.content
+
+
+class _HangingStore(MemoryStore):
+    """A store whose writes never finish, so the loop's per-call timeout
+    is the only thing that can end the reply."""
+
+    def __init__(self) -> None:
+        super().__init__(Path("/nonexistent"))
+
+    async def remember(self, agent: str, fact: str) -> None:
+        await asyncio.sleep(30)
+
+
+async def test_the_round_cap_ends_the_reply_in_speech() -> None:
+    # A model that keeps asking for tools must still stop talking: the
+    # last permitted round forbids calling.
+    script = ScriptedLlm([[call("ghost_tool")]] * 3 + ["All right, enough."])
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    assert await run_reply(session, "loop forever") == ["All right, enough."]
+
+    choices = [choice for _, _, choice in script.seen]
+    assert choices == ["auto", "auto", "auto", "none"]
+    assert len(script.seen) == pipeline_module.MAX_TOOL_ROUNDS
+
+
+async def test_history_keeps_the_speech_and_not_the_tool_exchange() -> None:
+    script = ScriptedLlm([[call("ghost_tool")], "It did not work."])
+    session = session_for(base_config(), POET_MAC, {"poet": script})
+    await run_reply(session, "do it")
+
+    assert session.runtime._turns == [Turn("user", "do it"), Turn("assistant", "It did not work.")]
+    # The structured turns existed, but only inside the reply.
+    assert any(turn.tool_calls for turns, _, _ in script.seen for turn in turns)
+
+
+async def test_switch_agent_is_offered_only_where_there_is_somewhere_to_go() -> None:
+    one = session_for(base_config(), POET_MAC)
+    both = session_for(base_config(), BOTH_MAC)
+    # `random_number` is in both snapshots, being the builtin under no
+    # condition at all; the conditional one is the difference.
+    assert [tool.name for tool in one.runtime._tool_snapshot()] == ["random_number"]
+    assert [tool.name for tool in both.runtime._tool_snapshot()] == [
+        "switch_agent",
+        "random_number",
+    ]
+    # The enum carries the device's full bound list, which is what lets
+    # the agent answer "who can I talk to?".
+    (tool,) = [t for t in both.runtime._tool_snapshot() if t.name == "switch_agent"]
+    assert tool.input_schema["properties"]["agent"]["enum"] == ["poet", "tutor"]
+    assert switch_agent_tool(["poet", "tutor"]).description.count("poet") == 1
+
+
+async def test_a_successful_switch_hands_over_to_the_other_agent() -> None:
+    poet = ScriptedLlm([[call("switch_agent", agent="tutor")]])
+    tutor = ScriptedLlm(["Tutor here, hello."])
+    session = session_for(base_config(), BOTH_MAC, {"poet": poet, "tutor": tutor})
+
+    assert await run_reply(session, "get me the tutor") == ["Tutor here, hello."]
+    assert session._agent == "tutor"
+    assert session.runtime._providers is not None
+    assert await session.runtime._system_prompt() == "TUTOR"
+
+    # The new agent saw the conversation so far plus an ephemeral turn
+    # telling it to greet, and that turn is not in the history.
+    (turns, _, _) = tutor.seen[0]
+    assert turns[0] == Turn("user", "get me the tutor")
+    assert turns[-1].content == pipeline_module.SWITCH_GREETING
+    assert all(turn.content != pipeline_module.SWITCH_GREETING for turn in session.runtime._turns)
+
+
+async def test_the_old_agents_words_stay_its_own_turn() -> None:
+    # A preamble the poet spoke before handing over is its own assistant
+    # turn: the switch happens between two turns, not inside one.
+    poet = ScriptedLlm([["One moment.", call("switch_agent", agent="tutor")]])
+    tutor = ScriptedLlm(["Tutor here."])
+    session = session_for(base_config(), BOTH_MAC, {"poet": poet, "tutor": tutor})
+    assert await run_reply(session, "the tutor please") == ["Tutor here."]
+    assert [turn.content for turn in session.runtime._turns] == [
+        "the tutor please",
+        "One moment.",
+        "Tutor here.",
+    ]
+
+
+async def test_a_switch_to_an_unbound_agent_is_refused_by_the_agent_talking() -> None:
+    poet = ScriptedLlm(
+        [[call("switch_agent", agent="stranger")], "I cannot reach that one."]
+    )
+    session = session_for(base_config(), BOTH_MAC, {"poet": poet})
+    assert await run_reply(session, "get me the stranger") == ["I cannot reach that one."]
+    assert session._agent == "poet"
+
+    (result,) = [
+        result for turns, _, _ in poet.seen for turn in turns for result in turn.tool_results
+    ]
+    assert result.is_error
+    assert "not bound to" in result.content
+    # The refusal names what the device can reach, so the model can say.
+    assert "poet" in result.content and "tutor" in result.content
+
+
+async def test_a_switch_to_the_agent_already_speaking_is_refused(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Naming the current persona mid-conversation used to hand over to
+    # it: a second LLM round that only greeted a user already talking.
+    poet = ScriptedLlm([[call("switch_agent", agent="poet")], "I am the poet already."])
+    session = session_for(base_config(), BOTH_MAC, {"poet": poet})
+
+    with caplog.at_level("INFO"):
+        assert await run_reply(session, "let me talk to the poet") == ["I am the poet already."]
+    assert session._agent == "poet"
+    # No handover was announced, and the second round continued the
+    # reply rather than greeting a user who is already mid-conversation.
+    assert not [record for record in caplog.records if getattr(record, "event", "") == "handover"]
+    assert all(
+        turn.content != pipeline_module.SWITCH_GREETING
+        for turns, _, _ in poet.seen
+        for turn in turns
+    )
+
+    (result,) = [
+        result for turns, _, _ in poet.seen for turn in turns for result in turn.tool_results
+    ]
+    assert result.is_error
+    assert "already speaking as this assistant" in result.content
+
+
+async def test_only_one_handover_happens_per_reply() -> None:
+    poet = ScriptedLlm([[call("switch_agent", agent="tutor")]])
+    tutor = ScriptedLlm([[call("switch_agent", agent="poet")], "Staying put, then."])
+    session = session_for(base_config(), BOTH_MAC, {"poet": poet, "tutor": tutor})
+
+    assert await run_reply(session, "keep switching") == ["Staying put, then."]
+    assert session._agent == "tutor"
+    (result,) = [
+        result for turns, _, _ in tutor.seen for turn in turns for result in turn.tool_results
+    ]
+    assert result.is_error
+    assert "already been handed over" in result.content
+
+
+async def test_two_switches_in_one_round_honour_the_first_and_refuse_the_rest() -> None:
+    poet = ScriptedLlm(
+        [[call("switch_agent", agent="tutor"), call("switch_agent", agent="poet")]]
+    )
+    tutor = ScriptedLlm(["Tutor here."])
+    session = session_for(base_config(), BOTH_MAC, {"poet": poet, "tutor": tutor})
+    await run_reply(session, "both please")
+    assert session._agent == "tutor"
+
+
+async def test_remembering_is_offered_and_executed_when_memory_is_configured(
+    tmp_path: Path,
+) -> None:
+    store = MemoryStore(tmp_path)
+    script = ScriptedLlm(
+        [[call("remember", text="the user is vegetarian")], "I will keep that in mind."]
+    )
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=store)
+
+    assert [tool.name for tool in session.runtime._tool_snapshot()] == [
+        "remember",
+        "random_number",
+    ]
+    assert await run_reply(session, "remember I am vegetarian") == ["I will keep that in mind."]
+    assert "the user is vegetarian" in store.read("poet")
+
+    (result,) = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert not result.is_error
+
+
+async def test_a_random_number_is_offered_with_no_configuration_and_drawn_when_asked_for() -> None:
+    """The one builtin under no condition: a device bound to a single
+    agent, with no memory configured, still has it, because a die is
+    neither the deployment's business nor the board's."""
+    script = ScriptedLlm([[call("random_number", minimum=1, maximum=6)], "You got a four."])
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=None)
+
+    assert [tool.name for tool in session.runtime._tool_snapshot()] == ["random_number"]
+    assert await run_reply(session, "roll a die") == ["You got a four."]
+
+    (result,) = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert not result.is_error
+    assert 1 <= int(result.content.split(",")[0]) <= 6
+
+
+async def test_a_random_range_that_cannot_be_drawn_from_comes_back_as_an_error() -> None:
+    """The refusal as the model receives it, which is the shape any
+    builtin's bad arguments take: an error result it reads and can call
+    again from, rather than an ended reply."""
+    script = ScriptedLlm(
+        [[call("random_number", minimum=10, maximum=1)], "Let me try that the other way round."]
+    )
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=None)
+    await run_reply(session, "pick a number between ten and one")
+
+    (result,) = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert result.is_error
+    assert "no greater than" in result.content
+
+
+async def test_a_remembered_fact_is_in_the_next_replys_prompt(tmp_path: Path) -> None:
+    store = MemoryStore(tmp_path)
+    await store.remember("poet", "the user is vegetarian")
+    session = session_for(base_config(), POET_MAC, memory=store)
+    assert "the user is vegetarian" in await session.runtime._system_prompt()
+    assert (await session.runtime._system_prompt()).startswith("POET")
+
+
+async def test_malformed_arguments_come_back_as_an_error_result() -> None:
+    broken = ToolCall(id="c1", name="remember", malformed_arguments="{text: oops")
+    script = ScriptedLlm([[broken], "Let me try that again."])
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=None)
+    assert await run_reply(session, "remember this") == ["Let me try that again."]
+
+    (result,) = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert result.is_error
+    assert "not a JSON object" in result.content
+
+
+# Not real credentials. The first stands for whatever a model streams
+# where a JSON object belongs; the second is shaped like a tool name, so
+# both LLM APIs accept it and the publishing rule leaves it untouched,
+# which is how a credential arrives as a name a peer chose (#154).
+ARGUMENT_SENTINEL = "sk-test-4f8b2c9e-never-a-real-credential"
+NAME_SENTINEL = "sk_test_4f8b2c9e_never_a_real_credential"
+
+
+async def refuse_malformed(
+    name: str, caplog: pytest.LogCaptureFixture
+) -> tuple[str, logging.LogRecord]:
+    """One call the dispatch turns away at its first line, and the
+    warning it wrote about it."""
+    arguments = f'{{"text": "{ARGUMENT_SENTINEL}"'
+    broken = ToolCall(id="c1", name=name, malformed_arguments=arguments)
+    script = ScriptedLlm([[broken], "Let me try that again."])
+    session = session_for(base_config(), POET_MAC, {"poet": script}, memory=None)
+    with caplog.at_level("DEBUG"):
+        await run_reply(session, "do it")
+    (line,) = [record for record in caplog.records if "unparseable" in record.getMessage()]
+    return arguments, line
+
+
+async def test_malformed_arguments_are_logged_by_length_and_never_by_value(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """What a model streamed instead of a JSON object is its own output,
+    and the retained logs keep no content (#120). The line that reports
+    the refusal says how much of it there was, which is what tells a
+    truncated object from an answer in prose, and the bytes reach no
+    record at any level."""
+    arguments, line = await refuse_malformed("remember", caplog)
+
+    assert f"{len(arguments)} characters" in line.getMessage()
+    # A builtin is the one name this server authored, so this line says
+    # it, exactly as the `tool_call` event beside it does.
+    assert 'builtin tool "remember"' in line.getMessage()
+    assert not any(ARGUMENT_SENTINEL in record.getMessage() for record in caplog.records)
+    assert not any(ARGUMENT_SENTINEL in str(record.args) for record in caplog.records)
+
+
+async def test_a_malformed_call_under_a_name_a_peer_chose_names_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The same rule the narrowing gave `tool_call`, on the plain line
+    that reports the refusal: a name no namespace publishes is the
+    model's own invention and a device's is the board's vocabulary, so
+    the warning says which namespace was reached into and nothing more.
+    Both sentinels are hunted, since this call carries one of each."""
+    arguments, line = await refuse_malformed(NAME_SENTINEL, caplog)
+
+    assert line.getMessage().endswith(
+        f"unknown tool got {len(arguments)} characters of unparseable arguments"
+    )
+    for record in caplog.records:
+        assert NAME_SENTINEL not in record.getMessage()
+        assert NAME_SENTINEL not in str(record.args)
+        assert ARGUMENT_SENTINEL not in record.getMessage()
+        assert ARGUMENT_SENTINEL not in str(record.args)
+
+
+def shadowing_config(*, inner: bool) -> Config:
+    """The entry `home`, publishing one tool under a name that the entry
+    `home__inside` would own; `inner` adds that second entry.
+
+    The test server lists whatever `VINGA_TEST_SHADOWED_TOOL` names, so
+    under `home` the tool `inside__secret_word` publishes as
+    `home__inside__secret_word`, which is exactly what `home__inside`
+    publishes its own `secret_word` as. Reloading from one of these to
+    the other moves a published name between entries without changing
+    anything the model sees."""
+    entry = {
+        "transport": "stdio",
+        "command": sys.executable,
+        "args": [str(STDIO_SERVER)],
+    }
+    shadowed = {"env": {SHADOWED_TOOL_ENV: "inside__secret_word"}}
+    entries: dict[str, object] = {"home": entry | shadowed}
+    granted = ["home"]
+    if inner:
+        entries["home__inside"] = entry
+        granted.append("home__inside")
+    return base_config(
+        mcp_servers=entries,
+        agents={
+            "poet": {"prompt": "POET", "tts": "tenor", "mcp": granted},
+            "tutor": {"prompt": "TUTOR", "tts": "alto"},
+        },
+    )
+
+
+async def test_a_name_that_changes_owner_between_calls_is_refused_not_rerouted(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A reload can land between a call being resolved and being run,
+    and a published name can move to a more specific entry when it does.
+
+    Following the move would run one server's tool under another
+    server's timeout and then record and log the entry that did not run
+    it, which is the one thing the reservation exists to prevent. So the
+    call is refused: the registry is told which entry the caller meant
+    and answers that the name is no longer served by it. The window is
+    driven directly, because it is the window and nothing about the
+    surrounding loop is under test."""
+    name = "home__inside__secret_word"
+    servers = McpServers.build(shadowing_config(inner=False))
+    await servers.start_all()
+    session = session_for(base_config(), POET_MAC, mcp_servers=servers)
+    try:
+        assert servers.owner_of(name) == "home"
+        (slot,) = session.runtime._reserve_tools([call(name)])
+        assert session.runtime._turn.reserved(slot).entry == "home"
+
+        await servers.reload(lambda: (shadowing_config(inner=True), None))
+        # The move really happened, or this test proves nothing: the
+        # name is the inner entry's now, and its tool answers
+        # differently, so a reroute would be visible in the result.
+        assert servers.owner_of(name) == "home__inside"
+
+        with caplog.at_level("INFO"):
+            result = await session.runtime._run_one(call(name), slot)
+    finally:
+        await servers.stop_all()
+
+    assert result.is_error
+    assert "rhubarb" not in result.content, "the call was rerouted to the new owner"
+    assert 'no longer served by MCP server "home"' in result.content
+    # The event and the row both still say the entry the call was
+    # reserved against, and both say it failed.
+    (logged,) = [
+        record for record in caplog.records if getattr(record, "event", None) == "tool_call"
+    ]
+    assert (logged.source, logged.entry, logged.is_error) == ("mcp", "home", True)
+    executed = session.runtime._turn.reserved(slot)
+    assert (executed.source, executed.entry, executed.is_error) == ("mcp", "home", True)
+    assert executed.duration_ms is not None
+
+
+def test_the_switch_agent_schema_is_json_serializable() -> None:
+    # It goes over the wire to two different APIs; anything exotic in it
+    # would fail there rather than here.
+    json.dumps(switch_agent_tool(["poet", "tutor"]).input_schema)
+
+
+async def test_a_device_bound_to_two_agents_is_answered_in_the_new_voice() -> None:
+    # The M5 assertions, reused across a handover: the reply text comes
+    # from the second agent's own prompt and the audio from its voice.
+    config = base_config(
+        providers={
+            "llm": {
+                "poetic": {"type": "mock", "reply": "{system} says hello."},
+                "handover": {
+                    "type": "mock",
+                    "reply": "unused",
+                    "tool_when": "tutor",
+                    "tool_name": "switch_agent",
+                    "tool_arguments": {"agent": "tutor"},
+                },
+            },
+            "asr": {"mock": {"type": "mock", "text": "the tutor please"}},
+            "tts": {
+                "tenor": {"type": "mock", "tone_hz": POET_TONE},
+                "alto": {"type": "mock", "tone_hz": TUTOR_TONE},
+            },
+            "vad": {"mock": {"type": "mock"}},
+        },
+        agent_defaults={"asr": "mock", "vad": "mock"},
+        agents={
+            "poet": {"prompt": "POET", "llm": "handover", "tts": "tenor"},
+            "tutor": {"prompt": "TUTOR", "llm": "poetic", "tts": "alto"},
+        },
+    )
+    with TestClient(create_app(config)) as client:
+        with connect(client, device_id=BOTH_MAC) as websocket:
+            shake_hands(websocket)
+            texts, audio = say_something(websocket)
+
+    assert sentences(texts) == ["TUTOR says hello."]
+    assert tone_strength(audio, TUTOR_TONE) > 10 * tone_strength(audio, POET_TONE)
+
+
+# What a reload changes for a conversation that is already running
+
+
+async def test_a_reload_between_replies_changes_what_the_next_one_may_reach() -> None:
+    """The promise the whole reload path exists for, at the seam where a
+    session meets it: the snapshot is taken per reply and asks the
+    registry by agent, so a grant written and reloaded mid-conversation
+    is on offer in the next reply and no session was dropped."""
+    servers = McpServers.build(registry_config(granted=False))
+    await servers.start_all()
+    script = ScriptedLlm(["First.", "Second."])
+    session = session_for(base_config(), POET_MAC, {"poet": script}, mcp_servers=servers)
+    try:
+        await run_reply(session, "hello")
+        offered_before = {tool.name for tool in script.seen[0][1]}
+
+        await servers.reload(lambda: (registry_config(granted=True), None))
+        await run_reply(session, "hello again")
+    finally:
+        await servers.stop_all()
+
+    assert not any(name.startswith("tools__") for name in offered_before)
+    assert "tools__secret_word" in {tool.name for tool in script.seen[-1][1]}
+
+
+async def test_a_hello_without_mcp_gets_no_device_tool_client() -> None:
+    with TestClient(create_app(base_config())) as client:
+        with connect(client, device_id=POET_MAC) as websocket:
+            websocket.send_text(json.dumps(dict(DEVICE_HELLO, features={})))
+            websocket.receive_text()
+            # A device that never advertised MCP sending one anyway is
+            # logged and ignored rather than ending the session.
+            websocket.send_text(json.dumps({"type": "mcp", "payload": {"jsonrpc": "2.0"}}))
+            texts, _ = say_something(websocket)
+    assert sentences(texts) == ["POET heard hello."]
+
+
+async def test_a_tool_of_an_entry_whose_name_holds_the_separator_is_dispatched() -> None:
+    """The session's own routing, on the name shape that used to break
+    it: `home__inside` is a legal entry name, and reading the name by
+    splitting at the first separator looked for a server called `home`,
+    so the tool was offered in the snapshot and answered "there is no
+    tool called" when the model asked for it. Both the dispatch and the
+    per-entry timeout read the entry off the call's reservation, which
+    is the registry's one answer about who owns the name."""
+    config = base_config(
+        mcp_servers={
+            "home__inside": {
+                "transport": "stdio",
+                "command": sys.executable,
+                "args": [str(STDIO_SERVER)],
+                "tool_timeout_s": 7.5,
+            }
+        },
+        agents={
+            "poet": {"prompt": "POET", "tts": "tenor", "mcp": ["home__inside"]},
+            "tutor": {"prompt": "TUTOR", "tts": "alto"},
+        },
+    )
+    servers = McpServers.build(config)
+    await servers.start_all()
+    script = ScriptedLlm([[call("home__inside__secret_word")], "The word is rhubarb."])
+    session = session_for(base_config(), POET_MAC, {"poet": script}, mcp_servers=servers)
+    try:
+        assert await run_reply(session, "tell me") == ["The word is rhubarb."]
+    finally:
+        await servers.stop_all()
+
+    offered = {tool.name for tool in script.seen[0][1]}
+    assert "home__inside__secret_word" in offered
+    (result,) = [
+        result for turns, _, _ in script.seen for turn in turns for result in turn.tool_results
+    ]
+    assert not result.is_error
+    assert result.content == "rhubarb"
+    # The entry's own timeout, taken from the same reservation the
+    # dispatch routes by rather than from a second reading of the name.
+    reserved = session.runtime._classified(call("home__inside__secret_word"), 0)
+    assert session.runtime._timeout_for(reserved) == 7.5

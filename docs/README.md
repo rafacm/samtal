@@ -1,9 +1,9 @@
-# samtal documentation
+# vinga documentation
 
 Reference material and working notes. User-facing documentation lives in the
 READMEs: [the project overview](../README.md),
-[samtal-server](../samtal-server/README.md), and
-[samtal-esp32](../samtal-esp32/README.md), and in
+[vinga-server](../vinga-server/README.md), and
+[vinga-esp32](../vinga-esp32/README.md), and in
 [`devices/`](devices/README.md), the per-board guides below.
 
 ## Research notes
@@ -12,17 +12,17 @@ READMEs: [the project overview](../README.md),
   device↔server protocol, ports, configuration keys, and the validated
   end-to-end demo procedure. Read this first for anything protocol-related.
 - [**related-projects.md**](related-projects.md): the neighbouring voice
-  assistant and agent projects, and the projects samtal is built from.
-  For an alternative: what it is, where it overlaps, where samtal is
-  deliberately different, and what samtal borrows. For a dependency: what
-  it is and why samtal touches it, with the license terms left in
+  assistant and agent projects, and the projects vinga is built from.
+  For an alternative: what it is, where it overlaps, where vinga is
+  deliberately different, and what vinga borrows. For a dependency: what
+  it is and why vinga touches it, with the license terms left in
   [`THIRD_PARTY_LICENSES.md`](../THIRD_PARTY_LICENSES.md). Entries are
   added as a project is actually read, never assumed.
 
 ## Device guides
 
 [**devices/**](devices/README.md) holds one user-facing guide per board
-samtal targets, describing the hardware in front of the user: which
+vinga targets, describing the hardware in front of the user: which
 button starts and stops a conversation, how long to hold PWR to power
 off, whether a wake word is enabled and which word it is, the commands
 the device answers by voice, what the display shows, and the board's
@@ -55,7 +55,7 @@ are reviewable markdown rather than prompt text.
 ## Principles
 
 - [**architecture/principles.md**](architecture/principles.md): the
-  standing fundamentals: samtal's identity, its product promises, and
+  standing fundamentals: vinga's identity, its product promises, and
   the architecture principles that keep them, each with an example and
   a counterexample. Promises take precedence over architecture. Read
   this before designing a feature or deciding direction. Issues hold
@@ -82,7 +82,7 @@ questions, and discoveries. A plan's milestone checklist doubles as its
 milestone descriptions: each ticked item links to its implementation-doc
 section, so a fresh session can resume from the repository alone.
 
-- [**samtal-server v1**](plans/2026-08-02-samtal-server-v1.md) ·
+- [**vinga-server v1**](plans/2026-08-02-samtal-server-v1.md) ·
   [implementation notes](plans/2026-08-02-samtal-server-v1-implementation.md):
   architecture and milestones M0 to M7, from package skeleton to a published
   container image.

@@ -1,6 +1,6 @@
 ---
 name: implement-issue
-description: Implement a GitHub issue end to end with the samtal plan/review/implement pipeline - committed plan, external plan review, per-milestone subagents in stacked worktrees, a PR per milestone with its own external review round, rebase merges with stacked-PR retargeting. Use for any issue whose settled decisions are ready to be built.
+description: Implement a GitHub issue end to end with the vinga plan/review/implement pipeline - committed plan, external plan review, per-milestone subagents in stacked worktrees, a PR per milestone with its own external review round, rebase merges with stacked-PR retargeting. Use for any issue whose settled decisions are ready to be built.
 ---
 
 # Implement an issue end to end
@@ -20,8 +20,8 @@ retargeting discipline under "Merging".
 
 - `git branch --show-current` must say `main`; `git pull --rebase`;
   stop and ask on any problem with either.
-- `export GH_REPO=rafacm/samtal`, and still pass
-  `--repo rafacm/samtal` on every `gh` call (AGENTS.md says why the
+- `export GH_REPO=rafacm/vinga`, and still pass
+  `--repo rafacm/vinga` on every `gh` call (AGENTS.md says why the
   flag stays even with the export).
 - All branch work happens in `git worktree`s under the session
   scratchpad, never in the main checkout: another session may hold
@@ -111,7 +111,7 @@ possible:
 
 - The reviewed plan is the authoritative spec, including its review
   round; where the brief and the plan disagree, the plan wins.
-- uv only, never pip; everything runs from `samtal-server/`.
+- uv only, never pip; everything runs from `vinga-server/`.
 - Small commits: one logical change, imperative ~50-char title, a
   body explaining what and why, ending with the Claude trailer.
 - No em-dashes anywhere. `config.example.yaml` updates in the same
@@ -122,7 +122,7 @@ possible:
 - Honest verification only: `uv run ruff check .`,
   `uv run pytest tests/unit -q`,
   `uv run pytest tests/integration -q`, and the doc drift checks,
-  all from `samtal-server/`; anything unverifiable locally (the
+  all from `vinga-server/`; anything unverifiable locally (the
   image, the smoke lane) stated plainly, never claimed.
 - `PYTHONDONTWRITEBYTECODE=1` outside pytest (the stale-bytecode
   trap in AGENTS.md).
@@ -136,7 +136,7 @@ before touching the branch yourself.
 ## Step 4: a PR per milestone
 
 Rebase the milestone branch onto its current base first, push, then
-`gh pr create --repo rafacm/samtal`. Title: imperative verb, colon,
+`gh pr create --repo rafacm/vinga`. Title: imperative verb, colon,
 deliverables. Bodies and comments are NEVER hard-wrapped (GitHub's
 breaks extension turns every newline into a line break): one line
 per paragraph and per list item. The body covers what and why,

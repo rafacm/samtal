@@ -1,7 +1,7 @@
 # Waveshare ESP32-S3-ePaper-1.54
 
 > [!WARNING]
-> **This board has not reached working status with samtal.** 🚧 No part
+> **This board has not reached working status with vinga.** 🚧 No part
 > of this guide has been verified on the hardware; every statement in
 > it is read from the upstream board support code. It grows, and gains
 > hands-on facts, as the board does.

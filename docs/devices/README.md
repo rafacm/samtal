@@ -1,6 +1,6 @@
 # Device guides
 
-One guide per board samtal targets, describing the hardware in front of
+One guide per board vinga targets, describing the hardware in front of
 you: which button starts a conversation, whether a wake word is
 listening and which word it is, what you can ask the device itself to
 do by voice, and what the display is telling you.

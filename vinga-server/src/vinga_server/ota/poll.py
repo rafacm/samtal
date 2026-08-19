@@ -1,0 +1,134 @@
+"""Where a waiting device polls until somebody claims it.
+
+The other half of the activation ceremony: the reply puts a code on the
+screen, and this is the request the firmware repeats every three seconds
+until the answer changes from "keep waiting" to "you are configured".
+Nothing is minted here and nothing is bound here; the binding happens on
+the operator's side, and this only reports what the bindings already
+say.
+"""
+
+from fastapi import Request, Response
+
+from vinga_server.composition import Composition
+from vinga_server.config.models import normalize_mac
+from vinga_server.device.bindings import DeviceBindings
+from vinga_server.onboarding.pending import PendingDevice, PendingDevices
+from vinga_server.onboarding.unbound import ACTIVATION_ALGORITHMS
+
+from . import events
+from .reply import DEVICE_ID_PROBLEM, _bad_request, _json_object
+
+# What the version header carries when a body is worth reading. A board
+# with no serial number burned, which every consumer board is, announces
+# version 1 and sends `{}`; upstream's own server never reads that body.
+ACTIVATION_VERSION_HEADER = "activation-version"
+
+
+async def activate(request: Request) -> Response:
+    """Where a waiting device polls, in bursts of ten three seconds
+    apart, until it is claimed.
+
+    200 means the MAC resolves to an agent this server has loaded, so a
+    200 always means the next OTA check hands the device its real
+    configuration. 202 is everything else, which is what upstream's own
+    "keep waiting" is: a device still unbound, a device bound to an
+    agent this process has not loaded (which flips to 200 at the restart
+    that loads it), and a device this server has no pending entry for at
+    all, since a restart loses the table and the device's own loop
+    fetches a fresh code within a couple of minutes.
+
+    What a version-2 body claims cannot be authenticated. Its HMAC is
+    computed with a key burned into the device's eFuses, which the
+    vendor's cloud knows from registration and vinga has no copy of, so
+    the code ceremony governs both versions (the plan's fourth
+    author-approved deviation from issue #40). What is checked while the
+    MAC is pending is what can be: the body parses, names an algorithm
+    this server knows, and echoes the challenge this server issued. A
+    poll answering somebody else's challenge is not evidence of
+    anything, so it is refused with the 202 it would have got anyway and
+    a log line naming which check failed.
+    """
+    device_id = request.headers.get("device-id", "").strip()
+    if not device_id:
+        return _bad_request("the Device-Id header is required and holds the device MAC")
+    try:
+        mac = normalize_mac(device_id)
+    except ValueError:
+        # Deliberately not the validator's own sentence, which quotes
+        # what it refused: see DEVICE_ID_PROBLEM.
+        return _bad_request(DEVICE_ID_PROBLEM)
+
+    comp: Composition = request.app.state.composition
+    bindings: DeviceBindings = comp.bindings
+    resolution = await bindings.resolve(mac)
+    if resolution.agents:
+        events.info(
+            "device %s is activated: its next configuration check hands it a token",
+            mac,
+            event="activation_complete",
+            device=mac,
+            agents=list(resolution.agents),
+        )
+        return Response(status_code=200)
+
+    pending = comp.pending
+    waiting = pending.waiting_for(mac)
+    if waiting is not None:
+        await _version_two(request, pending, waiting)
+    events.debug(
+        "device %s is still waiting to be claimed",
+        mac,
+        event="activation_pending",
+        device=mac,
+        code=None if waiting is None else waiting.code,
+        unloaded=list(resolution.unloaded),
+    )
+    return Response(status_code=202)
+
+
+async def _version_two(
+    request: Request, pending: PendingDevices, waiting: PendingDevice
+) -> None:
+    """The checks a version-2 poll can be held to, and the serial number
+    it carries, recorded as an observed fact."""
+    if request.headers.get(ACTIVATION_VERSION_HEADER, "").strip() != "2":
+        # Version 1 is `{}` and upstream's own server never reads it.
+        return
+    payload = await _json_object(request)
+    refusal = {"device": waiting.mac, "code": waiting.code}
+    if payload is None:
+        events.warning(
+            "device %s sent a version-2 activation body that is not a JSON object; it "
+            "is answered as still waiting. Nothing of the body is quoted here",
+            waiting.mac,
+            event="activation_refused",
+            **refusal,
+            reason="unreadable_body",
+        )
+        return
+    algorithm = payload.get("algorithm")
+    if not isinstance(algorithm, str) or algorithm not in ACTIVATION_ALGORITHMS:
+        events.warning(
+            "device %s sent a version-2 activation body naming an algorithm this "
+            "server does not know; it is answered as still waiting. The value is not "
+            "quoted here, since it is whatever the request carried",
+            waiting.mac,
+            event="activation_refused",
+            **refusal,
+            reason="unknown_algorithm",
+        )
+        return
+    if payload.get("challenge") != waiting.challenge:
+        events.warning(
+            "device %s sent a version-2 activation body answering a challenge this "
+            "server did not issue for it; it is answered as still waiting",
+            waiting.mac,
+            event="activation_refused",
+            **refusal,
+            reason="challenge_mismatch",
+        )
+        return
+    serial_number = payload.get("serial_number")
+    if isinstance(serial_number, str) and serial_number.strip():
+        pending.record_serial(waiting.mac, serial_number)

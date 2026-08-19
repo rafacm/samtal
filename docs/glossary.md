@@ -3,7 +3,7 @@
 **Date:** 2026-08-12
 
 The concepts, techniques, and technologies this project is built on:
-a short definition of each as samtal uses it, with pointers for going
+a short definition of each as vinga uses it, with pointers for going
 deeper. The [architecture walkthrough](architecture/README.md)
 teaches the pipeline-shaped subset of these in order, with diagrams;
 this page is for looking one thing up. Entries are alphabetical,
@@ -16,7 +16,7 @@ anywhere in the project: `docs/glossary.md#opus`,
 
 Signal processing that removes
 the device's own speaker output from its microphone input, using the
-played signal as the reference. On samtal's primary board it runs in
+played signal as the reference. On vinga's primary board it runs in
 firmware on dedicated codec hardware (ES8311 playback, ES7210
 capture), and it is why the field-measured echo leakage is below the
 ambient floor. Whether a device has AEC decides its listening mode
@@ -46,7 +46,7 @@ More: [Whisper paper](https://arxiv.org/abs/2212.04356),
 
 Free-text context an ASR accepts to bias
 transcription, used for vocabulary the model would otherwise mangle
-("samtal"). Kept to vocabulary only, never agent names or anything
+("vinga"). Kept to vocabulary only, never agent names or anything
 imperative, because the model can echo the prompt back as if the user
 had spoken it; see prompt echo.
 
@@ -109,7 +109,7 @@ linguistics, a filled pause; in voice interfaces the technique is
 latency masking: playing a filler when the reply is slow so the
 silence reads as thinking rather than deafness. Distinct from a
 backchannel, which is the listener's feedback ("mm-hm") while the
-other party speaks. Implemented in samtal as optional per-agent
+other party speaks. Implemented in vinga as optional per-agent
 latency masking, configured under an agent's (or `agent_defaults`')
 `filler` section.
 More: [filled pause](https://en.wikipedia.org/wiki/Filler_(linguistics)),
@@ -139,7 +139,7 @@ The general problem the endpointer is
 one answer to: deciding whether a pause means "your turn" or "still
 thinking". Human listeners read three signal families at once, and
 the same 700 ms pause reads differently under each: silence duration
-(all samtal's endpointer uses today), prosodic cues, and semantic
+(all vinga's endpointer uses today), prosodic cues, and semantic
 completeness. After "...y toca el piano muy bien." the pause yields
 the turn; after "guarda en la memòria que..." the same pause holds
 it, and only the last two signal families can tell those apart.
@@ -199,7 +199,7 @@ request. See
 The planned built-in agent bound to every device by
 default. Answers how the device in front of the user works (from the
 per-board device guide, selected by device model at runtime), what
-samtal's concepts mean, and which voice commands the device itself
+vinga's concepts mean, and which voice commands the device itself
 publishes as MCP tools. Knows whether its device has a wake word
 enabled, and that the wake word wakes the device, not an agent.
 
@@ -216,7 +216,7 @@ How the device decides when the microphone is
 live. Realtime: streams continuously, AEC removes playback, barge-in
 is possible. Auto: microphone stops during playback, re-arms each
 turn. Manual: push to talk. The firmware picks realtime whenever AEC
-is on, so realtime is the normal mode for samtal's target hardware.
+is on, so realtime is the normal mode for vinga's target hardware.
 
 ### LLM round
 
@@ -244,7 +244,7 @@ in the waveform.
 
 ### MCP (Model Context Protocol)
 
-The protocol samtal uses for tools
+The protocol vinga uses for tools
 on both sides: the device publishes its own controls (volume,
 screen) to the server over it, and the server connects outward to
 configured MCP servers whose tools agents may call.
@@ -252,7 +252,7 @@ More: [modelcontextprotocol.io](https://modelcontextprotocol.io/).
 
 ### Meta capability
 
-A samtal-owned tool injected into every agent's
+A vinga-owned tool injected into every agent's
 tool set, so meta questions are answerable in any conversation:
 conversation cost so far, searching and resuming the asking agent's
 past conversations, switching agents. Planned rather than built;
@@ -402,7 +402,7 @@ advances by.
 ### VAD (voice activity detection)
 
 Frame-by-frame classification of
-audio as speech or not, the pipeline's first judgment. samtal uses
+audio as speech or not, the pipeline's first judgment. vinga uses
 Silero VAD. Everything downstream sees only what the VAD passes, so
 "the assistant never heard me" begins here.
 More: [Silero VAD](https://github.com/snakers4/silero-vad).

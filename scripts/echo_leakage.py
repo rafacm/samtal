@@ -1,4 +1,4 @@
-"""Echo leakage measurement over samtal session captures.
+"""Echo leakage measurement over vinga session captures.
 
 For every capture in a directory (the `<session>.wav` + `<session>.jsonl`
 pairs that session capture writes), cross-correlates the microphone
@@ -20,7 +20,7 @@ First used for field test round 1 (issue #48), where it found no
 measurable echo path on the Waveshare board for any of three voices;
 method and figures are in that issue's closing comment.
 
-Needs numpy and scipy, which are not samtal-server dependencies:
+Needs numpy and scipy, which are not vinga-server dependencies:
 
     uv run --no-project --with numpy --with scipy \
         python scripts/echo_leakage.py /path/to/captures

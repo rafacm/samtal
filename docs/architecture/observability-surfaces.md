@@ -44,7 +44,7 @@ starving the UI.
 
 | Surface | Carries | Serves | Retention and access |
 | --- | --- | --- | --- |
-| **Structured events** (`samtal_server/events.py`, the JSON log) | Metadata only: closed field sets, reason tokens from closed sets, trusted identifiers, counts, durations. No conversation text, no far-side bytes, no exception prose. | 1, feedstock for 5 | Operator log retention (weeks); the no-leak contract holds by construction once #155 lands |
+| **Structured events** (`vinga_server/events.py`, the JSON log) | Metadata only: closed field sets, reason tokens from closed sets, trusted identifiers, counts, durations. No conversation text, no far-side bytes, no exception prose. | 1, feedstock for 5 | Operator log retention (weeks); the no-leak contract holds by construction once #155 lands |
 | **Conversation store** (#120, `conversations.db`) | Content as system of record: turns, tool and MCP calls with arguments and results, keyed by session and user | 2, 5 (evals), 7 | Configured retention with a stated default; per-session and per-user deletion; access-controlled reads under `/api` |
 | **Capture** (existing) | Raw audio plus decision track, explicit opt-in | 1 (deep diagnosis) | Short-lived, pruned, already governed |
 | **Audit** (future, small) | Admin/config actions, auth refusals, reload invocations | 4 | Long, append-only, narrow content |
@@ -64,7 +64,7 @@ verification; links below):
   message content is a separate, explicitly opt-in event stream
   (`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`, default
   `no_content`), correlated to spans by id rather than riding them.
-  samtal adopts the vocabulary for its usage fields so exporters
+  vinga adopts the vocabulary for its usage fields so exporters
   (#66/#67) and budget accounting consume events without mapping.
 - **Store-separated LLM observability stacks** (Langfuse, LangSmith,
   Arize Phoenix). Conversation traces live in a purpose-built store
@@ -76,7 +76,7 @@ verification; links below):
   guidance is unanimous that allowlisted, schema-restricted emission
   is the guarantee and pattern-scrubbing at the sink at most a net;
   #155 (the event registry) is that guarantee made mechanical.
-- **Evidence gaps the sources left open**, owned by samtal's own
+- **Evidence gaps the sources left open**, owned by vinga's own
   design: household/family consent workflows (named open question in
   #120), audit-trail field standards (future issue), and live
   transport choice (decided by the admin UI work, not by this page).
