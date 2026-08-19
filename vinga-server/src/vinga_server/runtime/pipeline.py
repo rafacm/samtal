@@ -30,7 +30,7 @@ are as often noise or the reply's own bleed as the user (#28). A manual
 What happens in a conversation is logged twice over: as a human
 sentence, and as the structured fields the JSON log format emits as
 top-level keys. Both halves go out through the session's
-`SessionEvents` ([events](../events.py)), so that every record carries
+`SessionEvents` ([events](../events/__init__.py)), so that every record carries
 the same channel and the same identity whichever side of the boundary
 emitted it, and so that every consumer of the events sees it.
 """
