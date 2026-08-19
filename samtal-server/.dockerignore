@@ -1,4 +1,4 @@
-# The build copies pyproject.toml, uv.lock, samtal_server/, and
+# The build copies pyproject.toml, uv.lock, src/, and
 # README.md. Everything else only invalidates layers or leaks local
 # state into an image.
 .venv/
