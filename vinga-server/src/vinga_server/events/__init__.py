@@ -80,6 +80,7 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
+from vinga_server.events.values import CLASS_NAME_PATTERN
 from vinga_server.events_schema import (
     REGISTRY as DECLARED_EVENTS,
 )
@@ -467,10 +468,10 @@ SAFE_MESSAGE = (
     "reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which"
 )
 
-# A type name, which is what `CLASS_NAME` admits.
-CLASS_NAME_PATTERN = r"[A-Za-z_][A-Za-z0-9_]*"
-
-# How a group of them renders when a site reports several at once.
+# How a group of class names renders when a site reports several at
+# once. The pattern one of them is held to lives beside the `ClassName`
+# value type in `values.py`, which is its one home; this is the joining
+# the untyped path still has to read.
 CLASS_NAME_SEPARATOR = ", "
 
 
