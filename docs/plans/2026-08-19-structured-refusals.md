@@ -295,8 +295,18 @@ CLI transport suite for the pass-through pins.
 
 - A `problem(status, detail, errors=())` expected-body builder joins
   the API tests' existing support so the exact-body pins reshape once;
-  substring assertions on `detail` stay as they are, which is the
-  claim that the sentences did not move.
+  substring assertions on `detail` stay as they are.
+- The byte-identity claim gets goldens, not substrings, the review
+  round's fourth finding: exact expected `detail` strings from real
+  repository-backed PUTs, one single-error and one multi-error
+  refusal with today's ordering, indentation and line breaks,
+  committed green before the rendering is refactored and unchanged
+  after, except the transport validator's recorded prose change,
+  whose new golden lands in the same commit as the change it pins.
+  The CLI compatibility test consumes one of those real responses (a
+  repository-backed refusal served over the test transport), not a
+  hand-built fake, and asserts the printed sentence equals the same
+  golden.
 - New pins, each named to what it holds:
   - One refusal from each emitter (repository refusal, gate 401,
     malformed request 422, last-resort 500, and the framework's
@@ -490,6 +500,14 @@ carries its resolution below it.
    strings from real repository-backed PUTs, including a multi-error
    result, and point the CLI compatibility test at a real response or
    the same exact sentence.
+
+   *Resolution.* Adopted whole. The test plan now requires golden
+   exact strings from real repository-backed PUTs (single-error and
+   multi-error, current ordering and line breaks), committed green
+   before the rendering refactor, with the transport validator's
+   deliberate prose change carrying its new golden in the same
+   commit; the CLI test consumes a real repository-backed response
+   and compares against the same golden.
 
 5. **P2: M1 omits existing OpenAPI tests that will fail and does not
    pin the absence of `application/json`.**
