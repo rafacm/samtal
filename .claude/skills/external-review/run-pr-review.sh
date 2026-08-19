@@ -7,10 +7,15 @@
 # Usage:
 #   run-pr-review.sh <worktree> <base-ref> <pr-number> "<pr-title>" "<context sentence>"
 #
+# REVIEW_MODEL selects the codex model (default gpt-5.6-sol). The
+# tiering rule lives in SKILL.md: sol for plans and behavior-changing
+# milestone PRs, terra for low-stakes rounds.
+#
 # Writes its working files (diff, prompt, output, posted comment) next
 # to nothing in the repository: they go to $TMPDIR (or /tmp).
 set -eu
 WORKTREE="$1"; BASE="$2"; PR="$3"; TITLE="$4"; CONTEXT="$5"
+MODEL="${REVIEW_MODEL:-gpt-5.6-sol}"
 SKILL_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK="${TMPDIR:-/tmp}/external-review-pr-$PR"
 mkdir -p "$WORK"
@@ -36,13 +41,13 @@ for key, value in [("__PR_NUMBER__", pr), ("__PR_TITLE__", title),
 open(out, "w").write(text)
 PY
 
-codex exec -m gpt-5.6-sol --sandbox read-only - < "$PROMPT" > "$OUT" 2> "$ERR"
+codex exec -m "$MODEL" --sandbox read-only - < "$PROMPT" > "$OUT" 2> "$ERR"
 
 HEAD_SHA="$(git rev-parse --short HEAD)"
 {
   printf '## External review round\n\n'
-  printf 'Automated external review of this PR'"'"'s diff (%s...%s): codex CLI %s, model gpt-5.6-sol, read-only, %s. Posted verbatim by the review run itself; resolutions follow as replies.\n\n' \
-    "$BASE" "$HEAD_SHA" "$(codex --version | sed 's/codex-cli //')" "$(date -u +%Y-%m-%d)"
+  printf 'Automated external review of this PR'"'"'s diff (%s...%s): codex CLI %s, model %s, read-only, %s. Posted verbatim by the review run itself; resolutions follow as replies.\n\n' \
+    "$BASE" "$HEAD_SHA" "$(codex --version | sed 's/codex-cli //')" "$MODEL" "$(date -u +%Y-%m-%d)"
   printf -- '---\n\n'
   cat "$OUT"
 } > "$WORK/comment.md"

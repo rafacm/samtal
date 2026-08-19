@@ -1,6 +1,6 @@
 ---
 name: external-review
-description: Run an adversarial external review (codex gpt-5.6-sol) of a committed plan or a PR diff, record the findings, and drive per-finding amendments. Use before implementing a plan and before merging any milestone PR.
+description: Run an adversarial external review (codex, sol or terra by stakes) of a committed plan or a PR diff, record the findings, and drive per-finding amendments. Use before implementing a plan and before merging any milestone PR.
 ---
 
 # External review
@@ -10,9 +10,25 @@ break it. Two modes: a plan review before any code exists, and a PR
 review of a milestone's diff before it merges. Both use the codex
 CLI with the prompts in this skill's directory.
 
+## Which model, by stakes
+
+Two tiers, decided per round (maintainer decision, 2026-08-19):
+
+- `gpt-5.6-sol`, the default: every plan review, and every PR whose
+  diff changes behavior. Sol's record here is P1s that need
+  whole-repo rule synthesis or concurrency reasoning; do not trade
+  those away for speed.
+- `gpt-5.6-terra`, the fast tier: low-stakes rounds only, meaning a
+  documentation-only diff, a mechanical follow-up (renames, moves,
+  pin updates with no logic change), or a re-review of fixes whose
+  original round was Sol's. When in doubt, it is not low-stakes.
+
+`run-pr-review.sh` reads the model from `REVIEW_MODEL` (default
+sol) and stamps whichever ran into the provenance header.
+
 ## Mechanics that are not obvious
 
-- Always `codex exec -m gpt-5.6-sol --sandbox read-only -` with the
+- Always `codex exec -m <model> --sandbox read-only -` with the
   prompt on stdin. Never `codex review` with a custom prompt: it
   ignores the prompt.
 - Run it in the background from the worktree under review. Sol takes
