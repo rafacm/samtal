@@ -290,8 +290,20 @@ the contract and moves with this change.
 The suites to touch are the ones already pinning refusal bodies:
 `test_config_api.py`, `test_config_api_reads.py`,
 `test_config_api_writes.py`, `test_config_api_pending.py`,
-`test_config_api_runtime.py`, `test_conversations_api.py`, and the
-CLI transport suite for the pass-through pins.
+`test_config_api_runtime.py`, `test_conversations_api.py`, the CLI
+transport suite for the pass-through pins, and the two document
+suites the review round's fifth finding names, which hard-code
+`application/json` for every refusal today:
+`test_api_openapi.py:245-253` and `test_config_api_runtime.py:595`.
+Their expectations move to `application/problem+json`, and two new
+document pins land beside them: every refusal response in the
+generated document carries exactly one content key,
+`application/problem+json`, whose schema resolves to `Problem` in
+`components`; and the `Problem` and `FieldError` component schemas
+declare all their fields required with `additionalProperties: false`.
+The exactly-one-key pin is what catches FastAPI's merge-sensitive
+leftover `application/json`, mechanically rather than by reading the
+document diff.
 
 - A `problem(status, detail, errors=())` expected-body builder joins
   the API tests' existing support so the exact-body pins reshape once;
@@ -517,6 +529,11 @@ carries its resolution below it.
    key (`application/problem+json`) with a resolving `Problem`
    schema, and pin `Problem`/`FieldError` required fields and
    `additionalProperties: false`.
+
+   *Resolution.* Adopted whole. The test plan names both files and
+   both new document pins: exactly one content key per refusal
+   response, resolving to `Problem`, and the `Problem`/`FieldError`
+   schemas required-and-closed.
 
 6. **P2: the documentation work does not classify all read shapes as
    writable or display-only.** The issue requires both categories;
