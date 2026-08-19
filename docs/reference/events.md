@@ -1,9 +1,9 @@
 # Event schema reference
 
-Generated from the registry by `samtal-server events reference`. Do not
+Generated from the registry by `vinga-server events reference`. Do not
 edit this file by hand: CI regenerates it and fails on any difference, so
 an edit here is reverted by the next run. The declarations live in
-`samtal-server/samtal_server/events_schema.py`.
+`vinga-server/vinga_server/events_schema.py`.
 
 The structured events are this server's observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)), and
@@ -15,7 +15,7 @@ conversation is in the conversation store instead, keyed by the same `session`
 ([its reference](conversations-schema.md)).
 
 The emitters hold every emission to what is written here before any of it is
-dispatched, and `SAMTAL_EVENTS_ENFORCEMENT` decides what happens to one that
+dispatched, and `VINGA_EVENTS_ENFORCEMENT` decides what happens to one that
 does not match. `forgiving` recovers the emission into a declared shape, or
 replaces it with `schema_violation` where it cannot, and says so on the
 emitter's own channel; `strict` raises instead.
@@ -26,8 +26,8 @@ telemetry bug must never cost a reply, and everything that is not a running
 server (a test lane, an import, a REPL) defaults to `strict`. Either mode can
 be asked for in either place, and a developer who wants a loud local server
 sets `strict` exactly that way. The [README's Logging
-section](../../samtal-server/README.md#logging) is the human overview, with
-one line per event saying when it fires.
+section](../../vinga-server/README.md#logging) is the human overview, with one
+line per event saying when it fires.
 
 ## How to read it
 
@@ -60,25 +60,25 @@ keeps validation a cost paid per decision rather than per frame.
 
 ## The channels
 
-The channel is the scope. One session channel, `samtal_server.session`,
-carries everything a conversation says about itself; the 13 server channels
-are each a subsystem's own module name. An event declared on one channel and
-emitted from another is a violation even when its fields are lawful.
+The channel is the scope. One session channel, `vinga_server.session`, carries
+everything a conversation says about itself; the 13 server channels are each a
+subsystem's own module name. An event declared on one channel and emitted from
+another is a violation even when its fields are lawful.
 
-- `samtal_server.session`
-- `samtal_server.app`
-- `samtal_server.capture`
-- `samtal_server.config.api`
-- `samtal_server.conversations.store`
-- `samtal_server.device.bindings`
-- `samtal_server.filler`
-- `samtal_server.onboarding`
-- `samtal_server.ota`
-- `samtal_server.providers.openai_asr`
-- `samtal_server.registry`
-- `samtal_server.tools.mcp`
-- `samtal_server.tools.memory`
-- `samtal_server.ws`
+- `vinga_server.session`
+- `vinga_server.app`
+- `vinga_server.capture`
+- `vinga_server.config.api`
+- `vinga_server.conversations.store`
+- `vinga_server.device.bindings`
+- `vinga_server.filler`
+- `vinga_server.onboarding`
+- `vinga_server.ota`
+- `vinga_server.providers.openai_asr`
+- `vinga_server.registry`
+- `vinga_server.tools.mcp`
+- `vinga_server.tools.memory`
+- `vinga_server.ws`
 
 ## What a value may be
 
@@ -154,16 +154,16 @@ never what an operator may have called something.
 
 | Grammar | Pattern | Built by | What it is |
 | --- | --- | --- | --- |
-| `empty_fragment` | `''` | `samtal_server.runtime.pipeline:_tool_named`, `samtal_server.runtime.pipeline:PipelineRuntime._provider_failed` | The nothing a site renders where it has nothing to add. Declared rather than left untyped, so a variant that may only say nothing says exactly that. |
-| `also_bound_to` | `'(?: \(also bound to [\s\S]+\))?'` | `samtal_server.ota.reply:check_version`, `samtal_server.device.session:DeviceSession.run` | The tail naming the agents a device is bound to beside the one that answered, empty for a device bound to exactly one. The names inside it are comma joined, and the grammar does not say so: a configured name may itself hold a comma, so the joined fragment cannot be parsed back into the names that made it, and a pattern claiming otherwise would refuse a lawful deployment. |
-| `agent_list` | `'[\s\S]+'` | `samtal_server.ota.reply:check_version`, `samtal_server.device.session:DeviceSession.run` | The configured agent names a device is bound to, comma-joined. Non-empty, and nothing further: see the tail grammar above for why the joining is not part of the claim. |
-| `session_list` | `'[0-9A-Za-z_-]{1,64}(?:, [0-9A-Za-z_-]{1,64})*'` | `samtal_server.capture:CaptureStore.prune` | The session ids a prune removed, comma-joined. |
-| `quoted_tool_name` | `' "[\s\S]+"'` | `samtal_server.runtime.pipeline:_tool_named` | A builtin's name, which is this server's own word, bounded here by the quoting alone. A device tool's name is the board's vocabulary and an unknown one is whatever the model invented, so neither is ever rendered here. |
-| `from_entry` | `' from entry "[\s\S]+"'` | `samtal_server.runtime.pipeline:_tool_named` | The configured MCP entry a call reached, never the far side's own tool name. Entry names are separately held to `[A-Za-z0-9_-]+` by the configuration, which makes this grammar a floor rather than the whole truth; the floor is what the registry may claim, since the tighter rule is configuration's to keep and to change. |
-| `quoted_provider` | `' "[\s\S]+"'` | `samtal_server.runtime.pipeline:PipelineRuntime._provider_failed` | The configuration entry the failing provider is, bounded by the quoting alone. |
-| `reaching_host` | `'(?: reaching [\s\S]+)?'` | `samtal_server.runtime.pipeline:PipelineRuntime._provider_failed` | Where the call was going, empty for an engine that runs in this process. |
-| `origin_provenance` | `'(?:from\|guessed from) [\s\S]+'` | `samtal_server.onboarding.origin:Origin.provenance` | Which configuration key the banner's origin came out of, and whether it was read or inferred. |
-| `device_or_unidentified` | `'[0-9a-f]{2}(?::[0-9a-f]{2}){5}\|an unidentified device'` | `samtal_server.ws:conversation` | The MAC behind a Device-Id header this server recognizes, or the fixed phrase. Nothing else: with device auth off nothing has verified that header, so an unrecognized one names no device at all. |
+| `empty_fragment` | `''` | `vinga_server.runtime.pipeline:_tool_named`, `vinga_server.runtime.pipeline:PipelineRuntime._provider_failed` | The nothing a site renders where it has nothing to add. Declared rather than left untyped, so a variant that may only say nothing says exactly that. |
+| `also_bound_to` | `'(?: \(also bound to [\s\S]+\))?'` | `vinga_server.ota.reply:check_version`, `vinga_server.device.session:DeviceSession.run` | The tail naming the agents a device is bound to beside the one that answered, empty for a device bound to exactly one. The names inside it are comma joined, and the grammar does not say so: a configured name may itself hold a comma, so the joined fragment cannot be parsed back into the names that made it, and a pattern claiming otherwise would refuse a lawful deployment. |
+| `agent_list` | `'[\s\S]+'` | `vinga_server.ota.reply:check_version`, `vinga_server.device.session:DeviceSession.run` | The configured agent names a device is bound to, comma-joined. Non-empty, and nothing further: see the tail grammar above for why the joining is not part of the claim. |
+| `session_list` | `'[0-9A-Za-z_-]{1,64}(?:, [0-9A-Za-z_-]{1,64})*'` | `vinga_server.capture:CaptureStore.prune` | The session ids a prune removed, comma-joined. |
+| `quoted_tool_name` | `' "[\s\S]+"'` | `vinga_server.runtime.pipeline:_tool_named` | A builtin's name, which is this server's own word, bounded here by the quoting alone. A device tool's name is the board's vocabulary and an unknown one is whatever the model invented, so neither is ever rendered here. |
+| `from_entry` | `' from entry "[\s\S]+"'` | `vinga_server.runtime.pipeline:_tool_named` | The configured MCP entry a call reached, never the far side's own tool name. Entry names are separately held to `[A-Za-z0-9_-]+` by the configuration, which makes this grammar a floor rather than the whole truth; the floor is what the registry may claim, since the tighter rule is configuration's to keep and to change. |
+| `quoted_provider` | `' "[\s\S]+"'` | `vinga_server.runtime.pipeline:PipelineRuntime._provider_failed` | The configuration entry the failing provider is, bounded by the quoting alone. |
+| `reaching_host` | `'(?: reaching [\s\S]+)?'` | `vinga_server.runtime.pipeline:PipelineRuntime._provider_failed` | Where the call was going, empty for an engine that runs in this process. |
+| `origin_provenance` | `'(?:from\|guessed from) [\s\S]+'` | `vinga_server.onboarding.origin:Origin.provenance` | Which configuration key the banner's origin came out of, and whether it was read or inferred. |
+| `device_or_unidentified` | `'[0-9a-f]{2}(?::[0-9a-f]{2}){5}\|an unidentified device'` | `vinga_server.ws:conversation` | The MAC behind a Device-Id header this server recognizes, or the fixed phrase. Nothing else: with device auth off nothing has verified that header, so an unrecognized one names no device at all. |
 
 ## The prompt provenance grammar
 
@@ -194,63 +194,63 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 
 | Event | Channels | Levels | Variants |
 | --- | --- | --- | --- |
-| `ota_check` | `samtal_server.ota` | INFO, WARNING | 4 |
-| `activation_not_offered` | `samtal_server.ota` | WARNING | 2 |
-| `activation_complete` | `samtal_server.ota` | INFO | 1 |
-| `activation_pending` | `samtal_server.ota` | DEBUG | 1 |
-| `activation_refused` | `samtal_server.ota` | WARNING | 3 |
-| `ota_request_rejected` | `samtal_server.ota` | WARNING | 1 |
-| `onboarding_banner` | `samtal_server.onboarding` | INFO | 2 |
-| `onboarding_key_mismatch` | `samtal_server.onboarding` | WARNING | 1 |
-| `onboarding_key_unshaped` | `samtal_server.onboarding` | WARNING | 1 |
-| `auth_rejected` | `samtal_server.ws` | WARNING | 1 |
-| `session_rejected` | `samtal_server.session`, `samtal_server.ws` | WARNING | 4 |
-| `session_open` | `samtal_server.session` | INFO | 1 |
-| `session_limit` | `samtal_server.session` | INFO | 1 |
-| `session_idle` | `samtal_server.session` | INFO | 1 |
-| `session_closed` | `samtal_server.session` | INFO | 1 |
-| `speaking_started` | `samtal_server.session` | INFO | 1 |
-| `heard` | `samtal_server.session` | INFO | 1 |
-| `replied` | `samtal_server.session` | INFO | 1 |
-| `agent_said` | `samtal_server.session` | INFO | 1 |
-| `handover` | `samtal_server.session` | INFO | 1 |
-| `prompt_assembled` | `samtal_server.session` | INFO | 1 |
-| `llm_retry` | `samtal_server.session` | WARNING | 2 |
-| `llm_round` | `samtal_server.session` | INFO | 2 |
-| `provider_failed` | `samtal_server.session` | WARNING | 2 |
-| `tool_call` | `samtal_server.session` | INFO | 3 |
-| `barge_in` | `samtal_server.session` | INFO | 1 |
-| `barge_in_suppressed` | `samtal_server.session` | INFO | 3 |
-| `barge_in_merged` | `samtal_server.session` | INFO | 1 |
-| `filler_skipped` | `samtal_server.session` | INFO | 2 |
-| `filler_played` | `samtal_server.session` | INFO | 1 |
-| `asr_prompt_echo` | `samtal_server.providers.openai_asr` | INFO, WARNING | 5 |
-| `mcp_connected` | `samtal_server.tools.mcp` | INFO | 1 |
-| `mcp_down` | `samtal_server.tools.mcp` | INFO, WARNING | 3 |
-| `mcp_call_dropped` | `samtal_server.tools.mcp` | WARNING | 1 |
-| `mcp_tool_shadowed` | `samtal_server.tools.mcp` | WARNING | 1 |
-| `mcp_reload` | `samtal_server.tools.mcp` | INFO, WARNING | 2 |
-| `memory_unreadable` | `samtal_server.tools.memory` | WARNING | 1 |
-| `filler_disabled` | `samtal_server.filler` | WARNING | 1 |
-| `capture_started` | `samtal_server.capture` | INFO | 1 |
-| `capture_declined` | `samtal_server.capture` | WARNING | 3 |
-| `capture_limit` | `samtal_server.capture` | INFO | 1 |
-| `capture_failed` | `samtal_server.capture` | WARNING | 1 |
-| `capture_pruned` | `samtal_server.capture` | INFO | 1 |
-| `capture_over_budget` | `samtal_server.capture` | WARNING | 1 |
-| `capture_enabled` | `samtal_server.app` | WARNING | 1 |
-| `capture_disabled` | `samtal_server.app` | INFO | 1 |
-| `conversations_enabled` | `samtal_server.conversations.store` | WARNING | 1 |
-| `conversations_dropped` | `samtal_server.conversations.store` | WARNING | 1 |
-| `conversations_failed` | `samtal_server.conversations.store` | WARNING | 2 |
-| `conversations_pruned` | `samtal_server.conversations.store` | INFO | 1 |
-| `drain_started` | `samtal_server.registry` | INFO | 1 |
-| `drain_finished` | `samtal_server.registry` | INFO | 1 |
-| `drain_incomplete` | `samtal_server.registry` | WARNING | 1 |
-| `device_bindings_snapshot_only` | `samtal_server.device.bindings` | DEBUG | 1 |
-| `device_bindings_unreadable` | `samtal_server.device.bindings` | WARNING | 1 |
-| `api_error` | `samtal_server.config.api` | ERROR | 1 |
-| `api_storage_error` | `samtal_server.config.api` | ERROR | 1 |
+| `ota_check` | `vinga_server.ota` | INFO, WARNING | 4 |
+| `activation_not_offered` | `vinga_server.ota` | WARNING | 2 |
+| `activation_complete` | `vinga_server.ota` | INFO | 1 |
+| `activation_pending` | `vinga_server.ota` | DEBUG | 1 |
+| `activation_refused` | `vinga_server.ota` | WARNING | 3 |
+| `ota_request_rejected` | `vinga_server.ota` | WARNING | 1 |
+| `onboarding_banner` | `vinga_server.onboarding` | INFO | 2 |
+| `onboarding_key_mismatch` | `vinga_server.onboarding` | WARNING | 1 |
+| `onboarding_key_unshaped` | `vinga_server.onboarding` | WARNING | 1 |
+| `auth_rejected` | `vinga_server.ws` | WARNING | 1 |
+| `session_rejected` | `vinga_server.session`, `vinga_server.ws` | WARNING | 4 |
+| `session_open` | `vinga_server.session` | INFO | 1 |
+| `session_limit` | `vinga_server.session` | INFO | 1 |
+| `session_idle` | `vinga_server.session` | INFO | 1 |
+| `session_closed` | `vinga_server.session` | INFO | 1 |
+| `speaking_started` | `vinga_server.session` | INFO | 1 |
+| `heard` | `vinga_server.session` | INFO | 1 |
+| `replied` | `vinga_server.session` | INFO | 1 |
+| `agent_said` | `vinga_server.session` | INFO | 1 |
+| `handover` | `vinga_server.session` | INFO | 1 |
+| `prompt_assembled` | `vinga_server.session` | INFO | 1 |
+| `llm_retry` | `vinga_server.session` | WARNING | 2 |
+| `llm_round` | `vinga_server.session` | INFO | 2 |
+| `provider_failed` | `vinga_server.session` | WARNING | 2 |
+| `tool_call` | `vinga_server.session` | INFO | 3 |
+| `barge_in` | `vinga_server.session` | INFO | 1 |
+| `barge_in_suppressed` | `vinga_server.session` | INFO | 3 |
+| `barge_in_merged` | `vinga_server.session` | INFO | 1 |
+| `filler_skipped` | `vinga_server.session` | INFO | 2 |
+| `filler_played` | `vinga_server.session` | INFO | 1 |
+| `asr_prompt_echo` | `vinga_server.providers.openai_asr` | INFO, WARNING | 5 |
+| `mcp_connected` | `vinga_server.tools.mcp` | INFO | 1 |
+| `mcp_down` | `vinga_server.tools.mcp` | INFO, WARNING | 3 |
+| `mcp_call_dropped` | `vinga_server.tools.mcp` | WARNING | 1 |
+| `mcp_tool_shadowed` | `vinga_server.tools.mcp` | WARNING | 1 |
+| `mcp_reload` | `vinga_server.tools.mcp` | INFO, WARNING | 2 |
+| `memory_unreadable` | `vinga_server.tools.memory` | WARNING | 1 |
+| `filler_disabled` | `vinga_server.filler` | WARNING | 1 |
+| `capture_started` | `vinga_server.capture` | INFO | 1 |
+| `capture_declined` | `vinga_server.capture` | WARNING | 3 |
+| `capture_limit` | `vinga_server.capture` | INFO | 1 |
+| `capture_failed` | `vinga_server.capture` | WARNING | 1 |
+| `capture_pruned` | `vinga_server.capture` | INFO | 1 |
+| `capture_over_budget` | `vinga_server.capture` | WARNING | 1 |
+| `capture_enabled` | `vinga_server.app` | WARNING | 1 |
+| `capture_disabled` | `vinga_server.app` | INFO | 1 |
+| `conversations_enabled` | `vinga_server.conversations.store` | WARNING | 1 |
+| `conversations_dropped` | `vinga_server.conversations.store` | WARNING | 1 |
+| `conversations_failed` | `vinga_server.conversations.store` | WARNING | 2 |
+| `conversations_pruned` | `vinga_server.conversations.store` | INFO | 1 |
+| `drain_started` | `vinga_server.registry` | INFO | 1 |
+| `drain_finished` | `vinga_server.registry` | INFO | 1 |
+| `drain_incomplete` | `vinga_server.registry` | WARNING | 1 |
+| `device_bindings_snapshot_only` | `vinga_server.device.bindings` | DEBUG | 1 |
+| `device_bindings_unreadable` | `vinga_server.device.bindings` | WARNING | 1 |
+| `api_error` | `vinga_server.config.api` | ERROR | 1 |
+| `api_storage_error` | `vinga_server.config.api` | ERROR | 1 |
 | `schema_violation` (internal) | every channel (14) | ERROR | 14 |
 
 ### `ota_check`
@@ -259,10 +259,10 @@ What a device said about itself at its configuration check, and what this
 server resolved it to. No session exists yet, so the record names the device
 instead.
 
-#### Variant 1: `samtal_server.ota` at WARNING
+#### Variant 1: `vinga_server.ota` at WARNING
 
 ```text
-device %s (%s, firmware %s) has no agent and is showing activation code %s; bind it with: samtal-server config add-device %s <agent>
+device %s (%s, firmware %s) has no agent and is showing activation code %s; bind it with: vinga-server config add-device %s <agent>
 ```
 
 | # | Argument | Nullable | Constraint | Note |
@@ -284,7 +284,7 @@ device %s (%s, firmware %s) has no agent and is showing activation code %s; bind
 | `unloaded` | `IDENTIFIER_LIST` | yes | no |  | Agents this device is bound to that this process did not load. Named on every record rather than only on the one that complains, so a query for devices waiting on a restart is one field. |
 | `code` | `ID` | yes | no | the `activation_code` syntax |  |
 
-#### Variant 2: `samtal_server.ota` at WARNING
+#### Variant 2: `vinga_server.ota` at WARNING
 
 ```text
 device %s (%s, firmware %s) is bound to agent %s, which this server has not loaded; restart to load it
@@ -307,7 +307,7 @@ device %s (%s, firmware %s) is bound to agent %s, which this server has not load
 | `agents` | `IDENTIFIER_LIST` | yes | no |  |  |
 | `unloaded` | `IDENTIFIER_LIST` | yes | no |  |  |
 
-#### Variant 3: `samtal_server.ota` at WARNING
+#### Variant 3: `vinga_server.ota` at WARNING
 
 ```text
 device %s (%s, firmware %s) has no agent: bind it under devices or set default_agent
@@ -329,7 +329,7 @@ device %s (%s, firmware %s) has no agent: bind it under devices or set default_a
 | `agents` | `IDENTIFIER_LIST` | yes | no |  |  |
 | `unloaded` | `IDENTIFIER_LIST` | yes | no |  |  |
 
-#### Variant 4: `samtal_server.ota` at INFO
+#### Variant 4: `vinga_server.ota` at INFO
 
 ```text
 device %s (%s, firmware %s) resolved to agent %s%s
@@ -357,7 +357,7 @@ device %s (%s, firmware %s) resolved to agent %s%s
 
 An unbound device that was answered with no activation code, and why.
 
-#### Variant 1: `samtal_server.ota` at WARNING
+#### Variant 1: `vinga_server.ota` at WARNING
 
 ```text
 device %s is unbound in the configuration this server started with, but the database could not be read, so no activation code was issued: this device may already be bound. Fix the database and it is offered one at its next check
@@ -373,10 +373,10 @@ device %s is unbound in the configuration this server started with, but the data
 | `device` | `ID` | yes | no | the `mac` syntax |  |
 | `reason` | `TOKEN` | yes | no | one of: `unreadable` |  |
 
-#### Variant 2: `samtal_server.ota` at WARNING
+#### Variant 2: `vinga_server.ota` at WARNING
 
 ```text
-device %s is unbound but was offered no activation code: %s. It is answered exactly as it was before onboarding existed, with no token; bind it by its MAC with: samtal-server config bind-device %s <agent>
+device %s is unbound but was offered no activation code: %s. It is answered exactly as it was before onboarding existed, with no token; bind it by its MAC with: vinga-server config bind-device %s <agent>
 ```
 
 | # | Argument | Nullable | Constraint | Note |
@@ -395,7 +395,7 @@ device %s is unbound but was offered no activation code: %s. It is answered exac
 
 A waiting device has been claimed; its next check hands it a token.
 
-#### Variant 1: `samtal_server.ota` at INFO
+#### Variant 1: `vinga_server.ota` at INFO
 
 ```text
 device %s is activated: its next configuration check hands it a token
@@ -415,7 +415,7 @@ device %s is activated: its next configuration check hands it a token
 
 A waiting device polled and is still waiting.
 
-#### Variant 1: `samtal_server.ota` at DEBUG
+#### Variant 1: `vinga_server.ota` at DEBUG
 
 ```text
 device %s is still waiting to be claimed
@@ -438,7 +438,7 @@ A version-2 activation poll failed one of the checks this server can hold it
 to. Nothing of the body is ever quoted: the checks name which one failed and
 stop there.
 
-#### Variant 1: `samtal_server.ota` at WARNING
+#### Variant 1: `vinga_server.ota` at WARNING
 
 ```text
 device %s sent a version-2 activation body that is not a JSON object; it is answered as still waiting. Nothing of the body is quoted here
@@ -455,7 +455,7 @@ device %s sent a version-2 activation body that is not a JSON object; it is answ
 | `code` | `ID` | yes | no | the `activation_code` syntax |  |
 | `reason` | `TOKEN` | yes | no | one of: `unreadable_body` |  |
 
-#### Variant 2: `samtal_server.ota` at WARNING
+#### Variant 2: `vinga_server.ota` at WARNING
 
 ```text
 device %s sent a version-2 activation body naming an algorithm this server does not know; it is answered as still waiting. The value is not quoted here, since it is whatever the request carried
@@ -472,7 +472,7 @@ device %s sent a version-2 activation body naming an algorithm this server does 
 | `code` | `ID` | yes | no | the `activation_code` syntax |  |
 | `reason` | `TOKEN` | yes | no | one of: `unknown_algorithm` |  |
 
-#### Variant 3: `samtal_server.ota` at WARNING
+#### Variant 3: `vinga_server.ota` at WARNING
 
 ```text
 device %s sent a version-2 activation body answering a challenge this server did not issue for it; it is answered as still waiting
@@ -494,7 +494,7 @@ device %s sent a version-2 activation body answering a challenge this server did
 A request this endpoint could not read. The sentence is one of three fixed
 refusals, so nothing a request carried is interpolated into the retained log.
 
-#### Variant 1: `samtal_server.ota` at WARNING
+#### Variant 1: `vinga_server.ota` at WARNING
 
 ```text
 rejected OTA request: %s
@@ -512,7 +512,7 @@ rejected OTA request: %s
 
 Where devices are configured, said once at startup.
 
-#### Variant 1: `samtal_server.onboarding` at INFO
+#### Variant 1: `vinga_server.onboarding` at INFO
 
 ```text
 device onboarding is off: devices are configured at the server.ota_path path on %s (%s), which is not printed here, since that segment is this deployment's secret
@@ -530,10 +530,10 @@ device onboarding is off: devices are configured at the server.ota_path path on 
 | `origin_source` | `TOKEN` | yes | no | one of: `server.public_url`, `server.websocket_url`, `the listen address (server.host and server.port)` |  |
 | `onboarding` | `BOOL` | yes | no |  |  |
 
-#### Variant 2: `samtal_server.onboarding` at INFO
+#### Variant 2: `vinga_server.onboarding` at INFO
 
 ```text
-device onboarding is on: devices are configured on %s (%s), at the short path samtal-server config ota-url prints. The path is not repeated here, since its key stands in front of the endpoint that issues device tokens
+device onboarding is on: devices are configured on %s (%s), at the short path vinga-server config ota-url prints. The path is not repeated here, since its key stands in front of the endpoint that issues device tokens
 ```
 
 | # | Argument | Nullable | Constraint | Note |
@@ -554,10 +554,10 @@ device onboarding is on: devices are configured on %s (%s), at the short path sa
 A request carried a key-shaped segment, and not this server's. Neither is
 repeated.
 
-#### Variant 1: `samtal_server.onboarding` at WARNING
+#### Variant 1: `vinga_server.onboarding` at WARNING
 
 ```text
-a request reached the onboarding path carrying %d characters shaped like a key, and not this server's; neither is repeated here. Check the URL typed into the device's captive portal against the one samtal-server config ota-url prints
+a request reached the onboarding path carrying %d characters shaped like a key, and not this server's; neither is repeated here. Check the URL typed into the device's captive portal against the one vinga-server config ota-url prints
 ```
 
 | # | Argument | Nullable | Constraint | Note |
@@ -573,10 +573,10 @@ a request reached the onboarding path carrying %d characters shaped like a key, 
 
 A request carried something that is not key-shaped at all.
 
-#### Variant 1: `samtal_server.onboarding` at WARNING
+#### Variant 1: `vinga_server.onboarding` at WARNING
 
 ```text
-a request reached the onboarding path carrying %d characters that are not shaped like a key at all, so they are not repeated here; the URL to type comes from samtal-server config ota-url
+a request reached the onboarding path carrying %d characters that are not shaped like a key at all, so they are not repeated here; the URL to type comes from vinga-server config ota-url
 ```
 
 | # | Argument | Nullable | Constraint | Note |
@@ -594,7 +594,7 @@ A handshake refused before the accept. No device: nothing is authenticated at
 this point, so the Device-Id header is a string whoever opened the socket
 chose.
 
-#### Variant 1: `samtal_server.ws` at WARNING
+#### Variant 1: `vinga_server.ws` at WARNING
 
 ```text
 refused a websocket handshake from an unidentified client: %s
@@ -613,10 +613,10 @@ refused a websocket handshake from an unidentified client: %s
 ### `session_rejected`
 
 A device turned away. Emitted on both scopes: the session channel for the
-refusals a session makes after the accept, and `samtal_server.ws` for the one
+refusals a session makes after the accept, and `vinga_server.ws` for the one
 the endpoint makes before a session can run at all.
 
-#### Variant 1: `samtal_server.session` at WARNING
+#### Variant 1: `vinga_server.session` at WARNING
 
 ```text
 session %s rejected: the Device-Id header is not a device MAC (six colon-separated hex pairs)
@@ -633,7 +633,7 @@ session %s rejected: the Device-Id header is not a device MAC (six colon-separat
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `reason` | `TOKEN` | yes | no | one of: `bad_device_id` |  |
 
-#### Variant 2: `samtal_server.session` at WARNING
+#### Variant 2: `vinga_server.session` at WARNING
 
 ```text
 session %s rejected: device %s is bound to agent %s, which this server has not loaded; restart to load it
@@ -652,7 +652,7 @@ session %s rejected: device %s is bound to agent %s, which this server has not l
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `reason` | `TOKEN` | yes | no | one of: `agent_not_loaded` |  |
 
-#### Variant 3: `samtal_server.session` at WARNING
+#### Variant 3: `vinga_server.session` at WARNING
 
 ```text
 session %s rejected: device %s has no agent: bind it under devices or set default_agent
@@ -670,7 +670,7 @@ session %s rejected: device %s has no agent: bind it under devices or set defaul
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 | `reason` | `TOKEN` | yes | no | one of: `no_agent` |  |
 
-#### Variant 4: `samtal_server.ws` at WARNING
+#### Variant 4: `vinga_server.ws` at WARNING
 
 ```text
 refused a websocket handshake from %s: the server is at capacity
@@ -691,7 +691,7 @@ refused a websocket handshake from %s: the server is at capacity
 
 A conversation starts.
 
-#### Variant 1: `samtal_server.session` at INFO
+#### Variant 1: `vinga_server.session` at INFO
 
 ```text
 session %s open: device %s (client %s) agent %s%s, protocol v%d, %d Hz %d ms frames in
@@ -723,7 +723,7 @@ session %s open: device %s (client %s) agent %s%s, protocol v%d, %d Hz %d ms fra
 
 The duration cap fires.
 
-#### Variant 1: `samtal_server.session` at INFO
+#### Variant 1: `vinga_server.session` at INFO
 
 ```text
 session %s reached the %.0f s time limit
@@ -745,7 +745,7 @@ session %s reached the %.0f s time limit
 
 The idle timeout hangs up on a realtime session.
 
-#### Variant 1: `samtal_server.session` at INFO
+#### Variant 1: `vinga_server.session` at INFO
 
 ```text
 session %s idle for %.0f s, hanging up
@@ -768,7 +768,7 @@ session %s idle for %.0f s, hanging up
 
 A conversation ends.
 
-#### Variant 1: `samtal_server.session` at INFO
+#### Variant 1: `vinga_server.session` at INFO
 
 ```text
 session %s closed (device %s)
@@ -791,7 +791,7 @@ session %s closed (device %s)
 
 The reply's first audio frame goes out.
 
-#### Variant 1: `samtal_server.session` at INFO
+#### Variant 1: `vinga_server.session` at INFO
 
 ```text
 session %s: speaking started
@@ -813,7 +813,7 @@ session %s: speaking started
 An utterance is transcribed. No transcript: what was said is the conversation
 store's, and what an operator measures with is how long the user spoke.
 
-#### Variant 1: `samtal_server.session` at INFO
+#### Variant 1: `vinga_server.session` at INFO
 
 ```text
 session %s: heard %.2f s of speech
@@ -838,7 +838,7 @@ session %s: heard %.2f s of speech
 
 A reply finishes.
 
-#### Variant 1: `samtal_server.session` at INFO
+#### Variant 1: `vinga_server.session` at INFO
 
 ```text
 session %s: %s replied in %d sentences
@@ -862,7 +862,7 @@ session %s: %s replied in %d sentences
 
 One agent's part of a reply.
 
-#### Variant 1: `samtal_server.session` at INFO
+#### Variant 1: `vinga_server.session` at INFO
 
 ```text
 session %s: %s said %d sentences
@@ -886,7 +886,7 @@ session %s: %s said %d sentences
 
 `switch_agent` succeeds.
 
-#### Variant 1: `samtal_server.session` at INFO
+#### Variant 1: `vinga_server.session` at INFO
 
 ```text
 session %s: handed over from agent %s to %s
@@ -912,7 +912,7 @@ The know-how half of a prompt is assembled and cached. The per-round memory
 read is deliberately not part of it, which is why `memory` is not one of the
 provenance forms.
 
-#### Variant 1: `samtal_server.session` at INFO
+#### Variant 1: `vinga_server.session` at INFO
 
 ```text
 session %s: assembled %d characters of prompt for %s
@@ -938,7 +938,7 @@ session %s: assembled %d characters of prompt for %s
 The first-token watchdog cancels a stalled generation and retries the round
 once.
 
-#### Variant 1: `samtal_server.session` at WARNING
+#### Variant 1: `vinga_server.session` at WARNING
 
 A provider the registry did not build names no entry.
 
@@ -962,7 +962,7 @@ session %s: no first token after %.1f s, retrying round %d
 | `duration_ms` | `INT` | yes | no |  |  |
 | `stage` | `IDENTIFIER` | yes | no |  |  |
 
-#### Variant 2: `samtal_server.session` at WARNING
+#### Variant 2: `vinga_server.session` at WARNING
 
 `provider` and `type` are atomic: a provider with an identity carries both.
 `host` is absent for an engine that runs in this process and `model` for a
@@ -996,7 +996,7 @@ session %s: no first token after %.1f s, retrying round %d
 
 A generation call finishes.
 
-#### Variant 1: `samtal_server.session` at INFO
+#### Variant 1: `vinga_server.session` at INFO
 
 ```text
 session %s: %s round %d took %.2f s over %d turns
@@ -1024,7 +1024,7 @@ session %s: %s round %d took %.2f s over %d turns
 | `output_tokens` | `COUNT` | no | no |  |  |
 | `first_token_ms` | `INT` | no | no |  | Times the first spoken token, so a round that only asked for a tool carries none. |
 
-#### Variant 2: `samtal_server.session` at INFO
+#### Variant 2: `vinga_server.session` at INFO
 
 ```text
 session %s: %s round %d took %.2f s over %d turns
@@ -1062,7 +1062,7 @@ An ASR, LLM or TTS call fails. The class name is reported and the exception's
 message is not: a type name says what went wrong, a message says what a
 stranger wrote.
 
-#### Variant 1: `samtal_server.session` at WARNING
+#### Variant 1: `vinga_server.session` at WARNING
 
 A provider the registry did not build names no entry and no host.
 
@@ -1090,7 +1090,7 @@ session %s: %s provider%s %s after %.2f s%s: %s
 | `duration_ms` | `INT` | yes | no |  |  |
 | `stage` | `IDENTIFIER` | yes | no |  |  |
 
-#### Variant 2: `samtal_server.session` at WARNING
+#### Variant 2: `vinga_server.session` at WARNING
 
 ```text
 session %s: %s provider%s %s after %.2f s%s: %s
@@ -1125,7 +1125,7 @@ session %s: %s provider%s %s after %.2f s%s: %s
 A tool returns. `source` says which namespace the model reached into; the name
 itself is only ever this server's own word for it.
 
-#### Variant 1: `samtal_server.session` at INFO
+#### Variant 1: `vinga_server.session` at INFO
 
 ```text
 session %s: %s tool%s took %.2f s%s
@@ -1150,7 +1150,7 @@ session %s: %s tool%s took %.2f s%s
 | `duration_ms` | `INT` | yes | no |  |  |
 | `is_error` | `BOOL` | yes | no |  |  |
 
-#### Variant 2: `samtal_server.session` at INFO
+#### Variant 2: `vinga_server.session` at INFO
 
 ```text
 session %s: %s tool%s took %.2f s%s
@@ -1175,7 +1175,7 @@ session %s: %s tool%s took %.2f s%s
 | `duration_ms` | `INT` | yes | no |  |  |
 | `is_error` | `BOOL` | yes | no |  |  |
 
-#### Variant 3: `samtal_server.session` at INFO
+#### Variant 3: `vinga_server.session` at INFO
 
 A device tool's name is the board's vocabulary and an unknown one is whatever
 the model invented, so neither is named.
@@ -1206,7 +1206,7 @@ session %s: %s tool%s took %.2f s%s
 
 Speech cuts a reply short.
 
-#### Variant 1: `samtal_server.session` at INFO
+#### Variant 1: `vinga_server.session` at INFO
 
 ```text
 session %s: barge-in, cancelling the reply in flight
@@ -1228,7 +1228,7 @@ session %s: barge-in, cancelling the reply in flight
 
 An interruption is dropped and the reply lives.
 
-#### Variant 1: `samtal_server.session` at INFO
+#### Variant 1: `vinga_server.session` at INFO
 
 ```text
 session %s: barge-in suppressed, %d ms of speech is under the %.0f ms floor
@@ -1248,7 +1248,7 @@ session %s: barge-in suppressed, %d ms of speech is under the %.0f ms floor
 | `reason` | `TOKEN` | yes | no | one of: `min_speech` |  |
 | `speech_ms` | `INT` | yes | no |  |  |
 
-#### Variant 2: `samtal_server.session` at INFO
+#### Variant 2: `vinga_server.session` at INFO
 
 ```text
 session %s: barge-in suppressed inside the refractory window
@@ -1266,7 +1266,7 @@ session %s: barge-in suppressed inside the refractory window
 | `reason` | `TOKEN` | yes | no | one of: `refractory` |  |
 | `speech_ms` | `INT` | yes | no |  |  |
 
-#### Variant 3: `samtal_server.session` at INFO
+#### Variant 3: `vinga_server.session` at INFO
 
 ```text
 session %s: barge-in suppressed, nothing transcribed
@@ -1288,7 +1288,7 @@ session %s: barge-in suppressed, nothing transcribed
 
 An interruption merges with the utterance the reply was transcribing.
 
-#### Variant 1: `samtal_server.session` at INFO
+#### Variant 1: `vinga_server.session` at INFO
 
 ```text
 session %s: barge-in mid-transcription, merging the utterances
@@ -1309,7 +1309,7 @@ session %s: barge-in mid-transcription, merging the utterances
 
 The filler timer fired but the user was there first, so no clip played.
 
-#### Variant 1: `samtal_server.session` at INFO
+#### Variant 1: `vinga_server.session` at INFO
 
 ```text
 session %s: filler skipped, the user is speaking (%d ms heard)
@@ -1329,7 +1329,7 @@ session %s: filler skipped, the user is speaking (%d ms heard)
 | `reason` | `TOKEN` | yes | no | one of: `user_speaking` |  |
 | `speech_ms` | `INT` | yes | no |  |  |
 
-#### Variant 2: `samtal_server.session` at INFO
+#### Variant 2: `vinga_server.session` at INFO
 
 ```text
 session %s: filler skipped, a barge-in is being confirmed
@@ -1352,7 +1352,7 @@ session %s: filler skipped, a barge-in is being confirmed
 The reply was slow, so a pre-synthesized clip masked the wait. Its first frame
 is the turn's `speaking_started`.
 
-#### Variant 1: `samtal_server.session` at INFO
+#### Variant 1: `vinga_server.session` at INFO
 
 ```text
 session %s: no reply audio after %d ms, playing filler %d
@@ -1380,7 +1380,7 @@ it, on what the first request left of `timeout_s`. No session or device:
 providers are shared singletons that serve every conversation, so the event
 names the host instead.
 
-#### Variant 1: `samtal_server.providers.openai_asr` at WARNING
+#### Variant 1: `vinga_server.providers.openai_asr` at WARNING
 
 ```text
 openai asr: the transcript came back as the configured prompt with %.1f s of the timeout left, too little to retry, treating %.2f s of audio as nothing said
@@ -1398,7 +1398,7 @@ openai asr: the transcript came back as the configured prompt with %.1f s of the
 | `duration_s` | `FLOAT` | yes | no |  |  |
 | `host` | `IDENTIFIER` | yes | no |  |  |
 
-#### Variant 2: `samtal_server.providers.openai_asr` at WARNING
+#### Variant 2: `vinga_server.providers.openai_asr` at WARNING
 
 ```text
 openai asr: the retry outran the timeout's remaining %.1f s, treating %.2f s of audio as nothing said
@@ -1417,7 +1417,7 @@ openai asr: the retry outran the timeout's remaining %.1f s, treating %.2f s of 
 | `host` | `IDENTIFIER` | yes | no |  |  |
 | `retry_ms` | `INT` | yes | no |  |  |
 
-#### Variant 3: `samtal_server.providers.openai_asr` at WARNING
+#### Variant 3: `vinga_server.providers.openai_asr` at WARNING
 
 ```text
 openai asr: the retry came back as the prompt again, treating %.2f s of audio as nothing said
@@ -1435,7 +1435,7 @@ openai asr: the retry came back as the prompt again, treating %.2f s of audio as
 | `host` | `IDENTIFIER` | yes | no |  |  |
 | `retry_ms` | `INT` | yes | no |  |  |
 
-#### Variant 4: `samtal_server.providers.openai_asr` at WARNING
+#### Variant 4: `vinga_server.providers.openai_asr` at WARNING
 
 ```text
 openai asr: the retry came back empty, treating %.2f s of audio as nothing said
@@ -1453,7 +1453,7 @@ openai asr: the retry came back empty, treating %.2f s of audio as nothing said
 | `host` | `IDENTIFIER` | yes | no |  |  |
 | `retry_ms` | `INT` | yes | no |  |  |
 
-#### Variant 5: `samtal_server.providers.openai_asr` at INFO
+#### Variant 5: `vinga_server.providers.openai_asr` at INFO
 
 ```text
 openai asr: the retry recovered %.2f s of audio the echo guard would have discarded
@@ -1476,7 +1476,7 @@ openai asr: the retry recovered %.2f s of audio the echo guard would have discar
 An entry's connect finishes and its tools are published. No session or device:
 one entry serves every conversation, and the rest of this block is the same.
 
-#### Variant 1: `samtal_server.tools.mcp` at INFO
+#### Variant 1: `vinga_server.tools.mcp` at INFO
 
 ```text
 mcp server %s connected with %d tool(s)
@@ -1499,7 +1499,7 @@ mcp server %s connected with %d tool(s)
 
 An entry fails to come up, or its connection is given up.
 
-#### Variant 1: `samtal_server.tools.mcp` at WARNING
+#### Variant 1: `vinga_server.tools.mcp` at WARNING
 
 ```text
 mcp server %s is unavailable, its tools are absent: %s
@@ -1517,7 +1517,7 @@ mcp server %s is unavailable, its tools are absent: %s
 | `reason` | `TOKEN` | yes | no | one of: `connect_timeout`, `discovery_failed`, `initialize_failed`, `transport_failed` |  |
 | `duration_ms` | `INT` | yes | no |  | How long the connect ran before it failed. |
 
-#### Variant 2: `samtal_server.tools.mcp` at INFO
+#### Variant 2: `vinga_server.tools.mcp` at INFO
 
 The intentional one, a shutdown or a reload, and the only `mcp_down` at INFO.
 No duration: how long a working connection lasted is a different number under
@@ -1537,7 +1537,7 @@ mcp server %s is stopped and its tools are gone
 | `entry` | `IDENTIFIER` | yes | no |  |  |
 | `reason` | `TOKEN` | yes | no | one of: `stopped` |  |
 
-#### Variant 3: `samtal_server.tools.mcp` at WARNING
+#### Variant 3: `vinga_server.tools.mcp` at WARNING
 
 Always beside an `mcp_call_dropped`, in that order.
 
@@ -1561,7 +1561,7 @@ A tool call failed and the connection was dropped because of it. The tool is
 said by its position in the far side's listing and never by its name: half a
 published name is what the far side called its tool.
 
-#### Variant 1: `samtal_server.tools.mcp` at WARNING
+#### Variant 1: `vinga_server.tools.mcp` at WARNING
 
 ```text
 mcp server %s: the call to published tool %s failed (%s), so its answer is lost
@@ -1584,7 +1584,7 @@ mcp server %s: the call to published tool %s failed (%s), so its answer is lost
 
 A published tool is dropped because a more specific entry owns its name.
 
-#### Variant 1: `samtal_server.tools.mcp` at WARNING
+#### Variant 1: `vinga_server.tools.mcp` at WARNING
 
 ```text
 mcp server %s: dropping published tool %d, its name is inside the namespace of the entry %s, which owns it
@@ -1608,7 +1608,7 @@ mcp server %s: dropping published tool %d, its name is inside the namespace of t
 A reload of the MCP servers finishes, whether or not the caller is still
 connected. Exactly one per reload, at whichever of the two phases ended it.
 
-#### Variant 1: `samtal_server.tools.mcp` at WARNING
+#### Variant 1: `vinga_server.tools.mcp` at WARNING
 
 ```text
 mcp servers were not reloaded and nothing was changed (%s)
@@ -1624,7 +1624,7 @@ mcp servers were not reloaded and nothing was changed (%s)
 | `outcome` | `TOKEN` | yes | no | one of: `refused` |  |
 | `reason` | `TOKEN` | yes | no | one of: `database_busy`, `in_progress`, `invalid`, `unexpected`, `unreadable` | Chosen where the exception is classified and never built out of its message. |
 
-#### Variant 2: `samtal_server.tools.mcp` at INFO
+#### Variant 2: `vinga_server.tools.mcp` at INFO
 
 ```text
 mcp servers reloaded: %d started, %d restarted, %d stopped, %d unchanged
@@ -1651,7 +1651,7 @@ mcp servers reloaded: %d started, %d restarted, %d stopped, %d unchanged
 
 An agent's memory could not be read; it remembers nothing this round.
 
-#### Variant 1: `samtal_server.tools.memory` at WARNING
+#### Variant 1: `vinga_server.tools.memory` at WARNING
 
 ```text
 could not read memory for agent %s (%s); it remembers nothing this round
@@ -1672,7 +1672,7 @@ could not read memory for agent %s (%s); it remembers nothing this round
 
 Filler synthesis failed for one agent, so latency masking is off for it.
 
-#### Variant 1: `samtal_server.filler` at WARNING
+#### Variant 1: `vinga_server.filler` at WARNING
 
 ```text
 agent %s: filler synthesis failed, latency masking is off for this agent (%s)
@@ -1693,7 +1693,7 @@ agent %s: filler synthesis failed, latency masking is off for this agent (%s)
 
 A session is being recorded.
 
-#### Variant 1: `samtal_server.capture` at INFO
+#### Variant 1: `vinga_server.capture` at INFO
 
 ```text
 session %s: capturing to %s
@@ -1714,7 +1714,7 @@ session %s: capturing to %s
 
 A session is not being recorded, and why.
 
-#### Variant 1: `samtal_server.capture` at WARNING
+#### Variant 1: `vinga_server.capture` at WARNING
 
 ```text
 session %s: not capturing, %s is unusable (%s)
@@ -1733,7 +1733,7 @@ session %s: not capturing, %s is unusable (%s)
 | `reason` | `TOKEN` | yes | no | one of: `unusable` |  |
 | `failure` | `CLASS_NAME` | yes | no |  |  |
 
-#### Variant 2: `samtal_server.capture` at WARNING
+#### Variant 2: `vinga_server.capture` at WARNING
 
 ```text
 session %s: not capturing, %.0f MB free is below the %.0f MB floor
@@ -1752,7 +1752,7 @@ session %s: not capturing, %.0f MB free is below the %.0f MB floor
 | `reason` | `TOKEN` | yes | no | one of: `min_free_mb` |  |
 | `free_mb` | `COUNT` | yes | no |  |  |
 
-#### Variant 3: `samtal_server.capture` at WARNING
+#### Variant 3: `vinga_server.capture` at WARNING
 
 ```text
 session %s: not capturing, could not open the files (%s)
@@ -1774,7 +1774,7 @@ session %s: not capturing, could not open the files (%s)
 
 A recording reached its per-session ceiling.
 
-#### Variant 1: `samtal_server.capture` at INFO
+#### Variant 1: `vinga_server.capture` at INFO
 
 ```text
 session %s: capture reached its %.0f s limit
@@ -1794,7 +1794,7 @@ session %s: capture reached its %.0f s limit
 
 A recording stopped after a write failed.
 
-#### Variant 1: `samtal_server.capture` at WARNING
+#### Variant 1: `vinga_server.capture` at WARNING
 
 ```text
 session %s: capture stopped after failing to %s (%s)
@@ -1817,7 +1817,7 @@ session %s: capture stopped after failing to %s (%s)
 
 Old recordings were removed to stay inside the disk budget.
 
-#### Variant 1: `samtal_server.capture` at INFO
+#### Variant 1: `vinga_server.capture` at INFO
 
 ```text
 capture: pruned %d session(s) to stay under %.0f MB: %s
@@ -1838,7 +1838,7 @@ capture: pruned %d session(s) to stay under %.0f MB: %s
 
 The disk budget is exceeded and nothing more can be pruned.
 
-#### Variant 1: `samtal_server.capture` at WARNING
+#### Variant 1: `vinga_server.capture` at WARNING
 
 ```text
 capture: %.0f MB on disk is over the %.0f MB budget and nothing more can be pruned; raise max_total_mb or lower max_session_s
@@ -1859,7 +1859,7 @@ capture: %.0f MB on disk is over the %.0f MB budget and nothing more can be prun
 Said once at startup, at WARNING: recording room audio is a thing an operator
 should not discover by accident.
 
-#### Variant 1: `samtal_server.app` at WARNING
+#### Variant 1: `vinga_server.app` at WARNING
 
 ```text
 session capture is on: room audio and a track of the session's events are being written to %s
@@ -1878,7 +1878,7 @@ session capture is on: room audio and a track of the session's events are being 
 
 Capture is configured but off.
 
-#### Variant 1: `samtal_server.app` at INFO
+#### Variant 1: `vinga_server.app` at INFO
 
 ```text
 session capture is configured but off; set server.capture.enabled to record to %s
@@ -1899,7 +1899,7 @@ The store opens at startup, which means this server is recording what is said
 to it. Said once, before anything connects, and at WARNING for the reason
 `capture_enabled` is.
 
-#### Variant 1: `samtal_server.conversations.store` at WARNING
+#### Variant 1: `vinga_server.conversations.store` at WARNING
 
 ```text
 recording conversations to %s
@@ -1919,7 +1919,7 @@ recording conversations to %s
 The store is behind and events for one session are being dropped. Said once
 per session at its first drop; the total lands on that session's row.
 
-#### Variant 1: `samtal_server.conversations.store` at WARNING
+#### Variant 1: `vinga_server.conversations.store` at WARNING
 
 ```text
 session %s: the conversation store is behind, dropping events
@@ -1939,7 +1939,7 @@ session %s: the conversation store is behind, dropping events
 A write to the store failed and its batch was dropped, or a prune could not
 run.
 
-#### Variant 1: `samtal_server.conversations.store` at WARNING
+#### Variant 1: `vinga_server.conversations.store` at WARNING
 
 ```text
 the conversation store dropped a batch after a write failed (%s)
@@ -1954,7 +1954,7 @@ the conversation store dropped a batch after a write failed (%s)
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 | `failure` | `CLASS_NAME` | yes | no |  | The exception's class name, never its message. |
 
-#### Variant 2: `samtal_server.conversations.store` at WARNING
+#### Variant 2: `vinga_server.conversations.store` at WARNING
 
 ```text
 the conversation store could not prune (%s)
@@ -1974,7 +1974,7 @@ the conversation store could not prune (%s)
 Retention deleted sessions older than the window. At INFO: a policy doing its
 job.
 
-#### Variant 1: `samtal_server.conversations.store` at INFO
+#### Variant 1: `vinga_server.conversations.store` at INFO
 
 ```text
 conversations: pruned %d session(s) older than %d days
@@ -1994,7 +1994,7 @@ conversations: pruned %d session(s) older than %d days
 
 A shutdown begins draining.
 
-#### Variant 1: `samtal_server.registry` at INFO
+#### Variant 1: `vinga_server.registry` at INFO
 
 ```text
 draining %d session(s), up to %.0f s
@@ -2015,7 +2015,7 @@ draining %d session(s), up to %.0f s
 
 Every reply finished speaking.
 
-#### Variant 1: `samtal_server.registry` at INFO
+#### Variant 1: `vinga_server.registry` at INFO
 
 ```text
 every session drained
@@ -2032,7 +2032,7 @@ No arguments: the sentence is fixed.
 
 A reply was cut, or a session hung.
 
-#### Variant 1: `samtal_server.registry` at WARNING
+#### Variant 1: `vinga_server.registry` at WARNING
 
 ```text
 drained with %d session(s) cut mid-reply and %d that did not finish
@@ -2056,7 +2056,7 @@ drained with %d session(s) cut mid-reply and %d that did not finish
 There is no configuration database, so bindings resolve from the boot
 snapshot.
 
-#### Variant 1: `samtal_server.device.bindings` at DEBUG
+#### Variant 1: `vinga_server.device.bindings` at DEBUG
 
 ```text
 no configuration database at %s: device bindings resolve from the configuration this server was built with
@@ -2075,7 +2075,7 @@ no configuration database at %s: device bindings resolve from the configuration 
 
 The database could not be read, so the answer is the boot snapshot's.
 
-#### Variant 1: `samtal_server.device.bindings` at WARNING
+#### Variant 1: `vinga_server.device.bindings` at WARNING
 
 ```text
 cannot read the device bindings for %s; answering from the configuration this server started with, which may be older than the database. The failure's kind is recorded beside this line
@@ -2096,7 +2096,7 @@ cannot read the device bindings for %s; answering from the configuration this se
 The configuration API failed to handle a request. The class name and nothing
 else.
 
-#### Variant 1: `samtal_server.config.api` at ERROR
+#### Variant 1: `vinga_server.config.api` at ERROR
 
 ```text
 the configuration API failed to handle a request (%s)
@@ -2114,7 +2114,7 @@ the configuration API failed to handle a request (%s)
 
 The configuration API met unreadable stored state.
 
-#### Variant 1: `samtal_server.config.api` at ERROR
+#### Variant 1: `vinga_server.config.api` at ERROR
 
 ```text
 the configuration API met unreadable stored state (%s)
@@ -2138,10 +2138,10 @@ What the emitter emits in forgiving mode when an emission cannot be recovered
 into a declared shape. Fixed at ERROR, because `log_level` admits roots above
 WARNING and a complaint that vanishes under one is no complaint.
 
-#### Variant 1: `samtal_server.session` at ERROR
+#### Variant 1: `vinga_server.session` at ERROR
 
 ```text
-an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
 ```
 
 No arguments: the sentence is fixed.
@@ -2152,10 +2152,10 @@ No arguments: the sentence is fixed.
 | `session` | `ID` | yes | no | the `session_id` syntax |  |
 | `device` | `ID` | yes | yes | the `mac` syntax |  |
 
-#### Variant 2: `samtal_server.app` at ERROR
+#### Variant 2: `vinga_server.app` at ERROR
 
 ```text
-an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
 ```
 
 No arguments: the sentence is fixed.
@@ -2164,10 +2164,10 @@ No arguments: the sentence is fixed.
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 
-#### Variant 3: `samtal_server.capture` at ERROR
+#### Variant 3: `vinga_server.capture` at ERROR
 
 ```text
-an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
 ```
 
 No arguments: the sentence is fixed.
@@ -2176,10 +2176,10 @@ No arguments: the sentence is fixed.
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 
-#### Variant 4: `samtal_server.config.api` at ERROR
+#### Variant 4: `vinga_server.config.api` at ERROR
 
 ```text
-an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
 ```
 
 No arguments: the sentence is fixed.
@@ -2188,10 +2188,10 @@ No arguments: the sentence is fixed.
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 
-#### Variant 5: `samtal_server.conversations.store` at ERROR
+#### Variant 5: `vinga_server.conversations.store` at ERROR
 
 ```text
-an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
 ```
 
 No arguments: the sentence is fixed.
@@ -2200,10 +2200,10 @@ No arguments: the sentence is fixed.
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 
-#### Variant 6: `samtal_server.device.bindings` at ERROR
+#### Variant 6: `vinga_server.device.bindings` at ERROR
 
 ```text
-an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
 ```
 
 No arguments: the sentence is fixed.
@@ -2212,10 +2212,10 @@ No arguments: the sentence is fixed.
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 
-#### Variant 7: `samtal_server.filler` at ERROR
+#### Variant 7: `vinga_server.filler` at ERROR
 
 ```text
-an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
 ```
 
 No arguments: the sentence is fixed.
@@ -2224,10 +2224,10 @@ No arguments: the sentence is fixed.
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 
-#### Variant 8: `samtal_server.onboarding` at ERROR
+#### Variant 8: `vinga_server.onboarding` at ERROR
 
 ```text
-an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
 ```
 
 No arguments: the sentence is fixed.
@@ -2236,10 +2236,10 @@ No arguments: the sentence is fixed.
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 
-#### Variant 9: `samtal_server.ota` at ERROR
+#### Variant 9: `vinga_server.ota` at ERROR
 
 ```text
-an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
 ```
 
 No arguments: the sentence is fixed.
@@ -2248,10 +2248,10 @@ No arguments: the sentence is fixed.
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 
-#### Variant 10: `samtal_server.providers.openai_asr` at ERROR
+#### Variant 10: `vinga_server.providers.openai_asr` at ERROR
 
 ```text
-an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
 ```
 
 No arguments: the sentence is fixed.
@@ -2260,10 +2260,10 @@ No arguments: the sentence is fixed.
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 
-#### Variant 11: `samtal_server.registry` at ERROR
+#### Variant 11: `vinga_server.registry` at ERROR
 
 ```text
-an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
 ```
 
 No arguments: the sentence is fixed.
@@ -2272,10 +2272,10 @@ No arguments: the sentence is fixed.
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 
-#### Variant 12: `samtal_server.tools.mcp` at ERROR
+#### Variant 12: `vinga_server.tools.mcp` at ERROR
 
 ```text
-an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
 ```
 
 No arguments: the sentence is fixed.
@@ -2284,10 +2284,10 @@ No arguments: the sentence is fixed.
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 
-#### Variant 13: `samtal_server.tools.memory` at ERROR
+#### Variant 13: `vinga_server.tools.memory` at ERROR
 
 ```text
-an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
 ```
 
 No arguments: the sentence is fixed.
@@ -2296,10 +2296,10 @@ No arguments: the sentence is fixed.
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
 
-#### Variant 14: `samtal_server.ws` at ERROR
+#### Variant 14: `vinga_server.ws` at ERROR
 
 ```text
-an event was refused by the event schema and replaced by this one; reproduce it under SAMTAL_EVENTS_ENFORCEMENT=strict to see which
+an event was refused by the event schema and replaced by this one; reproduce it under VINGA_EVENTS_ENFORCEMENT=strict to see which
 ```
 
 No arguments: the sentence is fixed.

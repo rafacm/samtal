@@ -1231,7 +1231,7 @@ wheels = [
 ]
 
 [[package]]
-name = "samtal-server"
+name = "vinga-server"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
