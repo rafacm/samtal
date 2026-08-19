@@ -67,12 +67,15 @@ class DeviceGone(RuntimeError):
     the close, so a runtime catching this type alone catches every
     vanished device (#137). The reply body does exactly that.
 
-    It still subclasses `RuntimeError`, which is what the sites that
-    stayed broad rely on: the closing `tts stop` pair and the filler
-    playback both suppress `RuntimeError` around a device send, and this
-    falls inside what they already swallow. The consequence is accepted
-    and stated in the ADR: a broad `RuntimeError` catch also swallows a
-    vanished device, which at those two sites is what is wanted.
+    It still subclasses `RuntimeError`, which is what the one site that
+    stayed broad relies on: the reply's closing `tts stop` pair
+    suppresses `RuntimeError` around a device send, and this falls
+    inside what it already swallows. The consequence is accepted and
+    stated in the ADR: a broad `RuntimeError` catch also swallows a
+    vanished device, which at that site is what is wanted. Filler
+    playback used to be the second such site and no longer is: it
+    catches this type alone, so a bare `RuntimeError` there is the
+    local bug it always was and is reported as one (#182).
     """
 
 
