@@ -270,8 +270,12 @@ fill/consume shape: the four store-internal hooks (`from_row`,
 `to_row`, `before_parse`, `inside_write`) become a private typed
 per-kind table inside `store.py`, since the store both installs and
 consumes them today. The three verb hooks (`read`, `write`, `delete`)
-become the typed `EntityAccess` surface the store exposes per kind,
-which is what `api.py` and `cli.py` actually need. `body` becomes a
+dissolve entirely: `ConfigStore` already exposes typed public
+read, write, and delete methods per kind, so the explicit routes and
+CLI commands call those directly, and no `EntityAccess` layer is
+added, since it would only forward arguments to names that exist
+(the deletion test, applied by the review to this plan's own first
+draft). `body` becomes a
 direct call into `views.py` (which already owns the derivation).
 `summary` becomes plain functions in `cli.py` called from the summary
 tree. `wrote`, `deleted`, and `notice` become typed lookups exported
@@ -365,7 +369,8 @@ carries its baseline proof inside its own PR.
   drift step. After this milestone the structures that must agree
   per event are one declaration and one golden line.
 - [ ] **M4: the entity registry sheds its hooks.** As decided above:
-  store-internal hooks inlined, `EntityAccess` exposed, `body` and
+  store-internal hooks inlined, routes and commands calling the
+  store's existing typed methods directly, `body` and
   `summary` and `wrote`/`deleted`/`notice` called directly, explicit
   routes with the byte-identical OpenAPI proof, `fill()` and
   `object.__setattr__` deleted, `Endpoint` moved out of the
@@ -447,9 +452,9 @@ carry the rule that a token value is chosen by exception type or
 explicit branch, never message text. The descriptor bounds stay at
 their four decision sites.
 
-**Honest seams.** `EntityAccess` and the emitter's typed-event
-acceptance compare `is not None` where optional; the construction
-guard's behavior gets its own pins since callers cannot prove it.
+**Honest seams.** Optional injections compare `is not None`; the
+construction guard's behavior gets its own pins since callers cannot
+prove it.
 
 **Inventories by tooling.** Every count above names its instrument
 (AST walk, tokenizer walk, line counts); the implementation doc
@@ -575,6 +580,11 @@ the goal section now says so.
 **6 (P2). `EntityAccess` fails the deletion test.** `ConfigStore`
 already exposes typed public read/write/delete methods per kind;
 the proposed surface would forward arguments to them.
+
+*Resolution.* Adopted. `EntityAccess` is dropped; explicit routes
+and CLI commands call the store's existing typed methods directly.
+No replacement layer is added without naming the invariant it hides
+and its non-forwarding consumers.
 
 **7 (P2). Moving `notice` out of the spec contradicts the settled
 effect-timing decision.** The issue requires the immutable spec to
