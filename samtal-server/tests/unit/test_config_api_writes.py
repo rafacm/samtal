@@ -39,7 +39,7 @@ from samtal_server.config.secrets import (
     generate_key,
     load_keys,
 )
-from samtal_server.config.store import ConfigStore
+from samtal_server.config.store import NOT_A_STAGE, ConfigStore
 from samtal_server.config.writes import (
     BINDING_NOTICE,
     MCP_RELOAD_NOTICE,
@@ -591,43 +591,53 @@ def test_deleting_something_that_is_not_there_is_404(client: TestClient) -> None
 
 
 # Every addressed section, as the path a read and a delete of something
-# nothing wrote go to, the sentence both answer with, and the value that
-# must not come back. The names are credential-shaped because a URL path
-# is where a paste lands; a device is addressed by a MAC, which cannot
-# be shaped like a credential, so its own identity is the sentinel.
+# that addresses nothing go to, the status and the sentence both answer
+# with, and the value that must not come back. The names are
+# credential-shaped because a URL path is where a paste lands; a device
+# is addressed by a MAC, which cannot be shaped like a credential, so
+# its own identity is the sentinel.
+#
+# The last row is a segment that addresses nothing in a different way: a
+# provider is addressed by a stage and a name together, and a stage that
+# is not one of the four is the caller's mistake rather than something
+# missing, so it is the same paste meeting a different refusal and a
+# different status.
 UNWRITTEN = [
-    (f"/providers/llm/{quote(SECRET, safe='')}", NO_SUCH_PROVIDER, SECRET),
-    (f"/providers/llm/{quote(f'{SECRET}.pasted', safe='')}", NO_SUCH_PROVIDER, SECRET),
-    (f"/mcp-servers/{quote(SECRET, safe='')}", NO_SUCH_MCP_SERVER, SECRET),
-    (f"/prompt-fragments/{quote(SECRET, safe='')}", NO_SUCH_FRAGMENT, SECRET),
-    (f"/prompt-fragments/{quote(f'{SECRET}.pasted', safe='')}", NO_SUCH_FRAGMENT, SECRET),
-    (f"/agents/{quote(SECRET, safe='')}", NO_SUCH_AGENT, SECRET),
-    ("/devices/aa:bb:cc:dd:ee:ff", NO_SUCH_DEVICE, "aa:bb:cc:dd:ee:ff"),
+    (f"/providers/llm/{quote(SECRET, safe='')}", 404, NO_SUCH_PROVIDER, SECRET),
+    (f"/providers/llm/{quote(f'{SECRET}.pasted', safe='')}", 404, NO_SUCH_PROVIDER, SECRET),
+    (f"/mcp-servers/{quote(SECRET, safe='')}", 404, NO_SUCH_MCP_SERVER, SECRET),
+    (f"/prompt-fragments/{quote(SECRET, safe='')}", 404, NO_SUCH_FRAGMENT, SECRET),
+    (f"/prompt-fragments/{quote(f'{SECRET}.pasted', safe='')}", 404, NO_SUCH_FRAGMENT, SECRET),
+    (f"/agents/{quote(SECRET, safe='')}", 404, NO_SUCH_AGENT, SECRET),
+    ("/devices/aa:bb:cc:dd:ee:ff", 404, NO_SUCH_DEVICE, "aa:bb:cc:dd:ee:ff"),
+    (f"/providers/{quote(SECRET, safe='')}/claude", 422, NOT_A_STAGE, SECRET),
 ]
 
 
-@pytest.mark.parametrize(("path", "detail", "sentinel"), UNWRITTEN)
-def test_an_entity_that_is_not_there_is_404_without_its_identity(
+@pytest.mark.parametrize(("path", "status", "detail", "sentinel"), UNWRITTEN)
+def test_an_identity_that_addresses_nothing_is_refused_without_it(
     client: TestClient,
     caplog: pytest.LogCaptureFixture,
     path: str,
+    status: int,
     detail: str,
     sentinel: str,
 ) -> None:
     """The read and the delete of an identity nothing wrote, for every
-    section that has one (#132).
+    section that has one, and of a stage that is not a stage (#132).
 
     It arrived in the path and was never validated by anything here, so
-    the 404 names the section and the fact and not what was typed. The
-    three places it could still come out are all looked at: the body,
-    the headers, and every record this server retained while answering.
+    the refusal names the section and the fact and not what was typed.
+    The three places it could still come out are all looked at: the
+    body, the headers, and every record this server retained while
+    answering.
     """
     with caplog.at_level(logging.DEBUG):
         read = client.get(path)
         removed = client.delete(path)
 
     for response in (read, removed):
-        assert response.status_code == 404
+        assert response.status_code == status
         # The leak first and the wording after it, so a failure here
         # says which of the two moved.
         assert sentinel not in response.text
@@ -686,7 +696,7 @@ def test_an_identity_that_cannot_be_addressed_at_all_is_422(client: TestClient) 
     mac = client.put("/devices/not-a-mac", json={"agents": ["sam"]})
 
     assert stage.status_code == 422
-    assert "is not a provider stage" in stage.json()["detail"]
+    assert stage.json()["detail"] == NOT_A_STAGE
     assert mac.status_code == 422
     assert "is not a MAC address" in mac.json()["detail"]
 

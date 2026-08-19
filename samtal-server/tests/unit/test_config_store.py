@@ -25,7 +25,7 @@ from samtal_server.config.entities import (
 from samtal_server.config.loader import StorageError, UnknownEntityError
 from samtal_server.config.models import mcp_entry_fragment
 from samtal_server.config.secrets import SecretLocation, generate_key
-from samtal_server.config.store import ConfigStore, verify_secrets
+from samtal_server.config.store import NOT_A_STAGE, ConfigStore, verify_secrets
 from samtal_server.db import open_database, schema
 
 # Not a real credential, and shaped so a substring check for it cannot
@@ -699,8 +699,9 @@ def test_a_nested_reference_key_must_still_name_a_variable(store: ConfigStore) -
 
 
 def test_an_unknown_stage_and_an_empty_name_are_refused(store: ConfigStore) -> None:
-    with pytest.raises(ConfigError, match="not a provider stage"):
+    with pytest.raises(ConfigError) as caught:
         store.set_provider("speech", "x", {"type": "mock"})
+    assert str(caught.value) == NOT_A_STAGE
     with pytest.raises(ConfigError, match="the name is empty"):
         store.set_agent("  ", {})
     with pytest.raises(ConfigError, match="not a MAC address"):
