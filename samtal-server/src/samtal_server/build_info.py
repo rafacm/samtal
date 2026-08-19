@@ -43,8 +43,10 @@ UNKNOWN_REVISION = "unknown"
 
 # The repository root, if this package is being run out of a checkout.
 # Resolved from the module rather than the process's cwd, which is not
-# the server's to assume.
-_CHECKOUT = Path(__file__).resolve().parent.parent
+# the server's to assume. Two levels up past src/ in the checkout;
+# inside site-packages the path is meaningless and git answers nothing,
+# which the caller treats as the ordinary no-checkout case.
+_CHECKOUT = Path(__file__).resolve().parents[2]
 
 # Long enough for git on a cold cache, short enough that a wedged one
 # cannot hold up a boot. Nothing here is worth delaying a server for.
