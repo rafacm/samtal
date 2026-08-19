@@ -94,6 +94,26 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   now has one home and every renderer reads it from there. Refusals
   about declared fields are unchanged, `api_key_env` among them: a name
   this server chose is a name it may print.
+- **A masked read is a write** (#192). The `entity` half of a read was
+  meant to be resubmittable, and one case was not: a value the display
+  masks is not always a stored secret. A lowercase environment name in
+  an `*_env` option and a whitespace-padded `$VAR` in an MCP server's
+  `env` are both values a write accepts and the display refuses to show,
+  because a bare lowercase name in a credential slot is as likely to be
+  a pasted key as a variable, so a read of such an entity came back with
+  `********` in it and could not be sent back. Writing the mask now
+  means keep the value stored there: the repository substitutes it
+  before the fragment is validated, walking the incoming body with the
+  same secret-shaped-key rule the display masks by, at the same depth,
+  so what a read hides and what a write restores cannot come to
+  disagree. The mask written where nothing is stored is refused rather
+  than stored, naming the field where the field is one this server
+  declares, because the mask is not a value. Nothing else about a write
+  changes: a PUT still replaces the model-shaped half and leaves stored
+  credentials alone, and rotating one is still the secret PUT. The
+  contract says all of this now, in the API description and in the
+  envelope's own field descriptions, including which read shapes are
+  display-only.
 
 - **A read shows every field its entity's model declares, masked at
   every depth** (#176, #171). The five body builders behind
