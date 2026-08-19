@@ -15,7 +15,6 @@ of naming no default agent), and a measurement nothing reads drifts
 silently.
 """
 
-import os
 import subprocess
 from pathlib import Path
 
@@ -25,6 +24,7 @@ from samtal_server.config import compose_config, load_file_config
 from samtal_server.config.models import domain_fields
 from samtal_server.config.store import ConfigStore
 from samtal_server.db import open_database
+from tests.integration.conftest import script_environment
 
 SERVER = Path(__file__).resolve().parents[2]
 DEPLOY_CONFIG = SERVER / "config.deploy.example.yaml"
@@ -48,7 +48,7 @@ def test_the_deployment_profile_boots_with_its_measured_values(
         subprocess.run(
             ["sh", str(DEPLOY_SEED)],
             check=True,
-            env={**os.environ, "SAMTAL_API_URL": api_url},
+            env=script_environment(SAMTAL_API_URL=api_url),
         )
 
     engine = open_database(directory)
