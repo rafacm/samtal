@@ -121,12 +121,15 @@ Every refusal this API answers becomes one shape, served as
 }
 ```
 
-- `title` is a short fixed string per status, one per entry of a new
-  `PROBLEM_TITLES` mapping beside `PROBLEM_DESCRIPTIONS`, so the two
-  status vocabularies live in one place. Titles are boring on purpose
-  (`unauthorized`, `not found`, `conflict`, `refused`,
-  `server failure`, `no runtime`): RFC 9457 wants a summary of the
-  problem type, not a second sentence.
+- `title` is the status's standard HTTP reason phrase (`Unauthorized`,
+  `Not Found`, `Conflict`, `Unprocessable Content`,
+  `Internal Server Error`, `Service Unavailable`), one per entry of a
+  new `PROBLEM_TITLES` mapping beside `PROBLEM_DESCRIPTIONS`, so the
+  two status vocabularies live in one place. Standard phrases rather
+  than this API's own words, because with `type` absent the problem
+  type is `about:blank`, whose title RFC 9457 says should be the
+  recommended status phrase; a custom title would imply a problem
+  type the body does not identify.
 - `status` repeats the HTTP status, as the RFC describes, so a body
   separated from its response (a log, a bug report) still says what it
   was.
@@ -568,3 +571,8 @@ carries its resolution below it.
    standard reason phrases, or define type URIs; given the plan's
    aversion to a type registry, the standard phrases are the
    consistent choice.
+
+   *Resolution.* Adopted, taking the standard phrases: the problem
+   body section now sets `title` to the status's recommended reason
+   phrase (`Unprocessable Content` for 422, per RFC 9110), keeping
+   `PROBLEM_TITLES` as the one home and `type` absent.
