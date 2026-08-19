@@ -9,6 +9,24 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The session channel's events are declared as types** (#210).
+  Twenty-seven emit sites across the device edge, the pipeline,
+  turn-taking, the filler runner and the websocket endpoint stop
+  restating a template, an argument order, an event name and a field set
+  and construct a typed variant instead; their declarations move into
+  the catalog and their sidecar entries are deleted. The vocabulary
+  grows to cover what a conversation says: a device MAC and a language
+  code held to their syntaxes, a bounded client id, prompt provenance by
+  size, and the closed sets as enumerations, with a variant narrowing
+  one where it admits fewer members and fixing one where the variant IS
+  the value. What operators consume is unchanged: the same channels,
+  levels, sentences, arguments and fields, held by a record baseline
+  captured before the conversion and byte-identical after it, and by the
+  golden inventory of every declared event's structure. The generated
+  event reference keeps its counts and its content; the converted
+  sections move to where the catalog declares them, and the composed
+  grammars name the value types that build them now.
+
 - **Events are declared as types, starting with the conversation
   store** (#210). `vinga_server/events.py` becomes a package, and
   beside it a catalog declares one event per code holding a

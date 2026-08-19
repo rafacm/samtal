@@ -318,3 +318,228 @@ Run from `vinga-server/`, at `32fbe99d`.
 
 The image and the smoke lane remain unverified here, for the reason
 given above.
+
+## M2: convert the session channel
+
+### What was done
+
+Seven commits, in the order the plan's pin-before-reshaping lens forces:
+the vocabulary, the mechanism, the baseline, the declarations, the
+conversion, the pins, the sentinels.
+
+**The vocabulary.** `events/values.py` gains the fourteen value types
+and eight enumerations the session channel is written in. `DeviceId` is
+the one that unblocked the rest: `declare()` refused a session-channel
+variant outright because the session base carries a device MAC and no
+value type could describe it. Beside it, `LanguageTag`, `Whole`, `Real`,
+`Flag`, `AgentNames`, `Descriptor` with `ClientId`, `PromptSources`, a
+`TokenValue` base with seven token types, and a `Fragment` base with
+eight formatted-fragment types.
+
+Two of those carry a decision worth naming. A token is a member of an
+enumeration rather than a string a site writes and a registry restates,
+and where one variant admits fewer members than its enumeration holds
+the narrowing is a subclass that refuses the rest at construction
+(`UnnamedToolSource`), which is a stronger claim than the registry's: a
+`tool_call` that names nothing cannot be built for a builtin. And each
+formatted fragment carries its grammar and its builder together, so a
+site cannot assemble a shape the declaration does not describe;
+`events_schema.py`'s grammars now name those builders, which is the
+generated reference's only content change beyond position.
+
+**The mechanism.** Three additions to `catalog.py` and the emitter.
+The session base is three values rather than one, built inside the guard
+through a thunk of its own, because a session id can refuse like
+anything else and has to refuse where the variant's own values refuse.
+`ARGS` may name a base value as well as one of the variant's own, since
+every conversation sentence opens with "session %s" and the session id
+is the emitter's to know rather than a value thirty sites restate;
+declaring a base name is still refused, because rendering is not owning.
+And `value(fixed=...)` states a value the variant IS, taking it out of
+the constructor entirely: `session_rejected` says one reason per shape,
+and the declared token set is that one member rather than the four a
+shared enumeration would have widened it to.
+
+**The declarations.** Twenty events, thirty variants on the session
+channel plus the one that rides `vinga_server.ws`. The transcription was
+proved rather than reviewed: a temporary test held every event declared
+in both sources equal to its old declaration, field notes and argument
+kinds included, and it retired with the entries it compared against.
+
+**The baseline.** Widened from five paths to thirty-one, with the prose
+pin suite's own drivers ported: those tests drove every one of these
+paths onto its own decision, and driving is exactly what a baseline
+needs. Three changes the session channel forced, each recorded as a
+deviation below.
+
+**The conversion.** Twenty-seven emit sites across five modules
+(`device/session.py` 8, `runtime/pipeline.py` 9, `runtime/turntaking.py`
+6, `runtime/filler_runner.py` 3, `ws.py` 1). Their `EventSpec` entries
+left `events_schema.py`, their `PINNED_BY` and `TOKEN_SOURCES` entries
+are deleted, and six of the nine spread builders went with them.
+
+**The pins.** `test_event_surface_pins.py` goes from thirty-four tests
+to nine. Every case that plants a credential-shaped sentinel is kept and
+widened; the rest restated what the golden inventory and the record
+baseline now hold.
+
+**The sentinels.** Both construction-guard branches are driven again on
+the session channel with a tap and a capture attached.
+
+### Deviations from the plan
+
+Six, each with its reason.
+
+1. **One server-channel site converted with the session channel.**
+   `session_rejected` is emitted on both scopes: the session channel for
+   the refusals a session makes after the accept, and `vinga_server.ws`
+   for the one the endpoint makes before a session can run at all. An
+   event is the unit of declaration, so leaving that variant behind
+   would have split one declaration across two sources, which is the
+   shape this plan exists to remove. Its record is unchanged and stays
+   pinned by `test_server_event_pins.py` until M3 converts that channel.
+
+2. **A driver's capture is its own path's records.** M1's harness kept
+   every record a driver produced on a scoped channel. A session driver
+   reaches its decision by holding a whole conversation, so its run
+   emits every neighbouring path's records too; keeping them would
+   record the same shapes several times over and make the committed file
+   move whenever an unrelated path's timing did. The capture is filtered
+   to the event the walk says that path emits, and every neighbour has a
+   driver of its own.
+
+3. **A variant is matched by its keys as well as its sentence.** M1
+   identified a produced variant by event, channel, level and template.
+   Several session events say one sentence about two shapes: `llm_round`
+   reports a provider the registry built out of a configured entry and
+   one it never built with the same words, and those four dimensions
+   would have let either stand in for both. A variant is now matched by
+   a record carrying everything it always carries and nothing it never
+   declares, and the drivers that reach such a site run both scenarios.
+   This is a strengthening rather than a workaround: under the old rule
+   the identity-less shapes of `llm_round`, `llm_retry` and
+   `provider_failed` were claimed by records of their siblings, and
+   nothing drove them at all.
+
+4. **The baseline's walk reads a chooser one level deep.** Three sites
+   pick their shape rather than knowing it, and the choice stays in the
+   module that owns it. The walk therefore accepts a thunk naming a
+   function in the same module and reads that function for the variants
+   it constructs, holding it to exactly one event; a shape it cannot
+   read is an error rather than a skip, as before. One level and no
+   further, deliberately: a chooser reaching through another chooser
+   would be a path whose event the walk could only guess at.
+
+5. **`test_conversations_session.py` migrated a milestone early.** The
+   plan has M3 moving it off the registry. It derives the permitted
+   stored-field surface from the declarations, and half of those moved
+   here, so it reads `events_docgen.documented()` instead: the one place
+   that already answers both sources while the conversion is in flight.
+   Recreating that union in the test would have been exactly the second
+   structure the conversion exists to remove.
+
+6. **The generated reference moves its converted sections.** M1's
+   regeneration was byte-identical because a converted event kept its
+   position: `{**registry, **catalog}` replaces a value and keeps the
+   original key's place. With the registry entries gone the session
+   events appear where the catalog declares them, after the unconverted
+   ones. The plan excepts the reference from byte identity and holds it
+   to semantic completeness, which `test_event_docs.py` asserts; its
+   counts are unchanged (58 events, 99 variants, 57 production, 1
+   internal).
+
+### Discoveries
+
+**The derived description was byte-equal to the registry's again.**
+All twenty-four catalog declarations, the store's four and the session
+channel's twenty, produced `EventSpec` objects equal to the registry's,
+notes and argument kinds included. That equality is why the reference's
+only content change is the composed grammars' builders.
+
+**A shared enumeration would have widened the contract.** The untyped
+registry declares `reason` per variant with the one member that variant
+emits: `{"bad_device_id"}`, `{"no_agent"}`, and so on. A field typed as
+`RejectionToken` would have declared all four everywhere. The fix
+tightened the contract instead of loosening it: a fixed value is
+`init=False`, so the caller cannot pass it at all, and the declared set
+is that one member.
+
+**`init=False` fields are exempt from the default-ordering rule.**
+CPython's `_init_fn` only tracks defaults for fields it puts in
+`__init__`, so a fixed field may sit anywhere in a variant's field
+order. The `Absent`-defaulted ones are not exempt, which is why every
+variant lists its omittable values last and its rendered-only values
+before them.
+
+**One driver per path, several scenarios per driver.** The harness's
+identity rule is one driver per emit path, and three of those paths emit
+two or three shapes. Rather than loosen the rule, those drivers run
+several scenarios: `drive_tool_call` makes a builtin call, an invented
+one and an MCP one, and the provider drivers run once against a
+configured entry and once against a provider the registry never built.
+
+**A driver that builds an app needs a database of its own.** The first
+app a run builds migrates the configuration database; the next app to
+find a migrated one resolves device bindings from it rather than from
+the configuration it was built with, which turned every session after
+the first into a rejection. Under pytest the per-test fixture hides
+this; inside one function driving thirty-one paths it does not.
+
+**A test module may import the baseline harness.** The boundary rule
+names a test module by its `test_` prefix, so `tests/tools/` is support
+rather than tests. The privacy suite therefore drives its sessions
+through the same functions the baseline does instead of keeping a second
+copy of them.
+
+### The inventory, after M2
+
+Production event machinery: 6,273 lines
+(`events/__init__.py` 1,484, `events/values.py` 834,
+`events/catalog.py` 1,594, `events_schema.py` 1,686,
+`events_docgen.py` 534, `events_cli.py` 141), against 4,738 after M1 and
+4,287 before it. It is still growing, as expected for the middle of a
+milestone sequence that builds a second mechanism before deleting the
+first: `events_schema.py` has lost 628 lines of declarations and keeps
+every line of the enforcement machinery its 49 remaining paths need, and
+`events/__init__.py` holds both paths. The plan's "roughly half of
+4,287" is a claim about the end of M3.
+
+Test assets: `test_event_surface_pins.py` falls from 1,392 lines to 425;
+`tests/tools/event_baseline.py` grows from 447 to 1,044, which is where
+those pins' drivers went; `test_event_schema_conformance.py` falls from
+2,695 to 2,547.
+
+Transitional apparatus, which falls as the conversion proceeds and is
+annotated where it is asserted: the walk finds 49 emit sites (76 after
+M1, 81 before) across 33 events (53, 57); `PINNED_BY` holds 49
+identities (76, 81); `TOKEN_SOURCES` 16 entries (22); `SPREAD_INVENTORY`
+3 (9); the classifier reads 53 field and 34 argument positions (70 and
+47); `events_schema.py` declares 33 production events plus the internal
+one (53 plus one), and the catalog declares the other 24 in 36 variants
+(4 in 5).
+
+### Verification
+
+Run from `vinga-server/`, at the last commit of the milestone.
+
+- `uv run ruff check .`: all checks passed.
+- `uv run mypy`: success, no issues found in 3 source files.
+- `uv run pytest tests/unit -q`: 3,073 passed, 16 skipped. (3,182 at the
+  end of M1's review round; the twenty-five prose pins and the
+  hundred-and-thirty-five conformance parametrizations that retired with
+  twenty-seven emit sites outnumber the thirty-eight tests the
+  vocabulary, the mechanism and the sentinels added.)
+- `uv run pytest tests/integration -q`: 60 passed.
+- The four documentation drift checks, regenerated and diffed against
+  `../docs/reference/`: `config reference`, `conversations schema`,
+  `events reference` and `config openapi` are all clean.
+  `docs/reference/events.md` is regenerated and committed inside the
+  conversion; its counts are unchanged (58 events in 99 variants, 57
+  production and 1 internal).
+- The record baseline is byte-identical across the conversion:
+  `vinga-server/tests/unit/data/event-baseline.json` was written before
+  the conversion commit and appears in no commit after it, which is the
+  identity proof.
+
+Not verified here, and not claimed: the container image and the smoke
+lane, for the reason M1 gives.
