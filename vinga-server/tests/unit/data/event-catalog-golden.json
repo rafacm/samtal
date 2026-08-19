@@ -1,0 +1,134 @@
+{
+  "conversations_enabled": [
+    {
+      "channel": "vinga_server.conversations.store",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "path",
+          "type": "ConfiguredPath"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "path",
+          "type": "ConfiguredPath",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "conversations_dropped": [
+    {
+      "channel": "vinga_server.conversations.store",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "session",
+          "type": "SessionId"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "session",
+          "type": "SessionId",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "conversations_failed": [
+    {
+      "channel": "vinga_server.conversations.store",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "failure",
+          "type": "ClassName"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "failure",
+          "type": "ClassName",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    },
+    {
+      "channel": "vinga_server.conversations.store",
+      "level": 30,
+      "arguments": [
+        {
+          "name": "failure",
+          "type": "ClassName"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "failure",
+          "type": "ClassName",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ],
+  "conversations_pruned": [
+    {
+      "channel": "vinga_server.conversations.store",
+      "level": 20,
+      "arguments": [
+        {
+          "name": "sessions",
+          "type": "Count"
+        },
+        {
+          "name": "days",
+          "type": "Count"
+        }
+      ],
+      "fields": [
+        {
+          "name": "event",
+          "type": "EventName",
+          "required": true,
+          "nullable": false
+        },
+        {
+          "name": "sessions",
+          "type": "Count",
+          "required": true,
+          "nullable": false
+        }
+      ]
+    }
+  ]
+}
