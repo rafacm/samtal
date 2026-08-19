@@ -7,6 +7,28 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-08-19
 
+### Added
+
+- **Agents can roll an honest die** (#82). A third builtin tool,
+  `random_number`, draws one whole number between two bounds, both
+  included, from the operating system's entropy (`secrets`). A language
+  model cannot do this on its own: asked to roll a die it writes
+  whichever digit its distribution favours, writes the same one again
+  next time, and sounds certain either way, which is a poor game and a
+  worse tie-break. Both bounds are optional and default to a die (1 to
+  6), so a model that sends no arguments gets one, and each is held
+  between -1000000 and 1000000, since the output of this pipeline is a
+  voice and a twenty-digit number is not an answer anybody asked to
+  hear. A range that runs backwards, a bound that is not a whole
+  number, and a bound outside those limits are refused in words the
+  model reads and calls again from, the way any builtin refuses
+  arguments it cannot use. Unlike its two siblings the tool is offered
+  unconditionally: it is configured by nothing and reaches nothing, so
+  there is no fact about a deployment or a board that would make chance
+  apply to one agent and not another. `random_number` joins the
+  reserved names an `mcp_servers` entry may not take, beside `self`,
+  `switch_agent` and `remember`.
+
 ### Fixed
 
 - **A failed barge-in confirmation names the class it failed with, not
