@@ -29,6 +29,37 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   reserved names an `mcp_servers` entry may not take, beside `self`,
   `switch_agent` and `remember`.
 
+### Changed
+
+- **A read shows every field its entity's model declares, masked at
+  every depth** (#176, #171). The five body builders behind
+  `config show` and the whole-configuration document each listed their
+  kind's fields by hand, so a field added to a model was invisible on
+  every read until somebody remembered to add it there, and no test
+  failed for the omission: the descriptor work measured exactly that,
+  with a scratch field that reached the store, both APIs, the CLI and
+  both generated references untouched and never appeared in a read.
+  One builder now derives the body from the entry's own model. The
+  display fails open by policy, because a read is thrown away as soon
+  as it has been read and an operator debugging with an incomplete
+  answer is the worse failure; a record keeps the opposite answer for
+  the opposite reason, since a capture manifest and a session row
+  outlive the conversation, and `views.provider_record` stays built key
+  by key and now says so as a split rather than as a preference. A
+  field is shown at whatever it holds, its default included, and is
+  left out only when it holds a default that means absence, because a
+  read is a fragment a write of it accepts back and an MCP server is
+  refused for naming a field of the other transport at all. Nothing
+  prints anything new today: the fields the five builders listed are
+  exactly the fields the five models declare. The masking is one walk
+  now, and it does not stop, which closes the gap beside it: a
+  provider's options were masked at every depth while an MCP server's
+  env and headers were masked one level down, so a credential nested
+  inside one was displayed as written. Which key names hold a
+  credential is a fact each kind's descriptor carries, and it is the
+  same predicate the models refuse an inline value under, so what a
+  write rejects and what a read masks cannot come to disagree.
+
 ### Fixed
 
 - **DEBUG logging no longer puts the request line, a device's token or
