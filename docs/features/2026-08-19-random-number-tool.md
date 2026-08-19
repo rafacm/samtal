@@ -76,7 +76,7 @@ authored rather than a peer's bytes.
 ## Verification
 
 - `uv run ruff check .` clean.
-- `uv run pytest tests/unit -q`: 3029 passed, 16 skipped.
+- `uv run pytest tests/unit -q`: 3031 passed, 16 skipped.
 - `uv run pytest tests/integration -q`: 58 passed. The end-to-end grant
   test now also proves the tool reaches a real conversation: the
   restricted agent's reply lists `random_number` beside the two tools
@@ -87,11 +87,50 @@ authored rather than a peer's bytes.
   that lists the builtins outside the grant model; the event and
   conversation schemas were byte-identical, since a new builtin adds no
   event and no column.
-- The new unit file covers the definition, the draw, the defaults, a
-  single-value range, a negative range, the widest allowed range, and
-  every refusal. It asserts range membership over many draws and never
-  that two draws differ, which is the one property a random source may
-  legitimately fail on any given afternoon.
+- The new unit file covers the definition, the draw with the entropy
+  scripted, the defaults, a single-value range, a negative range, the
+  widest allowed range, and every refusal. It asserts range membership
+  over many draws and never that two draws differ, which is the one
+  property a random source may legitimately fail on any given
+  afternoon.
+
+## External review round
+
+codex CLI, model gpt-5.6-sol, 2026-08-19, on the PR #204 diff. Three
+findings.
+
+1. **P1, rejected bounds reach the conversation API.** A call is
+   recorded before it runs, so a bound the tool threw away is persisted
+   and served. *Declined, with the code checked first.* This is the
+   content-and-telemetry split
+   ([ADR](../adr/2026-08-15-content-and-telemetry-are-separate-surfaces.md))
+   working as designed. Verified: the `tool_call` event declares a
+   closed field set (source, tool, duration_ms, is_error, the entry for
+   an MCP call), the emitter refuses an undeclared field at emit time,
+   the refusal path logs nothing of its own, and the store strips `tool`
+   from every `tool_call` row on top of that, so no argument value
+   reaches any event field or any log record. The `/conversations` reads
+   are registered on the gated `/api` sub-application, whose bearer gate
+   compares every request against the token resolved from
+   `SAMTAL_API_SECRET` at boot, and the rows exist only where the
+   deployment left the `text` switch on. An argument redacted because
+   the tool refused it would hide the evidence of why it refused, which
+   is what that record is for. The decline is pinned by a test
+   (`test_a_rejected_tool_argument_is_kept_as_content_and_named_on_no_telemetry`):
+   a credential-shaped bound is refused, then asserted present verbatim
+   on the `tool_invocations` row and absent from every emission, every
+   events row, and every log record in both formats. The pin was checked
+   by leaking the value onto the event on purpose.
+2. **P2, the entropy call is unpinned.** *Accepted.* The draw is now
+   driven with a scripted `randbelow`, asserting the width it is asked
+   for (`maximum - minimum + 1`) and turning both ends of what it may
+   answer into the two endpoints, which is also the statement that the
+   range is inclusive at both ends. Narrowing the width by one fails it.
+3. **P2, the grant integration test compared by subtraction.**
+   *Accepted.* Subtracting every builtin name made the test blind to a
+   builtin offered where its condition does not hold. Both offers are
+   now compared as complete sets, with the builtins genuinely due in
+   that configuration named in one place.
 
 ## Files modified
 
@@ -102,6 +141,7 @@ authored rather than a peer's bytes.
 - `samtal-server/tests/unit/test_tools_random.py` (new)
 - `samtal-server/tests/unit/test_session_tools.py`
 - `samtal-server/tests/unit/test_tool_names.py`
+- `samtal-server/tests/unit/test_conversations_session.py`
 - `samtal-server/tests/integration/test_tools.py`
 - `samtal-server/README.md`
 - `samtal-server/examples/mcp-server-stdio.yaml`
