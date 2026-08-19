@@ -350,8 +350,16 @@ def test_a_session_emission_answers_the_reading_it_was_stamped_with() -> None:
 def test_an_unusable_identity_is_refused_inside_the_guard() -> None:
     """A session id is a value type, so constructing one can refuse, and
     it must refuse where the variant's own values refuse rather than on
-    whatever path was emitting."""
+    whatever path was emitting.
+
+    What the recovery carries is the registry's own word for a session
+    it cannot state, never the string it was handed: what a caller
+    opened a session under is a caller's, and the recovery event is the
+    retained surface like any other record. The device answers the same
+    question with the null the surface already uses for "none was
+    understood"."""
     events = SessionEvents("has a space", clock=lambda: 1.0)
+    events.device = "not-a-mac"
     consumer = Tap()
     events.attach(consumer)
     events_module.set_enforcement(events_module.FORGIVING)
@@ -360,9 +368,44 @@ def test_an_unusable_identity_is_refused_inside_the_guard() -> None:
 
     assert only(consumer).payload == {
         "event": SCHEMA_VIOLATION,
-        "session": "has a space",
+        "session": events_module.UNSTATED_SESSION,
         "device": None,
     }
+
+
+def test_the_identity_that_did_validate_survives_the_one_that_did_not() -> None:
+    """One guard each rather than one around the pair. A recovery is a
+    record an operator reads, and the identity it can still state is the
+    half that makes it readable, so a device id that refuses must not
+    take a lawful session id down with it."""
+    events = SessionEvents("alpha", clock=lambda: 1.0)
+    events.device = "not-a-mac"
+    consumer = Tap()
+    events.attach(consumer)
+    events_module.set_enforcement(events_module.FORGIVING)
+
+    events.emit(lambda: Conversational(stage=Identifier("asr")))
+
+    assert only(consumer).payload == {
+        "event": SCHEMA_VIOLATION,
+        "session": "alpha",
+        "device": None,
+    }
+
+
+def test_an_unusable_identity_is_refused_whole_in_strict_mode() -> None:
+    """A conversation record missing the session it belongs to is a
+    shape the declaration denies exists, so an emission whose identity
+    could not be built is refused rather than half-emitted."""
+    events = SessionEvents("has a space", clock=lambda: 1.0)
+    consumer = Tap()
+    events.attach(consumer)
+    events_module.set_enforcement(events_module.STRICT)
+
+    with pytest.raises(EventSchemaError):
+        events.emit(lambda: Conversational(stage=Identifier("asr")))
+
+    assert consumer.seen == []
 
 
 # --- the guard, which no caller can prove -----------------------------
