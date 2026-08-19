@@ -273,16 +273,25 @@ push, so each milestone ends with both suites, lint, and the four
 drift checks green, and any milestone that touches the event surface
 carries its baseline proof inside its own PR.
 
-- [ ] **M1: the typed event foundation, beside the old machinery.**
-  New `events/values.py` and `events/catalog.py` with the vocabulary
+- [ ] **M1: the typed event foundation inside the package move.**
+  First, the mechanical move: `events.py` becomes
+  `events/__init__.py` whole, no line changed beyond the move,
+  proven by the still-alive pin suites and conformance walk passing
+  byte-unchanged, because a package added beside the module would
+  shadow it (review finding 1). Then, beside it in the same package:
+  `events/values.py` and `events/catalog.py` with the vocabulary
   and a first area of declarations (the conversations-store events,
   the smallest channel: 5 paths), the emitter extension that accepts
-  typed events, the forgiving construction guard, the golden
+  typed construction, the forgiving construction guard, the golden
   inventory harness (catalog to committed inventory, both
   directions), and the record-baseline harness: a script that
   captures (channel, levelno, msg template, arg types, payload keys)
   for every emit path before and after a conversion, the #143 wire
-  baseline pattern applied to log records. The five converted sites
+  baseline pattern applied to log records. The baseline's path list
+  is not self-claimed: it is generated from the conformance suite's
+  static site inventory while that inventory still exists, so every
+  statically known path must produce a record or the harness fails
+  (review finding 10). The five converted sites
   lose their entries in `PINNED_BY` and their prose pins
   (`test_conversations_event_pins.py` retires; its five paths enter
   the golden inventory; its exhaustiveness claim moves to the
@@ -471,6 +480,12 @@ Findings condensed but faithful; each carries its resolution.
 Python resolves `vinga_server.events` to the package, making the
 module unreachable; the plan claimed the old machinery stays
 untouched while adding the package.
+
+*Resolution.* Adopted. M1 now opens with the mechanical move of
+`events.py` into `events/__init__.py`, no line changed beyond the
+move, proven by the still-alive pin suites and conformance walk
+passing byte-unchanged; the catalog lands beside it inside the
+package, never beside the module.
 
 **2 (P1). One class-level channel and level cannot represent the
 contract.** 99 variants exist and at least `session_rejected`
