@@ -57,9 +57,9 @@ it can read in a minute.
 **Adapter.** A module whose job is to translate at a seam so that one
 side stops speaking the other's vocabulary. An adapter is allowed to
 be thin. It is not allowed to be a pass-through: `DeviceTools` in
-`tools/source.py` is short, and it earns its place because after it
-the runtime no longer knows that device tools arrive over the
-WebSocket at all.
+`tools/source.py` is four short methods over `DeviceOutput`, and it
+earns its place because after it the runtime asks the board's tools
+the same question it asks the other two sources.
 
 **Locality.** Every fact has one home, and everything that needs it
 reads it from there. Two structures that must agree are one structure
