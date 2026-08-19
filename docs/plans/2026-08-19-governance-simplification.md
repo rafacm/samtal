@@ -369,10 +369,18 @@ carries its baseline proof inside its own PR.
   `test_event_enforcement.py` shrinks to the construction-guard and
   mode-resolution behavior that still exists; the sentinel and
   descriptor-sanitization suites are rewritten against the typed
-  path and kept whole; `events_docgen.py` renders from the catalog
-  and `docs/reference/events.md` regenerates under the existing CI
-  drift step. After this milestone the structures that must agree
-  per event are one declaration and one golden line.
+  path and kept whole; the three registry importers outside the
+  event suites migrate by name: `tests/support/schema.py`'s
+  `scratch_registry` seam becomes a scratch-catalog seam,
+  `test_events.py`'s synthetic emissions construct through the new
+  public declaration interface, and `test_conversations_session.py`
+  derives its permitted stored-field surface from the catalog or the
+  golden rather than recreating a second registry;
+  `events_docgen.py` renders from the catalog and
+  `docs/reference/events.md` regenerates under the existing CI
+  drift step, held to the semantic-completeness test the goal
+  section states. After this milestone the structures that must
+  agree per event are one declaration and one golden line.
 - [ ] **M4: the entity registry sheds its hooks.** As decided above:
   store-internal hooks inlined, routes and commands calling the
   store's existing typed methods directly, `body` and
@@ -622,6 +630,11 @@ observation cannot establish.
 `tests/support/schema.py`, `test_events.py`, and
 `test_conversations_session.py` import the registry; the last
 derives permitted stored fields from it.
+
+*Resolution.* Adopted. M3 names all three migrations: the scratch
+seam becomes a scratch catalog, synthetic emissions use the public
+declaration interface, and the conversation-storage surface derives
+from the catalog or golden, never a second registry.
 
 **10 (P2). The record baseline has no stated proof of path
 exhaustiveness.** A runtime harness proves only paths it executes;
