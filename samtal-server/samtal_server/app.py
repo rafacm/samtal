@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from fastapi import FastAPI
 
-from samtal_server import __version__, onboarding, ota, ws
+from samtal_server import __version__, logs, onboarding, ota, ws
 from samtal_server.auth import build_device_auth
 from samtal_server.build_info import revision
 from samtal_server.capture import CaptureStore, DeviceFacts
@@ -493,6 +493,18 @@ def create_app(
     does do is refuse a deployment that cannot work at all, which stays
     here because a configuration that is missing a secret should be
     refused by whatever built the app, however it was launched."""
+    # The floor under the libraries that narrate somebody else's bytes
+    # (#124), applied before anything below can reach a database or a
+    # socket. Here for the same reason the line below is here: a
+    # production process may serve this app under an external ASGI
+    # runner and never reach `main()`, and `uvicorn --log-level debug`
+    # would then leave uvicorn's own logger tracing request lines,
+    # request headers and websocket frame payloads onto the retained
+    # log. Without a level, because the server's own is in the
+    # configuration this function is about to read; `logs.configure`
+    # applies it again with that level once it has it, and the call is
+    # idempotent.
+    logs.quiet_vendor_libraries()
     # How strictly this process holds its events to their declarations
     # (#155), resolved here rather than at import because a running
     # server is a deployment whatever launched it: a production process

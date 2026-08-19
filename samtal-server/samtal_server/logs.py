@@ -12,7 +12,10 @@ One thing is filtered rather than formatted: the libraries that carry
 somebody else's bytes are held below the server's level, because their
 debug records carry response headers, request lines, frame payloads and
 tracebacks nothing here has sanitized. See `quiet_vendor_libraries`
-below.
+below, which is called from here and, without a level, from the two
+places a deployment starts at, because one of them never reaches this
+function and the other reaches it after the boot configuration has
+already been read out of a database.
 
 Call sites need no wrapper. Anything passed as `extra=` on an ordinary
 logging call becomes a top-level field of the JSON object, found by
@@ -103,16 +106,31 @@ VENDOR_LOG_FLOORS: Mapping[str, int] = {
 }
 
 
-def quiet_vendor_libraries(level: int) -> None:
-    """Hold each of those libraries at its floor, or at the server's own
-    level when that is higher.
+def quiet_vendor_libraries(level: int | None = None) -> None:
+    """Hold each of those libraries at its floor, or at the level the
+    caller names when that is higher.
 
     The maximum rather than the floor alone, so this only ever quietens:
     an operator running at WARNING keeps the silence they asked for, and
     one running at DEBUG gets their own modules' debug lines without the
-    libraries' wire traces."""
+    libraries' wire traces.
+
+    `level` is the server's own, which only `configure` below knows.
+    Without it each library is held against what it is already
+    effectively set to, which is what a caller that is not this server's
+    logging configuration can honestly say: leave every one of them as
+    loud as it is and no louder, and never below its floor. That is the
+    call the two places a deployment starts from make before anything
+    opens a database or a socket, since one of them (an external ASGI
+    runner reaching `app.py:app`) never reaches `configure` at all and
+    the other reaches it only after the boot configuration has been
+    read. Idempotent, and cheap enough to call on every path that could
+    be the first.
+    """
     for name, floor in VENDOR_LOG_FLOORS.items():
-        logging.getLogger(name).setLevel(max(level, floor))
+        logger = logging.getLogger(name)
+        against = logger.getEffectiveLevel() if level is None else level
+        logger.setLevel(max(against, floor))
 
 
 class JsonFormatter(logging.Formatter):

@@ -315,6 +315,17 @@ def main() -> None:
     # the search start from the invocation directory, not this file's.
     load_dotenv(find_dotenv(usecwd=True))
 
+    # The floor under the libraries that narrate somebody else's bytes
+    # (#124), before any command below opens a database or a socket.
+    # `logs.configure` applies it again with the server's own level, but
+    # it cannot run until the configuration has been read, and reading it
+    # is itself a database open: a process started with SQL echoing would
+    # otherwise print every statement of the boot, parameters and all,
+    # before the floor arrived. Without a level, because the one this
+    # server was told to use is in the configuration nothing has read
+    # yet, and the call is idempotent.
+    logs.quiet_vendor_libraries()
+
     if sys.argv[1:2] == [CONFIG_COMMAND]:
         # `samtal-server config ...` configures and exits; anything else
         # is the server, parsed exactly as it was before this existed. A
