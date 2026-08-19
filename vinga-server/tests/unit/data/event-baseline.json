@@ -1,0 +1,130 @@
+{
+  "vinga_server.conversations.store:ConversationStore.start #1": [
+    {
+      "channel": "vinga_server.conversations.store",
+      "level": 30,
+      "template": "recording conversations to %s",
+      "argument_types": [
+        "PosixPath"
+      ],
+      "fields": [
+        "event",
+        "path"
+      ],
+      "event": "conversations_enabled"
+    }
+  ],
+  "vinga_server.conversations.store:ConversationStore.record_event #1": [
+    {
+      "channel": "vinga_server.conversations.store",
+      "level": 30,
+      "template": "recording conversations to %s",
+      "argument_types": [
+        "PosixPath"
+      ],
+      "fields": [
+        "event",
+        "path"
+      ],
+      "event": "conversations_enabled"
+    },
+    {
+      "channel": "vinga_server.conversations.store",
+      "level": 30,
+      "template": "session %s: the conversation store is behind, dropping events",
+      "argument_types": [
+        "str"
+      ],
+      "fields": [
+        "event",
+        "session"
+      ],
+      "event": "conversations_dropped"
+    }
+  ],
+  "vinga_server.conversations.store:ConversationStore._failed #1": [
+    {
+      "channel": "vinga_server.conversations.store",
+      "level": 30,
+      "template": "recording conversations to %s",
+      "argument_types": [
+        "PosixPath"
+      ],
+      "fields": [
+        "event",
+        "path"
+      ],
+      "event": "conversations_enabled"
+    },
+    {
+      "channel": "vinga_server.conversations.store",
+      "level": 30,
+      "template": "the conversation store dropped a batch after a write failed (%s)",
+      "argument_types": [
+        "str"
+      ],
+      "fields": [
+        "event",
+        "failure"
+      ],
+      "event": "conversations_failed"
+    }
+  ],
+  "vinga_server.conversations.store:ConversationStore._prune #1": [
+    {
+      "channel": "vinga_server.conversations.store",
+      "level": 30,
+      "template": "the conversation store could not prune (%s)",
+      "argument_types": [
+        "str"
+      ],
+      "fields": [
+        "event",
+        "failure"
+      ],
+      "event": "conversations_failed"
+    }
+  ],
+  "vinga_server.conversations.store:ConversationStore._prune #2": [
+    {
+      "channel": "vinga_server.conversations.store",
+      "level": 30,
+      "template": "recording conversations to %s",
+      "argument_types": [
+        "PosixPath"
+      ],
+      "fields": [
+        "event",
+        "path"
+      ],
+      "event": "conversations_enabled"
+    },
+    {
+      "channel": "vinga_server.conversations.store",
+      "level": 30,
+      "template": "recording conversations to %s",
+      "argument_types": [
+        "PosixPath"
+      ],
+      "fields": [
+        "event",
+        "path"
+      ],
+      "event": "conversations_enabled"
+    },
+    {
+      "channel": "vinga_server.conversations.store",
+      "level": 20,
+      "template": "conversations: pruned %d session(s) older than %d days",
+      "argument_types": [
+        "int",
+        "int"
+      ],
+      "fields": [
+        "event",
+        "sessions"
+      ],
+      "event": "conversations_pruned"
+    }
+  ]
+}
