@@ -671,18 +671,21 @@ def test_a_secret_nested_inside_an_option_is_refused_too(store: ConfigStore) -> 
     one. A rule that only looked at the top level would accept it,
     store it, and read it back verbatim."""
     nested = [
-        ({"type": "anthropic", "connection": {"api_key": SECRET}}, "connection.api_key"),
-        (
-            {"type": "anthropic", "backends": [{"auth": {"token": SECRET}}]},
-            "backends.0.auth.token",
-        ),
+        ({"type": "anthropic", "connection": {"api_key": SECRET}}, "api_key"),
+        ({"type": "anthropic", "backends": [{"auth": {"token": SECRET}}]}, "token"),
     ]
-    for fragment, path in nested:
+    for fragment, fragment_matched in nested:
         with pytest.raises(ConfigError) as caught:
             store.set_provider("llm", "claude", fragment)
 
-        assert path in str(caught.value)
-        assert "looks like an inline secret" in str(caught.value)
+        message = str(caught.value)
+        assert "looks like an inline secret" in message
+        # The closed fragment the key matched, and not the key: an
+        # option is a name the caller wrote, and a name is as good a
+        # place to paste a credential as a value is.
+        assert f'a key containing "{fragment_matched}"' in message
+        for key in ("connection", "backends", "auth"):
+            assert key not in message
         assert SECRET not in _chain(caught.value)
         assert caught.value.__cause__ is None
         assert caught.value.__context__ is None
@@ -694,7 +697,9 @@ def test_a_nested_reference_key_must_still_name_a_variable(store: ConfigStore) -
             "llm", "claude", {"type": "anthropic", "connection": {"api_key_env": SECRET}}
         )
 
-    assert "connection.api_key_env" in str(caught.value)
+    message = str(caught.value)
+    assert "a key ending in _env must hold the name of an environment variable" in message
+    assert "connection" not in message
     assert SECRET not in _chain(caught.value)
 
 

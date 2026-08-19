@@ -17,6 +17,12 @@ addressed by JSON Pointer. The plan's design landed whole. Six
 deviations and clarifications are recorded below; the fifth and sixth
 are the only ones that changed a decision rather than a spelling.
 
+What a refusal may name was narrowed after this section was written, by
+the review round's first finding: only names this repository declares
+and positions in a list. The round is recorded at the end of this file,
+and it is the reason a pointer no longer reaches an option key or an
+`env` entry.
+
 ### What was written
 
 `models.py` declares `FieldProblem` (a `NamedTuple` of `path` and

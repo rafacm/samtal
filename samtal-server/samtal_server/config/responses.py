@@ -421,10 +421,14 @@ class FieldError(BaseModel):
     path: str = Field(
         description=(
             "Which part of the submitted body this is about, as an RFC 6901 JSON "
-            "Pointer into it: `/connection/api_key_env` is that key of that object, "
-            "and the empty string is the body as a whole. A pointer rather than a "
-            "dotted path because a key may itself hold a dot, and `~` and `/` inside "
-            "a key are escaped as `~0` and `~1` the way the RFC says."
+            "Pointer into it: `/filler/phrases` is that field of that object, `/mcp/0` "
+            "is that position of that list, and the empty string is the body as a "
+            "whole. Only names this server declares and positions appear in it. A key "
+            "the request invented is never one of them: an unrecognized key, an option "
+            "a provider passes through, an entry of an `env` or `headers` map. A key is "
+            "as good a place to paste a credential as a value is, so the pointer stops "
+            "at the nearest enclosing place this server can name, which for a key "
+            "written at the top of a fragment is the fragment itself."
         )
     )
     message: str = Field(
@@ -433,7 +437,9 @@ class FieldError(BaseModel):
             "`detail` uses: the two are rendered from one computation, so a client "
             "showing this beside the field and one showing the whole sentence say the "
             "same thing. Like `detail`, it names a rule and never quotes the value it "
-            "rejected."
+            "rejected or a key the request invented. Where the rule is about such a "
+            "key, it names what made the key match instead, which is a word from a "
+            "closed list this server owns."
         )
     )
 
@@ -470,8 +476,8 @@ class Problem(BaseModel):
         description=(
             "What was refused and why, the same sentence the `samtal-server config` "
             "command prints for it. It names the entity the request addressed and "
-            "the rule that was broken; it never quotes a secret or a configuration "
-            "value that was rejected."
+            "the rule that was broken; it never quotes a secret, a configuration "
+            "value that was rejected, or a key the request invented."
         )
     )
     errors: list[FieldError] = Field(

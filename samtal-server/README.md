@@ -1382,7 +1382,12 @@ quote the paragraph. `errors` is always present and empty where the
 refusal names no field. A request body is never quoted back, on any
 path, and neither is a traceback: a fragment can carry a credential
 pasted where a variable name belongs, and a refusal that echoed it
-would be the leak.
+would be the leak. **Neither are its keys.** A refusal names only fields
+this server declares and positions in a list; a key the request invented
+(an unrecognized one, an option a provider passes through, an entry of
+an `env` or `headers` map) is as good a place to paste a credential as a
+value is, so a refusal about one says which rule it broke and points at
+the nearest enclosing place this server can name.
 
 **`samtal-server config` is the ergonomic client**, and the shape of a
 deployment's own use of the API. It finds the server in this order:

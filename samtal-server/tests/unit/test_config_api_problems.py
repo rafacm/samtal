@@ -30,8 +30,9 @@ assumed.
 """
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import NamedTuple
 
 import pytest
 from fastapi import FastAPI
@@ -48,21 +49,39 @@ from samtal_server.config.api import (
     UNEXPECTED,
     build_api,
 )
-from samtal_server.config.secrets import MASTER_KEY_ENV, generate_key
+from samtal_server.config.loader import ConfigError
+from samtal_server.config.models import UNRECOGNIZED_KEY_REFUSED, json_pointer
+from samtal_server.config.secrets import MASTER_KEY_ENV, generate_key, load_keys
+from samtal_server.config.store import ConfigStore
 from samtal_server.conversations.api import NO_STORE
+from samtal_server.db import open_database
 from tests.support.config_cli import runner
 from tests.support.problems import problem
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 
-# Not a real credential, and shaped so a substring check for it cannot
-# match by accident.
+# Not real credentials, and shaped so a substring check for one cannot
+# match by accident. The second is planted as a key rather than as a
+# value, and is spelled without a dot or a slash so that the one case
+# that adds them adds them itself.
 SENTINEL = "sk-test-6c3e9b12-never-a-real-credential"
+KEY_SENTINEL = "sk-test-9d41ac60-never-a-real-credential"
 
 
 @pytest.fixture
 def keys(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(MASTER_KEY_ENV, generate_key())
+
+
+@pytest.fixture
+def store(tmp_path: Path, keys: None) -> Iterator[ConfigStore]:
+    """The repository on its own, for the assertions that are about the
+    exception rather than about the response built from it."""
+    engine = open_database(tmp_path / "db")
+    try:
+        yield ConfigStore(engine, load_keys())
+    finally:
+        engine.dispose()
 
 
 @pytest.fixture
@@ -95,12 +114,20 @@ MULTI_ERROR_REFUSAL = (
 # golden that can be updated once.
 
 NESTED_SECRET_MESSAGE = (
-    '"connection.api_key" looks like an inline secret, which is not allowed; '
-    "reference an environment variable instead, for example "
-    "connection.api_key_env: MY_PROVIDER_API_KEY"
+    'a key containing "api_key" looks like an inline secret, which is not allowed; '
+    "reference an environment variable instead, in a key of the same name ending in "
+    "_env. The key is not quoted back"
 )
 
 NESTED_SECRET_REFUSAL = f"invalid providers.llm.claude:\n  - {NESTED_SECRET_MESSAGE}"
+
+DECLARED_ENV_MESSAGE = (
+    '"api_key_env" must hold the name of an environment variable, and what it holds '
+    "does not look like one; a pasted value belongs nowhere in this file, so name the "
+    "variable holding it, for example api_key_env: MY_PROVIDER_KEY"
+)
+
+DECLARED_ENV_REFUSAL = f"invalid providers.llm.claude:\n  - {DECLARED_ENV_MESSAGE}"
 
 FILLER_MESSAGE = (
     "filler.enabled is on with no phrases; add at least one, "
@@ -110,8 +137,9 @@ FILLER_MESSAGE = (
 FILLER_REFUSAL = f"invalid agents.sam:\n  - filler: {FILLER_MESSAGE}"
 
 MCP_SECRET_MESSAGE = (
-    "env.API_KEY looks like an inline secret, which is not allowed; reference an "
-    "environment variable instead, for example API_KEY: $MY_SERVER_SECRET"
+    'a key in env containing "api_key" looks like an inline secret, which is not '
+    "allowed; reference an environment variable instead, for example "
+    "$MY_SERVER_SECRET. The key is not quoted back"
 )
 
 # The one sentence this milestone changes, and the reason it changes:
@@ -352,9 +380,14 @@ def test_the_errors_and_the_detail_lines_are_the_same_problems(
 # Where a model-level validator says its problem is
 
 
-def test_a_nested_inline_secret_points_at_the_nested_key(client: TestClient) -> None:
-    """The validator is on the provider, so pydantic locates its error at
-    the provider. The pointer is the depth the rule actually walked to."""
+def test_a_nested_inline_secret_names_the_fragment_and_not_the_key(
+    client: TestClient,
+) -> None:
+    """A provider's options are pass-through, so every key under them is
+    the caller's and none of them may be printed. What the refusal names
+    instead is the closed fragment the key matched, which is one of this
+    repository's own six words, and a pointer to the nearest place it can
+    name, which for an option is the fragment itself."""
     response = client.put(
         "/providers/llm/claude",
         json={"type": "anthropic", "connection": {"api_key": SENTINEL}},
@@ -362,7 +395,22 @@ def test_a_nested_inline_secret_points_at_the_nested_key(client: TestClient) -> 
 
     assert response.status_code == 422
     assert response.json() == problem(
-        422, NESTED_SECRET_REFUSAL, [("/connection/api_key", NESTED_SECRET_MESSAGE)]
+        422, NESTED_SECRET_REFUSAL, [("", NESTED_SECRET_MESSAGE)]
+    )
+    assert SENTINEL not in response.text
+
+
+def test_a_declared_field_is_named_in_its_own_refusal(client: TestClient) -> None:
+    """The other side of the same rule, and why it is not "print
+    nothing": `api_key_env` is a field this repository declared, so the
+    refusal names it, and the pointer addresses it."""
+    response = client.put(
+        "/providers/llm/claude", json={"type": "anthropic", "api_key_env": SENTINEL}
+    )
+
+    assert response.status_code == 422
+    assert response.json() == problem(
+        422, DECLARED_ENV_REFUSAL, [("/api_key_env", DECLARED_ENV_MESSAGE)]
     )
     assert SENTINEL not in response.text
 
@@ -392,7 +440,9 @@ def test_an_mcp_fragment_breaking_two_rules_answers_one_entry_each(
             # empty pointer is the fragment itself, which is what RFC
             # 6901 gives a problem with no single field to blame.
             ("", 'transport "stdio" has no url; that belongs to the other transport'),
-            ("/env/API_KEY", MCP_SECRET_MESSAGE),
+            # The group and not the key: `env` is a declared field, and
+            # everything keyed under it is whatever the caller wrote.
+            ("/env", MCP_SECRET_MESSAGE),
         ],
     )
     assert SENTINEL not in response.text
@@ -414,21 +464,41 @@ def test_a_filler_problem_points_under_the_layer_that_holds_it(
     )
 
 
-def test_a_key_holding_a_dot_or_a_slash_answers_an_escaped_pointer(
+def test_an_unrecognized_key_answers_the_parent_it_was_written_under(
     client: TestClient,
 ) -> None:
-    """Why the pointer is a pointer. A dotted path cannot say whether
-    `a.b` is one key or two, and a key holding a slash would look like
-    nesting in any spelling that joins on one."""
-    response = client.put(
-        "/providers/llm/claude",
-        json={"type": "anthropic", "a.b": {"c/d": {"api_key": SENTINEL}}},
+    """A key the model does not declare is a key the caller invented, so
+    the refusal says that a key was not recognized and points at the
+    object it was written in, never at the key. At the top of a fragment
+    that object is the fragment, which is the empty pointer."""
+    top = client.put("/agents/sam", json={"prompt": "You are Sam.", "surprise": 1})
+    nested = client.put(
+        "/agents/sam", json={"prompt": "You are Sam.", "filler": {"surprise": 1}}
     )
 
-    assert response.status_code == 422
-    (error,) = response.json()["errors"]
-    assert error["path"] == "/a.b/c~1d/api_key"
-    assert SENTINEL not in response.text
+    assert top.json() == problem(
+        422,
+        f"invalid agents.sam:\n  - {UNRECOGNIZED_KEY_REFUSED}",
+        [("", UNRECOGNIZED_KEY_REFUSED)],
+    )
+    assert nested.json() == problem(
+        422,
+        f"invalid agents.sam:\n  - filler: {UNRECOGNIZED_KEY_REFUSED}",
+        [("/filler", UNRECOGNIZED_KEY_REFUSED)],
+    )
+
+
+def test_the_pointer_escapes_what_the_rfc_says_to_escape() -> None:
+    """The construction itself, pinned where it is built rather than
+    through a refusal, because no refusal can reach it any more: every
+    segment a pointer may carry is a name this repository declared, and
+    none of those holds a `~` or a `/`. The escaping stays because the
+    contract says RFC 6901 and a name that acquired one would otherwise
+    silently address something else."""
+    assert json_pointer(()) == ""
+    assert json_pointer(("filler", "phrases")) == "/filler/phrases"
+    assert json_pointer(("mcp", 0)) == "/mcp/0"
+    assert json_pointer(("a~b", "c/d")) == "/a~0b/c~1d"
 
 
 # Nothing of what was sent comes back
@@ -462,6 +532,107 @@ def test_a_planted_credential_is_absent_from_every_surface(
     for record in caplog.records:
         assert SENTINEL not in logs.JsonFormatter().format(record)
         assert SENTINEL not in text.format(record)
+
+
+# A credential planted as a key, which is the other half of the same
+# rule: a key is as good a place to paste one as a value, and better at
+# hiding there, because a key looks like a name.
+
+class PlantedKey(NamedTuple):
+    """One fragment carrying the sentinel as a key, and the two ways in:
+    the route a request reaches it by, and the repository call the CLI's
+    break-glass path reaches the same refusal by."""
+
+    what: str
+    path: str
+    fragment: dict[str, object]
+    write: Callable[[ConfigStore, dict[str, object]], None]
+
+
+PLANTED_KEYS = [
+    PlantedKey(
+        "an unrecognized key at the top of a fragment",
+        "/agents/sam",
+        {"prompt": "You are Sam.", KEY_SENTINEL: 1},
+        lambda store, fragment: store.set_agent("sam", fragment),
+    ),
+    PlantedKey(
+        "an unrecognized key nested inside a declared block",
+        "/agents/sam",
+        {"prompt": "You are Sam.", "filler": {KEY_SENTINEL: 1}},
+        lambda store, fragment: store.set_agent("sam", fragment),
+    ),
+    PlantedKey(
+        "a secret-shaped option key nested under another invented one",
+        "/providers/llm/claude",
+        {"type": "anthropic", KEY_SENTINEL: {f"{KEY_SENTINEL}_token": "v"}},
+        lambda store, fragment: store.set_provider("llm", "claude", fragment),
+    ),
+    PlantedKey(
+        "an option key holding a dot and a slash",
+        "/providers/llm/claude",
+        {"type": "anthropic", f"{KEY_SENTINEL}.a/b": {"api_key": "v"}},
+        lambda store, fragment: store.set_provider("llm", "claude", fragment),
+    ),
+    PlantedKey(
+        "a secret-shaped key in an MCP server's env",
+        "/mcp-servers/home",
+        {"transport": "stdio", "command": "uvx", "env": {f"{KEY_SENTINEL}_TOKEN": "v"}},
+        lambda store, fragment: store.set_mcp_server("home", fragment),
+    ),
+]
+
+PLANTED_IDS = [case.what for case in PLANTED_KEYS]
+
+
+@pytest.mark.parametrize("case", PLANTED_KEYS, ids=PLANTED_IDS)
+def test_a_credential_planted_as_a_key_is_absent_from_every_surface(
+    client: TestClient, caplog: pytest.LogCaptureFixture, case: PlantedKey
+) -> None:
+    """Over HTTP: the sentence, every pointer, every message, the whole
+    body, the headers, and the log in both formats this server writes."""
+    with caplog.at_level(logging.DEBUG):
+        response = client.put(case.path, json=case.fragment)
+
+    assert response.status_code == 422
+    body = response.json()
+    assert KEY_SENTINEL not in body["detail"]
+    for error in body["errors"]:
+        assert KEY_SENTINEL not in error["path"]
+        assert KEY_SENTINEL not in error["message"]
+    assert KEY_SENTINEL not in response.text
+    assert KEY_SENTINEL not in str(response.headers)
+
+    text = logging.Formatter(logs.TEXT_FORMAT)
+    for record in caplog.records:
+        assert KEY_SENTINEL not in logs.JsonFormatter().format(record)
+        assert KEY_SENTINEL not in text.format(record)
+
+
+@pytest.mark.parametrize("case", PLANTED_KEYS, ids=PLANTED_IDS)
+def test_a_credential_planted_as_a_key_is_absent_from_the_exception(
+    store: ConfigStore, case: PlantedKey
+) -> None:
+    """And underneath the transport, on the exception itself.
+
+    An exception is a surface of its own: anything that walks one
+    (a logger asked for a traceback, a debugger, a report) reads its
+    message, its repr, its cause and its context, and the API's own
+    `problems` ride on it. The repository builds the sentence inside the
+    handler and raises outside it for exactly this reason, which is what
+    keeps the rejected fragment off the chain.
+    """
+    with pytest.raises(ConfigError) as caught:
+        case.write(store, case.fragment)
+
+    refusal = caught.value
+    assert KEY_SENTINEL not in str(refusal)
+    assert KEY_SENTINEL not in repr(refusal)
+    assert refusal.__cause__ is None
+    assert refusal.__context__ is None
+    for carried in refusal.problems:
+        assert KEY_SENTINEL not in carried.path
+        assert KEY_SENTINEL not in carried.message
 
 
 # What the CLI prints for one
