@@ -51,6 +51,13 @@ violates a settled decision (two co-equal write paths, a mandatory
 variable CI does not set). Cut milestones so behavior changes sit
 alone in review. Commit the plan.
 
+Each milestone also names its design footprint: the modules it
+deepens, the seams it adds, and for any new module the one sentence
+saying what its callers stop having to know. A milestone that can
+only say it puts a layer beside an existing module has not been
+designed yet. The vocabulary and the worked examples are in
+`docs/architecture/design-guide.md`.
+
 ### The standing review lenses
 
 The external reviews of the 2026-08-14 batch applied the same
