@@ -36,6 +36,7 @@ import pytest
 from sqlalchemy import update
 
 from samtal_server.config import cli
+from samtal_server.config.entities import NO_SUCH_PROVIDER
 from samtal_server.config.secrets import MASK, MASTER_KEY_ENV
 from samtal_server.config.writes import BINDING_NOTICE
 from samtal_server.db import open_database, schema
@@ -542,4 +543,4 @@ def test_local_show_reaches_a_name_no_new_write_could_create(
     assert run("--local", "delete", "provider", "llm", "a/b") == 0
     capsys.readouterr()
     assert run("--local", "show", "provider", "llm", "a/b") == 1
-    assert "no such provider" in capsys.readouterr().err
+    assert NO_SUCH_PROVIDER in capsys.readouterr().err

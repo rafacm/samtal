@@ -34,6 +34,13 @@ import pytest
 from sqlalchemy import update
 
 from samtal_server.config import cli
+from samtal_server.config.entities import (
+    NO_SUCH_AGENT,
+    NO_SUCH_DEVICE,
+    NO_SUCH_FRAGMENT,
+    NO_SUCH_MCP_SERVER,
+    NO_SUCH_PROVIDER,
+)
 from samtal_server.config.writes import BINDING_NOTICE
 from samtal_server.db import open_database, schema
 from tests.support.config_cli import (
@@ -221,27 +228,63 @@ def test_a_fragment_an_agent_includes_is_not_deleted_from_under_it(
     assert "prompt_includes" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("name", [SECRET, f"{SECRET}.pasted"])
+# Every section a command addresses one entry of, as the arguments that
+# address something nothing wrote, the sentence both verbs answer with,
+# and the value that must not be printed. The names are credential
+# shaped, because a command line is where a paste lands; a device is
+# addressed by a MAC, which cannot be, so its own identity is the
+# sentinel.
+UNWRITTEN = [
+    (("provider", "llm", SECRET), NO_SUCH_PROVIDER, SECRET),
+    (("provider", "llm", f"{SECRET}.pasted"), NO_SUCH_PROVIDER, SECRET),
+    (("mcp-server", SECRET), NO_SUCH_MCP_SERVER, SECRET),
+    (("prompt-fragment", SECRET), NO_SUCH_FRAGMENT, SECRET),
+    (("prompt-fragment", f"{SECRET}.pasted"), NO_SUCH_FRAGMENT, SECRET),
+    (("agent", SECRET), NO_SUCH_AGENT, SECRET),
+    (("device", "aa:bb:cc:dd:ee:ff"), NO_SUCH_DEVICE, "aa:bb:cc:dd:ee:ff"),
+]
+
+
+@pytest.mark.parametrize(("addressed", "sentence", "sentinel"), UNWRITTEN)
 @pytest.mark.parametrize("local", [False, True])
-def test_a_fragment_that_is_not_there_is_refused_without_printing_it(
-    run, capsys: pytest.CaptureFixture[str], name: str, local: bool
+def test_an_entity_that_is_not_there_is_refused_without_printing_it(
+    run,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    addressed: tuple[str, ...],
+    sentence: str,
+    sentinel: str,
+    local: bool,
 ) -> None:
-    """Both ways in, since the recovery path opens the database itself
-    and has to say the same sentence: a name that addresses no fragment
-    was typed rather than stored, so neither the read nor the delete
-    repeats it."""
+    """Every section, both verbs, and both ways in (#132).
+
+    The recovery path opens the database itself and has to say the same
+    sentence as the client, so `--local` is driven beside the ordinary
+    path. An identity that addresses nothing was typed rather than
+    stored, so neither the read nor the delete repeats it: not on
+    stderr, not on stdout, and not in a record either of them retained.
+    """
     flags = ("--local",) if local else ()
-    for argv in (
-        (*flags, "show", "prompt-fragment", name),
-        (*flags, "delete", "prompt-fragment", name),
-    ):
-        assert run(*argv) == 1
+    for verb in ("show", "delete"):
+        with caplog.at_level(logging.DEBUG):
+            assert run(*flags, verb, *addressed) == 1
 
         captured = capsys.readouterr()
-        assert "no prompt fragment of that name exists" in captured.err
-        assert SECRET not in captured.err
-        assert SECRET not in captured.out
+        # The leak first and the wording after it, so a failure here
+        # says which of the two moved. The refusal is asserted whole, so
+        # a sentence that grew the identity back on the end would fail;
+        # `--local` prints its break-glass banner before it, which is
+        # why this is the tail of the stream rather than all of it.
+        assert sentinel not in captured.err
+        assert sentinel not in captured.out
+        assert captured.err.endswith(f"{sentence}\n")
         assert "Traceback" not in captured.err
+        # This project's own records. The client's HTTP library writes
+        # the URL it requested, which is the identity the operator just
+        # typed going out over the loopback socket the CLI is talking to
+        # itself on, not something a server retained.
+        written = [r for r in caplog.records if r.name.startswith("samtal_server")]
+        assert all(sentinel not in str(record.__dict__) for record in written)
 
 
 @pytest.mark.parametrize("layer", ["agent", "agent-defaults"])
@@ -480,7 +523,7 @@ def test_a_fragment_json_cannot_carry_is_refused_before_it_travels(
 
     # And nothing was written: the entity does not exist.
     assert run("show", "provider", "llm", "claude") == 1
-    assert "no such provider" in capsys.readouterr().err
+    assert NO_SUCH_PROVIDER in capsys.readouterr().err
 
 
 def test_a_fragment_sharing_one_anchor_twice_still_travels(
@@ -548,18 +591,21 @@ def test_show_renders_every_entity_kind(run, capsys: pytest.CaptureFixture[str])
     assert _document(capsys.readouterr().out) == {"agents": ["sam"]}
 
 
-def test_showing_something_that_is_not_there_names_it(
+def test_showing_something_that_is_not_there_names_the_section_only(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    for argv in (
-        ("show", "provider", "llm", "ghost"),
-        ("show", "mcp-server", "ghost"),
-        ("show", "agent", "ghost"),
-        ("show", "device", "aa:bb:cc:dd:ee:ff"),
+    """One fixed sentence per section, and the identity that was asked
+    for in none of them (#132)."""
+    for argv, sentence in (
+        (("show", "provider", "llm", "ghost"), NO_SUCH_PROVIDER),
+        (("show", "mcp-server", "ghost"), NO_SUCH_MCP_SERVER),
+        (("show", "prompt-fragment", "ghost"), NO_SUCH_FRAGMENT),
+        (("show", "agent", "ghost"), NO_SUCH_AGENT),
+        (("show", "device", "aa:bb:cc:dd:ee:ff"), NO_SUCH_DEVICE),
     ):
         assert run(*argv) == 1
         captured = capsys.readouterr()
-        assert "no such" in captured.err
+        assert captured.err == f"{sentence}\n"
         assert "Traceback" not in captured.err
 
 
@@ -626,7 +672,7 @@ def test_an_awkward_name_round_trips_through_the_whole_client(
     assert run("delete", "agent", name) == 0
     capsys.readouterr()
     assert run("show", "agent", name) == 1
-    assert "no such agent" in capsys.readouterr().err
+    assert NO_SUCH_AGENT in capsys.readouterr().err
 
 
 def test_a_name_a_url_path_cannot_carry_is_refused(

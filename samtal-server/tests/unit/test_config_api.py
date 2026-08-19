@@ -37,6 +37,7 @@ from samtal_server.config.api import (
     open_store,
     store_dependency,
 )
+from samtal_server.config.entities import NO_SUCH_AGENT
 from samtal_server.config.loader import DatabaseBusyError, StorageError, UnknownEntityError
 from samtal_server.config.store import ConfigStore
 from tests.support.apps import entered_client
@@ -173,7 +174,7 @@ def test_the_token_reaches_no_log_record(
 
 
 REFUSALS = [
-    (UnknownEntityError("agents.sam: no such agent"), 404),
+    (UnknownEntityError(NO_SUCH_AGENT), 404),
     (DatabaseBusyError("the configuration database is busy"), 409),
     (StorageError("the options column does not hold an object with string keys"), 500),
     (ConfigError("invalid agents.sam: the fragment is wrong"), 422),

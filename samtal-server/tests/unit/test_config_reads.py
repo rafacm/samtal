@@ -20,6 +20,13 @@ from cryptography.fernet import Fernet, MultiFernet
 from sqlalchemy import update
 
 from samtal_server.config import views
+from samtal_server.config.entities import (
+    NO_SUCH_AGENT,
+    NO_SUCH_DEVICE,
+    NO_SUCH_FRAGMENT,
+    NO_SUCH_MCP_SERVER,
+    NO_SUCH_PROVIDER,
+)
 from samtal_server.config.loader import ConfigError, UnknownEntityError
 from samtal_server.config.models import ProviderConfig
 from samtal_server.config.secrets import MASK, SecretLocation, generate_key
@@ -81,17 +88,19 @@ def test_every_kind_reads_back_what_was_written(store: ConfigStore) -> None:
     assert store.read_default_agent() == "sam"
 
 
-def test_reading_something_that_is_not_there_names_it(store: ConfigStore) -> None:
-    """The 404 set, with the sentences the CLI has always printed: one
-    vocabulary whichever way an operator reached the read."""
+def test_reading_something_that_is_not_there_does_not_name_it(store: ConfigStore) -> None:
+    """The 404 set, in one fixed sentence per section: one vocabulary
+    whichever way an operator reached the read, and never the identity
+    they asked for, which is a value nothing here has validated (#132).
+
+    Equality rather than a substring, so a sentence that grew the
+    identity back on the end would fail here."""
     cases = [
-        (lambda: store.read_provider("llm", "ghost"), "providers.llm.ghost: no such provider"),
-        (lambda: store.read_mcp_server("ghost"), "mcp_servers.ghost: no such MCP server"),
-        (lambda: store.read_agent("ghost"), "agents.ghost: no such agent"),
-        (
-            lambda: store.read_device("aa:bb:cc:dd:ee:ff"),
-            "devices.aa:bb:cc:dd:ee:ff: no such device",
-        ),
+        (lambda: store.read_provider("llm", "ghost"), NO_SUCH_PROVIDER),
+        (lambda: store.read_mcp_server("ghost"), NO_SUCH_MCP_SERVER),
+        (lambda: store.read_prompt_fragment("ghost"), NO_SUCH_FRAGMENT),
+        (lambda: store.read_agent("ghost"), NO_SUCH_AGENT),
+        (lambda: store.read_device("aa:bb:cc:dd:ee:ff"), NO_SUCH_DEVICE),
     ]
     for call, message in cases:
         with pytest.raises(UnknownEntityError) as caught:

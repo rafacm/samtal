@@ -92,34 +92,26 @@ API_OPTIONS_NOTE = f"{_OPTIONS_CONTRACT} under `samtal-server/examples/`{_OPTION
 # contract.
 Hook = Callable[..., object] | None
 
-# What a read or a delete of a fragment that is not there says. Fixed,
-# and deliberately not the `<section>.<name>: no such ...` shape its
-# neighbours use: a name that addresses no fragment is a name nothing in
-# this deployment has validated, it arrived in a URL path or on a
-# command line, and this sentence travels out as a 404 body and a
-# printed line. The section is what an operator needs to be told; the
-# name is the thing they typed and can see.
+# What a read or a delete of an entry that is not there says. One fixed
+# sentence per kind, naming the section and the fact and never the
+# identity that was asked for (#132).
+#
+# An identity that addresses nothing is a value nothing in this
+# deployment has validated. It arrived in a URL path or on a command
+# line, which is where a paste lands, and the sentence built from it
+# travels out as a 404 body, as a printed line, and into whatever the
+# caller's own log keeps. The section is what an operator needs to be
+# told; the identity is the thing they typed and can see.
+#
+# Fixed for every kind, including the ones whose identity has a rigid
+# shape. A MAC that reached a refusal is a MAC only in the sense that
+# something parsed it that way, and a rule with an exception in it is a
+# rule that gets the exception wrong later.
+NO_SUCH_PROVIDER = "providers: no provider of that name exists for that stage"
+NO_SUCH_MCP_SERVER = "mcp_servers: no MCP server of that name exists"
 NO_SUCH_FRAGMENT = "prompt_fragments: no prompt fragment of that name exists"
-
-
-def _no_such(section: str, noun: str) -> Callable[..., str]:
-    """The refusal every kind but one answers a missing entry with: the
-    section, the identity that was asked for, and what is not there."""
-
-    def missing(*identity: str) -> str:
-        return f"{section}.{'.'.join(identity)}: no such {noun}"
-
-    return missing
-
-
-def _always(sentence: str) -> Callable[..., str]:
-    """A refusal that says the same thing whatever was asked for, which
-    is what a kind whose identity must not be repeated needs."""
-
-    def missing(*_identity: str) -> str:
-        return sentence
-
-    return missing
+NO_SUCH_AGENT = "agents: no agent of that name exists"
+NO_SUCH_DEVICE = "devices: no device with that MAC is bound"
 
 
 # What one route of an entity kind does. Six, because the surface has
@@ -304,11 +296,12 @@ class EntityDescriptor(DocumentedShape):
     endpoints: tuple[Endpoint, ...] = ()
 
     # The refusal for an entry that is not there, used by the read, the
-    # delete and the slot check. The fragments answer one fixed sentence
-    # that does not repeat the name that was asked for; the others keep
-    # their own sentences; the singleton has no missing case, and says so
-    # by carrying none.
-    missing: Hook = None
+    # delete and the slot check. One fixed sentence naming the section,
+    # never built from what was addressed (see the constants above). A
+    # string rather than a hook, because nothing about the answer depends
+    # on the request any more; the singleton has no missing case, and
+    # says so by carrying none.
+    missing: str | None = None
 
     # CLI facts, filled by `cli.py`: how one entry of this kind reads in
     # the summary tree, after the name it is listed under. The
@@ -358,6 +351,12 @@ class Setting:
     route: str
     addressing: tuple[str, ...] = ()
 
+    # And the refusal for an entry that is not there, as for an entity
+    # and for the same reason: a MAC that addresses no binding was typed
+    # rather than stored. The scalar has no missing case (unset is a
+    # configuration, not an absence), and says so by carrying none.
+    missing: str | None = None
+
     # There are deliberately no hooks here, and no `endpoints`. A
     # setting's routes are the ones the entity tier's six verbs cannot
     # describe (bind by MAC, bind by activation code, unbind, set,
@@ -399,7 +398,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         moved_key="providers",
         table="providers",
         secret_slots="provider",
-        missing=_no_such("providers", "provider"),
+        missing=NO_SUCH_PROVIDER,
         endpoints=(
             Endpoint(
                 verb=READ_ALL,
@@ -480,7 +479,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         moved_key="mcp_servers",
         table="mcp_servers",
         secret_slots="mcp_server",
-        missing=_no_such("mcp_servers", "MCP server"),
+        missing=NO_SUCH_MCP_SERVER,
         endpoints=(
             Endpoint(
                 verb=READ_ALL,
@@ -576,7 +575,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         addressing=("name",),
         moved_key="prompt_fragments",
         table="prompt_fragments",
-        missing=_always(NO_SUCH_FRAGMENT),
+        missing=NO_SUCH_FRAGMENT,
         endpoints=(
             Endpoint(
                 verb=READ_ALL,
@@ -644,7 +643,7 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         addressing=("name",),
         moved_key="agents",
         table="agents",
-        missing=_no_such("agents", "agent"),
+        missing=NO_SUCH_AGENT,
         endpoints=(
             Endpoint(
                 verb=READ_ALL,
@@ -796,6 +795,7 @@ SETTINGS: tuple[Setting, ...] = (
         ),
         route="/devices",
         addressing=("mac",),
+        missing=NO_SUCH_DEVICE,
     ),
     Setting(
         name="default_agent",
@@ -816,11 +816,24 @@ SETTINGS: tuple[Setting, ...] = (
 
 _BY_NAME: dict[str, EntityDescriptor] = {entry.name: entry for entry in ENTITIES}
 
+_SETTINGS_BY_NAME: dict[str, Setting] = {entry.name: entry for entry in SETTINGS}
+
 
 def descriptor(name: str) -> EntityDescriptor:
     """One commanded kind, by the name its command, its route and its
     documentation section all carry."""
     return _BY_NAME[name]
+
+
+def setting(name: str) -> Setting:
+    """One domain-level field, by its key in the configuration document.
+
+    The other tier's accessor, so a fact that is true of both tiers
+    (what a miss answers with, so far) is read the same way for either,
+    rather than being a constant here for one of them and a descriptor
+    fact for the rest.
+    """
+    return _SETTINGS_BY_NAME[name]
 
 
 def fill(name: str, **facts: object) -> None:
@@ -865,7 +878,11 @@ __all__ = [
     "ENTITIES",
     "EXAMPLES",
     "NESTED",
+    "NO_SUCH_AGENT",
+    "NO_SUCH_DEVICE",
     "NO_SUCH_FRAGMENT",
+    "NO_SUCH_MCP_SERVER",
+    "NO_SUCH_PROVIDER",
     "OPTIONS_NOTE",
     "READ_ALL",
     "READ_ONE",
@@ -881,4 +898,5 @@ __all__ = [
     "Verb",
     "descriptor",
     "fill",
+    "setting",
 ]
