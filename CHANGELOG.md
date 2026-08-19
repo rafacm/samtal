@@ -31,6 +31,39 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **Every refusal the configuration API answers is now an RFC 9457
+  problem document** (#192). A refusal used to be `{"detail": "..."}`
+  served as `application/json`, which leaves a form with a paragraph to
+  quote and nothing to mark. It is now
+  `{"title", "status", "detail", "errors"}` served as
+  `application/problem+json`: the status's standard reason phrase, the
+  status repeated so a body separated from its response still says what
+  it was, the same sentence as before, and a list of the fields the
+  refusal names. `errors` is always present and empty where a refusal
+  names no field of the request, so every refusal has one shape. Each
+  entry addresses its field by RFC 6901 JSON Pointer
+  (`/connection/api_key_env`), which a dotted spelling could not do:
+  a key may hold a dot, and `~` and `/` inside one are escaped as the
+  RFC says. `type` and `instance` are deliberately absent, which means
+  `about:blank`, and is the truth: these problems are described by
+  their status and their prose rather than by a URI registry nobody
+  serves. The sentence is unchanged byte for byte, so the CLI prints
+  exactly what it printed before, and the committed OpenAPI document
+  moves with the wire. The framework's own refusals join them: an
+  authenticated request to an unmatched path, or to a route with the
+  wrong method, used to be answered by Starlette in a body nothing else
+  here sent, and is now the same document, keeping the `Allow` header a
+  405 needs to be one.
+- **A validator says which field it refused** (#192). The three rules
+  that know their semantic field (a provider's inline-secret walk, an
+  MCP entry's transport rule, an agent's filler block) are model-level,
+  so what they knew survived only inside the sentence. They now carry
+  it, and the API answers it. One sentence changes with them: the
+  transport rule found several problems and joined them into a single
+  `; `-separated line, which no reader can decompose back into the
+  fields it names, and it now reads one line per problem, the same
+  words in the same order.
+
 - **A read shows every field its entity's model declares, masked at
   every depth** (#176, #171). The five body builders behind
   `config show` and the whole-configuration document each listed their
