@@ -278,8 +278,13 @@ added, since it would only forward arguments to names that exist
 draft). `body` becomes a
 direct call into `views.py` (which already owns the derivation).
 `summary` becomes plain functions in `cli.py` called from the summary
-tree. `wrote`, `deleted`, and `notice` become typed lookups exported
-by `writes.py`. After this, understanding one entity means reading
+tree. `wrote` and `deleted` become typed functions exported by
+`writes.py` and called directly. `notice` stays a descriptor fact:
+it is effect-timing information, static and data-only, and the
+issue's settled decision keeps effect timing in the immutable spec;
+consumers keep rendering acknowledgement text from it, and it stops
+needing `fill()` because it is declared inline like every other data
+fact. After this, understanding one entity means reading
 the registry entry for its facts and the consumer for its behavior,
 with no import-order coupling; `docgen.py` is unchanged because it
 never read a hook.
@@ -371,7 +376,8 @@ carries its baseline proof inside its own PR.
 - [ ] **M4: the entity registry sheds its hooks.** As decided above:
   store-internal hooks inlined, routes and commands calling the
   store's existing typed methods directly, `body` and
-  `summary` and `wrote`/`deleted`/`notice` called directly, explicit
+  `summary` and `wrote`/`deleted` called directly, `notice` declared
+  inline as the descriptor fact it is, explicit
   routes with the byte-identical OpenAPI proof, `fill()` and
   `object.__setattr__` deleted, `Endpoint` moved out of the
   descriptor, `fields_in_help` deleted. The registry's own suite
@@ -589,6 +595,10 @@ and its non-forwarding consumers.
 **7 (P2). Moving `notice` out of the spec contradicts the settled
 effect-timing decision.** The issue requires the immutable spec to
 retain effect timing; `notice` is static data-only timing prose.
+
+*Resolution.* Adopted. `notice` stays a descriptor fact declared
+inline; only the behavioral `wrote`/`deleted` functions move to
+`writes.py` as direct typed calls.
 
 **8 (P2). M6 does not complete the classification it claims.** Only
 the support module and six files got dispositions; the rule allowed
