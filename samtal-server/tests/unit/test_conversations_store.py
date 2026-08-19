@@ -764,7 +764,16 @@ def test_stop_is_idempotent_and_bounded_by_a_wedged_writer(tmp_path: Path, store
 
     # And again, which has nothing to do.
     store.stop()
+
+    # Release the wedged writer AND wait it out. Without the join this
+    # test walks away while its writer thread is still winding down,
+    # and a neighbouring test that enumerates threads by name can see
+    # it on a slow runner (the main-push CI failure of 2026-08-19).
+    writer = store._thread
     wedged.forever.set()
+    assert writer is not None
+    writer.join(timeout=TIMEOUT_S)
+    assert not writer.is_alive(), "the released writer did not exit"
 
 
 def test_a_store_that_never_started_leaks_no_thread(tmp_path: Path, stores) -> None:
