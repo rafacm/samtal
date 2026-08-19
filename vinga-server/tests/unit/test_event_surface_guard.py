@@ -34,12 +34,14 @@ import vinga_server
 # to break it.
 PACKAGE = Path(vinga_server.__file__).parent
 
-# `events.py` is where the surface is emitted from: `LogTap` attaches the
-# finished payload as `extra=` on the channel the emitter was built for,
-# which is precisely the call every other site used to make by hand. It
-# is the exception the rule exists to concentrate everything into, and
-# the only one.
-EXEMPT = {"events.py"}
+# `events/__init__.py` is where the surface is emitted from: `LogTap`
+# attaches the finished payload as `extra=` on the channel the emitter
+# was built for, which is precisely the call every other site used to
+# make by hand. It is the exception the rule exists to concentrate
+# everything into, and the only one. The path is the package's
+# `__init__` rather than a module because the emitter became a package
+# without changing what it is; the exemption follows the file.
+EXEMPT = {str(Path("events") / "__init__.py")}
 
 # The `logging.Logger` methods that take a record's `extra=`.
 LOGGING_METHODS = frozenset(
