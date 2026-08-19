@@ -11,17 +11,19 @@ says so explicitly.
 
 Every refusal the `/api` namespace answers is now an RFC 9457 problem
 document served as `application/problem+json`, carrying the
-repository's own sentence unchanged as `detail` and, where the refusal
-names fields of the submitted fragment, one `errors` entry per field
+repository's own sentence as `detail` and, where the refusal names
+fields of the submitted fragment, one `errors` entry per field
 addressed by JSON Pointer. The plan's design landed whole. Six
 deviations and clarifications are recorded below; the fifth and sixth
 are the only ones that changed a decision rather than a spelling.
 
-What a refusal may name was narrowed after this section was written, by
-the review round's first finding: only names this repository declares
-and positions in a list. The round is recorded at the end of this file,
-and it is the reason a pointer no longer reaches an option key or an
-`env` entry.
+`detail` is byte-identical to the sentence the API answered before,
+with two exceptions, both deliberate and both recorded: the MCP
+transport rule's line, which is the prose change the plan sanctioned
+(deviation 2 below), and every refusal that used to name a key the
+caller invented, which the review round's first finding narrowed. That
+round is recorded at the end of this file, and it is why a pointer no
+longer reaches an option key or an `env` entry.
 
 ### What was written
 

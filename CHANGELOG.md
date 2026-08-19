@@ -47,9 +47,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   `type` and `instance` are deliberately absent, which means
   `about:blank`, and is the truth: these problems are described by
   their status and their prose rather than by a URI registry nobody
-  serves. The sentence is unchanged byte for byte, so the CLI prints
-  exactly what it printed before, and the committed OpenAPI document
-  moves with the wire. The framework's own refusals join them: an
+  serves. The sentence itself is unchanged byte for byte, and so is
+  what the CLI prints, except on the two refusals the next two entries
+  record; the committed OpenAPI document moves with the wire. The framework's own refusals join them: an
   authenticated request to an unmatched path, or to a route with the
   wrong method, used to be answered by Starlette in a body nothing else
   here sent, and is now the same document, keeping the `Allow` header a
