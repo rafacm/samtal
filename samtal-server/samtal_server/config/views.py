@@ -209,20 +209,36 @@ def entity_body(descriptor: entities.EntityDescriptor, entry: object) -> dict[st
 
 
 def _declared(entry: object, secret_key: Callable[[str], bool]) -> dict[str, object]:
-    """Every field a model declares, in declaration order, and then
-    whatever a pass-through model was given beyond them (a provider's
-    options, which are the implementation's and so cannot be declared).
+    """Every field a model declares, in the order a reader meets them,
+    and then whatever a pass-through model was given beyond them (a
+    provider's options, which are the implementation's and so cannot be
+    declared).
+
+    Declaration order is the display order, and the registry says where
+    a shape departs from it. Order is not presentation here: JSON and
+    YAML both keep the order a mapping was built in, so this is the
+    order an operator reads an entry in and the order the committed
+    bytes of a response have.
     """
     model = type(entry)
     shown = entities.always_shown(model)
     data: dict[str, object] = {}
-    for name, field in model.model_fields.items():
+    for name in _order(model):
+        field = model.model_fields[name]
         value = getattr(entry, name)
         if name in shown or not _absent(field, value):
             data[name] = _masked(name, value, secret_key)
     for name, value in (getattr(entry, "model_extra", None) or {}).items():
         data[name] = _masked(name, value, secret_key)
     return data
+
+
+def _order(model: type[BaseModel]) -> list[str]:
+    """The field names of one model, in the order a display shows them:
+    whatever the shape leads with, and then the rest as the model
+    declares them."""
+    lead = entities.leads_with(model)
+    return [*lead, *(name for name in model.model_fields if name not in lead)]
 
 
 def _masked(name: str, value: object, secret_key: Callable[[str], bool]) -> object:

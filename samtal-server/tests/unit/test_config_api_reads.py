@@ -266,6 +266,26 @@ def test_a_fragment_reads_as_the_body_a_write_of_it_carries(
     }
 
 
+def test_an_agent_reads_prompt_first(client: TestClient, store: ConfigStore) -> None:
+    """The response bytes, not the mapping they parse to. JSON keeps the
+    order a mapping was built in, so key order is part of what this
+    route answers, and comparing the parsed objects cannot see it move.
+
+    Prompt first, then what the agent overrides. `AgentConfig` declares
+    its prompt after the layer fields it inherits, which is an ordering
+    of the class and not of the entry, so the agent's descriptor says
+    which field a read opens with.
+    """
+    _populate(store)
+
+    text = client.get("/agents/sam").text
+
+    assert text == (
+        '{"entity":{"prompt":"You are Sam.","tts":"voice",'
+        '"prompt_includes":["household"]},"secrets":{}}'
+    )
+
+
 def test_an_include_list_reads_write_shaped(client: TestClient, store: ConfigStore) -> None:
     _populate(store)
 
