@@ -19,7 +19,7 @@ import pytest
 from cryptography.fernet import Fernet, MultiFernet
 from sqlalchemy import update
 
-from samtal_server.config import views
+from samtal_server.config import entities, views
 from samtal_server.config.entities import (
     NO_SUCH_AGENT,
     NO_SUCH_DEVICE,
@@ -28,7 +28,13 @@ from samtal_server.config.entities import (
     NO_SUCH_PROVIDER,
 )
 from samtal_server.config.loader import ConfigError, UnknownEntityError
-from samtal_server.config.models import ProviderConfig
+from samtal_server.config.models import (
+    AgentConfig,
+    FillerConfig,
+    McpServerConfig,
+    ProviderConfig,
+    mcp_entry_fragment,
+)
 from samtal_server.config.secrets import MASK, SecretLocation, generate_key
 from samtal_server.config.store import ConfigStore
 from samtal_server.db import open_database, schema
@@ -427,6 +433,223 @@ def test_a_listing_is_keyed_by_identity(store: ConfigStore) -> None:
     assert views.agents(snapshot)["sam"]["entity"]["prompt"] == "You are Sam."
     assert views.devices(snapshot)["aa:bb:cc:dd:ee:ff"]["entity"] == {"agents": ["sam"]}
     assert views.default_agent(snapshot.domain.default_agent) == {"name": "sam"}
+
+
+# The display fails open, the record fails closed
+#
+# What each of these builds an entry out of is the point: a display is
+# derived from the model, so a field added to one appears on every read
+# with nothing in `views.py` to edit, and a record is built key by key,
+# so the same field appears in no record until somebody decides it
+# belongs. The models below are what the next change to any of these
+# models looks like, declared here rather than in `models.py` so that
+# what is pinned is that nothing outside the model had to hear about it.
+
+
+class McpServerWithNote(McpServerConfig):
+    """An MCP server that gained two fields: an ordinary one, and one
+    whose name is credential-shaped."""
+
+    note: str | None = None
+    access_token: str | None = None
+
+
+class ProviderWithNote(ProviderConfig):
+    """A provider that gained one. Declared rather than passed through,
+    so it is not among `options` and a record cannot pick it up by the
+    pass-through route either."""
+
+    note: str | None = None
+
+
+class AgentWithSecret(AgentConfig):
+    """An agent that gained a credential-shaped field. Its kind holds no
+    stored secret today, which is exactly why the masking rule has to
+    apply to it: the field arrives before anybody revisits the rule."""
+
+    session_token: str | None = None
+
+
+def test_a_field_a_model_gains_is_shown_without_the_view_hearing_about_it() -> None:
+    """The fail-open half (#176). `views.py` names none of these fields
+    and shows all of them, which is what the descriptor work measured
+    the absence of: a scratch field reached the store, both APIs, the
+    CLI and both generated references untouched, and was invisible on
+    every read with no test failing for it."""
+    entry = McpServerWithNote(
+        transport="stdio", command="uvx", note="what it is for", access_token=PASTED
+    )
+
+    body = views.entity_body(entities.descriptor("mcp-server"), entry)
+
+    assert body["note"] == "what it is for"
+    # Shown, and masked: a new field is displayed by default and
+    # displaced by default when its name says it holds a credential.
+    assert body["access_token"] == MASK
+    assert PASTED not in str(body)
+
+
+def test_a_field_a_model_gains_is_masked_on_a_kind_that_holds_no_secret() -> None:
+    """The wider reading is the default for a kind that has not thought
+    about the question, so an agent that gains a credential-shaped field
+    does not have to wait for somebody to notice."""
+    entry = AgentWithSecret(prompt="You are Sam.", session_token=PASTED)
+
+    body = views.entity_body(entities.descriptor("agent"), entry)
+
+    assert body["session_token"] == MASK
+    assert body["prompt"] == "You are Sam."
+
+
+def test_a_field_a_model_gains_stays_out_of_a_record() -> None:
+    """The fail-closed half, and the reason the two are one decision: a
+    read is thrown away as soon as it is read, and a record is written
+    into a manifest and a session row that outlive the conversation."""
+    entry = ProviderWithNote(type="anthropic", model="m", note="what it is for")
+
+    assert views.entity_body(entities.descriptor("provider"), entry)["note"] == (
+        "what it is for"
+    )
+    assert "note" not in views.provider_record(entry)
+    # And the field it was always going to keep, so this is not passing
+    # by building nothing at all.
+    assert views.provider_record(entry)["model"] == "m"
+
+
+def test_a_credential_nested_in_an_mcp_entry_is_masked_at_every_depth() -> None:
+    """The masking gap this closes (#171): a provider's options were
+    masked at every depth while an MCP server's env and headers were
+    masked one level down, so a credential under a key inside one was
+    displayed as written. Built without validation, which is what "a
+    value that got in another way" means concretely: the model types
+    both mappings as flat, and this is the walk that does not rely on
+    it."""
+    entry = McpServerConfig.model_construct(
+        transport="stdio",
+        command="uvx",
+        env={
+            "HOME_TOKEN": PASTED,
+            "SETTINGS": {"api_key": PASTED, "host": "example"},
+            "PROFILES": [{"authorization": PASTED, "name": "default"}],
+        },
+    )
+
+    body = views.entity_body(entities.descriptor("mcp-server"), entry)
+
+    assert body["env"]["HOME_TOKEN"] == MASK
+    assert body["env"]["SETTINGS"] == {"api_key": MASK, "host": "example"}
+    assert body["env"]["PROFILES"] == [{"authorization": MASK, "name": "default"}]
+    assert PASTED not in str(body)
+
+
+def test_a_credential_nested_in_a_provider_option_is_masked_on_every_read(
+    store: ConfigStore,
+) -> None:
+    """The same depth, on the path a row can really reach: an option is
+    passed through to the implementation, so it can be a structure, and
+    a reference key one level down accepts anything shaped like a
+    variable name. Every display form masks it, and the document is one
+    of them."""
+    _populate(store)
+    store.set_provider(
+        "llm",
+        "claude",
+        {"type": "anthropic", "connection": {"api_key_env": PASTED, "host": "example"}},
+    )
+
+    entity = views.provider(store.read_provider("llm", "claude"))["entity"]
+    document = views.config(store.load())
+
+    assert entity["connection"] == {"api_key_env": MASK, "host": "example"}
+    assert document["config"]["providers"]["llm"]["claude"]["connection"] == {
+        "api_key_env": MASK,
+        "host": "example",
+    }
+    assert PASTED not in str(document)
+
+
+def test_a_grant_is_shown_in_the_form_the_row_holds(store: ConfigStore) -> None:
+    """A read is a fragment a write of it accepts back, and an `mcp`
+    entry has two spellings: a plain name is the whole server and an
+    object is part of one. Pinned against `mcp_entry_fragment`, which is
+    what a row is written with, so the displayed form and the stored
+    form cannot come to disagree."""
+    _populate(store)
+    store.set_agent("poet", {"prompt": "P", "mcp": [{"server": "weather", "tools": ["forecast"]}]})
+    store.set_agent_defaults({"mcp": ["weather"]})
+
+    poet = views.agent(store.read_agent("poet"))["entity"]
+    defaults = views.agent_defaults(store.read_agent_defaults())["entity"]
+
+    assert poet["mcp"] == [{"server": "weather", "tools": ["forecast"]}]
+    assert defaults["mcp"] == ["weather"]
+    for entry, shown in (
+        (store.read_agent("poet").entry, poet),
+        (store.read_agent_defaults().entry, defaults),
+    ):
+        assert shown["mcp"] == [mcp_entry_fragment(item) for item in entry.mcp]
+
+
+def test_a_section_nested_in_an_agent_is_shown_whole(store: ConfigStore) -> None:
+    """A default that is a real value is shown at it, so a filler
+    section reads as the three-part policy it is rather than as the one
+    part that was written. The phrase list is shown even when it is
+    empty, which is the one departure the registry declares and the
+    state a disabled section is in."""
+    _populate(store)
+    store.set_agent("poet", {"prompt": "P", "filler": {"enabled": False}})
+
+    body = views.agent(store.read_agent("poet"))["entity"]
+
+    assert body["filler"] == FillerConfig().model_dump()
+    assert body["filler"]["phrases"] == []
+
+
+def test_every_shown_body_is_a_fragment_a_write_accepts_back(store: ConfigStore) -> None:
+    """What the absence rule is for. A field holding a default that
+    means absence is left out rather than shown as null, because an MCP
+    server is refused for naming a field of the other transport at all,
+    so a stdio entry showing `url: null` could not be written back.
+    Every kind, written back and read again, byte for byte."""
+    _populate(store)
+    store.set_mcp_server("home", {"transport": "stdio", "command": "uvx", "args": ["run"]})
+    store.set_prompt_fragment("household", {"text": "The bins go out on Tuesday."})
+    store.set_agent_defaults({"llm": "claude", "filler": {"enabled": False}})
+
+    round_trips = [
+        (
+            "provider",
+            lambda: store.read_provider("llm", "claude"),
+            lambda body: store.set_provider("llm", "claude", body),
+        ),
+        # Both transports, because what each of them may not name is the
+        # other's fields.
+        (
+            "mcp-server",
+            lambda: store.read_mcp_server("home"),
+            lambda body: store.set_mcp_server("home", body),
+        ),
+        (
+            "mcp-server",
+            lambda: store.read_mcp_server("weather"),
+            lambda body: store.set_mcp_server("weather", body),
+        ),
+        (
+            "prompt-fragment",
+            lambda: store.read_prompt_fragment("household"),
+            lambda body: store.set_prompt_fragment("household", body),
+        ),
+        ("agent", lambda: store.read_agent("sam"), lambda body: store.set_agent("sam", body)),
+        (
+            "agent-defaults",
+            store.read_agent_defaults,
+            lambda body: store.set_agent_defaults(body),
+        ),
+    ]
+    for kind, read, write in round_trips:
+        before = views.entity(kind, read())["entity"]
+        write(before)
+        assert views.entity(kind, read())["entity"] == before, kind
 
 
 def test_a_listing_and_a_single_read_agree_about_a_shadow(store: ConfigStore) -> None:
