@@ -625,8 +625,15 @@ def unregistered(llm: Any, agent: str = "poet", mac: str = POET_MAC) -> Any:
     return session
 
 
-async def failing_reply(stage: str, provider: Any) -> None:
-    """One reply against a provider that fails."""
+async def failing_reply(stage: str, provider: Any, watch: Any = None) -> Any:
+    """One reply against a provider that fails, and the session it ran
+    in.
+
+    `watch` attaches a consumer before the reply starts, which is what
+    the privacy suite next door needs and what a baseline driver has no
+    use for: a claim about what reaches a tap has to be asserted at the
+    tap rather than inferred from the log.
+    """
 
     class TextSink:
         async def send_text(self, text: str) -> None:
@@ -639,7 +646,10 @@ async def failing_reply(stage: str, provider: Any) -> None:
     session.websocket = cast(Any, TextSink())
     session._mac = POET_MAC
     session.send_audio = _nothing  # type: ignore[method-assign]
+    if watch is not None:
+        session._events.attach(watch)
     await session.runtime._reply(UTTERANCE)
+    return session
 
 
 async def speaking_reply(config: Config, asr: Any) -> Any:
