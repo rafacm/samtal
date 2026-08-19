@@ -235,7 +235,11 @@ wanted: it belongs to M3.
 8. **The `shown_values` finding is filed as issue #171.** The plan
    has M1 file it as its own issue; the body recorded below is what
    was posted, kept here as the record of what M1 found and why the
-   contract forbade fixing it in place.
+   contract forbade fixing it in place. Answered since, on
+   2026-08-19, together with #176 and under one ratified policy: the
+   display fails open, masked, and the masking is one walk that does
+   not stop. See
+   [the display sweep](../features/2026-08-19-display-fails-open.md).
 
 No other deviation. No behavior changed, no sentence moved, and no
 consumer other than docgen reads a descriptor yet.
@@ -1303,6 +1307,14 @@ behavior change this issue's contract forbids, and deciding whether the
 display path should fail open or closed is now issue #176, filed
 from this walkthrough, the same question family as issue #171
 already holds open for the masking path beside it.
+
+**Answered since.** Both were decided together on 2026-08-19: the
+display fails open, masked. The five builders derive from the model, so
+the fourth file this walkthrough counted is no longer one, and the
+masking is a single walk applied at every depth. `provider_record` is
+untouched and still fails closed, which is now stated as the split it
+is rather than as a local preference. See
+[the display sweep](../features/2026-08-19-display-fails-open.md).
 
 ### Verification
 
