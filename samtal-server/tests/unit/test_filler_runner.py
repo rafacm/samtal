@@ -14,20 +14,25 @@ this runner does with one is the same whatever it holds.
 """
 
 import asyncio
+import logging
 from collections.abc import Sequence
 from typing import cast
 
 import pytest
 
-from samtal_server.device.boundary import DeviceOutput, PlayableAudio
+from samtal_server.device.boundary import DeviceGone, DeviceOutput, PlayableAudio
 from samtal_server.events import SessionEvents
 from samtal_server.filler import FillerClips
 from samtal_server.runtime.filler_runner import FillerRunner
 from tests.support.boundary import FakeDevice
 from tests.support.configs import OUTPUT_RATE
-from tests.support.events import events, only
+from tests.support.events import both_formats, events, only
 
 SESSION = "filler-runner"
+
+# A credential-shaped value, planted in the message of whatever the
+# playback path fails with.
+SENTINEL = "sk-live-6d17b3e0-never-a-real-credential"
 
 # A quarter second of clip, which the device's encoder makes several
 # frames of, so "the clip went out" is a claim about audio rather than
@@ -79,6 +84,30 @@ class HeldDevice(FakeDevice):
 
     async def send_audio(self, batch: PlayableAudio) -> None:
         await self.release.wait()
+        await super().send_audio(batch)
+
+
+class BrokenDevice(FakeDevice):
+    """A device one of whose calls fails, which is what tells the
+    playback path's two arms apart: a send raising `DeviceGone` is the
+    device leaving, and anything else, from the send or from the
+    encoder, is a bug in this process."""
+
+    def __init__(
+        self, send: BaseException | None = None, encode: BaseException | None = None
+    ) -> None:
+        super().__init__()
+        self._send = send
+        self._encode = encode
+
+    def encode_audio(self, pcm: bytes) -> PlayableAudio:
+        if self._encode is not None:
+            raise self._encode
+        return super().encode_audio(pcm)
+
+    async def send_audio(self, batch: PlayableAudio) -> None:
+        if self._send is not None:
+            raise self._send
         await super().send_audio(batch)
 
 
@@ -336,3 +365,84 @@ async def test_one_clip_per_turn_and_the_variants_rotate(
 
     assert [record.phrase_index for record in events(caplog, "filler_played")] == [0, 1]
     assert runner.fires == 2
+
+
+# --- what a clip that could not be played may cost --------------------
+
+
+async def test_a_device_that_left_mid_clip_ends_the_clip_and_says_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The documented outcome: a device that went away mid-clip ends the
+    clip, not the session, and quietly, because the disconnect is not a
+    failure of the mask and the session it belongs to is already on its
+    way down."""
+    device = BrokenDevice(send=DeviceGone("the device disconnected"))
+    runner, _ = runner_for({"poet": clips_for("Hmm, let me see...")}, device=device)
+
+    with caplog.at_level("INFO"):
+        runner.arm()
+        await asyncio.sleep(FIRED_S)
+        await runner.settle()
+
+    # It announced itself and then went nowhere, with nothing said about
+    # it beyond that announcement.
+    only(caplog, "filler_played")
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING] == []
+    assert device.sent == []
+    assert runner.armed is False
+    assert runner.sounding is False
+
+
+async def test_a_clip_that_would_not_encode_is_named_by_class_and_swallowed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """#182's decision: resampling, encoding and the encoder flush are
+    no longer covered by the disconnect arm, so a failure in any of them
+    is reported as the bug it is. The class name and nothing else: this
+    runs a codec over provider-synthesized audio, and a `logger.exception`
+    here would put whatever it raised, and the chain behind it, onto the
+    retained log."""
+    device = BrokenDevice(encode=ValueError(f"the encoder refused, near {SENTINEL}"))
+    runner, _ = runner_for({"poet": clips_for("Hmm, let me see...")}, device=device)
+
+    with caplog.at_level("INFO"):
+        runner.arm()
+        await asyncio.sleep(FIRED_S)
+        await runner.settle()
+
+    written = both_formats(caplog)
+    assert "filler playback failed: ValueError" in written
+    assert SENTINEL not in written
+    # The mask stood down exactly as it always did: swallowed, nothing
+    # sent, nothing left armed, and a settle that ended cleanly, which
+    # is what "the reply it masks is unharmed" means here.
+    assert device.sent == []
+    assert runner.armed is False
+    assert runner.sounding is False
+
+
+async def test_a_local_bug_in_the_send_is_no_longer_read_as_a_disconnect(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The one deliberate behavior change of #182. `DeviceGone`
+    subclasses `RuntimeError` and this arm used to catch the base class,
+    so a bare `RuntimeError` from anywhere in the block was returned on
+    in silence as though the device had left. The edge translates every
+    shape of a vanished device into `DeviceGone` (#137), so what is left
+    is a bug in this process, and it now says so instead of hiding
+    behind a disconnect."""
+    device = BrokenDevice(send=RuntimeError(f"a local bug, near {SENTINEL}"))
+    runner, _ = runner_for({"poet": clips_for("Hmm, let me see...")}, device=device)
+
+    with caplog.at_level("INFO"):
+        runner.arm()
+        await asyncio.sleep(FIRED_S)
+        await runner.settle()
+
+    written = both_formats(caplog)
+    assert "filler playback failed: RuntimeError" in written
+    assert SENTINEL not in written
+    assert device.sent == []
+    assert runner.armed is False
+    assert runner.sounding is False

@@ -241,19 +241,34 @@ class FillerRunner:
                 + self._output.flush_encoder()
             )
             await self._output.send_audio(batch)
-        except (DeviceGone, RuntimeError):
-            # Broader than the reply body's, and knowingly so. The `try`
-            # above covers resampling, encoding and the encoder flush as
-            # well as the send, so the `RuntimeError` half can still be
-            # a local bug swallowed as a disconnect. Narrowing it means
-            # deciding what a filler that fails to encode should do,
-            # which is the filler path's own question and is tracked as
-            # #182.
+        except DeviceGone:
+            # The device left mid-clip, which ends the clip and nothing
+            # else. Only this type, the way the reply body catches it
+            # (#137): the edge translates both of the transport's
+            # disconnect shapes into it, and `DeviceGone` is what the
+            # two device-facing calls in the block above raise, so
+            # nothing a resample or an encode can go wrong with reaches
+            # here. A bare `RuntimeError` used to be caught alongside
+            # it and returned on in silence, which made a local bug
+            # look like a disconnect; it now falls to the arm below and
+            # is logged (#182).
             return
         except asyncio.CancelledError:
             raise
-        except Exception:
-            logger.exception("session %s: filler playback failed", self.session_id)
+        except Exception as exc:
+            # A filler that could not be resampled, encoded, flushed or
+            # sent is a bug in this process, and the mask stands down
+            # exactly as before: swallowed, the reply unharmed. The
+            # class name and nothing else, no `exc_info` and no
+            # `str(exc)`, for the reason the reply body gives: a
+            # traceback rendered onto the retained log prints the whole
+            # chain behind it, and a failure anywhere near provider
+            # bytes can carry them in its message (#182).
+            logger.error(
+                "session %s: filler playback failed: %s",
+                self.session_id,
+                type(exc).__name__,
+            )
 
     async def tail(self) -> None:
         """The reply's own audio is ready: an unfired timer loses (the
