@@ -1036,25 +1036,71 @@ class _Refusal:
     fault: Fault
 
 
-def _no_identity() -> dict[str, EventValue | None]:
-    """The typed base of a server channel, which is nothing: a server
-    event names what it is about in its own fields."""
-    return {}
+@dataclass(frozen=True)
+class Identity:
+    """One value the emitter contributes to every event it emits, and
+    what a recovery calls it where the value itself could not be
+    stated.
+
+    Two halves because a recovery must never be built from what the
+    emitter was HANDED. A session id is a value type like any other, so
+    a caller that opened a session under a name no `SessionId` admits
+    has handed this module a string of its own choosing, and echoing it
+    into the declared recovery event would put exactly that string on
+    the retained surface under the emitter's own key. `unstated` is the
+    registry-owned answer instead: a fixed word for the session, and
+    nothing at all for the device, which is the same "none was
+    understood" the surface already says with a null.
+    """
+
+    build: Callable[[], EventValue | None]
+    unstated: Any
+
+
+# What a recovery calls a session whose own id this server could not
+# state. This module's own word, and one the `session_id` syntax admits,
+# so the recovery event is the shape its declaration says it is. The
+# rejected spelling is deliberately not echoed, for the reason
+# `resolve_enforcement` does not echo a rejected mode.
+UNSTATED_SESSION = "unidentified"
+
+
+def _identities(
+    declared: Mapping[str, Identity],
+) -> tuple[dict[str, EventValue | None], dict[str, Any], bool]:
+    """Build the emitter's own values, one guard each.
+
+    Answers what was built, what a recovery may say, and whether all of
+    them were built at all. One guard each rather than one around the
+    lot, because a device id that refuses must not take a lawful session
+    id down with it: the recovery is a record an operator reads, and the
+    identity it can still state is the half that makes it readable.
+
+    Nothing raises. What a failed build was holding is never looked at,
+    so there is nothing of it to leak by accident later.
+    """
+    held: dict[str, EventValue | None] = {}
+    safe: dict[str, Any] = {}
+    whole = True
+    for name, identity in declared.items():
+        try:
+            value = identity.build()
+        except Exception:  # noqa: BLE001 - telemetry never costs a reply
+            whole = False
+            safe[name] = identity.unstated
+            continue
+        held[name] = value
+        safe[name] = None if value is None else value.carried()
+    return held, safe, whole
 
 
 def _construct(
     channel: str,
-    base: dict[str, Any],
-    identity: Callable[[], dict[str, EventValue | None]],
+    held: dict[str, EventValue | None],
     build: Callable[[], Variant],
 ) -> Checked | _Refusal:
     """Build one variant and turn it into an emission, or answer what
     was wrong with it.
-
-    The emitter's own identity is built in here too, and through a thunk
-    for the same reason the variant is: a session id is a value type
-    like any other, so constructing one can refuse, and it must refuse
-    inside the guard rather than on the reply path that reached this.
 
     Nothing here raises, which is what lets the caller decide between
     the two modes AFTER the handler has ended, so a lane's stderr cannot
@@ -1065,7 +1111,6 @@ def _construct(
     exception built from far-side bytes carries them in its name.
     """
     try:
-        held = identity()
         variant = build()
         declaration = declaration_of(type(variant))
         if variant.CHANNEL != channel:
@@ -1098,11 +1143,11 @@ def _construct(
 def _built(
     log: logging.Logger,
     channel: str,
-    base: dict[str, Any],
+    identities: Mapping[str, Identity],
     build: Callable[[], Variant],
-    identity: Callable[[], dict[str, EventValue | None]] = _no_identity,
 ) -> Checked:
-    """One typed emission, constructed under the guard.
+    """One typed emission, its identity and its variant both constructed
+    under the guard.
 
     Strict refuses, the way it refuses an untyped violation and with a
     sentence of the same shape. Forgiving says so once on the emitter's
@@ -1112,14 +1157,26 @@ def _built(
     exception CLASS name, and no partially rendered text, because a
     thunk that raised may have raised holding exactly the bytes this
     surface exists to keep out.
+
+    So is the recovery event's payload. It is built from the identities
+    that VALIDATED, never from what the emitter was handed, and where
+    one did not validate the `Identity` says what to put there instead.
+    An emission whose identity could not be built is refused whole: a
+    conversation record missing the session it belongs to is a shape the
+    declaration denies exists.
     """
-    outcome = _construct(channel, base, identity, build)
+    held, safe, whole = _identities(identities)
+    outcome = (
+        _construct(channel, held, build)
+        if whole
+        else _Refusal(UNBUILT_LABEL, Fault(CONSTRUCTION_FAILED))
+    )
     if isinstance(outcome, Checked):
         return outcome
     if _enforcement == STRICT:
         raise EventSchemaError(refusal_text(outcome.label, (outcome.fault,)))
     _report(log, logging.ERROR, REFUSAL_MESSAGE, outcome.label, outcome.fault.rendered())
-    return _replacement(base)
+    return _replacement(safe)
 
 
 class SessionEvents:
@@ -1243,13 +1300,7 @@ class SessionEvents:
         and the order of that sentence's arguments all come off the
         emitter and the declaration.
         """
-        checked = _built(
-            logger,
-            SESSION_LOGGER,
-            {"session": self.session_id, "device": self.device},
-            build,
-            self._identity,
-        )
+        checked = _built(logger, SESSION_LOGGER, self._identities(), build)
         emission = Emission(
             payload=checked.payload,
             at=self._clock(),
@@ -1260,16 +1311,23 @@ class SessionEvents:
         _dispatch(tuple(self._taps), self._log, emission, logger)
         return emission.at
 
-    def _identity(self) -> dict[str, EventValue | None]:
-        """Whose conversation this is, as values.
+    def _identities(self) -> dict[str, Identity]:
+        """Whose conversation this is, as values, and what a recovery
+        calls each where the value could not be stated.
 
-        Read at emit time rather than kept as values, because both halves
-        move during a session: the device id is written by the edge as
-        soon as the MAC is normalized, and every event before that names
-        none."""
+        Thunks rather than values, because building one is what has to
+        happen inside the guard; read at emit time rather than kept,
+        because both halves move during a session: the device id is
+        written by the edge as soon as the MAC is normalized, and every
+        event before that names none.
+        """
         return {
-            "session": SessionId(self.session_id),
-            "device": None if self.device is None else DeviceId(self.device),
+            "session": Identity(
+                lambda: SessionId(self.session_id), UNSTATED_SESSION
+            ),
+            "device": Identity(
+                lambda: None if self.device is None else DeviceId(self.device), None
+            ),
         }
 
     def debug(self, message: str, *args: Any, event: str, **fields: Any) -> float:

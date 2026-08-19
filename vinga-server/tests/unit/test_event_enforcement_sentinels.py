@@ -45,6 +45,7 @@ from vinga_server.events import (
     SESSION_LOGGER,
     UNBUILT_LABEL,
     UNDECLARED_LABEL,
+    UNSTATED_SESSION,
     Emission,
     EventSchemaError,
     ServerEvents,
@@ -794,4 +795,110 @@ def test_forgiving_recovers_a_conversation_construction_without_repeating_it(
     assert SENTINEL not in both_formats(caplog)
     assert SENTINEL not in consumer.rendered()
     assert SENTINEL not in repr(capture.payloads)
+    assert capture.payloads, "the capture recorded nothing, so this proves nothing"
+
+# --- and the identity the emitter contributes -------------------------
+#
+# The half of a conversation record no variant declares. A session id
+# and a device MAC are value types like any other, so a session opened
+# under a name no `SessionId` admits, or a device id no `normalize_mac`
+# would have answered with, refuses inside the guard exactly as a
+# variant's own value does.
+#
+# What a recovery may say about it is the question this covers, and the
+# rule is the one the whole surface keeps: a recovery is built from the
+# identities that VALIDATED, never from what the emitter was handed.
+# Where one did not, the session gets this module's own word and the
+# device gets the null the surface already uses for "none was
+# understood".
+
+# The sentinel in the two shapes an identity can hold it: dotted, so no
+# `session_id` syntax admits it, and hyphenated, so no MAC does.
+SESSION_SENTINEL = SENTINEL
+DEVICE_SENTINEL = "sk-leak-4a7d2f1e-never-a-real-credential"
+
+
+def a_lawful_conversation() -> Variant:
+    """A variant with nothing wrong with it, so the refusal under test
+    is the identity's and nothing else."""
+    return Heard(agent=Identifier("poet"), duration_s=Real(0.5))
+
+
+def a_session_of(session: str, device: str | None) -> tuple[SessionEvents, Tap, Recording]:
+    emitter = SessionEvents(session, clock=lambda: 1.0)
+    emitter.device = device
+    consumer = Tap()
+    emitter.attach(consumer)
+    capture = Recording()
+    emitter.attach_capture(capture)
+    return emitter, consumer, capture
+
+
+UNUSABLE = (
+    ("an unusable session id", SESSION_SENTINEL, "aa:bb:cc:dd:ee:ff"),
+    ("an unusable device id", "alpha", DEVICE_SENTINEL),
+    ("both unusable", SESSION_SENTINEL, DEVICE_SENTINEL),
+)
+
+UNUSABLE_IDENTITIES = pytest.mark.parametrize(
+    "session, device",
+    [(one, two) for _, one, two in UNUSABLE],
+    ids=[one for one, _, _ in UNUSABLE],
+)
+
+
+@UNUSABLE_IDENTITIES
+def test_strict_refuses_an_unusable_identity_without_repeating_it(
+    session: str, device: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    events.set_enforcement(events.STRICT)
+    emitter, consumer, capture = a_session_of(session, device)
+
+    with caplog.at_level("DEBUG"), pytest.raises(EventSchemaError) as raised:
+        emitter.emit(a_lawful_conversation)
+
+    assert raised.value.args == (
+        "the event schema refused an emission of an event that could not "
+        "be built: construction_failed",
+    )
+    for planted in (SESSION_SENTINEL, DEVICE_SENTINEL):
+        assert planted not in str(raised.value)
+        assert planted not in repr(raised.value)
+        assert planted not in repr(raised.value.args)
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    assert caplog.records == []
+    assert consumer.seen == []
+    assert capture.payloads == []
+
+
+@UNUSABLE_IDENTITIES
+def test_forgiving_recovers_an_unusable_identity_without_repeating_it(
+    session: str, device: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The recovery by equality, so what it DOES carry is pinned rather
+    than merely absent, and then the sentinel hunted through every
+    surface it could reach: both shipped formats, the arguments behind
+    them, the session's own tap and the capture's decision track."""
+    events.set_enforcement(events.FORGIVING)
+    emitter, consumer, capture = a_session_of(session, device)
+
+    with caplog.at_level("DEBUG"):
+        emitter.emit(a_lawful_conversation)
+
+    said = [one for one in caplog.records if one.name == SESSION_LOGGER]
+    (complaint,) = [one for one in said if not hasattr(one, "event")]
+    assert complaint.args == (UNBUILT_LABEL, "construction_failed")
+    (recovered,) = [one for one in said if hasattr(one, "event")]
+    assert fields_of(recovered) == {
+        "event": SCHEMA_VIOLATION,
+        "session": "alpha" if session == "alpha" else UNSTATED_SESSION,
+        "device": "aa:bb:cc:dd:ee:ff" if device == "aa:bb:cc:dd:ee:ff" else None,
+    }
+    assert recovered.args == ()
+    for planted in (SESSION_SENTINEL, DEVICE_SENTINEL):
+        assert carrying(caplog, planted) == set()
+        assert planted not in both_formats(caplog)
+        assert planted not in consumer.rendered()
+        assert planted not in repr(capture.payloads)
     assert capture.payloads, "the capture recorded nothing, so this proves nothing"
