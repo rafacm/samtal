@@ -219,7 +219,12 @@ def test_an_abort_names_only_a_reason_the_server_knows(
     that reports the abort is kept. The firmware's `AbortReason` enum
     has one spelling and the upstream protocol note calls anything else
     implementation-defined, so a value outside the closed set is
-    reported as `other` and never quoted."""
+    reported as `other` and never quoted.
+
+    Four aborts, because three facts have to stay apart: the spelling
+    the firmware sends, an abort that carried no reason at all, and a
+    reason this side does not know. An empty string is the third and not
+    the second: a device chose to send it."""
     with caplog.at_level("INFO"):
         with TestClient(create_app(config_with_agent(asr_text="{ms}"))) as client:
             with connect(client) as websocket:
@@ -230,8 +235,10 @@ def test_an_abort_names_only_a_reason_the_server_knows(
                 )
                 send_pcm(websocket, speech_pcm(600), encoder)
                 websocket.send_text(json.dumps({"type": "abort", "reason": ABORT_SENTINEL}))
+                websocket.send_text(json.dumps({"type": "abort", "reason": ""}))
+                websocket.send_text(json.dumps({"type": "abort"}))
                 websocket.send_text(json.dumps({"type": "abort", "reason": "wake_word_detected"}))
-                # One ordinary turn after the two aborts, so both were
+                # One ordinary turn after the aborts, so all four were
                 # handled before the socket closed.
                 websocket.send_text(
                     json.dumps({"type": "listen", "state": "start", "mode": "manual"})
@@ -240,12 +247,18 @@ def test_an_abort_names_only_a_reason_the_server_knows(
                 websocket.send_text(json.dumps({"type": "listen", "state": "stop"}))
                 collect_reply(websocket)
 
-    written = both_formats(caplog)
-    # The known spelling is still named, which is what keeps `other`
-    # from being the answer to everything.
-    assert "device aborted (wake_word_detected)" in written
-    assert "device aborted (other)" in written
-    assert ABORT_SENTINEL not in written
+    aborted = [
+        record.getMessage()
+        for record in caplog.records
+        if "device aborted" in record.getMessage()
+    ]
+    assert [line.split(": ", 1)[1] for line in aborted] == [
+        "device aborted (other)",
+        "device aborted (other)",
+        "device aborted (none)",
+        "device aborted (wake_word_detected)",
+    ]
+    assert ABORT_SENTINEL not in both_formats(caplog)
 
 
 def test_a_malformed_abort_is_refused_without_quoting_what_it_carried(
