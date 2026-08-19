@@ -121,13 +121,25 @@ narrowest thing the runner needs and the cheapest thing a test can
 supply, and that is not a coincidence. It is what a well-chosen
 interface looks like.
 
-**Counterexample.** A test that constructs a pipeline and then sets
-`pipeline._know_how` directly to check the prompt it sends. It passes,
-it pins a name no caller uses, and it hides the real finding, which is
-that the assembled prompt needed a way to be read from outside. That
-way exists (`GET /runtime/agents/{name}/prompt`), and it exists
-because the question was asked at design time rather than worked
-around in a test.
+**Counterexample.** A test that sets `pipeline._know_how` directly to
+check the prompt a session sends. It passes, and it pins a name no
+caller uses. The caller-facing surface is right there: the model
+provider is what receives the prompt, so `RecordingLlm` in
+`tests/support/providers.py` keeps the system prompt of every round
+it was asked for, and `tests/unit/test_session_prompt.py` asserts
+against `llm.systems`, which is what the session actually sent. One
+test in that file does compare `llm.systems` with
+`session.runtime._know_how.text`, because its claim is exactly that
+with no memory store the cached half is the whole prompt; a reach-in
+with a stated reason is the flag being answered, not an exemption
+from it.
+
+The operator-facing read, `GET /runtime/agents/{name}/prompt`, is a
+separate interface with a separate job. It previews what an agent
+would be sent, so it can see neither a live session's cached half nor
+what the provider received, and it is not the test surface for
+either. Two questions, two interfaces: a surface built for a person
+is not automatically the one a test should use.
 
 ## Worked examples
 
