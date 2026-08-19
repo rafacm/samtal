@@ -275,12 +275,29 @@ def _read(variant: type[Variant]) -> tuple[Declared, ...]:
     return tuple(read)
 
 
+def _frozen(variant: type[Variant]) -> None:
+    """Frozen, and not merely a dataclass.
+
+    A variant is a value: the emitter constructs it inside the guard,
+    derives the payload and the arguments from its fields, and hands
+    those on. A mutable one could be changed between the derivation and
+    the dispatch, and a caller holding a reference to what it just
+    emitted could rewrite the record.
+
+    First of all the checks, and before the fields are read at all,
+    because reading them is what needs a dataclass: `dataclasses.fields`
+    answers a `TypeError` for anything else, which is not the error a
+    declaration is told to expect.
+    """
+    params = getattr(variant, "__dataclass_params__", None)
+    if not is_dataclass(variant) or params is None or not params.frozen:
+        raise CatalogError(f"{variant.__name__} is a frozen dataclass")
+
+
 def _check(variant: type[Variant], declared: tuple[Declared, ...]) -> None:
     """Everything about one variant a reviewer would otherwise check by
     eye."""
     where = variant.__name__
-    if not is_dataclass(variant):
-        raise CatalogError(f"{where} is a frozen dataclass")
     if variant.CHANNEL == SESSION_CHANNEL:
         # The session base carries `session` and `device` as well, and
         # the device id's value type arrives with the session channel's
@@ -362,6 +379,7 @@ def declare(
     for variant in variants:
         if variant in _state.owner:
             raise CatalogError(f"{variant.__name__} belongs to two events")
+        _frozen(variant)
         declared = _read(variant)
         _check(variant, declared)
         _state.values[variant] = declared

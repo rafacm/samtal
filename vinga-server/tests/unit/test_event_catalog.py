@@ -248,6 +248,39 @@ def test_a_refused_name_is_not_echoed_back() -> None:
     assert SENTINEL not in repr(raised.value)
 
 
+def test_a_variant_that_is_not_frozen_is_refused() -> None:
+    """A variant is a value. The emitter constructs it inside the guard
+    and derives the payload and the arguments from its fields, so a
+    mutable one could be rewritten between the derivation and the
+    dispatch."""
+    mutable = dataclass(frozen=False)(
+        type(
+            "Mutable",
+            (Variant,),
+            {
+                "CHANNEL": CHANNEL,
+                "LEVEL": logging.INFO,
+                "TEMPLATE": "said %s",
+                "ARGS": ("stage",),
+                "__annotations__": {"stage": Identifier},
+            },
+        )
+    )
+
+    with pytest.raises(CatalogError, match="frozen dataclass"):
+        declare("scratch_mutable", variants=(mutable,))
+
+
+def test_a_variant_that_is_not_a_dataclass_at_all_is_refused() -> None:
+    class Plain(Variant):
+        CHANNEL = CHANNEL
+        LEVEL = logging.INFO
+        TEMPLATE = "said nothing"
+
+    with pytest.raises(CatalogError, match="frozen dataclass"):
+        declare("scratch_plain", variants=(Plain,))
+
+
 def test_an_event_declared_twice_is_refused() -> None:
     with pytest.raises(CatalogError):
         declare("conversations_enabled", variants=(ConversationsEnabled,))
