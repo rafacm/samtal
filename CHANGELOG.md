@@ -50,6 +50,20 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   still closes the connection and any other malformed message is still
   ignored, both unchanged.
 
+- **The integration lane stops leaving bytecode caches behind** (#199).
+  The two suites that run the deployment seeding scripts verbatim start
+  `samtal-server` and its CLI as subprocesses, and nothing put
+  `PYTHONDONTWRITEBYTECODE` in their environment, so each run left about
+  fifteen `__pycache__` directories under `samtal_server/`. Those are
+  exactly the caches the repository's stale-bytecode safeguard exists to
+  keep off the tree: `tests/conftest.py` clears what it finds once,
+  before the first import, so a cache written by a subprocess later in
+  the run outlives it and goes stale on the next edit. The harness now
+  builds every such environment through one helper that sets the flag,
+  and the scripts stay deployment artifacts with nothing test-shaped in
+  them. A session-scoped check at the end of the lane fails, listing the
+  paths, if a cache is there anyway.
+
 ### Added
 
 - **The design method the architecture review used is written down**
