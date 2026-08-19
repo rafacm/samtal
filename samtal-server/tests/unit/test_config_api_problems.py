@@ -84,9 +84,9 @@ FILLER_REFUSAL = (
 # the implementation doc as a deliberate prose change.
 MCP_TRANSPORT_REFUSAL = (
     "invalid mcp_servers.home:\n"
-    '  - transport "stdio" needs "command"; '
-    'transport "stdio" has no url; that belongs to the other transport; '
-    "env.API_KEY looks like an inline secret, which is not allowed; reference an "
+    '  - transport "stdio" needs "command"\n'
+    '  - transport "stdio" has no url; that belongs to the other transport\n'
+    "  - env.API_KEY looks like an inline secret, which is not allowed; reference an "
     "environment variable instead, for example API_KEY: $MY_SERVER_SECRET"
 )
 
