@@ -13,7 +13,6 @@ from pathlib import Path
 import pytest
 
 from samtal_server.config import Config
-from samtal_server.tools import names
 from tests.integration.conftest import dominant_hz, spoken
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
@@ -288,30 +287,51 @@ def granting_config(kids_grant: object) -> Config:
     )
 
 
-BUILTINS = set(names.BUILTIN_TOOL_NAMES)
-
-
 def offered(events: list[dict]) -> set[str]:
     """The tool names the reply said it was given."""
     return set(spoken(events).removeprefix("I have ").rstrip(".").split(", "))
+
+
+# Everything this server publishes under the `tools` entry, which is
+# what an ungranted agent reaches. The two names the publishing rule
+# drops (a dotted one, one too long once prefixed) are not here because
+# they never reach a model at all.
+PUBLISHED = {
+    "tools__secret_word",
+    "tools__add",
+    "tools__slow_answer",
+    "tools__always_fails",
+    "tools__weather_today_v2",
+    "tools__inside__secret_word",
+}
+
+# The builtins due in this configuration, which is one of them.
+# `switch_agent` is not: each device here is bound to a single agent, so
+# there is nowhere to switch. `remember` is not either: the
+# configuration has no memory section, so no memory store exists.
+# Spelled as a set the assertions below compare against, so that a
+# conditional builtin appearing where its condition does not hold fails
+# this test rather than passing under a subtraction.
+DUE_BUILTINS = {"random_number"}
 
 
 async def test_a_restricted_agent_is_offered_exactly_its_subset(serve, simulate) -> None:
     """The issue's third verification step. Proven from the offer rather
     than from which calls happened: the model is free to call nothing,
     and a conversation that watched calls would pass with a forbidden
-    tool sitting on the list."""
+    tool sitting on the list.
+
+    Both offers are compared whole. A grant decides the MCP half of the
+    list and a structural condition decides the builtin half, and this
+    is the one place both halves are visible at once, so an extra name
+    from either of them is a failure here."""
     config = granting_config({"server": "tools", "tools": ["secret_word", "add"]})
     async with serve(config) as port:
         restricted, _ = await simulate(port, RESTRICTED_MAC)
         whole, _ = await simulate(port, DEVICE_MAC)
 
-    # An unconditional builtin sits beside the granted tools in every
-    # snapshot, and is outside the grant model by design, so what the
-    # grant decides is the rest of the list.
-    assert "random_number" in offered(restricted)
-    assert offered(restricted) - BUILTINS == {"tools__secret_word", "tools__add"}
+    assert offered(restricted) == DUE_BUILTINS | {"tools__secret_word", "tools__add"}
     # The sibling agent on the same server, so the subset is a
     # restriction rather than everything the server published.
+    assert offered(whole) == DUE_BUILTINS | PUBLISHED
     assert offered(whole) > offered(restricted)
-    assert "tools__always_fails" in offered(whole)
