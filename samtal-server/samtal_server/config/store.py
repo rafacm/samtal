@@ -449,22 +449,26 @@ class ConfigStore:
 
         The order is every kind's: the name is made usable, then
         whatever the kind checks before a body is looked at, then the
-        body read as a fragment, then the unchanged-value marker
-        resolved against what is stored, then the model that owns the
-        shape, then whatever the kind checks about the parsed entry.
-        Only after all of that does the write transaction open, so
-        nothing a caller got wrong costs a write lock.
-
-        The marker is what makes a read writable as it stands: a value
-        the display masked resubmits as itself, meaning keep what is
-        stored, and the fragment validates whole as if the operator had
-        retyped it.
-
-        Inside it, the entry is put where the configuration would hold
+        body read as a fragment, then the model that owns the shape,
+        then whatever the kind checks about the parsed entry. Inside the
+        transaction, the entry is put where the configuration would hold
         it and the reference pass runs against the state the write would
         leave, which is what makes an unresolvable write refusable
         before it lands. The columns the kind names are what is written,
         so the `secrets` column nobody named stays as it was.
+
+        Two shapes, and the difference between them is one question: does
+        this fragment depend on what is stored? A fragment that does not
+        is parsed and checked before the write lock is asked for, so
+        nothing a caller got wrong costs a lock. A fragment carrying the
+        unchanged-value marker does depend on it, and the whole of that
+        write happens under one lock: the row it resolves against is read
+        inside the transaction that replaces it, so no other writer can
+        change or delete the value between the resolution and the write.
+        Resolving under a lock taken later would let a value that was
+        gone by the time this write ran come back, which is an outcome no
+        serial order of the two writes produces, and this repository's
+        write is one transaction (see the module docstring).
         """
         if descriptor.addressing:
             name = _identifier(_location(descriptor, *identity[:-1]), identity[-1])
@@ -473,62 +477,17 @@ class ConfigStore:
         if descriptor.before_parse is not None:
             descriptor.before_parse(*identity)
         data = _readable(location, fragment)
-        kept = self._kept(descriptor, identity, location, data)
-        entry = _load(descriptor.model, location, kept)
-        if descriptor.inside_write is not None:
-            descriptor.inside_write(location, identity, entry)
+        marks = tuple(_masked_paths(data, descriptor.secret_key))
+        if not marks:
+            entry = _parsed(descriptor, identity, location, data)
+            with self._transaction() as connection:
+                _persist(connection, _read_domain(connection), descriptor, identity, entry)
+            return
         with self._transaction() as connection:
             domain = _read_domain(connection)
-            _place(domain, descriptor, identity, entry)
-            _refuse_unresolved(domain)
-            _upsert(
-                connection,
-                _table(descriptor),
-                _row_identity(descriptor, identity),
-                _to_row(descriptor, entry),
-            )
-
-    def _kept(
-        self,
-        descriptor: EntityDescriptor,
-        identity: tuple[str, ...],
-        location: str,
-        fragment: dict[str, object],
-    ) -> dict[str, object]:
-        """The fragment with every unchanged-value marker resolved: the
-        mask replaced by what this entity already holds at the same path,
-        so that a read resubmitted whole validates exactly as if the
-        operator had retyped the value the display would not show them.
-
-        The row is read only when the fragment carries a mask at all,
-        which is the uncommon case: an ordinary edit resubmits references
-        and values as themselves and touches the database once. That read
-        is its own transaction, before the write's, so what it can be
-        stale by is the lost update a read-modify-write already has; what
-        it substitutes is the model-shaped half an earlier read showed
-        and never ciphertext, which no fragment can carry and no write
-        replaces.
-
-        A mask with nothing stored under it is refused. A PUT that
-        creates the entity is that case for every mask in it, since an
-        entity that is not there yet holds nothing to keep.
-        """
-        paths = tuple(_masked_paths(fragment, descriptor.secret_key))
-        if not paths:
-            return fragment
-        with self._transaction() as connection:
-            stored = _entry(_read_domain(connection), descriptor, identity)
-        kept = fragment
-        missing: list[tuple[object, ...]] = []
-        for path in paths:
-            held = _held(stored, path)
-            if held is _NOTHING:
-                missing.append(path)
-                continue
-            kept = _substituted(kept, path, held)
-        if missing:
-            raise ConfigError(*_mask_refusal(location, descriptor.model, missing))
-        return kept
+            kept = _keep(descriptor, location, data, marks, _entry(domain, descriptor, identity))
+            entry = _parsed(descriptor, identity, location, kept)
+            _persist(connection, domain, descriptor, identity, entry)
 
     def _delete(self, descriptor: EntityDescriptor, *identity: str) -> None:
         """Remove one entity, by the identity that addresses it and
@@ -1027,6 +986,52 @@ def _place(
         setattr(domain, descriptor.moved_key, entry)
         return
     _section(domain, descriptor, identity)[identity[-1]] = entry
+
+
+def _parsed(
+    descriptor: EntityDescriptor,
+    identity: Sequence[str],
+    location: str,
+    data: Mapping[str, object],
+) -> BaseModel:
+    """One fragment through the model that owns its shape, and then
+    through whatever its kind checks about the parsed entry.
+
+    The same validators guard it as guard the YAML file, so a plaintext
+    secret never enters through a file here either. Named rather than
+    inlined because a write reaches it from two places now, and the
+    checks a kind runs are part of parsing rather than of persisting.
+    """
+    entry = _load(descriptor.model, location, data)
+    if descriptor.inside_write is not None:
+        descriptor.inside_write(location, identity, entry)
+    return entry
+
+
+def _persist(
+    connection: Connection,
+    domain: DomainConfig,
+    descriptor: EntityDescriptor,
+    identity: Sequence[str],
+    entry: BaseModel,
+) -> None:
+    """The end of every write, under the lock: the entry placed where the
+    configuration would hold it, the reference pass run against the state
+    the write would leave, and the row written.
+
+    `domain` is passed in rather than read here, because the write that
+    resolves an unchanged-value marker has already read it inside this
+    same transaction and a second read would be a second answer to a
+    question that must have one.
+    """
+    _place(domain, descriptor, identity, entry)
+    _refuse_unresolved(domain)
+    _upsert(
+        connection,
+        _table(descriptor),
+        _row_identity(descriptor, identity),
+        _to_row(descriptor, entry),
+    )
 
 
 # Reading rows
@@ -1729,10 +1734,49 @@ def _readable(location: str, fragment: object) -> dict[str, object]:
 # A mask with nothing stored behind it is refused rather than written.
 # The mask is not a value: storing it would put eight asterisks in the
 # row and read them back as a credential that is not there.
+#
+# Which paths carry a mark is a question about the fragment alone, so it
+# is asked before the write lock; what to put in their place is a
+# question about the row, so it is asked inside the transaction that
+# replaces that row, and `_write` above says why.
 
 # What is looked up and not found, distinct from a stored null, which is
 # a field holding nothing and so is not a value to keep either.
 _NOTHING = object()
+
+
+def _keep(
+    descriptor: EntityDescriptor,
+    location: str,
+    fragment: Mapping[str, object],
+    marks: Sequence[Sequence[object]],
+    stored: object,
+) -> dict[str, object]:
+    """The fragment with every unchanged-value marker resolved: the mask
+    replaced by what the entity already holds at the same path, so that a
+    read resubmitted whole validates exactly as if the operator had
+    retyped the value the display would not show them.
+
+    `stored` is the entry as the caller's own transaction reads it, and
+    the caller holding that transaction is the whole of this function's
+    correctness: the value put back is one this write is about to replace
+    while nobody else can be replacing it.
+
+    A mask with nothing stored under it is refused. A PUT that creates
+    the entity is that case for every mark in it, since an entity that is
+    not there yet holds nothing to keep.
+    """
+    kept = dict(fragment)
+    missing: list[Sequence[object]] = []
+    for path in marks:
+        held = _held(stored, path)
+        if held is _NOTHING:
+            missing.append(path)
+            continue
+        kept = _substituted(kept, path, held)
+    if missing:
+        raise ConfigError(*_mask_refusal(location, descriptor.model, missing))
+    return kept
 
 
 def _masked_paths(
