@@ -61,6 +61,14 @@ are reviewable markdown rather than prompt text.
   this before designing a feature or deciding direction. Issues hold
   evidence, ADRs hold decisions, plans hold execution, principles hold
   direction.
+- [**architecture/design-guide.md**](architecture/design-guide.md): what
+  a module looks like once it is on the right side of one of those
+  boundaries. The vocabulary (module, interface, seam, adapter, depth,
+  locality) defined against this codebase, the deletion test, the rule
+  that a test reaches the interface, and four merged changes worked
+  through: what each one's shape was before, what it became, and the
+  lens it teaches. Its short form is the design section of
+  [`../AGENTS.md`](../AGENTS.md).
 
 ## Architecture diagrams
 

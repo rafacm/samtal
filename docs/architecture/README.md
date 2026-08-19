@@ -1,6 +1,6 @@
 # Architecture diagrams
 
-The one file here that is not a diagram is [`principles.md`](principles.md): samtal's product promises and the architecture principles that keep them, each with an example and a counterexample, to be read before designing a feature or deciding direction.
+Two files here are not diagrams. [`principles.md`](principles.md) holds samtal's product promises and the architecture principles that keep them, each with an example and a counterexample, to be read before designing a feature or deciding direction. [`design-guide.md`](design-guide.md) holds the design method those principles are implemented with: the vocabulary of depth, seams and adapters defined against this codebase, the deletion test, and four merged changes worked through as examples. Principles say where the boundaries are; the guide says what a module inside one looks like, and when the two pull apart the principles win.
 
 Diagrams live in a directory per authoring tool, so a second tool can join without either one's files having to be picked out of a shared folder.
 
