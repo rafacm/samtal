@@ -248,6 +248,38 @@ def test_an_abort_names_only_a_reason_the_server_knows(
     assert ABORT_SENTINEL not in written
 
 
+def test_a_malformed_abort_is_refused_without_quoting_what_it_carried(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The closed reason set only covers an abort that parses. A
+    `reason` of the wrong shape is refused one layer earlier, and that
+    refusal used to be pydantic's own rendering, which carries
+    `input_value=`, logged verbatim by this edge. The message is
+    ignored, the session carries on, and nothing the device sent is on
+    the line."""
+    with caplog.at_level("INFO"):
+        with TestClient(create_app(config_with_agent(asr_text="{ms}"))) as client:
+            with connect(client) as websocket:
+                shake_hands(websocket)
+                encoder = OpusEncoder()
+                websocket.send_text(
+                    json.dumps({"type": "abort", "reason": [ABORT_SENTINEL]})
+                )
+                # The session is still up and still answering, which is
+                # what "ignored" means for an unparseable message.
+                websocket.send_text(
+                    json.dumps({"type": "listen", "state": "start", "mode": "manual"})
+                )
+                send_pcm(websocket, speech_pcm(240), encoder)
+                websocket.send_text(json.dumps({"type": "listen", "state": "stop"}))
+                texts, _ = collect_reply(websocket)
+
+    assert 180 <= heard_ms(texts) <= 300
+    written = both_formats(caplog)
+    assert 'ignored message: malformed "abort" message: reason (string_type)' in written
+    assert ABORT_SENTINEL not in written
+
+
 def test_abort_during_a_streaming_reply_does_not_eat_the_next_utterance() -> None:
     # The device barging in mid-reply and speaking again immediately must
     # get the new utterance answered: cancellation of the reply task is

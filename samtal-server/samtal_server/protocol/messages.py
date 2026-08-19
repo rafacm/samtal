@@ -91,6 +91,41 @@ _MESSAGE_TYPES: dict[str, type[BaseModel]] = {
 }
 
 
+def _refusal(message_type: str, model: type[BaseModel], exc: ValidationError) -> str:
+    """What a malformed message of a modelled type may be called.
+
+    Pydantic renders a `ValidationError` with `input_value=` in it, so a
+    device that aborts with `{"reason": ["sk-live-..."]}` puts its own
+    bytes into this sentence, and the session's edge logs the sentence
+    verbatim on a surface the no-leak contract governs (#185, the
+    content-and-telemetry ADR). The sentence therefore names the message
+    type, where the message broke, and which rule it broke, and nothing
+    that arrived.
+
+    Where it broke is read from the model's own field names rather than
+    from the error's `loc`, because a `loc` inside a nested value can
+    hold a key the far side wrote; a location that is not one of this
+    model's fields is called `shape`. Which rule is pydantic's error
+    `type`, a fixed slug (`string_type`, `literal_error`, `missing`)
+    with no value in it. Both halves are this side's vocabulary, which
+    is what makes the sentence safe to keep.
+    """
+    fields = set(model.model_fields)
+    faults = sorted(
+        {
+            (
+                str(error["loc"][0])
+                if error["loc"] and str(error["loc"][0]) in fields
+                else "shape",
+                error["type"],
+            )
+            for error in exc.errors()
+        }
+    )
+    named = ", ".join(f"{where} ({rule})" for where, rule in faults)
+    return f'malformed "{message_type}" message: {named or "shape"}'
+
+
 def parse_message(text: str | bytes) -> DeviceMessage:
     """Parse one text frame into a message, raising ProtocolError when it
     is not JSON, not an object, untyped, or malformed for a known type."""
@@ -111,7 +146,15 @@ def parse_message(text: str | bytes) -> DeviceMessage:
     try:
         return model.model_validate(data)
     except ValidationError as exc:
-        raise ProtocolError(f'malformed "{message_type}" message: {exc}') from exc
+        refusal = _refusal(message_type, model, exc)
+    # Raised out here rather than in the arm, the way the device edge
+    # raises `DeviceGone` (`device/session.py`): inside it, the
+    # `ValidationError` becomes this one's `__context__` even under
+    # `from None`, and anything that walks the chain of what it catches
+    # has the rejected value back. Nothing about which field validator
+    # objected is diagnosable from the exception anyway, since the
+    # sentence above is what this boundary exists to produce.
+    raise ProtocolError(refusal)
 
 
 def server_hello(session_id: str, audio_params: AudioParams) -> str:
