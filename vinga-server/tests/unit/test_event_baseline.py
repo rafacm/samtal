@@ -16,7 +16,12 @@ falls into. So the path list comes from outside it, twice over:
   be produced by some driver's run: every legal variant is
   constructible, and therefore directly drivable, which is what the plan
   means by claiming exhaustiveness over variants rather than over call
-  sites.
+  sites. A variant is identified by its event, channel, level and
+  template AND by its payload's keys, because several events say one
+  sentence about two shapes: `llm_round` reports a provider the registry
+  built out of a configured entry and one it never built with the same
+  words, and the four dimensions alone would let either stand in for
+  both.
 
 A walk is only worth what it finds, so it is proved here on planted
 sources rather than trusted: both shapes, both numbered in one sequence
@@ -52,7 +57,7 @@ from tests.tools.event_baseline import (
     sites_in,
 )
 from vinga_server.conversations.store import ConversationStore
-from vinga_server.events.catalog import catalog
+from vinga_server.events.catalog import Variant, catalog, payload_shape
 
 REGENERATE = (
     "the captured records are no longer the committed baseline. If a "
@@ -88,33 +93,55 @@ def test_every_driven_path_produces_the_event_it_emits(
 ) -> None:
     """Not merely that a driver produced something. The walk reads which
     event each path emits, from the `event=` keyword or from the variant
-    the thunk constructs, and the record has to be that one."""
+    the thunk constructs, and every record kept has to be that one."""
     expected = {site.identity: site.event for site in sites()}
 
     for driver in DRIVERS:
         produced = {one["event"] for one in capture[driver.key]}
-        assert expected[driver.identity] in produced, driver.key
+        assert produced == {expected[driver.identity]}, driver.key
+
+
+def matches(variant: type[Variant], record: dict[str, Any]) -> bool:
+    """Whether one captured record is an emission of one variant.
+
+    The four dimensions, and then the payload's keys: everything the
+    variant always carries is there, and nothing it never declares is.
+    That second half is what tells apart the pairs of variants that say
+    one sentence about two shapes, since a record naming a configured
+    provider entry cannot be the variant that declares no such field.
+    """
+    shape = payload_shape(variant)
+    required = {one.name for one in shape if one.carried and one.required}
+    declared = {one.name for one in shape if one.carried}
+    keys = set(record["fields"])
+    return (
+        record["channel"] == variant.CHANNEL
+        and record["level"] == variant.LEVEL
+        and record["template"] == variant.TEMPLATE
+        and required <= keys <= declared
+    )
 
 
 def test_every_catalog_variant_on_a_scoped_channel_is_produced(
     capture: dict[str, list[dict[str, Any]]],
 ) -> None:
-    """The obligation that outlives the walk. A variant identifies
-    itself by its event, channel, level and template, which is what a
-    captured record carries."""
-    declared = {
-        (name, variant.CHANNEL, variant.LEVEL, variant.TEMPLATE)
+    """The obligation that outlives the walk: every legal variant is
+    constructible, and therefore drivable, so a declaration nothing can
+    produce is a permanent enlargement of what this server may say."""
+    driven: dict[str, list[dict[str, Any]]] = {}
+    for records in capture.values():
+        for record in records:
+            driven.setdefault(record["event"], []).append(record)
+
+    unproduced = [
+        f"{name}: {variant.__name__}"
         for name, declaration in catalog().items()
         for variant in declaration.variants
         if variant.CHANNEL in SCOPE
-    }
-    produced = {
-        (one["event"], one["channel"], one["level"], one["template"])
-        for records in capture.values()
-        for one in records
-    }
+        and not any(matches(variant, one) for one in driven.get(name, []))
+    ]
 
-    assert declared == produced
+    assert unproduced == []
 
 
 def test_the_capture_is_the_committed_baseline(
