@@ -1,6 +1,6 @@
-@startuml samtal-architecture-overview
+@startuml vinga-architecture-overview
 ' What runs where, and what leaves the host. The colour of a provider is
-' its `egress` class marking (samtal_server/providers/base.py), which is
+' its `egress` class marking (vinga_server/providers/base.py), which is
 ' what `server.local_only` is checked against at boot.
 '
 ' Deliberately at overview altitude: the ordering inside one turn is in
@@ -11,7 +11,7 @@
 ' Needs Graphviz (`brew install plantuml` brings it). Add
 ' `!pragma layout smetana` to render without it, at some cost in layout.
 
-title samtal: what runs where, and what leaves the host
+title vinga: what runs where, and what leaves the host
 
 skinparam shadowing false
 skinparam backgroundColor white
@@ -33,7 +33,7 @@ rectangle "ESP32-S3 device\nthin: xiaozhi firmware, one config URL" as DEV #EEF3
   component "**NVS**\nota_url, websocket url,\ndevice token" as NVS
 }
 
-rectangle "samtal-server (FastAPI)" as SRV #EEF8EE {
+rectangle "vinga-server (FastAPI)" as SRV #EEF8EE {
   component "**OTA / config endpoint**\nPOST /xiaozhi/ota/, the token issuer.\nStateless HMAC-SHA256 tokens,\nso no token table to lose" as OTA
   component "**WebSocket endpoint**\n/xiaozhi/v1/, Bearer gate before\nthe accept. SessionRegistry caps\nthe count and drains on shutdown" as WS
   component "**Session**\none per connection: handshake,\nconversation loop, tool loop,\nbarge-in gates" as SESS
@@ -126,7 +126,7 @@ end note
 legend right
 |= Colour |= Meaning |
 |<#EEF3FF>    | Device: ESP32-S3, thin firmware |
-|<#EEF8EE>    | samtal-server core |
+|<#EEF8EE>    | vinga-server core |
 |<#FFFBF0>    | Pluggable pipeline providers |
 |<#D9EAD3>    | egress = False: stays on the machine |
 |<#FFE9C6>    | egress = None: the configuration decides, and must say so under local_only |

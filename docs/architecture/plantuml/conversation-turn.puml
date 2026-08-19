@@ -1,10 +1,10 @@
-@startuml samtal-conversation-turn
+@startuml vinga-conversation-turn
 ' One conversation turn as the code actually runs it. Ordering and
 ' concurrency are the point here, which is what a sequence diagram can
 ' show and a box-and-arrow picture cannot: the tool loop's rounds, the
 ' sentence lookahead overlapping playback, and who re-arms the listening.
 
-title samtal: one conversation turn, from wake word to spoken reply
+title vinga: one conversation turn, from wake word to spoken reply
 
 skinparam shadowing false
 skinparam backgroundColor white
@@ -15,7 +15,7 @@ skinparam sequenceMessageAlign left
 actor "Person" as H
 participant "ESP32-S3\ndevice" as D #EEF3FF
 
-box "samtal-server" #EEF8EE
+box "vinga-server" #EEF8EE
   participant "Session" as S
   participant "Endpointer\n(silero)" as V
   participant "ASR" as A
@@ -29,7 +29,7 @@ end box
 D -> S : POST /xiaozhi/ota/ with system info
 S --> D : websocket url, device token,\nprotocol version, wall clock
 note right of D
-  Persisted to NVS. samtal-server serves no
+  Persisted to NVS. vinga-server serves no
   firmware images, so the firmware section
   always answers "up to date", and the reply
   never carries an activation section.

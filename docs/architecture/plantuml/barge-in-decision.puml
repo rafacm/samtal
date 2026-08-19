@@ -1,4 +1,4 @@
-@startuml samtal-barge-in-decision
+@startuml vinga-barge-in-decision
 ' The gate an utterance must pass before it may cancel a reply already
 ' streaming. This is a decision structure, not a flow, which is why it
 ' gets its own picture: the conversation-turn diagram draws the happy
@@ -7,7 +7,7 @@
 ' Source: Session._finish_utterance and Session._gate_barge_in, and the
 ' ADR "replies cancel only on evidence of speech".
 
-title samtal: may this utterance cancel the reply in flight?
+title vinga: may this utterance cancel the reply in flight?
 
 skinparam shadowing false
 skinparam backgroundColor white
