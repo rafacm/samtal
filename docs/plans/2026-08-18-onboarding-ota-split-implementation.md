@@ -697,6 +697,13 @@ each.
    safeguard knows the unit lane is clean and the integration lane is
    not.
 
+   Fixed since, in #199 via PR #203: the integration harness owns the
+   environment those scripts are launched in and sets
+   `PYTHONDONTWRITEBYTECODE=1` there rather than in the scripts, which
+   stay deployment artifacts, and a session-scoped finalizer fails the
+   lane, listing the paths, if a cache is under `samtal_server/` when it
+   ends. Both lanes are clean now.
+
 4. **P3: this document's function-body-import verification was
    false.** The indentation grep recorded here as empty is not empty:
    it matches a wrapped docstring line in `origin.py` beginning with
