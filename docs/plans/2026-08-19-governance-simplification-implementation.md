@@ -543,3 +543,98 @@ Run from `vinga-server/`, at the last commit of the milestone.
 
 Not verified here, and not claimed: the container image and the smoke
 lane, for the reason M1 gives.
+
+### PR review round (2026-08-20)
+
+External review of PR #218, read-only against commit `d0de84ac`. Three
+P1 findings; two adopted with the commit that made each, one declined
+with its reasons.
+
+**1 (P1). A recovery was built from the identity it was handed.** The
+typed session path passed the emitter's raw base into `_replacement()`
+after identity construction failed, so `SessionEvents("sk.test.secret")`
+emitted a `schema_violation` carrying that spelling under `session`. The
+test beside it expected exactly that, which is how it survived review:
+it pinned the leak rather than the rule. The device identity had the
+same shape.
+
+*Resolution.* Adopted (`af91fdbf`). A recovery is no longer built from
+the base at all. Each identity is a thunk plus the answer a recovery
+gives where the value could not be stated, the emitter builds them under
+one guard each, and the replacement payload is assembled from the ones
+that validated. The session's fallback is `UNSTATED_SESSION`, this
+module's own word and one the `session_id` syntax admits, so the
+recovery event is the shape its declaration says it is; the device's is
+the null the surface already uses for "none was understood". One guard
+each rather than one around the pair, because a device id that refuses
+must not take a lawful session id down with it: a recovery is a record
+an operator reads, and the identity it can still state is the half that
+makes it readable. An emission whose identity could not be built is
+still refused whole, since a conversation record missing the session it
+belongs to is a shape the declaration denies exists. The offending test
+is replaced by three, and the sentinel suite drives all three
+combinations of an unusable session and an unusable device with
+credential-shaped spellings, through the exception's text and both
+chains, both shipped formats, the arguments behind them, the session's
+tap and the capture's decision track.
+
+**2 (P1). A declared type was an annotation and nothing more.** A
+variant serialized whatever object sat in a field through that object's
+own `carried()`, without asking whether it was the type the field
+declared. `declare()` reads the annotations, which is a different
+question from what a caller passed; mypy runs strict over the events
+package and no further; and a frozen dataclass takes whatever it is
+handed. `Identifier` is deliberately permissive, so one handed to a
+field declaring `LanguageTag` would put a far side's answer on the
+surface under a name that promises a bounded code.
+
+*Resolution.* Adopted (`6f05f2b3`). `Variant.verify()` holds every
+supplied, default and fixed value to its declared type, and the emitter
+calls it inside the guard before anything is rendered or serialized, so
+a mismatch is refused exactly the way a refused value is. Three checks,
+which are the three things an annotation states and a runtime does not:
+the type by `isinstance`, so a narrowing subclass still satisfies the
+field it narrows; a null only where the field is nullable; and an
+absence only where the field is not required, since `Absent` is an
+ordinary value at runtime and one passed to a required field would drop
+a key the golden inventory says is always there. The refusal names the
+variant, the field and the declared type, all three the catalog's own,
+and never what it was holding. Driven in both modes with a
+credential-shaped value in the wrong field.
+
+**3 (P1). Declined: the `%` arguments of an unconverted path.**
+
+*Resolution.* Declined as out of this milestone's scope, and the design
+question filed as issue #219. Four reasons, which are the standing
+resolution for pre-existing retained-surface behavior moved verbatim.
+The milestone is behavior-preserving by construction: every converted
+path emits the record it emitted before, and the committed record
+baseline is the evidence rather than the claim, byte-identical across
+the conversion and untouched by this round. The semantics in question
+predate #210 and are the surface's, not this change's, so altering them
+here would be a behavior change smuggled into a milestone whose whole
+proof is that behavior did not change. Whether they should change at all
+is a design decision with its own consequences for what operators read,
+which is what #219 is for. And the two untyped-path renders already
+parked for M3 by PR #217's round, the failed-tap sentence in `_offer`
+and the last-resort `GUARD_MESSAGE`, stay parked there: they are the
+same question on the same path, and splitting them across milestones
+would leave one half of it fixed and the other half live.
+
+### Verification, after the review round
+
+Run from `vinga-server/`, at `6f05f2b3`.
+
+- `uv run ruff check .`: all checks passed.
+- `uv run mypy`: success, no issues found in 3 source files.
+- `uv run pytest tests/unit -q`: 3,089 passed, 16 skipped (3,073 at the
+  end of M2; the 16 new tests are this round's).
+- `uv run pytest tests/integration -q`: 60 passed.
+- The four documentation drift checks: all clean, and
+  `docs/reference/events.md` is unchanged by this round.
+- The record baseline is untouched: no commit in this round names
+  `vinga-server/tests/unit/data/event-baseline.json`, which is what says
+  the two fixes moved no lawful record.
+
+The image and the smoke lane remain unverified here, for the reason
+given above.
