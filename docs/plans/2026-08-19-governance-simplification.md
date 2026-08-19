@@ -403,12 +403,19 @@ carries its baseline proof inside its own PR.
   the home of facts a model cannot carry.
 - [ ] **M5: the OpenAPI client spike.** Run Hey API's openapi-ts and
   openapi-typescript with openapi-fetch against the committed
-  document. Acceptance criteria, recorded with results in the
-  implementation doc: the generated client compiles under strict
-  TypeScript; every operation surfaces under its stable
-  `operation_id` name; request and response types for the five
-  entities need no handwritten mirror; nothing in the output leaks
-  server internals beyond the document. Deliverable is a decision
+  document, generator versions pinned and outputs required to be
+  deterministic with no manual edits. Acceptance criteria, recorded
+  with results in the implementation doc: the generated client
+  compiles under strict TypeScript; every operation surfaces under
+  its stable `operation_id` name; request and response types for the
+  five entities need no handwritten mirror; nothing in the output
+  leaks server internals beyond the document; and a strict-mode
+  consumer fixture, checked in with the spike, exercises
+  authentication, representative read, write, and delete operations
+  for all five entities, typed non-2xx problem responses, optional
+  and nullable field handling, and the provider entries' extension
+  properties, because a client that merely compiles can still be
+  unusable at exactly those edges. Deliverable is a decision
   and a recorded recommendation for #129, not frontend wiring; if
   both generators fail the criteria, the recorded fallback is
   handwritten types over the document, and the seam claim still
@@ -654,3 +661,9 @@ catalog's constructible variants, not call sites.
 unusable client.** Compilation and stable names do not catch
 optional-versus-nullable handling, auth, problem responses, or the
 provider extension properties.
+
+*Resolution.* Adopted. M5 gains a checked-in strict-TypeScript
+consumer fixture over auth, five-entity CRUD, typed problem
+responses, optional/nullable handling, and provider extension
+properties, with pinned generator versions and deterministic
+output.
