@@ -42,9 +42,9 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   refusal names. `errors` is always present and empty where a refusal
   names no field of the request, so every refusal has one shape. Each
   entry addresses its field by RFC 6901 JSON Pointer
-  (`/connection/api_key_env`), which a dotted spelling could not do:
-  a key may hold a dot, and `~` and `/` inside one are escaped as the
-  RFC says. `type` and `instance` are deliberately absent, which means
+  (`/filler/phrases`, `/mcp/0`, and the empty string for the fragment
+  as a whole), escaped as the RFC says.
+  `type` and `instance` are deliberately absent, which means
   `about:blank`, and is the truth: these problems are described by
   their status and their prose rather than by a URI registry nobody
   serves. The sentence is unchanged byte for byte, so the CLI prints
@@ -63,6 +63,23 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   `; `-separated line, which no reader can decompose back into the
   fields it names, and it now reads one line per problem, the same
   words in the same order.
+- **A refusal names only fields this server declares** (#192). Both the
+  sentence and the `errors` entries are built from where validation
+  failed, and that location can be a key the request invented: an
+  unrecognized key on a fragment, an option a provider passes through
+  to its implementation, an entry of an MCP server's `env` or
+  `headers`. A key is as good a place to paste a credential as a value
+  is, and better at hiding there, because a key looks like a name. So a
+  refusal renders only names this server declares and positions in a
+  list, and stops at the first segment that is neither: an unrecognized
+  key is refused as "an unrecognized key is not permitted" pointing at
+  the object it was written in, and a rule about a secret-shaped key
+  names the word from this server's own closed list that the key
+  matched, and where the key was written, rather than the key. The rule
+  was already written down for one refusal, a malformed `mcp` grant; it
+  now has one home and every renderer reads it from there. Refusals
+  about declared fields are unchanged, `api_key_env` among them: a name
+  this server chose is a name it may print.
 
 - **A read shows every field its entity's model declares, masked at
   every depth** (#176, #171). The five body builders behind

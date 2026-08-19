@@ -19,7 +19,8 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Annotated, Literal, NamedTuple, Protocol
+from types import UnionType
+from typing import Annotated, Literal, NamedTuple, Protocol, Union, get_args, get_origin
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import (
@@ -692,15 +693,18 @@ class FieldProblem(NamedTuple):
     API answers them as its problem document's `errors`.
 
     `path` is an RFC 6901 JSON Pointer into the fragment the validator
-    was handed, so the empty string is the fragment itself and a key
-    holding a dot or a slash is unambiguous, which a dotted spelling
-    cannot be. `message` is the sentence, which is the same text the
+    was handed, and the empty string is the fragment itself. It carries
+    only names this repository declared and positions in a list, which
+    `safe_location` below is the rule for: a key the caller wrote is not
+    addressed, and the pointer stops at the nearest enclosing place that
+    can be named. `message` is the sentence, which is the same text the
     refusal's own prose carries for this problem: one computation, two
     renderings, so the two cannot come to disagree.
 
-    It never carries a value. Every message here names a path and a
-    rule, because a key that fails one of these rules most likely holds
-    the credential itself.
+    It carries neither a value nor a caller's key. Every message here
+    names a place and a rule, because a key that fails one of these
+    rules most likely holds the credential, and so, often enough, does
+    the key.
     """
 
     path: str
@@ -727,6 +731,87 @@ class FieldProblemsError(ValueError):
         super().__init__("\n".join(problem.message for problem in self.problems))
 
 
+# What a refusal may name, in one place.
+#
+# A location segment inside a declared model is a name this repository
+# chose, so printing it publishes nothing. Every other segment is a key
+# the caller wrote: an unrecognized key on a closed model, an option on
+# a pass-through one, an entry of a mapping field such as an MCP
+# server's `env`. A key is as good a place to paste a credential as a
+# value is, and better at hiding there, so none of them reaches a
+# refusal's sentence, its pointers, its messages or a log line. The rule
+# lived here already, applied by hand to one refusal (`_grant_location`
+# below, and the comment on `_UNRECOGNIZED_KEY`); this is that same rule
+# with every renderer reading it from one place.
+UNRECOGNIZED_KEY_REFUSED = "an unrecognized key is not permitted"
+
+
+def safe_location(
+    model: type[BaseModel], location: Sequence[object]
+) -> tuple[tuple[object, ...], bool]:
+    """The longest prefix of a pydantic error location made only of
+    names this repository declared, and whether anything was dropped.
+
+    Walked against the model rather than matched against a list of
+    words, because what makes a segment safe is that the schema has it:
+    a declared field descends into its own annotation, a position
+    descends into a list's item type, and everything else stops the
+    walk. Truncating rather than substituting per segment is the
+    conservative reading: once a segment is the caller's, everything
+    under it is addressed relative to a key that cannot be printed, so
+    the honest answer is the nearest parent this repository can name.
+    """
+    safe: list[object] = []
+    reached: object = model
+    for part in location:
+        reached = _declared(reached, part)
+        if reached is None:
+            return tuple(safe), True
+        safe.append(part)
+    return tuple(safe), False
+
+
+def _declared(annotation: object, part: object) -> object | None:
+    """What one location segment reaches inside an annotation when the
+    segment is a name this repository declared, and None when it is
+    not."""
+    annotation = _unwrapped(annotation)
+    origin = get_origin(annotation)
+    if origin is UnionType or origin is Union:
+        # A union's error locations carry a branch tag pydantic builds
+        # from the branch's core schema (`constrained-str`,
+        # `McpGrant`). Those are not field names, so a tag stops the
+        # walk like any other unknown segment: the location falls back
+        # to the position or the field above it, which is the last thing
+        # both branches agree on anyway.
+        for branch in get_args(annotation):
+            found = _declared(branch, part)
+            if found is not None:
+                return found
+        return None
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        field = annotation.model_fields.get(part) if isinstance(part, str) else None
+        return field.annotation if field is not None else None
+    if origin in (list, tuple, set, frozenset) and isinstance(part, int):
+        arguments = get_args(annotation)
+        return arguments[0] if arguments else None
+    # A mapping's keys, and anything a scalar cannot be indexed into.
+    # Note which side of the line a mapping falls on: `env`, `headers`
+    # and the entity maps are keyed by whatever was written, so a key
+    # there is request bytes even when it names something real.
+    return None
+
+
+def _unwrapped(annotation: object) -> object:
+    """An annotation without its `Annotated` metadata, which is where
+    `NonBlankStr` and the other constrained aliases keep theirs."""
+    return getattr(annotation, "__origin__", annotation) if _annotated(annotation) else annotation
+
+
+def _annotated(annotation: object) -> bool:
+    return getattr(annotation, "__metadata__", None) is not None
+
+
 def json_pointer(segments: Iterable[object]) -> str:
     """The RFC 6901 pointer addressing a path of keys and array
     positions, from the segments themselves.
@@ -742,6 +827,19 @@ def json_pointer(segments: Iterable[object]) -> str:
     )
 
 
+def secret_option_fragment(name: str) -> str | None:
+    """Which of the closed fragments above an option name matched, or
+    None.
+
+    The fragment and not the name, because a refusal has to say what was
+    wrong with a key it may not print: the fragments are this
+    repository's own six words, so naming the one that matched tells an
+    operator which key to look at without publishing what they called
+    it."""
+    lowered = name.lower()
+    return next((fragment for fragment in _SECRET_KEY_FRAGMENTS if fragment in lowered), None)
+
+
 def is_secret_option(name: str) -> bool:
     """Whether an option name is secret-shaped.
 
@@ -749,8 +847,7 @@ def is_secret_option(name: str) -> bool:
     fragment an error, what decides which option names are credential
     slots a secret may be stored under, and what the display path masks
     the value of."""
-    lowered = name.lower()
-    return any(fragment in lowered for fragment in _SECRET_KEY_FRAGMENTS)
+    return secret_option_fragment(name) is not None
 
 
 def url_credential(value: object) -> str | None:
@@ -826,7 +923,7 @@ def is_env_name(value: object) -> bool:
     return isinstance(value, str) and _ENV_NAME_RE.match(value) is not None
 
 
-def check_no_inline_secrets(path: str, value: object) -> None:
+def check_no_inline_secrets(name: str, value: object, *, declared: bool = False) -> None:
     """A secret-shaped key holds no value, at any depth inside a
     provider's options.
 
@@ -837,59 +934,83 @@ def check_no_inline_secrets(path: str, value: object) -> None:
     accept the nested one, store it, and read it back verbatim on every
     display path, which is exactly what the flat rule exists to prevent.
 
-    Refusals name the dotted path and never the value: a key that fails
-    either check most likely holds the credential itself. The sentence
-    keeps the dotted spelling, which is how an operator reads their own
-    file; the `FieldProblem` beside it carries the same place as a JSON
-    Pointer, which is what a reader can act on. Both are derived from
-    the segments walked to here, so they cannot name different keys.
+    `declared` says whether `name` is a field this model declares, and
+    it decides what the refusal may say. A declared field is a name this
+    repository chose, so it is named: `api_key_env` is printed, and the
+    pointer addresses it. An option is a key the caller wrote, and so is
+    every key under it, so the refusal names the closed fragment the key
+    matched instead, and the pointer addresses the nearest place this
+    repository can name, which for a top-level option is the fragment
+    itself. Neither form ever carries the value: a key that fails one of
+    these rules most likely holds the credential, and so, often enough,
+    does the key.
     """
-    _check_no_inline_secrets((path,), value)
+    _check_no_inline_secrets((name,), value, named=declared)
 
 
-def _check_no_inline_secrets(segments: tuple[object, ...], value: object) -> None:
-    """The walk itself, carrying the segments rather than a joined path
-    so that the two spellings above stay one fact."""
-    path = ".".join(str(segment) for segment in segments)
+def _check_no_inline_secrets(
+    segments: tuple[object, ...], value: object, *, named: bool
+) -> None:
+    """The walk itself, carrying the segments so the dotted sentence and
+    the pointer stay one fact, and `named` so that going one key deeper
+    cannot make a caller's key printable."""
     leaf = str(segments[-1])
+    path = ".".join(str(segment) for segment in segments)
+    # Named or not, the pointer is the same decision: the segments this
+    # repository may address, which here is all of them or none of them.
+    pointer = json_pointer(segments) if named else ""
     if leaf.lower().endswith("_env"):
         if value is not None and not is_env_name(value):
-            raise FieldProblemsError(
-                [
-                    FieldProblem(
-                        json_pointer(segments),
-                        f'"{path}" must hold the name of an environment variable, and '
-                        f"what it holds does not look like one; a pasted value belongs "
-                        f"nowhere in this file, so name the variable holding it, for "
-                        f"example {path}: MY_PROVIDER_KEY",
-                    )
-                ]
-            )
-        return
-    if is_secret_option(leaf):
-        raise FieldProblemsError(
-            [
-                FieldProblem(
-                    json_pointer(segments),
-                    f'"{path}" looks like an inline secret, which is not allowed; '
-                    f"reference an environment variable instead, for example "
-                    f"{path}_env: MY_PROVIDER_{leaf.upper()}",
+            if named:
+                message = (
+                    f'"{path}" must hold the name of an environment variable, and '
+                    f"what it holds does not look like one; a pasted value belongs "
+                    f"nowhere in this file, so name the variable holding it, for "
+                    f"example {path}: MY_PROVIDER_KEY"
                 )
-            ]
-        )
+            else:
+                message = (
+                    "a key ending in _env must hold the name of an environment "
+                    "variable, and what this one holds does not look like one; a "
+                    "pasted value belongs nowhere in this file, so name the variable "
+                    "holding it. The key is not quoted back"
+                )
+            raise FieldProblemsError([FieldProblem(pointer, message)])
+        return
+    fragment = secret_option_fragment(leaf)
+    if fragment is not None:
+        if named:
+            message = (
+                f'"{path}" looks like an inline secret, which is not allowed; '
+                f"reference an environment variable instead, for example "
+                f"{path}_env: MY_PROVIDER_{leaf.upper()}"
+            )
+        else:
+            message = (
+                f'a key containing "{fragment}" looks like an inline secret, which is '
+                f"not allowed; reference an environment variable instead, in a key of "
+                f"the same name ending in _env. The key is not quoted back"
+            )
+        raise FieldProblemsError([FieldProblem(pointer, message)])
     if isinstance(value, Mapping):
         for key, nested in value.items():
-            _check_no_inline_secrets((*segments, key), nested)
+            _check_no_inline_secrets((*segments, key), nested, named=False)
     elif isinstance(value, (list, tuple)):
         for position, item in enumerate(value):
-            _check_no_inline_secrets((*segments, position), item)
+            _check_no_inline_secrets((*segments, position), item, named=False)
+
+
+def mcp_secret_fragment(name: str) -> str | None:
+    """The same question for an MCP server's env and headers, where the
+    key carrying a secret is as often called Authorization as token, and
+    the same answer: which fragment matched, so a refusal can say so
+    without printing a key the caller invented."""
+    lowered = name.lower()
+    return next((fragment for fragment in _MCP_SECRET_KEY_FRAGMENTS if fragment in lowered), None)
 
 
 def is_mcp_secret_key(name: str) -> bool:
-    """The same question for an MCP server's env and headers, where the
-    key carrying a secret is as often called Authorization as token."""
-    lowered = name.lower()
-    return any(fragment in lowered for fragment in _MCP_SECRET_KEY_FRAGMENTS)
+    return mcp_secret_fragment(name) is not None
 
 
 class ProviderConfig(BaseModel):
@@ -938,7 +1059,7 @@ class ProviderConfig(BaseModel):
         # The declared field and the pass-through extras are the same
         # question: a key ending in _env names a variable, and any other
         # secret-shaped key is a value that does not belong here.
-        check_no_inline_secrets("api_key_env", self.api_key_env)
+        check_no_inline_secrets("api_key_env", self.api_key_env, declared=True)
         for key, value in (self.model_extra or {}).items():
             check_no_inline_secrets(key, value)
         return self
@@ -1250,21 +1371,31 @@ class McpServerConfig(BaseModel):
     def _secret_problems(self) -> list[FieldProblem]:
         """Secret-bearing env and header keys must name an environment
         variable, the same rule that keeps provider secrets out of the
-        configuration file."""
+        configuration file.
+
+        Both maps are keyed by whatever was written, so a key here is
+        request bytes: the refusal names the group, which is a declared
+        field, and the closed fragment the key matched, and stops there.
+        Two keys in one group that matched the same fragment are one
+        problem, since the entries would be indistinguishable and a
+        refusal that said the same thing twice would only suggest the
+        second was about something else.
+        """
         problems: list[FieldProblem] = []
         for group, values in (("env", self.env), ("headers", self.headers)):
             for key, value in values.items():
-                if not is_mcp_secret_key(key):
+                fragment = mcp_secret_fragment(key)
+                if fragment is None or _env_reference(value) is not None:
                     continue
-                if _env_reference(value) is None:
-                    problems.append(
-                        FieldProblem(
-                            json_pointer((group, key)),
-                            f"{group}.{key} looks like an inline secret, which is not "
-                            f"allowed; reference an environment variable instead, for "
-                            f"example {key}: $MY_SERVER_SECRET",
-                        )
-                    )
+                problem = FieldProblem(
+                    json_pointer((group,)),
+                    f'a key in {group} containing "{fragment}" looks like an inline '
+                    f"secret, which is not allowed; reference an environment variable "
+                    f"instead, for example $MY_SERVER_SECRET. The key is not quoted "
+                    f"back",
+                )
+                if problem not in problems:
+                    problems.append(problem)
         return problems
 
 
@@ -1469,8 +1600,9 @@ def _repeated_positions(values: Sequence[str]) -> str:
 # What a grant's own refusal may name. A location inside a declared
 # model is a field this repository chose, so it is safe to print; a
 # location for a key the model does not declare is that key, which came
-# out of the request and may be anything at all.
-_GRANT_FIELDS = ("server", "tools")
+# out of the request and may be anything at all. This was the first
+# refusal held to that rule; `safe_location` is the rule itself, and
+# this is now one of its readers.
 _UNRECOGNIZED_KEY = "an unrecognized key"
 
 
@@ -1509,12 +1641,11 @@ def read_mcp_entry(index: int, item: object) -> object:
 def _grant_location(location: Sequence[object]) -> str:
     """Where inside a grant something failed, made of declared field
     names and positions only."""
-    return ".".join(
-        str(part)
-        if isinstance(part, int) or part in _GRANT_FIELDS
-        else _UNRECOGNIZED_KEY
-        for part in location
-    )
+    safe, dropped = safe_location(McpGrant, location)
+    parts = [str(part) for part in safe]
+    if dropped:
+        parts.append(_UNRECOGNIZED_KEY)
+    return ".".join(parts)
 
 
 def as_mcp_grant(entry: "str | McpGrant") -> McpGrant:

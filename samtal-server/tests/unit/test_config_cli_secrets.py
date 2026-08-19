@@ -74,8 +74,11 @@ def test_a_secret_nested_in_an_option_is_refused_and_never_read_back(
         assert run("set", "provider", "llm", "claude", "-f", "-", stdin=nested) == 1
 
     captured = capsys.readouterr()
-    assert "connection.api_key" in captured.err
+    assert 'a key containing "api_key"' in captured.err
     assert "looks like an inline secret" in captured.err
+    # The key the operator wrote is not printed back at them, because
+    # this one could have been the credential.
+    assert "connection" not in captured.err
     assert SECRET not in captured.err
     assert SECRET not in captured.out
     assert SECRET not in caplog.text

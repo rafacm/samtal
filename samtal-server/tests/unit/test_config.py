@@ -558,15 +558,34 @@ def test_agent_defaults_reject_a_prompt() -> None:
 
 def test_inline_secret_is_rejected_with_env_hint() -> None:
     data = {"providers": {"llm": {"claude": {"type": "anthropic", "api_key": "sk-123"}}}}
-    with pytest.raises(ConfigError, match="api_key_env"):
+    with pytest.raises(ConfigError, match="ending in _env"):
         load_config_from_data(data)
 
 
-@pytest.mark.parametrize("key", ["client_secret", "secret_key", "auth_token", "password"])
-def test_secret_like_option_names_are_rejected(key: str) -> None:
+# The option name, and the fragment of it that makes it secret-shaped.
+# The refusal names the second rather than the first: an option is a key
+# the caller wrote, and a key is as good a place to paste a credential
+# as a value is, so what a refusal may say about one is which of this
+# repository's own words it matched. That the invented part of a key
+# reaches nothing is pinned with a planted one, in the API's own suite.
+SECRET_LIKE_OPTIONS = [
+    ("client_secret", "secret"),
+    ("secret_key", "secret"),
+    ("auth_token", "token"),
+    ("password", "password"),
+]
+
+
+@pytest.mark.parametrize(("key", "matched"), SECRET_LIKE_OPTIONS)
+def test_secret_like_option_names_are_rejected(key: str, matched: str) -> None:
     data = {"providers": {"llm": {"x": {"type": "openai_compatible", key: "shh"}}}}
-    with pytest.raises(ConfigError, match=f"{key}_env"):
+    with pytest.raises(ConfigError) as caught:
         load_config_from_data(data)
+
+    message = str(caught.value)
+    assert f'a key containing "{matched}"' in message
+    assert "providers.llm.x" in message
+    assert "shh" not in message
 
 
 def test_a_pasted_value_in_an_env_key_is_rejected_without_quoting_it() -> None:
