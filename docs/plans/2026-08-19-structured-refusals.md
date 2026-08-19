@@ -62,7 +62,12 @@ All at main `68d00ce`.
   `_malformed_request` 422. The conversations routes raise the shared
   refusal types and add no body-building of their own
   (`grep -n JSONResponse samtal_server/conversations/api.py` finds
-  none), so they inherit whatever the handlers answer.
+  none), so they inherit whatever the handlers answer. A fifth
+  emitter hides in the framework, the review round's third finding:
+  no handler is registered for `StarletteHTTPException`, so an
+  authenticated request to an unmatched path or with an unsupported
+  method is answered by Starlette's own JSON shape, and
+  `test_config_api.py:120-153` exercises exactly those 404s.
 - 71 assertions across the unit and integration suites read or pin a
   refusal's `"detail"`
   (`grep -rn '"detail"' tests/unit tests/support tests/integration`),
@@ -149,6 +154,14 @@ place a refusal becomes bytes, so a handler stops knowing what a
 refusal body looks like, and the model and the wire cannot disagree.
 The gate and the last-resort middleware construct their responses
 through it too.
+
+The framework's own refusals join them: a sanitized
+`StarletteHTTPException` handler renders the exception's detail (a
+routing 404's and a 405's details are Starlette's fixed phrases,
+never request bytes, which the tests assert rather than assume)
+through `problem_response`, preserving the exception's safe protocol
+headers, `Allow` on a 405 in particular. With it registered, every
+status the application can answer inside `/api` is one shape.
 
 `responses.Problem` grows the three fields, and a `FieldError` model
 (`path`, `message`) is declared beside it, both `extra="forbid"` like
@@ -286,8 +299,11 @@ CLI transport suite for the pass-through pins.
   claim that the sentences did not move.
 - New pins, each named to what it holds:
   - One refusal from each emitter (repository refusal, gate 401,
-    malformed request 422, last-resort 500) answers the one shape,
-    with `application/problem+json` as its content type.
+    malformed request 422, last-resort 500, and the framework's
+    routing refusals: an authenticated unmatched path, a wrong
+    method with its `Allow` header held, and a trailing-slash path)
+    answers the one shape, with `application/problem+json` as its
+    content type and nothing of the request echoed.
   - A provider fragment failing validation on two fields answers
     `errors` entries whose paths and messages match the `detail`
     lines pairwise, which is the one-computation claim asserted from
@@ -459,6 +475,13 @@ carries its resolution below it.
    `problem_response`, preserving safe protocol headers such as
    `Allow`, with tests for unmatched paths, wrong methods and
    trailing-slash paths.
+
+   *Resolution.* Adopted whole. The emitter inventory in the evidence
+   section now names the framework as the fifth emitter, the
+   `problem_response` section registers a sanitized
+   `StarletteHTTPException` handler preserving `Allow`, the emitter
+   test covers the three request shapes the finding names, and M1
+   carries the handler.
 
 4. **P2: the proposed tests do not prove `detail` remains
    byte-identical.** Substring assertions cannot detect changed
