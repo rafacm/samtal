@@ -1,4 +1,4 @@
-You are reviewing a pull request's diff, read-only, in a checkout of the samtal repository with the PR's branch checked out. You have no network access; everything you need is in this prompt or the repository files.
+You are reviewing a pull request's diff, read-only, in a checkout of the vinga repository with the PR's branch checked out. You have no network access; everything you need is in this prompt or the repository files.
 
 ## The pull request
 

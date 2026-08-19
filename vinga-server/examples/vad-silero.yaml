@@ -1,0 +1,14 @@
+# The endpointer: what decides where an utterance starts and where it
+# ends. Runs locally on every audio frame, whichever ASR is configured,
+# and is a core dependency rather than an extra.
+#
+#   vinga-server config set provider vad silero -f examples/vad-silero.yaml
+
+type: silero
+
+# End-of-utterance tuning, defaults shown: Silero speech probability
+# threshold, the silence that ends an utterance, and the cap on
+# utterance length.
+# threshold: 0.5
+# trailing_silence_ms: 700
+# max_utterance_ms: 10000

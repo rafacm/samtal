@@ -1,7 +1,7 @@
 # Waveshare ESP32-S3-Touch-AMOLED-2.16
 
 > [!WARNING]
-> **This board has not reached working status with samtal.** 🚧 It has
+> **This board has not reached working status with vinga.** 🚧 It has
 > been brought up far enough to learn the things below, and no
 > further; this guide grows as the board does.
 
@@ -124,12 +124,12 @@ showed.
 ## Getting this board onto your server
 
 Verified in hands-on use (2026-08-13): a factory-fresh board
-completes samtal's onboarding ceremony entirely from its captive
+completes vinga's onboarding ceremony entirely from its captive
 portal, no USB needed. The factory image's portal (firmware 2.2.4)
 has the Custom OTA URL field on its Advanced tab: enter your WiFi
 and the server's onboarding URL in one pass, and the board then
 shows a 6-digit code and connects within seconds of
-`samtal-server config add-device <code> <agent>`. Two cautions from
+`vinga-server config add-device <code> <agent>`. Two cautions from
 that same session: type the URL exactly as the server printed it,
 and if the board shows `code=307` and keeps restarting, or a save
 does not seem to take, the portal wrote something other than what

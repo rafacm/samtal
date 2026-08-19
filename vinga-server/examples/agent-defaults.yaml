@@ -1,0 +1,67 @@
+# What every agent uses unless it names something else. One entry for
+# the whole deployment, written like an agent without a prompt:
+#
+#   vinga-server config set agent-defaults -f examples/agent-defaults.yaml
+#
+# There is deliberately no prompt here. A prompt is what makes an agent
+# that agent, and inheriting one silently would make two agents the same
+# one.
+#
+# Every name below must already exist as a provider or an MCP server:
+# the write is refused otherwise, which is what forces the natural
+# creation order (providers, MCP servers, agent defaults, agents,
+# devices).
+
+llm: claude
+asr: whisper
+tts: piper
+vad: silero
+
+# An agent that names its own list replaces this one rather than
+# extending it, so an agent's `mcp: []` opts it out of tools its
+# siblings have.
+#
+# This layer takes both entry forms, exactly as an agent does. A name on
+# its own is the whole server; the object form below is the server plus
+# which of its tools the layer may reach, named as the model is given
+# them minus the entry prefix, which is what `vinga-server config
+# status` prints. Written here it is the deployment-wide default, and an
+# agent that needs more (or less) of that server names its own list.
+#
+#   - server: home
+#     tools:
+#       - turn_on_light
+#       - turn_off_light
+mcp:
+  - weather
+
+# The shared prompt fragments every agent's system prompt carries, by
+# the name each is defined under in prompt_fragments (see
+# examples/prompt-fragment.yaml). They are injected after the agent's
+# own prompt, in the order listed here, and this is the deployment-wide
+# default: an agent that names its own list replaces this one rather
+# than extending it, and an agent's `prompt_includes: []` opts it out of
+# what its siblings share.
+prompt_includes:
+  - household
+
+# Latency masking with a pre-synthesized filled pause, off by default.
+# When a reply's first audio has not started within delay_ms of the
+# utterance being transcribed, the server plays one of the phrases
+# below, synthesized once at boot in the agent's own voice and cached,
+# so the clip costs nothing at the moment it masks and keeps working
+# when the TTS provider is the thing being slow. The real reply then
+# queues behind the clip's tail. Write the phrases in the agent's own
+# language, one or more; the player rotates through them. An agent can
+# name its own filler section, which replaces this one wholly, like the
+# stage fields above; a synthesis failure at boot logs a warning and
+# leaves the feature off for that agent rather than failing the boot.
+# The default delay of 1800 ms sits above the roughly 1.2 s a healthy
+# reply takes to its first audio and below the 2 to 3 s of dead air
+# where users start asking whether anyone is there.
+# filler:
+#   enabled: true
+#   delay_ms: 1800
+#   phrases:
+#     - "Hmm, let me see..."
+#     - "Good question..."

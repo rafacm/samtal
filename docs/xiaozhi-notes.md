@@ -38,7 +38,7 @@ git clone --depth 1 https://github.com/xinnan-tech/xiaozhi-esp32-server.git vend
     slashless path; a server that answers with a redirect, even a
     method-preserving 307, bricks the check-in loop, because the
     firmware's OTA HttpClient does not follow redirects: the board
-    shows `code=307` and restarts over and over. samtal-server
+    shows `code=307` and restarts over and over. vinga-server
     therefore serves the slashless spelling directly on every
     device-facing route. A device-facing endpoint can never rely on a
     redirect.
@@ -161,7 +161,7 @@ wants an interactive terminal). The port is `/dev/cu.usbmodem101` at
   version}` (and/or `mqtt {...}`), optional `firmware {version, url}` and
   optional `activation {...}` (omit it and no activation is ever required).
 - **A successful OTA check does not mean the device is authorised.** A
-  board whose MAC is missing from samtal-server's `devices:` allowlist
+  board whose MAC is missing from vinga-server's `devices:` allowlist
   still gets `200 OK`, with `websocket.token` empty; the refusal comes
   later, at the WebSocket handshake, as a `403` logged as `auth_rejected`
   with reason `no_token`. Nothing in the OTA response says the device is
@@ -195,12 +195,12 @@ Feishu wiki that answers 404 anonymously, and upstream's `docs/` never
 describes the OTA HTTP exchange. Device side: `main/ota.cc` and
 `main/application.cc` in `vendor/xiaozhi-esp32`; server side:
 `OTAController.java` and `DeviceServiceImpl.java` in the manager-api of
-`vendor/xiaozhi-esp32-server`. Issue #40 builds samtal's onboarding on
+`vendor/xiaozhi-esp32-server`. Issue #40 builds vinga's onboarding on
 this ceremony.
 
 - The OTA response may carry an optional `activation {message, code,
   challenge, timeout_ms}` object. Omitting it, which is what
-  samtal-server does today, means no activation is ever required and the
+  vinga-server does today, means no activation is ever required and the
   device proceeds straight to the websocket.
 - When it is present, the device shows `message` on screen with the
   activation jingle and speaks `code` digit by digit, each digit an OGG
@@ -230,7 +230,7 @@ this ceremony.
   be short-lived on the server, since the device fetches and displays a
   fresh one within a couple of minutes, and losing server-side pending
   state costs nothing but a changed number on the screen.
-- **The whole ceremony is validated on hardware against samtal-server**
+- **The whole ceremony is validated on hardware against vinga-server**
   (2026-08-13, the issue #40 checkpoint), on both available boards. The
   Waveshare factory AMOLED-2.16 (firmware 2.2.4), given the short
   onboarding URL through its portal, showed the server host over a
@@ -254,8 +254,8 @@ this ceremony.
 
 ## What running stock firmware costs the server
 
-samtal-server implements the server half of the protocol above and changes
-nothing about it: the device runs stock xiaozhi firmware, `samtal-esp32/`
+vinga-server implements the server half of the protocol above and changes
+nothing about it: the device runs stock xiaozhi firmware, `vinga-esp32/`
 ships no code, and every message named above is upstream's. That is the
 right trade for v1, and it has a price, paid in server-side machinery that
 exists only because the device cannot be asked to behave differently.
@@ -267,7 +267,7 @@ firmware would change. Add to it whenever a feature turns out to be shaped
 by the device rather than by the problem.
 
 - **The device owns the listening mode, and the server cannot change it.**
-  `listen` travels device to server only; samtal-server sends none. Manual
+  `listen` travels device to server only; vinga-server sends none. Manual
   mode ends an utterance with `listen stop`, auto mode re-arms itself after
   each `tts stop`, and realtime mode asks once and then streams for the rest
   of the connection. Barge-in therefore exists only in realtime, because
@@ -298,7 +298,7 @@ by the device rather than by the problem.
   else. The detection itself is not something the server can hear, tune,
   or substitute for. What the server does get is an after-the-fact report:
   the firmware sends `listen` `detect` with the fired word in `text`, which
-  samtal-server currently debug-logs (`device/session.py`) and does not
+  vinga-server currently debug-logs (`device/session.py`) and does not
   retain.
 
   The trigger audio is a build-time question rather than a settled one.
@@ -339,7 +339,7 @@ by the device rather than by the problem.
 
 ### Updating firmware over the air, once there is firmware
 
-The endpoint samtal-server calls "the OTA endpoint" is an over-the-air
+The endpoint vinga-server calls "the OTA endpoint" is an over-the-air
 *update* endpoint that xiaozhi also overloads for configuration. We use
 only the configuration half. Everything needed for the other half is
 already on the board, so the work when the device side starts is signing
@@ -392,7 +392,7 @@ and hosting, not plumbing.
 - Components: `xiaozhi-server` (Python 3.10, the conversation core) plus an
   optional Java/Vue management console. **Python-only mode needs no database
   and has no login/activation**: devices just connect; that's our reference
-  mode, and the management layer is what samtal-server will reimplement in
+  mode, and the management layer is what vinga-server will reimplement in
   Python if needed.
 - Ports: WebSocket **8000** (`ws://host:8000/xiaozhi/v1/`), HTTP **8003**
   (OTA `http://host:8003/xiaozhi/ota/`, vision API).
@@ -435,7 +435,7 @@ and hosting, not plumbing.
       language: English
       output_dir: tmp/
   prompt: |
-    You are Samtal, a friendly and concise voice assistant.
+    You are Vinga, a friendly and concise voice assistant.
     Always answer in English, in one or two short sentences, since your
     answers are spoken aloud.
   ```

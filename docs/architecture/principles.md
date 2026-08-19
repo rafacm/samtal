@@ -1,14 +1,14 @@
 # Principles
 
-The standing fundamentals of samtal: what the project promises, where
+The standing fundamentals of vinga: what the project promises, where
 its boundaries lie, and what it must not become. Read this before
 designing a feature or deciding direction, so a boundary is never
 crossed one reasonable-looking pull request at a time.
 
 The page holds two kinds of principle, and the distinction carries a
 precedence rule. **Product promises** are commitments to the person
-running samtal, falsifiable from outside; breaking one does not
-refactor samtal, it changes what samtal is. **Architecture
+running vinga, falsifiable from outside; breaking one does not
+refactor vinga, it changes what vinga is. **Architecture
 principles** are how the code keeps those promises; given new
 evidence, any of them can be revised, provided the promises still
 hold. When the two conflict, the promise wins.
@@ -25,8 +25,8 @@ updates to cite the record in the same change.
 
 ## Identity
 
-samtal makes xiaozhi-class open hardware a first-class endpoint for
-conversational AI runtimes. samtal owns the appliance: discovery and
+vinga makes xiaozhi-class open hardware a first-class endpoint for
+conversational AI runtimes. vinga owns the appliance: discovery and
 OTA, device authentication, the xiaozhi WebSocket protocol, Opus
 framing, the display, device-side tools, and eventually the firmware
 experience. Conversation runtimes own the conversation: turn
@@ -35,7 +35,7 @@ synthesis may begin.
 
 The identity is deliberately not "another pluggable VAD/ASR/LLM/TTS
 server". The bespoke pipeline built exactly that, and building it
-taught which concerns are inherently samtal's and which are generic
+taught which concerns are inherently vinga's and which are generic
 conversational infrastructure. That knowledge, not the pipeline, is
 the durable asset.
 
@@ -44,31 +44,31 @@ the durable asset.
 ### Stock xiaozhi firmware is the compatibility floor
 
 An ESP32-S3 board running upstream xiaozhi firmware, pointed at a
-samtal server, holds a conversation without a reflash. If samtal
+vinga server, holds a conversation without a reflash. If vinga
 ships its own firmware one day, that raises the ceiling, never the
 floor: protocol extensions are additive and negotiated, the server
-never requires samtal firmware for ordinary conversation, and samtal
+never requires vinga firmware for ordinary conversation, and vinga
 firmware never drifts into a private dialect a stock board cannot
 join.
 
 The promise is bounded three ways, and the bounds are part of it:
 
-- It covers the transport samtal implements: the WebSocket channel.
-  Upstream also speaks an MQTT-plus-UDP pairing; samtal does not
+- It covers the transport vinga implements: the WebSocket channel.
+  Upstream also speaks an MQTT-plus-UDP pairing; vinga does not
   promise every transport upstream carries.
 - Its version target is the firmware actually running on boards in
   the field. Upstream protocol changes are absorbed as shipped
   devices adopt them, not chased at upstream's commit log.
 - It is a floor, not a ceiling: ordinary conversation, not every
-  samtal feature.
+  vinga feature.
 
 **Example.** Onboarding a stock board is repointing one NVS
-`ota_url` entry at the samtal server
+`ota_url` entry at the vinga server
 ([xiaozhi-notes](../xiaozhi-notes.md)); everything after that is the
 standard OTA fetch and hello exchange.
 
 **Counterexample.** "Cleaning up" the hello exchange in a way stock
-firmware does not parse; or a samtal-firmware-only message becoming
+firmware does not parse; or a vinga-firmware-only message becoming
 load-bearing for ordinary conversation, so stock boards quietly stop
 being full citizens.
 
@@ -78,7 +78,7 @@ constrained to what stock firmware can express, and some rough edges
 price of meeting devices where they are.
 
 Evidence and tradeoffs:
-[issue #84](https://github.com/rafacm/samtal/issues/84).
+[issue #84](https://github.com/rafacm/vinga/issues/84).
 
 ### A fully local deployment is first-class
 
@@ -111,9 +111,9 @@ new provider type skipping the egress declaration because it is
 
 The intelligence lives server-side, so behavior improves without
 reflashing boards and cheap stock hardware stays sufficient. The
-boards run upstream xiaozhi firmware with `samtal-esp32` as a thin
+boards run upstream xiaozhi firmware with `vinga-esp32` as a thin
 customization. Firmware work is undertaken when it enables something
-samtal-specific, never because samtal happens to own the server.
+vinga-specific, never because vinga happens to own the server.
 Firmware has a proven ability to consume all available project time.
 
 **Example.** Protocol extensions the server-side experience actually
@@ -129,7 +129,7 @@ user-visible gain.
 
 ### Normalize the hardware edge, not the AI middle
 
-The xiaozhi protocol is the unusual thing samtal exists to normalize.
+The xiaozhi protocol is the unusual thing vinga exists to normalize.
 Conversation runtimes (the bespoke pipeline, a pipecat pipeline, a
 native realtime session) are allowed to remain themselves behind that
 edge.
@@ -151,11 +151,11 @@ on day one and false by design.
 
 Decision:
 [ADR](../adr/2026-08-10-normalize-the-hardware-edge.md). Evidence and
-tradeoffs: [issue #84](https://github.com/rafacm/samtal/issues/84).
+tradeoffs: [issue #84](https://github.com/rafacm/vinga/issues/84).
 
 ### The internal boundary is device-facing
 
-Interfaces at samtal's core describe what the device needs (audio in
+Interfaces at vinga's core describe what the device needs (audio in
 and out, user and assistant speaking state, display text, device tool
 calls, cancel current output), not how AI systems work (ASR, LLM,
 TTS, prompts, context windows).
@@ -163,7 +163,7 @@ TTS, prompts, context windows).
 The litmus test for which side code belongs on: **would this code
 still exist if the backend were a telephone call to a human?**
 
-| Would still exist (samtal)     | Would not (runtime)                 |
+| Would still exist (vinga)     | Would not (runtime)                 |
 | ------------------------------ | ----------------------------------- |
 | decode xiaozhi Opus packets    | split LLM output into sentences     |
 | authenticate a device          | route transcripts into the LLM      |
@@ -175,7 +175,7 @@ still exist if the backend were a telephone call to a human?**
 
 **Example.** On a confirmed barge-in, the device layer flushes
 outgoing audio and tells the device playback stopped. That much is
-samtal's job under any runtime.
+vinga's job under any runtime.
 
 **Counterexample.** The same barge-in handler also cancelling the LLM
 task, cancelling TTS, and deciding whether the half-spoken reply
@@ -186,13 +186,13 @@ framework.
 
 Decision:
 [ADR](../adr/2026-08-10-normalize-the-hardware-edge.md). Evidence and
-tradeoffs: [issue #84](https://github.com/rafacm/samtal/issues/84).
+tradeoffs: [issue #84](https://github.com/rafacm/vinga/issues/84).
 
 ### Runtimes are siblings, not providers
 
 A conversation runtime plugs in beside the others behind the
 device-facing boundary; it is never wrapped as one more provider
-inside another runtime's stage model, and samtal never defines a
+inside another runtime's stage model, and vinga never defines a
 universal interface all runtimes must fit. The
 lowest-common-denominator realtime API is the trap: it either grows
 into a home-grown, slightly wrong copy of every runtime's session
@@ -209,19 +209,19 @@ pretending one schema fits both.
 OpenAI Realtime and the bespoke pipeline must all implement. It
 starts as `send_audio()` and `events()`, then sprouts
 `commit_audio()`, `cancel_response()`, `truncate_response()`,
-`set_turn_detection()`, until samtal maintains its own slightly
+`set_turn_detection()`, until vinga maintains its own slightly
 different version of everyone's realtime protocol.
 
 Decision:
 [ADR](../adr/2026-08-10-normalize-the-hardware-edge.md). Evidence and
-tradeoffs: [issue #84](https://github.com/rafacm/samtal/issues/84).
+tradeoffs: [issue #84](https://github.com/rafacm/vinga/issues/84).
 
 ### Own the decision sites, and give every decision a reason
 
-The most diagnostic events in the system exist because samtal owns
+The most diagnostic events in the system exist because vinga owns
 the code that makes the decision and annotates it with why. Whatever
 framework runs the pipeline, the interesting decision sites stay in
-samtal's own components so their reasons keep flowing into the
+vinga's own components so their reasons keep flowing into the
 structured log, which is the observability surface
 ([ADR](../adr/2026-08-04-json-logs-are-the-observability-surface.md)).
 The surface carries metadata, never conversation content, which lives

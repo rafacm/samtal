@@ -1,7 +1,7 @@
 # Design guide
 
-How samtal's code is shaped inside the boundaries
-[`principles.md`](principles.md) draws. The principles say what samtal
+How vinga's code is shaped inside the boundaries
+[`principles.md`](principles.md) draws. The principles say what vinga
 promises and where its edges are; this page says what a module looks
 like once it is on the right side of one. Read it before splitting a
 file, adding a layer, or naming a new interface.
@@ -41,7 +41,7 @@ an undocumented ordering rule is an interface, and a bad one.
 
 **Depth.** Implementation divided by interface: how much a caller
 gets for how little it has to know. `ToolSource`
-(`samtal-server/samtal_server/tools/source.py`) is four methods, and
+(`vinga-server/vinga_server/tools/source.py`) is four methods, and
 behind one of its implementations sit six modules of MCP session
 management, reload and transport. That ratio is the thing to
 maximize. Its opposite is the pass-through, whose interface is its
@@ -69,7 +69,7 @@ exactly this failure.
 
 **Composition root.** The one place that knows how the parts are
 wired: `create_app` and the `Composition` dataclass in
-`samtal-server/samtal_server/composition.py`. Wiring knowledge
+`vinga-server/vinga_server/composition.py`. Wiring knowledge
 collects there deliberately, so that no module below it has to know
 what else exists. Before #142 (PRs #187 to #189, #196) the wiring was
 thirteen untyped attributes hung on `app.state` plus a
@@ -148,7 +148,7 @@ is not automatically the one a test should use.
 ### Deepening in place: the prompt assembler
 
 **Issue #122, PR #130**, extended by PRs #131 and #133.
-`samtal-server/samtal_server/runtime/prompt.py`
+`vinga-server/vinga_server/runtime/prompt.py`
 
 Prompt text used to be glued together in exactly one place,
 `tools.builtin.with_memory`, which appended remembered facts to a
@@ -166,7 +166,7 @@ together by one pure function. Nothing else in the server joins
 prompt text or counts it. Three surfaces read what it produces: the
 pipeline sends the text to the model, the `prompt_assembled` event
 carries the block sizes, and the inspection route behind
-`samtal-server config prompt <agent>` prints the blocks whole.
+`vinga-server config prompt <agent>` prints the blocks whole.
 
 What the module guarantees is worth stating precisely, because the
 tempting claim is larger than the truth. It does not make those three
@@ -200,7 +200,7 @@ empty prompt, a whitespace one and an indented one.
 
 ### Two encodings of one shape: the CLI's response predicates
 
-**Issue #139, PR #175.** `samtal-server/samtal_server/config/cli.py`
+**Issue #139, PR #175.** `vinga-server/vinga_server/config/cli.py`
 
 The anti-pattern, and it is instructive because nothing about it
 looked careless. `cli.py` decided whether a body it had been handed
@@ -241,7 +241,7 @@ twice.
 ### A seam is what a part asks of its parent
 
 **Issue #141, PRs #184 and #186.**
-`samtal-server/samtal_server/runtime/turntaking.py`,
+`vinga-server/vinga_server/runtime/turntaking.py`,
 `runtime/filler_runner.py`
 
 `runtime/pipeline.py` was 1,820 lines and one class of 47 methods
@@ -271,7 +271,7 @@ happened.
 ### One question, three answers: the tool sources
 
 **Issue #140, PRs #178 to #181.**
-`samtal-server/samtal_server/tools/source.py`
+`vinga-server/vinga_server/tools/source.py`
 
 The runtime knew its three tool origins by heart. Builtin tools,
 device tools and MCP tools each had their own way of being listed,

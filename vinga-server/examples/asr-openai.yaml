@@ -1,0 +1,81 @@
+# Cloud transcription, and the one cloud stage that is usually faster
+# than its local alternative rather than slower: the work runs on
+# someone else's accelerator, so the network round trip is cheaper than
+# a CPU decode. It also hears non-English far better under noise. The
+# endpoint reference and the guide:
+# https://platform.openai.com/docs/api-reference/audio/createTranscription
+# https://platform.openai.com/docs/guides/speech-to-text
+#
+#   vinga-server config set provider asr ears -f examples/asr-openai.yaml
+
+type: openai
+
+api_key_env: OPENAI_API_KEY
+
+# Default: gpt-4o-mini-transcribe. gpt-4o-transcribe is the larger
+# sibling, holds up better on the noisiest input, and costs about the
+# same in latency; whisper-1 is the same Whisper V2 as the local engine,
+# roughly twice the latency of the gpt-4o pair, and there is little
+# reason to choose it.
+# model: gpt-4o-transcribe
+
+# Any server implementing /v1/audio/transcriptions works here, the same
+# way openai_compatible opens the LLM stage to local models. A keyless
+# self-hosted one can leave api_key_env out; one that authenticates
+# still names its variable there, since only OpenAI's own host makes a
+# key mandatory. This is also what decides whether the audio leaves the
+# host, so the type cannot declare its own egress: under
+# server.local_only an entry carries `egress: false` to assert the
+# endpoint is local. An endpoint that accepts audio shorter than
+# OpenAI's 0.1 s minimum is sent it, since that floor was measured
+# against OpenAI.
+# base_url: http://localhost:8000/v1
+
+# A list of words the transcriber should expect. Not the agent's prompt:
+# that one is the agent's instruction on its own entry, and these two
+# unrelated options happen to share a name.
+#
+# Words the engine would not otherwise guess: names, places, the
+# assistant's own name. Worth setting, because an unfamiliar proper noun
+# is the failure this provider actually has ("vinga" comes back as
+# "sample" under noise, and as "Vinga" with this set).
+#
+# Keep it to vocabulary. On short or low-content audio the model hands
+# this string back as the transcript instead of hearing anything, which
+# is reliable rather than rare: 45 of 45 clips of room tone under a
+# second came back as the prompt word for word. Plain vocabulary makes
+# that harmless noise. Agent names, wake words or anything imperative
+# make it an instruction the model can act on, and in a field session an
+# echo of the agent names triggered a handover nobody asked for. A
+# transcript that is this string and nothing else never reaches the
+# model as if spoken: the clip is transcribed once more without the
+# prompt, a real short answer survives that retry, and an echo that
+# persists or comes back empty is discarded. A prompt that cannot be
+# acted on is still the real protection.
+# prompt: vinga, Stockholm
+
+# Spoken language (ISO 639-1). SET THIS for any deployment that is not
+# English. On clean audio leaving it unset costs nothing, since
+# detection happens inside the model, but a device checkpoint showed
+# far-field mic audio through Opus gives detection far less to go on:
+# unpinned, Swedish came back as English-shaped nonsense ("Vad heter
+# Sveriges huvudstad?" as "Hat hetas verigezogistad."), and pinning
+# fixed it outright. `prompt` above does not compensate; it fixes
+# vocabulary, not language. The gpt-4o models still treat this as a hint
+# and will answer in the language they hear, so a wrong value is fairly
+# harmless and an empty one is what costs you.
+language: sv
+
+# 0.0 to 1.0. Raise it only to loosen a decode that is stuck; the
+# default is the API's own.
+# temperature: 0.0
+
+# Seconds before a transcription request is abandoned, and a real bound
+# because retries are off: the SDK would otherwise try a failed request
+# three times while the user waits for an answer.
+# timeout_s: 30
+
+# There is no language detection reporting and no language_detect
+# option, unlike the local engine: the API returns no usable language
+# and no confidence at all. Nothing is lost by it, since the detection
+# those options exist to skip is free here.

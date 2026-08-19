@@ -1,0 +1,39 @@
+# One named block of prompt text, shared by the agents that include it:
+#
+#   vinga-server config set prompt-fragment household -f examples/prompt-fragment.yaml
+#
+# The name is an argument rather than part of the fragment, so the same
+# file installed under a second name is a second fragment. It must match
+# [A-Za-z0-9_-]+: the name is printed beside the block wherever the
+# assembled prompt is accounted for.
+#
+# An agent carries this by naming it in prompt_includes (see
+# examples/agent.yaml and examples/agent-defaults.yaml). It is injected
+# after the agent's own prompt and before any MCP server's guidance, in
+# the order the layer lists it, and nothing is added around it: no
+# heading, no separator of its own, no rewriting. What is written here
+# is what the model reads, this file's indentation and its own blank
+# lines included; the only bytes trimmed are whitespace at the two ends
+# of the whole assembled prompt, and `vinga-server config prompt
+# <agent>` reports what was sent rather than what was stored.
+#
+# What belongs here is standing context every agent in the house shares,
+# so that it is written once instead of being copied into every persona
+# prompt and drifting apart. What does not belong here is who an agent
+# is: that is the agent's own prompt, and inheriting it silently would
+# make two agents the same agent.
+#
+# There is no length cap, and every block competes with the others (and
+# with the remembered facts) for the context budget of a small local
+# model. `vinga-server config prompt <agent>` prints what an agent's
+# prompt is made of, block by block, with the size of each and the
+# total, which is the number to tune against.
+#
+# This applies at the next server start: an agent assembles its prompt
+# when a conversation opens on it, from the configuration the server
+# read at boot.
+text: |
+  Some things about this household:
+  the bins go out on Tuesday evening, the kitchen speaker is called
+  Bosse, and there is a cat called Ines who is not allowed out after
+  dark. Nobody in the house speaks Portuguese.

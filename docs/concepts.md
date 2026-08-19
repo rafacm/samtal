@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-12
 
-The domain model of samtal from the user's point of view: the nouns,
+The domain model of vinga from the user's point of view: the nouns,
 how they relate, and the semantics that were decided on purpose. The
 [glossary](glossary.md) defines each term in one paragraph for looking
 things up; this page explains how the terms fit together and why. The
@@ -86,7 +86,7 @@ The word is chosen deliberately. "Persona" suggests the differences
 between agents are cosmetic (a voice, a tone) when the point is that
 they differ in capability and scope; it also dresses software as a
 human. "Agent" is also what the surrounding ecosystem says, so
-samtal's documentation matches what its users already read. In samtal
+vinga's documentation matches what its users already read. In vinga
 the word means exactly: a named configuration of prompt, providers,
 voice, and tools that holds conversations and accrues memory. Older
 issues say "persona"; new writing says agent.
@@ -224,10 +224,10 @@ Some questions must be answerable in every conversation, whoever is
 answering: "how much has this conversation cost", "find the
 conversation where we discussed the trip and resume it here", "let me
 talk to Nadia". These are not features of any one agent; they are
-samtal capabilities, modeled as a small set of built-in tools injected
+vinga capabilities, modeled as a small set of built-in tools injected
 into every agent's tool set, exactly parallel to how the device's own
 controls already reach agents as MCP tools. The switch itself executes
-in samtal-owned code and logs its reason, per the decision-sites
+in vinga-owned code and logs its reason, per the decision-sites
 principle.
 
 Scoping decision: **conversation search is agent-scoped.** An agent
@@ -255,7 +255,7 @@ kinds of question:
   hold it to power off, what the display shows. Its source is the
   per-board device guide, selected by the device model at runtime, so
   it explains the hardware actually in front of the user.
-- **This system**: samtal's concepts, the contents of this page: what
+- **This system**: vinga's concepts, the contents of this page: what
   an agent is, what a conversation is, why the wake word wakes the
   device and not an agent.
 - **Device commands**: the controls the device itself publishes as

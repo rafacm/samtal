@@ -92,7 +92,7 @@ After the comment lands:
 
 ## Repository specifics
 
-Every `gh` call passes `--repo rafacm/samtal` (worktrees under
+Every `gh` call passes `--repo rafacm/vinga` (worktrees under
 `vendor/` make repository inference dangerous; see AGENTS.md).
 Review comments and replies are never hard-wrapped: GitHub renders
 comment newlines as line breaks, so one line per paragraph.

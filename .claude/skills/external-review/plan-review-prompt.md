@@ -1,4 +1,4 @@
-You are reviewing an implementation plan before any code is written. You are running read-only in a checkout of the samtal repository, on branch __BRANCH__. You have no network access; everything you need is in this prompt or in the repository files named below.
+You are reviewing an implementation plan before any code is written. You are running read-only in a checkout of the vinga repository, on branch __BRANCH__. You have no network access; everything you need is in this prompt or in the repository files named below.
 
 ## The task under review
 

@@ -1,0 +1,439 @@
+"""Draining conversations on the way out.
+
+Uvicorn cannot do this part. Verified in its source: it fail-closes
+every open websocket with 1012 the moment its shutdown begins, so
+`timeout_graceful_shutdown` alone would cut every reply off mid-word.
+The drain therefore runs first, from the signal handler, and uvicorn's
+shutdown is what happens after it, its 1012 acting as the backstop for
+anything the drain could not finish.
+"""
+
+import asyncio
+import gc
+import signal
+import time
+import weakref
+from typing import Any, cast
+
+import pytest
+import uvicorn
+
+from tests.support.registry import FakeSession, registry_with
+from vinga_server import main
+from vinga_server.config import Config
+from vinga_server.main import (
+    PING_INTERVAL_S,
+    PING_TIMEOUT_S,
+    UVICORN_GRACEFUL_SHUTDOWN_S,
+    DrainingServer,
+    serve,
+)
+from vinga_server.registry import SessionRegistry
+
+
+async def test_draining_asks_every_session_to_stop() -> None:
+    first, second = FakeSession(), FakeSession()
+    await registry_with(first, second).drain(timeout_s=5)
+    assert first.shutdown == (1001, "server shutting down")
+    assert second.shutdown == (1001, "server shutting down")
+    # And says why, so the record of each conversation names the drain
+    # rather than whatever arrived behind it.
+    assert first.close_reason == second.close_reason == "drain"
+
+
+async def test_a_reply_in_flight_finishes_before_its_socket_closes() -> None:
+    speaking = FakeSession(speaking_for=0.15)
+    await registry_with(speaking).drain(timeout_s=5)
+    # It was allowed to reach the end of what it was saying.
+    assert speaking.shutdown is not None
+
+
+async def test_draining_refuses_new_sessions() -> None:
+    registry = registry_with()
+    assert not registry.draining
+    await registry.drain(timeout_s=1)
+    assert registry.draining
+    # A server on its way out does not want the next conversation, even
+    # though every slot is now free.
+    assert not registry.try_add(cast(Any, FakeSession()))
+
+
+async def test_draining_an_idle_server_is_immediate() -> None:
+    registry = registry_with()
+    await asyncio.wait_for(registry.drain(timeout_s=30), timeout=1)
+
+
+async def test_a_reply_that_outlasts_the_budget_is_still_closed_politely() -> None:
+    """The grace expiring is not a reason to leave a socket hanging: the
+    device is told "server shutting down" with 1001, which is a better
+    answer than uvicorn's eventual 1012."""
+    long_reply = FakeSession(speaking_for=30)
+    quick = FakeSession()
+    registry = registry_with(long_reply, quick)
+    await asyncio.wait_for(registry.drain(timeout_s=0.2), timeout=5)
+    assert quick.shutdown == (1001, "server shutting down")
+    assert long_reply.shutdown == (1001, "server shutting down")
+
+
+async def test_a_session_stuck_in_its_own_shutdown_is_left_to_uvicorn(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The outer bound is the backstop for a session stuck somewhere the
+    reply grace cannot reach. Those are cancelled and left to uvicorn's
+    1012 fail-close."""
+
+    class StuckSession(FakeSession):
+        async def request_shutdown(
+            self, code=1001, reason="", grace_s=10.0, close_reason=None
+        ) -> bool:
+            await asyncio.sleep(60)
+            return True
+
+    registry = registry_with(StuckSession(), FakeSession())
+    with caplog.at_level("INFO"):
+        await asyncio.wait_for(registry.drain(timeout_s=0.3), timeout=5)
+
+    (incomplete,) = [
+        r for r in caplog.records if getattr(r, "event", None) == "drain_incomplete"
+    ]
+    assert incomplete.unfinished == 1
+
+
+async def test_the_drain_budget_is_what_a_reply_is_given() -> None:
+    """The defect the M7 device checkpoint caught: a constant inside the
+    session capped the wait at ten seconds, so raising server.drain_s
+    bought a long reply nothing and it was still cut mid-sentence."""
+    session = FakeSession()
+    await registry_with(session).drain(timeout_s=45)
+    assert session.granted_s is not None
+    # Nearly all of the budget, less the slice held back for the close.
+    assert 43 <= session.granted_s <= 45
+
+
+async def test_a_reply_cut_mid_sentence_is_reported_as_such(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Reporting this as a clean drain would hide the one signal that
+    says drain_s is too short for the replies this server gives."""
+    with caplog.at_level("INFO"):
+        await registry_with(FakeSession(speaking_for=30)).drain(timeout_s=1.2)
+
+    (incomplete,) = [
+        r for r in caplog.records if getattr(r, "event", None) == "drain_incomplete"
+    ]
+    assert incomplete.cut_mid_reply == 1
+    assert incomplete.unfinished == 0
+    assert incomplete.levelname == "WARNING"
+    assert "drain_finished" not in {getattr(r, "event", None) for r in caplog.records}
+
+
+async def test_the_drain_reports_what_it_could_not_finish(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("INFO"):
+        await registry_with(FakeSession(speaking_for=30)).drain(timeout_s=0.1)
+    events = {getattr(record, "event", None) for record in caplog.records}
+    assert "drain_started" in events
+    assert "drain_incomplete" in events
+
+
+async def test_the_drain_reports_a_clean_finish(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level("INFO"):
+        await registry_with(FakeSession()).drain(timeout_s=5)
+    events = {getattr(record, "event", None) for record in caplog.records}
+    assert "drain_finished" in events
+    assert "drain_timeout" not in events
+
+
+class FakeApp:
+    def __init__(self, registry: SessionRegistry) -> None:
+        # The registry where the drain reads it: on the composition, which
+        # is the one thing a served app's state carries.
+        composition = type("Composition", (), {"sessions": registry})()
+        self.state = type("State", (), {"composition": composition})()
+
+
+class StartingApp:
+    """An app whose lifespan has not finished building. Its state bag is
+    empty, which is exactly what a served app's is until the composition
+    is installed."""
+
+    def __init__(self) -> None:
+        self.state = type("State", (), {})()
+
+
+def draining_server(registry: SessionRegistry, drain_s: float = 5.0) -> DrainingServer:
+    app = cast(Any, FakeApp(registry))
+    return DrainingServer(uvicorn.Config(app), app, drain_s)
+
+
+async def test_the_first_signal_drains_before_uvicorn_exits() -> None:
+    session = FakeSession(speaking_for=0.1)
+    registry = registry_with(session)
+    server = draining_server(registry)
+
+    server.handle_exit(signal.SIGTERM, None)
+    # The signal did not stop the server on the spot: the conversation
+    # gets its sentence first.
+    assert not server.should_exit
+    for _ in range(100):
+        await asyncio.sleep(0.02)
+        if server.should_exit:
+            break
+    assert server.should_exit
+    assert session.shutdown is not None
+
+
+async def test_a_second_signal_forces_the_exit() -> None:
+    server = draining_server(registry_with(FakeSession(speaking_for=30)))
+    server.handle_exit(signal.SIGTERM, None)
+    assert not server.should_exit
+    # An operator in a hurry: the second signal is passed straight to
+    # uvicorn rather than starting another drain.
+    server.handle_exit(signal.SIGTERM, None)
+    assert server.should_exit
+
+
+async def test_a_signal_before_the_composition_exists_is_passed_straight_through() -> None:
+    """Construction is the lifespan's (#142), and it can spend minutes in
+    a provider loading a model, so a redeploy landing on a pod that is
+    still starting is ordinary. There are no sessions to drain yet and no
+    composition to read them from, so the signal goes to uvicorn the same
+    way a second one does, rather than raising inside a signal handler.
+    """
+    starting = cast(Any, StartingApp())
+    server = DrainingServer(uvicorn.Config(starting), starting, 5.0)
+
+    server.handle_exit(signal.SIGTERM, None)
+
+    assert server.should_exit
+
+
+def uvicorn_that_stops_mid_drain(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Stand in for uvicorn's own serving, in the shape that makes the
+    settle matter: a signal arrives, the drain is scheduled, and serving
+    ends while the drain is still in flight, which is what an operator's
+    second signal does to it.
+    """
+
+    async def _serve(server: uvicorn.Server, sockets: Any = None) -> None:
+        server.handle_exit(signal.SIGTERM, None)
+        # One turn of the loop is what the scheduled `_start_drain` needs
+        # to run and create the task.
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(uvicorn.Server, "_serve", _serve)
+
+
+async def test_the_drain_task_is_owned_and_finished_before_serving_ends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The task used to be created and dropped (#142), so nothing held
+    it, nothing joined it and whatever it raised went to the collector.
+    Serving now ends after it, not alongside it."""
+    uvicorn_that_stops_mid_drain(monkeypatch)
+    session = FakeSession(speaking_for=0.1)
+    server = draining_server(registry_with(session))
+
+    await server._serve()
+
+    assert server._drain_task is not None
+    assert server._drain_task.done()
+    # Nothing else drove the loop, so the conversation reached its end
+    # because serving waited for it.
+    assert session.shutdown == (1001, "server shutting down")
+
+
+def uvicorn_that_waits_out_the_drain(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The other shape: serving that stays up until the drain task is
+    over, so the settle meets a task that has already ended."""
+
+    async def _serve(server: uvicorn.Server, sockets: Any = None) -> None:
+        server.handle_exit(signal.SIGTERM, None)
+        await asyncio.sleep(0)
+        task = getattr(server, "_drain_task", None)
+        if task is not None:
+            # Waited on rather than awaited: waiting does not take what
+            # the task ended with off it, which is the whole of what the
+            # settle has to be seen doing.
+            await asyncio.wait({task}, timeout=5)
+
+    monkeypatch.setattr(uvicorn.Server, "_serve", _serve)
+
+
+# A credential-shaped string, in the message of an exception raised where
+# a client under the drain would raise one.
+DRAIN_SENTINEL = "sk-live-drain-9f3c2a"
+
+
+class LeakyDrainFailure(Exception):
+    """Stands in for a library exception from under the drain, quoting in
+    its message what it was handed."""
+
+
+def logged_text(caplog: pytest.LogCaptureFixture) -> str:
+    return "\n".join(
+        [record.getMessage() for record in caplog.records]
+        + [str(record.exc_info) for record in caplog.records]
+    )
+
+
+async def assert_the_task_left_nothing_behind(server: DrainingServer) -> None:
+    """Drop the drain task and collect it, which proves both that it
+    really went and that it left nothing for the loop's own handler to
+    print: an exception nobody took off a task is reported there, in
+    full, when the collector reaches it."""
+    loop = asyncio.get_running_loop()
+    reported: list[dict[str, Any]] = []
+    loop.set_exception_handler(lambda _loop, context: reported.append(context))
+    try:
+        task = server._drain_task
+        assert task is not None
+        server._drain_task = None
+        gone = weakref.ref(task)
+        del task
+        # More than one pass, and a turn of the loop between them: the
+        # task, its coroutine and the traceback of whatever it raised
+        # reference each other, so what frees them is the cycle
+        # collector rather than the last reference going.
+        for _ in range(3):
+            gc.collect()
+            await asyncio.sleep(0)
+        assert gone() is None, "the task outlived the check, which proves nothing"
+        assert reported == []
+    finally:
+        loop.set_exception_handler(None)
+
+
+async def test_a_drain_that_failed_before_the_settle_says_only_its_class(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The path with nothing to wait for is still the path that has to
+    ask. A drain runs through provider clients and a database, so what it
+    raises can quote a credential, and an exception left on a task is
+    printed in full by the collector."""
+
+    class FailingRegistry:
+        async def drain(self, timeout_s: float) -> None:
+            raise LeakyDrainFailure(f"the endpoint refused: key={DRAIN_SENTINEL}")
+
+    uvicorn_that_waits_out_the_drain(monkeypatch)
+    server = draining_server(cast(Any, FailingRegistry()))
+
+    with caplog.at_level("WARNING"):
+        await server._serve()
+
+    text = logged_text(caplog)
+    assert "LeakyDrainFailure" in text
+    assert DRAIN_SENTINEL not in text
+    assert DRAIN_SENTINEL not in capsys.readouterr().err
+    # No traceback either: a chain is the other way the message travels.
+    assert all(record.exc_info is None for record in caplog.records)
+    await assert_the_task_left_nothing_behind(server)
+
+
+async def test_a_drain_that_fails_during_the_settle_says_only_its_class(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """And the waited path says the same thing, rather than the
+    exception it was handed while waiting."""
+
+    class SlowlyFailingRegistry:
+        async def drain(self, timeout_s: float) -> None:
+            await asyncio.sleep(0.02)
+            raise LeakyDrainFailure(f"the endpoint refused: key={DRAIN_SENTINEL}")
+
+    uvicorn_that_stops_mid_drain(monkeypatch)
+    server = draining_server(cast(Any, SlowlyFailingRegistry()))
+
+    with caplog.at_level("WARNING"):
+        await server._serve()
+
+    text = logged_text(caplog)
+    assert "LeakyDrainFailure" in text
+    assert DRAIN_SENTINEL not in text
+    assert DRAIN_SENTINEL not in capsys.readouterr().err
+    assert all(record.exc_info is None for record in caplog.records)
+    await assert_the_task_left_nothing_behind(server)
+
+
+async def test_a_drain_that_outlives_its_bound_is_abandoned(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A drain that cannot end must not be able to wedge the exit: the
+    bound is the drain budget plus the registry's close margin, and past
+    it the process goes anyway, saying so.
+
+    The drain here does not cooperate with being cancelled, which is the
+    case a bound has to survive to be one: a `finally` doing cleanup of
+    its own, or a client that swallows the cancellation, decides for
+    itself when it is done, and serving must not be waiting on that
+    decision."""
+
+    class UncooperativeRegistry:
+        def __init__(self) -> None:
+            self.released = asyncio.Event()
+
+        async def drain(self, timeout_s: float) -> None:
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                await self.released.wait()
+
+    uvicorn_that_stops_mid_drain(monkeypatch)
+    monkeypatch.setattr(main, "CLOSE_MARGIN_S", 0.05)
+    registry = UncooperativeRegistry()
+    server = draining_server(cast(Any, registry), drain_s=0.05)
+
+    started = time.monotonic()
+    with caplog.at_level("WARNING"):
+        # The outer bound is the test's backstop; the assertion below is
+        # what says the server's own bound is what let go.
+        await asyncio.wait_for(server._serve(), timeout=5)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 1
+    assert any("drain did not finish" in record.getMessage() for record in caplog.records)
+    task = server._drain_task
+    assert task is not None
+    # Serving let go while the drain was still going, rather than waiting
+    # to see what it made of the cancellation.
+    assert not task.done()
+
+    # And when it does end, it still delivers the exit, and what it ended
+    # with is still taken off it.
+    registry.released.set()
+    await asyncio.wait({task}, timeout=1)
+    assert task.done()
+    assert server.should_exit
+
+
+async def test_a_zero_drain_period_is_an_ordinary_uvicorn_exit() -> None:
+    server = draining_server(registry_with(FakeSession()), drain_s=0)
+    server.handle_exit(signal.SIGTERM, None)
+    assert server.should_exit
+
+
+def test_the_server_is_built_with_explicit_pings_and_a_short_grace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The pings are what settle the per-path idle timeout question: a
+    proxy in front needs only a read timeout above the interval."""
+    built: dict[str, Any] = {}
+    monkeypatch.setattr(DrainingServer, "run", lambda self: built.update(config=self.config))
+
+    config = Config(server={"port": 9001, "drain_s": 12})
+    serve(cast(Any, FakeApp(registry_with())), config)
+
+    uvicorn_config = built["config"]
+    assert uvicorn_config.ws_ping_interval == PING_INTERVAL_S == 20.0
+    assert uvicorn_config.ws_ping_timeout == PING_TIMEOUT_S == 20.0
+    assert uvicorn_config.timeout_graceful_shutdown == UVICORN_GRACEFUL_SHUTDOWN_S
+    assert uvicorn_config.port == 9001
+    # Uvicorn's own loggers propagate into the root handler instead of
+    # printing in a second, fixed format.
+    assert uvicorn_config.log_config is None

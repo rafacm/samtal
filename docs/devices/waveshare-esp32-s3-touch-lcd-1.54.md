@@ -3,7 +3,7 @@
 A 240x240 LCD with a capacitive touch layer, two microphones with
 hardware echo cancellation, a speaker, a battery, and three buttons:
 PWR on one side, volume up and volume down on the other. This is the
-board samtal is developed against, and the only one currently at
+board vinga is developed against, and the only one currently at
 working status.
 
 What every board shares, and this guide does not repeat, is on the
@@ -17,7 +17,7 @@ echo-cancellation gesture below is the one thing that moves it out of
 that mode.
 
 Unless a section says otherwise, what follows describes the board
-running upstream's prebuilt firmware, which is what samtal uses today.
+running upstream's prebuilt firmware, which is what vinga uses today.
 
 ## Controls
 
@@ -54,7 +54,7 @@ ships the Chinese wake word, "nǐ hǎo xiǎo zhì", and it is enabled:
 saying it opens a session without touching a button. An English model
 ("Hi ESP", ESP-SR `wn9_hiesp`) exists in the firmware sources, and no
 prebuilt image inspected for this project has carried it, so reaching
-it means building the firmware; samtal's own build will use it. 🚧
+it means building the firmware; vinga's own build will use it. 🚧
 
 The wake word wakes the device, and never a particular agent. It is
 spotted on the chip by a model compiled into the firmware, the server
@@ -69,14 +69,14 @@ because an always-on microphone deserves a precise answer:
   so nothing that is heard before the wake word can reach anything.
 - After the wake word fires, the device opens the channel and reports
   the word that fired, after the fact, as a message naming it.
-  samtal debug-logs that message and does not retain it; the report is
+  vinga debug-logs that message and does not retain it; the report is
   described in [`../xiaozhi-notes.md`](../xiaozhi-notes.md).
 - One thing is unsettled, and worth knowing rather than glossing over.
   The firmware has a build setting, on by default in its sources, that
   also sends the short span of audio it had buffered around the trigger
   phrase as the conversation's first audio, so that the assistant can
   react to whatever was said in the same breath as the wake word.
-  samtal's own protocol notes describe only the after-the-fact word
+  vinga's own protocol notes describe only the after-the-fact word
   report reaching the server. Which of the two the prebuilt image
   actually does has not been checked on the wire, so treat the exact
   extent of what leaves the board at the moment of waking as an open
@@ -125,7 +125,7 @@ instance) appearing briefly over it.
 The interface language of upstream's prebuilt firmware is Chinese, and
 the language is compiled in rather than configured, so it stays Chinese
 until the board runs a build made with another one. An English
-interface is part of samtal's planned firmware build. 🚧 The language of
+interface is part of vinga's planned firmware build. 🚧 The language of
 the *conversation* is a server-side setting and is unaffected by this.
 
 The touch layer is initialized and registered as an input, but the
