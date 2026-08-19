@@ -5,20 +5,30 @@ scope and captures what it produced. On its own that would prove only
 what it happened to execute, which is exactly the hole a runtime harness
 falls into. So the path list comes from outside it, twice over:
 
-- **From the static walk, while it exists.** Every emit site the
-  conformance suite finds in a scoped module must be claimed by a
-  driver. That obligation is what makes the capture complete before a
-  conversion, and it retires with the last conversion, since a converted
-  site is invisible to a walk that looks for `event=` keywords.
-- **From the catalog, which outlives it.** Every variant declared on a
-  scoped channel must be produced by some driver's run. That one
-  survives the conversion and is what the plan means by claiming
-  exhaustiveness over the catalog's legal variants rather than over
-  arbitrary call sites: every legal variant is constructible, and
-  therefore directly drivable.
+- **From a static reading of the source.** The harness's own walk reads
+  the scoped modules and answers every emit path in them, in both the
+  untyped and the typed shape, and the drivers' identities must EQUAL
+  that inventory in both directions. A sixth path with no driver and a
+  driver naming no path fail the same way. Each inventoried path must
+  also produce a record of the event it emits, so a driver that runs and
+  emits something else is a failure rather than a pass.
+- **From the catalog.** Every variant declared on a scoped channel must
+  be produced by some driver's run: every legal variant is
+  constructible, and therefore directly drivable, which is what the plan
+  means by claiming exhaustiveness over variants rather than over call
+  sites.
 
-Both hold before a conversion and after it, which is the point: the
-committed capture is a file that does not move when the sites do.
+A walk is only worth what it finds, so it is proved here on planted
+sources rather than trusted: both shapes, both numbered in one sequence
+within their enclosing scope, and a tap's own `emit` left alone.
+
+All of it holds before a conversion and after it, which is the point:
+the committed capture is a file that does not move when the sites do.
+
+The first version of this borrowed the conformance suite's walk, which
+reads only the untyped shape. After the store converted, that walk found
+nothing in scope while the harness claimed five paths, and PR #217's
+review named the obligation for what it had become: vacuous.
 """
 
 import json
@@ -38,8 +48,9 @@ from tests.tools.event_baseline import (
     captured,
     committed,
     rendered,
+    sites,
+    sites_in,
 )
-from tests.unit.test_event_schema_conformance import emit_sites
 from vinga_server.conversations.store import ConversationStore
 from vinga_server.events.catalog import catalog
 
@@ -59,15 +70,30 @@ def capture() -> dict[str, list[dict[str, Any]]]:
     return captured()
 
 
-def test_every_statically_known_emit_site_in_scope_is_driven() -> None:
-    """The obligation the harness cannot give itself. Equality rather
-    than containment for as long as the walk still sees these sites: a
-    driver claiming a path that does not exist is as wrong as a path
-    with no driver."""
-    walked = {site.identity for site in emit_sites() if site.module in SCOPE}
+def test_every_emit_path_in_scope_is_driven_and_only_those() -> None:
+    """The obligation the harness cannot give itself, in both
+    directions: a driver claiming a path that does not exist is as wrong
+    as a path with no driver, and containment either way would let one
+    of the two through."""
+    walked = {site.identity for site in sites()}
     claimed = {driver.identity for driver in DRIVERS}
 
-    assert walked <= claimed, f"emit sites with no driver: {sorted(walked - claimed)}"
+    assert sorted(walked - claimed) == [], "emit paths with no driver"
+    assert sorted(claimed - walked) == [], "drivers naming no emit path"
+    assert len(walked) == len(sites()) == len(DRIVERS)
+
+
+def test_every_driven_path_produces_the_event_it_emits(
+    capture: dict[str, list[dict[str, Any]]],
+) -> None:
+    """Not merely that a driver produced something. The walk reads which
+    event each path emits, from the `event=` keyword or from the variant
+    the thunk constructs, and the record has to be that one."""
+    expected = {site.identity: site.event for site in sites()}
+
+    for driver in DRIVERS:
+        produced = {one["event"] for one in capture[driver.key]}
+        assert expected[driver.identity] in produced, driver.key
 
 
 def test_every_catalog_variant_on_a_scoped_channel_is_produced(
@@ -150,3 +176,71 @@ def test_the_store_says_nothing_else(
 
     said = [one for one in caplog.records if one.name in SCOPE]
     assert [getattr(one, "event", None) for one in said] == ["conversations_enabled"]
+
+
+# --- the walk, proved on planted sources ------------------------------
+#
+# Written rather than trusted, for the reason the conformance suite
+# gives about its own: an inventory that stopped finding things would
+# turn every obligation above into a pass over an empty set.
+
+PLANTED = "vinga_server.planted"
+
+BOTH_SHAPES = """
+from vinga_server.events import ServerEvents
+from vinga_server.events.catalog import ConversationsPruned
+
+events = ServerEvents(__name__)
+
+
+class Store:
+    def run(self):
+        events.warning("said %s", one, event="conversations_enabled", path=one)
+        events.emit(lambda: ConversationsPruned(sessions=one, days=two))
+"""
+
+A_TAPS_OWN_EMIT = """
+from vinga_server.events import ServerEvents
+from vinga_server.events.catalog import ConversationsPruned
+
+events = ServerEvents(__name__)
+
+
+class Sink:
+    def emit(self, emission):
+        self.kept.append(emission)
+
+
+class Store:
+    def run(self, tap):
+        tap.emit(emission)
+        events.emit(lambda: ConversationsPruned(sessions=one, days=two))
+"""
+
+
+def test_the_walk_reads_both_shapes_and_numbers_them_in_one_sequence() -> None:
+    """The moment the identity has to stay stable is the one where a
+    module is half converted, so the two shapes share one ordinal
+    counter rather than each starting at 1."""
+    found = sites_in(PLANTED, BOTH_SHAPES)
+
+    assert [(one.function, one.ordinal, one.event) for one in found] == [
+        ("Store.run", 1, "conversations_enabled"),
+        ("Store.run", 2, "conversations_pruned"),
+    ]
+
+
+def test_the_walk_leaves_a_taps_own_emit_alone() -> None:
+    """`emit` is a tap's method as well as an emitter's, and a scoped
+    module may hold both. The receiver is what tells them apart: a tap
+    is not the module's emitter, whatever it is called."""
+    found = sites_in(PLANTED, A_TAPS_OWN_EMIT)
+
+    assert [(one.function, one.ordinal) for one in found] == [("Store.run", 1)]
+
+
+def test_the_walk_refuses_a_thunk_it_cannot_read() -> None:
+    """A path the walk cannot read is a path the inventory would
+    silently lose, so it is an error rather than a skip."""
+    with pytest.raises(AssertionError, match="construct one variant"):
+        sites_in(PLANTED, "events = ServerEvents(__name__)\nevents.emit(lambda: 1)\n")

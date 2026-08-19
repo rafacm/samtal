@@ -15,16 +15,29 @@ every run would be a file nobody reads. What the values are is the
 golden inventory's question and the behavioral suites'.
 
 **The path list is not self-claimed.** A runtime harness proves only
-what it executes, so the obligation comes from outside it: while the
-conformance suite's static walk still exists, every emit site it finds
-in scope must be claimed by a driver here, and every variant the catalog
-declares on a scoped channel must be produced by one. The first
-obligation retires with the last conversion, and the second survives it,
-which is what the plan means by claiming exhaustiveness over the
-catalog's legal variants rather than over arbitrary call sites.
+what it executes, so the obligation comes from a static reading of the
+source instead. `sites()` below walks the scoped modules and answers
+every emit path in them, in BOTH of the shapes a path can have: the
+untyped `events.warning(..., event=...)` call and the typed
+`events.emit(lambda: Variant(...))` thunk. The drivers' identities must
+equal that walk's exactly, in both directions, so a sixth path with no
+driver and a driver naming no path each fail the same way, before a
+conversion and after it.
 
-`tests/unit/test_event_baseline.py` holds both obligations and compares
-the capture with the committed file. Regenerate it deliberately:
+Reading both shapes is the correction PR #217's review forced. The first
+version of this borrowed the conformance suite's walk, which recognizes
+only the untyped shape; once the store converted, that walk found zero
+sites in scope while the harness claimed five, and an obligation of the
+form "every one of nothing is claimed" is no obligation at all.
+
+The walk also reads which event each path emits, which is the `event=`
+keyword for an untyped site and the declaration behind the constructed
+variant for a typed one, so the test can hold each path to producing its
+own record rather than to producing something.
+
+`tests/unit/test_event_baseline.py` holds these obligations, proves the
+walk on planted sources, and compares the capture with the committed
+file. Regenerate it deliberately:
 
     uv run python -m tests.tools.event_baseline
 
@@ -35,6 +48,7 @@ deterministically, and they are the same ones `test_conversations_store.py`
 pays.
 """
 
+import ast
 import datetime as dt
 import json
 import logging
@@ -45,10 +59,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import vinga_server
 from tests.support.sessions import Gate
 from vinga_server.conversations import store as store_module
 from vinga_server.conversations.records import ToolInvocation, TurnRecord
 from vinga_server.conversations.store import ConversationStore
+from vinga_server.events import catalog as catalog_module
+from vinga_server.events.catalog import declaration_of
 from vinga_server.logs import _STANDARD_ATTRIBUTES
 
 # The channels this baseline covers, and therefore the modules whose
@@ -60,9 +77,166 @@ COMMITTED = (
     Path(__file__).resolve().parent.parent / "unit" / "data" / "event-baseline.json"
 )
 
+PACKAGE = Path(vinga_server.__file__).parent
+
+# The four emitter methods an untyped site calls, which is how that
+# shape is recognized; the typed shape is `emit` and is recognized by
+# name alone.
+LEVEL_METHODS = frozenset({"debug", "info", "warning", "error"})
+
+TYPED_METHOD = "emit"
+
+# How a session-scoped emitter is reached, spelled as the conformance
+# walk spells it. Nothing in scope uses it yet; M2 is where it starts
+# to.
+SESSION_RECEIVER = "self._events"
+
 # The clock these stores keep, so "recorded two hundred days ago" is a
 # number the harness chose rather than a sleep.
 NOW = dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC)
+
+
+# --- the static reading, which is what makes the drivers a claim ------
+
+
+@dataclass(frozen=True)
+class Site:
+    """One emit path as the source shows it, and the event it emits.
+
+    `module`, `function` and `ordinal` are the conformance walk's own
+    identity, so a driver's key means the same thing before and after
+    its path converts. Deliberately not a line number, for the reason
+    that walk gives: a line number churns with every edit above it.
+    """
+
+    module: str
+    function: str
+    ordinal: int
+    event: str
+
+    @property
+    def identity(self) -> tuple[str, str, int]:
+        return (self.module, self.function, self.ordinal)
+
+    def __str__(self) -> str:
+        return f"{self.module}:{self.function} #{self.ordinal} ({self.event})"
+
+
+def emitter_names(tree: ast.AST) -> frozenset[str]:
+    """What this module reaches its emitter through.
+
+    A module builds its own with `events = ServerEvents(__name__)`, or a
+    submodule takes its package's with `from . import events`. Reading
+    the binding rather than accepting any `.emit(` is what keeps a tap's
+    own `emit(emission)` out of the inventory: a tap is not the module's
+    emitter, whatever it is called.
+    """
+    names: set[str] = {SESSION_RECEIVER}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            called = node.value.func
+            if isinstance(called, ast.Name) and called.id == "ServerEvents":
+                names |= {
+                    target.id
+                    for target in node.targets
+                    if isinstance(target, ast.Name)
+                }
+        if isinstance(node, ast.ImportFrom) and node.level and node.module is None:
+            names |= {alias.asname or alias.name for alias in node.names}
+    return frozenset(names)
+
+
+def _event_of(module: str, enclosing: str, node: ast.Call) -> str:
+    """Which event one call emits.
+
+    An untyped call says so in its `event=` keyword. A typed one says so
+    by the variant it constructs, which is what the declaration behind
+    that variant is named. A shape neither of those reads is refused
+    rather than skipped: a path the walk cannot read is a path the
+    inventory would silently lose.
+    """
+    where = f"{module}:{enclosing}"
+    named = [keyword for keyword in node.keywords if keyword.arg == "event"]
+    if named:
+        return str(ast.literal_eval(named[0].value))
+    if len(node.args) != 1 or isinstance(node.args[0], ast.Lambda) is False:
+        raise AssertionError(f"{where}: an emit that is not a construction thunk")
+    body = node.args[0].body  # type: ignore[attr-defined]
+    if not isinstance(body, ast.Call) or not isinstance(body.func, ast.Name):
+        raise AssertionError(f"{where}: a thunk that does not construct one variant")
+    variant = getattr(catalog_module, body.func.id, None)
+    if variant is None:
+        raise AssertionError(f"{where}: {body.func.id} is not a catalog variant")
+    return declaration_of(variant).name
+
+
+class _Sites(ast.NodeVisitor):
+    """Every emit path in one module, in source order, numbered within
+    its enclosing scope across BOTH shapes.
+
+    Across both deliberately. Numbering the shapes separately would give
+    two paths in one function the same ordinal while a module was half
+    converted, which is the one moment the identity has to stay stable.
+    """
+
+    def __init__(self, module: str, tree: ast.AST) -> None:
+        self.module = module
+        self.receivers = emitter_names(tree)
+        self.stack: list[str] = []
+        self.ordinals: dict[str, int] = {}
+        self.found: list[Site] = []
+
+    def visit_FunctionDef(self, node: ast.AST) -> None:
+        self.stack.append(node.name)  # type: ignore[attr-defined]
+        self.generic_visit(node)
+        self.stack.pop()
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+    visit_ClassDef = visit_FunctionDef
+
+    def visit_Call(self, node: ast.Call) -> None:
+        function = node.func
+        if isinstance(function, ast.Attribute) and self._is_emit(function, node):
+            enclosing = ".".join(self.stack)
+            self.ordinals[enclosing] = self.ordinals.get(enclosing, 0) + 1
+            self.found.append(
+                Site(
+                    module=self.module,
+                    function=enclosing,
+                    ordinal=self.ordinals[enclosing],
+                    event=_event_of(self.module, enclosing, node),
+                )
+            )
+        self.generic_visit(node)
+
+    def _is_emit(self, function: ast.Attribute, node: ast.Call) -> bool:
+        if ast.unparse(function.value) not in self.receivers:
+            return False
+        if function.attr == TYPED_METHOD:
+            return True
+        return function.attr in LEVEL_METHODS and any(
+            keyword.arg == "event" for keyword in node.keywords
+        )
+
+
+def sites_in(module: str, source: str) -> tuple[Site, ...]:
+    """Every emit path in one module's text. Separate from `sites()` so
+    the walk can be run over a planted source and proved."""
+    tree = ast.parse(source)
+    walk = _Sites(module, tree)
+    walk.visit(tree)
+    return tuple(walk.found)
+
+
+def sites() -> tuple[Site, ...]:
+    """Every emit path in the scoped modules, in source order."""
+    found: list[Site] = []
+    for module in SCOPE:
+        path = PACKAGE.parent / f"{module.replace('.', '/')}.py"
+        if not path.exists():
+            path = PACKAGE.parent / module.replace(".", "/") / "__init__.py"
+        found += sites_in(module, path.read_text(encoding="utf-8"))
+    return tuple(found)
 
 
 class Raising:
