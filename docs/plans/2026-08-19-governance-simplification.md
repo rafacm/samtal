@@ -350,9 +350,10 @@ carries its baseline proof inside its own PR.
   inlining the catalog into the emitters would put 58 declarations
   back inside dispatch code, and inlining the emitters into callers
   would spread tap dispatch over 21 modules.
-- [ ] **M2: convert the session channel.** All session-scope emit
+- [x] **[M2: convert the session channel](2026-08-19-governance-simplification-implementation.md#m2-convert-the-session-channel).** (PR TBD)
+  All session-scope emit
   sites (the pipeline, the device session, turn-taking, the filler
-  runner, capture's session-scoped paths) construct typed events;
+  runner) construct typed events;
   their declarations move into the catalog; their `PINNED_BY` and
   `TOKEN_SOURCES` entries are deleted; the prose pins of
   `test_event_surface_pins.py` retire in favor of the golden
