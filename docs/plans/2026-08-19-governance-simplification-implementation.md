@@ -128,13 +128,17 @@ Five, each with its reason.
    `%` position is exactly the kind of loud diff the file exists for.
 
 5. **The test-boundary rule gained one named exception.** The baseline's
-   exhaustiveness obligation is generated from the conformance suite's
+   exhaustiveness obligation was generated from the conformance suite's
    static walk, which the plan requires by name, and
    `test_support_boundaries.py` forbids a test module importing another
-   one. Extracting the walk into `tests/support/` would be a
-   three-hundred-line move of code M3 deletes outright, so the pair is
-   exempted by both ends and by name, and the exemption goes with the
-   walk.
+   one. Extracting the walk into `tests/support/` would have been a
+   three-hundred-line move of code M3 deletes outright, so the pair was
+   exempted by both ends and by name.
+
+   Withdrawn by the review round below. Finding 2 showed the borrowed
+   walk could not see a converted site at all, so the harness reads the
+   source itself now and imports nothing; the exemption went with the
+   import, and the table it lived in stays behind, empty.
 
 ### Discoveries
 
@@ -214,3 +218,103 @@ Run from `vinga-server/`, at the last commit of the milestone.
 Not verified here, and not claimed: the container image and the smoke
 lane. The image job does not run on pull requests at present, and
 nothing in this milestone touches the image's plumbing.
+
+### PR review round (2026-08-19)
+
+External review of PR #217, read-only against commit b7faab99. Verdict:
+mergeable after fixes. Findings condensed but faithful; each carries
+its resolution and the commit that made it.
+
+**1 (P1). A construction refusal could print a secret.** The guard put
+`type(exc).__name__` into the forgiving complaint and the strict
+refusal alike. An exception's class name is caller-controlled:
+`type(name, (Exception,), {})` accepts any string as a name, validation
+included, so a thunk raising an exception built from far-side bytes
+carries those bytes in its class name and the refusal renders them.
+
+*Resolution.* Adopted (`92fe677a`). `construction_failed` carries no
+detail at all in either mode, and the handler does not bind the
+exception: what is never looked at cannot leak later. Both sentinel
+branches are now driven twice, once with the credential-shaped sentinel
+as a refused value and once with the same sentinel as the raised class's
+NAME, asserted absent from the sentence, the arguments, the fields, both
+shipped log formats, the exception's own `str`, `repr` and `args`, both
+exception chains, and an attached tap.
+
+Noted rather than fixed, because it is neither this PR's change nor its
+scope: the untyped path's two neighbouring reports, the failed-tap
+sentence in `_offer` and the last-resort `GUARD_MESSAGE`, still render
+an exception class name and are reachable by the same construction. They
+predate #210 and are pinned by suites this milestone does not touch;
+M3 rewrites both paths and is where they should go.
+
+**2 (P1). The baseline's exhaustiveness obligation was vacuous.** It
+compared the conformance walk's sites in scope against the drivers with
+`walked <= claimed`, and that walk recognizes only
+`events.<level>(..., event=...)`. Once the store converted it found zero
+sites in scope while the harness claimed five: every one of nothing is
+claimed.
+
+*Resolution.* Adopted (`9731e73b`), by the second of the two routes
+offered. The harness reads the scoped modules itself and recognizes both
+shapes, the untyped call and the typed `emit(lambda: Variant(...))`
+thunk, numbering them in one sequence within their enclosing scope so an
+identity stays stable while a module is half converted. Emitter calls
+are told from a tap's own `emit` by the receiver, read off the module's
+`ServerEvents(...)` binding, and a thunk shape the walk cannot read is
+an error rather than a skip. The assertion is equality in both
+directions, so a path with no driver and a driver with no path fail the
+same way; proved by mutation, since adding a sixth typed emit to the
+store turns the lane red. The walk also reads which event each path
+emits, so each driven path is held to producing its own record. The walk
+itself is proved on planted sources rather than trusted.
+
+**3 (P2). `declare()` accepted any string as an event name** while the
+payload documents `event` as an `EventName`, so a catalog could declare
+an event its own base field would refuse.
+
+*Resolution.* Adopted (`03fdb451`). The name is asked of `EventName`
+itself rather than of a pattern restated in the catalog, and the check
+runs before any refusal echoes the name: every later message prints it,
+which is safe exactly because a name that got that far is one the
+`event_name` syntax admits. A name that did not is caller-supplied
+bytes, so its refusal states the rule and never the value, asserted by
+equality with a credential-shaped spelling.
+
+**4 (P2). The frozen check was not a frozen check.** `_check` asked
+`is_dataclass()` while its own error text, the plan and every
+declaration said frozen.
+
+*Resolution.* Adopted (`ccd7ea65`). The check reads
+`__dataclass_params__.frozen`, and writing its test found a second half:
+it ran after the fields were read, and reading them is what needs a
+dataclass, so a plain class raised `TypeError` rather than
+`CatalogError`. It moved in front of the read, and both refusals are
+pinned.
+
+**5 (P3). Stale links after the package move.**
+`runtime/pipeline.py` and `device/session.py` still linked to the
+removed `../events.py`, and `events/values.py` pointed at an ADR path
+resolving inside `vinga-server/` rather than at the repository root.
+
+*Resolution.* Adopted (`32fbe99d`). The package's own `__init__` was
+wrong the same way, one level short before the move and two after it,
+so it is corrected too. Every link touched was resolved against the tree
+from the file that holds it rather than counted by eye.
+
+### Verification, after the review round
+
+Run from `vinga-server/`, at `32fbe99d`.
+
+- `uv run ruff check .`: all checks passed.
+- `uv run mypy`: success, no issues found in 3 source files.
+- `uv run pytest tests/unit -q`: 3,182 passed, 16 skipped (3,166 at the
+  end of M1; the 16 new tests are the review round's).
+- `uv run pytest tests/integration -q`: 60 passed.
+- The four documentation drift checks: all clean, and
+  `docs/reference/events.md` is unchanged by this round.
+- The record baseline is still byte-identical: no commit in this round
+  touches `vinga-server/tests/unit/data/event-baseline.json`.
+
+The image and the smoke lane remain unverified here, for the reason
+given above.
