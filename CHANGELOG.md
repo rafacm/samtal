@@ -45,7 +45,10 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   logger is enabled for INFO echoes every statement with the parameters
   bound to it; its floor is WARNING for that reason. An operator who
   genuinely wants a wire trace still raises the logger by name, which
-  no configuration key does for them.
+  no configuration key does for them. The floor goes on where each way
+  of starting the server begins rather than in `logs.configure` alone,
+  which one entry point never reaches and the other reaches only after
+  the boot has read its configuration out of a database.
 
 - **A read or a delete of something that is not there names its
   section, not what was addressed** (#132). Four entity kinds and the
@@ -60,7 +63,13 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   provider of that name exists for that stage`, `mcp_servers: no MCP
   server of that name exists`, `agents: no agent of that name exists`,
   `devices: no device with that MAC is bound`, and `<section>: no
-  secret is stored for that slot`.
+  secret is stored for that slot`. The two other segments a caller
+  sends are the same story and changed with them: a stage that is not
+  one of the four is refused with `providers: the stage has to be one
+  of asr, llm, tts, vad`, and a credential slot that is not one is
+  refused with the rule for that kind, since `set-secret` is the
+  command a credential gets pasted into and the slot is where one
+  typed an argument early lands.
 
 - **A failed barge-in confirmation names the class it failed with, not
   what the provider said** (#183). The gate ladder's catch was a
