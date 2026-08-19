@@ -9,6 +9,32 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ### Changed
 
+- **The project is now vinga** (#209). samtal collides with an
+  existing Swedish commercial conversational-AI product, so every
+  surface renames: the repository (`rafacm/vinga`, old URLs redirect),
+  the directories (`vinga-server/`, `vinga-esp32/`), the Python
+  distribution and import package (`vinga-server`, `vinga_server`),
+  the CLI (`vinga-server`), the container image
+  (`ghcr.io/rafacm/vinga-server`; the old `samtal-server` package
+  stays as published history), and all `SAMTAL_*` environment
+  variables (`VINGA_*`). Historical records keep the old name: this
+  changelog's earlier entries, `docs/adr/`, `docs/plans/`, and
+  `docs/features/`.
+
+  This is a hard cutover with no aliases. An existing deployment
+  updating to a renamed image must, in the same step: rename every
+  `SAMTAL_*` variable to `VINGA_*` (values unchanged, including
+  `VINGA_MASTER_KEY`, which still unlocks the same encrypted
+  secrets), move the data directory from `/var/lib/samtal` to
+  `/var/lib/vinga`, and rename `samtal.db` to `vinga.db` inside it
+  (`conversations.db` keeps its name). One derived value changes as
+  well: the onboarding key's HMAC label is versioned with the project
+  name, so the short onboarding path a provisioned board was given is
+  no longer served; print the new URL with `vinga-server config
+  ota-url` and re-provision the board's `ota_url`.
+
+### Changed
+
 - **samtal-server moved to the src layout** (#208). The import package
   now lives at `samtal-server/src/samtal_server`, so a process started
   from the project directory can no longer import it off the working
