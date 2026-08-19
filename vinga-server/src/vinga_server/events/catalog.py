@@ -45,8 +45,9 @@ imports no subsystem: the arrows keep pointing downward.
 
 import logging
 import re
-from dataclasses import dataclass, field, fields, is_dataclass
-from types import UnionType
+from collections.abc import Mapping
+from dataclasses import MISSING, dataclass, field, fields, is_dataclass
+from types import MappingProxyType, UnionType
 from typing import Any, ClassVar, Union, get_args, get_origin, get_type_hints
 
 from vinga_server.events.values import (
@@ -54,6 +55,7 @@ from vinga_server.events.values import (
     ClassName,
     ConfiguredPath,
     Count,
+    DeviceId,
     EventName,
     EventValue,
     EventValueError,
@@ -78,6 +80,10 @@ LEVELS: frozenset[int] = frozenset(
 # argument, which is why it is matched and then discarded rather than
 # left to be miscounted.
 _CONVERSION = re.compile(r"%(?:%|[-#0 +]*\d*(?:\.\d+)?[hlL]?[a-zA-Z])")
+
+# The base a variant is rendered against where there is none: a server
+# channel contributes only the event name, which no sentence renders.
+_NO_BASE: Mapping[str, EventValue | None] = MappingProxyType({})
 
 
 class CatalogError(Exception):
@@ -115,6 +121,13 @@ class Declared:
     `Absent`, `nullable` is true where it admits `None`, and `carried`
     is false for a value the sentence renders that the payload does not
     keep (a retention window is said and not stored).
+
+    `fixed` holds the value where the variant IS the value: a
+    `session_rejected` that says the Device-Id was not a MAC carries no
+    other reason, so the field is not a parameter at all. The declared
+    token set is that one member, which is what the untyped registry
+    spelled out per variant and what a shared enumeration would have
+    widened.
     """
 
     name: str
@@ -124,9 +137,17 @@ class Declared:
     carried: bool
     note: str
     rendered_note: str
+    fixed: EventValue | None = None
 
 
-def value(*, carried: bool = True, note: str = "", rendered_note: str = "") -> Any:
+def value(
+    *,
+    carried: bool = True,
+    note: str = "",
+    rendered_note: str = "",
+    fixed: EventValue | None = None,
+    default: Any = MISSING,
+) -> Any:
     """Declare one of a variant's values.
 
     `carried=False` marks a value the sentence renders and the payload
@@ -134,10 +155,24 @@ def value(*, carried: bool = True, note: str = "", rendered_note: str = "") -> A
     same list. The two notes are the reference's two columns: what the
     field means, and what its `%` position means where the sentence
     needs saying something the field does not.
+
+    `fixed=` states a value the variant always carries, and takes it out
+    of the constructor entirely: a caller that cannot pass it cannot
+    pass the wrong one. `default=ABSENT` is the other half of the same
+    idea for a field a variant MAY omit, so a site says nothing where it
+    has nothing.
     """
-    return field(
-        metadata={"carried": carried, "note": note, "rendered_note": rendered_note}
-    )
+    metadata = {
+        "carried": carried,
+        "note": note,
+        "rendered_note": rendered_note,
+        "fixed": fixed,
+    }
+    if fixed is not None:
+        return field(init=False, default=fixed, metadata=metadata)
+    if default is not MISSING:
+        return field(default=default, metadata=metadata)
+    return field(metadata=metadata)
 
 
 class Variant:
@@ -170,14 +205,25 @@ class Variant:
             built[declared.name] = None if held is None else held.carried()
         return built
 
-    def logged(self) -> Logged:
+    def logged(self, base: Mapping[str, EventValue | None] = _NO_BASE) -> Logged:
         """The template and the ordered arguments, derived from the
-        fields `ARGS` names."""
+        values `ARGS` names.
+
+        `base` is what the emitter contributes, and `ARGS` may name one
+        of those as well as one of the variant's own: every session
+        sentence opens with "session %s", and the session id is the
+        emitter's to know rather than a value each of thirty sites
+        restates. Nothing can be ambiguous, because a variant that
+        declared a base name is refused at declaration.
+        """
         return Logged(
             self.TEMPLATE,
             tuple(
                 None if held is None else held.rendered()
-                for held in (getattr(self, name) for name in self.ARGS)
+                for held in (
+                    base[name] if name in base else getattr(self, name)
+                    for name in self.ARGS
+                )
             ),
         )
 
@@ -270,6 +316,7 @@ def _read(variant: type[Variant]) -> tuple[Declared, ...]:
                 carried=bool(one.metadata.get("carried", True)),
                 note=str(one.metadata.get("note", "")),
                 rendered_note=str(one.metadata.get("rendered_note", "")),
+                fixed=one.metadata.get("fixed"),
             )
         )
     return tuple(read)
@@ -298,13 +345,6 @@ def _check(variant: type[Variant], declared: tuple[Declared, ...]) -> None:
     """Everything about one variant a reviewer would otherwise check by
     eye."""
     where = variant.__name__
-    if variant.CHANNEL == SESSION_CHANNEL:
-        # The session base carries `session` and `device` as well, and
-        # the device id's value type arrives with the session channel's
-        # own conversion. Refused rather than half-supported: a base
-        # this module cannot describe is a payload shape the golden
-        # inventory would have to guess at.
-        raise CatalogError(f"{where} rides the session channel, which converts in M2")
     if variant.CHANNEL not in CHANNELS:
         raise CatalogError(f"{where} names a channel this server does not speak on")
     if variant.LEVEL not in LEVELS:
@@ -314,12 +354,22 @@ def _check(variant: type[Variant], declared: tuple[Declared, ...]) -> None:
     # identity. On a server channel that is `event` alone: `session` and
     # `device` are ordinary fields there, declared where they are
     # carried, exactly as the untyped registry has them.
-    owned = {one.name for one in base_of(variant.CHANNEL)}.intersection(
-        one.name for one in declared
-    )
+    base = base_of(variant.CHANNEL)
+    owned = {one.name for one in base}.intersection(one.name for one in declared)
     if owned:
         raise CatalogError(f"{where} declares a field the emitter owns: {sorted(owned)}")
-    names = {one.name: one for one in declared}
+    for one in declared:
+        # A value the payload keeps has to have a field kind, which is
+        # what a reference prints and what says the value is metadata. A
+        # formatted fragment has none: it is a shape a sentence renders,
+        # never a key a record carries.
+        if one.carried and getattr(one.type, "KIND", None) is None:
+            raise CatalogError(f"{where}.{one.name} carries a value with no field kind")
+    # A sentence may render one of the emitter's own values as well as
+    # one of the variant's: every session sentence opens with the
+    # session id, and a base name cannot collide with a declared one
+    # because the check above already refused that.
+    names = {one.name: one for one in (*base, *declared)}
     if len(set(variant.ARGS)) != len(variant.ARGS):
         raise CatalogError(f"{where} renders one field twice")
     for name in variant.ARGS:
@@ -413,24 +463,44 @@ def declaration_of(variant: type[Variant]) -> Declaration:
 # both need the whole payload, so the base is described here, once,
 # rather than by each of them.
 
-_SERVER_BASE: tuple[Declared, ...] = (
-    Declared(
-        name="event",
-        type=EventName,
+def _base(
+    name: str,
+    type_: type[EventValue],
+    *,
+    nullable: bool = False,
+    note: str = "",
+) -> Declared:
+    return Declared(
+        name=name,
+        type=type_,
         required=True,
-        nullable=False,
+        nullable=nullable,
         carried=True,
-        note="",
+        note=note,
         rendered_note="",
-    ),
+    )
+
+
+_EVENT = _base("event", EventName)
+
+_SERVER_BASE: tuple[Declared, ...] = (_EVENT,)
+
+# What every conversation event carries whatever it says: the event's
+# name, the session it belongs to, and the device it is with. The last
+# is nullable and the nullability is a fact rather than a hedge: the
+# bad-Device-Id rejection names no device because none was understood.
+_SESSION_BASE: tuple[Declared, ...] = (
+    _EVENT,
+    _base("session", SessionId),
+    # Null until the edge has normalized the MAC, which is why the
+    # bad-Device-Id rejection names no device.
+    _base("device", DeviceId, nullable=True),
 )
 
 
 def base_of(channel: str) -> tuple[Declared, ...]:
     """The fields the emitter contributes on one channel."""
-    if channel == SESSION_CHANNEL:  # pragma: no cover - refused at declaration
-        raise CatalogError("the session channel's base converts in M2")
-    return _SERVER_BASE
+    return _SESSION_BASE if channel == SESSION_CHANNEL else _SERVER_BASE
 
 
 def payload_shape(variant: type[Variant]) -> tuple[Declared, ...]:
@@ -447,12 +517,25 @@ def payload_shape(variant: type[Variant]) -> tuple[Declared, ...]:
 # it goes when the registry does.
 
 
+def _tokens_of(declared: Declared) -> frozenset[str] | None:
+    """The closed set one declared value admits.
+
+    The type's own, or the single member where the variant fixes it: a
+    variant that always says `no_agent` declares that one reason and not
+    the four its enumeration holds, which is what the untyped registry
+    spelled out variant by variant.
+    """
+    if declared.fixed is not None and declared.type.TOKENS is not None:
+        return frozenset({str(declared.fixed.carried())})
+    return declared.type.TOKENS
+
+
 def _field_of(declared: Declared) -> EventField:
     return EventField(
         kind=declared.type.KIND,
         required=declared.required,
         nullable=declared.nullable,
-        tokens=declared.type.TOKENS,
+        tokens=_tokens_of(declared),
         syntax=declared.type.SYNTAX,
         bounds=declared.type.BOUNDS,
         note=declared.note,
@@ -463,15 +546,19 @@ def _arg_of(declared: Declared) -> ArgSpec:
     return ArgSpec(
         kind=declared.type.ARG_KIND,
         nullable=declared.nullable,
-        tokens=declared.type.TOKENS,
+        tokens=_tokens_of(declared),
         syntax=declared.type.SYNTAX,
         bounds=declared.type.BOUNDS,
+        grammar=declared.type.GRAMMAR,
         note=declared.rendered_note,
     )
 
 
 def _variant_of(variant: type[Variant]) -> EventVariant:
-    by_name = {one.name: one for one in declared_values(variant)}
+    # The base as well as the variant's own, because `ARGS` may render a
+    # base value and a reference has to describe the position it lands
+    # in.
+    by_name = {one.name: one for one in payload_shape(variant)}
     return EventVariant(
         channel=variant.CHANNEL,
         level=variant.LEVEL,

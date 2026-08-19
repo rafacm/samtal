@@ -37,18 +37,25 @@ from vinga_server.events.catalog import (
     declaration_of,
     declare,
     payload_shape,
+    value,
 )
 from vinga_server.events.values import (
     ABSENT,
     Absent,
     ClassName,
+    CloseReason,
+    CloseReasonToken,
     ConfiguredPath,
     Count,
+    DeviceId,
     Identifier,
+    Nothing,
     SessionId,
 )
 
 CHANNEL = "vinga_server.ota"
+
+SESSION_CHANNEL = "vinga_server.session"
 
 
 @pytest.fixture(autouse=True)
@@ -161,7 +168,6 @@ def a_variant(**overrides: object) -> type[Variant]:
 
 REFUSED = (
     ("an unknown channel", {"CHANNEL": "vinga_server.invented"}, "does not speak on"),
-    ("the session channel", {"CHANNEL": "vinga_server.session"}, "converts in M2"),
     ("a level no method emits at", {"LEVEL": logging.CRITICAL}, "no emitter method"),
     ("one field rendered twice", {"ARGS": ("stage", "stage")}, "renders one field twice"),
     ("fewer arguments than positions", {"ARGS": ()}, "0 argument"),
@@ -175,6 +181,11 @@ REFUSED = (
         "a value type the vocabulary does not have",
         {"__annotations__": {"stage": str}},
         "declares one value type",
+    ),
+    (
+        "a carried value with no field kind",
+        {"__annotations__": {"stage": Nothing}, "ARGS": ()},
+        "no field kind",
     ),
 )
 
@@ -294,6 +305,112 @@ def test_a_variant_belonging_to_two_events_is_refused() -> None:
 def test_an_event_with_no_variant_is_refused() -> None:
     with pytest.raises(CatalogError):
         declare("scratch_empty", variants=())
+
+
+# --- the session channel, whose base is three values ------------------
+
+
+@dataclass(frozen=True)
+class Conversational(Variant):
+    """A scratch session-channel variant. Its sentence opens the way
+    every real one does, by rendering a value the emitter owns."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: %s"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "stage")
+
+    stage: Identifier
+
+
+def test_the_session_base_is_the_three_values_a_conversation_carries() -> None:
+    """The event's name, the session it belongs to, and the device it is
+    with; the last nullable, because the bad-Device-Id rejection names
+    no device."""
+    declare("scratch_conversational", variants=(Conversational,))
+
+    shape = {
+        one.name: (one.type.__name__, one.required, one.nullable)
+        for one in payload_shape(Conversational)
+    }
+
+    assert shape == {
+        "event": ("EventName", True, False),
+        "session": ("SessionId", True, False),
+        "device": ("DeviceId", True, True),
+        "stage": ("Identifier", True, False),
+    }
+
+
+def test_a_sentence_may_render_a_value_the_emitter_owns() -> None:
+    """Every session sentence opens with the session id, and the session
+    id is the emitter's to know rather than a value thirty sites
+    restate. The variant's own fields fill the rest."""
+    declare("scratch_conversational", variants=(Conversational,))
+    built = Conversational(stage=Identifier("asr"))
+
+    logged = built.logged(
+        {"session": SessionId("alpha"), "device": DeviceId("aa:bb:cc:dd:ee:ff")}
+    )
+
+    assert logged.args == ("alpha", "asr")
+    assert built.payload() == {"stage": "asr"}
+
+
+def test_a_variant_that_renders_a_base_value_still_may_not_declare_one() -> None:
+    """Rendering is not owning. A variant declaring `session` would be a
+    site choosing the identity the emitter contributes."""
+    with pytest.raises(CatalogError, match="the emitter owns"):
+        declare(
+            "scratch_owned",
+            variants=(
+                a_variant(
+                    CHANNEL=SESSION_CHANNEL,
+                    __annotations__={"session": SessionId},
+                    ARGS=("session",),
+                ),
+            ),
+        )
+
+
+# --- a value the variant IS ------------------------------------------
+
+
+@dataclass(frozen=True)
+class Latched(Variant):
+    """A scratch variant whose token is not a parameter: this shape says
+    one reason and no other."""
+
+    CHANNEL: ClassVar[str] = CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "closed"
+
+    reason: CloseReasonToken = value(fixed=CloseReasonToken(CloseReason.DRAIN))
+
+
+def test_a_fixed_value_is_carried_and_cannot_be_passed() -> None:
+    """A caller that cannot pass it cannot pass the wrong one, which is
+    stronger than the registry's per-variant token set was."""
+    declare("scratch_latched", variants=(Latched,))
+
+    assert Latched().payload() == {"reason": "drain"}
+    with pytest.raises(TypeError):
+        Latched(reason=CloseReasonToken(CloseReason.IDLE))  # type: ignore[call-arg]
+
+
+def test_a_fixed_token_narrows_the_declared_set_to_the_one_it_says() -> None:
+    """A shared enumeration would have widened every variant's declared
+    set to the whole of it; a fixed value declares the member the
+    variant actually carries, which is what the registry spelled out."""
+    declaration = declare("scratch_latched", variants=(Latched,))
+    described = declaration_of(Latched)
+
+    assert described is declaration
+    from vinga_server.events.catalog import described as descriptions
+
+    fields = descriptions()[-1].variants[0].fields
+
+    assert fields["reason"].tokens == frozenset({"drain"})
 
 
 # --- the declaration is what names the event --------------------------

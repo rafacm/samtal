@@ -51,7 +51,6 @@ from vinga_server.events.values import (
     QuotedToolName,
     ReachingHost,
     Real,
-    Rejection,
     RejectionToken,
     SessionId,
     ToolOutcome,

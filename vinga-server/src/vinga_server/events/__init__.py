@@ -92,7 +92,12 @@ from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
 from vinga_server.events.catalog import Variant, declaration_of
-from vinga_server.events.values import CLASS_NAME_PATTERN
+from vinga_server.events.values import (
+    CLASS_NAME_PATTERN,
+    DeviceId,
+    EventValue,
+    SessionId,
+)
 from vinga_server.events_schema import (
     REGISTRY as DECLARED_EVENTS,
 )
@@ -1031,11 +1036,25 @@ class _Refusal:
     fault: Fault
 
 
+def _no_identity() -> dict[str, EventValue | None]:
+    """The typed base of a server channel, which is nothing: a server
+    event names what it is about in its own fields."""
+    return {}
+
+
 def _construct(
-    channel: str, base: dict[str, Any], build: Callable[[], Variant]
+    channel: str,
+    base: dict[str, Any],
+    identity: Callable[[], dict[str, EventValue | None]],
+    build: Callable[[], Variant],
 ) -> Checked | _Refusal:
     """Build one variant and turn it into an emission, or answer what
     was wrong with it.
+
+    The emitter's own identity is built in here too, and through a thunk
+    for the same reason the variant is: a session id is a value type
+    like any other, so constructing one can refuse, and it must refuse
+    inside the guard rather than on the reply path that reached this.
 
     Nothing here raises, which is what lets the caller decide between
     the two modes AFTER the handler has ended, so a lane's stderr cannot
@@ -1046,6 +1065,7 @@ def _construct(
     exception built from far-side bytes carries them in its name.
     """
     try:
+        held = identity()
         variant = build()
         declaration = declaration_of(type(variant))
         if variant.CHANNEL != channel:
@@ -1054,9 +1074,16 @@ def _construct(
             # registry-owned, the declaration's channel and the
             # emitter's own.
             return _Refusal(declaration.name, Fault(WRONG_CHANNEL))
-        logged = variant.logged()
+        logged = variant.logged(held)
         return Checked(
-            payload={"event": declaration.name, **base, **variant.payload()},
+            payload={
+                "event": declaration.name,
+                **{
+                    name: None if value is None else value.carried()
+                    for name, value in held.items()
+                },
+                **variant.payload(),
+            },
             level=variant.LEVEL,
             message=logged.template,
             args=logged.args,
@@ -1073,6 +1100,7 @@ def _built(
     channel: str,
     base: dict[str, Any],
     build: Callable[[], Variant],
+    identity: Callable[[], dict[str, EventValue | None]] = _no_identity,
 ) -> Checked:
     """One typed emission, constructed under the guard.
 
@@ -1085,7 +1113,7 @@ def _built(
     thunk that raised may have raised holding exactly the bytes this
     surface exists to keep out.
     """
-    outcome = _construct(channel, base, build)
+    outcome = _construct(channel, base, identity, build)
     if isinstance(outcome, Checked):
         return outcome
     if _enforcement == STRICT:
@@ -1197,6 +1225,52 @@ class SessionEvents:
     # site ignores the answer, which costs nothing; the one that does
     # not is #120's turn record, whose offset has to equal its `heard`
     # event's exactly rather than to within however long the emit took.
+
+    def emit(self, build: Callable[[], Variant]) -> float:
+        """Say one typed conversation event, and answer the reading it
+        was stamped with.
+
+        A thunk, for the reason `ServerEvents.emit` gives: building,
+        validating, rendering and serializing all happen inside the
+        guard, so a construction failure is telemetry's problem rather
+        than the reply's. The identity is a thunk of its own and built
+        in the same place, because a session id and a device MAC are
+        value types like any other and a malformed one must refuse where
+        everything else refuses.
+
+        The caller names the variant and its values. The session, the
+        device, the event's name, its channel, its level, its sentence
+        and the order of that sentence's arguments all come off the
+        emitter and the declaration.
+        """
+        checked = _built(
+            logger,
+            SESSION_LOGGER,
+            {"session": self.session_id, "device": self.device},
+            build,
+            self._identity,
+        )
+        emission = Emission(
+            payload=checked.payload,
+            at=self._clock(),
+            level=checked.level,
+            message=checked.message,
+            args=checked.args,
+        )
+        _dispatch(tuple(self._taps), self._log, emission, logger)
+        return emission.at
+
+    def _identity(self) -> dict[str, EventValue | None]:
+        """Whose conversation this is, as values.
+
+        Read at emit time rather than kept as values, because both halves
+        move during a session: the device id is written by the edge as
+        soon as the MAC is normalized, and every event before that names
+        none."""
+        return {
+            "session": SessionId(self.session_id),
+            "device": None if self.device is None else DeviceId(self.device),
+        }
 
     def debug(self, message: str, *args: Any, event: str, **fields: Any) -> float:
         return self._emit(logging.DEBUG, message, args, event, fields)
