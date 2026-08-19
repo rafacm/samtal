@@ -7,6 +7,38 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-08-19
 
+### Fixed
+
+- **A failed barge-in confirmation names the class it failed with, not
+  what the provider said** (#183). The gate ladder's catch was a
+  `logger.exception`, so an ASR failure put the provider's message, the
+  chain behind it and a traceback of both onto the retained log, which
+  the content-and-telemetry ADR's no-leak contract forbids. It now logs
+  one fixed sentence and the exception's class name. Nothing is lost:
+  the confirmation runs inside the runtime's provider watch, so a
+  failure on the wire is already reported as `provider_failed` with the
+  stage, the entry and the host. The resume-and-drop behavior is
+  unchanged.
+
+- **A filler clip that fails to encode is told apart from a device that
+  left** (#182). The playback arm caught `(DeviceGone, RuntimeError)`,
+  and `DeviceGone` subclasses `RuntimeError`, so it caught the base
+  class and swallowed every local bug in the block in silence as though
+  the device had disconnected. Only the translated type is a disconnect
+  now; a resample, encode, flush or send failure is logged by class
+  name and the mask stands down exactly as before, with the reply it
+  masks unharmed. The catch-all also stopped rendering exception text.
+  One behavior change is deliberate: a bare `RuntimeError` from the
+  send is now logged rather than swallowed.
+
+- **A device's abort reason is reported from a closed set** (#185).
+  `device aborted (...)` interpolated the abort message's `reason`, a
+  free string the far side writes, straight into a retained line. The
+  firmware's own enum has exactly two members, so the line now names
+  `wake_word_detected` or `none` and reports anything else as `other`
+  without repeating it. An abort with no reason renders `none` where it
+  used to render `no reason`.
+
 ### Added
 
 - **The design method the architecture review used is written down**
