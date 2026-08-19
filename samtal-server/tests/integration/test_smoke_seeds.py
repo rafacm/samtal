@@ -18,7 +18,6 @@ lifecycle is a large part of what is under test, so the scripts are run
 exactly as CI runs them, unmodified, with no fixture serving them.
 """
 
-import os
 import signal
 import socket
 import subprocess
@@ -30,6 +29,7 @@ import pytest
 
 from samtal_server.config.store import ConfigStore, DomainConfig
 from samtal_server.db import open_database
+from tests.integration.conftest import script_environment
 
 SMOKE = Path(__file__).resolve().parents[1] / "smoke"
 
@@ -64,12 +64,12 @@ def seeded(script: str, tmp_path: Path, environment: dict[str, str] | None = Non
     waits for it, writes through the API, and stops it again.
     """
     directory = tmp_path / "db"
-    inherited = {
-        key: value for key, value in os.environ.items() if key != "SAMTAL_CONFIG"
-    }
-    inherited["SAMTAL_SERVER__DATABASE__DIR"] = str(directory)
-    inherited["SAMTAL_SERVER__PORT"] = str(_free_port())
-    inherited.update(environment or {})
+    inherited = script_environment(
+        without=["SAMTAL_CONFIG"],
+        SAMTAL_SERVER__DATABASE__DIR=str(directory),
+        SAMTAL_SERVER__PORT=str(_free_port()),
+        **(environment or {}),
+    )
     subprocess.run(["sh", str(SMOKE / script)], check=True, env=inherited, timeout=180)
 
     return _domain(directory)
@@ -133,12 +133,12 @@ def test_an_interrupted_seeding_fails_and_leaves_no_server_behind(
     finished, and must not leave the server it started running: CI would
     then hold a port and a data volume open for the container that comes
     next."""
-    environment = {
-        key: value for key, value in os.environ.items() if key != "SAMTAL_CONFIG"
-    }
     port = _free_port()
-    environment["SAMTAL_SERVER__DATABASE__DIR"] = str(tmp_path / "db")
-    environment["SAMTAL_SERVER__PORT"] = str(port)
+    environment = script_environment(
+        without=["SAMTAL_CONFIG"],
+        SAMTAL_SERVER__DATABASE__DIR=str(tmp_path / "db"),
+        SAMTAL_SERVER__PORT=str(port),
+    )
 
     seeding = subprocess.Popen(
         ["sh", str(SMOKE / "seed.sh")],
@@ -197,13 +197,11 @@ def test_a_seeding_script_reports_a_server_that_will_not_start(
     server refuses to boot, which is what a deployment that skipped the
     upgrade note meets, and a seeding script that hung on it would say
     nothing at all."""
-    environment = {
-        key: value
-        for key, value in os.environ.items()
-        if key not in ("SAMTAL_CONFIG", "SAMTAL_API_SECRET")
-    }
-    environment["SAMTAL_SERVER__DATABASE__DIR"] = str(tmp_path / "db")
-    environment["SAMTAL_SERVER__PORT"] = str(_free_port())
+    environment = script_environment(
+        without=["SAMTAL_CONFIG", "SAMTAL_API_SECRET"],
+        SAMTAL_SERVER__DATABASE__DIR=str(tmp_path / "db"),
+        SAMTAL_SERVER__PORT=str(_free_port()),
+    )
 
     finished = subprocess.run(
         ["sh", str(SMOKE / "seed.sh")],

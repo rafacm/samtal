@@ -16,6 +16,7 @@ about rather than how the configuration is stored.
 import asyncio
 import contextlib
 import math
+import os
 import struct
 import threading
 import time
@@ -266,6 +267,34 @@ def spoken(events: list[dict]) -> str:
         for event in events
         if event.get("type") == "tts" and event["state"] == "sentence_start"
     )
+
+
+BYTECODE_OFF = "PYTHONDONTWRITEBYTECODE"
+
+
+def script_environment(without: Sequence[str] = (), **overrides: str) -> dict[str, str]:
+    """The environment a deployment script gets when this lane runs it.
+
+    This process's own, minus the variables the caller names, plus the
+    ones it sets, and always with bytecode writing off.
+
+    That last part is the harness's job and not the scripts'. They are
+    deployment artifacts, run here verbatim, and each of them starts
+    `samtal-server` and its CLI as processes of its own. Those children
+    inherit this environment, and without the flag they leave a
+    `__pycache__` beside every module they import. `tests/conftest.py`
+    stops this process writing bytecode and clears the caches it finds
+    once, before the first import, so a cache a child writes during the
+    run is one nothing clears: it outlives the run and goes stale on the
+    next edit, which is the trap that file exists to close.
+    """
+    named = set(without)
+    environment = {key: value for key, value in os.environ.items() if key not in named}
+    environment.update(overrides)
+    # Last, so no caller can hand a script an environment that writes
+    # bytecode by naming the variable itself.
+    environment[BYTECODE_OFF] = "1"
+    return environment
 
 
 @contextlib.contextmanager
