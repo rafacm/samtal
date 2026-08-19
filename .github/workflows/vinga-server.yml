@@ -55,6 +55,14 @@ jobs:
       - name: Lint
         run: uv run ruff check .
 
+      # Strict typing over the typed event package and nothing else.
+      # The catalog's whole argument is that its annotations carry the
+      # contract, and annotations nothing checks are decoration. The
+      # scope is in pyproject.toml; widening it to the rest of the
+      # server is a decision of its own.
+      - name: Type-check the events package
+        run: uv run mypy
+
       - name: Unit tests
         run: uv run pytest tests/unit -v
 

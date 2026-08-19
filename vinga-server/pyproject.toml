@@ -48,6 +48,7 @@ dev = [
     # "the API generates a document" means one a client generator will
     # accept rather than one that happens to be JSON. Tests only: the
     # server never validates its own document at runtime.
+    "mypy>=2.3.0",
     "openapi-spec-validator>=0.9.0",
     "pytest>=8.3",
     "pytest-asyncio>=1.4.0",
@@ -67,6 +68,26 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
+
+# Static typing, scoped to the typed event package and nothing else.
+#
+# The repository has never run a type checker, and the typed event
+# catalog is the first code whose whole argument is that its annotations
+# carry the contract: a variant's fields ARE the payload, and a value
+# type is what proves a value. Annotations that nothing checks would
+# make that argument decoration. So this lane is strict, and it is
+# narrow on purpose: widening it to the rest of the server is a decision
+# of its own, with its own diff, and bundling it here would bury the
+# thing being proved under a few hundred incidental findings.
+#
+# `follow_imports = silent` types what the package imports without
+# reporting on it, which is what keeps the boundary at the package
+# rather than at the import graph.
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src/vinga_server/events"]
+follow_imports = "silent"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
