@@ -202,6 +202,52 @@ def test_an_argument_that_may_be_absent_is_refused() -> None:
         )
 
 
+# One spelling for the name refusals, printable and dotted so that it
+# satisfies no `event_name` syntax while still being an ordinary string.
+SENTINEL = "sk.leak.4a7d2f1e.never-a-real-credential"
+
+
+@pytest.mark.parametrize(
+    "refused",
+    [
+        SENTINEL,
+        "Conversations",
+        "conversations enabled",
+        "1_leading_digit",
+        "a" * 65,
+        "",
+        7,
+    ],
+    ids=[
+        "a credential-shaped name",
+        "an uppercase name",
+        "a name with a space",
+        "a name starting with a digit",
+        "a name past its length",
+        "the empty name",
+        "a name that is not a string",
+    ],
+)
+def test_a_name_the_payload_could_not_carry_is_refused(refused: object) -> None:
+    """The payload carries the event as an `EventName`, so a catalog
+    admitting a name that field would refuse would declare an event
+    nothing could emit."""
+    with pytest.raises(CatalogError, match="event_name syntax"):
+        declare(refused, variants=(a_variant(),))  # type: ignore[arg-type]
+
+
+def test_a_refused_name_is_not_echoed_back() -> None:
+    """The rule the whole surface keeps: a name that did not pass is
+    caller-supplied bytes, so the refusal says what the rule is and
+    never what was passed. By equality, since absence alone proves only
+    that this spelling did not appear."""
+    with pytest.raises(CatalogError) as raised:
+        declare(SENTINEL, variants=(a_variant(),))
+
+    assert raised.value.args == ("an event name has to match the event_name syntax",)
+    assert SENTINEL not in repr(raised.value)
+
+
 def test_an_event_declared_twice_is_refused() -> None:
     with pytest.raises(CatalogError):
         declare("conversations_enabled", variants=(ConversationsEnabled,))

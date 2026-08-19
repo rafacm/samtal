@@ -56,6 +56,7 @@ from vinga_server.events.values import (
     Count,
     EventName,
     EventValue,
+    EventValueError,
     SessionId,
 )
 from vinga_server.events_schema import (
@@ -319,6 +320,23 @@ def _check(variant: type[Variant], declared: tuple[Declared, ...]) -> None:
         )
 
 
+def _named(name: object) -> bool:
+    """Whether one string is a lawful event name.
+
+    Asked of `EventName` rather than of a pattern written here, because
+    the payload carries the event as an `EventName` and a catalog that
+    admitted a name its own payload field would refuse would declare an
+    event nothing could emit. The refusal is built after the handler
+    ends, so no chain reaches the caller.
+    """
+    lawful = True
+    try:
+        EventName(name)  # type: ignore[arg-type]
+    except EventValueError:
+        lawful = False
+    return lawful
+
+
 def declare(
     name: str, *, variants: tuple[type[Variant], ...], note: str = ""
 ) -> Declaration:
@@ -328,6 +346,14 @@ def declare(
     variant" without a site ever naming one, and refuses at import
     anything that could not describe an emission.
     """
+    # The syntax first, before anything echoes the name. Every refusal
+    # below prints it, which is safe precisely because a name that got
+    # past this point is one the `event_name` syntax admits: lowercase,
+    # bounded, and this repository's own word. A name that did not is
+    # caller-supplied bytes like any other, so its refusal says what the
+    # rule is and never what was passed.
+    if not _named(name):
+        raise CatalogError("an event name has to match the event_name syntax")
     if name in _state.declarations:
         raise CatalogError(f"{name} is declared twice")
     if not variants:
