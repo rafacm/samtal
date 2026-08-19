@@ -71,7 +71,7 @@ sys.dont_write_bytecode = True
 # Only these two trees, never `.venv`: site-packages bytecode is
 # legitimate, expensive to rebuild, and its sources do not get edited.
 _ROOT = Path(__file__).resolve().parent.parent
-for _tree in (_ROOT / "samtal_server", _ROOT / "tests"):
+for _tree in (_ROOT / "src" / "samtal_server", _ROOT / "tests"):
     for _cache in _tree.rglob("__pycache__"):
         shutil.rmtree(_cache, ignore_errors=True)
 

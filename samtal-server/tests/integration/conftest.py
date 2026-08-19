@@ -271,7 +271,7 @@ def spoken(events: list[dict]) -> str:
 
 BYTECODE_OFF = "PYTHONDONTWRITEBYTECODE"
 
-PACKAGE = Path(__file__).resolve().parents[2] / "samtal_server"
+PACKAGE = Path(__file__).resolve().parents[2] / "src" / "samtal_server"
 
 
 def script_environment(without: Sequence[str] = (), **overrides: str) -> dict[str, str]:
@@ -315,6 +315,9 @@ def no_bytecode_left_behind() -> Iterator[None]:
     path is what says which subprocess wrote it.
     """
     yield
+    # A wrong PACKAGE path would make rglob yield nothing and the guard
+    # pass vacuously, which is precisely the failure it exists to catch.
+    assert PACKAGE.is_dir(), f"the package tree moved out from under this guard: {PACKAGE}"
     left = sorted(str(cache) for cache in PACKAGE.rglob("__pycache__"))
     assert not left, (
         "the lane left bytecode caches under samtal_server, which nothing "
