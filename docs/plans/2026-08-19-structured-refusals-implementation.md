@@ -333,6 +333,12 @@ that rotation is the secret PUT.
    substitutes is the model-shaped half an earlier read showed, never
    ciphertext, which no fragment can carry and no entity write replaces.
 
+   **Wrong, and reversed by the review round's first finding below.** A
+   marker-bearing write now takes the write lock first and resolves
+   under it. This note is left as it was written because it is why the
+   code shipped that way; what it got wrong is recorded with the
+   finding.
+
 3. **A stored null is nothing to keep.** `_held` answers "nothing" for
    an absent key and for a null alike, so a mask over a field the entity
    holds as null is refused rather than resolved to null. That agrees
@@ -427,3 +433,98 @@ All from `samtal-server/`, at the last commit of the milestone.
 
 No hardware was involved in this milestone, so nothing about a device is
 claimed.
+
+### PR review round
+
+External review of the PR diff (`main...86b3dd8`): codex CLI 0.147.0,
+model gpt-5.6-sol, read-only, 2026-08-19. Verdict: mergeable after the
+listed fixes. Findings as received, condensed but faithful; each carries
+its resolution and the commit that made it.
+
+1. **P1: masked PUTs break write serialization and can resurrect a stale
+   hidden value.** The marker read the stored value in one
+   `BEGIN IMMEDIATE` transaction, released it, and then opened another to
+   persist, which contradicts the one-transaction guarantee this module's
+   own docstring states. If A resolves a mask to X, B changes or removes
+   that path, and A then writes, A restores X: no serial ordering
+   produces that, and the marker did not keep the value stored when A
+   wrote. Acquire the write transaction before reading the current
+   entity, resolve and validate the marker while holding it, and run
+   reference checking and persistence without releasing it. Add a
+   deterministic concurrent-writer test modeled on
+   `test_two_concurrent_writers_serialize`.
+
+   *Resolution.* Adopted whole, in `050d11b`. A fragment carrying a mark
+   now takes the write lock first: the domain is read once inside that
+   transaction, the marks are resolved against the entry that read holds,
+   the fragment is validated, and the reference pass and the row write
+   follow without the lock being released. The one read serves both the
+   resolution and the reference pass, so the marked path costs no more
+   reads than it did. A fragment with no marks depends on nothing stored
+   and keeps the shape it had, parsed and checked before the lock is
+   asked for, which is the property `_write` had before this milestone.
+   `_parsed` and `_persist` are the two halves both paths now share,
+   extracted rather than repeated, and `_keep` takes the stored entry
+   instead of fetching one, which is what makes the caller's transaction
+   the whole of its correctness.
+
+   The correction, because deviation 2 above argued the other way. It
+   called the gap the lost update a read-modify-write already has, and
+   that was wrong: the operator's read-modify-write window is the
+   operator's, spanning two requests they made themselves and can be
+   told about, while this window was inside one server-side write call,
+   which is the unit this repository promises is atomic. The two are not
+   the same kind of thing, and the second is not excused by the first.
+   The deviation note is left standing with the correction on it rather
+   than rewritten, since what it claimed is why the code shipped that
+   way.
+
+   The new test is the sibling of the one the finding names, paced the
+   same deterministic way: the resubmitting writer announces that it has
+   looked the stored value up and waits for the other to finish. Under
+   one lock that wait always times out, because the other writer cannot
+   begin while this one holds it and the busy timeout is twenty times the
+   wait; under two it always resurrects. Reverting `_write` to the two
+   transactions makes it fail with the planted credential back in the
+   row, which is how the pin was checked.
+
+2. **P2: the OpenAPI contract never identifies the unchanged-value
+   marker.** `API_DESCRIPTION` and `Envelope.entity` said only "the
+   mask", and the generated document held no `********` anywhere, while
+   the plan requires stating that a value shown as `********` means keep
+   the stored value. Derive both descriptions from the shared `MASK`
+   constant, regenerate the document, and pin the exact marker in an
+   OpenAPI test.
+
+   *Resolution.* Adopted, in `2223ccb`, with one judgment call recorded
+   rather than buried. `api.py` derives its sentence from `secrets.MASK`,
+   which it already imports. `responses.py` cannot: the import that would
+   derive it closes a cycle, since `responses` sits under `entities`,
+   which sits under `loader`, which is what `secrets` imports, and it was
+   tried and raised exactly that. So that one description writes the
+   literal out, its module docstring says why and where the two are held
+   equal, and the pin asserts the constant appears in both descriptions
+   of the rendered document, which is the byte a client reads.
+
+   Two alternatives were weighed and declined. Moving `MASK` down to
+   `models.py`, the only shared ancestor, would derive by construction,
+   but it puts a display constant in the models module and hands
+   `responses.py` the heaviest import in the package, against the rule
+   its docstring exists to state. Defining it in `responses.py` for
+   `secrets` to read is acyclic and worse: a security module would read
+   its central display constant out of the module of HTTP shapes. A
+   duplicated eight-character literal held equal by a pin that fails
+   loudly is the smaller cost.
+
+### Verification after the round
+
+All from `samtal-server/`, at the last commit of the round.
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/unit -q`: 3126 passed, 16 skipped.
+- `uv run pytest tests/integration -q`: 60 passed.
+- The four generated references regenerated and byte-compared as the
+  workflow's drift steps do: only `docs/reference/api-openapi.json`
+  moved, carrying the mask literal in the two descriptions, and it moved
+  in `2223ccb` with the change that stated it. The other three are
+  byte-identical to their committed copies.
