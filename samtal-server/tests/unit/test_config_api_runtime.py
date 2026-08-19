@@ -51,6 +51,7 @@ from samtal_server.tools.mcp import (
     McpServers,
 )
 from tests.support.apps import entered_client
+from tests.support.problems import PROBLEM_KEYS, problem
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 
@@ -305,7 +306,7 @@ def test_an_application_without_a_server_refuses_to_reload(client: TestClient) -
     response = client.post(RELOAD_PATH)
 
     assert response.status_code == 503
-    assert set(response.json()) == {"detail"}
+    assert set(response.json()) == PROBLEM_KEYS
     assert "no running server" in response.json()["detail"]
 
 
@@ -380,7 +381,7 @@ def test_a_refusal_maps_to_its_status_and_carries_its_own_sentence(
         response = client.post(RELOAD_PATH)
 
     assert response.status_code == status
-    assert response.json() == {"detail": str(refusal)}
+    assert response.json() == problem(status, str(refusal))
 
 
 def test_a_read_that_fails_unexpectedly_answers_without_quoting_it(
@@ -407,7 +408,7 @@ def test_a_read_that_fails_unexpectedly_answers_without_quoting_it(
             response = client.post(RELOAD_PATH)
 
     assert response.status_code == 500
-    assert response.json() == {"detail": RELOAD_UNREADABLE}
+    assert response.json() == problem(500, RELOAD_UNREADABLE)
     assert sentinel not in response.text
     # And nothing of it in what the server kept about the refusal
     # either, in either shipped format.
@@ -532,7 +533,7 @@ def test_an_application_without_a_server_has_no_prompt_to_assemble(
     response = client.get(PROMPT_PATH)
 
     assert response.status_code == 503
-    assert set(response.json()) == {"detail"}
+    assert set(response.json()) == PROBLEM_KEYS
     assert "no running server" in response.json()["detail"]
 
 

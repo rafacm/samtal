@@ -26,6 +26,7 @@ from samtal_server.config import Config
 from samtal_server.config.models import API_MOUNT_PATH
 from samtal_server.config.writes import MCP_RELOAD_NOTICE
 from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, speech_pcm, spoken
+from tests.support.problems import PROBLEM_KEYS
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
 
@@ -227,7 +228,7 @@ async def test_a_refused_reload_leaves_the_running_servers_alone(
             refused = await control.post("/runtime/mcp-servers/reload")
 
             assert refused.status_code == 422
-            assert set(refused.json()) == {"detail"}
+            assert set(refused.json()) == PROBLEM_KEYS
             assert refused.json()["detail"].startswith(
                 "the reload was refused and nothing was changed:"
             )

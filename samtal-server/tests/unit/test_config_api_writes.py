@@ -51,6 +51,7 @@ from samtal_server.config.writes import (
     RESTART_NOTICE,
 )
 from samtal_server.db import DATABASE_FILENAME, open_database
+from tests.support.problems import PROBLEM_KEYS, problem
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 
@@ -598,7 +599,7 @@ def test_deleting_something_that_is_not_there_is_404(client: TestClient) -> None
     ):
         response = client.delete(path)
         assert response.status_code == 404, path
-        assert response.json() == {"detail": detail}
+        assert response.json() == problem(404, detail)
 
 
 # Every addressed section, as the path a read and a delete of something
@@ -653,7 +654,7 @@ def test_an_identity_that_addresses_nothing_is_refused_without_it(
         # says which of the two moved.
         assert sentinel not in response.text
         assert sentinel not in str(response.headers)
-        assert response.json() == {"detail": detail}
+        assert response.json() == problem(status, detail)
     served = [
         record for record in caplog.records if record.name.startswith("samtal_server")
     ]
@@ -666,7 +667,9 @@ def test_a_secret_for_a_slot_holding_none_is_404(client: TestClient) -> None:
     response = client.delete("/providers/llm/claude/secrets/api_key")
 
     assert response.status_code == 404
-    assert response.json() == {"detail": "providers: no secret is stored for that slot"}
+    assert response.json() == problem(
+        404, "providers: no secret is stored for that slot"
+    )
 
 
 @pytest.mark.parametrize("slot", ["api_key", SECRET])
@@ -746,9 +749,11 @@ def test_a_slot_that_is_not_a_credential_slot_is_refused_without_it(
         assert PASTED not in response.text
         assert SECRET not in response.text
     assert written.status_code == 422
-    assert written.json() == {"detail": detail}
+    assert written.json() == problem(422, detail)
     assert removed.status_code == 404
-    assert removed.json() == {"detail": f"{section}: no secret is stored for that slot"}
+    assert removed.json() == problem(
+        404, f"{section}: no secret is stored for that slot"
+    )
     served = [
         record for record in caplog.records if record.name.startswith("samtal_server")
     ]
@@ -790,7 +795,7 @@ def test_a_write_that_cannot_take_the_lock_is_409(
             holder.close()
 
         assert response.status_code == 409
-        assert set(response.json()) == {"detail"}
+        assert set(response.json()) == PROBLEM_KEYS
         # And with the lock let go, the same request is answered.
         assert client.put("/agents/sam", json={"prompt": "You are Sam."}).status_code == 200
 

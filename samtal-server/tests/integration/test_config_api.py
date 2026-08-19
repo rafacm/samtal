@@ -23,6 +23,7 @@ from samtal_server.app import create_app
 from samtal_server.config import cli
 from samtal_server.config.boot import load_boot_config
 from samtal_server.db import DATABASE_FILENAME
+from tests.support.problems import PROBLEM_KEYS
 
 # The pipeline a first deployment writes, in the order the write-time
 # reference checks require: providers, then what names them.
@@ -147,7 +148,7 @@ def test_a_contended_write_answers_over_a_real_socket(
             holder.close()
 
         assert response.status_code == 409
-        assert set(response.json()) == {"detail"}
+        assert set(response.json()) == PROBLEM_KEYS
 
         # And with the lock let go the same request is answered, which is
         # what makes the refusal above the retryable one it says it is.

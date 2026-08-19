@@ -41,6 +41,7 @@ from samtal_server.config.entities import NO_SUCH_AGENT
 from samtal_server.config.loader import DatabaseBusyError, StorageError, UnknownEntityError
 from samtal_server.config.store import ConfigStore
 from tests.support.apps import entered_client
+from tests.support.problems import problem
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 
@@ -86,7 +87,7 @@ def test_a_request_without_a_token_is_refused(client: TestClient) -> None:
 
     assert response.status_code == 401
     assert response.headers["WWW-Authenticate"] == "Bearer"
-    assert response.json() == {"detail": UNAUTHORIZED}
+    assert response.json() == problem(401, UNAUTHORIZED)
     # The body says how to authenticate and nothing else.
     assert "Authorization: Bearer" in UNAUTHORIZED
 
@@ -192,7 +193,7 @@ def test_each_refusal_maps_to_its_status(
     assert response.status_code == status
     # The repository's own sentence, unchanged: one vocabulary whether
     # an operator met it through the CLI or over HTTP.
-    assert response.json() == {"detail": str(refusal)}
+    assert response.json() == problem(status, str(refusal))
 
 
 def test_an_unhandled_failure_is_a_generic_500(
@@ -212,7 +213,7 @@ def test_an_unhandled_failure_is_a_generic_500(
         response = TestClient(api).get("/boom", headers=_bearer(TOKEN))
 
     assert response.status_code == 500
-    assert response.json() == {"detail": UNEXPECTED}
+    assert response.json() == problem(500, UNEXPECTED)
     assert SENTINEL not in response.text
 
     # It happened, and what kind of failure it was.
@@ -282,7 +283,7 @@ def test_a_body_that_is_not_the_expected_shape_is_not_quoted_back(api: FastAPI) 
 
     for response in responses:
         assert response.status_code == 422
-        assert response.json() == {"detail": MALFORMED_REQUEST}
+        assert response.json() == problem(422, MALFORMED_REQUEST)
         assert SENTINEL not in response.text
 
 

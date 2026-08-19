@@ -50,6 +50,7 @@ from samtal_server.conversations.api import (
 from samtal_server.conversations.records import ToolInvocation, TurnLeg, TurnRecord
 from samtal_server.conversations.store import ConversationStore, conversations_path
 from tests.support.configs import DEVICE_MAC, DEVICE_UUID, recording_config
+from tests.support.problems import problem
 from tests.support.sessions import until
 from tests.support.wire import connect, say_something, sentences, shake_hands
 
@@ -508,7 +509,7 @@ def test_an_unknown_session_is_a_404_on_both_reads(
     for path in ("/conversations/nobody", "/conversations/nobody/turns"):
         response = client.get(path)
         assert response.status_code == 404, path
-        assert response.json() == {"detail": UNKNOWN_SESSION}
+        assert response.json() == problem(404, UNKNOWN_SESSION)
 
 
 # What the switches leave behind
@@ -570,7 +571,7 @@ def test_no_route_answers_without_the_token(api: FastAPI, path: str) -> None:
 
     assert response.status_code == 401
     assert response.headers["WWW-Authenticate"] == "Bearer"
-    assert response.json() == {"detail": UNAUTHORIZED}
+    assert response.json() == problem(401, UNAUTHORIZED)
 
 
 @pytest.mark.parametrize("path", ROUTES)
@@ -580,7 +581,7 @@ def test_a_deployment_that_never_recorded_answers_404_naming_the_key(
     response = client.get(path)
 
     assert response.status_code == 404
-    assert response.json() == {"detail": NO_STORE}
+    assert response.json() == problem(404, NO_STORE)
     assert "server.conversations.enabled" in NO_STORE
     # And the read brought no database into existence, which is what
     # keeps an absent section a server that leaves no file behind.
@@ -621,7 +622,7 @@ def test_a_refused_argument_names_the_rule_and_quotes_nothing(
     assert response.status_code == 422
     # The whole body, equal to the fixed sentence: there is nowhere for
     # what was sent to be, which is a stronger check than looking for it.
-    assert response.json() == {"detail": refusal}
+    assert response.json() == problem(422, refusal)
     assert SENTINEL not in response.text
     assert SENTINEL not in _leaked(caplog)
     captured = capsys.readouterr()
@@ -661,7 +662,7 @@ def test_a_sentinel_in_the_path_reaches_no_body_and_no_log(
 
     for response in responses:
         assert response.status_code == 404
-        assert response.json() == {"detail": UNKNOWN_SESSION}
+        assert response.json() == problem(404, UNKNOWN_SESSION)
         assert SENTINEL not in response.text
     assert SENTINEL not in _leaked(caplog)
     captured = capsys.readouterr()
@@ -735,7 +736,7 @@ def test_a_failure_reaching_the_file_says_nothing_about_it(
         response = client.get("/conversations")
 
     assert response.status_code == 500
-    assert response.json() == {"detail": UNEXPECTED}
+    assert response.json() == problem(500, UNEXPECTED)
     assert SENTINEL not in response.text
     assert SENTINEL not in _leaked(caplog)
     assert any(
@@ -768,4 +769,4 @@ def test_the_reads_hold_no_engine_between_requests(
 
     response = client.get("/conversations")
     assert response.status_code == 404
-    assert response.json() == {"detail": NO_STORE}
+    assert response.json() == problem(404, NO_STORE)
