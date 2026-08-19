@@ -267,3 +267,163 @@ All from `samtal-server/`, at the last commit of the round.
   descriptions, and it moved in `f703715` with the change that
   narrowed them. The other three are byte-identical to their committed
   copies.
+
+## M2: the writable round trip
+
+A read of one entity is now a write of it, and the API says so. The
+behaviour half is the unchanged-value marker: on an entity PUT, before
+validation, the repository walks the incoming fragment with the kind's
+own `secret_key` predicate and replaces the mask with what the entity
+already holds at that path, so a read resubmitted whole validates as if
+the operator had retyped the value the display would not show them. The
+contract half is one new `API_DESCRIPTION` paragraph and the two
+sharpened `Envelope` field descriptions, which are committed bytes of
+the OpenAPI document.
+
+The plan's design landed whole. Six deviations and clarifications are
+recorded below; the first and the third are the only ones that changed a
+shape rather than a spelling.
+
+### What was written
+
+`store._write` gained one step. `_parse` split into `_readable`, which
+is everything before validation that is about the fragment being a
+fragment at all (an omitted body is the empty one, a body that is not a
+mapping is refused, what JSON cannot carry is refused), and `_load`,
+which is unchanged. Between them sits `ConfigStore._kept`, the marker.
+
+`_kept` collects the paths where a secret-shaped key holds the mask
+exactly (`_masked_paths`), and returns the fragment untouched when there
+are none, which is every ordinary edit. Otherwise it reads the entity's
+current entry, looks each path up on the stored side (`_held`), and
+rebuilds the fragment with the stored value in place of the mask
+(`_substituted`/`_inside`, copying only the containers along the path).
+Paths with nothing stored behind them become one refusal
+(`_mask_refusal`), a `ConfigError` carrying its sentence and its
+`FieldProblem` entries, exactly as a validation refusal does.
+
+`_refusal_line` is the one home for the shape of a problem line, read by
+`_validation_problems` and by `_mask_refusal`, which has no pydantic
+error behind it.
+
+`API_DESCRIPTION` carries the round-trip paragraph, `Envelope.entity`
+says the mask resubmits as keep-the-stored-value and no longer says the
+opposite in passing, and `Envelope.secrets` says it is display-only and
+that rotation is the secret PUT.
+
+### Deviations and clarifications
+
+1. **One seam, six functions.** The plan says "one helper in
+   `store.py`". The write path gained exactly one call, `self._kept`,
+   which is the seam a caller and every other part of `_write` sees;
+   behind it are five module functions, each a separate question with a
+   separate answer: which paths carry a mark, what the stored side holds
+   at a path, how a value is put back without copying the whole
+   fragment, what the refusal says, and how it is worded under the
+   naming rule. Folding them into one function would have made one
+   thirty-line body out of five things that are individually short and
+   testable through the seam.
+
+2. **The marker's read is its own transaction, before the write's.**
+   Substituting inside the write transaction would have moved parsing
+   and validation under the write lock, which `_write` deliberately
+   keeps them out of. The read is therefore a second transaction, and
+   what it can be stale by is the lost update a read-modify-write over
+   HTTP already has: two operators editing one entity. What it
+   substitutes is the model-shaped half an earlier read showed, never
+   ciphertext, which no fragment can carry and no entity write replaces.
+
+3. **A stored null is nothing to keep.** `_held` answers "nothing" for
+   an absent key and for a null alike, so a mask over a field the entity
+   holds as null is refused rather than resolved to null. That agrees
+   with the display's absence rule rather than departing from it: a
+   field holding a default that means absence is left out of the read,
+   so a mask can only have arrived there by hand.
+
+4. **The walk depends on `_readable` having run.** The marker walks a
+   fragment recursively, and a YAML anchor can make a structure that
+   contains itself. `check_transportable` refuses exactly that, and it
+   runs inside `_readable`, one line above the marker, which is what
+   makes the walk terminate. The ordering is stated in both docstrings
+   because it is not visible from either one alone.
+
+5. **A secret-shaped key is not walked into.** The display displaces
+   whatever such a key holds, structures included, so nothing under one
+   was ever shown to resubmit, and the marker stops where the display
+   stops. A mask under a key the predicate does not match is not a
+   marker at all and meets validation as the string it is, which is
+   pinned.
+
+6. **Two refusal wordings, and identical problems are one problem.**
+   The naming rule is `safe_location`'s, the same one every refusal
+   built from a validation error goes through, so a declared field is
+   named (`"api_key_env" holds the mask ...`) and a key the caller wrote
+   is not (`a key in env holds the mask ...`, or `a key holds the mask
+   ...` where there is no declared parent to name). Two marks that
+   truncate to one place are one entry, for the reason
+   `McpServerConfig._secret_problems` already gives: the entries would
+   be indistinguishable, and saying the same thing twice suggests the
+   second was about something else.
+
+### What building it turned up
+
+- **The per-kind round trip passed the moment it was written.** All
+  five kinds round-tripped their own example fragment before the marker
+  existed, which is #207's absence rule and `leads_with` doing what they
+  were for: a read is already write-shaped in structure and in order.
+  The masked values were the whole of the gap, which is what the review
+  round's first finding said and what the eight tests that fail without
+  the marker measure.
+- **Only the provider declares a secret-shaped field name.** Of the five
+  kinds' models, `api_key_env` is the only declared field name its
+  kind's predicate matches, so the "name the field" wording is reachable
+  through it and the "name no key" wording through everything else: a
+  provider's options at any depth, and an MCP server's `env` and
+  `headers`, which are keyed by whatever was written.
+- **A planted row round-trips only if what was planted is writable.**
+  The marker substitutes the stored value and validates the result, so a
+  row carrying a value the models would refuse is refused on resubmit.
+  That is the promise rather than a hole in it, "validates exactly as if
+  the operator had retyped it", and it is why the planted-row test
+  plants a credential shaped like an environment name: the case the
+  display exists for, a value that got past the models and must not be
+  shown, and the case an operator meets.
+- **The CLI needed nothing**, as the plan said: the marker is the
+  repository's, so `--local` writes inherit it, and a `set` over the API
+  inherits it from the server. The pin is a document `show` printed,
+  sent back through `set`, and shown again identical.
+
+### The plan's open question
+
+Closed, and closed the way the review round's first finding forced:
+**marker plus contract**, not contract alone. Contract alone was
+disproved by writes the API accepts today, and the alternative the issue
+named, a writable projection distinct from the display envelope, was not
+taken: the marker makes the display envelope the writable projection, so
+there is one shape for a reader and a writer rather than two that can
+come to disagree. That is also the resolution #194's per-entity export
+inherits.
+
+### Verification
+
+All from `samtal-server/`, at the last commit of the milestone.
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/unit -q`: 3124 passed, 16 skipped.
+- `uv run pytest tests/integration -q`: 60 passed.
+- The four generated references regenerated and byte-compared the way
+  the workflow's drift steps do (`config reference`,
+  `conversations schema`, `events reference`, `config openapi`): only
+  `docs/reference/api-openapi.json` moved, carrying the round-trip
+  paragraph and the two sharpened `Envelope` descriptions, and it moved
+  in the commit that changed the prose. The other three are
+  byte-identical to their committed copies.
+- The marker was bitten: with the walk that collects the marks disabled,
+  eight of the fourteen new tests fail (both masked resubmits, all three
+  nothing-stored refusals, the planted row, the sentinel and the CLI
+  leg) and the five per-kind round trips and the not-secret-shaped case
+  pass, which is the measure of what the marker is for. Restored by
+  copy-aside and `touch`.
+
+No hardware was involved in this milestone, so nothing about a device is
+claimed.

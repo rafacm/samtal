@@ -427,7 +427,8 @@ document diff.
   caller has to build), `store._load` (one computation for prose and
   payload), and `api.py`'s refusal rendering, where one seam replaces
   four body-building sites; no new module.
-- [ ] **M2: the writable round trip** (PR TBD). The unchanged-value
+- [x] **[M2: the writable round trip](2026-08-19-structured-refusals-implementation.md#m2-the-writable-round-trip)**
+  (PR TBD). The unchanged-value
   marker in the repository's entity write path, the
   `API_DESCRIPTION` paragraph and `Envelope` description sharpening,
   the regenerated document, the per-kind round-trip tests, the
