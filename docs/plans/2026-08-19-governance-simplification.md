@@ -335,7 +335,11 @@ carries its baseline proof inside its own PR.
   is not self-claimed: it is generated from the conformance suite's
   static site inventory while that inventory still exists, so every
   statically known path must produce a record or the harness fails
-  (review finding 10). The five converted sites
+  (review finding 10). The static inventory and this obligation
+  survive until the last conversion lands; after M3, exhaustiveness
+  is claimed over the catalog's legal variants, every one of which
+  is constructible and therefore directly testable, and never over
+  arbitrary call sites. The five converted sites
   lose their entries in `PINNED_BY` and their prose pins
   (`test_conversations_event_pins.py` retires; its five paths enter
   the golden inventory; its exhaustiveness claim moves to the
@@ -639,6 +643,12 @@ from the catalog or golden, never a second registry.
 **10 (P2). The record baseline has no stated proof of path
 exhaustiveness.** A runtime harness proves only paths it executes;
 completeness today comes from the static site inventory.
+
+*Resolution.* Adopted. The baseline's path list is generated from
+the still-alive static inventory, every inventoried path must
+produce a record, that obligation survives until the last
+conversion, and afterwards exhaustiveness is claimed over the
+catalog's constructible variants, not call sites.
 
 **11 (P2). The OpenAPI spike can compile while producing an
 unusable client.** Compilation and stable names do not catch
