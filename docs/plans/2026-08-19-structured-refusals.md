@@ -306,3 +306,82 @@ CLI transport suite for the pass-through pins.
 
 Both milestones leave `main` releasable: M1 changes the refusal body
 shape in one merge with its document, and M2 is prose and tests.
+
+## Plan review round
+
+External review: codex-cli 0.147.0, model gpt-5.6-sol, 2026-08-19,
+reviewing commit `dddd49c`. Verdict: ready after the P1/P2
+amendments. Findings as received, condensed but faithful; each
+carries its resolution below it.
+
+1. **P1: the contract-only round trip is disproved by an existing
+   validated write.** `_ENV_NAME_RE` (`models.py:69`) accepts
+   lowercase names while the display rule
+   (`secrets.py:157-173`) passes only `$NAME` or uppercase bare
+   references, and `tests/unit/test_config_reads.py:545` plus
+   `test_config_cli_secrets.py:83` prove a validated write of
+   `connection.api_key_env: sk_test_...` reads back as the mask. MCP
+   references differ too: `_env_reference` strips whitespace
+   (`models.py:905`), `mask` does not. So M2 needs a real writable
+   projection or an explicit unchanged-value marker, with defined PUT
+   semantics and coverage starting from API-accepted writes, not only
+   engine-planted rows.
+
+2. **P1: pydantic `loc` does not provide the field paths the feature
+   promises.** `ProviderConfig._reject_inline_secrets`
+   (`models.py:852`), `McpServerConfig._check_transport_fields`
+   (`models.py:1123-1148`) and `FillerConfig._check_phrases`
+   (`models.py:1258`) are model-level validators: their errors carry
+   an empty or collapsed location even though the messages name the
+   semantic field, and the transport validator joins several problems
+   into one error. The plan needs a mechanism by which validators emit
+   safe structured problems where they know the field, one source for
+   prose and structure, an unambiguous path encoding (JSON Pointer,
+   since dotted strings cannot distinguish a dot in a key from
+   nesting), and tests for the provider inline-secret, MCP multi-rule,
+   nested filler and arbitrary-key cases.
+
+3. **P2: framework-generated 404 and 405 responses bypass the claimed
+   single problem shape.** `_application` registers handlers only for
+   `ConfigError` subclasses and `RequestValidationError`
+   (`api.py:1780-1784`); authenticated unmatched paths and unsupported
+   methods are answered by Starlette directly, and
+   `test_config_api.py:120-153` exercises routing 404s. Add a
+   sanitized `StarletteHTTPException` handler rendering through
+   `problem_response`, preserving safe protocol headers such as
+   `Allow`, with tests for unmatched paths, wrong methods and
+   trailing-slash paths.
+
+4. **P2: the proposed tests do not prove `detail` remains
+   byte-identical.** Substring assertions cannot detect changed
+   indentation, ordering or prefixes, and a fake-transport CLI test
+   only proves relay of a supplied detail. Require exact golden
+   strings from real repository-backed PUTs, including a multi-error
+   result, and point the CLI compatibility test at a real response or
+   the same exact sentence.
+
+5. **P2: M1 omits existing OpenAPI tests that will fail and does not
+   pin the absence of `application/json`.**
+   `tests/unit/test_api_openapi.py:245-253` and
+   `test_config_api_runtime.py:595-599` hard-code `application/json`
+   for every refusal. Name both files, require exactly one content
+   key (`application/problem+json`) with a resolving `Problem`
+   schema, and pin `Problem`/`FieldError` required fields and
+   `additionalProperties: false`.
+
+6. **P2: the documentation work does not classify all read shapes as
+   writable or display-only.** The issue requires both categories;
+   the plan touches only `API_DESCRIPTION` and `Envelope`.
+   `ConfigDocument.config`/`.secrets` have no whole-document PUT,
+   listings carry identity-keyed wrappers, and pending, runtime and
+   conversation reads are not writable configuration. State that only
+   the per-entity envelope's `entity` is resubmittable, mark the rest
+   display-only, and explain that listing keys select the target URL.
+
+7. **P2: custom titles conflict with omitting `type` under RFC
+   9457.** With `type` absent (`about:blank`), the RFC says the title
+   should be the recommended HTTP status phrase; custom semantic
+   titles imply problem types the body does not identify. Use the
+   standard reason phrases, or define type URIs; given the plan's
+   aversion to a type registry, the standard phrases are the
+   consistent choice.
