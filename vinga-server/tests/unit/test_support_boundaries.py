@@ -34,14 +34,6 @@ smoke lanes import their own, which is the other half of decision 2's
 "support or a conftest", and a fixture cannot be imported and used as a
 fixture, so a conftest is the only home some shared things can have.
 
-One deliberate exception, named rather than implied. The record
-baseline's exhaustiveness obligation is that every emit site the
-conformance suite's static walk finds must be driven, and the walk is
-that suite's (#210's plan says so in as many words). Extracting it into
-support would be a three-hundred-line move of code the last conversion
-milestone deletes outright, so the pair is exempted here, by both ends
-and by name, and the exemption goes when the walk does.
-
 Two deliberate limits, stated rather than discovered later:
 
 - An import naming a module this repository does not hold is not
@@ -67,14 +59,11 @@ ROOT = TESTS.parent
 # file itself does not have to exist.
 PLANTED = TESTS / "unit" / "planted.py"
 
-# Which test module may import which other one, and nothing wider: a
-# pair, not a file with a licence. See the exception in the docstring
-# above.
-TRANSITIONAL: dict[str, frozenset[str]] = {
-    "unit/test_event_baseline.py": frozenset(
-        {"unit/test_event_schema_conformance.py"}
-    ),
-}
+# Which test module may import which other one: nothing, today. The
+# parameter below exists because the rule has had an exception once and
+# will again, and a rule whose exceptions are edits to its own logic is
+# a rule nobody can read.
+TRANSITIONAL: dict[str, frozenset[str]] = {}
 
 
 def sources() -> list[Path]:
