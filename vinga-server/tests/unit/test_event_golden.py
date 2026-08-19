@@ -110,15 +110,37 @@ def test_the_committed_file_is_what_the_generator_writes() -> None:
     assert COMMITTED.read_text(encoding="utf-8") == rendered(inventory())
 
 
+def strings(held: Any) -> list[str]:
+    """Every key and every string value in the file, however nested."""
+    if isinstance(held, dict):
+        return [
+            one
+            for key, value in held.items()
+            for one in [key, *strings(value)]
+            if isinstance(one, str)
+        ]
+    if isinstance(held, list):
+        return [one for value in held for one in strings(value)]
+    return [held] if isinstance(held, str) else []
+
+
 def test_the_inventory_carries_no_wording() -> None:
     """The risk this file was designed against: a golden that ossified
-    sentences would pin exactly what #210 set out to free."""
-    recorded = COMMITTED.read_text(encoding="utf-8")
+    sentences would pin exactly what #210 set out to free.
 
-    assert "%s" not in recorded
-    assert "%d" not in recorded
-    for word in ("note", "message", "template", "sentence"):
-        assert word not in recorded
+    Asserted on the words themselves rather than on a substring hunt
+    through the text, which a field called `sentences` defeats: every
+    string in here is a name, a type or a channel, so none of them holds
+    a space or a `%`, and no key is one of the four that would carry
+    prose."""
+    recorded = COMMITTED.read_text(encoding="utf-8")
+    held = strings(json.loads(recorded))
+
+    assert held, "the file is empty, so this proves nothing"
+    for one in held:
+        assert " " not in one, one
+        assert "%" not in one, one
+    assert not {"note", "message", "template", "sentence"} & set(held)
 
 
 if __name__ == "__main__":  # pragma: no cover - the regeneration path

@@ -51,15 +51,44 @@ from types import MappingProxyType, UnionType
 from typing import Any, ClassVar, Union, get_args, get_origin, get_type_hints
 
 from vinga_server.events.values import (
+    ABSENT,
     Absent,
+    AgentList,
+    AgentNames,
+    AlsoBoundTo,
     ClassName,
+    ClientId,
+    CloseReasonToken,
     ConfiguredPath,
     Count,
     DeviceId,
+    DeviceOrUnidentified,
     EventName,
     EventValue,
     EventValueError,
+    FillerSkip,
+    FillerSkipToken,
+    Flag,
+    FromEntry,
+    Identifier,
+    LanguageTag,
+    Nothing,
+    PromptSources,
+    ProviderOutcomeToken,
+    QuotedProvider,
+    QuotedToolName,
+    ReachingHost,
+    Real,
+    Rejection,
+    RejectionToken,
     SessionId,
+    Suppression,
+    SuppressionToken,
+    ToolOutcomeToken,
+    ToolSource,
+    ToolSourceToken,
+    UnnamedToolSource,
+    Whole,
 )
 from vinga_server.events_schema import (
     CHANNELS,
@@ -694,7 +723,848 @@ CONVERSATIONS_PRUNED = declare(
 )
 
 
+# --- device/session.py: the conversation's own edge --------------------
+#
+# The session channel, which is the one every conversation record rides.
+# Its base is three values rather than one (`values.py`'s `SessionId`
+# and `DeviceId` beside the event's name), and every sentence here opens
+# by rendering the first of them, which is why `ARGS` may name a base
+# value at all.
+
+WS_CHANNEL = "vinga_server.ws"
+
+
+@dataclass(frozen=True)
+class RejectedBadDeviceId(Variant):
+    """A Device-Id header that is not a MAC.
+
+    The header is bytes an unauthenticated caller chose, so neither the
+    sentence nor any field repeats it: the reason says which rejection
+    this is, the device is null because none was understood, and the
+    sentence still says what the header has to hold.
+    """
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "session %s rejected: the Device-Id header is not a device MAC "
+        "(six colon-separated hex pairs)"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("session",)
+
+    reason: RejectionToken = value(fixed=RejectionToken(Rejection.BAD_DEVICE_ID))
+
+
+@dataclass(frozen=True)
+class RejectedAgentNotLoaded(Variant):
+    """A device bound to an agent this server booted without."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "session %s rejected: device %s is bound to agent %s, which this "
+        "server has not loaded; restart to load it"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "mac", "unloaded")
+
+    reason: RejectionToken = value(fixed=RejectionToken(Rejection.AGENT_NOT_LOADED))
+    # Said and not stored: the base already carries the device this
+    # session is with, and a second copy under another name would be the
+    # same fact twice on one record.
+    mac: DeviceId = value(carried=False)
+    unloaded: AgentList = value(carried=False)
+
+
+@dataclass(frozen=True)
+class RejectedNoAgent(Variant):
+    """A device bound to nothing, with no default to fall back on."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "session %s rejected: device %s has no agent: bind it under devices "
+        "or set default_agent"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "mac")
+
+    reason: RejectionToken = value(fixed=RejectionToken(Rejection.NO_AGENT))
+    mac: DeviceId = value(carried=False)
+
+
+@dataclass(frozen=True)
+class RejectedAtCapacity(Variant):
+    """The refusal the endpoint makes before a session can run at all.
+
+    On the server channel, where `session` and `device` are ordinary
+    declarable fields: there is no conversation yet whose identity an
+    emitter could own.
+    """
+
+    CHANNEL: ClassVar[str] = WS_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = (
+        "refused a websocket handshake from %s: the server is at capacity"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("shown",)
+
+    device: DeviceId | None
+    session: SessionId
+    reason: RejectionToken = value(fixed=RejectionToken(Rejection.CAPACITY))
+    shown: DeviceOrUnidentified = value(carried=False)
+
+
+@dataclass(frozen=True)
+class SessionOpen(Variant):
+    """A conversation starts."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = (
+        "session %s open: device %s (client %s) agent %s%s, protocol v%d, "
+        "%d Hz %d ms frames in"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = (
+        "session",
+        "mac",
+        "said_client",
+        "agent",
+        "bound_tail",
+        "protocol",
+        "sample_rate",
+        "frame_ms",
+    )
+
+    client: ClientId | None = value(
+        note=(
+            "The device UUID, bounded for the event only: the capture "
+            "manifest and the conversation store keep the header as it "
+            "arrived."
+        )
+    )
+    agent: Identifier = value()
+    agents: AgentNames = value()
+    protocol: Whole = value()
+    revision: Identifier = value(
+        note=(
+            "Which build this server is, so every session from here on "
+            "is attributable to one."
+        )
+    )
+    mac: DeviceId = value(carried=False)
+    # The same bounded copy the field carries, or the fixed word where
+    # nothing printable survived: dropping a field would not un-render
+    # an argument, so the sentence says what the record keeps.
+    said_client: ClientId = value(carried=False)
+    bound_tail: AlsoBoundTo = value(carried=False)
+    sample_rate: Whole = value(carried=False)
+    frame_ms: Whole = value(carried=False)
+
+
+@dataclass(frozen=True)
+class SessionLimit(Variant):
+    """The duration cap fires."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s reached the %.0f s time limit"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "limit_s")
+
+    duration_s: Real = value()
+    # The cap, which is the configuration's; the field beside it is how
+    # long this session actually ran.
+    limit_s: Real = value(carried=False)
+
+
+@dataclass(frozen=True)
+class SessionIdle(Variant):
+    """The idle timeout hangs up on a realtime session."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s idle for %.0f s, hanging up"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "idle_s")
+
+    idle_s: Real = value()
+    duration_s: Real = value()
+
+
+@dataclass(frozen=True)
+class SessionClosed(Variant):
+    """A conversation ends."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s closed (device %s)"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "mac")
+
+    duration_s: Real = value()
+    reason: CloseReasonToken = value(
+        note=(
+            "The first cause to fire, so a drain closing a session an "
+            "idle timer was about to hang up on reads `drain`."
+        )
+    )
+    mac: DeviceId = value(carried=False)
+
+
+@dataclass(frozen=True)
+class SpeakingStarted(Variant):
+    """The reply's first audio frame goes out."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: speaking started"
+    ARGS: ClassVar[tuple[str, ...]] = ("session",)
+
+    agent: Identifier = value()
+
+
+# --- runtime/pipeline.py: what happens inside a conversation ----------
+
+
+@dataclass(frozen=True)
+class Heard(Variant):
+    """An utterance is transcribed.
+
+    No transcript, and the type is what says so: there is no value in
+    this vocabulary that a spoken sentence could be constructed as.
+    """
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: heard %.2f s of speech"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "duration_s")
+
+    agent: Identifier = value()
+    duration_s: Real = value()
+    language: LanguageTag | Absent = value(
+        default=ABSENT, note="Only engines that detected carry this."
+    )
+    language_confidence: Real | Absent = value(default=ABSENT)
+
+
+@dataclass(frozen=True)
+class Replied(Variant):
+    """A reply finishes."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: %s replied in %d sentences"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "agent", "sentences")
+
+    agent: Identifier = value()
+    sentences: Count = value(
+        note=(
+            "How many of them the user heard, so a reply a barge-in cut "
+            "short reports what went out."
+        )
+    )
+
+
+@dataclass(frozen=True)
+class AgentSaid(Variant):
+    """One agent's part of a reply."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: %s said %d sentences"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "agent", "sentences")
+
+    agent: Identifier = value()
+    sentences: Count = value()
+
+
+@dataclass(frozen=True)
+class Handover(Variant):
+    """`switch_agent` succeeds."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: handed over from agent %s to %s"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "from_agent", "to_agent")
+
+    from_agent: Identifier = value()
+    to_agent: Identifier = value()
+
+
+@dataclass(frozen=True)
+class PromptAssembled(Variant):
+    """The know-how half of a prompt is assembled and cached."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: assembled %d characters of prompt for %s"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "characters", "agent")
+
+    agent: Identifier = value()
+    characters: Count = value()
+    sources: PromptSources = value(
+        note=(
+            "Each block's size by provenance: how much of the prompt "
+            "came from where, never any of the prompt itself."
+        )
+    )
+
+
+@dataclass(frozen=True)
+class LlmRetry(Variant):
+    """The first-token watchdog retries a round, for a provider whose
+    identity the registry never built."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = "session %s: no first token after %.1f s, retrying round %d"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "duration_s", "round")
+    NOTE: ClassVar[str] = "A provider the registry did not build names no entry."
+
+    agent: Identifier = value()
+    round: Whole = value()
+    duration_ms: Whole = value()
+    stage: Identifier = value()
+    duration_s: Real = value(carried=False)
+
+
+@dataclass(frozen=True)
+class LlmRetryOfEntry(Variant):
+    """The same retry, for a provider the registry built out of a
+    configured entry."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = "session %s: no first token after %.1f s, retrying round %d"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "duration_s", "round")
+    NOTE: ClassVar[str] = (
+        "`provider` and `type` are atomic: a provider with an identity "
+        "carries both. `host` is absent for an engine that runs in this "
+        "process and `model` for a type that has none to name."
+    )
+
+    agent: Identifier = value()
+    round: Whole = value()
+    duration_ms: Whole = value()
+    stage: Identifier = value()
+    provider: Identifier = value()
+    type: Identifier = value()
+    duration_s: Real = value(carried=False)
+    host: Identifier | Absent = value(default=ABSENT)
+    model: Identifier | Absent = value(
+        default=ABSENT, note="The GenAI conventions' `gen_ai.request.model`."
+    )
+
+
+@dataclass(frozen=True)
+class LlmRound(Variant):
+    """A generation call finishes, on a provider with no configured
+    identity."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: %s round %d took %.2f s over %d turns"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "agent", "round", "duration_s", "turns")
+
+    agent: Identifier = value()
+    round: Whole = value(
+        note=(
+            "Counts the whole reply rather than one agent's leg, so the "
+            "generation after a handover is a round of its own."
+        )
+    )
+    turns: Count = value(note="The cheap proxy for payload size.")
+    duration_ms: Whole = value()
+    stage: Identifier = value()
+    duration_s: Real = value(carried=False)
+    input_tokens: Count | Absent = value(default=ABSENT)
+    output_tokens: Count | Absent = value(default=ABSENT)
+    first_token_ms: Whole | Absent = value(
+        default=ABSENT,
+        note=(
+            "Times the first spoken token, so a round that only asked "
+            "for a tool carries none."
+        ),
+    )
+
+
+@dataclass(frozen=True)
+class LlmRoundOfEntry(Variant):
+    """The same round, on a provider the registry built."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: %s round %d took %.2f s over %d turns"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "agent", "round", "duration_s", "turns")
+
+    agent: Identifier = value()
+    round: Whole = value()
+    turns: Count = value()
+    duration_ms: Whole = value()
+    stage: Identifier = value()
+    provider: Identifier = value()
+    type: Identifier = value()
+    duration_s: Real = value(carried=False)
+    host: Identifier | Absent = value(default=ABSENT)
+    model: Identifier | Absent = value(
+        default=ABSENT,
+        note=(
+            "Present where the configured entry names one. The GenAI "
+            "conventions' `gen_ai.request.model`."
+        ),
+    )
+    input_tokens: Count | Absent = value(
+        default=ABSENT,
+        note=(
+            "Present where the provider reported usage; their "
+            "absence is a fact about the endpoint."
+        ),
+    )
+    output_tokens: Count | Absent = value(default=ABSENT)
+    first_token_ms: Whole | Absent = value(default=ABSENT)
+
+
+@dataclass(frozen=True)
+class ProviderFailed(Variant):
+    """An ASR, LLM or TTS call fails, on a provider with no configured
+    identity."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = "session %s: %s provider%s %s after %.2f s%s: %s"
+    ARGS: ClassVar[tuple[str, ...]] = (
+        "session",
+        "stage",
+        "named",
+        "outcome",
+        "duration_s",
+        "where",
+        "error",
+    )
+    NOTE: ClassVar[str] = (
+        "A provider the registry did not build names no entry and no host."
+    )
+
+    agent: Identifier = value()
+    error: ClassName = value()
+    duration_ms: Whole = value()
+    stage: Identifier = value()
+    named: Nothing = value(carried=False)
+    outcome: ProviderOutcomeToken = value(carried=False)
+    duration_s: Real = value(carried=False)
+    where: Nothing = value(carried=False)
+
+
+@dataclass(frozen=True)
+class ProviderOfEntryFailed(Variant):
+    """The same failure, on a provider the registry built out of a
+    configured entry."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.WARNING
+    TEMPLATE: ClassVar[str] = "session %s: %s provider%s %s after %.2f s%s: %s"
+    ARGS: ClassVar[tuple[str, ...]] = (
+        "session",
+        "stage",
+        "named",
+        "outcome",
+        "duration_s",
+        "where",
+        "error",
+    )
+
+    agent: Identifier = value()
+    error: ClassName = value(
+        note="A round whose retry also stalled carries `FirstTokenTimeout`."
+    )
+    duration_ms: Whole = value()
+    stage: Identifier = value()
+    provider: Identifier = value()
+    type: Identifier = value()
+    named: QuotedProvider = value(carried=False)
+    outcome: ProviderOutcomeToken = value(carried=False)
+    duration_s: Real = value(carried=False)
+    where: ReachingHost = value(carried=False)
+    host: Identifier | Absent = value(default=ABSENT)
+    model: Identifier | Absent = value(default=ABSENT)
+
+
+@dataclass(frozen=True)
+class BuiltinToolCall(Variant):
+    """A builtin returns. The one branch that names its tool, because a
+    builtin's name is this server's own word."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: %s tool%s took %.2f s%s"
+    ARGS: ClassVar[tuple[str, ...]] = (
+        "session",
+        "source",
+        "named",
+        "duration_s",
+        "outcome",
+    )
+
+    agent: Identifier = value()
+    source: ToolSourceToken = value(fixed=ToolSourceToken(ToolSource.BUILTIN))
+    tool: Identifier = value(note="The only tool names this server authors.")
+    duration_ms: Whole = value()
+    is_error: Flag = value()
+    named: QuotedToolName = value(carried=False)
+    duration_s: Real = value(carried=False)
+    outcome: ToolOutcomeToken = value(carried=False)
+
+
+@dataclass(frozen=True)
+class McpToolCall(Variant):
+    """An MCP call returns, named by the entry an operator configured."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: %s tool%s took %.2f s%s"
+    ARGS: ClassVar[tuple[str, ...]] = (
+        "session",
+        "source",
+        "named",
+        "duration_s",
+        "outcome",
+    )
+
+    agent: Identifier = value()
+    source: ToolSourceToken = value(fixed=ToolSourceToken(ToolSource.MCP))
+    entry: Identifier = value(
+        note="The configured entry, never the far side's tool name."
+    )
+    duration_ms: Whole = value()
+    is_error: Flag = value()
+    named: FromEntry = value(carried=False)
+    duration_s: Real = value(carried=False)
+    outcome: ToolOutcomeToken = value(carried=False)
+
+
+@dataclass(frozen=True)
+class UnnamedToolCall(Variant):
+    """A call this surface may not name at all."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: %s tool%s took %.2f s%s"
+    ARGS: ClassVar[tuple[str, ...]] = (
+        "session",
+        "source",
+        "named",
+        "duration_s",
+        "outcome",
+    )
+    NOTE: ClassVar[str] = (
+        "A device tool's name is the board's vocabulary and an unknown "
+        "one is whatever the model invented, so neither is named."
+    )
+
+    agent: Identifier = value()
+    source: UnnamedToolSource = value()
+    duration_ms: Whole = value()
+    is_error: Flag = value()
+    named: Nothing = value(carried=False)
+    duration_s: Real = value(carried=False)
+    outcome: ToolOutcomeToken = value(carried=False)
+
+
+# --- runtime/turntaking.py: who is talking ---------------------------
+
+
+@dataclass(frozen=True)
+class BargeIn(Variant):
+    """Speech cuts a reply short."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: barge-in, cancelling the reply in flight"
+    ARGS: ClassVar[tuple[str, ...]] = ("session",)
+
+    speech_ms: Whole = value()
+    speaking_ms: Whole | Absent = value(
+        default=ABSENT,
+        note=(
+            "Milliseconds from `speaking_started` to the cancel "
+            "decision, absent when the reply had not yet spoken."
+        ),
+    )
+
+
+@dataclass(frozen=True)
+class BargeInUnderFloor(Variant):
+    """Too little classified speech to be anything but a noise blip."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = (
+        "session %s: barge-in suppressed, %d ms of speech is under the %.0f ms floor"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "speech_ms", "floor_ms")
+
+    reason: SuppressionToken = value(fixed=SuppressionToken(Suppression.MIN_SPEECH))
+    speech_ms: Whole = value()
+    floor_ms: Real = value(carried=False)
+
+
+@dataclass(frozen=True)
+class BargeInInRefractory(Variant):
+    """The onset transient a device's echo cancellation let through."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: barge-in suppressed inside the refractory window"
+    ARGS: ClassVar[tuple[str, ...]] = ("session",)
+
+    reason: SuppressionToken = value(fixed=SuppressionToken(Suppression.REFRACTORY))
+    speech_ms: Whole = value()
+
+
+@dataclass(frozen=True)
+class BargeInWithoutTranscript(Variant):
+    """A pause that asked ASR and got nothing back."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: barge-in suppressed, nothing transcribed"
+    ARGS: ClassVar[tuple[str, ...]] = ("session",)
+
+    reason: SuppressionToken = value(fixed=SuppressionToken(Suppression.NO_TRANSCRIPT))
+    speech_ms: Whole = value()
+
+
+@dataclass(frozen=True)
+class BargeInMerged(Variant):
+    """An interruption merges with the utterance the reply was
+    transcribing."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = (
+        "session %s: barge-in mid-transcription, merging the utterances"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("session",)
+
+    speech_ms: Whole = value()
+
+
+# --- runtime/filler_runner.py: the latency mask -----------------------
+
+
+@dataclass(frozen=True)
+class FillerSkippedForSpeech(Variant):
+    """The timer fired but the user was there first."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = (
+        "session %s: filler skipped, the user is speaking (%d ms heard)"
+    )
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "speech_ms")
+
+    agent: Identifier = value()
+    reason: FillerSkipToken = value(fixed=FillerSkipToken(FillerSkip.USER_SPEAKING))
+    speech_ms: Whole = value()
+
+
+@dataclass(frozen=True)
+class FillerSkippedForBargeIn(Variant):
+    """The outgoing frames are paused while a barge-in is confirmed, so
+    the silence the timer would mask is not silence."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: filler skipped, a barge-in is being confirmed"
+    ARGS: ClassVar[tuple[str, ...]] = ("session",)
+
+    agent: Identifier = value()
+    reason: FillerSkipToken = value(fixed=FillerSkipToken(FillerSkip.BARGE_IN_PENDING))
+
+
+@dataclass(frozen=True)
+class FillerPlayed(Variant):
+    """A pre-synthesized clip masked the wait."""
+
+    CHANNEL: ClassVar[str] = SESSION_CHANNEL
+    LEVEL: ClassVar[int] = logging.INFO
+    TEMPLATE: ClassVar[str] = "session %s: no reply audio after %d ms, playing filler %d"
+    ARGS: ClassVar[tuple[str, ...]] = ("session", "delay_ms", "phrase_index")
+
+    agent: Identifier = value()
+    delay_ms: Whole = value(note="Measured, from the transcription to the fire.")
+    phrase_index: Count = value()
+
+
+SESSION_REJECTED = declare(
+    "session_rejected",
+    note=(
+        "A device turned away. Emitted on both scopes: the session "
+        "channel for the refusals a session makes after the accept, "
+        "and `vinga_server.ws` for the one the endpoint makes before "
+        "a session can run at all."
+    ),
+    variants=(
+        RejectedBadDeviceId,
+        RejectedAgentNotLoaded,
+        RejectedNoAgent,
+        RejectedAtCapacity,
+    ),
+)
+
+SESSION_OPEN = declare("session_open", note="A conversation starts.", variants=(SessionOpen,))
+
+SESSION_LIMIT = declare("session_limit", note="The duration cap fires.", variants=(SessionLimit,))
+
+SESSION_IDLE = declare(
+    "session_idle",
+    note="The idle timeout hangs up on a realtime session.",
+    variants=(SessionIdle,),
+)
+
+SESSION_CLOSED = declare("session_closed", note="A conversation ends.", variants=(SessionClosed,))
+
+SPEAKING_STARTED = declare(
+    "speaking_started",
+    note="The reply's first audio frame goes out.",
+    variants=(SpeakingStarted,),
+)
+
+HEARD = declare(
+    "heard",
+    note=(
+        "An utterance is transcribed. No transcript: what was said is "
+        "the conversation store's, and what an operator measures with "
+        "is how long the user spoke."
+    ),
+    variants=(Heard,),
+)
+
+REPLIED = declare("replied", note="A reply finishes.", variants=(Replied,))
+
+AGENT_SAID = declare("agent_said", note="One agent's part of a reply.", variants=(AgentSaid,))
+
+HANDOVER = declare("handover", note="`switch_agent` succeeds.", variants=(Handover,))
+
+PROMPT_ASSEMBLED = declare(
+    "prompt_assembled",
+    note=(
+        "The know-how half of a prompt is assembled and cached. The "
+        "per-round memory read is deliberately not part of it, which "
+        "is why `memory` is not one of the provenance forms."
+    ),
+    variants=(PromptAssembled,),
+)
+
+LLM_RETRY = declare(
+    "llm_retry",
+    note="The first-token watchdog cancels a stalled generation and retries the round once.",
+    variants=(LlmRetry, LlmRetryOfEntry),
+)
+
+LLM_ROUND = declare(
+    "llm_round", note="A generation call finishes.", variants=(LlmRound, LlmRoundOfEntry)
+)
+
+PROVIDER_FAILED = declare(
+    "provider_failed",
+    note=(
+        "An ASR, LLM or TTS call fails. The class name is reported and "
+        "the exception's message is not: a type name says what went "
+        "wrong, a message says what a stranger wrote."
+    ),
+    variants=(ProviderFailed, ProviderOfEntryFailed),
+)
+
+TOOL_CALL = declare(
+    "tool_call",
+    note=(
+        "A tool returns. `source` says which namespace the model "
+        "reached into; the name itself is only ever this server's own "
+        "word for it."
+    ),
+    variants=(BuiltinToolCall, McpToolCall, UnnamedToolCall),
+)
+
+BARGE_IN = declare("barge_in", note="Speech cuts a reply short.", variants=(BargeIn,))
+
+BARGE_IN_SUPPRESSED = declare(
+    "barge_in_suppressed",
+    note="An interruption is dropped and the reply lives.",
+    variants=(BargeInUnderFloor, BargeInInRefractory, BargeInWithoutTranscript),
+)
+
+BARGE_IN_MERGED = declare(
+    "barge_in_merged",
+    note="An interruption merges with the utterance the reply was transcribing.",
+    variants=(BargeInMerged,),
+)
+
+FILLER_SKIPPED = declare(
+    "filler_skipped",
+    note="The filler timer fired but the user was there first, so no clip played.",
+    variants=(FillerSkippedForSpeech, FillerSkippedForBargeIn),
+)
+
+FILLER_PLAYED = declare(
+    "filler_played",
+    note=(
+        "The reply was slow, so a pre-synthesized clip masked the "
+        "wait. Its first frame is the turn's `speaking_started`."
+    ),
+    variants=(FillerPlayed,),
+)
+
+
 __all__ = [
+    "AGENT_SAID",
+    "AgentSaid",
+    "BARGE_IN",
+    "BARGE_IN_MERGED",
+    "BARGE_IN_SUPPRESSED",
+    "BargeIn",
+    "BargeInInRefractory",
+    "BargeInMerged",
+    "BargeInUnderFloor",
+    "BargeInWithoutTranscript",
+    "BuiltinToolCall",
+    "FILLER_PLAYED",
+    "FILLER_SKIPPED",
+    "FillerPlayed",
+    "FillerSkippedForBargeIn",
+    "FillerSkippedForSpeech",
+    "HANDOVER",
+    "HEARD",
+    "Handover",
+    "Heard",
+    "LLM_RETRY",
+    "LLM_ROUND",
+    "LlmRetry",
+    "LlmRetryOfEntry",
+    "LlmRound",
+    "LlmRoundOfEntry",
+    "McpToolCall",
+    "PROMPT_ASSEMBLED",
+    "PROVIDER_FAILED",
+    "PromptAssembled",
+    "ProviderFailed",
+    "ProviderOfEntryFailed",
+    "REPLIED",
+    "RejectedAgentNotLoaded",
+    "RejectedAtCapacity",
+    "RejectedBadDeviceId",
+    "RejectedNoAgent",
+    "Replied",
+    "SESSION_CLOSED",
+    "SESSION_IDLE",
+    "SESSION_LIMIT",
+    "SESSION_OPEN",
+    "SESSION_REJECTED",
+    "SPEAKING_STARTED",
+    "SessionClosed",
+    "SessionIdle",
+    "SessionLimit",
+    "SessionOpen",
+    "SpeakingStarted",
+    "TOOL_CALL",
+    "UnnamedToolCall",
+    "WS_CHANNEL",
     "CONVERSATIONS_CHANNEL",
     "CONVERSATIONS_DROPPED",
     "CONVERSATIONS_ENABLED",
