@@ -42,6 +42,7 @@ from vinga_server import events
 from vinga_server.events import (
     GUARD_MESSAGE,
     REFUSAL_MESSAGE,
+    UNBUILT_LABEL,
     UNDECLARED_LABEL,
     Emission,
     EventSchemaError,
@@ -49,6 +50,8 @@ from vinga_server.events import (
     attach_server_tap,
     detach_server_tap,
 )
+from vinga_server.events.catalog import ConversationsDropped, Variant
+from vinga_server.events.values import SessionId
 from vinga_server.events_schema import (
     MAC,
     REGISTRY,
@@ -554,3 +557,71 @@ def test_strict_refuses_a_descriptor_past_its_declared_length() -> None:
         "the event schema refused an emission of checked: "
         "bad_bounds (argument 1); bad_bounds (board)",
     )
+
+
+# --- and the typed path's construction guard --------------------------
+#
+# The same rule, one layer earlier. A converted site hands the emitter a
+# thunk, so the value that would have been a field is now an argument to
+# a value type's constructor, and a refusal happens there rather than in
+# the validator above. Everything that reaches a surface from that
+# refusal is registry-owned: a fixed label, a fixed code, and the
+# exception's class name. Never its words, because a thunk that raised
+# may have raised holding exactly the bytes this suite hunts.
+
+STORE_CHANNEL = "vinga_server.conversations.store"
+
+
+def a_refused_construction() -> Variant:
+    """The sentinel planted where a converted site would put a session
+    id, which no `SessionId` admits: the dots see to that."""
+    return ConversationsDropped(session=SessionId(SENTINEL))
+
+
+def test_strict_refuses_a_construction_without_repeating_its_value(
+    caplog: pytest.LogCaptureFixture, tap: Tap
+) -> None:
+    """`args` whole, so `str` and `repr` are pinned with it, and nothing
+    written or dispatched on the way to the refusal."""
+    events.set_enforcement(events.STRICT)
+
+    with caplog.at_level("DEBUG"), pytest.raises(EventSchemaError) as raised:
+        ServerEvents(STORE_CHANNEL).emit(a_refused_construction)
+
+    assert raised.value.args == (
+        "the event schema refused an emission of an event that could not "
+        "be built: construction_failed (EventValueError)",
+    )
+    assert SENTINEL not in repr(raised.value)
+    assert SENTINEL not in repr(raised.value.__cause__)
+    assert SENTINEL not in repr(raised.value.__context__)
+    assert caplog.records == []
+    assert tap.seen == []
+
+
+def test_forgiving_recovers_a_construction_without_repeating_its_value(
+    caplog: pytest.LogCaptureFixture, tap: Tap
+) -> None:
+    """The complaint by equality, then the sentinel hunted through every
+    surface a value could reach: both shipped formats, the arguments
+    behind them, and what the taps were handed."""
+    events.set_enforcement(events.FORGIVING)
+
+    with caplog.at_level("DEBUG"):
+        ServerEvents(STORE_CHANNEL).emit(a_refused_construction)
+
+    (complaint,) = [one for one in caplog.records if not hasattr(one, "event")]
+    assert complaint.levelno == logging.ERROR
+    assert complaint.msg == REFUSAL_MESSAGE
+    assert complaint.args == (
+        UNBUILT_LABEL,
+        "construction_failed (EventValueError)",
+    )
+    # The declared recovery event rode in the emission's place, carrying
+    # the fixed token and nothing the thunk was holding.
+    (recovered,) = [one for one in caplog.records if hasattr(one, "event")]
+    assert fields_of(recovered) == {"event": SCHEMA_VIOLATION}
+    assert recovered.args == ()
+    assert carrying(caplog, SENTINEL) == set()
+    assert SENTINEL not in both_formats(caplog)
+    assert SENTINEL not in tap.rendered()

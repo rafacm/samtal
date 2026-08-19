@@ -67,6 +67,17 @@ variants, sentence and arguments included. Which of the two things that
 buys happens depends on `VINGA_EVENTS_ENFORCEMENT`: `strict` raises, so
 a lane, an import or a REPL refuses a violation outright, and
 `forgiving` recovers, so a telemetry bug can never cost a reply.
+
+That is the untyped path, and it is being replaced one area at a time
+(#210). A converted site hands `emit()` a thunk that builds a typed
+variant from `catalog.py` instead of restating a template, an argument
+order, an event name and a field set: the declaration owns all four, so
+there is nothing left for a call to get wrong and nothing left to
+judge it against. What survives is the guard, because construction can
+still fail on a value, and the two modes above, because what a failed
+construction costs must still be a log line rather than a reply. Both
+paths dispatch the same `Emission` to the same taps, which is what the
+committed record baseline proves rather than assumes.
 """
 
 import asyncio
@@ -80,6 +91,7 @@ from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
+from vinga_server.events.catalog import Variant, declaration_of
 from vinga_server.events.values import CLASS_NAME_PATTERN
 from vinga_server.events_schema import (
     REGISTRY as DECLARED_EVENTS,
@@ -431,9 +443,18 @@ BAD_SOURCE_KEY = "bad_source_key"
 BAD_SOURCE_VALUE = "bad_source_value"
 AMBIGUOUS_VARIANT = "ambiguous_variant"
 
+# The typed path's own code: a construction thunk that raised, so no
+# variant exists to judge. Its detail is the exception's class name and
+# never its words, the way a failed tap is reported.
+CONSTRUCTION_FAILED = "construction_failed"
+
 # What an event that is not in the registry is called in a diagnostic,
 # since it cannot be called by the name the caller gave it.
 UNDECLARED_LABEL = "an undeclared event"
+
+# And what an event whose construction never finished is called, since
+# the thunk is opaque until it returns and a failed one names nothing.
+UNBUILT_LABEL = "an event that could not be built"
 
 # The one sentence a refusal renders, strict or forgiving: the event's
 # declared name (or the fixed label above) and the violation summary.
@@ -857,9 +878,17 @@ def _replacement(base: dict[str, Any]) -> Checked:
     """The declared recovery event, built from whole cloth: the fixed
     token, the emitter's own trusted identity, the fixed sentence and no
     arguments, so a hostile event name, key, value, message or argument
-    in the original call reaches nothing."""
+    in the original call reaches nothing.
+
+    `event` is written first rather than merged over whatever the base
+    held, so that the key order a record carries is the same whether the
+    base named the event (the untyped path, whose base always does) or
+    the declaration did (the typed path, whose base never does)."""
     return Checked(
-        payload={**base, "event": SCHEMA_VIOLATION},
+        payload={
+            "event": SCHEMA_VIOLATION,
+            **{key: value for key, value in base.items() if key != "event"},
+        },
         level=logging.ERROR,
         message=SCHEMA_VIOLATION_MESSAGE,
         args=(),
@@ -964,6 +993,92 @@ def _enforce(
         # nothing behind it and cost the reply the guard exists for.
         _report(log, logging.ERROR, GUARD_MESSAGE, type(exc).__name__)
         return _replacement(base)
+
+
+# --- the typed path ---------------------------------------------------
+#
+# What a converted site does instead. It hands the emitter a THUNK
+# rather than a constructed variant, and the difference is the whole
+# point: building the variant, validating its values, rendering its
+# sentence and serializing its payload all happen inside the guard
+# below, so a construction failure on a reply path is telemetry's
+# problem and never the reply's. `emit(SomeVariant(...))` would have
+# evaluated the constructor at the call site, outside anything.
+#
+# There is no second enforcement step here. The declaration IS the
+# check: a variant that exists has already proved its channel, its
+# level, its template, its argument order and every one of its values,
+# because none of them could have been constructed otherwise. What is
+# left to check at emit time is the one thing a variant cannot know,
+# which is whether it was handed to an emitter on the channel it
+# declares.
+
+
+@dataclass(frozen=True)
+class _Refusal:
+    """What the construction guard made of an emission it could not
+    build: the name a diagnostic may call it, and the one fault."""
+
+    label: str
+    fault: Fault
+
+
+def _construct(
+    channel: str, base: dict[str, Any], build: Callable[[], Variant]
+) -> Checked | _Refusal:
+    """Build one variant and turn it into an emission, or answer what
+    was wrong with it.
+
+    Nothing here raises, which is what lets the caller decide between
+    the two modes AFTER the handler has ended. The exception itself is
+    never carried out: only its class name is, so a lane's stderr
+    cannot receive what it was holding through `__cause__` or
+    `__context__` either.
+    """
+    try:
+        variant = build()
+        declaration = declaration_of(type(variant))
+        if variant.CHANNEL != channel:
+            # The one thing a variant cannot check for itself, and the
+            # only check left at emit time: both halves are
+            # registry-owned, the declaration's channel and the
+            # emitter's own.
+            return _Refusal(declaration.name, Fault(WRONG_CHANNEL))
+        logged = variant.logged()
+        return Checked(
+            payload={"event": declaration.name, **base, **variant.payload()},
+            level=variant.LEVEL,
+            message=logged.template,
+            args=logged.args,
+        )
+    except Exception as exc:  # noqa: BLE001 - telemetry never costs a reply
+        failure = type(exc).__name__
+    return _Refusal(UNBUILT_LABEL, Fault(CONSTRUCTION_FAILED, failure))
+
+
+def _built(
+    log: logging.Logger,
+    channel: str,
+    base: dict[str, Any],
+    build: Callable[[], Variant],
+) -> Checked:
+    """One typed emission, constructed under the guard.
+
+    Strict refuses, the way it refuses an untyped violation and with a
+    sentence of the same shape. Forgiving says so once on the emitter's
+    own channel and dispatches the declared `schema_violation` instead,
+    built from registry-owned identifiers only: no caller-supplied
+    name, no field value, no exception message and no partially
+    rendered text, because a thunk that raised may have raised holding
+    exactly the bytes this surface exists to keep out.
+    """
+    outcome = _construct(channel, base, build)
+    if isinstance(outcome, Checked):
+        return outcome
+    if _enforcement == STRICT:
+        raise EventSchemaError(refusal_text(outcome.label, (outcome.fault,)))
+    _report(log, logging.ERROR, REFUSAL_MESSAGE, outcome.label, outcome.fault.rendered())
+    return _replacement(base)
 
 
 class SessionEvents:
@@ -1180,6 +1295,32 @@ class ServerEvents:
 
     def error(self, message: str, *args: Any, event: str, **fields: Any) -> None:
         self._emit(logging.ERROR, message, args, event, fields)
+
+    def emit(self, build: Callable[[], Variant]) -> None:
+        """Say one typed event.
+
+        A thunk rather than a variant, because construction is part of
+        what the guard has to cover: `emit(SomeVariant(...))` would
+        evaluate the constructor at the call site, where a value that
+        did not pass its own type would raise on whatever path was
+        emitting. Here building, validating, rendering and serializing
+        all happen inside `_built`.
+
+        The caller names the variant and its values. Everything else,
+        the event's name, its channel, its level, its sentence and the
+        order of that sentence's arguments, comes off the declaration
+        the variant belongs to, which is the whole of what a typed site
+        stops having to restate correctly.
+        """
+        checked = _built(self._logger, self.channel, {}, build)
+        emission = Emission(
+            payload=checked.payload,
+            at=self._clock(),
+            level=checked.level,
+            message=checked.message,
+            args=checked.args,
+        )
+        _dispatch(tuple(_hub.taps), self._log, emission, self._logger)
 
     def _emit(
         self,
