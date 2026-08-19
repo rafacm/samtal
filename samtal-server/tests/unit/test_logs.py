@@ -17,7 +17,11 @@ in `tests/integration/test_access_logs.py`.
 
 import json
 import logging
+import os
+import subprocess
 import sys
+import textwrap
+from pathlib import Path
 
 import httpx
 import pytest
@@ -292,3 +296,147 @@ def test_without_the_floor_the_engine_echoes_its_parameters(
         connection.execute(text("insert into kept values (:value)"), {"value": SENTINEL})
 
     assert SENTINEL in caplog.text
+
+
+# --- when the floor arrives, on both ways a deployment starts (#124) --
+
+
+def _child(*source: str, cwd: Path, **environment: str) -> subprocess.CompletedProcess[str]:
+    """A fresh interpreter running exactly this source.
+
+    A subprocess because the subject is when a process applies the floor,
+    and this one has had the floor applied since its own first test. `-B`
+    for the reason `test_onboarding_import_weight.py` gives: this suite
+    clears the bytecode caches once and writes none, and a child that
+    wrote a full set back would hand the next run a stale one.
+
+    Every SAMTAL_ variable is dropped and the named ones put back, and
+    the child runs in a directory of the test's own, so neither the
+    developer's environment nor a `.env` beside the checkout can decide
+    what it reads.
+
+    The parts are dedented one by one and then joined, so a block
+    written at a function's indentation and one written at the module's
+    can be handed in together.
+    """
+    env = {key: value for key, value in os.environ.items() if not key.startswith("SAMTAL_")}
+    return subprocess.run(
+        [sys.executable, "-B", "-c", "".join(textwrap.dedent(part) for part in source)],
+        capture_output=True,
+        text=True,
+        cwd=cwd,
+        env=env | environment,
+    )
+
+
+# The three the child reports on: the one uvicorn turns up, the one
+# whose floor is not INFO, and one of the four that were already held.
+FLOORED = ("uvicorn.error", "sqlalchemy", "httpx")
+
+# A token shaped like the ones the environment carries, for the child
+# that has to get all the way to a described application.
+TOKEN = "test-secret-" + "0123456789abcdef" * 2
+
+# What the child reports, so the assertions read in the names `logging`
+# uses rather than in numbers. The level each logger carries of its own
+# rather than the effective one, because that is the difference the
+# floor makes: an unfloored process leaves them inheriting (`NOTSET`) or
+# at whatever set them.
+_REPORT = """
+    import json, logging
+    print(json.dumps({
+        name: logging.getLevelName(logging.getLogger(name).level) for name in %r
+    }))
+"""
+
+
+def test_an_external_asgi_runner_gets_the_floor_too(tmp_path: Path) -> None:
+    """`uvicorn samtal_server.app:app` never reaches `configure`.
+
+    That entry point builds the app through the module's `__getattr__`
+    and serves it, so until the floor moved into `create_app` a
+    deployment launched that way ran with none of it: `uvicorn
+    --log-level debug` sets `uvicorn.error` to DEBUG before it imports
+    the app, and nothing afterwards took it back down. The child does
+    what uvicorn does to that logger, and to the engine's for good
+    measure, and then touches the attribute uvicorn touches.
+    """
+    database = tmp_path / "db"
+    finished = _child(
+        """
+        import logging
+        # What `uvicorn --log-level debug` has already done by the time
+        # it imports the application.
+        logging.getLogger("uvicorn.error").setLevel(logging.DEBUG)
+        # And a process that has had the engine's own pin overridden,
+        # so the floor is the only thing left holding it.
+        logging.getLogger("sqlalchemy").setLevel(logging.DEBUG)
+
+        import samtal_server.app as module
+
+        module.app
+        """,
+        _REPORT % (FLOORED,),
+        cwd=tmp_path,
+        SAMTAL_SERVER__DATABASE__DIR=str(database),
+        SAMTAL_API_SECRET=TOKEN,
+        SAMTAL_AUTH_SECRET=TOKEN,
+    )
+
+    assert finished.returncode == 0, finished.stderr
+    levels = json.loads(finished.stdout.splitlines()[-1])
+    # uvicorn's DEBUG comes back down to the floor, the engine's override
+    # is overridden in turn, and httpx is pinned where it already
+    # effectively was: without a level to hold them to, the floor makes
+    # nothing louder than the process already is.
+    assert levels == {"uvicorn.error": "INFO", "sqlalchemy": "WARNING", "httpx": "WARNING"}
+
+
+def test_the_boot_that_reads_the_configuration_is_inside_the_floor(tmp_path: Path) -> None:
+    """The other path's window: `configure` cannot run until the
+    configuration has been read, and reading it opens a database.
+
+    So the floor goes on at the top of `main()` instead, and this is what
+    says it got there in time. The child turns SQL echoing on before
+    calling `main()`, which is what an operator diagnosing a database
+    problem does, and the boot then opens the configuration database and
+    migrates it. Asserted on the output rather than on a level, because
+    what matters is that no statement and no bound parameter was printed
+    during the window, not which call closed it.
+
+    The boot is made to stop right after that window by leaving the
+    device authentication secret out of the environment, which
+    `create_app` refuses in one sentence: the database work happens, the
+    server never starts.
+    """
+    database = tmp_path / "db"
+    finished = _child(
+        """
+        import logging, sys
+
+        logging.basicConfig(
+            level=logging.DEBUG, format="%(name)s|%(message)s", stream=sys.stdout
+        )
+        logging.getLogger("sqlalchemy").setLevel(logging.DEBUG)
+
+        sys.argv = ["samtal-server"]
+        from samtal_server.main import main
+
+        main()
+        """,
+        cwd=tmp_path,
+        SAMTAL_SERVER__DATABASE__DIR=str(database),
+    )
+
+    # The boot got as far as the refusal it was pointed at, which is
+    # after the database work: an empty log would otherwise prove
+    # nothing.
+    assert finished.returncode == 1
+    assert "SAMTAL_AUTH_SECRET is not set" in finished.stderr
+    assert any(
+        line.startswith("alembic.runtime.migration|") for line in finished.stdout.splitlines()
+    ), finished.stdout
+    # And the engine said nothing while it did it.
+    assert not [
+        line for line in finished.stdout.splitlines() if line.startswith("sqlalchemy")
+    ], finished.stdout
