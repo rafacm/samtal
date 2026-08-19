@@ -88,11 +88,13 @@ that survives deletion is one whose absence would put a decision back
 in a place that does not own it.
 
 **Example.** The onboarding and OTA split (#143, PRs #197 and #198)
-produced `onboarding/unbound.py`, a small module holding one function,
-`activation_for`. It passes the test because deleting it would put the
-answer to "what does a device with no agent receive" back where it
-came from, which was three files that had to agree. Its size is not
-the point; the decision having exactly one home is.
+produced `onboarding/unbound.py`, a small module centered on one
+decision: `activation_for`, with the `Unbound` result type and the
+`activation_object` rendering helper beside it. It passes the test
+because deleting it would put the answer to "what does a device with
+no agent receive" back where it came from, which was three files that
+had to agree. Its size is not the point; the decision having exactly
+one home is.
 
 **Counterexample.** A `runtime/prompt_helpers.py` that wraps
 `prompt.know_how` to pass its arguments through in a different order,
@@ -262,8 +264,9 @@ that made the extraction safe.
 The lens: a field soup is not converted into a seam by moving code.
 It becomes a seam when the crossing can be written down, and if it
 cannot be written down in a few signatures, the cluster is not the
-one to extract yet. `pipeline.py` came out at 1,483 lines, which is
-the smallest thing that happened.
+one to extract yet. `PipelineRuntime` came out of those two PRs at
+1,484 lines and 38 methods, which is the smallest thing that
+happened.
 
 ### One question, three answers: the tool sources
 
