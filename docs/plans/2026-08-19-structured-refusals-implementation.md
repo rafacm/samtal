@@ -168,3 +168,102 @@ All from `samtal-server/`, at the last commit of the milestone.
 
 No hardware was involved in this milestone, so nothing about a device
 is claimed.
+
+## PR review round
+
+External review of the PR diff (`main...8f6bfde`): codex CLI 0.147.0,
+model gpt-5.6-sol, read-only, 2026-08-19. Verdict: mergeable after the
+listed fixes. Findings as received, condensed but faithful; each
+carries its resolution and the commit that made it.
+
+1. **P1: untrusted JSON keys leak verbatim through `detail` and
+   `errors.path`.** `_validation_problems` serializes every pydantic
+   `loc` segment without establishing that it is a schema-owned name,
+   so a `PUT /agents/sam` body holding an unknown key returns that key
+   in the sentence and as a pointer segment. `McpServerConfig`'s secret
+   rule interpolates arbitrary `env` and `headers` keys into both
+   surfaces independently. This contradicts the rule this repository
+   already wrote down for a malformed `mcp` grant, that a key the model
+   does not declare came out of the request and may be anything at all.
+   The sentinel test planted credentials only in values under known
+   fields, so it missed the path. Render only schema-owned names and
+   positions, point at the nearest safe parent, make the arbitrary-key
+   validator messages generic, and add API, CLI, exception-chain,
+   header and log assertions with the sentinel placed in a key.
+
+   *Resolution.* Adopted whole, in `f703715`. `models.safe_location` is
+   the rule with one home: it walks a location against the model, a
+   declared field descending into its own annotation and a position
+   into a list's item type, and truncates at the first segment that is
+   neither. `_validation_problems` puts every location through it and
+   both renderings truncate together, so a pointer now stops at
+   `/env`, at `/filler`, or at the empty pointer. `_grant_location`
+   reads the same rule rather than restating it, and `_GRANT_FIELDS`
+   is gone. An `extra_forbidden` error is rendered as
+   `an unrecognized key is not permitted` at the object the key was
+   written in, the error type being the decision site because it is a
+   closed token where the message is not. `check_no_inline_secrets`
+   takes a `declared` flag and keeps naming `api_key_env`, which is a
+   field this repository declares, while an option and everything under
+   it is refused by naming the closed fragment its name matched;
+   `_secret_problems` does the same for `env` and `headers`, pointing
+   at the group. Five planted-key cases assert absence from the
+   sentence, every pointer, every message, the whole body, the headers,
+   the log in both formats, and the exception's own `str`, `repr`,
+   chain and `problems`. The CLI leg is the secrets suite's
+   nested-option refusal, which now asserts that the key the operator
+   wrote is absent from what the command printed.
+
+   Three judgment calls inside those bounds, recorded rather than
+   buried. The narrowing is applied at the repository boundary
+   (`store._validation_problems`) and not to `loader`'s rendering of
+   the YAML file half: a config file is a local artifact its operator
+   wrote, the same trust level the moved-key and moved-variable
+   refusals already print names from, and truncating there would cost
+   an operator the diagnostic without a matching threat. The
+   validators' messages did narrow everywhere, because a validator
+   cannot know which boundary is rendering it. And two keys in one MCP
+   group that matched the same fragment are one problem, since the two
+   entries would be indistinguishable and a refusal that said the same
+   thing twice would only suggest the second was about something else.
+
+   One consequence worth naming: no pointer can now carry a `~` or a
+   `/`, since every segment in one is a name this repository declared.
+   The escaping stays, because the contract says RFC 6901 and a name
+   that acquired one would otherwise silently address something else,
+   and the test that used to reach it through a refusal is now a direct
+   pin on `json_pointer`.
+
+2. **P2: the plan's problem example contradicts the reviewed wire
+   contract.** The example shows the custom title `"refused"` and the
+   path `"type"`, while the settled design immediately below it
+   requires the standard 422 reason phrase and RFC 6901 pointer syntax.
+
+   *Resolution.* Adopted, in `684168e`: the example now reads
+   `"title": "Unprocessable Content"` and `"path": "/type"`. It is the
+   only edit this milestone made to the plan's body.
+
+3. **P3: the release documentation claims every refusal sentence is
+   byte-identical.** The changelog says the sentence and the CLI output
+   are unchanged byte for byte, and eleven lines later correctly
+   records that MCP transport refusals went from one semicolon-joined
+   line to several. The implementation doc's overview repeats the
+   unqualified claim.
+
+   *Resolution.* Adopted, in `7041816`. Both claims now name both
+   exceptions: the transport rule's prose change, which the plan
+   sanctioned, and finding 1's narrowing, which landed in this round.
+
+### Verification after the round
+
+All from `samtal-server/`, at the last commit of the round.
+
+- `uv run ruff check .`: `All checks passed!`
+- `uv run pytest tests/unit -q`: 3110 passed, 16 skipped.
+- `uv run pytest tests/integration -q`: 60 passed.
+- The four generated references regenerated and byte-compared as the
+  workflow's drift steps do: only `docs/reference/api-openapi.json`
+  moved, carrying the sharpened `Problem` and `FieldError`
+  descriptions, and it moved in `f703715` with the change that
+  narrowed them. The other three are byte-identical to their committed
+  copies.
