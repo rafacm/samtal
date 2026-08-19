@@ -82,6 +82,35 @@ this before suspecting the code.
   one). Every commit has an imperative title of roughly 50 characters and a
   body explaining the what and the why.
 
+## Design conventions
+
+Modules are judged by depth: how much a caller gets for how little it has to
+know. The method and its worked examples from merged samtal code are in
+[`docs/architecture/design-guide.md`](docs/architecture/design-guide.md).
+
+- **Module**: a file, or a package when its parts change for separate reasons.
+  **Interface**: everything a caller must know. **Implementation**: what the
+  module knows so its callers do not. **Depth**: the second divided by the
+  first, and the number to maximize.
+- **Seam**: a crossing stated as a type, not implied by a shared object both
+  sides mutate (`device/boundary.py`). **Adapter**: a module translating at a
+  seam so one side stops speaking the other's vocabulary; thin is fine, a
+  pass-through is not. **Locality**: every fact has one home, and everything
+  that needs it reads it from there.
+- **The deletion test**: if a module did not exist and its body were inlined
+  into its only caller, would the caller get harder to read? If not, it is a
+  pass-through and should not exist.
+- **The interface is the test surface**: a test reaches the names a caller
+  reaches. An underscore reach-in in a new test is a review flag: either the
+  module lacks an interface callers need, or the test pins a detail.
+- Prefer deepening an existing module over adding a pass-through beside it: a
+  layer that forwards its arguments adds a name and hides nothing.
+- A new domain concept gets its own module rather than a thousandth line in an
+  existing file. Length is evidence of a second responsibility, never by
+  itself a reason to cut a file where it felt tiring.
+- Two structures that must agree are one structure with a bug pending. Derive
+  the second from the first.
+
 ## Documentation process
 
 - When a plan is accepted, commit it to `docs/plans/` as one Markdown file
