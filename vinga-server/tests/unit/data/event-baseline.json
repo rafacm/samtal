@@ -18,19 +18,6 @@
     {
       "channel": "vinga_server.conversations.store",
       "level": 30,
-      "template": "recording conversations to %s",
-      "argument_types": [
-        "PosixPath"
-      ],
-      "fields": [
-        "event",
-        "path"
-      ],
-      "event": "conversations_enabled"
-    },
-    {
-      "channel": "vinga_server.conversations.store",
-      "level": 30,
       "template": "session %s: the conversation store is behind, dropping events",
       "argument_types": [
         "str"
@@ -43,19 +30,6 @@
     }
   ],
   "vinga_server.conversations.store:ConversationStore._failed #1": [
-    {
-      "channel": "vinga_server.conversations.store",
-      "level": 30,
-      "template": "recording conversations to %s",
-      "argument_types": [
-        "PosixPath"
-      ],
-      "fields": [
-        "event",
-        "path"
-      ],
-      "event": "conversations_enabled"
-    },
     {
       "channel": "vinga_server.conversations.store",
       "level": 30,
@@ -88,32 +62,6 @@
   "vinga_server.conversations.store:ConversationStore._prune #2": [
     {
       "channel": "vinga_server.conversations.store",
-      "level": 30,
-      "template": "recording conversations to %s",
-      "argument_types": [
-        "PosixPath"
-      ],
-      "fields": [
-        "event",
-        "path"
-      ],
-      "event": "conversations_enabled"
-    },
-    {
-      "channel": "vinga_server.conversations.store",
-      "level": 30,
-      "template": "recording conversations to %s",
-      "argument_types": [
-        "PosixPath"
-      ],
-      "fields": [
-        "event",
-        "path"
-      ],
-      "event": "conversations_enabled"
-    },
-    {
-      "channel": "vinga_server.conversations.store",
       "level": 20,
       "template": "conversations: pruned %d session(s) older than %d days",
       "argument_types": [
@@ -125,6 +73,652 @@
         "sessions"
       ],
       "event": "conversations_pruned"
+    }
+  ],
+  "vinga_server.device.session:DeviceSession._watch_for_idle #1": [
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s idle for %.0f s, hanging up",
+      "argument_types": [
+        "str",
+        "float"
+      ],
+      "fields": [
+        "device",
+        "duration_s",
+        "event",
+        "idle_s",
+        "session"
+      ],
+      "event": "session_idle"
+    }
+  ],
+  "vinga_server.device.session:DeviceSession.run #1": [
+    {
+      "channel": "vinga_server.session",
+      "level": 30,
+      "template": "session %s rejected: the Device-Id header is not a device MAC (six colon-separated hex pairs)",
+      "argument_types": [
+        "str"
+      ],
+      "fields": [
+        "device",
+        "event",
+        "reason",
+        "session"
+      ],
+      "event": "session_rejected"
+    }
+  ],
+  "vinga_server.device.session:DeviceSession.run #2": [
+    {
+      "channel": "vinga_server.session",
+      "level": 30,
+      "template": "session %s rejected: device %s is bound to agent %s, which this server has not loaded; restart to load it",
+      "argument_types": [
+        "str",
+        "str",
+        "str"
+      ],
+      "fields": [
+        "device",
+        "event",
+        "reason",
+        "session"
+      ],
+      "event": "session_rejected"
+    }
+  ],
+  "vinga_server.device.session:DeviceSession.run #3": [
+    {
+      "channel": "vinga_server.session",
+      "level": 30,
+      "template": "session %s rejected: device %s has no agent: bind it under devices or set default_agent",
+      "argument_types": [
+        "str",
+        "str"
+      ],
+      "fields": [
+        "device",
+        "event",
+        "reason",
+        "session"
+      ],
+      "event": "session_rejected"
+    }
+  ],
+  "vinga_server.device.session:DeviceSession.run #4": [
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s open: device %s (client %s) agent %s%s, protocol v%d, %d Hz %d ms frames in",
+      "argument_types": [
+        "str",
+        "str",
+        "str",
+        "str",
+        "str",
+        "int",
+        "int",
+        "int"
+      ],
+      "fields": [
+        "agent",
+        "agents",
+        "client",
+        "device",
+        "event",
+        "protocol",
+        "revision",
+        "session"
+      ],
+      "event": "session_open"
+    }
+  ],
+  "vinga_server.device.session:DeviceSession.run #5": [
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s reached the %.0f s time limit",
+      "argument_types": [
+        "str",
+        "float"
+      ],
+      "fields": [
+        "device",
+        "duration_s",
+        "event",
+        "session"
+      ],
+      "event": "session_limit"
+    }
+  ],
+  "vinga_server.device.session:DeviceSession.run #6": [
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s closed (device %s)",
+      "argument_types": [
+        "str",
+        "str"
+      ],
+      "fields": [
+        "device",
+        "duration_s",
+        "event",
+        "reason",
+        "session"
+      ],
+      "event": "session_closed"
+    }
+  ],
+  "vinga_server.device.session:DeviceSession.send_audio #1": [
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s: speaking started",
+      "argument_types": [
+        "str"
+      ],
+      "fields": [
+        "agent",
+        "device",
+        "event",
+        "session"
+      ],
+      "event": "speaking_started"
+    }
+  ],
+  "vinga_server.runtime.pipeline:PipelineRuntime._watchdog_stream #1": [
+    {
+      "channel": "vinga_server.session",
+      "level": 30,
+      "template": "session %s: no first token after %.1f s, retrying round %d",
+      "argument_types": [
+        "str",
+        "float",
+        "int"
+      ],
+      "fields": [
+        "agent",
+        "device",
+        "duration_ms",
+        "event",
+        "model",
+        "provider",
+        "round",
+        "session",
+        "stage",
+        "type"
+      ],
+      "event": "llm_retry"
+    },
+    {
+      "channel": "vinga_server.session",
+      "level": 30,
+      "template": "session %s: no first token after %.1f s, retrying round %d",
+      "argument_types": [
+        "str",
+        "float",
+        "int"
+      ],
+      "fields": [
+        "agent",
+        "device",
+        "duration_ms",
+        "event",
+        "round",
+        "session",
+        "stage"
+      ],
+      "event": "llm_retry"
+    }
+  ],
+  "vinga_server.runtime.pipeline:PipelineRuntime._llm_round_done #1": [
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s: %s round %d took %.2f s over %d turns",
+      "argument_types": [
+        "str",
+        "str",
+        "int",
+        "float",
+        "int"
+      ],
+      "fields": [
+        "agent",
+        "device",
+        "duration_ms",
+        "event",
+        "first_token_ms",
+        "input_tokens",
+        "model",
+        "output_tokens",
+        "provider",
+        "round",
+        "session",
+        "stage",
+        "turns",
+        "type"
+      ],
+      "event": "llm_round"
+    },
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s: %s round %d took %.2f s over %d turns",
+      "argument_types": [
+        "str",
+        "str",
+        "int",
+        "float",
+        "int"
+      ],
+      "fields": [
+        "agent",
+        "device",
+        "duration_ms",
+        "event",
+        "first_token_ms",
+        "round",
+        "session",
+        "stage",
+        "turns"
+      ],
+      "event": "llm_round"
+    }
+  ],
+  "vinga_server.runtime.pipeline:PipelineRuntime._provider_failed #1": [
+    {
+      "channel": "vinga_server.session",
+      "level": 30,
+      "template": "session %s: %s provider%s %s after %.2f s%s: %s",
+      "argument_types": [
+        "str",
+        "str",
+        "str",
+        "str",
+        "float",
+        "str",
+        "str"
+      ],
+      "fields": [
+        "agent",
+        "device",
+        "duration_ms",
+        "error",
+        "event",
+        "host",
+        "model",
+        "provider",
+        "session",
+        "stage",
+        "type"
+      ],
+      "event": "provider_failed"
+    },
+    {
+      "channel": "vinga_server.session",
+      "level": 30,
+      "template": "session %s: %s provider%s %s after %.2f s%s: %s",
+      "argument_types": [
+        "str",
+        "str",
+        "str",
+        "str",
+        "float",
+        "str",
+        "str"
+      ],
+      "fields": [
+        "agent",
+        "device",
+        "duration_ms",
+        "error",
+        "event",
+        "session",
+        "stage"
+      ],
+      "event": "provider_failed"
+    }
+  ],
+  "vinga_server.runtime.pipeline:PipelineRuntime._prompt_assembled #1": [
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s: assembled %d characters of prompt for %s",
+      "argument_types": [
+        "str",
+        "int",
+        "str"
+      ],
+      "fields": [
+        "agent",
+        "characters",
+        "device",
+        "event",
+        "session",
+        "sources"
+      ],
+      "event": "prompt_assembled"
+    }
+  ],
+  "vinga_server.runtime.pipeline:PipelineRuntime._reply #1": [
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s: heard %.2f s of speech",
+      "argument_types": [
+        "str",
+        "float"
+      ],
+      "fields": [
+        "agent",
+        "device",
+        "duration_s",
+        "event",
+        "session"
+      ],
+      "event": "heard"
+    }
+  ],
+  "vinga_server.runtime.pipeline:PipelineRuntime._reply #2": [
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s: %s replied in %d sentences",
+      "argument_types": [
+        "str",
+        "str",
+        "int"
+      ],
+      "fields": [
+        "agent",
+        "device",
+        "event",
+        "sentences",
+        "session"
+      ],
+      "event": "replied"
+    }
+  ],
+  "vinga_server.runtime.pipeline:PipelineRuntime._speak_reply #1": [
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s: %s said %d sentences",
+      "argument_types": [
+        "str",
+        "str",
+        "int"
+      ],
+      "fields": [
+        "agent",
+        "device",
+        "event",
+        "sentences",
+        "session"
+      ],
+      "event": "agent_said"
+    }
+  ],
+  "vinga_server.runtime.pipeline:PipelineRuntime._speak_reply #2": [
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s: handed over from agent %s to %s",
+      "argument_types": [
+        "str",
+        "str",
+        "str"
+      ],
+      "fields": [
+        "device",
+        "event",
+        "from_agent",
+        "session",
+        "to_agent"
+      ],
+      "event": "handover"
+    }
+  ],
+  "vinga_server.runtime.pipeline:PipelineRuntime._run_one #1": [
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s: %s tool%s took %.2f s%s",
+      "argument_types": [
+        "str",
+        "str",
+        "str",
+        "float",
+        "str"
+      ],
+      "fields": [
+        "agent",
+        "device",
+        "duration_ms",
+        "event",
+        "is_error",
+        "session",
+        "source",
+        "tool"
+      ],
+      "event": "tool_call"
+    },
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s: %s tool%s took %.2f s%s",
+      "argument_types": [
+        "str",
+        "str",
+        "str",
+        "float",
+        "str"
+      ],
+      "fields": [
+        "agent",
+        "device",
+        "duration_ms",
+        "event",
+        "is_error",
+        "session",
+        "source"
+      ],
+      "event": "tool_call"
+    },
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s: %s tool%s took %.2f s%s",
+      "argument_types": [
+        "str",
+        "str",
+        "str",
+        "float",
+        "str"
+      ],
+      "fields": [
+        "agent",
+        "device",
+        "duration_ms",
+        "entry",
+        "event",
+        "is_error",
+        "session",
+        "source"
+      ],
+      "event": "tool_call"
+    }
+  ],
+  "vinga_server.runtime.turntaking:TurnTaking.finish_utterance #1": [
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s: barge-in, cancelling the reply in flight",
+      "argument_types": [
+        "str"
+      ],
+      "fields": [
+        "device",
+        "event",
+        "session",
+        "speech_ms"
+      ],
+      "event": "barge_in"
+    }
+  ],
+  "vinga_server.runtime.turntaking:TurnTaking._gate_barge_in #1": [
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s: barge-in suppressed, %d ms of speech is under the %.0f ms floor",
+      "argument_types": [
+        "str",
+        "int",
+        "float"
+      ],
+      "fields": [
+        "device",
+        "event",
+        "reason",
+        "session",
+        "speech_ms"
+      ],
+      "event": "barge_in_suppressed"
+    }
+  ],
+  "vinga_server.runtime.turntaking:TurnTaking._gate_barge_in #2": [
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s: barge-in mid-transcription, merging the utterances",
+      "argument_types": [
+        "str"
+      ],
+      "fields": [
+        "device",
+        "event",
+        "session",
+        "speech_ms"
+      ],
+      "event": "barge_in_merged"
+    }
+  ],
+  "vinga_server.runtime.turntaking:TurnTaking._gate_barge_in #3": [
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s: barge-in suppressed inside the refractory window",
+      "argument_types": [
+        "str"
+      ],
+      "fields": [
+        "device",
+        "event",
+        "reason",
+        "session",
+        "speech_ms"
+      ],
+      "event": "barge_in_suppressed"
+    }
+  ],
+  "vinga_server.runtime.turntaking:TurnTaking._gate_barge_in #4": [
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s: barge-in suppressed, nothing transcribed",
+      "argument_types": [
+        "str"
+      ],
+      "fields": [
+        "device",
+        "event",
+        "reason",
+        "session",
+        "speech_ms"
+      ],
+      "event": "barge_in_suppressed"
+    }
+  ],
+  "vinga_server.runtime.turntaking:TurnTaking._gate_barge_in #5": [
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s: barge-in, cancelling the reply in flight",
+      "argument_types": [
+        "str"
+      ],
+      "fields": [
+        "device",
+        "event",
+        "session",
+        "speaking_ms",
+        "speech_ms"
+      ],
+      "event": "barge_in"
+    }
+  ],
+  "vinga_server.runtime.filler_runner:FillerRunner._fire #1": [
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s: filler skipped, the user is speaking (%d ms heard)",
+      "argument_types": [
+        "str",
+        "int"
+      ],
+      "fields": [
+        "agent",
+        "device",
+        "event",
+        "reason",
+        "session",
+        "speech_ms"
+      ],
+      "event": "filler_skipped"
+    }
+  ],
+  "vinga_server.runtime.filler_runner:FillerRunner._fire #2": [
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s: filler skipped, a barge-in is being confirmed",
+      "argument_types": [
+        "str"
+      ],
+      "fields": [
+        "agent",
+        "device",
+        "event",
+        "reason",
+        "session"
+      ],
+      "event": "filler_skipped"
+    }
+  ],
+  "vinga_server.runtime.filler_runner:FillerRunner._fire #3": [
+    {
+      "channel": "vinga_server.session",
+      "level": 20,
+      "template": "session %s: no reply audio after %d ms, playing filler %d",
+      "argument_types": [
+        "str",
+        "int",
+        "int"
+      ],
+      "fields": [
+        "agent",
+        "delay_ms",
+        "device",
+        "event",
+        "phrase_index",
+        "session"
+      ],
+      "event": "filler_played"
     }
   ]
 }
