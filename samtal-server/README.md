@@ -1367,15 +1367,22 @@ since that is what applies them to a running server. Nothing about a
 running conversation changes when a write lands, in any of the three
 cases; a reload is what makes the third one take effect.
 
-**A refusal carries the sentence the CLI prints**, in `detail`, with a
-status code: 404 for an entity that does not exist, 409 for the
-retryable busy database lock or a reload already running (nothing was
-changed, so retry), 422 for a fragment or an address the caller got
-wrong, 500 for stored state that cannot be read, and 503 for a runtime
-action asked of an application with no server around it. A request body
-is never quoted back, on any path, and neither is a traceback: a
-fragment can carry a credential pasted where a variable name belongs,
-and a refusal that echoed it would be the leak.
+**A refusal is an RFC 9457 problem document**, served as
+`application/problem+json`, and carries the sentence the CLI prints in
+`detail`, with a status code: 404 for an entity that does not exist,
+409 for the retryable busy database lock or a reload already running
+(nothing was changed, so retry), 422 for a fragment or an address the
+caller got wrong, 500 for stored state that cannot be read, and 503 for
+a runtime action asked of an application with no server around it.
+Beside `detail` are the status's standard reason phrase as `title`, the
+status repeated, and `errors`: one `{path, message}` entry per field of
+the submitted fragment the refusal names, `path` an RFC 6901 JSON
+Pointer into it, so a form can mark the offending field rather than
+quote the paragraph. `errors` is always present and empty where the
+refusal names no field. A request body is never quoted back, on any
+path, and neither is a traceback: a fragment can carry a credential
+pasted where a variable name belongs, and a refusal that echoed it
+would be the leak.
 
 **`samtal-server config` is the ergonomic client**, and the shape of a
 deployment's own use of the API. It finds the server in this order:

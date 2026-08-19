@@ -417,7 +417,8 @@ document diff.
 
 ## Milestones
 
-- [ ] **M1: refusals as problem details** (PR TBD). The body shape,
+- [x] **[M1: refusals as problem details](2026-08-19-structured-refusals-implementation.md#m1-refusals-as-problem-details)**
+  (PR TBD). The body shape,
   the `problem_response` seam, `ConfigError.problems` filled in
   `store._load`, `Problem`/`FieldError` models, `PROBLEM_TITLES`, the
   media type in `_problems`, the regenerated OpenAPI document, the
