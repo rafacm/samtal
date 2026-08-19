@@ -39,7 +39,12 @@ from samtal_server.config.secrets import (
     generate_key,
     load_keys,
 )
-from samtal_server.config.store import NOT_A_STAGE, ConfigStore
+from samtal_server.config.store import (
+    NOT_A_PROVIDER_SLOT,
+    NOT_A_STAGE,
+    NOT_AN_MCP_SLOT,
+    ConfigStore,
+)
 from samtal_server.config.writes import (
     BINDING_NOTICE,
     MCP_RELOAD_NOTICE,
@@ -53,6 +58,12 @@ TOKEN = "test-api-token-" + "0123456789abcdef" * 2
 # match by accident.
 SECRET = "sk-test-4f8b2c9e-never-a-real-credential"
 OTHER_SECRET = "tok-test-7a1d3f60-never-a-real-credential"
+
+# A pasted credential holding none of the fragments that make an option
+# name secret-shaped, so it is refused as a slot rather than accepted as
+# one. The two above are not usable for that: both carry the word
+# "credential", which is one of those fragments.
+PASTED = "sk-live-3f9a1c7e-never-a-real-value"
 
 SHORT_BUSY_MS = 200
 
@@ -682,13 +693,67 @@ def test_a_secret_on_an_entity_that_is_not_there_is_404_without_either_name(
     assert all(OTHER_SECRET not in str(record.__dict__) for record in served)
 
 
-def test_a_slot_that_is_not_a_credential_slot_is_422(client: TestClient) -> None:
-    client.put("/providers/llm/claude", json={"type": "anthropic", "model": "m"})
+# The second half of a secret's address, driven against entities that
+# exist so that the check under test is the slot's own rather than the
+# entity miss that would otherwise answer first. One entry per kind: the
+# entity to create, the body that creates it, and the slot path with the
+# sentence it refuses with.
+SLOTS = [
+    (
+        "/providers/llm/claude",
+        {"type": "anthropic", "model": "m"},
+        f"/providers/llm/claude/secrets/{quote(PASTED, safe='')}",
+        "providers",
+        NOT_A_PROVIDER_SLOT,
+    ),
+    (
+        "/mcp-servers/home",
+        {"transport": "stdio", "command": "uvx"},
+        f"/mcp-servers/home/secrets/{quote(PASTED, safe='')}",
+        "mcp_servers",
+        NOT_AN_MCP_SLOT,
+    ),
+]
 
-    response = client.put("/providers/llm/claude/secrets/model", json={"secret": SECRET})
 
-    assert response.status_code == 422
-    assert "is not a credential slot" in response.json()["detail"]
+@pytest.mark.parametrize(("entity", "body", "path", "section", "detail"), SLOTS)
+def test_a_slot_that_is_not_a_credential_slot_is_refused_without_it(
+    client: TestClient,
+    caplog: pytest.LogCaptureFixture,
+    entity: str,
+    body: dict[str, object],
+    path: str,
+    section: str,
+    detail: str,
+) -> None:
+    """A slot arrives the way an entity name does, in a URL path, and the
+    request it arrives on is the one a credential is pasted into: a slot
+    that is not a slot may be the credential itself, sent one segment
+    early (#132). So the refusal states the rule and never the value.
+
+    Both verbs, and they answer differently on purpose. A write checks
+    the slot, which is the 422 above; a delete never validates one, it
+    looks for a stored secret and does not find it, which is the 404 its
+    section answers with. Neither repeats what was addressed.
+    """
+    assert client.put(entity, json=body).status_code == 200
+
+    with caplog.at_level(logging.DEBUG):
+        written = client.put(path, json={"secret": SECRET})
+        removed = client.delete(path)
+
+    for response in (written, removed):
+        assert PASTED not in response.text
+        assert SECRET not in response.text
+    assert written.status_code == 422
+    assert written.json() == {"detail": detail}
+    assert removed.status_code == 404
+    assert removed.json() == {"detail": f"{section}: no secret is stored for that slot"}
+    served = [
+        record for record in caplog.records if record.name.startswith("samtal_server")
+    ]
+    assert all(PASTED not in str(record.__dict__) for record in served)
+    assert all(SECRET not in str(record.__dict__) for record in served)
 
 
 def test_an_identity_that_cannot_be_addressed_at_all_is_422(client: TestClient) -> None:

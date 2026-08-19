@@ -34,6 +34,7 @@ import yaml
 from samtal_server.config import cli
 from samtal_server.config.entities import NO_SUCH_PROVIDER
 from samtal_server.config.secrets import MASK, MASTER_KEY_ENV
+from samtal_server.config.store import NOT_A_PROVIDER_SLOT, NOT_AN_MCP_SLOT
 from tests.support.config_cli import OTHER_SECRET, SECRET, runner
 
 
@@ -320,3 +321,68 @@ def test_an_unusable_key_names_its_position_and_not_its_material(
     assert "not-a-fernet-key" not in captured.err
     assert SECRET not in captured.err
     assert "Traceback" not in captured.err
+
+
+# A pasted credential holding none of the fragments that make an option
+# name secret-shaped, so it is refused as a slot rather than accepted as
+# one. The suite's own sentinels are not usable for that: they carry the
+# word "credential", which is one of those fragments.
+PASTED = "sk-live-3f9a1c7e-never-a-real-value"
+
+# One entry per kind, against an entity that exists, so the check under
+# test is the slot's own rather than an entity miss answering first: how
+# the entity is written, how a secret on it is addressed, and the
+# sentence a slot that is not a slot is refused with.
+SLOTS = [
+    (
+        ("set", "provider", "llm", "claude", "-f", "-"),
+        "type: anthropic\nmodel: m\n",
+        ("provider", "llm", "claude", PASTED),
+        NOT_A_PROVIDER_SLOT,
+    ),
+    (
+        ("set", "mcp-server", "home", "-f", "-"),
+        "transport: stdio\ncommand: uvx\n",
+        ("mcp-server", "home", PASTED),
+        NOT_AN_MCP_SLOT,
+    ),
+]
+
+
+@pytest.mark.parametrize(("write", "fragment", "addressed", "sentence"), SLOTS)
+@pytest.mark.parametrize("local", [False, True])
+def test_a_slot_that_is_not_a_credential_slot_is_refused_without_printing_it(
+    run,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    write: tuple[str, ...],
+    fragment: str,
+    addressed: tuple[str, ...],
+    sentence: str,
+    local: bool,
+) -> None:
+    """The slot half of a secret's address, on both paths (#132).
+
+    `set-secret` is the command a credential is pasted into, so a
+    credential typed one argument early lands in the slot. The entity it
+    is offered to exists here on purpose: the entity-miss refusal used
+    to answer first, which meant this check was never the one under
+    test. Neither the slot nor the secret behind it may be printed.
+    """
+    assert run(*write, stdin=fragment) == 0
+    capsys.readouterr()
+    flags = ("--local",) if local else ()
+
+    with caplog.at_level(logging.DEBUG):
+        assert run(*flags, "set-secret", *addressed, stdin=SECRET) == 1
+
+    captured = capsys.readouterr()
+    assert PASTED not in captured.err
+    assert PASTED not in captured.out
+    assert SECRET not in captured.err
+    assert SECRET not in captured.out
+    assert captured.err.endswith(f"{sentence}\n")
+    assert "Traceback" not in captured.err
+    written = [record for record in caplog.records if record.name.startswith("samtal_server")]
+    assert all(PASTED not in str(record.__dict__) for record in written)
+    assert all(SECRET not in str(record.__dict__) for record in written)
