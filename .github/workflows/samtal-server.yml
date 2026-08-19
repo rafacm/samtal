@@ -16,6 +16,13 @@ on:
       - "samtal-server/**"
       - "docs/reference/**"
       - ".github/workflows/samtal-server.yml"
+  # On-demand full runs against any branch: the image job below skips
+  # pull_request events, and a branch that touches the image's own
+  # plumbing (its name, its env vars, its volume paths) should be able
+  # to prove itself before merging rather than on main afterwards. A
+  # dispatch run builds and smokes but never publishes; the publish
+  # steps are gated on a push to main.
+  workflow_dispatch:
 
 defaults:
   run:
@@ -211,9 +218,19 @@ jobs:
           print(f"migrated a fresh conversation store from {installed.parent}")
           PY
 
-  # The image is built and smoke-tested on every run, and published only
-  # on a push to main. `needs: test` is what makes publishing conditional
-  # on the suite: nothing reaches the registry that did not pass it.
+  # The image is built and smoke-tested on every push to main and on
+  # every manual dispatch, and published only on a push to main.
+  # `needs: test` is what makes publishing conditional on the suite:
+  # nothing reaches the registry that did not pass it.
+  #
+  # Skipped on pull requests, deliberately and temporarily: while the
+  # pre-release simplification milestones and the rename land, PRs come
+  # quickly and this job (two variants, arm64 under QEMU, the whole
+  # smoke conversation) is the longest pole in each round-trip. Every
+  # merge still gets the full lane on main, so no merged commit goes
+  # unsmoked; a PR that touches the image's own plumbing gets a manual
+  # workflow_dispatch run before merging. When the churn settles,
+  # delete this job's `if` so PRs run the full lane again.
   #
   # Two variants, from one Dockerfile so they cannot drift. `default`
   # carries the local engines and keeps the unsuffixed tags every
@@ -223,6 +240,7 @@ jobs:
   # provably the same server rather than two that merely build.
   image:
     needs: test
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -519,8 +537,8 @@ jobs:
       # below. Computing tags is free, and gating it meant the one step
       # that decides what a variant is called was never exercised until
       # after a merge, which is the worst place to find out an
-      # expression was wrong. The PR run prints exactly what would be
-      # pushed.
+      # expression was wrong. A dispatch run prints exactly what a
+      # push to main would publish.
       - name: Tags
         id: meta
         uses: docker/metadata-action@v5
@@ -542,8 +560,9 @@ jobs:
       # `type=sha,format=short` decides the tag's length, and if it ever
       # stopped being the seven characters computed above, a container
       # would go back to reporting something its tag does not say, which
-      # is the defect and not a detail. Runs on a PR like the tags
-      # themselves do, so a change in either is caught before a merge.
+      # is the defect and not a detail. Runs whenever the tags are
+      # computed, so a dispatch run catches a change in either before
+      # a merge does.
       - name: Check the sha tag carries the revision
         run: |
           tag=$(printf '%s\n' "${{ steps.meta.outputs.tags }}" | grep ':sha-' || true)
