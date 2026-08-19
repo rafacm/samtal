@@ -161,10 +161,15 @@ into the declared `schema_violation` event, so a telemetry bug still
 cannot take down a reply.
 
 **How do 58 declarations avoid becoming a new 2,386-line wall?** The
-catalog declares an event as one frozen dataclass: typed fields,
-class-level name, channel and level, and a `render()` producing the
-sentence from the fields it holds, so the template and the argument
-order stop existing as separate structures. The shared vocabulary
+catalog declares an event as one declaration per event code holding
+a discriminated set of typed variants, because 99 variants exist and
+at least `session_rejected` crosses two channels: each variant is a
+frozen dataclass owning its channel, level, exact payload shape, and
+rendering inputs, and a single-variant event declares exactly one.
+Callers construct a specific variant; documentation and the golden
+inventory derive from the enclosing declaration. The template and
+the argument order stop existing as separate structures because each
+variant derives them from its own fields. The shared vocabulary
 (token enums, syntaxes, the descriptor bound type) lives beside it
 once. The expectation, stated so the review can hold the plan to it:
 catalog plus vocabulary plus emitters plus docgen land at roughly half
@@ -491,6 +496,13 @@ package, never beside the module.
 contract.** 99 variants exist and at least `session_rejected`
 crosses two channels; the plan's single-channel dataclass model
 contradicts its own risk section.
+
+*Resolution.* Adopted. The catalog model is now one declaration per
+event code holding a discriminated set of typed variants, each
+variant a frozen dataclass owning its channel, level, payload shape,
+and rendering inputs; callers construct a specific variant, and the
+golden inventory and documentation derive from the enclosing
+declaration.
 
 **3 (P1). Typed construction happens before the proposed guard.**
 `emit(LlmRound(...))` evaluates the constructor outside the guarded
