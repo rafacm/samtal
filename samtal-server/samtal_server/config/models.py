@@ -1484,7 +1484,8 @@ class AgentDefaults(BaseModel):
             "than extending it, so an empty list opts an agent out of the tools its "
             "siblings have. The builtin tools are outside this model: switch_agent "
             "and remember appear under a structural condition (a device bound to "
-            "more than one agent, memory configured) rather than by grant."
+            "more than one agent, memory configured) and random_number under none "
+            "at all, rather than by grant."
         ),
     )
 
