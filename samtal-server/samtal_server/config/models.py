@@ -16,10 +16,10 @@ which no model here ever carries.
 
 import os
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Annotated, Literal, Protocol
+from typing import Annotated, Literal, NamedTuple, Protocol
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from pydantic import (
@@ -679,6 +679,69 @@ class ServerConfig(BaseModel):
         return self
 
 
+class FieldProblem(NamedTuple):
+    """One thing wrong with one field of a fragment, said where the
+    field is known.
+
+    Declared here, beside the validators that produce it, because the
+    only place that knows which field a rule is about is the rule. A
+    model-level validator is located by pydantic at the model, so a
+    refusal that named the field only inside its sentence would leave a
+    reader, and a form, to parse prose for it. This is that fact carried
+    as data instead: `loader.ConfigError` takes a tuple of these and the
+    API answers them as its problem document's `errors`.
+
+    `path` is an RFC 6901 JSON Pointer into the fragment the validator
+    was handed, so the empty string is the fragment itself and a key
+    holding a dot or a slash is unambiguous, which a dotted spelling
+    cannot be. `message` is the sentence, which is the same text the
+    refusal's own prose carries for this problem: one computation, two
+    renderings, so the two cannot come to disagree.
+
+    It never carries a value. Every message here names a path and a
+    rule, because a key that fails one of these rules most likely holds
+    the credential itself.
+    """
+
+    path: str
+    message: str
+
+
+class FieldProblemsError(ValueError):
+    """The problems one validator found, raised as one exception.
+
+    A ValueError because that is what pydantic collects from a
+    validator, and a subclass because that is what lets the walk over
+    `ValidationError.errors()` recognize its own structure again: the
+    exception object travels in the error's `ctx`, so the fields survive
+    the trip that flattens everything else to a location and a sentence.
+
+    Its `str` is the messages one per line, which is what pydantic puts
+    in `msg` and what every renderer that has only the sentence (the
+    boot path's, in `loader.py`) prints. A validator that found three
+    problems therefore reads as three lines wherever it is rendered.
+    """
+
+    def __init__(self, problems: Iterable[FieldProblem]) -> None:
+        self.problems: tuple[FieldProblem, ...] = tuple(problems)
+        super().__init__("\n".join(problem.message for problem in self.problems))
+
+
+def json_pointer(segments: Iterable[object]) -> str:
+    """The RFC 6901 pointer addressing a path of keys and array
+    positions, from the segments themselves.
+
+    Escaping is the whole reason this exists rather than a join: `~`
+    becomes `~0` and `/` becomes `~1`, in that order, so a key named
+    `a/b` is one segment rather than two and a key named `a.b` is not
+    nesting. An empty sequence is the empty pointer, which addresses the
+    whole fragment.
+    """
+    return "".join(
+        "/" + str(segment).replace("~", "~0").replace("/", "~1") for segment in segments
+    )
+
+
 def is_secret_option(name: str) -> bool:
     """Whether an option name is secret-shaped.
 
@@ -775,30 +838,51 @@ def check_no_inline_secrets(path: str, value: object) -> None:
     display path, which is exactly what the flat rule exists to prevent.
 
     Refusals name the dotted path and never the value: a key that fails
-    either check most likely holds the credential itself.
+    either check most likely holds the credential itself. The sentence
+    keeps the dotted spelling, which is how an operator reads their own
+    file; the `FieldProblem` beside it carries the same place as a JSON
+    Pointer, which is what a reader can act on. Both are derived from
+    the segments walked to here, so they cannot name different keys.
     """
-    leaf = path.rpartition(".")[2]
+    _check_no_inline_secrets((path,), value)
+
+
+def _check_no_inline_secrets(segments: tuple[object, ...], value: object) -> None:
+    """The walk itself, carrying the segments rather than a joined path
+    so that the two spellings above stay one fact."""
+    path = ".".join(str(segment) for segment in segments)
+    leaf = str(segments[-1])
     if leaf.lower().endswith("_env"):
         if value is not None and not is_env_name(value):
-            raise ValueError(
-                f'"{path}" must hold the name of an environment variable, and '
-                f"what it holds does not look like one; a pasted value belongs "
-                f"nowhere in this file, so name the variable holding it, for "
-                f"example {path}: MY_PROVIDER_KEY"
+            raise FieldProblemsError(
+                [
+                    FieldProblem(
+                        json_pointer(segments),
+                        f'"{path}" must hold the name of an environment variable, and '
+                        f"what it holds does not look like one; a pasted value belongs "
+                        f"nowhere in this file, so name the variable holding it, for "
+                        f"example {path}: MY_PROVIDER_KEY",
+                    )
+                ]
             )
         return
     if is_secret_option(leaf):
-        raise ValueError(
-            f'"{path}" looks like an inline secret, which is not allowed; '
-            f"reference an environment variable instead, for example "
-            f"{path}_env: MY_PROVIDER_{leaf.upper()}"
+        raise FieldProblemsError(
+            [
+                FieldProblem(
+                    json_pointer(segments),
+                    f'"{path}" looks like an inline secret, which is not allowed; '
+                    f"reference an environment variable instead, for example "
+                    f"{path}_env: MY_PROVIDER_{leaf.upper()}",
+                )
+            ]
         )
     if isinstance(value, Mapping):
         for key, nested in value.items():
-            check_no_inline_secrets(f"{path}.{key}", nested)
+            _check_no_inline_secrets((*segments, key), nested)
     elif isinstance(value, (list, tuple)):
         for position, item in enumerate(value):
-            check_no_inline_secrets(f"{path}.{position}", item)
+            _check_no_inline_secrets((*segments, position), item)
 
 
 def is_mcp_secret_key(name: str) -> bool:
@@ -1132,35 +1216,54 @@ class McpServerConfig(BaseModel):
         else:
             required, foreign = "url", stdio_only
 
-        problems: list[str] = []
+        problems: list[FieldProblem] = []
         value = getattr(self, required)
         if value is None or not str(value).strip():
-            problems.append(f'transport "{self.transport}" needs "{required}"')
+            problems.append(
+                FieldProblem(
+                    json_pointer((required,)),
+                    f'transport "{self.transport}" needs "{required}"',
+                )
+            )
         named = [field for field in foreign if field in self.model_fields_set]
         if named:
+            # The whole fragment, because this problem is about a
+            # combination rather than about one key: the fix is either
+            # the transport or the fields, and the sentence names them
+            # all. The empty pointer is what RFC 6901 gives that.
             problems.append(
-                f'transport "{self.transport}" has no {", ".join(named)}; '
-                f"that belongs to the other transport"
+                FieldProblem(
+                    "",
+                    f'transport "{self.transport}" has no {", ".join(named)}; '
+                    f"that belongs to the other transport",
+                )
             )
         problems += self._secret_problems()
         if problems:
-            raise ValueError("; ".join(problems))
+            # One entry per problem, and therefore one line per problem
+            # wherever this is rendered. It used to be one `; `-joined
+            # line, which is a sentence no reader can decompose back
+            # into the fields it names (#192).
+            raise FieldProblemsError(problems)
         return self
 
-    def _secret_problems(self) -> list[str]:
+    def _secret_problems(self) -> list[FieldProblem]:
         """Secret-bearing env and header keys must name an environment
         variable, the same rule that keeps provider secrets out of the
         configuration file."""
-        problems: list[str] = []
+        problems: list[FieldProblem] = []
         for group, values in (("env", self.env), ("headers", self.headers)):
             for key, value in values.items():
                 if not is_mcp_secret_key(key):
                     continue
                 if _env_reference(value) is None:
                     problems.append(
-                        f'{group}.{key} looks like an inline secret, which is not '
-                        f"allowed; reference an environment variable instead, for "
-                        f"example {key}: $MY_SERVER_SECRET"
+                        FieldProblem(
+                            json_pointer((group, key)),
+                            f"{group}.{key} looks like an inline secret, which is not "
+                            f"allowed; reference an environment variable instead, for "
+                            f"example {key}: $MY_SERVER_SECRET",
+                        )
                     )
         return problems
 
@@ -1258,9 +1361,17 @@ class FillerConfig(BaseModel):
     @model_validator(mode="after")
     def _check_phrases(self) -> "FillerConfig":
         if self.enabled and not self.phrases:
-            raise ValueError(
-                "filler.enabled is on with no phrases; add at least one, "
-                'for example "Hmm, let me see..."'
+            # The pointer names the field to fill in, under whatever
+            # layer holds this filler block; the sentence keeps naming
+            # the switch that made it required.
+            raise FieldProblemsError(
+                [
+                    FieldProblem(
+                        json_pointer(("phrases",)),
+                        "filler.enabled is on with no phrases; add at least one, "
+                        'for example "Hmm, let me see..."',
+                    )
+                ]
             )
         return self
 
