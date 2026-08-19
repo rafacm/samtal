@@ -2,11 +2,7 @@ name: vinga-server
 
 on:
   push:
-    # rename/vinga temporarily, because the renamed workflow file cannot
-    # be workflow_dispatch-ed until it exists on the default branch: a
-    # push-event run is the same full lane, and the publish steps below
-    # stay gated on main. Reverted before merge.
-    branches: [main, rename/vinga]
+    branches: [main]
     paths:
       - "vinga-server/**"
       # The generated domain-configuration reference is committed there
