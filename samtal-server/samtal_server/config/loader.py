@@ -15,7 +15,7 @@ what validates the whole snapshot the way it always has.
 """
 
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 import yaml
@@ -26,6 +26,7 @@ from samtal_server.config import entities
 from samtal_server.config.models import (
     DOMAIN_KEYS,
     Config,
+    FieldProblem,
     FileConfig,
     yaml_file_var,
 )
@@ -56,7 +57,27 @@ DOMAIN_REFERENCE = "docs/reference/domain-config.md"
 
 
 class ConfigError(Exception):
-    """A configuration problem, with a message meant to be shown as is."""
+    """A configuration problem, with a message meant to be shown as is.
+
+    `problems` is that same refusal decomposed, where it decomposes:
+    one `FieldProblem` per thing wrong, each addressing a field of the
+    submitted fragment by JSON Pointer and carrying the sentence the
+    message already says about it. It exists so the API can answer a
+    form something to highlight without a second validation pass and
+    without parsing its own prose; the CLI keeps printing the message
+    and never looks at it.
+
+    Optional and empty by default, so every raise site that has nothing
+    structured to say keeps reading as it did, and so do the subclasses,
+    which inherit this constructor untouched. An empty tuple is the
+    honest answer for the refusals that name no field of the request:
+    an unreadable stored row, a reference to another entity, a body
+    whose whole shape was wrong.
+    """
+
+    def __init__(self, message: object, problems: Sequence[FieldProblem] = ()) -> None:
+        super().__init__(message)
+        self.problems: tuple[FieldProblem, ...] = tuple(problems)
 
 
 # The refusals that are not simply "this configuration is wrong". They
