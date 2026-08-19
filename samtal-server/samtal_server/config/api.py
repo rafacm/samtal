@@ -103,7 +103,7 @@ from samtal_server.config.responses import (
     SecretValue,
     StoredSecretLocation,
 )
-from samtal_server.config.secrets import SecretLocation, load_keys
+from samtal_server.config.secrets import MASK, SecretLocation, load_keys
 from samtal_server.config.store import ConfigStore
 from samtal_server.config.writes import (
     BINDING_NOTICE,
@@ -176,9 +176,10 @@ API_DESCRIPTION = (
     "read it, change it, send the whole of it back, and the fields a read leaves "
     "out are the ones that mean absence and mean the same absence on the way back. "
     "An environment reference reads back as itself and resubmits as itself. A value "
-    "shown as the mask resubmits as keep the stored value, which is substituted "
-    "before the fragment is validated; the mask written where nothing is stored is "
-    "refused, naming the field where the field is one this API declares. An "
+    f"shown as the mask, `{MASK}`, resubmits as keep the stored value, which is "
+    "substituted before the fragment is validated; that mask written where nothing "
+    "is stored is refused, naming the field where the field is one this API "
+    "declares. An "
     "unchanged stored secret needs no action at all: the envelope's `secrets` "
     "mapping is informational, and rotating a credential is the secret PUT, which "
     "is the one door a plaintext value enters by. Everything else a read answers is "

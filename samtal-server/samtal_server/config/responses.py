@@ -9,6 +9,14 @@ rather than against a hand-kept list of the keys it expects. `writes.py`
 records why the CLI must not import the API, and `config schema` and
 `config reference` are the commands that would otherwise pay for it.
 
+"Nothing else" is why one description below writes the mask out as a
+literal rather than reading `secrets.MASK`: this module sits under
+`entities`, which sits under `loader`, which is what `secrets` imports,
+so the import that would derive it is a cycle. The two are held equal
+from the outside instead, by the pin in `test_api_openapi.py` that looks
+for the constant in the rendered document, which is the byte a client
+reads and the one that must not drift.
+
 Beside the models, and for the same reason, the two runtime surfaces
 the API is handed: the protocol a status read is taken through and the
 shape of the callable a reload is applied by. Both are stated in
@@ -69,9 +77,13 @@ class Envelope(BaseModel):
             "replaces the model-shaped half and never the credentials stored beside "
             "it; a field this read leaves out is one whose absence is what it means, "
             "and it means the same absence on the way back. An environment reference "
-            "reads back as itself; a value shown as the mask resubmits as keep the "
-            "stored value, which is substituted before the fragment is validated, "
-            "and the mask written where nothing is stored is refused. Described "
+            # The mask, written out: see the module docstring for why it
+            # is not read from `secrets.MASK` here, and where the two are
+            # held equal.
+            "reads back as itself; a value shown as the mask, `********`, resubmits "
+            "as keep the stored value, which is substituted before the fragment is "
+            "validated, and that mask written where nothing is stored is refused. "
+            "Described "
             "rather than validated here, because the mask is not a value the entity "
             "model would accept on its own: the entity schemas under "
             "`components/schemas` are what say which keys a write may carry."

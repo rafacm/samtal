@@ -27,7 +27,7 @@ from samtal_server.config.api import (
     MOUNT_PATH,
     PROBLEM_MEDIA_TYPE,
 )
-from samtal_server.config.secrets import MASTER_KEY_ENV
+from samtal_server.config.secrets import MASK, MASTER_KEY_ENV
 
 COMMITTED = Path(__file__).resolve().parents[3] / "docs" / "reference" / "api-openapi.json"
 
@@ -457,6 +457,31 @@ def test_the_description_admits_the_provider_options_contract() -> None:
 
     assert "#88" in description
     assert "passed through rather than declared" in description
+
+
+def test_the_document_states_the_unchanged_value_marker() -> None:
+    """What a client sends back to keep a value it was not shown is a
+    literal, so the contract has to carry that literal.
+
+    Both places a reader could look: the namespace description, and the
+    description of the envelope field the mask appears in. Compared
+    against the constant the mask is rendered from rather than against a
+    copy of it, since the whole point of stating it is that the document
+    and the display cannot come to mean different strings.
+
+    This is also where the two are held equal. `api.py` derives its
+    sentence from the constant; `responses.py` cannot, because the
+    import that would do it closes a cycle (`responses` is under
+    `entities`, which is under `loader`, which `secrets` imports), and
+    its docstring says so. So the equality is asserted here, on the
+    rendered document, which is the byte a client reads.
+    """
+    document = json.loads(docgen.openapi())
+    entity = document["components"]["schemas"]["Envelope"]["properties"]["entity"]
+
+    for description in (document["info"]["description"], entity["description"]):
+        assert f"`{MASK}`" in description
+        assert "keep the stored value" in description
 
 
 def test_the_command_needs_no_database_no_key_and_no_token(
