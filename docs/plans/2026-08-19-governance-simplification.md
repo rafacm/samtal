@@ -137,10 +137,14 @@ consumers (`LogTap`, `CaptureTap`, the conversation store's
 which parse sentences; the generated reference and README index are
 rendered from declarations; the server-tap hub has no production
 consumer yet. The compatibility contract that replaces the pins is a
-committed golden inventory: for every event, its name, channel,
-level, and field names with their declared types, asserted against
-the catalog in both directions so a rename or a field change is a
-loud diff on a reviewable file. Sentences remain tested where they
+committed golden inventory: for every event, its name, its variants'
+channels and levels, and its field names with their declared types,
+their requiredness, and their nullability, asserted against the
+catalog in both directions so a rename or a field or presence change
+is a loud diff on a reviewable file. Absence and null stay distinct
+facts: a conditionally absent field (today's `heard.language`)
+becomes a separate variant or an explicit typed absence, never a
+bare `| None` whose serialization is left to guesswork. Sentences remain tested where they
 carry a promise (the no-leak sentinel suites assert what prose must
 NOT contain), never for wording.
 
@@ -458,7 +462,8 @@ from the implementation doc.
   silently: the OpenAPI byte-diff is in CI and in the suite, and it
   is the merge gate for M4.
 - **The golden inventory ossifies wording.** It contains no wording:
-  names, channels, levels, field names and types only. Sentences are
+  names, channels, levels, field names, types, requiredness and
+  nullability only. Sentences are
   free to improve, which is the issue's stated intent while
   pre-release.
 - **M6 tempts interface invention.** The rule in its brief: reroute
@@ -534,6 +539,11 @@ value types keep explicit runtime validation of untrusted inputs.
 models `required` and `nullable` separately (`heard.language` is
 conditionally absent); a `str | None` annotation says nothing about
 key omission, and the golden did not pin requiredness.
+
+*Resolution.* Adopted. Variants carry requiredness and nullability
+explicitly; conditional absence becomes a separate variant or an
+explicit typed absence; the golden pins both facts beside names and
+types.
 
 **5 (P2). `render()` contradicts the preserved `EventTap` seam and
 the byte-identical reference claim.** `Emission` exposes unrendered
