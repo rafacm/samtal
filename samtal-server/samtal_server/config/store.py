@@ -1412,11 +1412,18 @@ def _secret_value(location: SecretLocation, secret: object) -> None:
         )
 
 
+# What a provider addressed by a stage that is not one is told. The four
+# stages are named because they are constants of this server; the word
+# that was sent is not, for the reason every refusal here has stopped
+# repeating one (#132). A stage is a path segment and a command
+# argument, so it is a place a paste lands like any other, and a value
+# that failed this check is one nothing has validated.
+NOT_A_STAGE = "providers: the stage has to be one of " + ", ".join(sorted(PROVIDER_STAGES))
+
+
 def _stage(stage: str) -> str:
     if stage not in PROVIDER_STAGES:
-        raise ConfigError(
-            f'"{stage}" is not a provider stage; expected one of: ' + ", ".join(PROVIDER_STAGES)
-        )
+        raise ConfigError(NOT_A_STAGE)
     return stage
 
 

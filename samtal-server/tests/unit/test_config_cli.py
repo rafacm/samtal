@@ -41,6 +41,7 @@ from samtal_server.config.entities import (
     NO_SUCH_MCP_SERVER,
     NO_SUCH_PROVIDER,
 )
+from samtal_server.config.store import NOT_A_STAGE
 from samtal_server.config.writes import BINDING_NOTICE
 from samtal_server.db import open_database, schema
 from tests.support.config_cli import (
@@ -242,12 +243,16 @@ UNWRITTEN = [
     (("prompt-fragment", f"{SECRET}.pasted"), NO_SUCH_FRAGMENT, SECRET),
     (("agent", SECRET), NO_SUCH_AGENT, SECRET),
     (("device", "aa:bb:cc:dd:ee:ff"), NO_SUCH_DEVICE, "aa:bb:cc:dd:ee:ff"),
+    # The same paste one argument to the left. A provider is addressed
+    # by a stage and a name together, and a stage that is not one of the
+    # four is refused before anything is looked up, on both paths.
+    (("provider", SECRET, "claude"), NOT_A_STAGE, SECRET),
 ]
 
 
 @pytest.mark.parametrize(("addressed", "sentence", "sentinel"), UNWRITTEN)
 @pytest.mark.parametrize("local", [False, True])
-def test_an_entity_that_is_not_there_is_refused_without_printing_it(
+def test_an_identity_that_addresses_nothing_is_refused_without_printing_it(
     run,
     capsys: pytest.CaptureFixture[str],
     caplog: pytest.LogCaptureFixture,
@@ -263,6 +268,8 @@ def test_an_entity_that_is_not_there_is_refused_without_printing_it(
     path. An identity that addresses nothing was typed rather than
     stored, so neither the read nor the delete repeats it: not on
     stderr, not on stdout, and not in a record either of them retained.
+    That covers a name nothing wrote and a stage that is not a stage,
+    which are the two ways a segment can address nothing.
     """
     flags = ("--local",) if local else ()
     for verb in ("show", "delete"):

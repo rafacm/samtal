@@ -39,7 +39,7 @@ from samtal_server.config.secrets import (
     generate_key,
     load_keys,
 )
-from samtal_server.config.store import ConfigStore
+from samtal_server.config.store import NOT_A_STAGE, ConfigStore
 from samtal_server.db import DATABASE_FILENAME, open_database, schema
 
 TOKEN = "test-api-token-" + "0123456789abcdef" * 2
@@ -408,7 +408,7 @@ def test_an_identity_that_cannot_be_addressed_at_all_is_422(
     mac = client.get("/devices/not-a-mac")
 
     assert stage.status_code == 422
-    assert "is not a provider stage" in stage.json()["detail"]
+    assert stage.json()["detail"] == NOT_A_STAGE
     assert mac.status_code == 422
     assert "is not a MAC address" in mac.json()["detail"]
 
