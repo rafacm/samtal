@@ -356,6 +356,30 @@ def test_the_masked_values_are_masked_on_both_paths(
     assert SECRET not in shown
 
 
+def test_an_agent_is_printed_prompt_first(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The printed document, byte for byte, which is the other half of
+    the same claim the API's exact-bytes pin makes: YAML keeps the order
+    the mapping was built in, so an agent read on either path opens with
+    the prompt that makes it that agent and then says what it
+    overrides."""
+    _a_provider(run)
+    run(
+        "set",
+        "agent",
+        "sam",
+        "-f",
+        "-",
+        stdin="llm: claude\nprompt: You are Sam.\n",
+    )
+    capsys.readouterr()
+
+    assert run("--local", "show", "agent", "sam") == 0
+
+    assert capsys.readouterr().out == "prompt: You are Sam.\nllm: claude\n"
+
+
 def test_a_credential_nested_in_an_option_is_masked_in_the_rendered_document(
     run, capsys: pytest.CaptureFixture[str]
 ) -> None:

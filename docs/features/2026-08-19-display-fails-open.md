@@ -125,6 +125,8 @@ grows a nested shape.
   four kinds.
 - `DocumentedShape.always_shown`: `("phrases",)` on the filler shape,
   empty everywhere else.
+- `DocumentedShape.leads_with`: `("prompt",)` on the agent, empty
+  everywhere else.
 - The absence set: `None`, `[]`, `{}`, compared against the field's own
   declared default.
 - `secrets.mask` is unchanged: only a syntactically valid environment
@@ -135,10 +137,11 @@ grows a nested shape.
 From `samtal-server/`, with `PYTHONDONTWRITEBYTECODE=1` outside pytest:
 
 - `uv run ruff check .`: `All checks passed!`
-- `uv run pytest tests/unit -q`: `3070 passed, 16 skipped`. The lane
-  held 3061 before this change and the nine added are this change's
-  own, which is also the shape of the claim: deriving the bodies moved
-  the count by nothing at all, because no existing pin had to change.
+- `uv run pytest tests/unit -q`: `3073 passed, 16 skipped`. The lane
+  held 3061 before this change and the twelve added are this change's
+  own (nine, and three more from the review round), which is also the
+  shape of the claim: deriving the bodies moved the count by nothing at
+  all, because no existing pin had to change.
 - `uv run pytest tests/integration -q`: `60 passed`, unchanged.
 - All four generated references regenerate byte-identical, run exactly
   as the CI drift steps run them: `config reference`,
@@ -158,6 +161,51 @@ copy-aside and a `touch`.
 | the declared `always_shown` | the filler-shown-whole test |
 | the absence rule | twelve tests, including every write-shaped read and the whole-configuration document |
 
+## The review round
+
+One finding on PR #207, accepted.
+
+**The agent body's field order drifted (P2).** `AgentConfig` inherits
+the layer fields and declares `prompt` after them, so a builder that
+walks `model_fields` renders the overrides first and the prompt last,
+where the retired `agent_body` put the prompt first. JSON and YAML both
+keep the order a mapping was built in, so this is drift in the bytes an
+API response and a printed document are made of, and every assertion in
+this change compared mappings, which cannot see it.
+
+The fix is a third registry fact rather than a special case in the
+walk: `DocumentedShape.leads_with`, the fields a display puts before the
+rest, empty everywhere except the agent, which leads with its prompt.
+Declaration order stays the display order; what the fact says is the one
+thing declaration order cannot, that a field declared last is read
+first, because a subclass declares its own fields after the ones it
+inherits and an agent's prompt is what makes it that agent.
+
+The other four kinds were checked the same way, by diffing each retired
+builder's key order against its model's declaration order:
+
+| Kind | Retired builder's order | Model order | |
+| --- | --- | --- | --- |
+| provider | `type`, `api_key_env`, `egress`, options | same | same |
+| mcp-server | all 11 declared fields | same | same |
+| prompt-fragment | `text` | same | same |
+| agent | `prompt` first, then the layer half | layer half first, `prompt` last | **drift** |
+| agent-defaults | the layer half | same | same |
+| filler (nested) | `enabled`, `delay_ms`, `phrases` | same | same |
+| mcp-grant (nested) | `server`, `tools` | same | same |
+
+Order is now pinned in bytes rather than in mappings: an agent carrying
+both a prompt and an override is asserted as the exact JSON text of the
+API response and as the exact YAML text the CLI prints. A registry
+coherence test also holds `leads_with` and `always_shown` to naming
+fields their shape's model actually declares, since a lead field that
+does not exist would raise and an always-shown field renamed would
+silently stop being shown.
+
+Bitten: with the agent's `leads_with` removed, the two byte-exact pins
+fail and nothing else does, which is also the measure of how invisible
+the drift was.
+
 ## Files modified
 
 - `samtal-server/samtal_server/config/views.py`: one derived builder and
@@ -169,8 +217,12 @@ copy-aside and a `touch`.
   declared exception, and `always_shown(model)` for the walk.
 - `samtal-server/tests/unit/test_config_reads.py`: the coherence tests
   for both halves of the split, and the depth sentinels.
+- `samtal-server/tests/unit/test_config_api_reads.py`: an agent's exact
+  response bytes.
 - `samtal-server/tests/unit/test_config_cli_local.py`: the nested
-  credential as the CLI renders it.
+  credential as the CLI renders it, and an agent's exact printed bytes.
+- `samtal-server/tests/unit/test_config_entities.py`: the display facts
+  held to the fields their models declare.
 - `docs/plans/2026-08-17-config-descriptors-implementation.md`: the two
   findings it recorded as open questions now point at the answer.
 - `CHANGELOG.md`.

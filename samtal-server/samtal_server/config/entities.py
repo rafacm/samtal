@@ -194,6 +194,19 @@ class DocumentedShape:
     purpose: str
     notes: tuple[str, ...] = ()
 
+    # Which of the model's fields a display puts first, before the rest
+    # in the order the model declares them.
+    #
+    # Almost always empty, because declaration order is display order: a
+    # shape that listed its own fields here would be a second copy of
+    # the model's list, which is the drift this registry exists to end.
+    # What it is for is the one thing declaration order cannot say, that
+    # a field declared last is read first. A subclass declares its own
+    # fields after the ones it inherits, so an agent's prompt, which is
+    # what makes it that agent, would arrive after the overrides that
+    # qualify it.
+    leads_with: tuple[str, ...] = ()
+
     # Which of the model's fields a display shows even when they hold
     # their declared default.
     #
@@ -662,6 +675,11 @@ ENTITIES: tuple[EntityDescriptor, ...] = (
         ),
         command="samtal-server config set agent <name> -f fragment.yaml",
         examples=("agent.yaml",),
+        # The prompt is the agent, and the stages it overrides qualify
+        # it, so a read opens with it. `AgentConfig` declares it after
+        # the layer fields it inherits, which is an ordering of the
+        # class rather than of the entry.
+        leads_with=("prompt",),
         notes=(
             "An agent's name is also the key its remembered facts are stored under, "
             "so renaming an agent orphans its memory: the old file stays on disk and "
@@ -876,6 +894,19 @@ def setting(name: str) -> Setting:
     return _SETTINGS_BY_NAME[name]
 
 
+def leads_with(model: type[BaseModel]) -> tuple[str, ...]:
+    """Which of one model's fields a display puts before the rest.
+
+    Addressed by the model, and answering with nothing for one the
+    registry does not carry, for the reasons `always_shown` below gives:
+    these are the two questions a display asks about a shape that the
+    shape's own field list cannot answer, and they are asked in the same
+    place and the same way.
+    """
+    shape = _BY_MODEL.get(model)
+    return shape.leads_with if shape is not None else ()
+
+
 def always_shown(model: type[BaseModel]) -> tuple[str, ...]:
     """Which of one model's fields a display shows even when they hold
     their declared default.
@@ -954,5 +985,6 @@ __all__ = [
     "always_shown",
     "descriptor",
     "fill",
+    "leads_with",
     "setting",
 ]
