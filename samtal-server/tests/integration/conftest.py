@@ -20,7 +20,7 @@ import os
 import struct
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -271,6 +271,8 @@ def spoken(events: list[dict]) -> str:
 
 BYTECODE_OFF = "PYTHONDONTWRITEBYTECODE"
 
+PACKAGE = Path(__file__).resolve().parents[2] / "samtal_server"
+
 
 def script_environment(without: Sequence[str] = (), **overrides: str) -> dict[str, str]:
     """The environment a deployment script gets when this lane runs it.
@@ -295,6 +297,32 @@ def script_environment(without: Sequence[str] = (), **overrides: str) -> dict[st
     # bytecode by naming the variable itself.
     environment[BYTECODE_OFF] = "1"
     return environment
+
+
+@pytest.fixture(scope="session", autouse=True)
+def no_bytecode_left_behind() -> Iterator[None]:
+    """That the lane wrote no bytecode cache into the package.
+
+    The check the safeguard needs and could not have: a subprocess
+    started without `PYTHONDONTWRITEBYTECODE` writes caches that the
+    clearing in `tests/conftest.py` has already run past, so the lane
+    that defeats the safeguard is also the lane least able to notice.
+    Reading the tree once the lane is over is what notices, and it
+    notices whichever test spawned the subprocess.
+
+    Session-scoped and autouse, so it is the last thing the lane does,
+    and it names the directories rather than merely counting them: the
+    path is what says which subprocess wrote it.
+    """
+    yield
+    left = sorted(str(cache) for cache in PACKAGE.rglob("__pycache__"))
+    assert not left, (
+        "the lane left bytecode caches under samtal_server, which nothing "
+        "clears and which go stale on the next edit:\n"
+        + "\n".join(left)
+        + "\nEvery subprocess a test starts needs PYTHONDONTWRITEBYTECODE=1 "
+        "in its environment; build it with script_environment()."
+    )
 
 
 @contextlib.contextmanager
