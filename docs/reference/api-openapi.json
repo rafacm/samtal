@@ -30,7 +30,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -40,7 +40,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -50,7 +50,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -86,7 +86,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -96,7 +96,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -106,7 +106,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -155,7 +155,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -165,7 +165,7 @@
           "404": {
             "description": "Nothing of that identity exists.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -175,7 +175,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -185,7 +185,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -195,7 +195,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -252,7 +252,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -262,7 +262,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -272,7 +272,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -282,7 +282,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -329,7 +329,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -339,7 +339,7 @@
           "404": {
             "description": "Nothing of that identity exists.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -349,7 +349,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -359,7 +359,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -369,7 +369,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -402,7 +402,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -412,7 +412,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -422,7 +422,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -462,7 +462,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -472,7 +472,7 @@
           "404": {
             "description": "Nothing of that identity exists.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -482,7 +482,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -492,7 +492,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -502,7 +502,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -550,7 +550,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -560,7 +560,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -570,7 +570,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -580,7 +580,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -618,7 +618,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -628,7 +628,7 @@
           "404": {
             "description": "Nothing of that identity exists.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -638,7 +638,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -648,7 +648,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -658,7 +658,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -691,7 +691,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -701,7 +701,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -711,7 +711,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -751,7 +751,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -761,7 +761,7 @@
           "404": {
             "description": "Nothing of that identity exists.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -771,7 +771,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -781,7 +781,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -791,7 +791,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -839,7 +839,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -849,7 +849,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -859,7 +859,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -869,7 +869,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -907,7 +907,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -917,7 +917,7 @@
           "404": {
             "description": "Nothing of that identity exists.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -927,7 +927,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -937,7 +937,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -947,7 +947,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -980,7 +980,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -990,7 +990,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1000,7 +1000,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1040,7 +1040,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1050,7 +1050,7 @@
           "404": {
             "description": "Nothing of that identity exists.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1060,7 +1060,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1070,7 +1070,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1080,7 +1080,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1128,7 +1128,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1138,7 +1138,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1148,7 +1148,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1158,7 +1158,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1196,7 +1196,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1206,7 +1206,7 @@
           "404": {
             "description": "Nothing of that identity exists.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1216,7 +1216,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1226,7 +1226,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1236,7 +1236,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1265,7 +1265,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1275,7 +1275,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1285,7 +1285,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1322,7 +1322,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1332,7 +1332,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1342,7 +1342,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1352,7 +1352,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1385,7 +1385,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1395,7 +1395,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1405,7 +1405,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1438,7 +1438,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1478,7 +1478,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1488,7 +1488,7 @@
           "404": {
             "description": "Nothing of that identity exists.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1498,7 +1498,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1508,7 +1508,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1518,7 +1518,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1566,7 +1566,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1576,7 +1576,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1586,7 +1586,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1596,7 +1596,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1634,7 +1634,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1644,7 +1644,7 @@
           "404": {
             "description": "Nothing of that identity exists.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1654,7 +1654,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1664,7 +1664,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1674,7 +1674,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1703,7 +1703,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1713,7 +1713,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1723,7 +1723,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1760,7 +1760,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1770,7 +1770,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1780,7 +1780,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1790,7 +1790,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1817,7 +1817,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1827,7 +1827,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1837,7 +1837,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1905,7 +1905,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1915,7 +1915,7 @@
           "404": {
             "description": "Nothing of that identity exists.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1925,7 +1925,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1935,7 +1935,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -1945,7 +1945,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2001,7 +2001,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2011,7 +2011,7 @@
           "404": {
             "description": "Nothing of that identity exists.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2021,7 +2021,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2031,7 +2031,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2041,7 +2041,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2100,7 +2100,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2110,7 +2110,7 @@
           "404": {
             "description": "Nothing of that identity exists.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2120,7 +2120,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2130,7 +2130,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2140,7 +2140,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2187,7 +2187,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2197,7 +2197,7 @@
           "404": {
             "description": "Nothing of that identity exists.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2207,7 +2207,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2217,7 +2217,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2227,7 +2227,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2277,7 +2277,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2287,7 +2287,7 @@
           "404": {
             "description": "Nothing of that identity exists.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2297,7 +2297,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2307,7 +2307,7 @@
           "422": {
             "description": "The request names something that cannot be addressed, such as a stage that is not a provider stage or a MAC address that is not one.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2317,7 +2317,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2350,7 +2350,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2390,7 +2390,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2400,7 +2400,7 @@
           "404": {
             "description": "No agent of that name was loaded when this server started. An agent written since then waits for the restart that builds its providers.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2410,7 +2410,7 @@
           "422": {
             "description": "The request could not be read in the shape this endpoint expects. The refusal is the sanitized `Problem` body every other refusal uses, and nothing sent is quoted back.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2420,7 +2420,7 @@
           "503": {
             "description": "This application has no running server around it, so there is no loaded agent, no running MCP slice and no memory store to assemble a prompt from. Unlike the MCP status read beside it, there is no honest empty answer: an empty block list would say a session opening now is sent nothing.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2449,7 +2449,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2459,7 +2459,7 @@
           "409": {
             "description": "Something this request needs is held by another one: the configuration database's write lock, the activation code a concurrent claim is already binding, or a reload of the MCP servers that is already running. Nothing was changed and the request can be retried.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2469,7 +2469,7 @@
           "422": {
             "description": "The stored configuration was refused: it does not compose into a valid snapshot, or a server it names could not be built (an environment reference nothing sets, a stored credential that will not decrypt, an entry `server.local_only` forbids). Nothing was stopped, started or swapped, and the running servers are exactly as they were.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2479,7 +2479,7 @@
           "500": {
             "description": "The stored configuration cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2489,7 +2489,7 @@
           "503": {
             "description": "This application has no running server around it, so there is nothing for a runtime action to act on. A deployment reaches the API on its server's own port; an application built without one serves the reads in the /runtime namespace emptily and refuses the actions.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2574,7 +2574,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2584,7 +2584,7 @@
           "404": {
             "description": "There is no conversation store to read, or no session of that id in it. The body says which.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2594,7 +2594,7 @@
           "422": {
             "description": "One of the query arguments could not be read: the limit, the cursor or the device filter. Nothing sent is quoted back.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2604,7 +2604,7 @@
           "500": {
             "description": "The conversation store cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2644,7 +2644,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2654,7 +2654,7 @@
           "404": {
             "description": "There is no conversation store to read, or no session of that id in it. The body says which.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2664,7 +2664,7 @@
           "422": {
             "description": "One of the query arguments could not be read: the limit, the cursor or the device filter. Nothing sent is quoted back.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2674,7 +2674,7 @@
           "500": {
             "description": "The conversation store cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2750,7 +2750,7 @@
           "401": {
             "description": "The request carried no bearer token, or not the one this server was given.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2760,7 +2760,7 @@
           "404": {
             "description": "There is no conversation store to read, or no session of that id in it. The body says which.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2770,7 +2770,7 @@
           "422": {
             "description": "One of the query arguments could not be read: the limit, the cursor or the device filter. Nothing sent is quoted back.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -2780,7 +2780,7 @@
           "500": {
             "description": "The conversation store cannot be read, or the request failed for a reason that is not the caller's. The details are in the server's log.",
             "content": {
-              "application/json": {
+              "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/Problem"
                 }
@@ -3700,22 +3700,6 @@
         "title": "PendingDevice",
         "description": "One device waiting to be claimed, as the listing shows it.\n\nThe listing is keyed by the code, because the code is what the\noperator has: they are holding a board with six digits on it, and\nthe question the board model and the firmware version answer is\nwhich of these entries is that board."
       },
-      "Problem": {
-        "properties": {
-          "detail": {
-            "type": "string",
-            "title": "Detail",
-            "description": "What was refused and why, the same sentence the `samtal-server config` command prints for it. It names the entity the request addressed and the rule that was broken; it never quotes a secret or a configuration value that was rejected."
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "detail"
-        ],
-        "title": "Problem",
-        "description": "A refusal, in the repository's own words."
-      },
       "PromptBlock": {
         "properties": {
           "provenance": {
@@ -4528,6 +4512,65 @@
           "secret"
         ],
         "title": "SecretValue",
+        "type": "object"
+      },
+      "FieldError": {
+        "additionalProperties": false,
+        "description": "One field of the submitted body that a refusal names.",
+        "properties": {
+          "path": {
+            "description": "Which part of the submitted body this is about, as an RFC 6901 JSON Pointer into it: `/connection/api_key_env` is that key of that object, and the empty string is the body as a whole. A pointer rather than a dotted path because a key may itself hold a dot, and `~` and `/` inside a key are escaped as `~0` and `~1` the way the RFC says.",
+            "title": "Path",
+            "type": "string"
+          },
+          "message": {
+            "description": "What is wrong with it, in the same words the corresponding line of `detail` uses: the two are rendered from one computation, so a client showing this beside the field and one showing the whole sentence say the same thing. Like `detail`, it names a rule and never quotes the value it rejected.",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "message"
+        ],
+        "title": "FieldError",
+        "type": "object"
+      },
+      "Problem": {
+        "additionalProperties": false,
+        "description": "A refusal, as RFC 9457 problem details.\n\nServed as `application/problem+json`. `type` and `instance` are\ndeliberately absent: an absent `type` means `about:blank`, which is\nthe truth here, since these problems are described by their status\nand their prose rather than by a URI registry nobody serves.",
+        "properties": {
+          "title": {
+            "description": "The status code's standard HTTP reason phrase, such as `Not Found`. It is the phrase and not a description of this API's own, because with `type` absent the problem type is `about:blank`, whose title RFC 9457 says should be the status's recommended phrase; a title of this server's own would imply a problem type the body does not identify. What was actually refused is `detail`.",
+            "title": "Title",
+            "type": "string"
+          },
+          "status": {
+            "description": "The HTTP status code, repeated in the body as the RFC describes, so that a problem separated from its response (in a log, in a bug report) still says what it was answered under.",
+            "title": "Status",
+            "type": "integer"
+          },
+          "detail": {
+            "description": "What was refused and why, the same sentence the `samtal-server config` command prints for it. It names the entity the request addressed and the rule that was broken; it never quotes a secret or a configuration value that was rejected.",
+            "title": "Detail",
+            "type": "string"
+          },
+          "errors": {
+            "description": "The fields of the submitted body the refusal names, one entry each, for a client that wants to mark the offending field rather than show a paragraph. Present on every refusal and empty where there is no field to name: a body whose whole shape was wrong, a reference to another entity, a failure that was not the caller's. The entries are the same problems `detail` lists, in the same order and the same words.",
+            "items": {
+              "$ref": "#/components/schemas/FieldError"
+            },
+            "title": "Errors",
+            "type": "array"
+          }
+        },
+        "required": [
+          "title",
+          "status",
+          "detail",
+          "errors"
+        ],
+        "title": "Problem",
         "type": "object"
       }
     },

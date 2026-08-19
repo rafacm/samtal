@@ -24,6 +24,7 @@ from samtal_server.config.api import (
     MOUNT_PATH,
     NO_RUNTIME_PROMPT_DESCRIPTION,
     PROBLEM_DESCRIPTIONS,
+    PROBLEM_MEDIA_TYPE,
     RELOAD_REFUSED_DESCRIPTION,
     build_api,
     document,
@@ -596,7 +597,7 @@ def test_the_prompt_read_describes_the_refusals_it_can_actually_answer() -> None
     responses = document()["paths"][PROMPT_TEMPLATE]["get"]["responses"]
 
     for status in ("401", "404", "422", "503"):
-        schema = responses[status]["content"]["application/json"]["schema"]
+        schema = responses[status]["content"][PROBLEM_MEDIA_TYPE]["schema"]
         assert schema == {"$ref": "#/components/schemas/Problem"}, status
     assert responses["422"]["description"] == MALFORMED_REQUEST_DESCRIPTION
     assert responses["422"]["description"] != PROBLEM_DESCRIPTIONS[422]
