@@ -275,8 +275,23 @@ class TurnTaking:
             # In the receive path on purpose: incoming frames buffer in
             # the socket for the duration, so ordering is unaffected.
             result = await self._reply.confirm_transcript(pcm)
-        except Exception:
-            logger.exception("session %s: barge-in confirmation failed", self.session_id)
+        except Exception as exc:
+            # The class name, and nothing else: no `exc_info`, no
+            # `str(exc)`. The confirmation runs inside the runtime's
+            # `_watching("asr", ...)`, so a failure on the wire has
+            # already been reported as `provider_failed` with the
+            # stage, the provider and the host on it, sanitized at
+            # that decision site. What is left for this line to add is
+            # which utterance was dropped and what class of failure
+            # dropped it. A traceback here would print the provider's
+            # own message and the chain behind it onto the retained
+            # log, which is what the observability ADR's no-leak
+            # contract forbids (#183).
+            logger.error(
+                "session %s: barge-in confirmation failed: %s",
+                self.session_id,
+                type(exc).__name__,
+            )
             self._resume_output()
             return None
         if not result.text.strip():
