@@ -97,6 +97,33 @@ def test_abort_parses_with_and_without_a_reason() -> None:
     assert bare.reason is None
 
 
+def test_a_malformed_message_names_the_field_and_the_rule_not_the_value() -> None:
+    """The refusal is logged verbatim by the session edge, so what it
+    says is a retained surface. A device controls the value it sends and
+    nothing else about this sentence: the type is one of the four
+    modelled spellings, the field name comes from the model, and the
+    rule is pydantic's own fixed slug. The rejected value appears
+    nowhere, and neither does the `ValidationError` that carries it in
+    its rendering, which is why the chain behind the refusal is empty."""
+    planted = "sk-live-4e91c7a2-never-a-real-credential"
+    with pytest.raises(ProtocolError) as caught:
+        parse_message(json.dumps({"type": "abort", "reason": [planted]}))
+
+    assert str(caught.value) == 'malformed "abort" message: reason (string_type)'
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
+
+
+def test_a_malformed_nested_value_is_named_by_the_field_that_holds_it() -> None:
+    """A `loc` reaches into nested values, and a key inside one can be
+    something the far side wrote. Only the outermost name is used, and
+    only when the model declares it."""
+    with pytest.raises(ProtocolError) as caught:
+        parse_message(json.dumps({"type": "hello", "audio_params": {"sample_rate": "fast"}}))
+
+    assert str(caught.value) == 'malformed "hello" message: audio_params (int_parsing)'
+
+
 def test_mcp_messages_keep_their_jsonrpc_payload() -> None:
     message = parse_message(
         '{"type": "mcp", "payload": {"jsonrpc": "2.0", "id": 1, "result": {}}}'
