@@ -7,6 +7,20 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-08-19
 
+### Changed
+
+- **CI's image lane skips pull requests for now** (#212). The image
+  job (both variants, arm64 under QEMU, the whole smoke conversation)
+  was the longest pole in every PR round-trip, and the upcoming
+  simplification and rename work arrives as many PRs in quick
+  succession. The job now runs on pushes to `main` and on manual
+  `workflow_dispatch` runs, so every merged commit still gets the full
+  build, smoke, drain check, and publish; a branch that touches the
+  image's own plumbing gets a dispatch run before merging. This is a
+  churn-period measure with its revert condition written next to the
+  gate: when the work settles, the job's `if` is deleted and PRs run
+  the full lane again.
+
 ### Added
 
 - **Agents can roll an honest die** (#82). A third builtin tool,
