@@ -84,6 +84,14 @@ def _identity(name: str, entry: McpServerConfig, secrets: SecretStore) -> str:
     entry no agent references needs: it has no manager to be compared
     with, so this is the only record of it a generation holds.
 
+    Which fields fall in which part is read from `_PROMPT_ONLY_FIELDS`
+    rather than listed again, and the difference is worth knowing before
+    reading either: `inject_prompts` is prompt text but it is not a
+    prompt-only field, because editing it changes what a connect
+    fetches, so it sits in the connection identity and a reload applies
+    it by making the connection again. Reading the list is what keeps
+    this true if a field ever moves between the two.
+
     A digest rather than the parts, so that retaining one per entry
     retains no entry values and no secret marks: agreement is the whole
     of what a caller may learn from one of these, and there is then

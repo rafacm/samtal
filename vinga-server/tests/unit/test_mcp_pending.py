@@ -169,17 +169,24 @@ def test_an_entry_whose_headers_were_written_in_another_order_is_unchanged() -> 
     assert pending.changed == ()
 
 
-async def test_a_prompt_only_edit_is_pending_and_the_connection_still_stands() -> None:
-    """The two answers differ on purpose. `instructions` is prompt text
-    the connection never sees, so the reload reports the entry as
-    unchanged and keeps the live connection; the entry is still
-    different from what is running, so it is pending until that reload
-    happens.
+@pytest.mark.parametrize(
+    "edit",
+    [
+        pytest.param({"instructions": "Read this first."}, id="instructions"),
+        pytest.param({"use_server_instructions": True}, id="use_server_instructions"),
+    ],
+)
+async def test_a_prompt_only_edit_is_pending_and_the_connection_still_stands(
+    edit: dict[str, object],
+) -> None:
+    """The two answers differ on purpose, and for both of the fields
+    that are prompt-only. Each is text the connection never sees, so the
+    reload reports the entry as unchanged and keeps the live connection;
+    the entry is still not what is running, so it is pending until that
+    reload happens.
     """
     before = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
-    after = config_with(
-        {"tools": entry_data(instructions="Read this first.")}, {"assistant": ["tools"]}
-    )
+    after = config_with({"tools": entry_data(**edit)}, {"assistant": ["tools"]})
     servers = await started(before)
     try:
         kept = servers.manager_of("tools")
@@ -194,6 +201,35 @@ async def test_a_prompt_only_edit_is_pending_and_the_connection_still_stands() -
         assert applied.unchanged == ("tools",)
         assert servers.manager_of("tools") is kept
         assert servers.status()["tools"]["state"] == CONNECTED
+        assert servers.pending_against(after).changed == ()
+    finally:
+        await servers.stop_all()
+
+
+async def test_an_inject_prompts_edit_is_pending_and_the_reload_reconnects() -> None:
+    """The prompt field that is not a prompt-only field. Editing it
+    changes what a connect fetches from the server, so applying it means
+    fetching again, and the reload says so by restarting the entry.
+
+    Pending answers the same for it as for the other two, which is what
+    keeps this read about the entry rather than about the connection:
+    what is stored is not what is running, whatever applying it will
+    cost.
+    """
+    before = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    after = config_with(
+        {"tools": entry_data(inject_prompts=["house_style"])}, {"assistant": ["tools"]}
+    )
+    servers = await started(before)
+    try:
+        was = servers.manager_of("tools")
+
+        assert servers.pending_against(after).changed == ("tools",)
+
+        applied = await servers.reload(reading(after))
+
+        assert applied.restarted == ("tools",)
+        assert servers.manager_of("tools") is not was
         assert servers.pending_against(after).changed == ()
     finally:
         await servers.stop_all()

@@ -233,8 +233,12 @@ generation in, at boot and at reload alike, therefore also retains
 one opaque comparison identity per configured entry, every entry
 and not only the referenced ones, computed from the connection
 identity the reload's `same_as` already uses, the prompt-only
-fields (`instructions`, `use_server_instructions`,
-`inject_prompts`), and the entry's stored-secret fingerprint. The
+fields (`instructions` and `use_server_instructions`, which are
+the two that identity excludes; `inject_prompts` is deliberately
+not one of them, because editing it changes what a connect
+fetches and so restarts the connection, and it is therefore
+already inside the connection identity), and the entry's
+stored-secret fingerprint. The
 identities are swapped atomically with the world they describe,
 and one derivation computes them for the running side at install
 and for the stored candidate at diff time, so the two sides cannot
@@ -337,8 +341,10 @@ transport cases beside the existing `/runtime` suite.
   new read and the diff function): an unused entry's
   connection-field edit reports changed; an unused entry's
   stored-secret rotation reports changed; a prompt-only edit
-  (`instructions`, `use_server_instructions`, `inject_prompts`)
-  reports changed without any connection difference; effective
+  (`instructions`, `use_server_instructions`) reports changed
+  without any connection difference, and an `inject_prompts` edit
+  reports changed and does restart the connection, since that
+  field is part of the connection identity; effective
   grants compare through the defaults-then-own rule, so moving a
   grant between `agent_defaults` and the agent without changing the
   effective set reports nothing; a deleted boot-loaded agent's
