@@ -938,7 +938,10 @@ mcp:
   unchanged: home
 prompts:
   changed: house
-fillers: (this server does not apply this kind without a restart)
+fillers:
+  resynthesized: (none)
+  reused: house, kids
+  disabled: (none)
 providers: (this server does not apply this kind without a restart)
 agents: (this server does not apply this kind without a restart)
 
@@ -952,9 +955,9 @@ weather: connected since 2026-08-13T11:02:44.118902+00:00
 
 **What it applies** is the `mcp_servers` entries with the secrets stored
 on them, the agents' effective `mcp` grant lists (`agents.<name>.mcp`
-and `agent_defaults.mcp`), the shared `prompt_fragments`, and each
-agent's own `prompt` and `prompt_includes`, all re-read from the
-configuration database. An MCP entry that is new or newly referenced is
+and `agent_defaults.mcp`), the shared `prompt_fragments`, each agent's
+own `prompt` and `prompt_includes`, and each agent's own `filler`
+section, all re-read from the configuration database. An MCP entry that is new or newly referenced is
 started, one whose fragment or whose stored secrets changed is stopped
 and rebuilt (so rotating a credential applies here too), one that is
 gone or no longer referenced is stopped, and an unchanged one keeps the
@@ -969,13 +972,25 @@ text configures a prompt and not a connection, so dropping a live one
 to apply it (mid-call tools, a respawned stdio child) would be churn
 without a cause.
 
-**What still needs a restart** is the rest: an agent's providers, its
-memory and its filler are built at start, so a new agent waits for the
-one that builds them, and a write to an agent says both halves, since
-its prompt fields are applied and the rest of it is not. Providers,
-provider credentials, `agent_defaults` and the whole `server` section
-(including the configuration file itself) are start-time as they always
-were.
+**Filled pauses are re-synthesized, and only where they had to be.** A
+clip is a configured phrase spoken by a configured voice, so an apply
+keeps every clip whose phrases and whose voice are what they were and
+synthesizes the rest: an edit to a prompt sends nothing to a
+text-to-speech engine, and neither does an edit to a provider, whose
+voice this server goes on speaking in until it is restarted. The
+`fillers` section names each agent under one of three outcomes, and an
+agent whose synthesis failed is `disabled`: the reload applied, that
+agent runs with the mask off, and the next reload tries again. A
+text-to-speech hiccup never holds back a prompt fix.
+
+**What still needs a restart** is the rest: an agent's providers and its
+memory are built at start, so a new agent waits for the one that builds
+them, and a write to an agent says both halves, since its prompt fields,
+its grants and its filler section are applied and the rest of it is
+not.
+Providers, provider credentials, `agent_defaults` and the whole `server`
+section (including the configuration file itself) are start-time as they
+always were.
 
 **No session is dropped**, and when one meets the change depends on
 which half moved. The tools an agent may reach are snapshotted per
@@ -985,7 +1000,10 @@ fails into the same error result a server dropping mid-call produces,
 which the assistant explains in its own words. Prompt text is assembled
 once per activation and cached for it, so a rewritten prompt, fragment
 or `instructions` reaches a conversation at its next activation, which
-is a new session or an agent switch, and never mid-reply.
+is a new session or an agent switch, and never mid-reply. Filler clips
+are bound by a conversation when it opens, so a re-synthesized one
+reaches the next conversation rather than changing what an open one is
+masking with.
 
 **Nothing is half applied.** The whole new world is composed, validated
 and built before anything running is touched, so an unset `$VAR`, a
@@ -1195,10 +1213,14 @@ prompt fragment or rewriting an agent's own prompt takes effect when a
 running server is asked to reload, with no restart and no session
 dropped: that is [Applying a change without a
 restart](#applying-a-change-without-a-restart). Those writes name
-`vinga-server config reload` instead of the restart. A write to an agent
-names both, because an agent entry is the one kind whose fields fall on
-both sides of the line: its prompt and its includes are applied, and its
-providers, memory and filler are built at start.
+`vinga-server config reload` instead of the restart. So does rewriting
+an agent's `filler` section, whose clips are synthesized again during
+the reload. A write to an agent names both, because an agent entry is
+the one kind whose fields fall on both sides of the line, and it gives
+each applied field the moment it converges at: its prompt and its
+includes at the next activation, its grants at the next utterance, its
+filler section at the next conversation, while its providers and memory
+are built at start.
 
 **Device bindings are the other, applied by being noticed.** A running
 server reads the devices table and the default agent as a device asks
@@ -1386,8 +1408,11 @@ device's next OTA check or connection, unless they name an agent this
 server has not loaded, which brings the first sentence back. An MCP
 server entry, the secret slots on it and a prompt fragment carry the
 third, which names the reload above, since that is what applies them to
-a running server. An agent carries a fourth that says both, its prompt
-fields being applied by the reload and the rest of it not. Nothing about
+a running server. An agent carries a fourth that says both, naming the
+moment each applied field converges at: its prompt fields, its grants
+and its filler section are applied by the reload, at the next
+activation, the next utterance and the next conversation respectively,
+and the rest of it is not. Nothing about
 a running conversation changes when a write lands, in any of these
 cases; a reload is what makes the third and the applied half of the
 fourth take effect.
@@ -1709,12 +1734,16 @@ YAML
 When a reply's first audio has not started within `delay_ms` of the
 utterance being transcribed, the session plays one of the phrases,
 rotating through them, and the real reply queues behind the clip's
-tail. The clips are synthesized once at boot in each agent's own voice
+tail. The clips are synthesized ahead of time in each agent's own voice
 and cached as PCM, never at fire time: synthesis at the moment of
 masking would add TTS latency to the exact gap being masked, and a
 cached clip keeps working when the TTS provider is the thing being
-slow. A synthesis failure at boot logs a warning and leaves the
-feature off for that agent rather than failing the boot.
+slow. Ahead of time is the server start and every `vinga-server config
+reload` after it, which re-synthesizes only the agents whose phrases or
+whose voice moved and hands the result to the next conversation; one
+already open keeps the clips it opened with. A synthesis failure logs a
+warning and leaves the feature off for that agent rather than failing
+the boot or refusing the reload.
 
 The filler is honest assistant speech: it moves the device into its
 speaking state, counts as the turn's `speaking_started`, lands on
@@ -2301,8 +2330,9 @@ MCP entry and `config set prompt-fragment` reach a running server when
 it is asked to reload; a device binding reaches it at that device's next
 check-in. Writing an agent says both, because an agent entry is the one
 kind whose fields fall on either side: its `prompt`, its
-`prompt_includes` and its `mcp` grants are applied by the reload, and
-its providers, memory and filler are built at the next start. The one
+`prompt_includes`, its `mcp` grants and its `filler` section are applied
+by the reload, and its providers and memory are built at the next
+start. The one
 place the fragments are not live is `agent_defaults.prompt_includes`,
 which is the layer every agent's effective value is inherited through
 and which a reload deliberately does not move.
