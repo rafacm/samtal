@@ -7,6 +7,26 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 
 ## 2026-08-20
 
+### Added
+
+- **The frontend's client seam is decided, and the evidence is
+  committed** (#210). `spikes/2026-08-20-openapi-ts-client/` generates a
+  TypeScript client from `docs/reference/api-openapi.json` twice, once
+  with Hey API's openapi-ts and once with openapi-typescript and
+  openapi-fetch, with exact pinned versions, lockfiles, and the output
+  committed so it can be read. Each carries a strict-mode consumer
+  fixture that compiles instead of running, because a generated client
+  can compile and still be unusable: the fixtures exercise the bearer
+  token, a read and a write and a delete for each of the five entities,
+  the RFC 9457 problem document a refusal answers with, one field of
+  each optional-versus-nullable character, and the provider entries'
+  passthrough options. Both generators are byte-deterministic across
+  three runs and neither output was hand-edited. The recommendation is
+  Hey API, on authentication, which is the one criterion the two split
+  on; the reasoning, the per-criterion results and the two decisions
+  the admin UI still owes are in the plan's implementation doc. Nothing
+  here ships or runs in CI.
+
 ### Changed
 
 - **Every event this server may emit is declared as a type, and the

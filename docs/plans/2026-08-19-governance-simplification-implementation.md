@@ -1168,3 +1168,401 @@ Run from `vinga-server/`, at the last commit of the round.
   `docs/reference/api-openapi.json` and
   `docs/reference/domain-config.md` are still byte-identical, and no
   commit in this round or in the milestone touches either file.
+
+## M5: the OpenAPI client spike
+
+### What was done
+
+Four commits, and no Python. Nothing under `vinga-server/` is touched
+by this milestone: it reads `docs/reference/api-openapi.json` and
+writes only under `spikes/`.
+
+The spike lives at
+[`spikes/2026-08-20-openapi-ts-client/`](../../spikes/2026-08-20-openapi-ts-client/),
+with its own README saying what it is, that none of it ships, and how
+to re-run it. Two sub-projects, each a self-contained npm project with
+exact pinned versions, a committed lockfile, a generation script and a
+strict-mode consumer fixture:
+
+- `hey-api/`: `@hey-api/openapi-ts` 0.99.0, driven by
+  `openapi-ts.config.ts`, generating an SDK function per operation, a
+  type per schema and its own fetch client.
+- `openapi-typescript/`: `openapi-typescript` 7.13.0 writing one
+  declaration file, consumed at runtime by `openapi-fetch` 0.17.0.
+
+Both pin TypeScript 5.9.3. The assertion vocabulary the two fixtures
+are written in is shared (`shared/expect.ts`, 45 lines); the fixtures
+themselves are not, because the two client shapes are not: one calls
+generated functions, the other calls a client keyed by path template
+and HTTP method. Each fixture makes the same six claims in the same
+order, so the pair can be read side by side.
+
+Nothing under either `generated/` directory was edited by hand. The
+only two knobs turned are `openapi-ts.config.ts` (which plugins to run,
+and where to write) and the `--default-non-nullable false` flag on the
+`openapi-typescript` command line, whose reason is finding 2 below.
+
+### Output sizes
+
+| | Hey API | openapi-typescript |
+| --- | --- | --- |
+| Files generated | 16 | 1 |
+| Lines | 5,391 | 3,971 |
+| Bytes | 205,537 | 173,584 |
+| Of which types | 104,441 (`types.gen.ts`) | 173,584 (the whole file) |
+| Of which per-operation code | 37,282 (`sdk.gen.ts`, 38 functions) | none |
+| Of which vendored runtime | 52,943 (`client/` and `core/`) | none |
+| Runtime library to install | none | `openapi-fetch`, 17,235 bytes of ESM |
+
+The two totals are close, and they are made of different things. Hey
+API writes 53 kB of HTTP client into the repository, which the project
+then owns as generated code and an upgrade rewrites. openapi-typescript
+writes none and takes a 17 kB published dependency instead. Hey API's
+extra 37 kB is the one function per operation that its call-site
+criterion is bought with.
+
+The fixtures are 429 lines (Hey API, 6 refusal probes) and 414 lines
+(openapi-fetch, 8), sharing 45 lines of vocabulary.
+
+### Determinism
+
+Each generator was run three times, deleting the output directory
+between runs, and the outputs diffed pairwise. Both are byte-identical
+across all three runs: `diff -r` on the Hey API tree and `diff` on the
+single openapi-typescript file report nothing, twice each. Neither
+generator writes a timestamp, a version banner or an absolute path into
+its output.
+
+### The acceptance criteria, one by one
+
+| # | Criterion | Hey API | openapi-typescript + openapi-fetch |
+| --- | --- | --- | --- |
+| 1 | Compiles under strict TypeScript | Pass | Pass |
+| 2 | Every operation under its `operation_id` name | Pass | Partial |
+| 3 | Five entities need no handwritten mirror | Partial | Partial |
+| 4 | No server internals beyond the document | Pass | Pass |
+| 5a | Probe: authentication | Pass | Fail |
+| 5b | Probe: read, write, delete for five entities | Pass | Pass |
+| 5c | Probe: typed non-2xx problem responses | Pass | Pass |
+| 5d | Probe: optional versus nullable | Pass | Pass with a flag |
+| 5e | Probe: provider extension properties | Pass | Pass |
+| 6 | Pinned generator versions | Pass | Pass |
+| 7 | Deterministic output | Pass | Pass |
+| 8 | No manual edits to generated code | Pass | Pass |
+
+**1. Compiles under strict TypeScript.** Both. `tsconfig.json` in each
+sub-project sets `strict: true`, `noEmit: true` and
+`verbatimModuleSyntax: true`, and `npx tsc --noEmit` is clean over the
+fixture and the whole generated output, `skipLibCheck` deliberately
+off. Both also compile under TypeScript 7.0.2, checked with
+`npx --package typescript@7.0.2 tsc --noEmit -p tsconfig.json`. Two
+things had to be right rather than guessed: Hey API's generated
+`core/queryKeySerializer.gen.ts` iterates `URLSearchParams.entries()`,
+so `lib` needs `DOM.Iterable` and not just `DOM`; and generation, as
+opposed to compilation, is where Hey API needs the older TypeScript
+(finding 1).
+
+**2. Every operation surfaces under its stable `operation_id` name.**
+Hey API passes: the document's 38 operations become 38 exported SDK
+functions, each named as the camel case of its `operationId`, so
+`read_provider_providers__stage___name__get` is
+`readProviderProvidersStageNameGet`. openapi-typescript is partial: the
+ids survive verbatim as keys of the generated `operations` interface,
+so every operation's request and response types are reachable by the
+document's own name, but a call is addressed by path template and HTTP
+method and the id never appears at one. The fixture pins both halves,
+and pins that the path table and the operation table agree
+(`paths["/providers/{stage}/{name}"]["put"]` is exactly
+`operations["write_provider_providers__stage___name__put"]`). Finding 3
+is about the word "stable" in the criterion, and it applies to both.
+
+**3. Request and response types for the five entities need no
+handwritten mirror.** Partial for both, identically, and the cause is
+the document rather than either generator. The write bodies are fully
+typed: `ProviderConfig`, `McpServerConfig`, `PromptFragmentConfig`,
+`AgentConfig` and `AgentDefaults` all arrive as models a form can bind
+to. An addressed read does not. Every one of them answers `Envelope`,
+whose `entity` is declared `additionalProperties: true` with no
+properties, because the masked shape a read returns is not a value the
+entity model would accept (the `********` mask is not a valid provider
+option), so both generators render it `{ [key: string]: unknown }`. An
+admin UI reading one entity in order to edit it therefore receives an
+untyped bag and has to narrow it to the write model itself. That is one
+narrowing per entity, not a mirror of the field lists, and it is the
+same in both candidates. Finding 4 records it as work for #129.
+
+**4. Nothing leaks server internals beyond the document.** Both pass.
+The generated trees were scanned for absolute paths, `vinga_server`,
+Python module names, ORM and framework names, and hostnames. Two hits,
+both verbatim from the document's own prose: `records.py` in a
+description of the conversation store, and `localhost` in the MCP
+egress description. The base URL both clients default to is `/api`,
+which is the document's `servers` entry. Nothing else crosses.
+
+**5a. Authentication.** The one criterion that separates the two.
+The document declares a single `bearerToken` HTTP scheme and applies it
+to every operation. Hey API carries it into the output: each SDK
+function emits `security: [{ scheme: 'bearer', type: 'http' }]`, the
+client config takes an `auth` value or a synchronous or asynchronous
+callback, and the generated `core/auth.gen.ts` writes the
+`Authorization` header and the `Bearer ` prefix. A consumer never
+spells either. openapi-fetch has no notion of security schemes:
+openapi-typescript renders them as documentation, and the fixture has
+to install a middleware that sets the header and the prefix by hand.
+The fixture pins the consequence rather than describing it: a client
+built with no middleware at all is the same type as one with it, so
+forgetting authentication compiles and fails at runtime with 401 on
+every call. That is what a failing probe looks like, and it is recorded
+rather than worked around.
+
+**5b. Read, write and delete for the five entities.** Both pass, for
+providers, MCP servers, prompt fragments, agents and agent defaults,
+with each call's response annotated with the type it must return
+(`Envelope` for a read, `Acknowledgement` for a write or a delete) so
+that a client typing its answers `unknown` would fail to compile. Two
+things the probe turned up and the fixtures state in comments. First,
+`/agent-defaults` has no DELETE: the document declares GET and PUT and
+nothing else, because the defaults are a singleton that always exists,
+so the delete probe for that entity is `DELETE /default-agent`, which
+is the operation an admin UI's "clear this" control would call.
+Second, `holds<T>(x)` would also accept `any`, so the provider read in
+both fixtures additionally pins `data` and `error` to exactly
+`Envelope | undefined` and `Problem | undefined` with an invariant type
+equality, which is the assertion that would catch a generator handing
+back `any`.
+
+**5c. Typed non-2xx problem responses.** Both pass. Every refusal in
+the document is `application/problem+json` carrying the RFC 9457
+`Problem` from #192, and both generators type it as `Problem` rather
+than `unknown`. Both return a discriminated `{ data, error }` pair:
+the fixtures prove the discrimination bites by reading `result.data`
+before checking `error` under `@ts-expect-error`. The `Problem` shape
+itself is `additionalProperties: false`, and both refuse the `type` key
+the server deliberately omits. Where they differ is granularity. Hey
+API emits an `Errors` type keyed by status code, so
+`WriteProviderProvidersStageNamePutErrors` is exactly
+`{ 401: Problem; 409: Problem; 422: Problem; 500: Problem }` and the
+read's has 404 as well, and then collapses it to one union at the call
+site. openapi-typescript keeps the statuses apart in
+`operations[...]["responses"]` and openapi-fetch collapses them the
+same way. Both fixtures pin the per-status table, which is what a
+consumer wanting to branch on 404 versus 409 would read.
+
+**5d. Optional versus nullable.** The document has fields of all three
+characters and the fixtures pin one of each:
+
+| Character | Example | Document |
+| --- | --- | --- |
+| Optional, not nullable | `AgentConfig.prompt` | not in `required`, `type: string` |
+| Required, nullable | `DefaultAgent.name` | in `required`, `anyOf` with `null` |
+| Optional and nullable | `ProviderConfig.api_key_env` | neither |
+
+Hey API distinguishes all three straight from the document:
+`prompt?: string`, `name: string | null`, `api_key_env?: string | null`.
+The fixture proves the distinction in both directions, asserting that
+an agent with no prompt is valid, that an agent with a `null` prompt is
+refused, that `{ name: null }` is a valid `DefaultAgent` and that `{}`
+is not.
+
+openapi-typescript needed the flag of finding 2 to get there, and with
+it the same six assertions hold. Under the generator's own defaults it
+fails: every property carrying a JSON Schema `default` loses its `?`,
+turning `prompt?: string` into `prompt: string` and
+`api_key_env?: string | null` into `api_key_env: string | null`, so a
+provider write demands two keys the server treats as optional and an
+agent write demands a prompt. The fixture was not contorted to
+accommodate that; the generation script passes
+`--default-non-nullable false` and the finding is recorded.
+
+**5e. The provider entries' extension properties.** Both pass, by
+different renderings of the same fact. `ProviderConfig` is the one
+entity with `additionalProperties: true`, because a provider carries
+whatever options its `type` takes and the server passes them through.
+Hey API emits `[key: string]: unknown` on the object; openapi-typescript
+emits an intersection with `{ [key: string]: unknown }`. Both admit an
+entry carrying `base_url`, `model`, `temperature` and `extra_headers`
+beside the declared keys, which is what makes a provider form writable
+at all. Three further things the probe checked and both got right: a
+declared key keeps its declared type through the passthrough
+(`egress: "false"` is refused in both), an extension property reads
+back as `unknown` so the consumer has to narrow it, and the entities
+that declare `additionalProperties: false` do refuse invented keys, so
+the passthrough is a provider fact rather than a hole in every model.
+
+**6. Pinned generator versions.** Both. `@hey-api/openapi-ts` 0.99.0,
+`openapi-typescript` 7.13.0, `openapi-fetch` 0.17.0, `typescript`
+5.9.3, all exact, no `^` and no `~`, with `package-lock.json` committed
+in each sub-project so `npm ci` reproduces the tree.
+
+**7. Deterministic output.** Both, three runs each, recorded above.
+
+**8. No manual edits to generated code.** Stated and true. No file
+under either `generated/` directory has been edited; the determinism
+check is what makes that claim checkable, since a hand edit would show
+up as a diff on the next run. The two knobs are named in the "What was
+done" section.
+
+### Findings
+
+**1. `@hey-api/openapi-ts` 0.99.0 cannot run under TypeScript 7.0.2,
+while declaring a peer range that admits it.** The first run of the
+generator, with TypeScript pinned to the current 7.0.2, died before
+writing a file: `TypeError: Cannot read properties of undefined
+(reading 'AnyKeyword')`, from the generator's own initialization
+reading `ts.SyntaxKind`. The generator builds its output through the
+legacy TypeScript compiler API, which the 7.x native port does not
+expose, and its declared peer range is
+`>=5.5.3 || >=6.0.0 || 6.0.1-rc`, which 7.0.2 satisfies by semver. The
+resolution is to pin 5.9.3, which is what the sub-project does. Worth
+knowing rather than alarming: it constrains the TypeScript used to
+*generate*, not the one used to build the application, and the
+generated output type-checks under 7.0.2 unchanged. openapi-typescript
+7.13.0 has no such constraint.
+
+**2. `openapi-typescript` erases optionality for every field with a
+default.** Its `defaultNonNullable` option is on by default and strips
+`?` from any property declaring a JSON Schema `default`. The reasoning
+is sound for a response, which a server fills from the default, and
+wrong for a request body, which is what all five entity schemas in this
+document are: it made `AgentConfig.prompt`,
+`ProviderConfig.api_key_env`, `ProviderConfig.egress` and
+`McpServerConfig.tool_timeout_s` required. Passing
+`--default-non-nullable false` restores the document's own shape
+exactly. The flag is global, which is harmless here because the entity
+models appear only as request bodies: an addressed read answers
+`Envelope`, whose `entity` is untyped (criterion 3). A frontend
+adopting this generator has to know about the flag, and would find out
+by having its provider form reject valid input.
+
+**3. The document's `operation_id`s are FastAPI's generated ones, so
+"stable" is weaker than the criterion assumes.** They read
+`read_provider_providers__stage___name__get`: the route function's
+name, the path with its separators flattened, and the method. Renaming
+the Python function, moving the route, or changing the path template
+renames the client symbol, and the OpenAPI drift check would pass the
+rename through as an ordinary diff. This affects both candidates, and
+Hey API more, since its call sites carry the names. Declaring explicit
+`operation_id`s on the routes would make the client's names a stated
+contract that a route refactor cannot move; it is a small change to
+`api.py`, out of scope for a spike that must not touch Python, and
+recorded here as work to do before #129 builds on the names.
+
+**4. An addressed read answers an untyped entity.** Recorded under
+criterion 3 above and repeated here because it is the one place a
+frontend still writes type code by hand. The document says so
+deliberately, so this is not a defect to fix in either generator: what
+#129 needs to decide is where the narrowing from
+`{ [key: string]: unknown }` to the write model lives, and whether it
+is a runtime validation or a cast. Note that the mask makes a plain
+cast a lie in one direction: a read may carry `********` where the
+model declares a real value.
+
+**5. Nothing else surprised.** Both generators ran offline apart from
+`npm install` fetching packages, both read the committed document by a
+relative path without a resolver step, and neither needed a
+preprocessing pass over the document. `npm ci` from the committed
+lockfiles reproduces both trees and both type-checks.
+
+### The recommendation for #129
+
+**Hey API's `@hey-api/openapi-ts`.** Four reasons, in the order they
+weigh.
+
+First, authentication. It is the one acceptance criterion the two
+candidates split on, and it splits on the thing the admin UI does on
+every single request. Hey API carries the document's security scheme
+into the client; openapi-fetch leaves the `Authorization` header and
+the `Bearer ` prefix to a middleware the consumer writes, and a client
+that forgot it compiles.
+
+Second, optionality without a corrective flag. Hey API reads the
+document's `required` list as written. openapi-typescript needs
+`--default-non-nullable false`, and the failure mode when a future
+contributor regenerates without it is a form that rejects valid input,
+which is exactly the class of unusable-but-compiling the plan's review
+warned about.
+
+Third, the operation criterion is met literally: 38 named functions,
+one per operation, so a document change that renames or removes an
+operation is a compile error at the call site rather than a runtime
+404. With openapi-fetch a removed operation is caught (the path table
+shrinks) but a renamed `operation_id` is not.
+
+Fourth, Angular. Both are framework-independent, which is the honest
+headline: Hey API's default client and openapi-fetch are both plain
+`fetch` wrappers with no framework coupling, and either would work in
+#129's Angular and spartan stack. Beyond that, Hey API additionally
+ships an `@hey-api/client-angular` plugin that generates against
+Angular's `HttpClient`, so `HttpInterceptor`-based auth and error
+handling and `HttpTestingController` keep working, plus a
+`@tanstack/angular-query` plugin; openapi-fetch sits outside
+`HttpClient` entirely, so an Angular app adopting it rebuilds its
+interceptor story in openapi-fetch middleware. The Angular client
+plugin was not exercised in this spike, since it needs `@angular/common`
+as a peer and the spike deliberately installs no framework; it is
+recorded as an option, not as a verified result.
+
+The costs of the choice, stated so the decision is not sold: 53 kB of
+HTTP client is generated into the consuming repository rather than
+installed, and an upgrade rewrites it; the generation step pins
+TypeScript below 7 until Hey API stops using the legacy compiler API;
+and the generated symbol names inherit FastAPI's verbose auto ids,
+which finding 3 says to fix at the source anyway.
+
+**The fallback is not needed.** The plan's recorded fallback was
+handwritten types over the document if both generators failed the
+criteria. Neither did: openapi-typescript would also be a defensible
+choice for a project that preferred no generated runtime, and the seam
+claim holds under either, since the document is CI-drift-checked
+whatever consumes it.
+
+**Before #129 builds on this**, two decisions from the findings:
+declare explicit `operation_id`s on the entity routes (finding 3), and
+decide where an addressed read's `Envelope.entity` is narrowed to its
+write model (finding 4).
+
+### Deviations from the plan
+
+One, and it is an addition rather than a departure. The plan says to
+run both generators against the committed document with pinned versions
+and a checked-in strict-mode consumer fixture, and that is what
+happened. The addition is the `--default-non-nullable false` flag on
+the openapi-typescript command line: without it that candidate fails
+the optional-versus-nullable probe outright, and evaluating it under a
+setting that makes every request body wrong would have compared the
+wrong thing. The default's behaviour is recorded as finding 2 rather
+than hidden by the flag.
+
+### Verification
+
+Run from `vinga-server/`, at the last commit of the milestone. This
+milestone changes no Python, so these pass trivially; they were run
+anyway, which is the only way "trivially" is a fact rather than an
+assumption.
+
+- `uv run ruff check .`: all checks passed.
+- `uv run pytest tests/unit -q`: 2,639 passed, 16 skipped.
+- `uv run pytest tests/integration -q`: 60 passed.
+- The four documentation drift checks, regenerated and diffed against
+  `../docs/reference/`: `config reference`, `conversations schema`,
+  `events reference` and `config openapi` are all clean.
+  `docs/reference/api-openapi.json` is byte-identical and no commit in
+  this milestone touches it, which is what makes the spike a consumer
+  of the seam rather than a participant in it.
+
+In the spike, run from each sub-project directory:
+
+- `npm ci` then `npm run typecheck`: clean in both, under the pinned
+  TypeScript 5.9.3 and again under 7.0.2.
+- `npm run generate` three times each with the output deleted between
+  runs: byte-identical every time.
+- The fixtures were proved to bite rather than trusted. Inverting one
+  nullability claim (`Nullable<AgentConfig, "prompt">` from `false` to
+  `true`) turns the run red with `TS2344`, and restoring it turns it
+  green; and an unused `@ts-expect-error` is itself an error, so all
+  six refusal probes in the Hey API fixture and all eight in the
+  openapi-fetch one are load-bearing rather than decorative.
+
+Not verified here, and not claimed: any of this running against a live
+server. The spike is compile-time by construction, which is what the
+plan asked for; the first real request will be #129's.
