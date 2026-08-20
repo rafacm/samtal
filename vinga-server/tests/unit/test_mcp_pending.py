@@ -293,6 +293,58 @@ async def test_a_deleted_agent_s_grants_stay_pending_until_a_reload() -> None:
         await servers.stop_all()
 
 
+async def test_a_deleted_agent_written_back_is_pending_again() -> None:
+    """The population is the agents this process can serve, and a reload
+    cannot move it.
+
+    An agent deleted from storage and reloaded away is still one this
+    server would talk as, because loading an agent takes a restart. So
+    writing it back, identical to what this process booted with, is a
+    change a reload would apply, and a comparison over whichever agents
+    the current world happens to hold would have stopped seeing it the
+    moment the first reload landed.
+    """
+    booted = config_with(
+        {"tools": entry_data()}, {"assistant": ["tools"], "helper": ["tools"]}
+    )
+    deleted = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    servers = McpServers.build(booted)
+    try:
+        await servers.reload(reading(deleted))
+        assert servers.pending_against(deleted).grants == ()
+
+        assert servers.pending_against(booted).grants == ("helper",)
+    finally:
+        await servers.stop_all()
+
+
+async def test_an_agent_a_reload_installed_is_still_not_a_grant_change() -> None:
+    """The other direction of the same rule. A reload can install grants
+    for an agent this process cannot build a session for, and editing
+    those grants afterwards changes nothing this server would do: the
+    agent arrives at the restart that loads it, with whatever the store
+    says then.
+    """
+    booted = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
+    added = config_with(
+        {"tools": entry_data()}, {"assistant": ["tools"], "helper": ["tools"]}
+    )
+    narrowed = config_with(
+        {"tools": entry_data()},
+        {
+            "assistant": ["tools"],
+            "helper": [{"server": "tools", "tools": ["secret_word"]}],
+        },
+    )
+    servers = McpServers.build(booted)
+    try:
+        await servers.reload(reading(added))
+
+        assert servers.pending_against(narrowed).grants == ()
+    finally:
+        await servers.stop_all()
+
+
 def test_an_agent_only_the_stored_side_knows_is_not_a_grant_change() -> None:
     """It rides the agents' own added row instead: its grants describe a
     world that begins at the restart that adds it, and claiming them as

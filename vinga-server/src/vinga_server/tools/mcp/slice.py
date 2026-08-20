@@ -21,7 +21,7 @@ and answering it connects nothing.
 
 import hashlib
 import json
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -216,7 +216,7 @@ class McpSlice:
             },
         )
 
-    def pending_against(self, candidate: "McpSlice") -> McpPending:
+    def pending_against(self, candidate: "McpSlice", agents: Iterable[str]) -> McpPending:
         """What a candidate composed from a fresh read holds that this
         world does not: entries added, taken away and changed, and the
         agents whose effective grants would move.
@@ -227,15 +227,18 @@ class McpSlice:
         and an operator who writes one and grants it nothing still wants
         to be told that the reload has something to apply.
 
-        The grants are compared for every agent of THIS world, and an
-        agent the candidate does not know answers with the empty grant
-        set, which is `grants_for`'s own rule read here for what it
-        means: a boot-loaded agent deleted from storage keeps talking
-        until a restart, while a reload would revoke its tools now, so
-        that pending revocation stays reported until a reload applies
-        it. An agent only the candidate knows is deliberately not here:
-        it rides the agents' own added row, since its grants describe a
-        world that begins at the restart that adds it.
+        `agents` is whose grants to compare, and it is passed in rather
+        than read off either slice because neither of them holds the
+        right answer. It is the set the server can serve, which a
+        restart fixes and a reload cannot move, while a slice holds the
+        agents of whichever world it is: this one may have had an agent
+        installed that no session can be built for, or have had one
+        dropped that is still talking. Each side of the comparison
+        answers with the empty grant set for an agent it does not know,
+        which is `grants_for`'s own rule read for what it means here: a
+        boot-loaded agent deleted from storage keeps talking until a
+        restart while a reload would revoke its tools now, so that
+        pending revocation stays reported until a reload applies it.
         """
         running, stored = set(self.identities), set(candidate.identities)
         return McpPending(
@@ -250,7 +253,7 @@ class McpSlice:
             ),
             grants=tuple(
                 agent
-                for agent in sorted(self.grants)
+                for agent in sorted(agents)
                 if self.grants_for(agent) != candidate.grants_for(agent)
             ),
         )
