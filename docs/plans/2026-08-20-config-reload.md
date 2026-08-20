@@ -103,11 +103,42 @@ the decision real.
 
 **Where does the generation live?** A new top-level module,
 `generation.py`, beside `composition.py`: a frozen `Generation`
-(the composed `Config`, its `SecretStore`, and, as the milestones
+(its serving `Config`, its `SecretStore`, and, as the milestones
 widen it, the built `AgentProviders` mapping and the filler cache),
 and a `Generations` holder whose `current()` is what every
 convergence point reads and whose swap is a single assignment with
-no await, the `McpServers._install` shape. The holder also owns the
+no await, the `McpServers._install` shape.
+
+**What is a generation's config? An overlay, never the raw stored
+snapshot** (the review's finding 1). Until milestone 4, the freshly
+loaded `Config` describes a world this process must not fully
+serve: `agent_defaults` and the agent set are restart-bound, and
+the effective-value helpers inherit through them
+(`fragments_for_agent` falls back to
+`agent_defaults.prompt_includes`, the provider and filler lookups
+fall back the same way), so serving the stored snapshot whole would
+apply restart-bound changes by inheritance, and an activation could
+index an agent the store has deleted. The prepare phase therefore
+composes the candidate generation's config as an overlay: the
+previous generation's config with exactly the live slices replaced
+from the store. Per milestone, the live slices are: M1, the
+`prompt_fragments` kind and each retained agent's own `prompt` and
+`prompt_includes` fields; M2, additionally each retained agent's
+own `filler` section; M3, additionally the `providers` kind (the
+entries themselves; which entry an agent names remains
+restart-bound); M4, everything in the domain half, at which point
+the overlay becomes the identity function and retires. The overlay
+is validated whole, by the same `check_completeness` and
+`check_references` every composition passes, and an apply whose
+overlay does not compose refuses with the standard sentences:
+deleting a fragment in the store while a restart-bound
+`agent_defaults.prompt_includes` still names it is an apply that
+must wait for the restart, said plainly. The diff mirrors the same
+field-level regimes so an applied live-slice change reports
+nothing and a restart-bound change keeps reporting: the agent
+kind's reload-labeled half grows per milestone (prompt fields at
+M1, the filler section at M2) beside the grants it already has,
+and `agent_defaults` stays restart-labeled whole until M4. The holder also owns the
 one operator-visible generation counter: #193's diff guard reads it
 (the mark moves here from `McpServers`, whose own counter becomes
 an internal detail or is dropped), and every apply advances it
@@ -349,9 +380,16 @@ session across a reload), and the drift-check pins.
   before the apply keeps its know-how, one activated after
   assembles the new text, driven through the public runtime
   harness); the prompt preview and the diff agree with activation
-  after an apply (the free-win claim, pinned); integration: edit a
-  fragment, apply, same socket, next activation speaks the new
-  text; the diff empties for the prompt half after apply.
+  after an apply (the free-win claim, pinned); the overlay's
+  inheritance paths: an `agent_defaults.prompt_includes` edit does
+  not reach an inheriting agent's activation and stays pending in
+  the diff, an agent's own prompt edit does and empties, an agent
+  added or deleted in the store changes no activation before M4,
+  and an overlay that no longer composes (fragment deleted, a
+  restart-bound reference remains) refuses the apply whole;
+  integration: edit a fragment, apply, same socket, next
+  activation speaks the new text; the diff empties for the prompt
+  half after apply.
 - **M2**: clip reuse pinned by object identity across an apply
   that edits only a prompt; a phrase edit re-synthesizes only that
   agent; synthesis failure degrades and reports; a session's
@@ -465,6 +503,13 @@ an overlay of only that milestone's live slices onto the previous
 generation, preserving the servable agent set and restart-bound
 defaults until M4, with field-level regime splits in the diff and
 tests for the inheritance paths.
+
+*Resolution.* Adopted. The new "What is a generation's config"
+decision defines the overlay, its per-milestone live slices, its
+whole re-validation with the honest refusal for slice
+interactions, its retirement at M4, and the matching field-level
+regimes in the diff; the M1 test bullet names the inheritance,
+added-agent, deleted-agent, and overlay-refusal cases.
 
 **2 (P1). The replacement counter cannot protect the diff across
 the first swap.** Advancing the counter only after the last swap
