@@ -627,12 +627,17 @@ session across a reload), and the drift-check pins.
   closed by their providers' `close()`, and faster-whisper and
   Piper release their held engine and voice references; local-model
   double residency is not asserted numerically, but the
-  close-called-once property is; finding 5's binding-event cases:
-  a rejected device id, a device with no binding, a disconnect
-  before hello (admitted, never bound, removed cleanly), and a
-  reload between admission and runtime construction (the session
-  binds the generation the factory read, and the count follows
-  it).
+  close-called-once property is; the binding-event cases (round
+  2's finding 5, corrected by round 3's finding 7): the
+  never-bound cases are a rejected device id, a device with no
+  binding, and a cancellation during binding resolution, each
+  admitted and removed cleanly with no generation held; a
+  disconnect before hello is a bound case, because the runtime is
+  constructed before the hello, and its test proves the
+  generation is released although the conversation cleanup block
+  never ran; and a reload between admission and runtime
+  construction binds the generation the factory read, with the
+  count following it.
 - **M4**: bind a device to an agent added by apply and see it
   served at the next check-in with the binding notice, no restart;
   delete an agent with a live session, apply, the session finishes
@@ -1161,3 +1166,8 @@ It is reclassified; the never-bound cases are an invalid MAC, no
 binding, and cancellation during binding resolution; and a test
 proves the pre-hello runtime's generation is released although
 the conversation cleanup block never ran.
+
+*Resolution.* Adopted. The M3 test bullet reclassifies the case
+and carries the pre-hello release proof; the never-bound cases
+are the invalid MAC, the missing binding, and cancellation during
+binding resolution.
