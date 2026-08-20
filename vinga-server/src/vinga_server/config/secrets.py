@@ -68,6 +68,19 @@ _PAYLOAD_VERSION = 1
 EntityKind = Literal["provider", "mcp_server"]
 
 
+def provider_identity(stage: str, name: str) -> str:
+    """A provider's identity: its stage and its name together, since two
+    stages may hold the same name.
+
+    One home for the string, because two callers have to agree about it:
+    the location a stored secret is written under, below, and anything
+    asking this store what it holds for that provider. A second spelling
+    would ask about an entity nothing has ever written to, and the empty
+    answer that comes back looks exactly like nothing stored.
+    """
+    return f"{stage}.{name}"
+
+
 @dataclass(frozen=True)
 class SecretLocation:
     """Where a stored secret belongs: an entity kind, that entity's
@@ -85,7 +98,7 @@ class SecretLocation:
     def provider(cls, stage: str, name: str, slot: str) -> "SecretLocation":
         """A provider is identified by its stage and its name together,
         everywhere it is named."""
-        return cls(kind="provider", identity=f"{stage}.{name}", slot=slot)
+        return cls(kind="provider", identity=provider_identity(stage, name), slot=slot)
 
     @classmethod
     def mcp_server(cls, name: str, slot: str) -> "SecretLocation":
