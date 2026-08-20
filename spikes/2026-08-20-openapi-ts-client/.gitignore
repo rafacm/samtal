@@ -1,0 +1,3 @@
+# Installed by `npm ci` from the committed lockfiles. The generated
+# clients are committed; what generates them is not.
+node_modules/
