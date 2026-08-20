@@ -31,10 +31,13 @@ the decision site did, which is what the four sanitization sites next
 door are held to from the other end.
 """
 
+import contextlib
 import logging
+import traceback
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import ClassVar
+from pathlib import Path
+from typing import Any, ClassVar, cast
 
 import pytest
 
@@ -732,3 +735,255 @@ def test_a_failing_log_taps_exception_names_nothing_either(
     assert consumer.seen[0].payload["event"] == "checked"
     assert SENTINEL not in consumer.rendered()
     assert SENTINEL not in both_formats(caplog)
+
+
+# --- and what the refusal itself carries as an object ------------------
+#
+# Strict mode is the one place anything leaves this module, and half the
+# converted sites emit from inside an `except` arm, because that is
+# where a failure is known. Python attaches whatever exception is being
+# handled to any exception raised while it is, so a refusal about a
+# thunk this module deliberately never looked at used to arrive holding
+# the original under `__context__`: its message, its own chain, and
+# everything they render as.
+#
+# The tests below assert the object rather than the text. `raise ...
+# from None` would pass a text-only check and fail these, which is the
+# distinction that matters: it suppresses the default traceback's
+# printing of a context that is still attached and still reachable from
+# anything that walks the chain.
+
+
+def raising_variant() -> Variant:
+    """A construction that refuses because the class name it is handed
+    is not one: `ClassName.of` is what every converted catch site calls,
+    and `type()` accepts any string as a class name."""
+    return ConversationsDropped(session=SessionId(SENTINEL))
+
+
+def chained() -> None:
+    """One emit, made from inside a handler for an exception carrying
+    the sentinel in its message, its class name and its own cause."""
+    try:
+        try:
+            raise ValueError(f"while reading {SENTINEL}")
+        except ValueError as cause:
+            raise type(SENTINEL, (Exception,), {})(SENTINEL) from cause
+    except Exception:
+        ServerEvents(STORE_CHANNEL).emit(raising_variant)
+
+
+def unchained(error: BaseException) -> str:
+    """Everything an exception carries as an object, walked: both chain
+    links to the bottom, and the traceback as it would be printed."""
+    parts = [str(error), repr(error), repr(error.args)]
+    seen = error
+    while True:
+        following = seen.__cause__ or seen.__context__
+        if following is None:
+            break
+        parts += [str(following), repr(following)]
+        seen = following
+    parts.append("".join(traceback.format_exception(error)))
+    return "\n".join(parts)
+
+
+def test_a_strict_refusal_carries_neither_a_cause_nor_a_context() -> None:
+    """Both, by identity. A context that is merely suppressed from
+    rendering is still an object a consumer, a reporter or a debugger
+    reaches through one attribute."""
+    events.set_enforcement(events.STRICT)
+
+    with pytest.raises(EventSchemaError) as raised:
+        chained()
+
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
+    assert SENTINEL not in unchained(raised.value)
+
+
+def test_a_forgiving_recovery_from_inside_a_handler_says_nothing_either(
+    caplog: pytest.LogCaptureFixture, tap: Tap
+) -> None:
+    """The other mode on the same path: nothing is raised, so nothing
+    can carry a context, and the recovery event and its complaint are
+    the fixed pair."""
+    events.set_enforcement(events.FORGIVING)
+
+    with caplog.at_level("DEBUG"):
+        chained()
+
+    (complaint,) = [one for one in caplog.records if not hasattr(one, "event")]
+    assert complaint.args == (UNBUILT_LABEL, "construction_failed")
+    assert SENTINEL not in both_formats(caplog)
+    assert SENTINEL not in tap.rendered()
+
+
+class TrackSpy:
+    """A capture's own surface, which is the third place a value could
+    surface: the decision track is written from the payload before the
+    record exists."""
+
+    def __init__(self) -> None:
+        self.seen: list[dict[str, object]] = []
+
+    def event(self, payload: dict[str, object], now: float) -> None:
+        self.seen.append(payload)
+
+    def vad(self, speech_ms: float, listening: bool, replying: bool, now: float) -> None:
+        return None
+
+    def dropped(self, reason: str, now: float) -> None:
+        return None
+
+
+def test_a_conversations_refusal_reaches_no_capture_either(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The session scope, where a capture is attached: forgiving, since
+    strict dispatches nothing at all, so what is asserted is that the
+    recovery reached the track and the sentinel did not."""
+    events.set_enforcement(events.FORGIVING)
+    session = SessionEvents("alpha", clock=lambda: 1.0)
+    track = TrackSpy()
+    session.attach_capture(track)
+
+    with caplog.at_level("DEBUG"):
+        try:
+            raise type(SENTINEL, (Exception,), {})(SENTINEL)
+        except Exception:
+            session.emit(
+                lambda: Heard(
+                    agent=Identifier("assistant"),
+                    duration_s=Real(1.0),
+                    language=LanguageTag(SENTINEL),
+                )
+            )
+
+    assert [one["event"] for one in track.seen] == [SCHEMA_VIOLATION]
+    assert SENTINEL not in repr(track.seen)
+    assert SENTINEL not in both_formats(caplog)
+
+
+# --- the same claim, on the production paths that make it -------------
+#
+# The emitter's property is asserted above on a scratch declaration,
+# which is where a property of the machinery belongs. What is asserted
+# here is that real converted sites have it, because the shape that
+# leaks is a site's rather than the emitter's: an emit made while an
+# exception is being handled. Twenty-nine sites in the package can do
+# it, in two shapes, and one of each is driven.
+#
+# Every one plants an exception whose class name IS the sentinel, which
+# is what makes the refusal happen at all: `ClassName.of` is what a
+# catch site hands the failure to, and a name that is not a Python
+# identifier is one it refuses.
+
+
+def hostile() -> BaseException:
+    """A failure carrying the sentinel in every place one can: its class
+    name, its message, and the cause behind it."""
+    try:
+        try:
+            raise ValueError(f"while reading {SENTINEL}")
+        except ValueError as cause:
+            raise type(SENTINEL, (Exception,), {})(SENTINEL) from cause
+    except Exception as raised:
+        return raised
+
+
+def carries_nothing(raised: BaseException, caplog: pytest.LogCaptureFixture,
+                    consumer: Tap) -> None:
+    """One escaping refusal, held to the whole claim: no cause, no
+    context, and the sentinel in no record, no argument, no shipped
+    format and no consumer's copy."""
+    assert isinstance(raised, EventSchemaError)
+    assert raised.__cause__ is None
+    assert raised.__context__ is None
+    assert SENTINEL not in unchained(raised)
+    assert SENTINEL not in both_formats(caplog)
+    assert SENTINEL not in consumer.rendered()
+
+
+async def test_a_filler_that_will_not_synthesize_refuses_carrying_nothing(
+    caplog: pytest.LogCaptureFixture, tap: Tap
+) -> None:
+    """The first shape: an emit lexically inside the `except` arm, in a
+    library the boot calls. `build_agent_fillers` catches around a whole
+    synthesis, so what it holds is whatever a voice provider or its
+    transport raised."""
+    from dataclasses import replace as replace_field
+
+    from tests.support.configs import masked_config
+    from vinga_server.filler import build_agent_fillers
+    from vinga_server.providers import build_agent_providers
+
+    class HostileTts:
+        sample_rate = 24000
+
+        def synthesize(self, text: str) -> object:
+            raise hostile()
+
+    events.set_enforcement(events.STRICT)
+    config = masked_config()
+    providers = build_agent_providers(config)
+    providers["poet"] = replace_field(providers["poet"], tts=cast(Any, HostileTts()))
+
+    with caplog.at_level("DEBUG"), pytest.raises(EventSchemaError) as raised:
+        await build_agent_fillers(config, providers)
+
+    carries_nothing(raised.value, caplog, tap)
+
+
+def test_a_failing_api_request_refuses_carrying_nothing(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, tap: Tap
+) -> None:
+    """The same shape on a request path, where what the handler caught
+    is whatever a request put in front of it."""
+    from fastapi.testclient import TestClient
+
+    from vinga_server.config.api import build_api
+
+    token = "test-api-token-" + "0123456789abcdef" * 2
+    api = build_api(token, tmp_path / "db")
+
+    @api.get("/boom")
+    def endpoint() -> dict[str, str]:
+        raise hostile()
+
+    events.set_enforcement(events.STRICT)
+
+    with caplog.at_level("DEBUG"), pytest.raises(EventSchemaError) as raised:
+        TestClient(api).get("/boom", headers={"Authorization": f"Bearer {token}"})
+
+    carries_nothing(raised.value, caplog, tap)
+
+
+def test_a_failed_capture_write_refuses_carrying_nothing(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, tap: Tap
+) -> None:
+    """The second shape: the emit is not in the arm at all. `_add`
+    catches and calls `_disable`, which emits, so the exception is being
+    handled a frame further up than the site that reports it."""
+    from tests.support.stores import CAPTURE_MANIFEST, store, tone
+
+    events.set_enforcement(events.STRICT)
+    opened = 100.0
+    capture = store(tmp_path).open("s1", opened, CAPTURE_MANIFEST)
+    assert capture is not None
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise hostile()
+
+    capture._mic.add = refuse  # type: ignore[method-assign]
+
+    try:
+        with caplog.at_level("DEBUG"), pytest.raises(EventSchemaError) as raised:
+            capture.microphone(tone(100, 1000), opened)
+    finally:
+        # `_disable` raises before it closes, since the emit is the first
+        # thing it does; the files are this test's to shut.
+        with contextlib.suppress(Exception):
+            capture.close()
+
+    carries_nothing(raised.value, caplog, tap)
