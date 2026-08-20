@@ -251,23 +251,24 @@ async def test_the_memory_read_happens_off_the_event_loop(
 
 
 async def test_a_session_without_memory_reads_nothing_at_all() -> None:
-    """No store means no thread hop and no memory block: the cached
-    half is the whole prompt."""
+    """No store means no thread hop and no memory block: the half the
+    activation assembled is the whole prompt."""
+    config = base_config()
     llm = RecordingLlm()
-    session = session_with(CountingServers(), {"poet": llm}, memory=None)
+    servers = CountingServers()
+    session = session_with(servers, {"poet": llm}, memory=None, config=config)
 
     await run_reply(session, "hello")
 
-    # White-box, and the one reach-in in this file: the design guide
-    # names it, and what
-    # public observation cannot establish is that the text the model was
-    # sent IS the cached half rather than a rebuild that happens to
-    # match it. Nothing reports the cached text: the event carries sizes
-    # and no words, deliberately, and the operator-facing route
-    # assembles a fresh preview that reads memory as a new session
-    # would. Identity is the claim, so identity is what is asserted.
-    assert session.runtime._know_how is not None
-    assert llm.systems == [session.runtime._know_how.text]
+    # Nothing was appended to the half, and the half was assembled once:
+    # a rebuild is what asks the registry, and it was asked at the
+    # activation and not again.
+    assert llm.systems == [
+        know_how(
+            config.prompt_for_agent("poet"), config.fragments_for_agent("poet")
+        ).text
+    ]
+    assert servers.asked == ["poet"]
 
 
 # The event

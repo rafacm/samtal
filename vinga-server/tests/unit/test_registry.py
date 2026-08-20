@@ -12,7 +12,6 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from tests.support.apps import entered_app
 from tests.support.configs import config_with_agent
 from tests.support.wire import connect, shake_hands
 from vinga_server.app import create_app
@@ -132,12 +131,19 @@ def test_a_bad_token_is_refused_before_capacity_is_even_considered(
 
 
 def test_the_cap_is_configurable() -> None:
+    """A cap of one is the default's neighbour and proves the refusal
+    exists; a configured three has to be three conversations and a
+    fourth turned away, which is what the number means to whoever set
+    it."""
     config = config_with_agent()
     config.server.limits.max_sessions = 3
-    with entered_app(config) as (app, _):
-        # White-box: the cap is a number a registry refuses at, and
-        # what a configured one does is observable only by opening that
-        # many sessions plus one. The refusal itself is driven above
-        # against the default; this says the configured value is the
-        # one the registry got.
-        assert app.state.composition.sessions._max_sessions == 3
+    with TestClient(create_app(config)) as client:
+        with connect(client) as first:
+            shake_hands(first)
+            with connect(client) as second:
+                shake_hands(second)
+                with connect(client) as third:
+                    shake_hands(third)
+                    with pytest.raises(WebSocketDisconnect):
+                        with connect(client):
+                            pass
