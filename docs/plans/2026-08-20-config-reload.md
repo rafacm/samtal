@@ -327,15 +327,19 @@ session reports that binding to the registry in the same
 synchronous step, so admission and binding are two recorded
 states: `remove` releases the generation for a bound session and
 is a no-op on that axis for an admitted-but-never-bound one. From
-M4 the handoff is pinned end to end (round 2's finding 4): the
-session captures one generation on the event loop after the
-awaited bindings resolve, filters the resolved agent list against
-that exact generation, and passes the same object into runtime
-construction and registry accounting, so a reload that deletes an
-agent between the binding read and the factory call cannot
-produce a list the serving generation cannot serve; the barrier
-test that forces exactly that interleaving is named in M4's
-tests. The
+M4 the handoff is pinned end to end (round 2's finding 4, made
+exact by round 3's finding 3): `DeviceBindings` returns the raw
+bound and default names, unclassified, because its own loaded-set
+classification would be a second generation read at a different
+moment; the session captures one generation on the event loop
+after that await, classifies the raw names against it, constructs
+the runtime from the same object, and registers its lease with
+the registry synchronously before yielding control, with the
+release owned as an explicitly awaited path rather than a
+fire-and-forget. A reload that adds or deletes an agent between
+the binding read and the capture therefore lands wholly before or
+wholly after the session's world; both directions are barrier
+cases in M4's tests. The
 `SessionRegistry`, the only object that knows the whole session
 set, counts bound sessions per generation and disposes a
 generation that is neither current nor held by any bound session,
@@ -1071,6 +1075,13 @@ await, classifies against it, constructs from the same object,
 and synchronously registers its lease before yielding, with the
 release owned explicitly and both an addition and a deletion
 tested at the barrier. Round 2's finding 4 partially resolved.
+
+*Resolution.* Adopted. The binding decision now specifies the
+interface: raw names from `DeviceBindings`, one generation
+captured after the await, classification against it, construction
+from the same object, the lease registered synchronously before
+yielding, the release owned as an awaited path, and both barrier
+directions tested.
 
 **4 (P1). Immediate ownership is not achievable through the
 current provider builder.** `build_provider` constructs then
