@@ -1,15 +1,22 @@
 """The descriptor registry, held to the surfaces it describes.
 
 The registry is only worth having if it says what the rest of the
-package says. Three things are pinned here while the consumers are
-still being moved onto it: that every descriptor names a real domain
-key, that the command it carries reaches the sentence the loader
-refuses a moved section with, and that the two tiers the documentation
-renders are the two tiers the registry declares. The fourth is the
-decision that stored secrets hang on exactly two kinds, which is a
-`Literal` in one place and a descriptor fact in another.
+package says. Four relations are pinned here: that every descriptor
+names a real domain key, that the command it carries reaches the
+sentence the loader refuses a moved section with, that the two tiers
+the documentation renders are the two tiers the registry declares, and
+that stored secrets hang on exactly two kinds, which is a `Literal` in
+one place and a descriptor fact in another.
+
+The fifth is the module's own claim, and since #210 it is a claim
+rather than an aspiration: a descriptor is whole the moment this module
+is imported, with nothing installed onto it afterwards by a consumer.
 """
 
+import dataclasses
+import json
+import subprocess
+import sys
 from pathlib import Path
 from typing import get_args
 
@@ -95,3 +102,88 @@ def test_exactly_two_kinds_can_hold_a_stored_secret() -> None:
     }
 
     assert holders == set(get_args(EntityKind))
+
+
+# What the registry may pull in: the models it declares its kinds
+# against, and what those reach in turn. Named one by one rather than
+# matched on a prefix, because each of the consumers that are absent is
+# a separate way for the module to stop being readable on its own.
+ALLOWED_IMPORTS = frozenset(
+    {
+        "vinga_server",
+        "vinga_server.config",
+        "vinga_server.config.entities",
+        "vinga_server.config.loader",
+        "vinga_server.config.models",
+        "vinga_server.runtime",
+        "vinga_server.runtime.prompt",
+        "vinga_server.tools",
+        "vinga_server.tools.names",
+    }
+)
+
+# Run in a child interpreter that has imported the registry and nothing
+# else. `-B` for the reason `test_onboarding_import_weight.py` gives: a
+# child that writes bytecode back hands the next command the stale cache
+# `conftest.py` just cleared.
+_ALONE = """
+import json
+import sys
+from dataclasses import fields
+
+import vinga_server.config.entities as entities
+
+print(json.dumps({
+    "loaded": sorted(name for name in sys.modules if name.startswith("vinga_server")),
+    "unset": {
+        entry.name: sorted(
+            field.name for field in fields(entry) if getattr(entry, field.name) is None
+        )
+        for entry in entities.ENTITIES
+    },
+}))
+"""
+
+
+def _registry_imported_alone() -> dict[str, object]:
+    finished = subprocess.run(
+        [sys.executable, "-B", "-c", _ALONE], capture_output=True, text=True, check=True
+    )
+    return json.loads(finished.stdout)
+
+
+def test_the_registry_is_whole_on_its_own() -> None:
+    """Importing the registry loads none of its consumers, and a
+    descriptor holds the same facts there as it does here, where the
+    whole package is loaded.
+
+    The second half is the one that was false until #210: `store.py`,
+    `views.py`, `cli.py` and `writes.py` installed forty-four callables
+    and five sentences onto these descriptors at their own import,
+    through a `fill` that reached past the frozen dataclass with
+    `object.__setattr__`. A reader could not tell what a descriptor held
+    without knowing what had been imported, and `docgen` rendered the
+    committed reference from a registry four other modules were still
+    allowed to write to. Compared as which facts are unset, because that
+    is what filling one changed and it survives a trip through JSON.
+
+    The four are imported here by name rather than relied on to be
+    loaded by whatever else the run collected, since which of them a
+    single-file run has imported is exactly the thing that used to
+    decide what a descriptor held.
+    """
+    import vinga_server.config.api  # noqa: F401
+    import vinga_server.config.cli  # noqa: F401
+    import vinga_server.config.store  # noqa: F401
+    import vinga_server.config.views  # noqa: F401
+    import vinga_server.config.writes  # noqa: F401
+
+    alone = _registry_imported_alone()
+
+    assert frozenset(alone["loaded"]) == ALLOWED_IMPORTS
+    assert alone["unset"] == {
+        entry.name: sorted(
+            field.name for field in dataclasses.fields(entry) if getattr(entry, field.name) is None
+        )
+        for entry in entities.ENTITIES
+    }
