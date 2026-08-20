@@ -75,7 +75,11 @@ async def test_a_slow_reply_is_masked_at_the_threshold(
     assert played.phrase_index == 0
     started = only(caplog, "speaking_started")
     replied = only(caplog, "replied")
+    # The reply arrived and was spoken: the device was told the
+    # sentence, and `replied` counts the sentences whose audio went out,
+    # so the pair says both halves of what the history read used to.
     assert spoken(cast(Any, session.websocket))[-1] == "Recovered now."
+    assert replied.sentences == 1
     # The filler is what started the speaking, and the reply followed.
     order = [caplog.records.index(record) for record in (played, started, replied)]
     assert order == sorted(order)
@@ -90,6 +94,7 @@ async def test_a_fast_reply_plays_no_filler(caplog: pytest.LogCaptureFixture) ->
     assert events(caplog, "filler_played") == []
     only(caplog, "speaking_started")
     assert spoken(cast(Any, session.websocket))[-1] == "POET heard hello."
+    assert only(caplog, "replied").sentences == 1
     # The timer was stood down with the reply, not left running.
     assert mask(session).armed is False
 
@@ -180,7 +185,11 @@ async def test_a_handover_from_a_fillerless_agent_still_masks_the_new_voice(
     played = only(caplog, "filler_played")
     assert played.agent == "tutor"
     only(caplog, "speaking_started")
+    # The reply arrived and was spoken: the device was told the
+    # sentence, and `replied` counts the sentences whose audio went out,
+    # so the pair says both halves of what the history read used to.
     assert spoken(cast(Any, session.websocket))[-1] == "Recovered now."
+    assert only(caplog, "replied").sentences == 1
 
 
 async def test_a_fire_on_an_agent_without_clips_quietly_plays_nothing(
@@ -197,7 +206,11 @@ async def test_a_fire_on_an_agent_without_clips_quietly_plays_nothing(
 
     assert events(caplog, "filler_played") == []
     only(caplog, "speaking_started")
+    # The reply arrived and was spoken: the device was told the
+    # sentence, and `replied` counts the sentences whose audio went out,
+    # so the pair says both halves of what the history read used to.
     assert spoken(cast(Any, session.websocket))[-1] == "Recovered now."
+    assert only(caplog, "replied").sentences == 1
     assert mask(session).armed is False
     assert mask(session).sounding is False
     assert mask(session).fires == 0
@@ -231,7 +244,11 @@ async def test_a_fire_into_live_user_speech_is_skipped(
     assert skipped.reason == "user_speaking"
     assert skipped.speech_ms > 0
     assert events(caplog, "filler_played") == []
+    # The reply arrived and was spoken: the device was told the
+    # sentence, and `replied` counts the sentences whose audio went out,
+    # so the pair says both halves of what the history read used to.
     assert spoken(cast(Any, session.websocket))[-1] == "Recovered now."
+    assert only(caplog, "replied").sentences == 1
     # The skip consumed no phrase and left no state behind.
     assert mask(session).armed is False
     assert mask(session).fires == 0
@@ -263,7 +280,11 @@ async def test_a_fire_during_a_barge_in_confirmation_is_skipped(
     skipped = only(caplog, "filler_skipped")
     assert skipped.reason == "barge_in_pending"
     assert events(caplog, "filler_played") == []
+    # The reply arrived and was spoken: the device was told the
+    # sentence, and `replied` counts the sentences whose audio went out,
+    # so the pair says both halves of what the history read used to.
     assert spoken(cast(Any, session.websocket))[-1] == "Recovered now."
+    assert only(caplog, "replied").sentences == 1
     assert mask(session).armed is False
     assert mask(session).fires == 0
 
