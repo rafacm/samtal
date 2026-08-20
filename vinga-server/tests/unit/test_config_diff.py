@@ -20,7 +20,13 @@ from tests.support.configs import config_with
 from tests.support.tools_mcp import entry_data
 from vinga_server.config import Config
 from vinga_server.config.boot import BootConfig
-from vinga_server.config.diff import APPLIES, GRANTS_APPLY, McpPending, config_diff
+from vinga_server.config.diff import (
+    APPLIES,
+    GRANTS_APPLY,
+    PROMPT_APPLY,
+    McpPending,
+    config_diff,
+)
 from vinga_server.config.models import DOMAIN_KEYS
 from vinga_server.config.responses import Applies, ConfigDiff, LiveKind
 from vinga_server.config.secrets import SecretLocation, SecretStore, encrypt, generate_key
@@ -181,14 +187,53 @@ def test_an_agent_that_arrives_or_goes_is_named() -> None:
     assert answer.agents.changed == ()
 
 
-def test_an_edited_agent_prompt_is_pending_a_restart() -> None:
+def test_an_edited_agent_prompt_is_pending_a_reload() -> None:
+    """A prompt is assembled at an activation, so a reload puts the new
+    text in front of the next one. It is therefore reported under the
+    agent's prompt half rather than in the restart-bound lists, exactly
+    as a grants-only edit is reported under the grants."""
     running = config_with(agents={"assistant": {"prompt": "A"}})
     stored = config_with(agents={"assistant": {"prompt": "Something else"}})
 
     answer = diff_of(running, stored)
 
-    assert answer.agents.changed == ("assistant",)
+    assert answer.agents.changed == ()
+    assert answer.agents.prompt.changed == ("assistant",)
+    assert answer.agents.prompt.applies is PROMPT_APPLY
+    assert answer.agents.prompt.applies is Applies.RELOAD
     assert answer.agents.applies is Applies.RESTART
+
+
+def test_an_edited_include_list_rides_the_prompt_half_too() -> None:
+    """`prompt_includes` names the shared fragments an assembly injects,
+    which the same activation resolves, so it converges where the prompt
+    does."""
+    running = config_with(
+        prompt_fragments={"house": {"text": "The house is quiet."}},
+        agents={"assistant": {"prompt": "A"}},
+    )
+    stored = config_with(
+        prompt_fragments={"house": {"text": "The house is quiet."}},
+        agents={"assistant": {"prompt": "A", "prompt_includes": ["house"]}},
+    )
+
+    answer = diff_of(running, stored)
+
+    assert answer.agents.changed == ()
+    assert answer.agents.prompt.changed == ("assistant",)
+
+
+def test_a_fragment_edit_is_pending_a_reload_and_names_no_agent() -> None:
+    """The fragment is its own kind, and a reload applies it whole. What
+    it is included by is not reported against every agent that carries
+    it: the change has one home and that is where it is named."""
+    running = config_with(prompt_fragments={"house": {"text": "Quiet."}})
+    stored = config_with(prompt_fragments={"house": {"text": "Loud."}})
+
+    answer = diff_of(running, stored)
+
+    assert answer.prompt_fragments.changed == ("house",)
+    assert answer.prompt_fragments.applies is Applies.RELOAD
 
 
 # The agent's two regimes
@@ -214,13 +259,14 @@ def test_a_grants_only_edit_is_not_claimed_pending_restart() -> None:
     assert answer.agents.removed == ()
 
 
-def test_an_edit_beside_the_grants_is_still_pending_a_restart() -> None:
-    """The exclusion is one field and not a general softening: the rest
-    of the entry converges where it always did."""
+def test_an_edit_beside_the_reloaded_fields_is_still_pending_a_restart() -> None:
+    """The exclusion is a named list of fields and not a general
+    softening: the rest of the entry converges where it always did. The
+    filler section is the case, since it is what a start synthesizes."""
     running = granting("tools")
     stored = config_with(
         mcp_servers={"tools": entry_data()},
-        agents={"assistant": {"prompt": "Something else", "mcp": []}},
+        agents={"assistant": {"prompt": "A", "mcp": [], "filler": {"enabled": False}}},
     )
 
     assert diff_of(running, stored).agents.changed == ("assistant",)
