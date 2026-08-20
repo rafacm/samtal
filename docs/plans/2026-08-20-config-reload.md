@@ -535,7 +535,7 @@ in the same change as the prose that feeds them.
   PR #229.
 - [x] **[M2: fillers, re-synthesized with clip
   reuse](2026-08-20-config-reload-implementation.md#m2-fillers-re-synthesized-with-clip-reuse).**
-  (PR TBD) The filler
+  (PR #230) The filler
   cache becomes a generation value bound per session; prepare
   re-synthesizes only agents whose reuse key (effective filler
   section plus effective TTS entry identity) changed, reusing
