@@ -140,6 +140,27 @@ class DeviceBindings:
         than a live one and a fallback one that could come to disagree."""
         return cls(config, None)
 
+    @property
+    def snapshot_authoritative(self) -> bool:
+        """Whether there is no database behind this view, so what this
+        server was handed is the whole truth there is.
+
+        Decided once, at the open, and asked here rather than decided a
+        second time somewhere else: which mode a server is in is a fact
+        about how it was composed, and two places working it out is two
+        places that can come to disagree. What reads it is the
+        configuration API, whose comparison and whose apply both span a
+        store and a running world and have nothing to span in this mode,
+        and whose device writes can then say only that the write is
+        stored.
+
+        Named for what it asserts rather than for what is missing: the
+        snapshot is authoritative here, which is why the answers this
+        server gives about bindings are still exactly right. It is the
+        answers about a STORE that have nowhere to come from.
+        """
+        return self._engine is None
+
     def dispose(self) -> None:
         """Close the connection pool. Called from the app's lifespan, so
         a server on its way out leaves no file handle behind."""
