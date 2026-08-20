@@ -65,6 +65,16 @@ class McpServers:
         # invariant where every implementation of the protocol must fit.
         self._managers: Mapping[str, McpManager] = managers
         self._configured = configured if configured is not None else McpSlice()
+        # The agents this process can serve, read once off the world it
+        # was built with and never replaced. A restart is what loads an
+        # agent, so this set is fixed for the life of the process while
+        # the slice above is not: a reload installs grants for agents no
+        # session can be built for, and drops agents that are still
+        # talking. Which is why the pending read reports the grants of
+        # exactly these: it answers what this server would do
+        # differently, and an agent it could not talk as either way is
+        # not part of that.
+        self._agents = tuple(self._configured.grants)
         # Which running entries have a more specific entry inside their
         # namespace, and which of their tools have already been reported
         # unreachable because of it. Both are decided by the manager set,
@@ -518,6 +528,13 @@ class McpServers:
         reload has already applied, which is the one thing an answer
         about what is pending must not do.
 
+        The grants are reported for the agents this process can serve,
+        which is the set it booted with rather than the set the slice
+        holds now. A reload cannot change which agents exist here, only
+        what they may reach, so an agent it installed is one no session
+        can be built for until a restart, and an agent it dropped is one
+        this server may still be talking as.
+
         Nothing is connected, built or started, and nothing about a
         manager is read. The candidate is composed into the same slice a
         reload would install, and the two are compared as
@@ -526,7 +543,7 @@ class McpServers:
         nothing else: not what an entry connects to, not what is stored
         for it, and not how either world is held.
         """
-        return self._configured.pending_against(McpSlice.of(config, secrets))
+        return self._configured.pending_against(McpSlice.of(config, secrets), self._agents)
 
     async def reload_result(
         self, read: Callable[[], tuple[Config, SecretStore | None]]
