@@ -26,6 +26,17 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   generated event reference keeps its counts and its content; its
   sections appear where the catalog declares them.
 
+- **The configuration API's entity routes are written out, and the
+  entity registry holds only facts** (#210). The twenty-two routes for
+  providers, MCP servers, prompt fragments, agents and the agent
+  defaults were synthesized from tuples on the registry by a factory
+  that set a generated function's name, docstring and signature; each is
+  now an ordinary route function carrying its own operation id, summary,
+  description, response model and refusals. `docs/reference/api-openapi.json`
+  regenerates byte-identically, which is the proof that the two
+  spellings describe one API, and the CLI's rendered output and every
+  acknowledgement are unchanged.
+
 ### Fixed
 
 - **A failing event tap no longer names the exception it raised**
@@ -45,6 +56,19 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   pins that restated templates, argument tuples and field sets retire
   with them; the no-leak sentinel suites are kept whole and rewritten
   against the typed path.
+
+- **The entity descriptors' eleven behavior hooks and the import-time
+  mutation that installed them** (#210). Row mappings and write checks
+  are a private typed table inside the repository, which both installed
+  and consumed them; the masked body builder, the summary lines and the
+  acknowledgement sentences are called directly by the modules that own
+  them; and the routes and the CLI's break-glass paths call the
+  repository's typed methods by name. `fill()`, its `object.__setattr__`
+  and the `Callable[..., object]` alias go with them, so a descriptor is
+  whole the moment it is declared and no module has to be imported
+  before another for it to be. `notice` stays a descriptor fact, since
+  when a write takes effect is data about the kind; `fields_in_help` had
+  no consumer and is deleted.
 
 ## 2026-08-19
 
