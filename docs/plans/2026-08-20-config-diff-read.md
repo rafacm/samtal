@@ -95,8 +95,13 @@ plaintext still changes the fingerprint, and the diff reports the
 entity as changed. That is the store's own documented posture
 ("rebuilding is the safe direction to be wrong in") and it matches
 the MCP reload, whose `same_as` treats a rewritten secret as a
-change for the same reason. "Changed" therefore means "written
-since boot", which is the operationally useful sentence anyway.
+change for the same reason. What "changed" means, and what the API
+description says, is that the stored state differs from the
+comparison baseline: an edit changed back before anyone looked
+produces no diff, and a rewritten stored secret counts as different
+because its ciphertext fingerprint changes even when the plaintext
+may not have. State comparison, not write history, with the one
+place the two blur documented rather than fought.
 
 **How is the agent kind kept honest?** An agent entry spans two
 regimes: its `mcp` grants are applied by the MCP reload (the
@@ -413,7 +418,8 @@ definition (grep for the defaults-then-own rule cited in review).
   new failure vocabulary is invented.
 - **Fingerprint semantics surprise an operator** (a re-set of the
   same value reports changed). Documented in the API description
-  sentence for the read: changed means written since boot.
+  sentence for the read: changed means the stored state differs
+  from the baseline, and a rewritten secret counts as different.
 - **M1 lands machinery no route reaches yet.** Accepted for one
   milestone by design: publishing a partial schema was the worse
   trade (findings 2 and 6), the new interfaces are exercised by
@@ -543,3 +549,9 @@ equality reports state difference, not write history: an edit
 changed back produces no diff, and only re-encrypted secrets retain
 history, accidentally. Say that changed means the stored state
 differs from the baseline.
+
+*Resolution.* Adopted, with the reviewer's sentence: changed means
+the stored state differs from the comparison baseline, and a
+rewritten stored secret counts as different because its ciphertext
+fingerprint changes even when the plaintext may not have. The
+comparison decision and the risk table now say exactly that.
