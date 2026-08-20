@@ -10,12 +10,12 @@ work binds one of them at its own convergence point rather than
 inheriting the only one there was (#191).
 
 So this module owns two facts and nothing else. A `Generation` is one
-such world: the configuration to serve and the stored credentials that
-open behind it, frozen together because a configuration and the
-credentials it was loaded with are one state and comparing them
-separately is how two loads come to disagree. `Generations` is where the
-current one is found and where the next one is put, and it is the only
-place a swap happens.
+such world: the configuration to serve, the stored credentials that open
+behind it, and what was built from the two of them, frozen together
+because a configuration and what was made from it are one state and
+holding them apart is how two loads come to disagree. `Generations` is
+where the current one is found and where the next one is put, and it is
+the only place a swap happens.
 
 The mark beside it exists because reading two things across an await is
 not the same as reading one world. An apply changes serving state more
@@ -33,23 +33,35 @@ one home, and this is it.
 """
 
 import contextlib
-from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator, Mapping
+from dataclasses import dataclass, field
 
 from vinga_server.config import Config
 from vinga_server.config.secrets import SecretStore
+from vinga_server.filler import FillerClips
 
 
 @dataclass(frozen=True)
 class Generation:
-    """One world this server serves: a validated configuration snapshot
-    and the stored credentials loaded beside it.
+    """One world this server serves: a validated configuration snapshot,
+    the stored credentials loaded beside it, and the filled pauses
+    synthesized for it.
 
-    The pair travels together for the reason `config.boot.BootConfig`'s
-    does: the credentials are needed exactly where the configuration is
+    The first two travel together for the reason `config.boot.BootConfig`'s
+    do: the credentials are needed exactly where the configuration is
     turned into running things, and a generation whose secrets came from
     a different load would build one world's providers with another
     world's keys. Nothing here holds plaintext.
+
+    `fillers` is here for the same reason one step further on. A clip is
+    a configured phrase spoken by a configured voice, so it is a
+    consequence of this world and not of this process, and putting it
+    anywhere else would be a second place that has to agree with the
+    configuration above it. A session binds the mapping at its
+    construction, which is what makes the convergence point the next
+    session: a conversation's masking does not change under it
+    mid-turn. Empty is a deployment where no agent masks its latency,
+    which is the default.
 
     `config` carries the file half as well as the domain half, and that
     is not an accident of composition: a reload never re-reads the file,
@@ -65,6 +77,7 @@ class Generation:
 
     config: Config
     secrets: SecretStore
+    fillers: Mapping[str, FillerClips] = field(default_factory=dict)
 
 
 # What one apply is handed to put its world in place with: the swap

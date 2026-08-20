@@ -27,7 +27,6 @@ from vinga_server.config.api import ApiRuntime
 from vinga_server.conversations import ConversationStore
 from vinga_server.device.bindings import DeviceBindings
 from vinga_server.device.boundary import RuntimeFactory
-from vinga_server.filler import AgentFillers
 from vinga_server.generation import Generations
 from vinga_server.onboarding import PendingDevices
 from vinga_server.providers import AgentProviders
@@ -66,8 +65,9 @@ class Composition:
     runs, so it is a holder to ask rather than a snapshot to keep: a
     handler that captured what it answers would be serving a world this
     server may have stopped serving. There is deliberately no whole
-    `Config` here any more, because a second copy of the domain half
-    would be a stale one the moment an apply lands.
+    `Config` here any more, and no filler clips either, for one reason:
+    a second copy of anything a generation owns would be a stale one the
+    moment an apply lands.
     """
 
     server: ServerConfig
@@ -79,7 +79,6 @@ class Composition:
     memory: MemoryStore | None
     sessions: SessionRegistry
     agent_providers: dict[str, AgentProviders]
-    agent_fillers: AgentFillers
     conversations: ConversationStore | None
     runtime_factory: RuntimeFactory
     device_facts: DeviceFacts
