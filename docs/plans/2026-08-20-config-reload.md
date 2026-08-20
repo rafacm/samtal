@@ -202,12 +202,19 @@ the closures that today capture the boot `Config`
 (`bespoke_runtime_factory`, `_prompt_preview`,
 `config_diff_reader`) capture the holder instead and read
 `current()` at their existing convergence points. What the
-generation comes to own, `Composition` stops owning (the review's
-finding 10): the standalone `agent_fillers` field goes in M2 and
-`agent_providers` in M3, each becoming a read of the holder where
-a caller genuinely needs the current world and a generation read
-where it needs its own, so no stored duplicate can disagree with
-the world being served.
+generation comes to own, `Composition` stops owning (round 1's
+finding 10, widened by round 2's finding 9): the full `config`
+snapshot goes in M1, replaced by the restart-only server half the
+device paths actually need (`ws.py` and the OTA paths read limits
+and file-half settings; their domain reads, the manifest provider
+lookups included, move to the holder or the session's bound
+generation, and the grep-backed closure inventory counts
+`composition.config` reads before M1 merges); the standalone
+`agent_fillers` field goes in M2 and `agent_providers` in M3,
+each becoming a read of the holder where a caller genuinely needs
+the current world and a generation read where it needs its own,
+so no stored duplicate can disagree with the world being
+served.
 
 **One endpoint, and what happens to the MCP route?** The
 generalized endpoint is `POST /runtime/config/reload`, and it
@@ -949,6 +956,12 @@ after M1. The full domain snapshot leaves `Composition`; callers
 keep the restart-only server half and read the domain through the
 holder or their bound generation; `composition.config` reads join
 the grep-backed closure inventory.
+
+*Resolution.* Adopted. The holder decision now removes the full
+`config` snapshot from `Composition` in M1, keeps the restart-only
+server half for the device paths, moves domain reads to the holder
+or the bound generation, and adds `composition.config` reads to
+the pre-M1 closure inventory.
 
 **10 (P2). The byte-equivalent MCP claim contradicts the
 intentional transport deltas.** The path, the nesting, and the
