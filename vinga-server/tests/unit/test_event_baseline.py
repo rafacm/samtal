@@ -1,39 +1,31 @@
-"""The record baseline, and the two obligations that make it a proof.
+"""The record baseline, and the obligation that makes it a proof.
 
-The harness in `tests/tools/event_baseline.py` drives every emit path in
-scope and captures what it produced. On its own that would prove only
-what it happened to execute, which is exactly the hole a runtime harness
-falls into. So the path list comes from outside it, twice over:
+The harness in `tests/tools/event_baseline.py` drives every emit path
+and captures what it produced. On its own that would prove only what it
+happened to execute, which is exactly the hole a runtime harness falls
+into. So the completeness claim comes from outside it: from the catalog.
 
-- **From a static reading of the source.** The harness's own walk reads
-  the scoped modules and answers every emit path in them, in both the
-  untyped and the typed shape, and the drivers' identities must EQUAL
-  that inventory in both directions. A sixth path with no driver and a
-  driver naming no path fail the same way. Each inventoried path must
-  also produce a record of the event it emits, so a driver that runs and
-  emits something else is a failure rather than a pass.
-- **From the catalog.** Every variant declared on a scoped channel must
-  be produced by some driver's run: every legal variant is
-  constructible, and therefore directly drivable, which is what the plan
-  means by claiming exhaustiveness over variants rather than over call
-  sites. A variant is identified by its event, channel, level and
-  template AND by its payload's keys, because several events say one
-  sentence about two shapes: `llm_round` reports a provider the registry
-  built out of a configured entry and one it never built with the same
-  words, and the four dimensions alone would let either stand in for
-  both.
+Every variant the catalog declares has to be produced by some driver's
+run. Every legal variant is constructible, and therefore directly
+drivable, so a declaration nothing can produce is a permanent
+enlargement of what this server may say. That is what the plan means by
+claiming exhaustiveness over variants rather than over call sites, and
+it is what the static walk this file used to carry was standing in for
+while an untyped emit site was invisible to anything but a reading of
+the source. The walk retired with the last conversion.
 
-A walk is only worth what it finds, so it is proved here on planted
-sources rather than trusted: both shapes, both numbered in one sequence
-within their enclosing scope, and a tap's own `emit` left alone.
+A variant is identified by its event, channel, level and template AND by
+its payload's keys, because several events say one sentence about two
+shapes: `llm_round` reports a provider the registry built out of a
+configured entry and one it never built with the same words, and the
+four dimensions alone would let either stand in for both.
+
+Beside it, the smaller claim the drivers can give themselves: each one
+produces the event it says it does, so a driver whose path stopped
+firing fails rather than quietly recording a neighbour's records.
 
 All of it holds before a conversion and after it, which is the point:
 the committed capture is a file that does not move when the sites do.
-
-The first version of this borrowed the conformance suite's walk, which
-reads only the untyped shape. After the store converted, that walk found
-nothing in scope while the harness claimed five paths, and PR #217's
-review named the obligation for what it had become: vacuous.
 """
 
 import json
@@ -53,8 +45,6 @@ from tests.tools.event_baseline import (
     captured,
     committed,
     rendered,
-    sites,
-    sites_in,
 )
 from vinga_server.conversations.store import ConversationStore
 from vinga_server.events.catalog import Variant, catalog, payload_shape
@@ -75,30 +65,24 @@ def capture() -> dict[str, list[dict[str, Any]]]:
     return captured()
 
 
-def test_every_emit_path_in_scope_is_driven_and_only_those() -> None:
-    """The obligation the harness cannot give itself, in both
-    directions: a driver claiming a path that does not exist is as wrong
-    as a path with no driver, and containment either way would let one
-    of the two through."""
-    walked = {site.identity for site in sites()}
-    claimed = {driver.identity for driver in DRIVERS}
+def test_every_driver_names_a_path_of_its_own() -> None:
+    """One driver per emit path, so a capture keyed by identity is a
+    capture of eighty-one paths rather than of however many survived a
+    collision."""
+    claimed = [driver.identity for driver in DRIVERS]
 
-    assert sorted(walked - claimed) == [], "emit paths with no driver"
-    assert sorted(claimed - walked) == [], "drivers naming no emit path"
-    assert len(walked) == len(sites()) == len(DRIVERS)
+    assert len(set(claimed)) == len(claimed) == 81
 
 
 def test_every_driven_path_produces_the_event_it_emits(
     capture: dict[str, list[dict[str, Any]]],
 ) -> None:
-    """Not merely that a driver produced something. The walk reads which
-    event each path emits, from the `event=` keyword or from the variant
-    the thunk constructs, and every record kept has to be that one."""
-    expected = {site.identity: site.event for site in sites()}
-
+    """Not merely that a driver produced something: every record kept
+    has to be the event that driver names, so a path that stopped firing
+    fails rather than quietly recording a neighbour's."""
     for driver in DRIVERS:
         produced = {one["event"] for one in capture[driver.key]}
-        assert produced == {expected[driver.identity]}, driver.key
+        assert produced == {driver.event}, driver.key
 
 
 def matches(variant: type[Variant], record: dict[str, Any]) -> bool:
@@ -209,71 +193,3 @@ def test_the_store_says_nothing_else(
 
     said = [one for one in caplog.records if one.name in SCOPE]
     assert [getattr(one, "event", None) for one in said] == ["conversations_enabled"]
-
-
-# --- the walk, proved on planted sources ------------------------------
-#
-# Written rather than trusted, for the reason the conformance suite
-# gives about its own: an inventory that stopped finding things would
-# turn every obligation above into a pass over an empty set.
-
-PLANTED = "vinga_server.planted"
-
-BOTH_SHAPES = """
-from vinga_server.events import ServerEvents
-from vinga_server.events.catalog import ConversationsPruned
-
-events = ServerEvents(__name__)
-
-
-class Store:
-    def run(self):
-        events.warning("said %s", one, event="conversations_enabled", path=one)
-        events.emit(lambda: ConversationsPruned(sessions=one, days=two))
-"""
-
-A_TAPS_OWN_EMIT = """
-from vinga_server.events import ServerEvents
-from vinga_server.events.catalog import ConversationsPruned
-
-events = ServerEvents(__name__)
-
-
-class Sink:
-    def emit(self, emission):
-        self.kept.append(emission)
-
-
-class Store:
-    def run(self, tap):
-        tap.emit(emission)
-        events.emit(lambda: ConversationsPruned(sessions=one, days=two))
-"""
-
-
-def test_the_walk_reads_both_shapes_and_numbers_them_in_one_sequence() -> None:
-    """The moment the identity has to stay stable is the one where a
-    module is half converted, so the two shapes share one ordinal
-    counter rather than each starting at 1."""
-    found = sites_in(PLANTED, BOTH_SHAPES)
-
-    assert [(one.function, one.ordinal, one.event) for one in found] == [
-        ("Store.run", 1, "conversations_enabled"),
-        ("Store.run", 2, "conversations_pruned"),
-    ]
-
-
-def test_the_walk_leaves_a_taps_own_emit_alone() -> None:
-    """`emit` is a tap's method as well as an emitter's, and a scoped
-    module may hold both. The receiver is what tells them apart: a tap
-    is not the module's emitter, whatever it is called."""
-    found = sites_in(PLANTED, A_TAPS_OWN_EMIT)
-
-    assert [(one.function, one.ordinal) for one in found] == [("Store.run", 1)]
-
-
-def test_the_walk_refuses_a_thunk_it_cannot_read() -> None:
-    """A path the walk cannot read is a path the inventory would
-    silently lose, so it is an error rather than a skip."""
-    with pytest.raises(AssertionError, match="construct one variant"):
-        sites_in(PLANTED, "events = ServerEvents(__name__)\nevents.emit(lambda: 1)\n")

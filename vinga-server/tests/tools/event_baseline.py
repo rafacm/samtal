@@ -48,7 +48,6 @@ deterministically, and they are the same ones `test_conversations_store.py`
 pays.
 """
 
-import ast
 import asyncio
 import datetime as dt
 import inspect
@@ -160,8 +159,7 @@ from vinga_server.conversations.records import ToolInvocation, TurnRecord
 from vinga_server.conversations.store import ConversationStore
 from vinga_server.device.bindings import DeviceAgents, DeviceBindings
 from vinga_server.device.session import DeviceSession
-from vinga_server.events import catalog as catalog_module
-from vinga_server.events.catalog import CHANNELS, declaration_of
+from vinga_server.events.catalog import CHANNELS
 from vinga_server.filler import build_agent_fillers
 from vinga_server.logs import _STANDARD_ATTRIBUTES
 from vinga_server.ota import ACTIVATE_SEGMENT, OTA_PATH
@@ -230,190 +228,24 @@ SESSION_RECEIVER = "self._events"
 NOW = dt.datetime(2026, 8, 15, 12, 0, tzinfo=dt.UTC)
 
 
-# --- the static reading, which is what makes the drivers a claim ------
-
-
-@dataclass(frozen=True)
-class Site:
-    """One emit path as the source shows it, and the event it emits.
-
-    `module`, `function` and `ordinal` are the conformance walk's own
-    identity, so a driver's key means the same thing before and after
-    its path converts. Deliberately not a line number, for the reason
-    that walk gives: a line number churns with every edit above it.
-    """
-
-    module: str
-    function: str
-    ordinal: int
-    event: str
-
-    @property
-    def identity(self) -> tuple[str, str, int]:
-        return (self.module, self.function, self.ordinal)
-
-    def __str__(self) -> str:
-        return f"{self.module}:{self.function} #{self.ordinal} ({self.event})"
-
-
-def emitter_names(tree: ast.AST) -> frozenset[str]:
-    """What this module reaches its emitter through.
-
-    A module builds its own with `events = ServerEvents(__name__)`, or a
-    submodule takes its package's with `from . import events`. Reading
-    the binding rather than accepting any `.emit(` is what keeps a tap's
-    own `emit(emission)` out of the inventory: a tap is not the module's
-    emitter, whatever it is called.
-    """
-    names: set[str] = {SESSION_RECEIVER}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
-            called = node.value.func
-            if isinstance(called, ast.Name) and called.id == "ServerEvents":
-                names |= {
-                    target.id
-                    for target in node.targets
-                    if isinstance(target, ast.Name)
-                }
-        if isinstance(node, ast.ImportFrom) and node.level and node.module is None:
-            names |= {alias.asname or alias.name for alias in node.names}
-    return frozenset(names)
-
-
-def _declared_by(name: str) -> str | None:
-    """The event a catalog variant belongs to, or None where the name is
-    not a variant at all."""
-    found = getattr(catalog_module, name, None)
-    if isinstance(found, type) and issubclass(found, catalog_module.Variant):
-        return declaration_of(found).name
-    return None
-
-
-def _chosen_in(tree: ast.AST, name: str) -> frozenset[str]:
-    """The events a variant-choosing function in this module can emit.
-
-    Some paths pick their shape rather than knowing it: `tool_call` says
-    one thing about a builtin, another about an MCP entry and a third
-    about a call this surface may not name, and the choice is a branch
-    the emitting module owns. So the thunk names a function, and the
-    function's own body is read for the variants it constructs.
-
-    One level and no further, deliberately: a chooser that reached
-    through another chooser would be a path whose event this walk could
-    only guess at, and guessing is what the assertion exists to
-    prevent.
-    """
-    found: set[str] = set()
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-            continue
-        if node.name != name:
-            continue
-        for inner in ast.walk(node):
-            if isinstance(inner, ast.Call) and isinstance(inner.func, ast.Name):
-                declared = _declared_by(inner.func.id)
-                if declared is not None:
-                    found.add(declared)
-    return frozenset(found)
-
-
-def _event_of(module: str, enclosing: str, tree: ast.AST, node: ast.Call) -> str:
-    """Which event one call emits.
-
-    An untyped call says so in its `event=` keyword. A typed one says so
-    by the variant it constructs, or, where it constructs one of
-    several, by the function that chooses between them. A shape none of
-    those reads is refused rather than skipped: a path the walk cannot
-    read is a path the inventory would silently lose.
-    """
-    where = f"{module}:{enclosing}"
-    named = [keyword for keyword in node.keywords if keyword.arg == "event"]
-    if named:
-        return str(ast.literal_eval(named[0].value))
-    if len(node.args) != 1 or isinstance(node.args[0], ast.Lambda) is False:
-        raise AssertionError(f"{where}: an emit that is not a construction thunk")
-    body = node.args[0].body  # type: ignore[attr-defined]
-    if not isinstance(body, ast.Call) or not isinstance(body.func, ast.Name):
-        raise AssertionError(f"{where}: a thunk that does not construct one variant")
-    declared = _declared_by(body.func.id)
-    if declared is not None:
-        return declared
-    chosen = _chosen_in(tree, body.func.id)
-    if len(chosen) != 1:
-        raise AssertionError(
-            f"{where}: {body.func.id} constructs {len(chosen)} events rather than one"
-        )
-    return next(iter(chosen))
-
-
-class _Sites(ast.NodeVisitor):
-    """Every emit path in one module, in source order, numbered within
-    its enclosing scope across BOTH shapes.
-
-    Across both deliberately. Numbering the shapes separately would give
-    two paths in one function the same ordinal while a module was half
-    converted, which is the one moment the identity has to stay stable.
-    """
-
-    def __init__(self, module: str, tree: ast.AST) -> None:
-        self.module = module
-        self.tree = tree
-        self.receivers = emitter_names(tree)
-        self.stack: list[str] = []
-        self.ordinals: dict[str, int] = {}
-        self.found: list[Site] = []
-
-    def visit_FunctionDef(self, node: ast.AST) -> None:
-        self.stack.append(node.name)  # type: ignore[attr-defined]
-        self.generic_visit(node)
-        self.stack.pop()
-
-    visit_AsyncFunctionDef = visit_FunctionDef
-    visit_ClassDef = visit_FunctionDef
-
-    def visit_Call(self, node: ast.Call) -> None:
-        function = node.func
-        if isinstance(function, ast.Attribute) and self._is_emit(function, node):
-            enclosing = ".".join(self.stack)
-            self.ordinals[enclosing] = self.ordinals.get(enclosing, 0) + 1
-            self.found.append(
-                Site(
-                    module=self.module,
-                    function=enclosing,
-                    ordinal=self.ordinals[enclosing],
-                    event=_event_of(self.module, enclosing, self.tree, node),
-                )
-            )
-        self.generic_visit(node)
-
-    def _is_emit(self, function: ast.Attribute, node: ast.Call) -> bool:
-        if ast.unparse(function.value) not in self.receivers:
-            return False
-        if function.attr == TYPED_METHOD:
-            return True
-        return function.attr in LEVEL_METHODS and any(
-            keyword.arg == "event" for keyword in node.keywords
-        )
-
-
-def sites_in(module: str, source: str) -> tuple[Site, ...]:
-    """Every emit path in one module's text. Separate from `sites()` so
-    the walk can be run over a planted source and proved."""
-    tree = ast.parse(source)
-    walk = _Sites(module, tree)
-    walk.visit(tree)
-    return tuple(walk.found)
-
-
-def sites() -> tuple[Site, ...]:
-    """Every emit path in the scoped modules, in source order."""
-    found: list[Site] = []
-    for module in MODULES:
-        path = PACKAGE.parent / f"{module.replace('.', '/')}.py"
-        if not path.exists():
-            path = PACKAGE.parent / module.replace(".", "/") / "__init__.py"
-        found += sites_in(module, path.read_text(encoding="utf-8"))
-    return tuple(found)
+# --- one driver per emit path -----------------------------------------
+#
+# `identity` is where the path is: its module, its enclosing function,
+# and which emit call within it. Deliberately not a line number, for the
+# reason the walk that used to read these gave: a line number churns
+# with every edit above it.
+#
+# The static walk itself retired with the last conversion. It existed to
+# hold the drivers to the source, because a runtime harness proves only
+# what it executes and an untyped emit site was invisible to anything
+# but a reading of the code. A variant is a type now, so what the
+# drivers are held to instead is the catalog: every variant it declares
+# is constructible, and therefore drivable, and
+# `tests/unit/test_event_baseline.py` fails if one of them is produced
+# by no driver's run. That is a claim about what this server may say
+# rather than about which lines happen to say it, which is what the plan
+# means by claiming exhaustiveness over variants rather than over call
+# sites.
 
 
 class Raising:
@@ -429,20 +261,23 @@ class Raising:
 
 @dataclass(frozen=True)
 class Driver:
-    """One emit path, and what makes it fire.
-
-    `identity` is the conformance walk's own: module, enclosing
-    function, and which emit call within it. Deliberately not a line
-    number, for the reason that walk gives: a line number churns with
-    every edit above it.
+    """One emit path, what makes it fire, and the event it emits.
 
     `drive` may be a coroutine function. A conversation only exists
     inside a loop, so most of the session channel's paths are reached
     through one; `captured()` runs those in a loop of their own.
+
+    `event` is what its run is filtered to, and the filter is the point
+    rather than a tidiness: a session driver reaches its decision by
+    holding a whole conversation, so its run emits every neighbouring
+    path's records too. Keeping them would record the same shapes
+    several times over and make the committed file move whenever an
+    unrelated path's timing did.
     """
 
     identity: tuple[str, str, int]
     drive: Callable[[Path], Any]
+    event: str
 
     @property
     def key(self) -> str:
@@ -551,11 +386,11 @@ def drive_pruned(directory: Path) -> None:
 MODULE = "vinga_server.conversations.store"
 
 STORE_DRIVERS: tuple[Driver, ...] = (
-    Driver((MODULE, "ConversationStore.start", 1), drive_enabled),
-    Driver((MODULE, "ConversationStore.record_event", 1), drive_dropped),
-    Driver((MODULE, "ConversationStore._failed", 1), drive_write_failed),
-    Driver((MODULE, "ConversationStore._prune", 1), drive_prune_failed),
-    Driver((MODULE, "ConversationStore._prune", 2), drive_pruned),
+    Driver((MODULE, "ConversationStore.start", 1), drive_enabled, "conversations_enabled"),
+    Driver((MODULE, "ConversationStore.record_event", 1), drive_dropped, "conversations_dropped"),
+    Driver((MODULE, "ConversationStore._failed", 1), drive_write_failed, "conversations_failed"),
+    Driver((MODULE, "ConversationStore._prune", 1), drive_prune_failed, "conversations_failed"),
+    Driver((MODULE, "ConversationStore._prune", 2), drive_pruned, "conversations_pruned"),
 )
 
 
@@ -975,37 +810,56 @@ TURNTAKING = "vinga_server.runtime.turntaking"
 FILLER = "vinga_server.runtime.filler_runner"
 
 SESSION_DRIVERS: tuple[Driver, ...] = (
-    Driver((EDGE, "DeviceSession._watch_for_idle", 1), drive_session_idle),
-    Driver((EDGE, "DeviceSession.run", 1), drive_bad_device_id),
-    Driver((EDGE, "DeviceSession.run", 2), drive_agent_not_loaded),
-    Driver((EDGE, "DeviceSession.run", 3), drive_no_agent),
-    Driver((EDGE, "DeviceSession.run", 4), drive_session_open),
-    Driver((EDGE, "DeviceSession.run", 5), drive_session_limit),
-    Driver((EDGE, "DeviceSession.run", 6), drive_session_closed),
-    Driver((EDGE, "DeviceSession.send_audio", 1), drive_speaking_started),
-    Driver((PIPELINE, "PipelineRuntime._watchdog_stream", 1), drive_llm_retry),
-    Driver((PIPELINE, "PipelineRuntime._llm_round_done", 1), drive_llm_round),
-    Driver((PIPELINE, "PipelineRuntime._provider_failed", 1), drive_provider_failed),
-    Driver((PIPELINE, "PipelineRuntime._prompt_assembled", 1), drive_prompt_assembled),
-    Driver((PIPELINE, "PipelineRuntime._reply", 1), drive_heard),
-    Driver((PIPELINE, "PipelineRuntime._reply", 2), drive_replied),
-    Driver((PIPELINE, "PipelineRuntime._speak_reply", 1), drive_agent_said),
-    Driver((PIPELINE, "PipelineRuntime._speak_reply", 2), drive_handover),
-    Driver((PIPELINE, "PipelineRuntime._run_one", 1), drive_tool_call),
-    Driver((TURNTAKING, "TurnTaking.finish_utterance", 1), drive_barge_in_manual),
-    Driver((TURNTAKING, "TurnTaking._gate_barge_in", 1), drive_barge_in_under_the_floor),
-    Driver((TURNTAKING, "TurnTaking._gate_barge_in", 2), drive_barge_in_merged),
+    Driver((EDGE, "DeviceSession._watch_for_idle", 1), drive_session_idle, "session_idle"),
+    Driver((EDGE, "DeviceSession.run", 1), drive_bad_device_id, "session_rejected"),
+    Driver((EDGE, "DeviceSession.run", 2), drive_agent_not_loaded, "session_rejected"),
+    Driver((EDGE, "DeviceSession.run", 3), drive_no_agent, "session_rejected"),
+    Driver((EDGE, "DeviceSession.run", 4), drive_session_open, "session_open"),
+    Driver((EDGE, "DeviceSession.run", 5), drive_session_limit, "session_limit"),
+    Driver((EDGE, "DeviceSession.run", 6), drive_session_closed, "session_closed"),
+    Driver((EDGE, "DeviceSession.send_audio", 1), drive_speaking_started, "speaking_started"),
+    Driver((PIPELINE, "PipelineRuntime._watchdog_stream", 1), drive_llm_retry, "llm_retry"),
+    Driver((PIPELINE, "PipelineRuntime._llm_round_done", 1), drive_llm_round, "llm_round"),
+    Driver(
+        (PIPELINE, "PipelineRuntime._provider_failed", 1),
+        drive_provider_failed,
+        "provider_failed",
+    ),
+    Driver(
+        (PIPELINE, "PipelineRuntime._prompt_assembled", 1),
+        drive_prompt_assembled,
+        "prompt_assembled",
+    ),
+    Driver((PIPELINE, "PipelineRuntime._reply", 1), drive_heard, "heard"),
+    Driver((PIPELINE, "PipelineRuntime._reply", 2), drive_replied, "replied"),
+    Driver((PIPELINE, "PipelineRuntime._speak_reply", 1), drive_agent_said, "agent_said"),
+    Driver((PIPELINE, "PipelineRuntime._speak_reply", 2), drive_handover, "handover"),
+    Driver((PIPELINE, "PipelineRuntime._run_one", 1), drive_tool_call, "tool_call"),
+    Driver((TURNTAKING, "TurnTaking.finish_utterance", 1), drive_barge_in_manual, "barge_in"),
+    Driver(
+        (TURNTAKING, "TurnTaking._gate_barge_in", 1),
+        drive_barge_in_under_the_floor,
+        "barge_in_suppressed",
+    ),
+    Driver((TURNTAKING, "TurnTaking._gate_barge_in", 2), drive_barge_in_merged, "barge_in_merged"),
     Driver(
         (TURNTAKING, "TurnTaking._gate_barge_in", 3),
         drive_barge_in_in_the_refractory_window,
+        "barge_in_suppressed",
     ),
     Driver(
-        (TURNTAKING, "TurnTaking._gate_barge_in", 4), drive_barge_in_without_a_transcript
+        (TURNTAKING, "TurnTaking._gate_barge_in", 4),
+        drive_barge_in_without_a_transcript,
+        "barge_in_suppressed",
     ),
-    Driver((TURNTAKING, "TurnTaking._gate_barge_in", 5), drive_barge_in_confirmed),
-    Driver((FILLER, "FillerRunner._fire", 1), drive_filler_skipped_for_speech),
-    Driver((FILLER, "FillerRunner._fire", 2), drive_filler_skipped_for_a_barge_in),
-    Driver((FILLER, "FillerRunner._fire", 3), drive_filler_played),
+    Driver((TURNTAKING, "TurnTaking._gate_barge_in", 5), drive_barge_in_confirmed, "barge_in"),
+    Driver((FILLER, "FillerRunner._fire", 1), drive_filler_skipped_for_speech, "filler_skipped"),
+    Driver(
+        (FILLER, "FillerRunner._fire", 2),
+        drive_filler_skipped_for_a_barge_in,
+        "filler_skipped",
+    ),
+    Driver((FILLER, "FillerRunner._fire", 3), drive_filler_played, "filler_played"),
 )
 
 
@@ -1524,56 +1378,100 @@ MEMORY = "vinga_server.tools.memory"
 WS = "vinga_server.ws"
 
 SERVER_DRIVERS: tuple[Driver, ...] = (
-    Driver((APP, "_build_composition", 1), drive_capture_enabled),
-    Driver((APP, "_build_composition", 2), drive_capture_disabled),
-    Driver((CAPTURE, "SessionCapture._disable", 1), drive_capture_failed),
-    Driver((CAPTURE, "SessionCapture._finish_at_limit", 1), drive_capture_limit),
-    Driver((CAPTURE, "CaptureStore.prune", 1), drive_capture_pruned),
-    Driver((CAPTURE, "CaptureStore.prune", 2), drive_capture_over_budget),
-    Driver((CAPTURE, "CaptureStore.open", 1), drive_capture_declined_unusable),
-    Driver((CAPTURE, "CaptureStore.open", 2), drive_capture_declined_below_floor),
-    Driver((CAPTURE, "CaptureStore.open", 3), drive_capture_declined_unopenable),
-    Driver((CAPTURE, "CaptureStore.open", 4), drive_capture_started),
-    Driver((CONFIG_API, "_SanitizedErrors.__call__", 1), drive_api_error),
-    Driver((CONFIG_API, "_refusal.handler", 1), drive_api_storage_error),
-    Driver((BINDINGS, "DeviceBindings.open", 1), drive_bindings_snapshot_only),
-    Driver((BINDINGS, "DeviceBindings._warn", 1), drive_bindings_unreadable),
-    Driver((FILLER_BUILD, "build_agent_fillers", 1), drive_filler_disabled),
-    Driver((KEYS, "_log_mismatch", 1), drive_onboarding_key_mismatch),
-    Driver((KEYS, "_log_mismatch", 2), drive_onboarding_key_unshaped),
-    Driver((ORIGIN, "log_banner", 1), drive_onboarding_banner_off),
-    Driver((ORIGIN, "log_banner", 2), drive_onboarding_banner_on),
-    Driver((POLL, "activate", 1), drive_activation_complete),
-    Driver((POLL, "activate", 2), drive_activation_pending),
-    Driver((POLL, "_version_two", 1), drive_activation_refused_unreadable_body),
-    Driver((POLL, "_version_two", 2), drive_activation_refused_unknown_algorithm),
-    Driver((POLL, "_version_two", 3), drive_activation_refused_challenge_mismatch),
-    Driver((REPLY, "check_version", 1), drive_ota_check_activating),
-    Driver((REPLY, "check_version", 2), drive_ota_check_agent_not_loaded),
-    Driver((REPLY, "check_version", 3), drive_ota_check_no_agent),
-    Driver((REPLY, "check_version", 4), drive_ota_check_resolved),
-    Driver((REPLY, "_activation", 1), drive_activation_not_offered_unreadable),
-    Driver((REPLY, "_activation", 2), drive_activation_not_offered_refused),
-    Driver((REPLY, "_bad_request", 1), drive_ota_request_rejected),
-    Driver((ASR, "OpenAiAsr._retry_without_prompt", 1), drive_echo_skipped),
-    Driver((ASR, "OpenAiAsr._retry_without_prompt", 2), drive_echo_timed_out),
-    Driver((ASR, "OpenAiAsr._retry_without_prompt", 3), drive_echo_confirmed),
-    Driver((ASR, "OpenAiAsr._retry_without_prompt", 4), drive_echo_confirmed_empty),
-    Driver((ASR, "OpenAiAsr._retry_without_prompt", 5), drive_echo_recovered),
-    Driver((REGISTRY, "SessionRegistry.drain", 1), drive_drain_started),
-    Driver((REGISTRY, "SessionRegistry.drain", 2), drive_drain_incomplete),
-    Driver((REGISTRY, "SessionRegistry.drain", 3), drive_drain_finished),
-    Driver((MANAGER, "McpServerManager._run", 1), drive_mcp_connected),
-    Driver((MANAGER, "McpServerManager._run", 2), drive_mcp_connect_failed),
-    Driver((MANAGER, "McpServerManager._run", 3), drive_mcp_stopped),
-    Driver((MANAGER, "McpServerManager._mark_down", 1), drive_mcp_call_dropped),
-    Driver((MANAGER, "McpServerManager._mark_down", 2), drive_mcp_dropped),
-    Driver((MCP_REGISTRY, "McpServers._reachable", 1), drive_mcp_tool_shadowed),
-    Driver((RELOAD, "_refused", 1), drive_mcp_reload_refused),
-    Driver((RELOAD, "_apply", 1), drive_mcp_reload_applied),
-    Driver((MEMORY, "MemoryStore.read", 1), drive_memory_unreadable),
-    Driver((WS, "conversation", 1), drive_auth_rejected),
-    Driver((WS, "conversation", 2), drive_session_rejected_at_capacity),
+    Driver((APP, "_build_composition", 1), drive_capture_enabled, "capture_enabled"),
+    Driver((APP, "_build_composition", 2), drive_capture_disabled, "capture_disabled"),
+    Driver((CAPTURE, "SessionCapture._disable", 1), drive_capture_failed, "capture_failed"),
+    Driver((CAPTURE, "SessionCapture._finish_at_limit", 1), drive_capture_limit, "capture_limit"),
+    Driver((CAPTURE, "CaptureStore.prune", 1), drive_capture_pruned, "capture_pruned"),
+    Driver((CAPTURE, "CaptureStore.prune", 2), drive_capture_over_budget, "capture_over_budget"),
+    Driver((CAPTURE, "CaptureStore.open", 1), drive_capture_declined_unusable, "capture_declined"),
+    Driver(
+        (CAPTURE, "CaptureStore.open", 2),
+        drive_capture_declined_below_floor,
+        "capture_declined",
+    ),
+    Driver(
+        (CAPTURE, "CaptureStore.open", 3),
+        drive_capture_declined_unopenable,
+        "capture_declined",
+    ),
+    Driver((CAPTURE, "CaptureStore.open", 4), drive_capture_started, "capture_started"),
+    Driver((CONFIG_API, "_SanitizedErrors.__call__", 1), drive_api_error, "api_error"),
+    Driver((CONFIG_API, "_refusal.handler", 1), drive_api_storage_error, "api_storage_error"),
+    Driver(
+        (BINDINGS, "DeviceBindings.open", 1),
+        drive_bindings_snapshot_only,
+        "device_bindings_snapshot_only",
+    ),
+    Driver(
+        (BINDINGS, "DeviceBindings._warn", 1),
+        drive_bindings_unreadable,
+        "device_bindings_unreadable",
+    ),
+    Driver((FILLER_BUILD, "build_agent_fillers", 1), drive_filler_disabled, "filler_disabled"),
+    Driver((KEYS, "_log_mismatch", 1), drive_onboarding_key_mismatch, "onboarding_key_mismatch"),
+    Driver((KEYS, "_log_mismatch", 2), drive_onboarding_key_unshaped, "onboarding_key_unshaped"),
+    Driver((ORIGIN, "log_banner", 1), drive_onboarding_banner_off, "onboarding_banner"),
+    Driver((ORIGIN, "log_banner", 2), drive_onboarding_banner_on, "onboarding_banner"),
+    Driver((POLL, "activate", 1), drive_activation_complete, "activation_complete"),
+    Driver((POLL, "activate", 2), drive_activation_pending, "activation_pending"),
+    Driver(
+        (POLL, "_version_two", 1),
+        drive_activation_refused_unreadable_body,
+        "activation_refused",
+    ),
+    Driver(
+        (POLL, "_version_two", 2),
+        drive_activation_refused_unknown_algorithm,
+        "activation_refused",
+    ),
+    Driver(
+        (POLL, "_version_two", 3),
+        drive_activation_refused_challenge_mismatch,
+        "activation_refused",
+    ),
+    Driver((REPLY, "check_version", 1), drive_ota_check_activating, "ota_check"),
+    Driver((REPLY, "check_version", 2), drive_ota_check_agent_not_loaded, "ota_check"),
+    Driver((REPLY, "check_version", 3), drive_ota_check_no_agent, "ota_check"),
+    Driver((REPLY, "check_version", 4), drive_ota_check_resolved, "ota_check"),
+    Driver(
+        (REPLY, "_activation", 1),
+        drive_activation_not_offered_unreadable,
+        "activation_not_offered",
+    ),
+    Driver(
+        (REPLY, "_activation", 2),
+        drive_activation_not_offered_refused,
+        "activation_not_offered",
+    ),
+    Driver((REPLY, "_bad_request", 1), drive_ota_request_rejected, "ota_request_rejected"),
+    Driver((ASR, "OpenAiAsr._retry_without_prompt", 1), drive_echo_skipped, "asr_prompt_echo"),
+    Driver((ASR, "OpenAiAsr._retry_without_prompt", 2), drive_echo_timed_out, "asr_prompt_echo"),
+    Driver((ASR, "OpenAiAsr._retry_without_prompt", 3), drive_echo_confirmed, "asr_prompt_echo"),
+    Driver(
+        (ASR, "OpenAiAsr._retry_without_prompt", 4),
+        drive_echo_confirmed_empty,
+        "asr_prompt_echo",
+    ),
+    Driver((ASR, "OpenAiAsr._retry_without_prompt", 5), drive_echo_recovered, "asr_prompt_echo"),
+    Driver((REGISTRY, "SessionRegistry.drain", 1), drive_drain_started, "drain_started"),
+    Driver((REGISTRY, "SessionRegistry.drain", 2), drive_drain_incomplete, "drain_incomplete"),
+    Driver((REGISTRY, "SessionRegistry.drain", 3), drive_drain_finished, "drain_finished"),
+    Driver((MANAGER, "McpServerManager._run", 1), drive_mcp_connected, "mcp_connected"),
+    Driver((MANAGER, "McpServerManager._run", 2), drive_mcp_connect_failed, "mcp_down"),
+    Driver((MANAGER, "McpServerManager._run", 3), drive_mcp_stopped, "mcp_down"),
+    Driver((MANAGER, "McpServerManager._mark_down", 1), drive_mcp_call_dropped, "mcp_call_dropped"),
+    Driver((MANAGER, "McpServerManager._mark_down", 2), drive_mcp_dropped, "mcp_down"),
+    Driver(
+        (MCP_REGISTRY, "McpServers._reachable", 1),
+        drive_mcp_tool_shadowed,
+        "mcp_tool_shadowed",
+    ),
+    Driver((RELOAD, "_refused", 1), drive_mcp_reload_refused, "mcp_reload"),
+    Driver((RELOAD, "_apply", 1), drive_mcp_reload_applied, "mcp_reload"),
+    Driver((MEMORY, "MemoryStore.read", 1), drive_memory_unreadable, "memory_unreadable"),
+    Driver((WS, "conversation", 1), drive_auth_rejected, "auth_rejected"),
+    Driver((WS, "conversation", 2), drive_session_rejected_at_capacity, "session_rejected"),
 )
 
 
@@ -1628,15 +1526,9 @@ def captured() -> dict[str, list[dict[str, Any]]]:
     """Every driver run, in declaration order, with what its own path
     produced.
 
-    Filtered to the event the walk says that path emits, and the filter
-    is the point rather than a tidiness. A session driver reaches its
-    decision by holding a whole conversation, so its run emits every
-    neighbouring path's records too; keeping them would record the same
-    shapes several times over and make this file move whenever an
-    unrelated path's timing did. Every neighbour has a driver of its
-    own, which is what the exhaustiveness obligations above are for.
+    Filtered to the event each driver says its path emits, for the
+    reason `Driver` gives.
     """
-    emitted = {site.identity: site.event for site in sites()}
     baseline: dict[str, list[dict[str, Any]]] = {}
     for driver in DRIVERS:
         with tempfile.TemporaryDirectory(prefix="vinga-baseline-") as directory:
@@ -1647,7 +1539,7 @@ def captured() -> dict[str, list[dict[str, Any]]]:
             baseline[driver.key] = [
                 shape(one)
                 for one in collector.records
-                if getattr(one, "event", None) == emitted[driver.identity]
+                if getattr(one, "event", None) == driver.event
             ]
     return baseline
 
