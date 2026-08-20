@@ -509,8 +509,8 @@ Every merge leaves `main` releasable: lint, both suites, and the
 four drift checks green, with the generated references regenerated
 in the same change as the prose that feeds them.
 
-- [ ] **M1: the generation seam and the generalized reload, with
-  the prompt slice live.** `generation.py` holding config and
+- [x] **[M1: the generation seam and the generalized reload, with
+  the prompt slice live](2026-08-20-config-reload-implementation.md#m1-the-generation-seam-and-the-generalized-reload-with-the-prompt-slice-live).** (PR TBD) `generation.py` holding config and
   secrets; the holder's mark, with its instability window,
   replaces `McpServers.generation` in the diff guard; `config/reload.py` with the widened
   exclusion, prepare (the re-read, whole-snapshot validation, MCP
