@@ -421,7 +421,7 @@ carries its baseline proof inside its own PR.
   both generators fail the criteria, the recorded fallback is
   handwritten types over the document, and the seam claim still
   holds because the document is CI-drift-checked either way.
-- [ ] **M6: the reach-in sweep.** `tests/support/sessions.py` first:
+- [x] **[M6: the reach-in sweep](2026-08-19-governance-simplification-implementation.md#m6-the-reach-in-sweep).** (PR TBD) `tests/support/sessions.py` first:
   its 22 sites route 220+ invocations, and each helper either moves
   to an existing public seam (the wire, the boundary, the providers'
   recording fakes, `SessionEvents`' public `clock` and `attach`) or
