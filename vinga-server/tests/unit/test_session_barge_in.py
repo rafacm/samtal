@@ -21,8 +21,9 @@ from fastapi.testclient import TestClient
 
 from tests.support.configs import LONG_REPLY, config_with_agent
 from tests.support.events import events, only
-from tests.support.providers import ConfirmingAsr, GatedAsr, ScriptedEndpointer
-from tests.support.sessions import realtime_session
+from tests.support.providers import ConfirmingAsr, GatedAsr, ScriptedLlm, ScriptedVad
+from tests.support.sessions import realtime_session, start_reply, wait_for_reply
+from tests.support.sockets import spoken
 from tests.support.wire import (
     assert_endpointed_speech,
     collect_reply,
@@ -48,6 +49,34 @@ SLOW_REPLY = (
     "This reply runs on for roughly four seconds, which leaves an "
     "interruption plenty of stream left to land in."
 )
+
+
+def ended_utterance(session):
+    """End the utterance the way the endpointer ends one.
+
+    White-box, deliberately, and the only shape of reach-in these four
+    tests keep besides the two below. The endpointer-driven end is a
+    decision the endpointer makes while audio is being fed, and the
+    device has no message for it: `listen stop` is the manual end, which
+    is a different gate with a different rule, and it is the one thing
+    these tests must not use. Reaching it publicly would mean a real VAD
+    classifying synthetic tones and ending an utterance at a moment
+    nothing in the test chose, which is the timing every case here
+    depends on.
+    """
+    return session.runtime._turntaking.finish_utterance(endpointed=True)
+
+
+def reply_task(session):
+    """The reply task in flight.
+
+    White-box, deliberately: `replying()` answers True for the reply
+    that was already running and for a replacement started in its place,
+    and what two of these tests claim is precisely that the gate did NOT
+    replace it. Task identity is the only thing that tells those apart,
+    and no interface carries it.
+    """
+    return session.runtime._reply_task
 
 
 def test_a_short_blip_does_not_interrupt_the_reply(
@@ -168,29 +197,35 @@ async def test_a_barge_in_during_transcription_merges_the_sentence(
     # embeds the duration it was handed, which pins the merged length
     # exactly: 320 ms of head plus 480 ms of tail is 800 ms.
     asr = GatedAsr()
-    session, _ = realtime_session(config_with_agent(), asr)
-    session.runtime._turntaking.endpointer = ScriptedEndpointer(speech_ms=600)
+    script = ScriptedLlm(["You said 800 ms."])
+    session, socket = realtime_session(
+        config_with_agent(), asr, ScriptedVad(600), {"assistant": script}
+    )
     head = speech_pcm(320)
     tail = speech_pcm(480)
 
     with caplog.at_level("INFO"):
-        await session.runtime._turntaking.feed(head)
-        await session.runtime._turntaking.finish_utterance(endpointed=True)
+        await session.runtime.audio(head)
+        await ended_utterance(session)
         await asyncio.sleep(0.05)  # the reply is now held inside ASR
-        await session.runtime._turntaking.feed(tail)
-        await session.runtime._turntaking.finish_utterance(endpointed=True)
+        await session.runtime.audio(tail)
+        await ended_utterance(session)
         asr.release.set()
-        assert session.runtime._reply_task is not None
-        await session.runtime._reply_task
+        await wait_for_reply(session)
 
     assert asr.pcms == [head, head + tail]
     # The event says how long the merged utterance was; what was heard
-    # in it is the turn below, since the events carry no transcript
-    # (#120).
+    # in it is what the model was asked below, since the events carry no
+    # transcript (#120).
     assert only(caplog, "heard").duration_s == 0.8
     merged = only(caplog, "barge_in_merged")
     assert merged.speech_ms == 600
-    assert session.runtime._turns == [Turn("user", "800 ms"), Turn("assistant", "You said 800 ms.")]
+    # One turn answered the whole sentence: the model saw the merged
+    # utterance and nothing before it, and the device was told one
+    # sentence.
+    (asked, _tools, _choice) = script.seen[-1]
+    assert list(asked) == [Turn("user", "800 ms")]
+    assert spoken(socket) == ["You said 800 ms."]
 
 
 async def test_an_unconfirmed_barge_in_pauses_and_resumes_the_reply(
@@ -200,25 +235,30 @@ async def test_an_unconfirmed_barge_in_pauses_and_resumes_the_reply(
     # reached, ASR hears nothing in the interruption, and the same
     # reply resumes with its pacing clock shifted by the pause, so the
     # stream picks up where it stopped instead of bursting.
-    config = config_with_agent(
-        llm_reply="Hold the thought while this sentence finishes playing out loud.",
-        server={"barge_in_refractory_ms": 0},
-    )
+    held = "Hold the thought while this sentence finishes playing out loud."
+    config = config_with_agent(server={"barge_in_refractory_ms": 0})
     asr = ConfirmingAsr(AsrResult(text=""))
-    session, socket = realtime_session(config, asr)
-    session.runtime._turntaking.endpointer = ScriptedEndpointer(speech_ms=600)
+    script = ScriptedLlm([held, "A second answer nobody should need."])
+    session, socket = realtime_session(config, asr, ScriptedVad(600), {"assistant": script})
 
     with caplog.at_level("INFO"):
-        session.runtime._reply_task = asyncio.create_task(session.runtime._reply(speech_pcm(600)))
-        reply = session.runtime._reply_task
+        start_reply(session, speech_pcm(600))
+        reply = reply_task(session)
         while socket.frames < 3:
             await asyncio.sleep(0.02)
+        # White-box, and the five reads below it are the same one. The
+        # pacing clock and the gate that holds it are the edge's own
+        # state, and what they do is shift the cadence of frames going
+        # out. Observing that publicly means measuring the arrival times
+        # of paced audio against a wall clock and inferring the shift,
+        # which is a race dressed as an assertion; the frames-frozen
+        # check beside it is the observable half, and this is the half
+        # that says why they froze and that the clock moved with them
+        # rather than the stream bursting to catch up afterwards.
         pace_before = session._pace_start
 
-        await session.runtime._turntaking.feed(speech_pcm(600))
-        finish = asyncio.create_task(
-            session.runtime._turntaking.finish_utterance(endpointed=True)
-        )
+        await session.runtime.audio(speech_pcm(600))
+        finish = asyncio.create_task(ended_utterance(session))
         await asyncio.sleep(0.05)
         # Paused: the confirmation is in flight and no frames move.
         assert not session._pace_resume.is_set()
@@ -233,18 +273,19 @@ async def test_an_unconfirmed_barge_in_pauses_and_resumes_the_reply(
         assert pace_before is not None and session._pace_start is not None
         assert session._pace_start - pace_before >= 0.3
         # The same reply, never cancelled, plays to the end.
-        assert session.runtime._reply_task is reply
-        await reply
+        assert reply_task(session) is reply
+        await wait_for_reply(session)
 
     suppressed = only(caplog, "barge_in_suppressed")
     assert suppressed.reason == "no_transcript"
     assert suppressed.speech_ms == 600
     assert events(caplog, "barge_in") == []
     assert asr.calls == 2
-    assert session.runtime._turns == [
-        Turn("user", "the question"),
-        Turn("assistant", "Hold the thought while this sentence finishes playing out loud."),
-    ]
+    # One reply, one sentence, and the model was asked once: a cancelled
+    # and restarted reply would have asked it again.
+    assert spoken(socket) == [held]
+    assert len(script.seen) == 1
+    assert list(script.seen[0][0]) == [Turn("user", "the question")]
 
 
 async def test_a_failed_confirmation_is_reported_as_the_provider_failure_it_is(
@@ -270,19 +311,20 @@ async def test_a_failed_confirmation_is_reported_as_the_provider_failure_it_is(
         llm_reply="Hold the thought while this sentence finishes playing out loud.",
         server={"barge_in_refractory_ms": 0},
     )
-    session, socket = realtime_session(config, FailingConfirmation(AsrResult(text="")))
-    session.runtime._turntaking.endpointer = ScriptedEndpointer(speech_ms=600)
+    session, socket = realtime_session(
+        config, FailingConfirmation(AsrResult(text="")), ScriptedVad(600)
+    )
 
     with caplog.at_level("INFO"):
-        session.runtime._reply_task = asyncio.create_task(session.runtime._reply(speech_pcm(600)))
-        reply = session.runtime._reply_task
+        start_reply(session, speech_pcm(600))
+        reply = reply_task(session)
         while socket.frames < 3:
             await asyncio.sleep(0.02)
-        await session.runtime._turntaking.feed(speech_pcm(600))
-        await session.runtime._turntaking.finish_utterance(endpointed=True)
+        await session.runtime.audio(speech_pcm(600))
+        await ended_utterance(session)
         # The reply lives, which is why this needs saying out loud.
-        assert session.runtime._reply_task is reply
-        await reply
+        assert reply_task(session) is reply
+        await wait_for_reply(session)
 
     (failed,) = [r for r in caplog.records if getattr(r, "event", None) == "provider_failed"]
     assert failed.stage == "asr"
@@ -301,9 +343,7 @@ async def test_a_confirmed_barge_in_reuses_the_transcript_and_the_lock(
     # fires once for the interruption with its language fields, and the
     # language lock takes effect. What was actually heard is the history
     # at the end: the events carry no transcript (#120).
-    config = config_with_agent(
-        llm_reply="Answering {text}.", server={"barge_in_refractory_ms": 0}
-    )
+    config = config_with_agent(server={"barge_in_refractory_ms": 0})
     asr = ConfirmingAsr(
         AsrResult(
             text="stop and listen",
@@ -313,19 +353,22 @@ async def test_a_confirmed_barge_in_reuses_the_transcript_and_the_lock(
         )
     )
     asr.release.set()
-    session, socket = realtime_session(config, asr)
-    session.runtime._turntaking.endpointer = ScriptedEndpointer(speech_ms=700)
+    script = ScriptedLlm([SLOW_REPLY, "Answering stop and listen."])
+    session, socket = realtime_session(config, asr, ScriptedVad(700), {"assistant": script})
 
     with caplog.at_level("INFO"):
-        session.runtime._reply_task = asyncio.create_task(session.runtime._reply(speech_pcm(600)))
+        start_reply(session, speech_pcm(600))
         while socket.frames < 3:
             await asyncio.sleep(0.02)
-        await session.runtime._turntaking.feed(speech_pcm(600))
-        await session.runtime._turntaking.finish_utterance(endpointed=True)
-        assert session.runtime._reply_task is not None
-        await session.runtime._reply_task
+        await session.runtime.audio(speech_pcm(600))
+        await ended_utterance(session)
+        await wait_for_reply(session)
 
     assert asr.calls == 2
+    # White-box: what the lock does is ride along as the language hint of
+    # the next transcription, and this scenario has no next one. That the
+    # session kept it is what says an interruption did not reset it, and
+    # a session's own memory of a lock is on no interface.
     assert session.runtime._asr_language == "es"
     first, second = events(caplog, "heard")
     assert first.duration_s > 0
@@ -334,10 +377,10 @@ async def test_a_confirmed_barge_in_reuses_the_transcript_and_the_lock(
     barged = only(caplog, "barge_in")
     assert barged.speech_ms == 700
     assert barged.speaking_ms >= 0
-    # The cut sentence never finished sending, so it is not history;
-    # the answer to the confirmed transcript is.
-    assert session.runtime._turns == [
+    # The cut sentence never finished sending, so it is not history: the
+    # second round saw both user turns and nothing the first reply said.
+    assert list(script.seen[-1][0]) == [
         Turn("user", "the question"),
         Turn("user", "stop and listen"),
-        Turn("assistant", "Answering stop and listen."),
     ]
+    assert spoken(socket) == [SLOW_REPLY, "Answering stop and listen."]

@@ -231,12 +231,25 @@ async def masked_session(config: Config, mac: str, scripts: dict[str, Any] | Non
     return session
 
 
-def realtime_session(config, asr) -> tuple[session_module.DeviceSession, RecordingSocket]:
+def realtime_session(
+    config,
+    asr,
+    vad: Any = None,
+    scripts: dict[str, Any] | None = None,
+) -> tuple[session_module.DeviceSession, RecordingSocket]:
     """A session mid-conversation on a realtime device, its ASR swapped
-    for the test's."""
+    for the test's, and its endpointing and its model too where the test
+    says so. All three are stages of the agent's providers, so all three
+    are handed in where a deployment's own are."""
     socket = RecordingSocket()
+    stages: dict[str, Any] = {"asr": asr}
+    if vad is not None:
+        stages["vad"] = vad
     session = device_session(
-        config, DEVICE_MAC, agent_providers(config, stages={"asr": asr}), websocket=socket
+        config,
+        DEVICE_MAC,
+        agent_providers(config, scripts, stages),
+        websocket=socket,
     )
     _listening_in_realtime(session)
     return session, socket

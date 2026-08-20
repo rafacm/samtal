@@ -32,7 +32,7 @@ from vinga_server.providers import (
     Turn,
     Usage,
 )
-from vinga_server.providers.base import TtsProvider
+from vinga_server.providers.base import TtsProvider, VadProvider
 from vinga_server.providers.mock import MockAsr
 from vinga_server.runtime.prompt import GuidanceBlock
 from vinga_server.tools.mcp import McpServers
@@ -179,6 +179,24 @@ class ScriptedEndpointer:
 
     def speech_ms(self) -> float:
         return self._speech_ms
+
+
+class ScriptedVad(VadProvider):
+    """The VAD an agent is built with, making the endpointer a test
+    wrote down.
+
+    An endpointer belongs to the agent talking: the runtime asks its VAD
+    for a fresh one at every activation, so this is where a scripted one
+    is handed in, rather than written over the one the runtime built.
+    """
+
+    egress = False
+
+    def __init__(self, speech_ms: float) -> None:
+        self._speech_ms = speech_ms
+
+    def new_endpointer(self) -> ScriptedEndpointer:
+        return ScriptedEndpointer(self._speech_ms)
 
 
 # --- the voices -------------------------------------------------------
