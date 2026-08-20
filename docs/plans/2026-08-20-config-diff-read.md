@@ -109,16 +109,26 @@ grant comparison under the reload label, computed against the
 current slice for the agents both worlds hold: grants of an agent
 only one side knows ride that agent's own added or removed row.
 
-**Sync or async handler?** Async, from milestone 1. The existing
-runtime status read is `async def` deliberately, to read the MCP
-managers on the loop that owns them; milestone 2 needs the same
-guarantee for the diff (a thread-pool read could see a reload's
-world half-installed). Landing the route async from the start means
-milestone 2 changes what the handler composes, never its execution
-model. The stored side loads through `asyncio.to_thread` around the
-same `ConfigStore.load` every configuration read uses, and the
-composition of the answer runs after that await with no await of
-its own, the `reload_result` one-world rule applied to a read.
+**How does the read stay one-world?** The route is `async def` for
+the reason the runtime status read is: the MCP world is read on the
+loop that owns it. But being on the loop is not enough, because the
+stored side is loaded in a worker thread and that await is itself
+the race window (the review's finding 3): a concurrent reload can
+read the store after the diff did and install its world before the
+diff composes, leaving stored generation A compared against a
+runtime that installed B, two states that never coexisted. The
+registry therefore exposes the cheap generation mark its install
+advances (a fact milestone 1 adds anyway); the route captures it on
+the loop before the worker-thread load, re-checks it on the loop
+after, and on a mismatch loads again, twice at most, then refuses
+with a retryable 409 from the typed refusal set rather than
+composing a mixed world. Whether `ReloadInProgressError`'s sentence
+honestly covers "the running world moved while the diff read" or a
+sibling refusal joins the closed set is decided with the code in
+front of the milestone; the status is 409 and the mapping lives in
+`REFUSAL_STATUS` either way. After the last mark check the
+composition runs with no await of its own, which is the
+`reload_result` one-world rule applied to a read.
 
 ## Design decisions this plan makes
 
@@ -298,6 +308,11 @@ transport cases beside the existing `/runtime` suite.
   503; the happy path returns the typed shape; the route joins the
   pinned inventory in `test_api_openapi.py` and the committed
   document is regenerated in the same change.
+- **Concurrency**: a barrier-driven test forces a reload's install
+  between the diff's stored load and its composition, and asserts
+  the answer is a re-read of one world or the retryable 409, never
+  a mixture; a second case proves the retry succeeds when the world
+  holds still.
 - **No-leak sentinel**: plant a credential-shaped stored secret,
   change it, and assert the serialized diff response carries the
   entity's name and no fragment of the planted value, in the body
@@ -341,11 +356,12 @@ definition (grep for the defaults-then-own rule cited in review).
 
 ## Risks and mitigations
 
-- **A reload runs while the diff composes (M2).** The registry
-  swaps its world atomically on the loop, and the diff reads it on
-  the loop with no await between the read and the response, so the
-  answer is one world or the other, never a mix. The rule is stated
-  in the route docstring the way `reload_result` states it.
+- **A reload runs while the diff reads.** Handled structurally by
+  the generation mark, the bounded re-load, and the retryable 409
+  (the one-world question above), and pinned by a barrier-driven
+  concurrency test that forces an install between the diff's stored
+  load and its composition. The rule is stated in the route
+  docstring the way `reload_result` states it.
 - **The stored half fails to load** (unreadable database, secrets
   that do not open). The diff route meets it exactly as `GET
   /config` does: the typed refusals map through `REFUSAL_STATUS`,
@@ -403,6 +419,13 @@ window: a diff can load stored generation A, then observe runtime
 generation B after a concurrent reload. Add a generation token
 captured before the load and re-checked after, with a bounded retry
 and a retryable refusal, plus a barrier-driven concurrency test.
+
+*Resolution.* Adopted. The one-world question now states the
+mechanism: the mark is captured on the loop before the worker-thread
+load and re-checked after, a mismatch re-loads at most twice and
+then refuses with a retryable 409 through `REFUSAL_STATUS`, and the
+barrier-driven test (install forced between load and composition)
+is named in the test strategy and the risk table.
 
 **4 (P1). `ConfigStore.load()` is not the re-read the MCP reload
 uses.** The reload goes through `reload_domain_config`, which also
