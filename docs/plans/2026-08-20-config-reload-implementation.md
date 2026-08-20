@@ -555,3 +555,44 @@ Run from `vinga-server/`, at the last commit of the milestone.
 Not verified here, and not claimed: the container image, the smoke lane,
 and anything against a real device, none of which this milestone
 touches.
+
+### PR review round (2026-08-20)
+
+External review of PR #230: codex exec, model gpt-5.6-sol, read-only
+against `main...f855ef04`. Verdict: mergeable after the fix. One
+finding, P2, condensed but faithful, with its resolution and the commit
+that made it.
+
+**1 (P2). The operator documentation understated when synthesis runs.**
+`api.py`, the docgen contract prose, the server README and the changelog
+all said that only an agent whose phrases or whose voice moved is
+synthesized again, while the reuse comparison is over the whole
+effective `FillerConfig`: a `delay_ms`-only edit re-synthesizes, which
+this section's own discovery note already records. The gap matters
+because synthesis is a round of work at the configured text-to-speech
+provider and may be billed there, so an operator sizing a reload of a
+deployment with many masked agents was reading a smaller number than the
+truth.
+
+*Resolution.* Adopted (`fa6d1c6b`). Every source statement now says the
+effective filler section or the voice that speaks it, names the
+`delay_ms` case out loud with the note that its audio is identical to
+what it replaced, and says why the unit is the whole section rather than
+part of it. The `resynthesized` field's own description carries the same
+correction, since that is what a client reads off the answer, and both
+committed references were regenerated with the prose.
+
+### Verification after the round
+
+- `uv run ruff check .`: all checks passed.
+- `uv run pytest tests/unit -q`: 2,744 passed, 16 skipped, unchanged:
+  this round moved prose and no behavior, and the pins over these
+  sentences are semantic rather than literal.
+- `uv run pytest tests/integration -q`: 61 passed, unchanged.
+- The four documentation drift checks: all clean. `api-openapi.json` and
+  `domain-config.md` moved with the descriptions and are committed with
+  them; `events.md` and `conversations-schema.md` are byte-untouched by
+  this round as by the milestone.
+
+The image and the smoke lane remain unverified here, for the reason
+given above.
