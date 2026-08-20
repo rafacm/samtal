@@ -48,19 +48,25 @@ from enum import StrEnum
 from typing import Any, ClassVar, Final
 
 from vinga_server.events_schema import (
+    ACTIVATION_CODE,
     AGENT_LIST,
     ALSO_BOUND_TO,
+    BOARD_BOUNDS,
     CLIENT_BOUNDS,
     DEVICE_OR_UNIDENTIFIED,
     EMPTY_FRAGMENT,
     EVENT_NAME,
+    FIRMWARE_BOUNDS,
     FROM_ENTRY,
     LANGUAGE,
     MAC,
+    ORIGIN_PROVENANCE,
     QUOTED_PROVIDER,
     QUOTED_TOOL_NAME,
     REACHING_HOST,
+    REPORTED_MAC,
     SESSION_ID,
+    SESSION_LIST,
     SOURCE_KEY_PATTERN,
     ArgKind,
     Bounds,
@@ -77,6 +83,12 @@ from vinga_server.events_schema import (
 CLASS_NAME_PATTERN: Final = r"[A-Za-z_][A-Za-z0-9_]*"
 
 _CLASS_NAME = re.compile(rf"\A(?:{CLASS_NAME_PATTERN})\Z")
+
+# How a group of class names renders when a site reports several at
+# once. Beside the pattern above because the joining is part of what a
+# `ClassNames` is; the emitter imports it back for the untyped path it
+# still serves.
+CLASS_NAME_SEPARATOR: Final = ", "
 
 
 class EventValueError(ValueError):
@@ -125,6 +137,10 @@ class EventValue:
     SYNTAX: ClassVar[Syntax | None] = None
     BOUNDS: ClassVar[Bounds | None] = None
     TOKENS: ClassVar[frozenset[str] | None] = None
+    # `CLASS_NAME` only: whether this value may carry the ", "-joined
+    # form a group of exceptions renders as. A documentation fact like
+    # the three above, and a constraint the type enforces.
+    JOINED: ClassVar[bool] = False
     # `COMPOSED` arguments only: the shape a formatted fragment is held
     # to. A fragment is never a payload field, so this has no field-side
     # twin.
@@ -243,6 +259,57 @@ class EventName(MachineId):
 
 
 @dataclass(frozen=True)
+class ReportedMac(MachineId):
+    """The Device-Id header as the firmware sent it.
+
+    Rendered and never carried: the field beside it holds the canonical
+    form `normalize_mac` answered with, and this is the spelling the OTA
+    sentence shows so an operator can grep for what the board printed.
+    Only a header `normalize_mac` accepted ever reaches a sentence, so
+    the looser separator and case are the whole of the difference.
+    """
+
+    SYNTAX: ClassVar[Syntax | None] = REPORTED_MAC
+
+
+@dataclass(frozen=True)
+class ActivationCode(MachineId):
+    """A claim ticket read off a device's screen.
+
+    Not a credential, which is why it may be said at all: it names a
+    board an operator is holding, and the token the reply issues never
+    reaches an event.
+    """
+
+    SYNTAX: ClassVar[Syntax | None] = ACTIVATION_CODE
+
+
+@dataclass(frozen=True)
+class SessionIds(EventValue):
+    """The session ids a prune removed, as a list on the record.
+
+    A tuple in here so a value nothing can append to is what a variant
+    holds, and each element is a `SessionId`: the element rule is that
+    type's, and a copy of it here would be the second structure.
+    """
+
+    KIND: ClassVar[Kind] = Kind.ID_LIST
+    ARG_KIND: ClassVar[ArgKind] = ArgKind.ID
+    SYNTAX: ClassVar[Syntax | None] = SESSION_ID
+
+    value: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.value, tuple):
+            raise EventValueError("SessionIds is a tuple of session ids")
+        for one in self.value:
+            SessionId(one)
+
+    def carried(self) -> list[str]:
+        return list(self.value)
+
+
+@dataclass(frozen=True)
 class ClassName(TextValue):
     """An exception or type name, which is the whole of what an event
     may say about a failure: a type name says what went wrong, a message
@@ -254,7 +321,8 @@ class ClassName(TextValue):
     def __post_init__(self) -> None:
         if not isinstance(self.value, str):
             raise EventValueError("a ClassName is a string")
-        if not _CLASS_NAME.match(self.value):
+        parts = self.value.split(CLASS_NAME_SEPARATOR) if self.JOINED else [self.value]
+        if not all(_CLASS_NAME.match(part) for part in parts):
             raise EventValueError("a ClassName is a Python identifier")
 
     @classmethod
@@ -267,6 +335,21 @@ class ClassName(TextValue):
         `str(exc)`, and that edit is the leak.
         """
         return cls(type(failure).__name__)
+
+
+@dataclass(frozen=True)
+class ClassNames(ClassName):
+    """One failure's class name, or a group's names joined with `, `.
+
+    The MCP lifecycle is where a group happens: a transport raises
+    inside anyio task groups, sometimes inside a group holding a group,
+    so what a handler catches is an `ExceptionGroup` whose own name says
+    nothing at all. The site unwraps it to the sorted set of the names
+    inside; this is the type that says the joined form is lawful, and
+    the separator lives here because the joining does.
+    """
+
+    JOINED: ClassVar[bool] = True
 
 
 @dataclass(frozen=True)
@@ -462,6 +545,29 @@ class ClientId(Descriptor):
 
 
 @dataclass(frozen=True)
+class BoardName(Descriptor):
+    """What a device calls itself at its configuration check.
+
+    The OTA endpoint is unauthenticated and the board name arrives in a
+    JSON body, so this is a stranger's string of a stranger's length
+    with any character in it. `bounded_descriptor` truncates and strips
+    the unprintables at the decision site; this is the bound applied
+    again where the value reaches the surface.
+    """
+
+    BOUNDS: ClassVar[Bounds | None] = BOARD_BOUNDS
+
+
+@dataclass(frozen=True)
+class FirmwareVersion(Descriptor):
+    """The firmware version a device states at its configuration check,
+    which is the only moment it ever states one: the websocket handshake
+    does not carry it."""
+
+    BOUNDS: ClassVar[Bounds | None] = FIRMWARE_BOUNDS
+
+
+@dataclass(frozen=True)
 class PromptSources(EventValue):
     """How much of a prompt came from where, by provenance.
 
@@ -564,6 +670,143 @@ class ToolOutcome(StrEnum):
     FAILED = " and failed"
 
 
+class AuthRejection(StrEnum):
+    """Why the handshake gate refused before the accept."""
+
+    NO_TOKEN = "no_token"
+    BAD_TOKEN = "bad_token"
+
+
+class OriginSource(StrEnum):
+    """Which configuration key the startup banner's origin came out of.
+
+    The last of the three is a guess and the provenance fragment beside
+    it says so; the token is which key was read, not how sure it is.
+    """
+
+    PUBLIC_URL = "server.public_url"
+    WEBSOCKET_URL = "server.websocket_url"
+    LISTEN_ADDRESS = "the listen address (server.host and server.port)"
+
+
+class ActivationRefusal(StrEnum):
+    """Which check a version-2 activation poll failed.
+
+    Nothing of the body is ever quoted, on any of the three: the token
+    names which check, and the sentence says the value is not repeated.
+    """
+
+    UNREADABLE_BODY = "unreadable_body"
+    UNKNOWN_ALGORITHM = "unknown_algorithm"
+    CHALLENGE_MISMATCH = "challenge_mismatch"
+
+
+class NotOffered(StrEnum):
+    """Why an unbound device was answered with no activation code.
+
+    Three members and two shapes. `UNREADABLE` is the view's failure and
+    says so in a sentence of its own; the other two are the pending
+    table's bounds, worded as the sentences their warning renders,
+    because that is what the surface has always carried. Long members
+    and a closed set are not in tension: what makes a token a token is
+    that the set is closed.
+    """
+
+    UNREADABLE = "unreadable"
+    PENDING_FULL = "128 devices are already waiting to be claimed, which is the cap"
+    MINT_SPENT = (
+        "30 activation codes have been issued in the last 10 minutes, "
+        "which is the limit"
+    )
+
+
+class OtaRefusal(StrEnum):
+    """The whole of what a rejected OTA request may say.
+
+    Every refusal this endpoint makes is one of these three fixed
+    sentences, said once to the caller and once to the log, which is
+    what keeps a header it could not read out of both. The endpoint
+    reaches for these members rather than restating them, so the closed
+    set and the wording have one home.
+    """
+
+    DEVICE_ID_REQUIRED = "the Device-Id header is required and holds the device MAC"
+    CLIENT_ID_REQUIRED = "the Client-Id header is required and holds the device UUID"
+    DEVICE_ID_UNREADABLE = (
+        "the Device-Id header does not hold a MAC address; it has to be six "
+        "colon-separated hex pairs, for example aa:bb:cc:dd:ee:ff. What was sent is "
+        "not quoted back, since a header that missed the MAC may hold anything at all"
+    )
+
+
+class CaptureDeclined(StrEnum):
+    """Why a session is not being recorded."""
+
+    UNUSABLE = "unusable"
+    MIN_FREE_MB = "min_free_mb"
+    OPEN = "open"
+
+
+class CaptureWrite(StrEnum):
+    """Which of a recording's two tracks a failed write was for. Worded
+    as the sentence renders it, since the sentence names the doing."""
+
+    AUDIO = "write audio"
+    EVENT = "write an event"
+
+
+class EchoOutcome(StrEnum):
+    """How the ASR prompt-echo guard's retry ended."""
+
+    SKIPPED = "skipped"
+    TIMED_OUT = "timed_out"
+    CONFIRMED_ECHO = "confirmed_echo"
+    CONFIRMED_EMPTY = "confirmed_empty"
+    RECOVERED = "recovered"
+
+
+class McpTransport(StrEnum):
+    """How a configured MCP entry is reached."""
+
+    STDIO = "stdio"
+    STREAMABLE_HTTP = "streamable_http"
+
+
+class McpDown(StrEnum):
+    """Why an entry's tools are gone.
+
+    Six members and two shapes: the four a failed connect is classified
+    into, the intentional stop, and the drop that follows a failed call.
+    Every one is chosen where the exception is classified and never
+    built out of its message.
+    """
+
+    TRANSPORT_FAILED = "transport_failed"
+    INITIALIZE_FAILED = "initialize_failed"
+    DISCOVERY_FAILED = "discovery_failed"
+    CONNECT_TIMEOUT = "connect_timeout"
+    STOPPED = "stopped"
+    CALL_FAILED = "call_failed"
+
+
+class McpReloadOutcome(StrEnum):
+    """Whether a reload changed anything."""
+
+    APPLIED = "applied"
+    REFUSED = "refused"
+
+
+class McpRefusal(StrEnum):
+    """Why a reload was refused and nothing was changed. Chosen where
+    the exception is classified and never built out of its message."""
+
+    IN_PROGRESS = "in_progress"
+    DATABASE_BUSY = "database_busy"
+    UNREADABLE = "unreadable"
+    INVALID = "invalid"
+    UNEXPECTED = "unexpected"
+
+
 @dataclass(frozen=True)
 class TokenValue(TextValue):
     """One member of a closed set, held to it at construction.
@@ -650,6 +893,95 @@ class ProviderOutcomeToken(TokenValue):
 @dataclass(frozen=True)
 class ToolOutcomeToken(TokenValue):
     ENUM: ClassVar[type[StrEnum]] = ToolOutcome
+
+
+@dataclass(frozen=True)
+class AuthRejectionToken(TokenValue):
+    ENUM: ClassVar[type[StrEnum]] = AuthRejection
+
+
+@dataclass(frozen=True)
+class OriginSourceToken(TokenValue):
+    ENUM: ClassVar[type[StrEnum]] = OriginSource
+
+
+@dataclass(frozen=True)
+class ActivationRefusalToken(TokenValue):
+    ENUM: ClassVar[type[StrEnum]] = ActivationRefusal
+
+
+@dataclass(frozen=True)
+class NotOfferedToken(TokenValue):
+    ENUM: ClassVar[type[StrEnum]] = NotOffered
+
+
+@dataclass(frozen=True)
+class PendingRefusal(NotOfferedToken):
+    """The two bounds the pending table refuses a code at, and only
+    those. The view's own failure says so in a sentence of its own and
+    cannot be built here, which is the narrowing the untyped registry
+    spelled out variant by variant."""
+
+    MEMBERS: ClassVar[frozenset[str] | None] = frozenset(
+        {NotOffered.PENDING_FULL, NotOffered.MINT_SPENT}
+    )
+
+
+@dataclass(frozen=True)
+class OtaRefusalToken(TokenValue):
+    ENUM: ClassVar[type[StrEnum]] = OtaRefusal
+
+
+@dataclass(frozen=True)
+class CaptureDeclinedToken(TokenValue):
+    ENUM: ClassVar[type[StrEnum]] = CaptureDeclined
+
+
+@dataclass(frozen=True)
+class CaptureWriteToken(TokenValue):
+    ENUM: ClassVar[type[StrEnum]] = CaptureWrite
+
+
+@dataclass(frozen=True)
+class EchoOutcomeToken(TokenValue):
+    ENUM: ClassVar[type[StrEnum]] = EchoOutcome
+
+
+@dataclass(frozen=True)
+class McpTransportToken(TokenValue):
+    ENUM: ClassVar[type[StrEnum]] = McpTransport
+
+
+@dataclass(frozen=True)
+class McpDownToken(TokenValue):
+    ENUM: ClassVar[type[StrEnum]] = McpDown
+
+
+@dataclass(frozen=True)
+class McpConnectFailure(McpDownToken):
+    """The four a failed connect is classified into. A stop and a drop
+    after a failed call are the other two ways down and each says so in
+    a sentence of its own, so neither can be built for the sentence that
+    reports an entry that never came up."""
+
+    MEMBERS: ClassVar[frozenset[str] | None] = frozenset(
+        {
+            McpDown.TRANSPORT_FAILED,
+            McpDown.INITIALIZE_FAILED,
+            McpDown.DISCOVERY_FAILED,
+            McpDown.CONNECT_TIMEOUT,
+        }
+    )
+
+
+@dataclass(frozen=True)
+class McpReloadOutcomeToken(TokenValue):
+    ENUM: ClassVar[type[StrEnum]] = McpReloadOutcome
+
+
+@dataclass(frozen=True)
+class McpRefusalToken(TokenValue):
+    ENUM: ClassVar[type[StrEnum]] = McpRefusal
 
 
 # --- the formatted fragments ------------------------------------------
@@ -762,6 +1094,31 @@ class ReachingHost(Fragment):
         return cls(f" reaching {host}" if host is not None else "")
 
 
+@dataclass(frozen=True)
+class SessionList(Fragment):
+    """The session ids a prune removed, comma-joined, for the sentence
+    that names them. The field beside it carries the ids themselves."""
+
+    GRAMMAR: ClassVar[Grammar | None] = SESSION_LIST
+
+    @classmethod
+    def of(cls, sessions: tuple[str, ...]) -> "SessionList":
+        return cls(", ".join(sessions))
+
+
+@dataclass(frozen=True)
+class OriginProvenance(Fragment):
+    """Which configuration key the startup banner's origin came out of,
+    and whether it was read or inferred.
+
+    Built by `Origin.provenance`, which is where the guess and its
+    reasons are decided; this is the type that says the assembled shape
+    is one the sentence may render.
+    """
+
+    GRAMMAR: ClassVar[Grammar | None] = ORIGIN_PROVENANCE
+
+
 # What a refusal says instead of naming a device, wherever there is no
 # device this server recognizes to name. Here rather than at the site,
 # because the grammar below is what admits it and the two would
@@ -784,12 +1141,24 @@ class DeviceOrUnidentified(Fragment):
 
 __all__ = [
     "ABSENT",
-    "CLASS_NAME_PATTERN",
     "Absent",
+    "ActivationCode",
+    "ActivationRefusal",
+    "ActivationRefusalToken",
     "AgentList",
     "AgentNames",
     "AlsoBoundTo",
+    "AuthRejection",
+    "AuthRejectionToken",
+    "BoardName",
+    "CLASS_NAME_PATTERN",
+    "CLASS_NAME_SEPARATOR",
+    "CaptureDeclined",
+    "CaptureDeclinedToken",
+    "CaptureWrite",
+    "CaptureWriteToken",
     "ClassName",
+    "ClassNames",
     "ClientId",
     "CloseReason",
     "CloseReasonToken",
@@ -798,18 +1167,38 @@ __all__ = [
     "Descriptor",
     "DeviceId",
     "DeviceOrUnidentified",
+    "EchoOutcome",
+    "EchoOutcomeToken",
     "EventName",
     "EventValue",
     "EventValueError",
     "FillerSkip",
     "FillerSkipToken",
+    "FirmwareVersion",
     "Flag",
     "Fragment",
     "FromEntry",
     "Identifier",
     "LanguageTag",
     "MachineId",
+    "McpConnectFailure",
+    "McpDown",
+    "McpDownToken",
+    "McpRefusal",
+    "McpRefusalToken",
+    "McpReloadOutcome",
+    "McpReloadOutcomeToken",
+    "McpTransport",
+    "McpTransportToken",
+    "NotOffered",
+    "NotOfferedToken",
     "Nothing",
+    "OriginProvenance",
+    "OriginSource",
+    "OriginSourceToken",
+    "OtaRefusal",
+    "OtaRefusalToken",
+    "PendingRefusal",
     "PromptSources",
     "ProviderOutcome",
     "ProviderOutcomeToken",
@@ -819,7 +1208,10 @@ __all__ = [
     "Real",
     "Rejection",
     "RejectionToken",
+    "ReportedMac",
     "SessionId",
+    "SessionIds",
+    "SessionList",
     "Suppression",
     "SuppressionToken",
     "TextValue",

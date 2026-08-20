@@ -26,10 +26,18 @@ from vinga_server.conversations.schema import TOOL_SOURCES as STORED_TOOL_SOURCE
 from vinga_server.device.session import CLOSE_REASONS as CLOSED_BY
 from vinga_server.events.values import (
     ABSENT,
+    ActivationCode,
+    ActivationRefusal,
     AgentList,
     AgentNames,
     AlsoBoundTo,
+    AuthRejection,
+    BoardName,
+    Bounds,
+    CaptureDeclined,
+    CaptureWrite,
     ClassName,
+    ClassNames,
     ClientId,
     CloseReason,
     CloseReasonToken,
@@ -37,13 +45,26 @@ from vinga_server.events.values import (
     Count,
     DeviceId,
     DeviceOrUnidentified,
+    EchoOutcome,
     EventName,
     EventValueError,
+    FirmwareVersion,
     Flag,
     FromEntry,
     Identifier,
     LanguageTag,
+    McpConnectFailure,
+    McpDown,
+    McpDownToken,
+    McpRefusal,
+    McpReloadOutcome,
+    McpTransport,
     Nothing,
+    NotOffered,
+    OriginProvenance,
+    OriginSource,
+    OtaRefusal,
+    PendingRefusal,
     PromptSources,
     ProviderOutcome,
     ProviderOutcomeToken,
@@ -52,7 +73,10 @@ from vinga_server.events.values import (
     ReachingHost,
     Real,
     RejectionToken,
+    ReportedMac,
     SessionId,
+    SessionIds,
+    SessionList,
     ToolOutcome,
     ToolSource,
     ToolSourceToken,
@@ -391,3 +415,173 @@ def test_an_identifier_refusal_names_the_type_and_the_constraint() -> None:
         Identifier("   ")
 
     assert raised.value.args == ("an Identifier is non-empty once stripped",)
+
+
+# --- the server channels' own values ----------------------------------
+
+
+def test_a_reported_mac_is_the_header_as_the_firmware_spelled_it() -> None:
+    """Looser than the canonical form in separator and case, and only
+    because a header `normalize_mac` accepted is the only one that ever
+    reaches the sentence that renders it."""
+    assert ReportedMac("AA-BB-CC-DD-EE-FF").carried() == "AA-BB-CC-DD-EE-FF"
+    assert ReportedMac("aa:bb:cc:dd:ee:ff").carried() == "aa:bb:cc:dd:ee:ff"
+    with pytest.raises(EventValueError):
+        ReportedMac("aabbccddeeff")
+
+
+def test_an_activation_code_is_six_digits_read_off_a_screen() -> None:
+    assert ActivationCode("123456").carried() == "123456"
+    for refused in ("12345", "1234567", "12345a"):
+        with pytest.raises(EventValueError):
+            ActivationCode(refused)
+
+
+def test_a_board_name_and_a_firmware_version_carry_their_own_bounds() -> None:
+    """Two descriptors rather than one, because the decision sites
+    truncate to two different lengths and the bound is the site's."""
+    assert BoardName("waveshare-s3").carried() == "waveshare-s3"
+    assert FirmwareVersion("1.8.2").carried() == "1.8.2"
+    assert BoardName.BOUNDS is not None
+    assert FirmwareVersion.BOUNDS is not None
+    assert BoardName.BOUNDS.max_length > FirmwareVersion.BOUNDS.max_length
+    with pytest.raises(EventValueError):
+        FirmwareVersion("v" * (FirmwareVersion.BOUNDS.max_length + 1))
+    with pytest.raises(EventValueError):
+        BoardName("waveshare\nsecond line")
+
+
+def test_the_descriptor_bounds_are_the_ones_the_check_in_truncates_to() -> None:
+    """The event's bound and the decision site's are one number. A
+    descriptor bounded here more loosely than the site truncates would
+    be a claim the site does not keep."""
+    from vinga_server.config.models import (
+        BOARD_LIMIT,
+        CLIENT_ID_LIMIT,
+        FIRMWARE_LIMIT,
+    )
+
+    assert BoardName.BOUNDS == Bounds(BOARD_LIMIT)
+    assert FirmwareVersion.BOUNDS == Bounds(FIRMWARE_LIMIT)
+    assert ClientId.BOUNDS == Bounds(CLIENT_ID_LIMIT)
+
+
+def test_session_ids_carry_a_list_and_hold_each_element_to_the_syntax() -> None:
+    assert SessionIds(("alpha", "beta")).carried() == ["alpha", "beta"]
+    with pytest.raises(EventValueError):
+        SessionIds(("alpha", SENTINEL))
+    with pytest.raises(EventValueError):
+        SessionIds(["alpha"])  # type: ignore[arg-type]
+
+
+def test_joined_class_names_admit_a_group_and_a_plain_one_alike() -> None:
+    """A transport raises inside anyio task groups, so what a handler
+    catches is a group whose own name says nothing; the site unwraps it
+    to the names inside and this is the type that admits the joining."""
+    assert ClassNames("TimeoutError").carried() == "TimeoutError"
+    assert ClassNames("ConnectError, TimeoutError").carried() == (
+        "ConnectError, TimeoutError"
+    )
+    assert ClassNames.JOINED is True
+    assert ClassName.JOINED is False
+    with pytest.raises(EventValueError):
+        ClassNames("ConnectError; TimeoutError")
+    with pytest.raises(EventValueError):
+        ClassName("ConnectError, TimeoutError")
+
+
+# --- and their closed sets, by their decision sites -------------------
+
+
+def test_the_ota_refusals_are_the_whole_of_what_that_endpoint_says() -> None:
+    """By identity rather than by equality: the endpoint reaches for
+    these members rather than restating the sentences, so the closed set
+    and the wording have one home."""
+    from vinga_server.ota import reply
+
+    assert reply.DEVICE_ID_PROBLEM is OtaRefusal.DEVICE_ID_UNREADABLE
+    assert len(frozenset(OtaRefusal)) == 3
+
+
+def test_the_pending_refusals_are_the_two_bounds_the_table_refuses_at() -> None:
+    """Restated rather than imported, because the pending table imports
+    the emitter and an import back would be a cycle. Held equal here, so
+    a reworded bound fails rather than degrades."""
+    from vinga_server.onboarding.pending import BUDGET_SPENT, CAPACITY_REACHED
+
+    assert PendingRefusal.TOKENS == frozenset({CAPACITY_REACHED, BUDGET_SPENT})
+    assert NotOffered.PENDING_FULL == CAPACITY_REACHED
+    assert NotOffered.MINT_SPENT == BUDGET_SPENT
+    with pytest.raises(EventValueError):
+        PendingRefusal(NotOffered.UNREADABLE)
+
+
+def test_the_origin_sources_are_the_three_the_banner_can_name() -> None:
+    from vinga_server.config import ServerConfig
+    from vinga_server.onboarding.origin import public_origin
+
+    assert public_origin(ServerConfig(public_url="https://vinga.example")).source == (
+        OriginSource.PUBLIC_URL
+    )
+    assert public_origin(
+        ServerConfig(websocket_url="wss://vinga.example/ws")
+    ).source == OriginSource.WEBSOCKET_URL
+    assert public_origin(ServerConfig()).source == OriginSource.LISTEN_ADDRESS
+
+
+def test_the_mcp_down_reasons_are_the_ones_the_transport_classifies_into() -> None:
+    from vinga_server.tools.mcp import transport
+
+    assert McpConnectFailure.TOKENS == frozenset(
+        {
+            transport.TRANSPORT_FAILED,
+            transport.INITIALIZE_FAILED,
+            transport.DISCOVERY_FAILED,
+            transport.CONNECT_TIMEOUT,
+        }
+    )
+    assert McpDownToken.TOKENS == frozenset(McpConnectFailure.TOKENS) | {
+        transport.STOPPED,
+        transport.CALL_FAILED,
+    }
+    with pytest.raises(EventValueError):
+        McpConnectFailure(McpDown.STOPPED)
+
+
+def test_the_mcp_reload_words_are_the_ones_the_reload_answers_with() -> None:
+    from vinga_server.tools.mcp import reload
+
+    assert frozenset(McpReloadOutcome) == frozenset({reload.APPLIED, reload.REFUSED})
+    assert frozenset(McpRefusal) == frozenset(
+        {"in_progress", "database_busy", "unreadable", "invalid", "unexpected"}
+    )
+
+
+def test_the_remaining_server_sets_are_the_words_their_sites_write() -> None:
+    """The small ones, gathered: a handshake refusal, a declined
+    recording, a failed write's track, the echo guard's outcome and a
+    configured transport."""
+    assert frozenset(AuthRejection) == frozenset({"no_token", "bad_token"})
+    assert frozenset(CaptureDeclined) == frozenset({"unusable", "min_free_mb", "open"})
+    assert frozenset(CaptureWrite) == frozenset({"write audio", "write an event"})
+    assert frozenset(EchoOutcome) == frozenset(
+        {"skipped", "timed_out", "confirmed_echo", "confirmed_empty", "recovered"}
+    )
+    assert frozenset(McpTransport) == frozenset({"stdio", "streamable_http"})
+    assert frozenset(ActivationRefusal) == frozenset(
+        {"unreadable_body", "unknown_algorithm", "challenge_mismatch"}
+    )
+
+
+def test_the_two_new_fragments_are_built_by_the_types_that_declare_them() -> None:
+    assert SessionList.of(("alpha", "beta")).carried() == "alpha, beta"
+    assert OriginProvenance("from server.public_url").carried() == (
+        "from server.public_url"
+    )
+    assert OriginProvenance("guessed from the listen address").carried() == (
+        "guessed from the listen address"
+    )
+    with pytest.raises(EventValueError):
+        SessionList.of(())
+    with pytest.raises(EventValueError):
+        OriginProvenance("server.public_url")
