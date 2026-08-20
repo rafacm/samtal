@@ -1,7 +1,8 @@
 """The configurations a session suite is built on, and their constants.
 
-What belongs here is a `Config` a test hands to `create_app` or to a
-session builder, and the constants such a configuration names: the
+What belongs here is a `Config` a test hands to `create_app`, the
+generation holder a session builder is handed one through, and the
+constants such a configuration names: the
 device identity a handshake presents, the audio shapes the wire is
 agreed on, the two personas' MAC addresses and tones. Nothing here
 constructs a session or touches a socket, so this module imports only
@@ -23,6 +24,8 @@ import yaml
 
 from vinga_server.config import Config, compose_config, load_file_config
 from vinga_server.config.models import DOMAIN_KEYS
+from vinga_server.config.secrets import SecretStore
+from vinga_server.generation import Generation, Generations
 
 # --- the device the handshake presents -------------------------------
 
@@ -329,3 +332,22 @@ def load_config_from_data(data: dict) -> Config:
         path = Path(tmp) / "config.yaml"
         path.write_text(yaml.safe_dump(file_data), encoding="utf-8")
         return compose_config(load_file_config(path), domain_data, str(path))
+
+
+def world(config: Config, secrets: SecretStore | None = None) -> Generations:
+    """One server's generation holder, holding `config` as the world it
+    serves.
+
+    What every caller that used to be handed a `Config` is handed now:
+    the session builders, the runtime factory, and anything that reads
+    the configuration at a convergence point. A holder that is never
+    applied to is exactly the world it was built with, which is what a
+    suite about anything other than reloading wants and what it used to
+    have.
+
+    `secrets` defaults to an empty store rather than None for the reason
+    the composition root's does: a deployment whose credentials are all
+    environment references has no stored secret, and one shape of
+    generation is easier to reason about than two.
+    """
+    return Generations(Generation(config, secrets if secrets is not None else SecretStore()))
