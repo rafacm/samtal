@@ -76,6 +76,49 @@ def rows(directory: Path, table: str, **where: Any) -> list[dict[str, Any]]:
         engine.dispose()
 
 
+# --- what a database actually holds -----------------------------------
+
+
+def stored_rows(store: Any, selection: Any) -> list[dict[str, Any]]:
+    """What the database actually holds, row by row.
+
+    White-box, deliberately, and the database is the reason. A public
+    read answers what this build makes of a row, which cannot tell a
+    value kept verbatim from one this build encodes on the way in and
+    decodes on the way out. The stored form is a compatibility surface
+    of its own: a migration, a backup restored under another build, and
+    the upgrade path this project supports from the first revision
+    forward all read the column rather than the accessor. So a suite
+    that promises a field is kept byte for byte has to look at the
+    bytes.
+    """
+    with store._engine.connect() as connection:
+        return [dict(row) for row in connection.execute(selection).mappings()]
+
+
+def stored_row(store: Any, selection: Any) -> dict[str, Any]:
+    """The one row a query answers, as the database holds it."""
+    (row,) = stored_rows(store, selection)
+    return row
+
+
+def planted(store: Any, *statements: Any) -> None:
+    """Write rows the way an older, or a broken, build wrote them.
+
+    White-box, deliberately: what these suites are about is a row no
+    current write can produce, because the current write is the one
+    whose output is not the thing under test. A row from before a column
+    existed, a row from before a normalization landed, and a row holding
+    a value today's writer would have refused are all rows a running
+    deployment can have, arriving from an upgrade, from another build,
+    or from a file something else corrupted, and reading one safely is
+    the promise being kept.
+    """
+    with store._engine.begin() as connection:
+        for statement in statements:
+            connection.execute(statement)
+
+
 # --- an agent's memory file, made unreadable --------------------------
 
 

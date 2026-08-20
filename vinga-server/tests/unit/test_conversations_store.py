@@ -288,6 +288,14 @@ def test_the_bound_counts_events_the_writer_is_holding_in_a_batch(
     with caplog.at_level(logging.INFO):
         for index in range(10):
             store.record_event("alpha", "vad_edge", logging.DEBUG, {"n": index}, 101.0)
+    # White-box for this file's reads of the writer, and its own thread
+    # is the reason. The store's promise is that a conversation's rows
+    # land and that a bounded queue never becomes unbounded memory, and
+    # both are about work in flight on a thread nobody outside can see:
+    # a batch not yet committed is by definition not in the database, so
+    # a public read answers the same before and after the bug. The
+    # thread reads below are the join that keeps one test's writer from
+    # outliving it.
         _until(
             lambda: len(store._batches.get("alpha", _Batch()).events) == 4,
             "the writer never took the accepted events into its batch",
@@ -369,6 +377,10 @@ def test_the_writers_defaults_are_the_documented_ones(tmp_path: Path, stores) ->
     assert (store.metrics, store.text) == (True, True)
     # The pragma the connection really carries, rather than the constant
     # it was meant to be built from.
+    # White-box: a pragma is a property of the connection the writer
+    # holds, and nothing reports it. What it protects is a second writer
+    # waiting rather than failing, and a deletion leaving no readable
+    # bytes behind, neither of which any read can show.
     with store._engine.connect() as connection:
         assert connection.execute(sql("PRAGMA busy_timeout")).scalar() == 10_000
         assert connection.execute(sql("PRAGMA secure_delete")).scalar() == 1
@@ -687,6 +699,11 @@ def test_a_failed_marker_drops_its_batch_and_names_only_the_class(
         # Parked in front of the turn's own transaction, which is what
         # makes the swap below hit exactly that one and no other.
         gate.wait()
+        # White-box: the failure under test is the database refusing a
+        # write the writer has already accepted, with the refusal's text
+        # holding what was being written. Nothing public can make a
+        # committed engine fail on the next statement, and what is being
+        # proved is that the report of it carries no content.
         store._engine = Raising(f"near {SENTINEL}: syntax error")
         with caplog.at_level(logging.INFO):
             gate.open_forever()
@@ -733,6 +750,8 @@ def test_a_failed_close_leaves_the_session_open_shaped(tmp_path: Path, stores) -
     gate.let_through()
     store.close_session("alpha", duration_s=5.0, reason="drain")
     gate.wait()
+    # White-box, same shape: a close that cannot be written is what
+    # leaves a session row open, and only a broken engine produces one.
     store._engine = Raising("no")
     gate.open_forever()
     store.stop()

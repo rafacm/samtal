@@ -33,6 +33,7 @@ from fastapi.testclient import TestClient
 
 from tests.support.config_cli import chain, document, runner
 from tests.support.problems import problem
+from tests.support.stores import planted
 from vinga_server import logs
 from vinga_server.config.api import build_api
 from vinga_server.config.loader import ConfigError
@@ -325,12 +326,12 @@ def test_a_planted_credential_round_trips_without_becoming_the_mask(
     entry's model does not silently replace a credential they cannot
     see with eight asterisks."""
     client.put("/providers/llm/claude", json={"type": "anthropic", "model": "m"})
-    with store._engine.begin() as connection:  # noqa: SLF001 - a row from another door
-        connection.execute(
-            schema.providers.update()
-            .where(schema.providers.c.name == "claude")
-            .values(api_key_env=PASTED)
-        )
+    planted(
+        store,
+        schema.providers.update()
+        .where(schema.providers.c.name == "claude")
+        .values(api_key_env=PASTED),
+    )
     envelope = client.get("/providers/llm/claude").json()
     assert envelope["entity"]["api_key_env"] == MASK
 

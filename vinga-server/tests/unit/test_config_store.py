@@ -14,6 +14,7 @@ import pytest
 from cryptography.fernet import Fernet, MultiFernet
 from sqlalchemy import select, update
 
+from tests.support.stores import planted, stored_row, stored_rows
 from vinga_server.config import ConfigError
 from vinga_server.config.entities import (
     NO_SUCH_AGENT,
@@ -149,11 +150,8 @@ def test_both_mcp_entry_forms_round_trip_through_the_row(store: ConfigStore) -> 
     store.set_mcp_server("shed", {"transport": "stdio", "command": "uvx"})
     store.set_agent("poet", {"prompt": "You are a poet.", "mcp": written})
 
-    with store._engine.connect() as connection:
-        stored = connection.execute(
-            select(schema.agents.c.mcp).where(schema.agents.c.name == "poet")
-        ).scalar_one()
-    assert stored == written
+    row = stored_row(store, select(schema.agents.c.mcp).where(schema.agents.c.name == "poet"))
+    assert row["mcp"] == written
 
     entry = store.load().domain.agents["poet"]
     assert entry.mcp is not None
@@ -170,13 +168,11 @@ def test_an_entrys_guidance_round_trips_byte_for_byte(store: ConfigStore) -> Non
         "weather", {"transport": "stdio", "command": "uvx", "instructions": written}
     )
 
-    with store._engine.connect() as connection:
-        stored = connection.execute(
-            select(schema.mcp_servers.c.instructions).where(
-                schema.mcp_servers.c.name == "weather"
-            )
-        ).scalar_one()
-    assert stored == written
+    row = stored_row(
+        store,
+        select(schema.mcp_servers.c.instructions).where(schema.mcp_servers.c.name == "weather"),
+    )
+    assert row["instructions"] == written
     assert store.load().domain.mcp_servers["weather"].instructions == written
     assert store.read_mcp_server("weather").entry.instructions == written
 
@@ -188,12 +184,12 @@ def test_a_row_written_before_the_guidance_column_loads_unchanged(
     already means, so a row from a database written before the migration
     is an entry with no guidance rather than an unreadable row."""
     _populate(store)
-    with store._engine.begin() as connection:
-        connection.execute(
-            update(schema.mcp_servers)
-            .where(schema.mcp_servers.c.name == "home")
-            .values(instructions=None)
-        )
+    planted(
+        store,
+        update(schema.mcp_servers)
+        .where(schema.mcp_servers.c.name == "home")
+        .values(instructions=None),
+    )
 
     entry = store.load().domain.mcp_servers["home"]
     assert entry.instructions is None
@@ -214,15 +210,15 @@ def test_the_server_guidance_opt_ins_round_trip(store: ConfigStore) -> None:
         },
     )
 
-    with store._engine.connect() as connection:
-        stored = connection.execute(
-            select(
-                schema.mcp_servers.c.use_server_instructions,
-                schema.mcp_servers.c.inject_prompts,
-            ).where(schema.mcp_servers.c.name == "weather")
-        ).one()
-    assert stored.use_server_instructions
-    assert stored.inject_prompts == ["house_style", "safety"]
+    row = stored_row(
+        store,
+        select(
+            schema.mcp_servers.c.use_server_instructions,
+            schema.mcp_servers.c.inject_prompts,
+        ).where(schema.mcp_servers.c.name == "weather"),
+    )
+    assert row["use_server_instructions"]
+    assert row["inject_prompts"] == ["house_style", "safety"]
 
     entry = store.load().domain.mcp_servers["weather"]
     assert entry.use_server_instructions is True
@@ -251,13 +247,13 @@ def test_a_fragment_round_trips_byte_for_byte(store: ConfigStore) -> None:
     written = "  The bins go out on Tuesday.\n\n    The radio is called Bosse.\n"
     store.set_prompt_fragment("household", {"text": written})
 
-    with store._engine.connect() as connection:
-        stored = connection.execute(
-            select(schema.prompt_fragments.c.text).where(
-                schema.prompt_fragments.c.name == "household"
-            )
-        ).scalar_one()
-    assert stored == written
+    row = stored_row(
+        store,
+        select(schema.prompt_fragments.c.text).where(
+            schema.prompt_fragments.c.name == "household"
+        ),
+    )
+    assert row["text"] == written
     assert store.load().domain.prompt_fragments["household"].text == written
     assert store.read_prompt_fragment("household").entry.text == written
 
@@ -349,11 +345,8 @@ def test_an_include_list_round_trips_write_shaped(store: ConfigStore, layer: str
         table, where = schema.agents, schema.agents.c.name
         identity = "poet"
 
-    with store._engine.connect() as connection:
-        stored = connection.execute(
-            select(table.c.prompt_includes).where(where == identity)
-        ).scalar_one()
-    assert stored == written
+    row = stored_row(store, select(table.c.prompt_includes).where(where == identity))
+    assert row["prompt_includes"] == written
 
     domain = store.load().domain
     entry = domain.agent_defaults if layer == "agent_defaults" else domain.agents["poet"]
@@ -381,17 +374,13 @@ def test_a_row_written_before_the_includes_column_loads_unchanged(
     already means, so a row from a database written before the migration
     is a layer that includes nothing of its own."""
     _populate(store)
-    with store._engine.begin() as connection:
-        connection.execute(
-            update(schema.agents)
-            .where(schema.agents.c.name == "sam")
-            .values(prompt_includes=None)
-        )
-        connection.execute(
-            update(schema.agent_defaults)
-            .where(schema.agent_defaults.c.id == schema.AGENT_DEFAULTS_ID)
-            .values(prompt_includes=None)
-        )
+    planted(
+        store,
+        update(schema.agents).where(schema.agents.c.name == "sam").values(prompt_includes=None),
+        update(schema.agent_defaults)
+        .where(schema.agent_defaults.c.id == schema.AGENT_DEFAULTS_ID)
+        .values(prompt_includes=None),
+    )
 
     domain = store.load().domain
     assert domain.agents["sam"].prompt_includes is None
@@ -455,10 +444,9 @@ def test_a_pre_upgrade_string_row_loads_and_is_written_back_unchanged(
     list of names, which is why the string form is stored as a string
     and not normalized into an object: there is no migration to run."""
     _populate(store)
-    with store._engine.begin() as connection:
-        connection.execute(
-            update(schema.agents).where(schema.agents.c.name == "sam").values(mcp=["home"])
-        )
+    planted(
+        store, update(schema.agents).where(schema.agents.c.name == "sam").values(mcp=["home"])
+    )
 
     entry = store.load().domain.agents["sam"]
     assert entry.mcp == ["home"]
@@ -466,11 +454,8 @@ def test_a_pre_upgrade_string_row_loads_and_is_written_back_unchanged(
     # Written back through the same path the API writes with, which is
     # where a normalization would have shown up.
     store.set_agent("sam", {"prompt": "You are Sam.", "mcp": ["home"]})
-    with store._engine.connect() as connection:
-        stored = connection.execute(
-            select(schema.agents.c.mcp).where(schema.agents.c.name == "sam")
-        ).scalar_one()
-    assert stored == ["home"]
+    row = stored_row(store, select(schema.agents.c.mcp).where(schema.agents.c.name == "sam"))
+    assert row["mcp"] == ["home"]
 
 
 @pytest.mark.parametrize(
@@ -529,8 +514,7 @@ def test_the_credential_reference_lives_in_its_own_column(store: ConfigStore) ->
         {"type": "anthropic", "model": "claude-sonnet-5", "api_key_env": "ANTHROPIC_API_KEY"},
     )
 
-    with store._engine.connect() as connection:
-        row = connection.execute(schema.providers.select()).mappings().one()
+    row = stored_row(store, schema.providers.select())
     assert row["api_key_env"] == "ANTHROPIC_API_KEY"
     assert "api_key_env" not in row["options"]
 
@@ -876,12 +860,12 @@ def test_a_number_that_is_not_finite_is_refused(store: ConfigStore) -> None:
 
 def _corrupt_provider(store: ConfigStore, name: str) -> None:
     """A row whose JSON column holds something no model will load."""
-    with store._engine.begin() as connection:
-        connection.execute(
-            update(schema.providers)
-            .where(schema.providers.c.name == name)
-            .values(options="not an object")
-        )
+    planted(
+        store,
+        update(schema.providers)
+        .where(schema.providers.c.name == name)
+        .values(options="not an object"),
+    )
 
 
 def test_a_row_that_cannot_be_loaded_can_still_be_deleted(store: ConfigStore) -> None:
@@ -902,10 +886,12 @@ def test_a_row_that_cannot_be_loaded_is_deletable_for_every_kind(
     store.set_mcp_server("home", {"transport": "stdio", "command": "uvx"})
     store.set_agent("sam", {"prompt": "You are Sam."})
     store.bind_device("aa:bb:cc:dd:ee:ff", ["sam"])
-    with store._engine.begin() as connection:
-        connection.execute(update(schema.mcp_servers).values(env="not an object"))
-        connection.execute(update(schema.agents).values(mcp="not an array"))
-        connection.execute(update(schema.devices).values(agents="not an array"))
+    planted(
+        store,
+        update(schema.mcp_servers).values(env="not an object"),
+        update(schema.agents).values(mcp="not an array"),
+        update(schema.devices).values(agents="not an array"),
+    )
     with pytest.raises(ConfigError):
         store.load()
 
@@ -955,11 +941,9 @@ def test_a_corrupt_row_something_still_references_is_refused(store: ConfigStore)
     assert "references unresolved" in str(caught.value)
     # Nothing changed: the row is still there, still unreadable, which is
     # the rollback doing its work inside the one transaction.
-    with store._engine.begin() as connection:
-        rows = connection.execute(select(schema.providers.c.name)).scalars().all()
-        options = connection.execute(select(schema.providers.c.options)).scalars().all()
-    assert list(rows) == ["claude"]
-    assert list(options) == ["not an object"]
+    kept = stored_rows(store, select(schema.providers.c.name, schema.providers.c.options))
+    assert [row["name"] for row in kept] == ["claude"]
+    assert [row["options"] for row in kept] == ["not an object"]
 
 
 def test_a_value_json_cannot_carry_is_refused(store: ConfigStore) -> None:
@@ -1030,8 +1014,7 @@ def test_a_stored_number_that_is_not_finite_cannot_be_read(store: ConfigStore) -
     """A row written before the rule, or by something else: reported as
     unreadable rather than answered with a value nobody wrote."""
     store.set_provider("llm", "claude", {"type": "anthropic", "temperature": 0.7})
-    with store._engine.begin() as connection:
-        connection.execute(update(schema.providers).values(options={"temperature": nan}))
+    planted(store, update(schema.providers).values(options={"temperature": nan}))
 
     with pytest.raises(StorageError) as caught:
         store.load()
@@ -1234,8 +1217,7 @@ def test_a_json_column_of_the_wrong_shape_is_a_config_error(
     _populate(store)
     store.set_agent("poet", {"prompt": "p", "mcp": [], "filler": {"enabled": False}})
 
-    with store._engine.begin() as connection:
-        connection.execute(update(getattr(schema, table)).values(**{column: written}))
+    planted(store, update(getattr(schema, table)).values(**{column: written}))
 
     with pytest.raises(ConfigError) as caught:
         store.load()
@@ -1253,8 +1235,7 @@ def test_a_corrupt_json_column_does_not_stop_a_secret_being_cleared(
     still refuses in words rather than in a traceback."""
     _populate(store)
 
-    with store._engine.begin() as connection:
-        connection.execute(update(schema.providers).values(secrets="not an object"))
+    planted(store, update(schema.providers).values(secrets="not an object"))
 
     with pytest.raises(ConfigError) as caught:
         store.clear_secret(CLAUDE)
@@ -1288,6 +1269,12 @@ def test_two_concurrent_writers_serialize(
     finally:
         setup.dispose()
 
+    # White-box for this pacing and the one in the next test, and the
+    # race is the reason. What is under test is two writers arriving at
+    # the same moment: whether one is refused, whether both land, and
+    # what a reader sees in between. A real race is what a test cannot
+    # schedule, so the two threads are paced through the one function
+    # each of them has to pass, and no public seam sits inside a write.
     names = ("delete", "reference")
     has_read = {name: threading.Event() for name in names}
     read_domain = store_module._read_domain

@@ -19,6 +19,7 @@ import pytest
 from cryptography.fernet import Fernet, MultiFernet
 from sqlalchemy import update
 
+from tests.support.stores import planted
 from vinga_server.config import entities, views
 from vinga_server.config.entities import (
     NO_SUCH_AGENT,
@@ -206,17 +207,17 @@ def test_a_recorded_provider_carries_no_credential(store: ConfigStore) -> None:
     holds. Written straight to the database here, which is what a row
     that predates the rule looks like."""
     _populate(store)
-    with store._engine.begin() as connection:  # noqa: SLF001 - a row from before the rule
-        connection.execute(
-            update(schema.providers)
-            .where(schema.providers.c.name == "claude")
-            .values(
-                options={
-                    "base_url": f"https://user:{SECRET}@host/v1?api_key={OTHER_SECRET}",
-                    "connection": {"endpoint": f"https://{SECRET}@host"},
-                }
-            )
-        )
+    planted(
+        store,
+        update(schema.providers)
+        .where(schema.providers.c.name == "claude")
+        .values(
+            options={
+                "base_url": f"https://user:{SECRET}@host/v1?api_key={OTHER_SECRET}",
+                "connection": {"endpoint": f"https://{SECRET}@host"},
+            }
+        ),
+    )
 
     recorded = views.provider_record(store.read_provider("llm", "claude").entry)
 
@@ -369,12 +370,12 @@ def test_a_reference_that_is_not_one_comes_back_masked(store: ConfigStore) -> No
     everything else: the read that would find the mistake must not be
     the one that prints it."""
     _populate(store)
-    with store._engine.begin() as connection:
-        connection.execute(
-            update(schema.providers)
-            .where(schema.providers.c.name == "claude")
-            .values(api_key_env=PASTED)
-        )
+    planted(
+        store,
+        update(schema.providers).where(schema.providers.c.name == "claude").values(
+            api_key_env=PASTED
+        ),
+    )
 
     body = views.provider(store.read_provider("llm", "claude"))["entity"]
 

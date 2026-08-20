@@ -92,6 +92,11 @@ def engine_of(view: DeviceBindings) -> Engine:
     `dispose()` on an object holding nothing. This is what says so rather
     than letting such a test pass.
     """
+    # White-box for this file's engine and thread reads. What a
+    # lifespan promises is that what it took is given back: an engine
+    # disposed, a pool released, a writer thread joined. A released
+    # resource has no public form at all, which is the point of
+    # releasing it, so ownership is asserted where it lives.
     engine = view._engine
     assert engine is not None, (
         "the bindings view opened no engine, so nothing below proves a disposal: "

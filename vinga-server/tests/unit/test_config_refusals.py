@@ -24,6 +24,7 @@ import pytest
 from cryptography.fernet import Fernet, MultiFernet
 from sqlalchemy import update
 
+from tests.support.stores import planted
 from vinga_server import db as db_module
 from vinga_server.config.entities import (
     NO_SUCH_AGENT,
@@ -121,8 +122,7 @@ def test_a_refusal_that_is_not_about_a_missing_entity_stays_plain(store: ConfigS
 def test_a_column_that_cannot_be_read_is_a_storage_error(store: ConfigStore) -> None:
     """The 500 set: the request was fine, the stored row is not."""
     _populate(store)
-    with store._engine.begin() as connection:
-        connection.execute(update(schema.providers).values(options="not an object"))
+    planted(store, update(schema.providers).values(options="not an object"))
 
     with pytest.raises(StorageError) as caught:
         store.load()
@@ -149,8 +149,7 @@ def test_a_stored_row_that_will_not_validate_is_a_storage_error(
     _populate(store)
     store.set_agent_defaults({"llm": "claude"})
     store.bind_device("aa:bb:cc:dd:ee:ff", ["sam"])
-    with store._engine.begin() as connection:
-        connection.execute(update(table).values(**values))
+    planted(store, update(table).values(**values))
 
     with pytest.raises(StorageError) as caught:
         store.load()
@@ -189,8 +188,7 @@ def test_an_unreadable_row_still_fails_the_boot_as_a_config_error(
 
 def test_a_stored_row_naming_no_stage_is_a_storage_error(store: ConfigStore) -> None:
     _populate(store)
-    with store._engine.begin() as connection:
-        connection.execute(update(schema.providers).values(stage="nonsense"))
+    planted(store, update(schema.providers).values(stage="nonsense"))
 
     with pytest.raises(StorageError):
         store.load()
