@@ -2290,19 +2290,22 @@ the variable names, so the file belongs on the data volume and in
 access-controlled backups, not in a repository.
 
 And the operational one, said again because it is the trap of a
-configuration read once at start: **most of an edit applies at the next
-server start.** A `config set` of a provider, an agent, a prompt fragment or
-the agent defaults against a running deployment is accepted by that
-server and changes nothing it is doing until the process restarts, which
-both the command and the API's answer say every time they write. Two
-kinds of write answer otherwise, and each write says which of the three
-cases it is in: `config set mcp-server`, and a secret stored on an MCP
-entry, reach a running server when it is asked to reload; a device
-binding reaches it at that device's next check-in. Writing an agent
-stays with the first group even though a reload does re-read that
-agent's `mcp` grant list, because the rest of it (prompt, providers,
-memory, filler) is built at boot, and a notice right about one field and
-wrong about the others would be worse than the conservative one.
+configuration most of which is read once at start: **an edit applies at
+the next server start unless the reload applies it.** A `config set` of
+a provider or of the agent defaults against a running deployment is
+accepted by that server and changes nothing it is doing until the
+process restarts, which both the command and the API's answer say every
+time they write. Two kinds of write answer otherwise, and each write
+says which case it is in: `config set mcp-server`, a secret stored on an
+MCP entry and `config set prompt-fragment` reach a running server when
+it is asked to reload; a device binding reaches it at that device's next
+check-in. Writing an agent says both, because an agent entry is the one
+kind whose fields fall on either side: its `prompt`, its
+`prompt_includes` and its `mcp` grants are applied by the reload, and
+its providers, memory and filler are built at the next start. The one
+place the fragments are not live is `agent_defaults.prompt_includes`,
+which is the layer every agent's effective value is inherited through
+and which a reload deliberately does not move.
 
 ### The configuration API in a deployment
 

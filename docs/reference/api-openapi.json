@@ -802,7 +802,7 @@
       },
       "put": {
         "summary": "Write Prompt Fragment",
-        "description": "Create or replace one shared prompt fragment.\n\nIt carries the restart sentence rather than the reload's: what\nthe reload re-reads is the MCP entries, their secrets and the\ngrant lists, and a fragment is prompt text the agents compose\nwith at their next activation on a server that read it at boot.",
+        "description": "Create or replace one shared prompt fragment.\n\nIt carries the reload sentence: a fragment is prompt text, the\nreload re-reads the whole `prompt_fragments` kind, and prompt\ntext is assembled at an activation, so the new words reach every\nagent that includes this fragment at that agent's next\nactivation. Which agents those are depends on the layer that\nnames it: an agent's own `prompt_includes` is applied by the\nsame reload, while `agent_defaults.prompt_includes` is what\nevery agent's effective value is inherited through and waits for\nthe next server start.",
         "operationId": "write_prompt_fragment_prompt_fragments__name__put",
         "parameters": [
           {
@@ -4794,7 +4794,7 @@
               }
             ],
             "default": null,
-            "description": "The shared prompt fragments this layer's system prompt carries, each by the name it is defined under in prompt_fragments, injected in the order listed and directly after the agent's own prompt. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the fragments its siblings share. Every name has to be a fragment that exists, since the fragment is in this same database, and a name listed twice is refused. A reload applies this list and the fragments it names alike, so an edit here reaches a conversation at its next activation, which is a new session or an agent switch.",
+            "description": "The shared prompt fragments this agent's system prompt carries, each by the name it is defined under in prompt_fragments, injected in the order listed and directly after the agent's own prompt. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts this agent out of the fragments its siblings share. Every name has to be a fragment that exists, since the fragment is in this same database, and a name listed twice is refused. A reload applies this list, so an edit here reaches a conversation at its next activation, which is a new session or an agent switch. Inheriting instead, by leaving it unset, inherits the agent_defaults list's regime with it: a change made there waits for the next server start.",
             "title": "Prompt Includes"
           },
           "prompt": {
@@ -4917,7 +4917,7 @@
               }
             ],
             "default": null,
-            "description": "The shared prompt fragments this layer's system prompt carries, each by the name it is defined under in prompt_fragments, injected in the order listed and directly after the agent's own prompt. Unset inherits the agent_defaults list; naming a list replaces the inherited one rather than extending it, so an empty list opts an agent out of the fragments its siblings share. Every name has to be a fragment that exists, since the fragment is in this same database, and a name listed twice is refused. A reload applies this list and the fragments it names alike, so an edit here reaches a conversation at its next activation, which is a new session or an agent switch.",
+            "description": "The shared prompt fragments every agent's system prompt carries unless the agent names a list of its own, each by the name it is defined under in prompt_fragments, injected in the order listed and directly after the agent's own prompt. An agent naming a list replaces this one rather than extending it, so an empty list there opts that agent out of the fragments its siblings share. Every name has to be a fragment that exists, since the fragment is in this same database, and a name listed twice is refused. A reload does not apply this list, unlike an agent's own: it is the layer every agent's effective value is inherited through, so a change here reaches a conversation at the next server start. What a reload does apply is an agent's own list and the text of a fragment either layer names.",
             "title": "Prompt Includes"
           }
         },

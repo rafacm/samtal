@@ -1795,10 +1795,15 @@ def _entity_writes(api: FastAPI) -> None:
     ) -> dict[str, Any]:
         """Create or replace one shared prompt fragment.
 
-        It carries the restart sentence rather than the reload's: what
-        the reload re-reads is the MCP entries, their secrets and the
-        grant lists, and a fragment is prompt text the agents compose
-        with at their next activation on a server that read it at boot."""
+        It carries the reload sentence: a fragment is prompt text, the
+        reload re-reads the whole `prompt_fragments` kind, and prompt
+        text is assembled at an activation, so the new words reach every
+        agent that includes this fragment at that agent's next
+        activation. Which agents those are depends on the layer that
+        names it: an agent's own `prompt_includes` is applied by the
+        same reload, while `agent_defaults.prompt_includes` is what
+        every agent's effective value is inherited through and waits for
+        the next server start."""
         store.set_prompt_fragment(name, body)
         return _acknowledge(wrote_prompt_fragment(name), _PROMPT_FRAGMENT.notice)
 
