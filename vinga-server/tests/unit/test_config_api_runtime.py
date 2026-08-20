@@ -2,11 +2,12 @@
 stored.
 
 The status read answers from the MCP registry the serving application
-was handed, and the prompt read from the assembly the composition root
-closed over, so what is checked here is the transport around them: the
-gate, the shape, the honest answer when there is no server, and the one
-structural reason this namespace exists at all, that an entity may
-legally be named after a word a route wants.
+was handed, the prompt read from the assembly the composition root
+closed over, and the diff read from the comparison it closed over, so
+what is checked here is the transport around them: the gate, the shape,
+the honest answer when there is no server, and the one structural reason
+this namespace exists at all, that an entity may legally be named after
+a word a route wants.
 """
 
 import sys
@@ -22,8 +23,11 @@ from tests.support.apps import entered_client
 from tests.support.problems import PROBLEM_KEYS, problem
 from vinga_server.config import Config
 from vinga_server.config.api import (
+    DIFF_MOVED_DESCRIPTION,
+    DIFF_REFUSED_DESCRIPTION,
     MALFORMED_REQUEST_DESCRIPTION,
     MOUNT_PATH,
+    NO_RUNTIME_DIFF_DESCRIPTION,
     NO_RUNTIME_PROMPT_DESCRIPTION,
     PROBLEM_DESCRIPTIONS,
     PROBLEM_MEDIA_TYPE,
@@ -35,10 +39,20 @@ from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
     ReloadInProgressError,
+    RunningConfigMovedError,
     StorageError,
 )
 from vinga_server.config.models import MemoryConfig
-from vinga_server.config.responses import McpReloadResult
+from vinga_server.config.responses import (
+    AgentsDiff,
+    Applies,
+    ConfigDiff,
+    EntityDiff,
+    GrantsDiff,
+    LiveKind,
+    McpReloadResult,
+    SingletonDiff,
+)
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
 from vinga_server.config.store import ConfigStore
 from vinga_server.db import open_database
@@ -124,6 +138,7 @@ def serving(
     servers: McpServers | None,
     reload: object = None,
     agent_prompt: object = None,
+    config_diff: object = None,
 ) -> Iterator[TestClient]:
     api = build_api(
         TOKEN,
@@ -131,6 +146,7 @@ def serving(
         mcp_servers=servers,
         mcp_reload=reload,
         agent_prompt=agent_prompt,
+        config_diff=config_diff,
     )
     with TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"}) as client:
         yield client
@@ -719,3 +735,185 @@ def test_a_running_server_hands_its_own_assembly_to_the_api(
         )
 
     assert missing.status_code == 404
+
+
+# The stored-versus-running diff
+#
+# What this module owns, a third time: the gate, the shape of the answer,
+# the status each refusal maps to, and the honest refusal when there is
+# no server. What the comparison decides is `test_config_diff.py`'s and
+# `test_mcp_pending.py`'s; what the composition root does with a database
+# and a moving world is `test_config_diff_read.py`'s.
+
+DIFF_PATH = "/runtime/config/diff"
+
+NOTHING = {"added": (), "removed": (), "changed": ()}
+
+
+def answer(
+    providers: tuple[str, ...] = (),
+    mcp_servers: tuple[str, ...] = (),
+    grants: tuple[str, ...] = (),
+) -> ConfigDiff:
+    """One whole diff, the way the composition root composes one: every
+    kind present with its own regime, and whatever this case is about
+    filled in."""
+    return ConfigDiff(
+        providers=EntityDiff(
+            applies=Applies.RESTART, added=providers, removed=(), changed=()
+        ),
+        mcp_servers=EntityDiff(
+            applies=Applies.RELOAD, added=(), removed=(), changed=mcp_servers
+        ),
+        prompt_fragments=EntityDiff(applies=Applies.RESTART, **NOTHING),
+        agent_defaults=SingletonDiff(applies=Applies.RESTART, changed=False),
+        agents=AgentsDiff(
+            applies=Applies.RESTART,
+            **NOTHING,
+            grants=GrantsDiff(applies=Applies.RELOAD, changed=grants),
+        ),
+        devices=LiveKind(applies=Applies.CHECK_IN),
+        default_agent=LiveKind(applies=Applies.CHECK_IN),
+    )
+
+
+def comparing(composed: ConfigDiff):
+    async def diff() -> ConfigDiff:
+        return composed
+
+    return diff
+
+
+def refusing_diff(exc: Exception):
+    async def diff() -> ConfigDiff:
+        raise exc
+
+    return diff
+
+
+def test_the_diff_read_needs_the_bearer_token(directory: Path) -> None:
+    with TestClient(build_api(TOKEN, directory)) as anonymous:
+        assert anonymous.get(DIFF_PATH).status_code == 401
+        wrong = anonymous.get(DIFF_PATH, headers={"Authorization": "Bearer wrong"})
+        assert wrong.status_code == 401
+
+
+def test_an_application_without_a_server_has_nothing_to_compare(
+    client: TestClient,
+) -> None:
+    """Unlike the status read, there is no honest empty answer: an empty
+    diff would say that everything stored is already in effect, which is
+    a claim about a running server there is none of."""
+    response = client.get(DIFF_PATH)
+
+    assert response.status_code == 503
+    assert set(response.json()) == PROBLEM_KEYS
+    assert "no running server" in response.json()["detail"]
+
+
+def test_the_diff_answers_every_kind_with_its_own_regime(directory: Path) -> None:
+    """The whole shape on the wire, since this is the contract a client
+    generates against: seven kinds, each labelled, the two live ones
+    carrying their label and nothing else, and the grants beside the
+    agents rather than inside their lists."""
+    composed = answer(
+        providers=("llm.local",), mcp_servers=("tools",), grants=("assistant",)
+    )
+
+    with serving(directory, None, config_diff=comparing(composed)) as client:
+        response = client.get(DIFF_PATH)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "providers": {
+            "applies": "restart",
+            "added": ["llm.local"],
+            "removed": [],
+            "changed": [],
+        },
+        "mcp_servers": {
+            "applies": "reload",
+            "added": [],
+            "removed": [],
+            "changed": ["tools"],
+        },
+        "prompt_fragments": {
+            "applies": "restart",
+            "added": [],
+            "removed": [],
+            "changed": [],
+        },
+        "agent_defaults": {"applies": "restart", "changed": False},
+        "agents": {
+            "applies": "restart",
+            "added": [],
+            "removed": [],
+            "changed": [],
+            "grants": {"applies": "reload", "changed": ["assistant"]},
+        },
+        "devices": {"applies": "check-in"},
+        "default_agent": {"applies": "check-in"},
+    }
+
+
+@pytest.mark.parametrize(
+    ("refusal", "status"),
+    [
+        (RunningConfigMovedError("the running configuration changed"), 409),
+        (DatabaseBusyError("the configuration database is busy"), 409),
+        (ConfigError('agents.assistant.llm: unknown llm provider "ghost"'), 422),
+        (StorageError("the stored configuration cannot be read"), 500),
+    ],
+)
+def test_a_diff_refusal_maps_to_its_status_and_carries_its_own_sentence(
+    directory: Path, refusal: Exception, status: int
+) -> None:
+    """The same typed refusals the reload answers, plus the one this read
+    has of its own: a world that moved while it was being compared is
+    retryable exactly as a contended write is."""
+    with serving(directory, None, config_diff=refusing_diff(refusal)) as client:
+        response = client.get(DIFF_PATH)
+
+    assert response.status_code == status
+    assert response.json() == problem(status, str(refusal))
+
+
+def test_the_diff_read_describes_the_refusals_it_can_actually_answer() -> None:
+    """Three of its refusals cannot inherit a shared sentence.
+
+    Its 422 is not about addressing, since it addresses nothing and
+    carries no body: it is the stored half being refused. Its 409 is not
+    one of the three things the shared sentence lists, because a world
+    that moved under a read is neither a held lock nor a reload asked
+    for twice. And the shared 503 says the reads in this namespace
+    answer emptily, which is the one thing this read must not do.
+    """
+    responses = document()["paths"][DIFF_PATH]["get"]["responses"]
+
+    for status in ("401", "409", "422", "500", "503"):
+        schema = responses[status]["content"][PROBLEM_MEDIA_TYPE]["schema"]
+        assert schema == {"$ref": "#/components/schemas/Problem"}, status
+    assert responses["409"]["description"] == DIFF_MOVED_DESCRIPTION
+    assert responses["409"]["description"] != PROBLEM_DESCRIPTIONS[409]
+    assert responses["422"]["description"] == DIFF_REFUSED_DESCRIPTION
+    assert responses["422"]["description"] != PROBLEM_DESCRIPTIONS[422]
+    assert responses["503"]["description"] == NO_RUNTIME_DIFF_DESCRIPTION
+    assert responses["503"]["description"] != PROBLEM_DESCRIPTIONS[503]
+    # The 500 is the shared one, and stays it: a failure that is not the
+    # caller's means here what it means everywhere.
+    assert responses["500"]["description"] == PROBLEM_DESCRIPTIONS[500]
+
+
+def test_the_document_says_what_changed_means() -> None:
+    """The one semantic an operator can be surprised by, in the contract
+    rather than in a commit message: a credential set again to the same
+    value reports its entity as changed, because what is compared is a
+    mark over the ciphertext."""
+    rendered = document()
+    described = rendered["components"]["schemas"]["EntityDiff"]["properties"]
+    changed = described["changed"]["description"]
+
+    assert "differs from what this server is serving" in changed
+    assert "never that something was written" in changed
+    for prose in (rendered["info"]["description"], changed):
+        assert "plaintext may not have" in prose
