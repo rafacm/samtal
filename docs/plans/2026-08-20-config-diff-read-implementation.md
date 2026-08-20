@@ -278,3 +278,140 @@ Run from `vinga-server/`, at `012f11c7`.
 
 The image and the smoke lane remain unverified here, for the reason
 given above.
+
+## M2: the route, complete
+
+### What was done
+
+Five commits, and the surface is whole: `GET /runtime/config/diff`
+answers the comparison milestone 1 built, the schema is published once
+with every kind and every list in it, and the committed OpenAPI document
+carries the route in the same change.
+
+**The shape.** The result types moved from `config/diff.py` into
+`config/responses.py` as pydantic models, and the `applies` token enum
+moved with them, so the closed set a client reads out of the document and
+the one the regime map is written in are one declaration. `config_diff`
+returns the model the route sends, which is the direction `McpReloadResult`
+already travels: the module that knows what an answer is made of composes
+it, and the handler awaits and answers.
+
+**The route.** `ApiRuntime` gains one optional async callable beside
+`mcp_reload` and `agent_prompt`, compared `is not None`, resolved by a
+dependency like its siblings, and answered with the prompt read's 503
+when it is absent. The route is `async def` for the reason the status
+read is, declares 401, 409, 422, 500 and 503, and gives three of them
+descriptions of their own, because the shared sentences are about
+addressing, about locks, and about reads that can answer emptily, and
+none of the three is true here.
+
+**The composition root.** `config_diff_reader` is built where both
+worlds are in hand. Its stored side is `reload_domain_config`, the
+reload's own re-read, run in a worker thread; its running side is the
+boot snapshot with the credentials loaded beside it; and its one-world
+rule is the registry's generation mark, taken on the loop before the
+read and again after it, with the comparison running only if the mark
+held and with no await of its own after the check. Three reads at most,
+then the retryable refusal.
+
+**Tests.** The transport cases join `tests/unit/test_config_api_runtime.py`
+(the gate, the 503, the whole shape on the wire, each refusal's status,
+and the document's own descriptions), the route joins the pinned
+inventory in `test_api_openapi.py`, and the composition root's own
+behavior is `tests/unit/test_config_diff_read.py`: the two stored-side
+refusals against a real database and a real key, the four no-leak
+sentinels over both paths and both log formats, the two race cases, and
+the wiring through the mount. The integration lane carries the care point
+end to end.
+
+### Deviations from the plan
+
+Five, and the first is the one the plan asked to be decided with the code
+in front of it.
+
+**1. The 409 is a new refusal, `RunningConfigMovedError`, not
+`ReloadInProgressError` reused.** The plan left the choice open and the
+code decided it: `ReloadInProgressError` says that a reload was asked for
+while one was already running and that the second request changed
+nothing, which is a sentence about a second reload. What this read met is
+not that. It asked for nothing to be changed, and the reload that moved
+the world under it may have finished before the refusal is composed. The
+two share a status and share the whole of their advice, which is to ask
+again, so the sibling sits in `loader.py` beside it and maps to 409 in
+`REFUSAL_STATUS` exactly as the plan said it would either way.
+
+**2. The result types are pydantic models in `config/responses.py`, and
+`Applies` went with them.** Milestone 1 recorded this as its own
+deviation 3 and left the choice of "map or move" to this milestone. Moved,
+because mapping would have been two structures that must agree: a
+dataclass field list and a model field list, with a converter between
+them and nothing holding the two together. `responses.py` still imports
+pydantic and the standard library and nothing else, and `diff.py` imports
+it, which is the direction `registry.py` and `reload.py` already import
+their result shapes from. Two lines of milestone 1's test moved with the
+shapes: the two live kinds are constructed by keyword, and the
+completeness pin reads `ConfigDiff.model_fields` rather than
+`dataclasses.fields`, which now holds the published shape to
+`DOMAIN_KEYS` as well as the map.
+
+**3. No field of a model type carries a description.** The prose the plan
+implies for each kind is there, but in the docstring of the model it
+points at rather than beside the reference to it. pydantic renders a
+described model-typed field as a `$ref` with a sibling key, and the
+committed document had exactly zero of those before this change: the
+codebase's own note on the subject (`_resolve_body_schemas` in `api.py`)
+says a `$ref` with a sibling is at best ignored, and a document that a
+TypeScript client is generated from (#210) is not the place to introduce
+the pattern. The per-kind facts that had nowhere else to go, the
+provider's `stage.name` identity and the MCP half's running baseline,
+are in `ConfigDiff`'s own description.
+
+**4. The composition root's builder is public and takes its read as an
+argument.** The plan says "the closure builder beside `_mcp_reloader`",
+and the two around it are private and do their own reads. This one is
+`config_diff_reader(running, servers, read)`, which is the shape
+`McpServers.reload(read)` already has and for the same stated reason:
+opening a database belongs to the layer that owns one, and what this
+function owns is where that read runs and what makes its answer one
+world. It is also what makes the rule checkable. The race the plan asks
+to be pinned is a reload landing between the stored read and the
+composition, and forcing that deterministically means gating the read;
+a builder that performed its own read could only be tested by patching a
+module global, and a test that reaches for a private name is a design
+flag rather than a test problem.
+
+**5. The closure catches nothing.** The milestone brief asked for
+sanitized errors built in an except arm and raised after the block. There
+is no except arm, deliberately: every failure `reload_domain_config` has
+is a `ConfigError` that `REFUSAL_STATUS` already maps, and anything else
+is a bug, which the API's last-resort middleware answers as a sanitized
+500 while recording the exception's class in one fixed line. Catching it
+here to raise a `StorageError` with a sentence of this closure's would
+answer the same status with less information: the class recorded would be
+the replacement's, not the failure's. The no-leak property is the same
+either way and the sentinel suite asserts it over the refusal path that
+exists.
+
+### Discoveries
+
+**The committed document had no `$ref` siblings at all.** Checked
+mechanically rather than assumed, over the document as it stood before
+this change, which is what turned a stylistic question into deviation 3.
+
+**Milestone 1 left nothing for the MCP package to do.**
+`McpServers.pending_against` and `McpServers.generation` were exactly the
+two reads this milestone needed, and no file under `tools/mcp/` is
+touched by it.
+
+**An unreferenced entry makes the race cheap to force.** A reload of
+entries no agent grants builds no manager, starts nothing and stops
+nothing, and still advances the generation, because the mark counts
+installs rather than lifecycle work. Both concurrency cases therefore run
+in milliseconds and spawn no processes, which is the same discovery
+milestone 1 made about its own MCP cases arriving from the other side.
+
+**The two boundaries are visible in one run.** The integration case
+writes providers and an agent, sees them pending, writes two MCP entries,
+reloads, and sees the MCP half go quiet while the providers stay pending.
+That contrast is the whole reason the labels exist, and it took no
+scaffolding beyond the pipeline the file already had.
