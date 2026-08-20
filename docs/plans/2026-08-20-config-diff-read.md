@@ -102,12 +102,18 @@ since boot", which is the operationally useful sentence anyway.
 regimes: its `mcp` grants are applied by the MCP reload (the
 registry's slice derives grants from the whole candidate
 configuration), while everything else about it waits for a restart.
-Milestone 1 therefore compares agents and `agent_defaults` with the
-`mcp` field excluded, so a grants-only edit that a reload already
-applied is never claimed pending-restart. Milestone 2 adds the
-grant comparison under the reload label, computed against the
-current slice for the agents both worlds hold: grants of an agent
-only one side knows ride that agent's own added or removed row.
+The restart-bound comparison therefore takes agents and
+`agent_defaults` with the `mcp` field excluded, so a grants-only
+edit that a reload already applied is never claimed
+pending-restart. The grant comparison under the reload label
+covers every agent of the current generation, not only the agents
+both worlds hold (the review's finding 5): a boot-loaded agent
+deleted from storage keeps talking until a restart, while a reload
+would revoke its grants now, so its stored side compares as the
+empty grant set and the pending revocation stays in the grants
+list until a reload applies it. An agent only the stored side
+knows rides its own added row: its grants describe a world that
+begins at the restart that adds it.
 
 **How does the read stay one-world?** The route is `async def` for
 the reason the runtime status read is: the MCP world is read on the
@@ -471,6 +477,13 @@ omits that pending revocation. Compare effective grants for every
 current-generation agent, treating absence from the stored
 candidate as an empty grant set, with the before- and after-reload
 test.
+
+*Resolution.* Adopted. The agent-honesty decision now compares
+effective grants for every current-generation agent, a deleted
+agent's stored side comparing as the empty grant set so its pending
+revocation stays reported until a reload applies it; the deleted
+agent's before- and after-reload case is named in the MCP test
+list.
 
 **6 (P2). M2 is a breaking response-schema change, not an additive
 extension.** Response models forbid extra keys, so a client
