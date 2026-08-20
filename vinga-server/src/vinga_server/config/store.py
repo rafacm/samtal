@@ -474,8 +474,9 @@ class ConfigStore:
             name = _identifier(_location(descriptor, *identity[:-1]), identity[-1])
             identity = (*identity[:-1], name)
         location = _location(descriptor, *identity)
-        if descriptor.before_parse is not None:
-            descriptor.before_parse(*identity)
+        check = _STORAGE[descriptor.name].before_parse
+        if check is not None:
+            check(identity[-1])
         data = _readable(location, fragment)
         marks = tuple(_masked_paths(data, descriptor.secret_key))
         if not marks:
@@ -853,13 +854,45 @@ def _database_problem(exc: SQLAlchemyError) -> ConfigError:
 
 # Rows and the kinds they hold
 #
-# One kind is one table, one row mapping and one location, and all three
-# are the descriptor's. The default mapping is the model itself: every
-# declared field is a column of the same name, so validating the row
-# against the model is the whole of it. A hook is what a kind pays where
-# its model asks for something a dump cannot say, which the inventory
-# found for three of the five, and each of those is filled below beside
-# the code it is.
+# One kind is one table, one row mapping and one location. The table and
+# the location are the descriptor's, because every surface addresses a
+# kind by them. The row mapping is not: it is written in terms of this
+# module's own row helpers, it is read by this module and by nothing
+# else, and a registry it was hung on would be this module talking to
+# itself through a global. So it lives here, in `_STORAGE` at the foot of
+# the section, typed per kind rather than as a loose callable.
+#
+# The default mapping is the model itself: every declared field is a
+# column of the same name, so validating the row against the model is the
+# whole of it. An entry in the table is what a kind pays where its model
+# asks for something a dump cannot say, which the inventory found for
+# three of the five.
+
+
+@dataclass(frozen=True, kw_only=True)
+class _Storage[Entry: BaseModel]:
+    """What one kind does around its own rows, beyond what its model
+    already says.
+
+    Four facts, each None for a kind that needs none, and each with the
+    signature its own callers use rather than a shared loose one: how a
+    stored row becomes the entry (`from_row`), how an entry becomes the
+    columns that hold it (`to_row`), what is checked about the name
+    before a body is parsed (`before_parse`), and what is checked about
+    the parsed entry before the write opens (`inside_write`).
+
+    The two checks take the same arguments as each other in spirit but
+    not in shape, and deliberately: a name check runs before there is an
+    entry to speak of, so it is given the name and nothing else, while an
+    entry check is given the location a refusal will name, the parameters
+    that address the entry, and the entry itself.
+    """
+
+    from_row: Callable[[Row], Entry] | None = None
+    to_row: Callable[[Entry], dict[str, object]] | None = None
+    before_parse: Callable[[str], None] | None = None
+    inside_write: Callable[[str, tuple[str, ...], Entry], None] | None = None
+
 
 _PROVIDER = entities.descriptor("provider")
 _MCP_SERVER = entities.descriptor("mcp-server")
@@ -921,8 +954,9 @@ def _location(descriptor: EntityDescriptor, *identity: str) -> str:
 def _from_row(descriptor: EntityDescriptor, row: Row) -> BaseModel:
     """One stored row as its model, through the kind's own mapping where
     it has one and through the model itself where it does not."""
-    if descriptor.from_row is not None:
-        return descriptor.from_row(row)
+    mapping = _STORAGE[descriptor.name].from_row
+    if mapping is not None:
+        return mapping(row)
     identity = tuple(getattr(row, part) for part in descriptor.addressing)
     return _stored(
         descriptor.model,
@@ -935,8 +969,9 @@ def _to_row(descriptor: EntityDescriptor, entry: BaseModel) -> dict[str, object]
     """One entry as the columns that hold it, the same way round: the
     kind's own mapping where it has one, and the model's own dump where
     it does not."""
-    if descriptor.to_row is not None:
-        return descriptor.to_row(entry)
+    mapping = _STORAGE[descriptor.name].to_row
+    if mapping is not None:
+        return mapping(entry)
     return entry.model_dump()
 
 
@@ -1003,8 +1038,9 @@ def _parsed(
     checks a kind runs are part of parsing rather than of persisting.
     """
     entry = _load(descriptor.model, location, data)
-    if descriptor.inside_write is not None:
-        descriptor.inside_write(location, identity, entry)
+    check = _STORAGE[descriptor.name].inside_write
+    if check is not None:
+        check(location, tuple(identity), entry)
     return entry
 
 
@@ -1194,17 +1230,13 @@ def _layer_data(location: str, row: Row) -> dict[str, object]:
     return data
 
 
-# How a row of each kind is read. The three mappings a model demands are
-# the ones above, unchanged: the MCP server's per-column omissions,
-# which are what lets its transport validator read `model_fields_set`;
-# the layer's tri-state, where None inherits and an empty list opts out;
-# and the provider's split between its declared fields and the options
-# extras. A prompt fragment names no mapping at all, because its model
-# is the whole of it.
-entities.fill("provider", from_row=_provider_from_row)
-entities.fill("mcp-server", from_row=_mcp_from_row)
-entities.fill("agent", from_row=_agent_from_row)
-entities.fill("agent-defaults", from_row=_defaults_from_row)
+# The three mappings a model demands are the ones above: the MCP
+# server's per-column omissions, which are what lets its transport
+# validator read `model_fields_set`; the layer's tri-state, where None
+# inherits and an empty list opts out; and the provider's split between
+# its declared fields and the options extras. A prompt fragment names no
+# mapping at all, because its model is the whole of it. Which kind reads
+# through which is `_STORAGE` at the foot of this section.
 
 
 def _mapping(location: str, column: str, value: object) -> dict[str, object]:
@@ -1300,15 +1332,10 @@ def _agent_values(entry: AgentConfig) -> dict[str, object]:
     return {"prompt": entry.prompt, **_layer_values(entry)}
 
 
-# How a row of each kind is written, the mirror of the mappings above. A
-# prompt fragment names none, so it is written through its model: the
-# one column it has is the text as it was given, whose indentation and
-# blank lines are part of it, and a dump of the model that holds it is
-# exactly that.
-entities.fill("provider", to_row=_provider_values)
-entities.fill("mcp-server", to_row=_mcp_values)
-entities.fill("agent", to_row=_agent_values)
-entities.fill("agent-defaults", to_row=_layer_values)
+# The mirror of the mappings above. A prompt fragment names none, so it
+# is written through its model: the one column it has is the text as it
+# was given, whose indentation and blank lines are part of it, and a dump
+# of the model that holds it is exactly that.
 
 
 def _delete_row(
@@ -1599,9 +1626,25 @@ def _check_no_url_credentials(
         _refuse_url_credentials(f"{location}.{key}", value)
 
 
-entities.fill("provider", inside_write=_check_no_url_credentials)
-entities.fill("mcp-server", inside_write=_check_entry_name)
-entities.fill("prompt-fragment", before_parse=_check_fragment_name)
+# What each kind does around its own rows, in one table because the four
+# facts are read by one module and answered per kind. Private and typed:
+# the row mappings are written in terms of this file's helpers, the
+# checks raise this file's refusals, and no surface above it has ever had
+# a reason to name one. A kind absent from a group takes the model's own
+# behavior, which is what the None defaults say.
+_STORAGE: dict[str, _Storage] = {
+    "provider": _Storage(
+        from_row=_provider_from_row,
+        to_row=_provider_values,
+        inside_write=_check_no_url_credentials,
+    ),
+    "mcp-server": _Storage(
+        from_row=_mcp_from_row, to_row=_mcp_values, inside_write=_check_entry_name
+    ),
+    "prompt-fragment": _Storage(before_parse=_check_fragment_name),
+    "agent": _Storage(from_row=_agent_from_row, to_row=_agent_values),
+    "agent-defaults": _Storage(from_row=_defaults_from_row, to_row=_layer_values),
+}
 
 
 def _refuse_url_credentials(path: str, value: object) -> None:
