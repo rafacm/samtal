@@ -235,6 +235,13 @@ async def test_the_drain_task_is_owned_and_finished_before_serving_ends(
     session = FakeSession(speaking_for=0.1)
     server = draining_server(registry_with(session))
 
+    # White-box for this file. `serve()` is the public entry and it
+    # runs uvicorn against a real socket for the life of a process; what
+    # is under test is the shutdown path inside it, driven with a
+    # uvicorn that stops mid-drain. And the claim is task ownership:
+    # that serving ends after the drain rather than beside it, and that
+    # nothing is left for the loop's collector to report. A task nobody
+    # holds is exactly the bug, so holding it is how it is checked.
     await server._serve()
 
     assert server._drain_task is not None

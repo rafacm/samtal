@@ -307,6 +307,10 @@ def test_the_store_dependency_serves_the_engine_it_was_given(tmp_path: Path) -> 
         with pytest.raises(StopIteration):
             next(generator)
 
+        # White-box: the claim is one engine per process rather than one
+        # per request, and identity is what says it. Two engines over one
+        # database answer every public read the same way, and the
+        # difference only shows as a pool that grows.
         assert store._engine is handle.engine
         assert "sam" in next(store_dependency(runtime)).load().domain.agents
 

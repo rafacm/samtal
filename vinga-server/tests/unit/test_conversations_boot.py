@@ -125,6 +125,11 @@ def test_nothing_is_opened_before_the_lifespan_runs(tmp_path: Path) -> None:
         store = app.state.composition.conversations
         assert store is not None
         assert (tmp_path / DATABASE_FILENAME).is_file()
+        # White-box for this file's thread reads: the store's writer
+        # thread is what boot starts and shutdown joins, and whether one
+        # is running is on no surface. Its absence is what the failures
+        # below are about, and a test that walked away from a live one
+        # would leave it for a neighbouring test to find.
         assert store._thread is not None and store._thread.is_alive()
 
 

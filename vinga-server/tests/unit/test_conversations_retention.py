@@ -365,6 +365,10 @@ def test_a_reader_defers_the_stores_truncation_and_the_next_marker_takes_it(
     held.execute(text("select count(*) from sessions")).scalar()
     pruning = stores(retention_days=90)
     pruning.start()
+    # White-box: the writer's own record of when it last truncated is
+    # what says the prune ran at all. What a prune leaves behind is
+    # asserted below through the database; this is the synchronisation
+    # in front of it, and a store publishes no "have you pruned yet".
     _until(
         lambda: pruning._truncation_due,
         "the prune never ran, or was checkpointed past a held reader",
@@ -439,5 +443,8 @@ def test_the_checkpoint_runs_outside_a_transaction(tmp_path: Path, stores) -> No
     _until(lambda: stored_sessions(tmp_path) == ["one"], "the session was never committed")
     assert log.stat().st_size > 0
 
+    # White-box: a checkpoint is run against the writer's own
+    # connection, and the claim is about that connection's log rather
+    # than about any reader's view of the data.
     assert _checkpoint(store._engine) is True
     assert log.stat().st_size == 0

@@ -24,6 +24,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import update
 
 from tests.support.problems import PROBLEM_KEYS, problem
+from tests.support.stores import planted
 from vinga_server import db as db_module
 from vinga_server.config.api import build_api
 from vinga_server.config.entities import (
@@ -440,8 +441,7 @@ def test_a_row_that_cannot_be_read_is_500(
     """The request was fine and the stored state is not, which is the
     server's problem and not the caller's."""
     _populate(store)
-    with store._engine.begin() as connection:
-        connection.execute(update(schema.providers).values(options="not an object"))
+    planted(store, update(schema.providers).values(options="not an object"))
 
     with caplog.at_level(logging.ERROR):
         response = client.get("/config")
@@ -482,8 +482,7 @@ def test_a_stored_row_that_will_not_validate_is_500(
     whether it is asked for by name or met on the way through the whole
     document."""
     _populate(store)
-    with store._engine.begin() as connection:
-        connection.execute(update(table).values(**values))
+    planted(store, update(table).values(**values))
 
     for target in (path, "/config"):
         response = client.get(target)
@@ -499,12 +498,12 @@ def test_a_stored_number_that_is_not_finite_is_500(
     nobody wrote and a different configuration from the stored one. The
     read says the row cannot be read instead."""
     _populate(store)
-    with store._engine.begin() as connection:
-        connection.execute(
-            update(schema.providers)
-            .where(schema.providers.c.name == "claude")
-            .values(options={"temperature": float("nan")})
-        )
+    planted(
+        store,
+        update(schema.providers)
+        .where(schema.providers.c.name == "claude")
+        .values(options={"temperature": float("nan")}),
+    )
 
     response = client.get("/providers/llm/claude")
 
@@ -607,12 +606,12 @@ def test_a_plaintext_that_got_into_a_row_comes_back_masked(
     past that check, and the request an operator would make to find the
     mistake must not be the one that publishes it."""
     _populate(store)
-    with store._engine.begin() as connection:
-        connection.execute(
-            update(schema.providers)
-            .where(schema.providers.c.name == "claude")
-            .values(api_key_env=PASTED)
-        )
+    planted(
+        store,
+        update(schema.providers).where(schema.providers.c.name == "claude").values(
+            api_key_env=PASTED
+        ),
+    )
 
     entity = client.get("/providers/llm/claude")
     whole = client.get("/config")

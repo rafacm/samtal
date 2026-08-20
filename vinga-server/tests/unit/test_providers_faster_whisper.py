@@ -68,6 +68,10 @@ def built_with(
     provider = faster_whisper.build(
         "providers.asr.ears", ProviderConfig.model_validate({"type": "faster_whisper", **options})
     )
+    # White-box, for the same reason the cloud providers' clients are:
+    # the model a deployment gets is built inside the provider and
+    # handed to nobody, so which decode flags reached it is observable
+    # only by loading a real model and listening to what comes back.
     return provider, provider._engine  # type: ignore[attr-defined]
 
 
