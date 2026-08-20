@@ -1838,9 +1838,11 @@ mapped carried most of the rewriting, and two more turned up:
   are white-box and say so once for twenty-eight sites.
 
 **What the count did.** 440 sites over 85 names across 55 files became
-**167 over 77 names across 48 files**. Six files lost every reach-in
-they had; two support modules gained six between them, which is where
-the consolidated justifications live.
+**164 over 76 names across 46 files**. Ten files lost every reach-in
+they had; one support module joined the census with two, which is
+where a consolidated justification lives. (These are the numbers after
+the PR review round below, which retired three more sites; the sweep
+itself ended at 167 over 77 across 48.)
 
 ### The complete inventory
 
@@ -1851,7 +1853,7 @@ private name as the plan permits. The classes are the issue's:
 **(d)** white-box safety invariant kept with the justification written
 at the reach. A group whose sites split across classes says so.
 
-The arithmetic: **(a) 0, (b) 10, (c) 133, (d) 297, summing to 440.**
+The arithmetic: **(a) 0, (b) 10, (c) 136, (d) 294, summing to 440.**
 (a) is empty, and necessarily: the plan review's finding 8 permits a
 surviving reach-in only as a white-box safety invariant, so a site kept
 without a stated justification has no class to be in. Every (d) site
@@ -1968,7 +1970,7 @@ counts, a docstring alone does not.
 
 | name | before | after | class | why |
 | --- | --: | --: | --- | --- |
-| `_know_how` | 13 | 2 | (c) 11, (d) 2 | CountingServers.asked, the prompt_assembled event and RecordingLlm.systems; the identity pair the design guide names stays |
+| `_know_how` | 13 | 0 | (c) | CountingServers.asked, the prompt_assembled event, RecordingLlm.systems and prompt.know_how, which is what the activation itself calls |
 
 **`tests/unit/test_session_events.py`**
 
@@ -2261,7 +2263,7 @@ counts, a docstring alone does not.
 
 | name | before | after | class | why |
 | --- | --: | --: | --- | --- |
-| `_max_sessions` | 1 | 1 | (d) | a cap shows only when it is reached |
+| `_max_sessions` | 1 | 0 | (c) | a configured cap driven through sockets, as the cap of one above is |
 
 **`tests/unit/test_tools_device.py`**
 
@@ -2301,7 +2303,7 @@ Six reaches exist that did not before, all in the two support modules,
 and all of them are the consolidation: `stamp_with` and `attached_taps`
 and `turn_taking` and `plant_utterance` in
 `tests/support/sessions.py`, and `stored_rows` and `planted` in
-`tests/support/stores.py`. 161 + 6 is the 167 the after-walk finds.
+`tests/support/stores.py`. 158 + 6 is the 164 the after-walk finds.
 
 ### Deviations from the plan
 
@@ -2440,7 +2442,113 @@ Run from `vinga-server/`, at the last commit of the milestone.
   the harness was rewritten.
 - The after-walk is the before-walk's own code:
   `uv run python -m tests.tools.reach_ins` reports 167 sites over 77
-  names across 48 files, against 440 over 85 across 55.
+  names across 48 files, against 440 over 85 across 55. (The review
+  round below re-runs it at 164 over 76 across 46.)
 
 Not verified here, and not claimed: the container image and the smoke
 lane, for the reason M1 gives.
+
+### PR review round (2026-08-20)
+
+External review of PR #224, read-only against commit `8655b19c`.
+Verdict: mergeable after fixes. Four P2 findings, all adopted, each
+with the commit that made it.
+
+**1 (P2). A rewritten wait walked past a reply's failure.**
+`wait_for_reply` waited through `drain()` alone, and `drain`'s contract
+is that a reply which failed is a reply which finished: it answers True
+for a task holding an exception, deliberately, because that is what the
+edge needs to know. Every site that used to await the task itself
+stopped seeing a failure that arrived late.
+
+*Resolution.* Adopted (`f93360ec`). `drain` is the bound and nothing
+else now: the task is held before the wait, because a barge-in landing
+in between replaces it, and awaited after, which is the line that
+raises. All thirteen callers want that, since each awaited the task
+itself before this milestone. Proved by mutation: a raise at the end of
+the reply's own `finally` turns three filler tests red and passed
+silently before.
+
+**2 (P2). The barge-in histories stopped proving the finished turn.**
+The three rewrites say what the second model round was handed and what
+the device was announced, which between them cover the utterances and
+the sentences and not the completed assistant turn. Deleting the append
+at the end of the reply would have left all three green.
+
+*Resolution.* Adopted (`d83e5bee`). Each drives a probe round through
+`history()` and holds the turns that round was handed against the whole
+conversation, the assistant turn included. The device-facing half stays,
+because the two say different things: one is what the user heard, the
+other is what whoever answers next is written against. Proved by
+mutation: dropping the assistant append turns all three red, and turned
+none of them red before.
+
+**3 (P2). The prompt tests compared lengths where they had compared
+text.** Losing the reach-ins cost them their exact comparisons: a
+length, a prefix and two substrings agree about prompts that differ, so
+interior whitespace could drift and a total could be a separator short
+with all of it green.
+
+*Resolution.* Adopted (`1b3dd921`). The exact value was available from
+the module that owns the question: `runtime.prompt.know_how` is public
+and is the call the activation makes, so the tests ask it what this
+agent's half is and hold the recorded model prompt, the event's
+character count and its per-block sizes against that text, that total
+and those sizes. What is compared is the session's claim rather than a
+second spelling of the joining rule, which is `test_runtime_prompt.py`'s
+question. Proved by mutation: reporting the sum of the block sizes as
+the total, which is the separator-short count the old arithmetic was
+built from, turns three tests red.
+
+**4 (P2). Two survivors failed the plan's own rule.** A reach-in
+survives only where public observation cannot establish the property,
+and neither of these met it.
+
+*Resolution.* Adopted (`c657578f`), and both are reclassified from (d)
+to (c) in the table above. The session cap was guarded by reading the
+number off the registry, with a note claiming a configured cap is
+observable only by opening that many sessions plus one; the file opens
+sessions, and proves the cap of one three tests up. So the configured
+three is driven the same way, three conversations and a fourth turned
+away. Proved by mutation: a registry that ignores its argument and caps
+at one turns this test and its two neighbours red. And the prompt
+identity claimed nothing reports the cached half's text, which
+`know_how` does, while `CountingServers.asked` answers whether it was
+rebuilt, since a rebuild is what asks; both fakes were already in the
+test.
+
+The design guide named the second one as its worked example of a
+reach-in with a stated reason. Its paragraph now says what the sweep
+found, because a rule whose example no longer exists is worse than no
+example, and the lesson that survives is the rule's own: a stated
+reason is the flag answered rather than an exemption from it, and an
+answer can turn out to be wrong later, which is what re-asking the
+question across a whole suite is for.
+
+### The inventory, after the review round
+
+The walk, re-run rather than adjusted by hand: **164 sites over 76
+names across 46 files**, against 167 over 77 across 48 at the end of the
+sweep and 440 over 85 across 55 before it. `test_registry.py` and
+`test_session_prompt.py` now hold none at all.
+
+The dispositions move with them: **(a) 0, (b) 10, (c) 136, (d) 294**,
+still summing to 440. Three sites left (d) for (c), which is the
+finding's whole point: (d) is a claim about what cannot be observed,
+and a claim like that is falsifiable.
+
+### Verification, after the review round
+
+Run from `vinga-server/`, at the last commit of the round.
+
+- `uv run ruff check .`: all checks passed.
+- `uv run mypy`: success, no issues found in 3 source files.
+- `uv run pytest tests/unit -q`: 2,640 passed, 16 skipped (2,640 at the
+  end of the sweep; the round rewrote tests and added none).
+- `uv run pytest tests/integration -q`: 60 passed.
+- The four documentation drift checks: all clean, and no commit in this
+  round touches any of the four files.
+- The record baseline is untouched: no commit in this round names
+  `vinga-server/tests/unit/data/event-baseline.json`.
+- Production source is still untouched: `git diff --stat origin/main --
+  vinga-server/src` is empty across the whole branch.
