@@ -408,10 +408,21 @@ const providerWithAWrongDeclaredKey: ProviderConfig = {
 };
 holds<ProviderConfig>(providerWithAWrongDeclaredKey);
 
-// Reading an extension property back gives `unknown`, which is honest:
-// the document does not say what these are, so the consumer narrows.
+// Reading an extension property back gives exactly `unknown`, which is
+// honest: the document does not say what these are, so the consumer
+// narrows. `unknown` and not `any` is the whole point, and it has to be
+// asserted as an equality rather than as an annotation, because `any`
+// is assignable to `unknown`: an index signature of `any` would switch
+// type checking off for every option a provider carries and an
+// annotated read would not have noticed.
+export type AnExtensionReadsAsUnknown = Expect<
+  Equals<ProviderConfig["base_url"], unknown>
+>;
+
 function readAnExtensionProperty(entry: ProviderConfig): string {
-  const model: unknown = entry["model"];
+  const model = entry["model"];
+  const readIsExactlyUnknown: Expect<Equals<typeof model, unknown>> = true;
+  holds<true>(readIsExactlyUnknown);
   return typeof model === "string" ? model : "";
 }
 

@@ -381,8 +381,20 @@ const providerWithAWrongDeclaredKey: ProviderConfig = {
 };
 holds<ProviderConfig>(providerWithAWrongDeclaredKey);
 
+// As in the Hey API fixture, and for the same reason: the read has to
+// be exactly `unknown`, asserted as an equality rather than as an
+// annotation, because `any` is assignable to `unknown` and an index
+// signature of `any` would switch type checking off for every option a
+// provider carries without failing an annotated read. It matters more
+// here, where the index signature arrives through an intersection.
+export type AnExtensionReadsAsUnknown = Expect<
+  Equals<ProviderConfig["base_url"], unknown>
+>;
+
 function readAnExtensionProperty(entry: ProviderConfig): string {
-  const model: unknown = entry["model"];
+  const model = entry["model"];
+  const readIsExactlyUnknown: Expect<Equals<typeof model, unknown>> = true;
+  holds<true>(readIsExactlyUnknown);
   return typeof model === "string" ? model : "";
 }
 
