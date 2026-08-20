@@ -11,5 +11,5 @@
     "verbatimModuleSyntax": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["consumer.ts", "generated/**/*.ts", "../shared/**/*.ts"]
+  "include": ["consumer.ts", "probe.ts", "generated/**/*.ts", "../shared/**/*.ts"]
 }

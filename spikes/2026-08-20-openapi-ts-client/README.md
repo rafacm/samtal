@@ -39,7 +39,8 @@ and its own strict-mode consumer fixture.
 | [`openapi-typescript/`](openapi-typescript/) | `openapi-typescript` 7.13.0 | `openapi-fetch` 0.17.0 |
 
 Both type-check under TypeScript 5.9.3, which is what both sub-projects
-pin, and both also type-check under TypeScript 7.0.2.
+pin, and both also type-check under TypeScript 7.0.2. Both run their
+probe under `tsx` 4.23.12, pinned the same way.
 
 ## The consumer fixtures
 
@@ -77,15 +78,30 @@ typing everything as `any`. Where a claim could not be made to hold, it
 is left failing with a comment saying so rather than contorted until it
 passes, and the implementation doc records it as a finding.
 
+Probe 1 is the exception to the compile-time rule, because it has to
+be. What the types say about an `auth` option is not what the client
+puts on the wire, and the recommendation turns on that difference, so
+each sub-project also carries a `probe.ts` that runs: it injects a
+fetch which records the request and answers from memory, invokes a
+generated operation, and asserts the `Authorization` header it observes.
+It is hermetic by construction, with no network, a host that does not
+exist and a token that is a literal in the file, and it shares the
+runtime vocabulary in [`shared/observe.ts`](shared/observe.ts).
+
 ## Re-running it
 
 Node 24 and npm. From either sub-project directory:
 
 ```bash
-npm ci          # install the pinned versions from the lockfile
+npm ci            # install the pinned versions from the lockfile
 npm run generate  # regenerate into ./generated
-npm run typecheck # tsc --noEmit over the fixture and the output
+npm run check     # typecheck, then run the authentication probe
 ```
+
+`npm run check` is `npm run typecheck` (`tsc --noEmit` over the
+fixture, the probe and the whole generated output) followed by
+`npm run probe` (`tsx probe.ts`). Both fail loudly: an assertion that
+does not hold throws, and the exit code is what says so.
 
 `npm run generate` overwrites `generated/` in place, so
 `git status` after it is the determinism check: both generators were
