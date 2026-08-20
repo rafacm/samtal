@@ -57,7 +57,7 @@ from vinga_server.config.models import (
     is_secret_option,
     without_url_credential,
 )
-from vinga_server.config.secrets import mask
+from vinga_server.config.secrets import mask, provider_identity
 from vinga_server.config.store import Entity, Snapshot, StoredSecret, stored_secrets
 
 # Entity envelopes
@@ -158,7 +158,7 @@ def providers(snapshot: Snapshot) -> dict[str, dict[str, object]]:
         stage: {
             name: _envelope(
                 entity_body(descriptor, entry),
-                stored.get((descriptor.secret_slots, f"{stage}.{name}"), ()),
+                stored.get((descriptor.secret_slots, provider_identity(stage, name)), ()),
             )
             for name, entry in sorted(getattr(snapshot.domain.providers, stage).items())
         }
