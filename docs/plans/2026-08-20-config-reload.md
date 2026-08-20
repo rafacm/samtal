@@ -186,7 +186,11 @@ carries the MCP status document, whose own no-leak properties
 pinned and whose suites migrate whole. Other kinds get the vocabulary that is true for
 them: prompts and fragments converge by re-assembly, so their
 section reports the agents whose assembled know-how inputs changed;
-fillers report agents re-synthesized and agents reusing clips;
+fillers report agents re-synthesized, agents reusing clips, and
+agents whose synthesis failed, a closed three-outcome set whose
+third member means the generation applied with no clip for that
+agent (the review's finding 8), rendered by the CLI like its
+siblings;
 providers report entries built, reused, and retired. The
 `RELOAD_OUTCOMES`-style CLI rendering introspects `list[str]`
 fields, so each new section either keeps that shape or brings its
@@ -449,8 +453,11 @@ session across a reload), and the drift-check pins.
   that edits only a prompt; a phrase edit re-synthesizes only that
   agent; a provider-only or provider-secret-only edit preserves
   clip identity and stays pending in the diff (finding 3's case);
-  synthesis failure degrades and reports; a session's filler
-  timing does not change mid-session.
+  synthesis failure applies the generation with no clip and the
+  response names the agent under the disabled outcome, asserted on
+  the response body itself and in the CLI rendering, not only on
+  the existing event (finding 8); a session's filler timing does
+  not change mid-session.
 - **M3**: unchanged-entry reuse pinned by provider object identity
   (a prompt-only apply reuses every provider); a changed entry
   builds anew and the old provider closes when the last bound
