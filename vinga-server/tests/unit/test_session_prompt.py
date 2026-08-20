@@ -251,7 +251,8 @@ async def test_a_session_without_memory_reads_nothing_at_all() -> None:
 
     await run_reply(session, "hello")
 
-    # The one reach-in in this file, and the design guide names it: what
+    # White-box, and the one reach-in in this file: the design guide
+    # names it, and what
     # public observation cannot establish is that the text the model was
     # sent IS the cached half rather than a rebuild that happens to
     # match it. Nothing reports the cached text: the event carries sizes

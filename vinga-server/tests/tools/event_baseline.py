@@ -802,6 +802,9 @@ async def drive_filler_skipped_for_a_barge_in(_: Path) -> None:
     session = await masked_session(masked_config(), POET_MAC, {"poet": StallingLlm([STALL_S])})
     start_reply(session, UTTERANCE)
     await asyncio.sleep(DELAY_MS / 1000 / 3)
+    # White-box: the pause the confirmation ladder holds, put on at the
+    # instant the fire rule reads it, which three real clocks would have
+    # to agree on.
     turn_taking(session)._pause_output()
     await asyncio.sleep(DELAY_MS / 1000)
     turn_taking(session)._resume_output()

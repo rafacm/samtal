@@ -449,6 +449,7 @@ async def test_a_name_that_changes_owner_between_calls_is_refused_not_rerouted(
         record for record in caplog.records if getattr(record, "event", None) == "tool_call"
     ]
     assert (logged.source, logged.entry, logged.is_error) == ("mcp", "home", True)
+    # White-box, per the note at the reservation above.
     executed = session.runtime._turn.reserved(slot)
     assert (executed.source, executed.entry, executed.is_error) == ("mcp", "home", True)
     assert executed.duration_ms is not None

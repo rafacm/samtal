@@ -123,6 +123,7 @@ def opened_bindings(
     def spy(cls: type[DeviceBindings], config: Config) -> DeviceBindings:
         view = real(cls, config)
         opened.append(view)
+        # White-box, per the note in `engine_of` above.
         if view._engine is not None:
             pools.append(view._engine.pool)
         return view
@@ -209,6 +210,7 @@ def test_entering_and_leaving_releases_everything(
         composition = app.state.composition
         store = composition.conversations
         assert store is not None
+        # White-box, per the note in `engine_of` above.
         assert store._thread is not None and store._thread.is_alive()
         assert disposed == [], "the bindings pool went while the server was serving"
         # Held open while it serves, and reading: a lookup is what the
@@ -225,6 +227,7 @@ def test_entering_and_leaving_releases_everything(
     # connections actually being let go.
     assert engine.pool is not pools[0], "the connection pool outlived the server"
     assert stopped == ["mcp"]
+    # White-box, per the note in `engine_of` above.
     assert store._stopped
     assert not store._thread.is_alive()
 
@@ -384,6 +387,7 @@ def test_a_binding_written_through_the_api_is_live_at_the_next_check_in(
         # There is a database behind the view, so what follows is about
         # resolution and not about the fallback.
         composition: Composition = app.state.composition
+        # White-box, per the note in `engine_of` above.
         assert composition.bindings._engine is not None
 
         # Nobody has claimed this board yet, which is what makes the

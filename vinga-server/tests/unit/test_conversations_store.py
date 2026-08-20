@@ -316,6 +316,7 @@ def test_the_bound_counts_events_the_writer_is_holding_in_a_batch(
     )
 
     # And the allowance comes back when the marker writes them off.
+    # White-box, per the note at the batch assertion above.
     store.record_turn("alpha", a_turn())
     _until(
         lambda: store._in_flight == 0,
@@ -784,6 +785,8 @@ def test_stop_is_idempotent_and_bounded_by_a_wedged_writer(tmp_path: Path, store
     # And again, which has nothing to do.
     store.stop()
 
+    # White-box: joining the writer needs the thread, and no public call
+    # waits out one wedged on a gate the test is holding.
     # Release the wedged writer AND wait it out. Without the join this
     # test walks away while its writer thread is still winding down,
     # and a neighbouring test that enumerates threads by name can see

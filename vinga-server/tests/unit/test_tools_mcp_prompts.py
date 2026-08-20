@@ -446,6 +446,8 @@ def test_an_oversized_prompt_is_measured_without_being_built() -> None:
     is never allocated."""
     halves = ["y" * SHIPPED_BLOCK_LIMIT, "z" * SHIPPED_BLOCK_LIMIT]
 
+    # White-box, per the note in `discovered` above, and the docstring
+    # says the rest: what matters is what was never built.
     rendering = mcp_module._rendered(text_result(*halves))
 
     assert rendering.text is None
@@ -561,6 +563,7 @@ async def test_a_shipped_instructions_block_past_the_cap_is_skipped_whole(
     huge = "i" * (SHIPPED_BLOCK_LIMIT + 1)
 
     with caplog.at_level(logging.WARNING, logger=MANAGER_LOGGER):
+        # White-box, per the note in `discovered` above.
         assert prompts._injectable("tools", huge, "instructions") is None
 
     (warned,) = [record.getMessage() for record in caplog.records]
@@ -666,6 +669,8 @@ async def test_a_listing_that_fails_skips_every_configured_name(
     error, so a listing this client could not read is every name refused
     by the same rule rather than each name refused by a guess."""
     session = StubSession()
+    # White-box: a listing this client cannot read is what the rule is
+    # about, and a cooperating server does not produce one.
     session._pages = []
 
     with caplog.at_level(logging.WARNING, logger=MANAGER_LOGGER):

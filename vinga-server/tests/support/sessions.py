@@ -400,24 +400,27 @@ async def run_reply(session: DeviceSession, said: str) -> list[str]:
 
 
 def turn_taking(session: DeviceSession) -> Any:
-    """The floor behind this session, per the note above."""
+    """The floor behind this session. White-box, per the note above."""
     return session.runtime._turntaking
 
 
 def plant_utterance(session: DeviceSession, pcm: bytes) -> None:
     """The audio a device would have streamed, put where the floor keeps
-    it, so the instant the gates read is the instant the test chose."""
+    it, so the instant the gates read is the instant the test chose.
+    White-box, per the note above."""
     turn_taking(session)._utterance = bytearray(pcm)
 
 
 async def end_utterance(session: DeviceSession, endpointed: bool = True) -> None:
-    """End the utterance the way the endpointer ends one."""
+    """End the utterance the way the endpointer ends one. White-box,
+    per the note above."""
     await turn_taking(session).finish_utterance(endpointed=endpointed)
 
 
 def reply_in_flight(session: DeviceSession) -> Any:
     """The reply task this session has running, for a caller that has to
-    await or identify this one and not merely wait for it to end."""
+    await or identify this one and not merely wait for it to end.
+    White-box, per the note above."""
     return session.runtime._reply_task
 
 
