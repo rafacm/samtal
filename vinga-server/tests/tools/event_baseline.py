@@ -161,8 +161,7 @@ from vinga_server.conversations.store import ConversationStore
 from vinga_server.device.bindings import DeviceAgents, DeviceBindings
 from vinga_server.device.session import DeviceSession
 from vinga_server.events import catalog as catalog_module
-from vinga_server.events.catalog import declaration_of
-from vinga_server.events_schema import CHANNELS
+from vinga_server.events.catalog import CHANNELS, declaration_of
 from vinga_server.filler import build_agent_fillers
 from vinga_server.logs import _STANDARD_ATTRIBUTES
 from vinga_server.ota import ACTIVATE_SEGMENT, OTA_PATH
