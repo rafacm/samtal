@@ -450,7 +450,7 @@ async def test_the_shutdown_waits_out_a_reply_that_is_still_generating(
     socket = ProbingSocket()
     session.websocket = cast(Any, socket)
     with caplog.at_level("INFO"):
-        reply = start_reply(session, UTTERANCE)
+        start_reply(session, UTTERANCE)
         await asyncio.sleep(0.05)
         # Generating: nothing has been spoken, and nothing is closed.
         assert not socket.frames
@@ -458,7 +458,7 @@ async def test_the_shutdown_waits_out_a_reply_that_is_still_generating(
         assert await session.request_shutdown(grace_s=5.0) is True
 
     assert loop.time() - began >= 0.2
-    assert reply.done()
+    assert not session.runtime.replying()
     assert socket.frames, "the reply was cut off before it spoke"
     assert socket.closed is not None
     assert session.runtime._turns[-1].content == "All done."

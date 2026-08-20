@@ -44,6 +44,34 @@ from vinga_server.tools.memory import MemoryStore
 # --- building one -----------------------------------------------------
 
 
+def agent_providers(
+    config: Config,
+    scripts: dict[str, Any] | None = None,
+    stages: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Every agent's engines, with substitutions applied before a
+    session is built rather than after.
+
+    `scripts` replaces the named agents' models; `stages` replaces one
+    named stage (`asr`, `tts`, `vad`) for every agent. Both are what the
+    composition root's own parameter takes, so a test that wants a
+    scripted far side hands one in the way `create_app` hands the real
+    ones in, and no test has to reach into a live runtime to swap an
+    engine it could have built with.
+    """
+    providers = build_agent_providers(config)
+    for agent, script in (scripts or {}).items():
+        # The entry the script stands in for, so the events a session
+        # emits about its LLM carry what a real one's would.
+        script.identity = providers[agent].llm.identity
+        providers[agent] = replace(providers[agent], llm=script)
+    if stages:
+        providers = {
+            agent: replace(entry, **stages) for agent, entry in providers.items()
+        }
+    return providers
+
+
 def device_session(
     config: Config,
     mac: str,
@@ -68,13 +96,24 @@ def device_session(
     not asked for one has."""
     factory = bespoke_runtime_factory(
         config,
-        providers if providers is not None else build_agent_providers(config),
+        providers if providers is not None else agent_providers(config),
         mcp_servers if mcp_servers is not None else McpServers({}),
         memory,
         fillers if fillers is not None else {},
         conversations,
     )
     session = session_module.DeviceSession(cast(Any, websocket), config, factory)
+    # White-box, deliberately, and the only three sites in this file that
+    # are. These two lines are `run`'s own, transcribed: it resolves the
+    # binding, keeps the agents, and calls the factory with the session,
+    # the session's events object and those agents. Nothing public does
+    # that half, because the only caller that ever needs to is the edge
+    # itself, and reaching it through `run` means a socket, a hello and a
+    # live task, which is `open_session` below and a different test. What
+    # cannot be established any other way is that a session built here is
+    # wired exactly as a served one: the runtime holds the session as its
+    # device, and both sides attribute their events to the same object,
+    # which is what makes `_mac` and `_agent` one fact rather than two.
     session._agents = config.agents_for_device(mac)
     session.runtime = factory(session, session._events, session._agents)
     return session
@@ -89,24 +128,21 @@ def session_for(
     websocket: Any = None,
     mcp_servers: McpServers | None = None,
     conversations: Any = None,
+    stages: dict[str, Any] | None = None,
 ) -> DeviceSession:
     """A device session with a real bespoke runtime behind it, built the
     way `run` builds one, with the named agents' LLMs replaced by
     scripts. No websocket by default: these tests drive the loop
     directly and never speak."""
-    providers = build_agent_providers(config)
-    for agent, script in (scripts or {}).items():
-        # The entry the script stands in for, so the events a session
-        # emits about its LLM carry what a real one's would.
-        script.identity = providers[agent].llm.identity
-        providers[agent] = type(providers[agent])(
-            llm=script,
-            asr=providers[agent].asr,
-            tts=providers[agent].tts,
-            vad=providers[agent].vad,
-        )
     return device_session(
-        config, mac, providers, memory, fillers, websocket, mcp_servers, conversations
+        config,
+        mac,
+        agent_providers(config, cast(Any, scripts), stages),
+        memory,
+        fillers,
+        websocket,
+        mcp_servers,
+        conversations,
     )
 
 
@@ -151,10 +187,37 @@ async def open_session(
     task = asyncio.create_task(session.run())
     for _ in range(200):
         await asyncio.sleep(0.01)
+        # White-box, deliberately: this is the handshake's completion,
+        # and the only thing that records it. `run` stamps `_opened_at`
+        # on the accept and builds the runtime after the binding
+        # resolves, so the pair is what says the session is past every
+        # rejection and inside the guard. Nothing public reports it: the
+        # server hello goes out through a socket the test supplied, so
+        # waiting on the wire would prove the send and not the state
+        # behind it, and a caller that polled `runtime` alone would
+        # return a session mid-accept. A test that raced this would fail
+        # somewhere else entirely.
         if session.runtime is not None and session._opened_at is not None:
             if websocket.inbox.empty():
                 return session, websocket, task
     raise AssertionError("the session never opened")
+
+
+def _listening_in_realtime(session: DeviceSession) -> None:
+    """A device that streams its microphone continuously.
+
+    White-box, deliberately, and the last of this file's three. The mode
+    a device asked to listen in reaches a session in one way, as the
+    `mode` field of a `listen start` message on the wire, and these
+    sessions have no serve loop to receive one: they are built below the
+    websocket precisely so that what a reply decides can be asserted
+    without a device. What the mode decides is who re-arms the listening
+    after an utterance, which is the property the suites that ask for one
+    are about, so a session left in the default mode would answer their
+    question with the wrong policy rather than fail.
+    """
+    session._listen_mode = "realtime"
+    session.listening = True
 
 
 async def masked_session(config: Config, mac: str, scripts: dict[str, Any] | None = None):
@@ -164,8 +227,7 @@ async def masked_session(config: Config, mac: str, scripts: dict[str, Any] | Non
     fillers = await build_agent_fillers(config, build_agent_providers(config))
     session = session_for(config, mac, scripts, fillers=fillers)
     session.websocket = cast(Any, RecordingSocket())
-    session._listen_mode = "realtime"
-    session.listening = True
+    _listening_in_realtime(session)
     return session
 
 
@@ -173,24 +235,53 @@ def realtime_session(config, asr) -> tuple[session_module.DeviceSession, Recordi
     """A session mid-conversation on a realtime device, its ASR swapped
     for the test's."""
     socket = RecordingSocket()
-    session = device_session(config, DEVICE_MAC, websocket=socket)
-    session._listen_mode = "realtime"
-    session.listening = True
-    assert session.runtime._providers is not None
-    session.runtime._providers = replace(session.runtime._providers, asr=asr)
+    session = device_session(
+        config, DEVICE_MAC, agent_providers(config, stages={"asr": asr}), websocket=socket
+    )
+    _listening_in_realtime(session)
     return session, socket
-
-
-# --- driving a reply through it ---------------------------------------
 
 
 def call(name: str, **arguments: Any) -> ToolCall:
     return ToolCall(id=f"c-{name}", name=name, arguments=arguments)
 
 
+# --- driving a reply through it ---------------------------------------
+#
+# One of these three is public and two are not, which is worth stating
+# once rather than three times.
+#
+# The public way into a reply is `start_reply(pcm, result)` plus
+# `drain(grace_s)`, both on the runtime's own interface: the first
+# creates the reply task the edge's jobs ask about, the second waits for
+# it. `start_reply` below is exactly that and nothing else.
+#
+# What that pair cannot establish is what the other two are for. It
+# swallows a failure inside the reply, deliberately and by contract, so
+# a reply that raised is indistinguishable through it from one that
+# finished; the suites that drive a whole reply are the ones asking
+# whether it survived, so `drive_reply` awaits the reply body and lets
+# what happened inside reach the test. And it takes an utterance rather
+# than a transcript, so what a reply was answering is whatever the
+# configured ear made of the PCM: `run_reply` is the sixty-odd tests
+# that are about the decision the loop makes for an exactly known
+# sentence, before any of it becomes audio, and neither the transcript
+# going in nor the sentences coming out has a public form here.
+#
+# Neither is fixed by inventing a production interface. A reply that
+# reports its own failure, or one that takes a transcript from outside,
+# would be surface with no caller but this file, which is what the
+# design guide's test-surface rule forbids.
+
+
 async def run_reply(session: DeviceSession, said: str) -> list[str]:
-    """One reply, with speaking stubbed out: what the loop decides is
-    what these tests are about, not the audio."""
+    """One reply for a known sentence, with speaking stubbed out: what
+    the loop decides is what these tests are about, not the audio.
+
+    White-box, per the note above. The history is written the way
+    `_reply` writes it around the same call, because the loop reads the
+    user's turn out of it and the next reply reads the assistant's.
+    """
     spoken: list[str] = []
 
     async def speak(synthesis: Any, resampler: Any, into: list[str]) -> None:
@@ -209,22 +300,25 @@ async def run_reply(session: DeviceSession, said: str) -> list[str]:
 
 
 async def drive_reply(session: DeviceSession, pcm: bytes) -> None:
-    """One whole reply, audio and all, run to completion.
+    """One whole reply, audio and all, run to completion, with whatever
+    happened inside it reaching the caller.
 
-    The two helpers below exist so that the characterization suite,
-    which pins today's behavior from outside, names the reply entry
-    point in one place instead of thirty. When the reply moves behind
-    the device-facing boundary, these lines move with it and the tests
-    that use them do not change."""
+    White-box, per the note above: `drain` answers that the reply
+    finished and never how, which is the one thing a suite about a
+    failing reply needs.
+    """
     await session.runtime._reply(pcm)
 
 
-def start_reply(session: DeviceSession, pcm: bytes) -> asyncio.Task[None]:
+def start_reply(session: DeviceSession, pcm: bytes) -> None:
     """A reply in flight, registered the way an utterance registers one,
     so that everything asking whether this session is replying (the idle
-    watchdog, the shutdown, the barge-in gates) sees it."""
-    session.runtime._reply_task = asyncio.create_task(session.runtime._reply(pcm))
-    return session.runtime._reply_task
+    watchdog, the shutdown, the barge-in gates) sees it.
+
+    The runtime's own public entry point, named here so that the suites
+    driving a reply name it in one place. Whether it has finished is
+    `replying()`; waiting for it is `drain()`."""
+    session.runtime.start_reply(pcm, None)
 
 
 async def _nothing(*args: object, **kwargs: object) -> None:
@@ -242,16 +336,21 @@ async def reply_with(
         async def send_text(self, text: str) -> None:
             return None
 
-    session = session_for(base_config(), POET_MAC, {"poet": ScriptedLlm(["One sentence."])})
-    assert session.runtime._providers is not None
-    session.runtime._providers = replace(
-        session.runtime._providers, **{provider_stage: cast(Any, Unreachable(provider_stage, exc))}
+    session = session_for(
+        base_config(),
+        POET_MAC,
+        {"poet": ScriptedLlm(["One sentence."])},
+        stages={provider_stage: cast(Any, Unreachable(provider_stage, exc))},
     )
     session.websocket = cast(Any, TextSink())
+    # White-box, and the same construction `device_session` explains: a
+    # session built below the websocket never ran the handshake that
+    # reads the Device-Id header, and the event under test names the
+    # device it failed for.
     session._mac = POET_MAC
     session.send_audio = _nothing  # type: ignore[method-assign]
     with caplog.at_level("INFO"):
-        await session.runtime._reply(b"\x00\x00" * 320)
+        await drive_reply(session, b"\x00\x00" * 320)
     return only(caplog, "provider_failed")
 
 
