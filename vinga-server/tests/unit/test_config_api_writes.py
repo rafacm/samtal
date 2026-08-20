@@ -296,21 +296,33 @@ def test_the_default_agent_notice_is_about_the_row_too(
     assert store.read_default_agent() == "sam"
 
 
-def test_everything_else_still_waits_for_a_restart(serving_client: TestClient) -> None:
-    """The exceptions are device bindings and the fields a reload
-    applies, and the loaded agents do not widen either: writing an
-    agent's providers is still a boot-time change, and the sentence the
-    write carries says so beside the half that is not."""
+def test_an_agent_write_names_every_field_a_reload_applies(
+    serving_client: TestClient,
+) -> None:
+    """The whole sentence, on the wire, because an operator acts on it
+    and every field it leaves out is one they will restart a server for
+    without needing to.
+
+    Three of an agent's fields are what a reload applies: its `prompt`,
+    its `prompt_includes` and its `mcp` grants. The rest of it (the
+    provider overrides, the filler section) is built at the next start,
+    and both halves are said because a sentence right about one and
+    silent about the other is the trap this notice exists to close.
+    """
     _pipeline(serving_client)
 
     answer = serving_client.put("/agents/sam", json={"prompt": "You are Sam still."})
 
-    assert answer.json()["notice"] == AGENT_NOTICE
-    # Both halves said, because both are true of what was just written:
-    # the prompt reaches the next activation of a reloaded server, and
-    # everything else about the agent waits for the start that builds
-    # its providers.
-    assert "prompt_includes" in AGENT_NOTICE
+    assert answer.json() == {"wrote": "agent sam", "notice": AGENT_NOTICE}
+    # Read off the constant rather than off the answer, so the fields
+    # this claims are named are named in the string itself.
+    for field in ("`prompt`", "`prompt_includes`", "`mcp`"):
+        assert field in AGENT_NOTICE
+    # And the two clocks the applied half has, which differ: prompt text
+    # is assembled once per activation, and the tools an agent may reach
+    # are snapshotted per reply.
+    assert "next activation" in AGENT_NOTICE
+    assert "next utterance" in AGENT_NOTICE
     assert "next server start" in AGENT_NOTICE
 
 

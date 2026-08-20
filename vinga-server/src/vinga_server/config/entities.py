@@ -144,19 +144,25 @@ RELOAD_NOTICE = (
     "it without a restart and without dropping a conversation."
 )
 
-# The third, for the one kind whose fields are not all in one regime. An
-# agent's prompt and the fragments it includes are assembled at an
-# activation, so a reload puts them in front of the next one; its
-# provider overrides and its filler section are built at boot and wait
-# for the next start. Both halves are stated, because a write that
-# carried either sentence alone would be exactly right about part of
-# what was just written and exactly wrong about the rest.
+# The third, for the one kind whose fields are not all in one regime.
+# Three of them are what a reload applies: the prompt and the fragments
+# it includes are assembled at an activation, and the `mcp` list is what
+# the reload derives this agent's tools from. The provider overrides and
+# the filler section are built at boot and wait for the next start. Both
+# halves are stated, because a write that carried either sentence alone
+# would be exactly right about part of what was just written and exactly
+# wrong about the rest.
+#
+# The two applied halves converge at different moments and the sentence
+# says so: prompt text is assembled once per activation and cached for
+# it, while the tools an agent may reach are snapshotted per reply.
 AGENT_NOTICE = (
-    "This applies in two parts. The `prompt` and `prompt_includes` fields apply when the "
-    "running server is asked to reload, at each conversation's next activation: run "
-    "`vinga-server config reload`. Everything else about the agent, and the agent itself "
-    "if it is new, applies at the next server start, because that is when its providers "
-    "are built."
+    "This applies in two parts. The `prompt`, `prompt_includes` and `mcp` fields apply "
+    "when the running server is asked to reload: run `vinga-server config reload`, and "
+    "a conversation in progress meets the new prompt text at its next activation and "
+    "the new tools at its next utterance. Everything else about the agent, and the "
+    "agent itself if it is new, applies at the next server start, because that is when "
+    "its providers are built."
 )
 
 # The fourth, for a server that was handed its configuration rather than

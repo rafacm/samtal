@@ -940,8 +940,9 @@ class Acknowledgement(BaseModel):
             "loaded, which is the case that carries the restart sentence again. A "
             "write to an MCP server entry, to one of its secret slots or to a prompt "
             "fragment names the reload instead, since that is what applies it to a "
-            "running server. A write to an agent names both, its prompt fields being "
-            "applied by the reload and the rest of it built at the next start. A "
+            "running server. A write to an agent names both, its prompt fields and its "
+            "`mcp` grants being applied by the reload and the rest of it built at the "
+            "next start. A "
             "server serving a configuration no store describes says that the write is "
             "stored and takes effect when a server boots from that store."
         )
