@@ -122,6 +122,26 @@ class ReloadInProgressError(ConfigError):
     configuration API, which deliberately loads none of that."""
 
 
+class RunningConfigMovedError(ConfigError):
+    """A read that has to describe one running world found that the
+    world had moved underneath it. Nothing was changed, and the same
+    call may be retried.
+
+    A sibling of the refusal above rather than that refusal reused,
+    because the two say different things. `ReloadInProgressError` is
+    about a second reload asked for while the first is running; this one
+    is about a read whose answer would otherwise mix two states that
+    never coexisted, and it can be raised long after the reload that
+    moved the world has finished. Retrying is the whole of the advice in
+    both cases, which is why they answer under the same status.
+
+    Here rather than beside its raiser for the reason the two above are:
+    what raises it is the composition root, on the conversation side of
+    the process, and what has to answer it with a status code is the
+    configuration API.
+    """
+
+
 class StorageError(ConfigError):
     """The stored state cannot be read as configuration, or the database
     could not be read or written at all. Not the caller's mistake."""

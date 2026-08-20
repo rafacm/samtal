@@ -74,6 +74,7 @@ from vinga_server.config.loader import (
     DatabaseBusyError,
     DeviceAlreadyBoundError,
     ReloadInProgressError,
+    RunningConfigMovedError,
     StorageError,
     UnknownEntityError,
 )
@@ -85,6 +86,8 @@ from vinga_server.config.models import (
 from vinga_server.config.responses import (
     Acknowledgement,
     AssembledPrompt,
+    ConfigDiff,
+    ConfigDiffReader,
     ConfigDocument,
     DefaultAgent,
     DefaultAgentName,
@@ -230,6 +233,21 @@ API_DESCRIPTION = (
     "the database, so it cannot disagree with what a session would get, and it is a "
     "preview of a new session rather than a readback of a running one: a conversation "
     "already in progress holds the half it assembled at its own activation.\n\n"
+    "`GET /runtime/config/diff` is the third read there, and the one that spans both "
+    "sides: what the database holds that this server is not serving, kind by kind, as "
+    "the entity names added, removed and changed, each kind carrying the boundary its "
+    "changes converge at. `restart` is the boot-time snapshot; `reload` is what the "
+    "MCP reload below applies, which is the MCP entries and the agents' grants; "
+    "`check-in` is the device bindings and the default agent, which a device is "
+    "answered as it asks and which are therefore never pending, so they carry the "
+    "label alone and no lists. Changed means the stored state differs from the "
+    "comparison baseline rather than that something was written: an edit changed back "
+    "before anyone looked produces no diff, and a rewritten stored secret counts as "
+    "different, because what is compared is an opaque mark over the ciphertext and it "
+    "moves even when the plaintext may not have. Entity names and those labels are the "
+    "whole of the answer: no bodies, no values and no marks cross it. The MCP half is "
+    "compared against the entries running now rather than the ones this process booted "
+    "with, so a change a reload has already applied is not reported as pending.\n\n"
     "`POST /runtime/mcp-servers/reload` is the second exception to the boot-time "
     "snapshot, and unlike device bindings it is asked for rather than noticed. It "
     "re-reads the `mcp_servers` entries, the secrets stored on them and the agents' "
@@ -300,6 +318,10 @@ REFUSAL_STATUS: dict[type[ConfigError], int] = {
     # MCP servers runs at a time, and the second is retryable exactly as
     # a contended write is.
     ReloadInProgressError: 409,
+    # And the fourth, which is neither held nor wrong but too late: a
+    # read that has to describe one running world found the world had
+    # moved under it, and refused rather than answer with two.
+    RunningConfigMovedError: 409,
     StorageError: 500,
     NoRuntimeError: 503,
     ConfigError: 422,
@@ -549,6 +571,34 @@ RELOAD_REFUSED_DESCRIPTION = (
     "they were."
 )
 
+# The diff read's three refusals that cannot inherit a shared sentence.
+# It addresses nothing and carries no body, so the shared 422 (a stage
+# that is not a stage, a MAC that is not one) cannot be what one of its
+# own means; its 409 is not one of the three things the shared sentence
+# lists; and the shared 503 says the reads in this namespace answer
+# emptily, which is exactly what this one must not do.
+DIFF_REFUSED_DESCRIPTION = (
+    "The stored half was refused: it does not compose into a valid snapshot, or a "
+    "credential stored in it will not decrypt under the configured keys. It is the "
+    "same read the MCP reload makes and the same refusal, so a diff that answers this "
+    "is telling you a reload would be refused too. Nothing was compared and nothing "
+    "was changed."
+)
+
+DIFF_MOVED_DESCRIPTION = (
+    "Either the configuration database's write lock is held by another request, or the "
+    "running MCP world was replaced by a reload while this read was between its two "
+    "halves. An answer built across such a change would describe two states that never "
+    "existed together, so it is refused instead. Nothing was changed and the request "
+    "can be retried."
+)
+
+NO_RUNTIME_DIFF_DESCRIPTION = (
+    "This application has no running server around it, so there is no world to compare "
+    "the database with. Unlike the MCP status read beside it, there is no honest empty "
+    "answer: an empty diff would say that everything stored is already in effect."
+)
+
 
 @dataclass
 class StoreHandle:
@@ -661,7 +711,7 @@ class ApiRuntime:
     `store` is the configuration database's one engine, installed by
     whichever lifespan owns it and None until then; `conversations` is
     still a per-request open, which is a property that store documents
-    for itself. The other five are the live objects the server shares
+    for itself. The other six are the live objects the server shares
     with this application, or the honest empties an application built
     without a server around it gets.
     """
@@ -673,6 +723,7 @@ class ApiRuntime:
     mcp_servers: McpStatusSource | None
     mcp_reload: McpReloader | None
     agent_prompt: Callable[[str], Awaitable[Any]] | None
+    config_diff: ConfigDiffReader | None
 
 
 def build_api(
@@ -683,6 +734,7 @@ def build_api(
     mcp_servers: McpStatusSource | None = None,
     mcp_reload: McpReloader | None = None,
     agent_prompt: Callable[[str], Awaitable[Any]] | None = None,
+    config_diff: ConfigDiffReader | None = None,
 ) -> FastAPI:
     """The sub-application the server mounts: the routes, gated.
 
@@ -726,9 +778,23 @@ def build_api(
     configuration, the MCP registry and the memory store), and this
     application must not learn what a prompt is made of. None is the
     honest answer without a server, and the route answers 503.
+
+    `config_diff` compares what the database holds with what the server
+    around this application is serving. A callable for the reason the
+    two above are: what it closes over is the world this process booted,
+    the credentials loaded with it and the registry a reload replaces,
+    and this application must not learn which kind of configuration
+    converges where. None is the honest answer without a server, and the
+    route answers 503 rather than reporting that nothing is pending.
     """
     runtime = build_api_runtime(
-        database_dir, loaded_agents, pending, mcp_servers, mcp_reload, agent_prompt
+        database_dir,
+        loaded_agents,
+        pending,
+        mcp_servers,
+        mcp_reload,
+        agent_prompt,
+        config_diff,
     )
     # A lifespan of its own, which runs only when this application is the
     # top-level one: it opens the configuration database and installs the
@@ -755,6 +821,7 @@ def build_api_runtime(
     mcp_servers: McpStatusSource | None = None,
     mcp_reload: McpReloader | None = None,
     agent_prompt: Callable[[str], Awaitable[Any]] | None = None,
+    config_diff: ConfigDiffReader | None = None,
 ) -> ApiRuntime:
     """What a request to this application resolves out of the server
     around it, assembled.
@@ -787,6 +854,7 @@ def build_api_runtime(
         mcp_servers=mcp_servers,
         mcp_reload=mcp_reload,
         agent_prompt=agent_prompt,
+        config_diff=config_diff,
     )
 
 
@@ -940,6 +1008,17 @@ def _agent_prompt(request: Request) -> Callable[[str], Awaitable[Any]] | None:
 
 
 AgentPromptDep = Annotated[Any, Depends(_agent_prompt)]
+
+
+def _config_diff(request: Request) -> ConfigDiffReader | None:
+    """What compares the stored configuration with the running server,
+    or None for an application built without one. Taken from the
+    application for the reason the store is."""
+    runtime: ApiRuntime = request.app.state.api_runtime
+    return runtime.config_diff
+
+
+ConfigDiffDep = Annotated[ConfigDiffReader | None, Depends(_config_diff)]
 
 
 def _pending_view(device: PendingRecord) -> dict[str, Any]:
@@ -1381,6 +1460,62 @@ def _runtime(api: FastAPI) -> None:
         if reload is None or servers is None:
             raise NoRuntimeError(PROBLEM_DESCRIPTIONS[503])
         return await reload()
+
+    @api.get(
+        "/runtime/config/diff",
+        response_model=ConfigDiff,
+        responses=_problems(
+            401,
+            409,
+            422,
+            500,
+            503,
+            instead={
+                409: DIFF_MOVED_DESCRIPTION,
+                422: DIFF_REFUSED_DESCRIPTION,
+                503: NO_RUNTIME_DIFF_DESCRIPTION,
+            },
+        ),
+    )
+    async def read_config_diff(diff: ConfigDiffDep) -> ConfigDiff:
+        """What the database holds that this server is not serving, kind
+        by kind, with the boundary each kind's changes converge at.
+
+        The read the other two in this namespace cannot give: they say
+        what is running, the entity reads say what is stored, and the
+        question an operator actually has after a write is what stands
+        between the two. Most of the configuration is a boot-time
+        snapshot, so most of an answer here is waiting for a restart;
+        the MCP entries and the agents' grants are waiting for the
+        reload below; device bindings and the default agent are read as
+        a device asks and are therefore never pending, so they carry
+        their label and no lists.
+
+        Names and labels, and nothing else. No entity bodies, no values,
+        no masks and no secret marks cross this surface: what a
+        credential change looks like here is the entity holding it
+        listed as changed.
+
+        The stored half is the same re-read the reload makes, so a
+        stored configuration that will not compose, or a credential in
+        it that will not decrypt, refuses here exactly as it would
+        there, and a diff that answers is a diff a reload could act on.
+        The running half is read on the loop that owns it, either side
+        of that database read: a reload landing in between would leave
+        the two halves describing states that never existed together, so
+        such an answer is not composed at all and the request is refused
+        as retryable instead.
+        """
+        # The docstring is the endpoint's description in the committed
+        # document, so what belongs to the handler rather than to the
+        # contract is said here. The whole comparison arrives composed,
+        # for the reason the reload's whole result does: which world is
+        # compared against which, and what makes the two one world, are
+        # decided where both are in hand, and a handler that took the
+        # answer apart would be holding an invariant it cannot keep.
+        if diff is None:
+            raise NoRuntimeError(PROBLEM_DESCRIPTIONS[503])
+        return await diff()
 
 
 def _entity_writes(api: FastAPI) -> None:
@@ -2180,6 +2315,7 @@ __all__ = [
     # routes, and it is the name every caller already knows them by.
     "Acknowledgement",
     "AssembledPrompt",
+    "ConfigDiff",
     "ConfigDocument",
     "DefaultAgent",
     "DefaultAgentName",
