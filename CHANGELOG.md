@@ -14,9 +14,10 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   `vinga-server config reload` calls, re-reads the stored configuration
   and applies every kind this release can apply while the process runs:
   the `mcp_servers` entries with the secrets stored on them, the agents'
-  effective `mcp` grant lists, the shared prompt fragments, and each
-  agent's own `prompt` and `prompt_includes`. Editing an agent's persona
-  or a fragment it includes no longer costs a restart and every
+  effective `mcp` grant lists, the shared prompt fragments, each agent's
+  own `prompt` and `prompt_includes`, and each agent's own `filler`
+  section. Editing an agent's persona, a fragment it includes or the
+  phrases it masks a slow reply with no longer costs a restart and every
   conversation on the server. Nothing is swapped, stopped or started
   until the whole new world has been composed, validated and built, so a
   refusal has changed nothing at all; one apply runs at a time, and a
@@ -26,10 +27,16 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   picked up on the next utterance, while prompt text is assembled once
   per activation, so a rewritten prompt, fragment or `instructions`
   reaches a conversation at its next activation, which is a new session
-  or an agent switch. The answer carries one section per kind, with the
-  sections a later release will fill declared now and answering null, so
-  a client generated from this contract keeps reading later ones.
-  Everything else still waits for the start that reads it: the
+  or an agent switch, and filler clips are bound by a conversation when
+  it opens, so a re-synthesized one reaches the next conversation. Only
+  an agent whose phrases or whose voice moved is synthesized again, so an
+  edit to a prompt sends nothing to a text-to-speech engine, and an agent
+  whose synthesis fails applies with no clip and runs unmasked rather
+  than making the reload refuse, which the answer's `fillers` section
+  reports under its own outcome. The answer carries one section per kind,
+  with the sections a later release will fill declared now and answering
+  null, so a client generated from this contract keeps reading later
+  ones. Everything else still waits for the start that reads it: the
   providers, the agent set, `agent_defaults`, and the server section.
 
 - **A running server says what it has not picked up yet** (#193).
@@ -37,7 +44,8 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   the server is not serving, kind by kind: the entity names added,
   removed and changed, and for each kind the boundary its changes
   converge at, which is `restart` for the boot-time snapshot, `reload`
-  for the MCP entries and the agents' grants, and `check-in` for the
+  for the MCP entries, the agents' grants, the shared prompt fragments
+  and each agent's own prompt and filler halves, and `check-in` for the
   device bindings and the default agent, which a device is answered as
   it asks and which are therefore never pending. Until now the only
   trace of a pending change was the sentence in a write's

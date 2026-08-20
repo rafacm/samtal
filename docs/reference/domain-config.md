@@ -72,19 +72,26 @@ The reload is the second, and unlike the first it is asked for rather
 than noticed. `vinga-server config reload` has a running server re-read
 the stored configuration and apply every kind it can apply while it
 runs: the `mcp_servers` entries with the secrets stored on them, the
-agents' effective `mcp` grant lists, the prompt fragments, and each
-agent's own `prompt` and `prompt_includes`. Entries are started,
+agents' effective `mcp` grant lists, the prompt fragments, each
+agent's own `prompt` and `prompt_includes`, and each agent's own
+`filler` section. Entries are started,
 restarted, stopped or left alone, and no conversation is dropped. When
 one meets the result depends on which half moved: the tools an agent
 may reach are snapshotted per reply, so an entry that moved is picked
 up on the next utterance, while prompt text is assembled at an
 activation and cached for it, so a rewritten prompt, fragment or
 `instructions` reaches a conversation at its next activation, which is
-a new session or an agent switch.
+a new session or an agent switch. Filled pauses are synthesized during
+the reload and bound by a conversation when it opens, so an edited
+phrase reaches the next conversation and never changes what one
+already open is masking with; only an agent whose phrases or whose
+voice moved is synthesized again, and one whose synthesis fails runs
+unmasked rather than making the reload refuse.
 
-The agent is the one kind whose fields fall on both sides of that
-line, so a write to one says both: its prompt and its includes are
-applied by a reload, and its providers, its memory and its filler
+The agent is the one kind whose fields fall on several sides of that
+line, so a write to one says all of them: its prompt and its includes
+are applied by a reload at the next activation, its filler section by
+a reload at the next conversation, and its providers and its memory
 still wait for the start that builds them.
 
 `vinga-server config schema [entity]` prints the same field descriptions

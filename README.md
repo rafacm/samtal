@@ -148,7 +148,7 @@ The order matters: a write whose references do not resolve is refused, so the pr
 
 From outside the container instead, name the API with `--api-url` (or `VINGA_API_URL`) and carry the token yourself, over TLS or a tunnel that terminates it: the client refuses a plain `http://` connection to a host that is not a loopback address. [The configuration API](vinga-server/README.md#the-configuration-api) in the server README has the whole surface, and [`docs/reference/api-openapi.json`](docs/reference/api-openapi.json) is the contract for anything that writes this configuration without a person typing it.
 
-**4. Restart the server.** The providers and the agent set are read once at start, which is why the writes above said they apply at the next one. This is that next one. Not every later change needs it: `vinga config reload` applies the MCP entries, the prompt fragments and an agent's own prompt to a running server, and every write says which of the two it is waiting for.
+**4. Restart the server.** The providers and the agent set are read once at start, which is why the writes above said they apply at the next one. This is that next one. Not every later change needs it: `vinga config reload` applies the MCP entries, the prompt fragments, an agent's own prompt and an agent's own filled pauses to a running server, and every write says which of the two it is waiting for.
 
 ```bash
 docker restart vinga

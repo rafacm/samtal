@@ -1445,11 +1445,15 @@ class FillerConfig(BaseModel):
     """Masking reply latency with a pre-synthesized filled pause.
 
     Off by default. When enabled, the phrases are synthesized in the
-    agent's own voice at boot and cached as PCM; a reply whose first
-    audio has not started within `delay_ms` of the utterance being
+    agent's own voice ahead of time and cached as PCM; a reply whose
+    first audio has not started within `delay_ms` of the utterance being
     transcribed plays one, and the real reply queues behind its tail.
-    A synthesis failure at boot logs a warning and leaves the feature
-    off for that agent rather than failing the boot.
+    "Ahead of time" is the server start, and a reload after it: an edit
+    here is synthesized again while the process runs and reaches the
+    next conversation, since a conversation already open keeps the clips
+    it opened with. A synthesis failure logs a warning and leaves the
+    feature off for that agent rather than failing the boot or refusing
+    the reload.
     """
 
     model_config = ConfigDict(extra="forbid")
