@@ -19,6 +19,7 @@
 
 import { createClient, createConfig } from "./generated/client";
 import type { ClientOptions } from "./generated/types.gen";
+import * as sdk from "./generated/sdk.gen";
 import {
   readProviderProvidersStageNameGet,
   writeProviderProvidersStageNamePut,
@@ -395,9 +396,67 @@ holds<PromptFragmentConfig>(fragmentWithAnInventedKey);
 // ---------------------------------------------------------------------
 //
 // The SDK names each function after the document's `operationId`,
-// camel-cased. The probe is the import list at the top of this file
-// plus this exhaustive re-export: a rename in the document is a compile
-// error here rather than a runtime 404.
+// camel-cased. The claim under test is about all thirty-eight
+// operations the document declares, not about the fifteen the round
+// trips above happen to call, so the inventory is exhaustive and
+// checked in both directions: every name below is exported, and every
+// export is named below. A rename, a loss or an unannounced addition
+// anywhere in the document reddens this file rather than surfacing as a
+// runtime 404.
+
+const everyOperation = [
+  "readConfigConfigGet",
+  "readProvidersProvidersGet",
+  "readProviderProvidersStageNameGet",
+  "writeProviderProvidersStageNamePut",
+  "removeProviderProvidersStageNameDelete",
+  "writeProviderSecretProvidersStageNameSecretsSlotPut",
+  "removeProviderSecretProvidersStageNameSecretsSlotDelete",
+  "readMcpServersMcpServersGet",
+  "readMcpServerMcpServersNameGet",
+  "writeMcpServerMcpServersNamePut",
+  "removeMcpServerMcpServersNameDelete",
+  "writeMcpSecretMcpServersNameSecretsSlotPut",
+  "removeMcpSecretMcpServersNameSecretsSlotDelete",
+  "readPromptFragmentsPromptFragmentsGet",
+  "readPromptFragmentPromptFragmentsNameGet",
+  "writePromptFragmentPromptFragmentsNamePut",
+  "removePromptFragmentPromptFragmentsNameDelete",
+  "readAgentsAgentsGet",
+  "readAgentAgentsNameGet",
+  "writeAgentAgentsNamePut",
+  "removeAgentAgentsNameDelete",
+  "readAgentDefaultsAgentDefaultsGet",
+  "writeAgentDefaultsAgentDefaultsPut",
+  "readDefaultAgentDefaultAgentGet",
+  "writeDefaultAgentDefaultAgentPut",
+  "removeDefaultAgentDefaultAgentDelete",
+  "readDevicesDevicesGet",
+  "readDeviceDevicesMacGet",
+  "writeDeviceDevicesMacPut",
+  "removeDeviceDevicesMacDelete",
+  "readPendingDevicesDevicesPendingGet",
+  "addDeviceDevicesPendingCodePost",
+  "readMcpServerStatusRuntimeMcpServersGet",
+  "reloadMcpServersRuntimeMcpServersReloadPost",
+  "readAgentPromptRuntimeAgentsNamePromptGet",
+  "readConversationsConversationsGet",
+  "readConversationConversationsSessionGet",
+  "readConversationTurnsConversationsSessionTurnsGet",
+] as const;
+
+export type EveryOperationIsExported = Expect<
+  Equals<(typeof everyOperation)[number], keyof typeof sdk>
+>;
+export type TheDocumentDeclaresThirtyEight = Expect<
+  Equals<(typeof everyOperation)["length"], 38>
+>;
+
+// And each name is a callable, not just a key: a generator that emitted
+// a type of that name and no function would satisfy the union above.
+export const everyOperationIsCallable = everyOperation.map(
+  (name) => sdk[name],
+);
 
 export const entityOperations = {
   readProvider: readProviderProvidersStageNameGet,

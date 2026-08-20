@@ -374,6 +374,97 @@ holds<PromptFragmentConfig>(fragmentWithAnInventedKey);
 // an operation id in the document therefore breaks this table and
 // leaves every call above compiling.
 
+// The claim under test is about all thirty-eight operations, not the
+// fifteen the round trips call, so both surfaces are inventoried
+// exhaustively and in both directions. The operation ids first, which
+// is where the document's own names survive.
+
+const everyOperationId = [
+  "read_config_config_get",
+  "read_providers_providers_get",
+  "read_provider_providers__stage___name__get",
+  "write_provider_providers__stage___name__put",
+  "remove_provider_providers__stage___name__delete",
+  "write_provider_secret_providers__stage___name__secrets__slot__put",
+  "remove_provider_secret_providers__stage___name__secrets__slot__delete",
+  "read_mcp_servers_mcp_servers_get",
+  "read_mcp_server_mcp_servers__name__get",
+  "write_mcp_server_mcp_servers__name__put",
+  "remove_mcp_server_mcp_servers__name__delete",
+  "write_mcp_secret_mcp_servers__name__secrets__slot__put",
+  "remove_mcp_secret_mcp_servers__name__secrets__slot__delete",
+  "read_prompt_fragments_prompt_fragments_get",
+  "read_prompt_fragment_prompt_fragments__name__get",
+  "write_prompt_fragment_prompt_fragments__name__put",
+  "remove_prompt_fragment_prompt_fragments__name__delete",
+  "read_agents_agents_get",
+  "read_agent_agents__name__get",
+  "write_agent_agents__name__put",
+  "remove_agent_agents__name__delete",
+  "read_agent_defaults_agent_defaults_get",
+  "write_agent_defaults_agent_defaults_put",
+  "read_default_agent_default_agent_get",
+  "write_default_agent_default_agent_put",
+  "remove_default_agent_default_agent_delete",
+  "read_devices_devices_get",
+  "read_device_devices__mac__get",
+  "write_device_devices__mac__put",
+  "remove_device_devices__mac__delete",
+  "read_pending_devices_devices_pending_get",
+  "add_device_devices_pending__code__post",
+  "read_mcp_server_status_runtime_mcp_servers_get",
+  "reload_mcp_servers_runtime_mcp_servers_reload_post",
+  "read_agent_prompt_runtime_agents__name__prompt_get",
+  "read_conversations_conversations_get",
+  "read_conversation_conversations__session__get",
+  "read_conversation_turns_conversations__session__turns_get",
+] as const;
+
+export type EveryOperationIdIsAKey = Expect<
+  Equals<(typeof everyOperationId)[number], keyof operations>
+>;
+export type TheDocumentDeclaresThirtyEight = Expect<
+  Equals<(typeof everyOperationId)["length"], 38>
+>;
+
+// And the path table, because with this candidate the path is the call
+// site: a path that vanished from the document would break a call, and
+// a renamed operation id would not. Twenty-three paths carry the
+// thirty-eight operations.
+
+const everyPath = [
+  "/config",
+  "/providers",
+  "/providers/{stage}/{name}",
+  "/providers/{stage}/{name}/secrets/{slot}",
+  "/mcp-servers",
+  "/mcp-servers/{name}",
+  "/mcp-servers/{name}/secrets/{slot}",
+  "/prompt-fragments",
+  "/prompt-fragments/{name}",
+  "/agents",
+  "/agents/{name}",
+  "/agent-defaults",
+  "/default-agent",
+  "/devices",
+  "/devices/{mac}",
+  "/devices/pending",
+  "/devices/pending/{code}",
+  "/runtime/mcp-servers",
+  "/runtime/mcp-servers/reload",
+  "/runtime/agents/{name}/prompt",
+  "/conversations",
+  "/conversations/{session}",
+  "/conversations/{session}/turns",
+] as const;
+
+export type EveryPathIsAKey = Expect<
+  Equals<(typeof everyPath)[number], keyof paths>
+>;
+export type TheDocumentDeclaresTwentyThreePaths = Expect<
+  Equals<(typeof everyPath)["length"], 23>
+>;
+
 export type EntityOperations = {
   readProvider: operations["read_provider_providers__stage___name__get"];
   writeProvider: operations["write_provider_providers__stage___name__put"];
