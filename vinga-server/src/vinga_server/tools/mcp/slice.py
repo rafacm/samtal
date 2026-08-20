@@ -10,16 +10,29 @@ Beside it, the two questions that are asked of a grant and of a
 manager set together: which of a server's tools a grant reaches,
 and which running entries have another entry inside their
 namespace.
+
+And, because this is the half a reload swaps, the comparison one
+of these makes against a candidate composed from a fresh read:
+which entries a stored configuration would add, take away or
+change, and whose tools would move. It lives here rather than
+beside the managers because it is a question about configuration
+and answering it connects nothing.
 """
 
+import hashlib
+import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from vinga_server.config import Config, McpGrant
+from vinga_server.config import Config, McpGrant, McpServerConfig
+from vinga_server.config.diff import McpPending
+from vinga_server.config.secrets import SecretStore
 from vinga_server.providers import ToolDef
 from vinga_server.runtime.prompt import Guidance, GuidanceBlock
 from vinga_server.tools import names
+
+from .transport import _PROMPT_ONLY_FIELDS, _connection_identity
 
 if TYPE_CHECKING:
     from .manager import McpManager
@@ -57,6 +70,39 @@ def _allowed(grant: McpGrant, tools: list[ToolDef]) -> list[ToolDef]:
     return [tool for tool in tools if names.unqualified(grant.server, tool.name) in allowed]
 
 
+def _identity(name: str, entry: McpServerConfig, secrets: SecretStore) -> str:
+    """One configured entry's comparison identity: an opaque mark of
+    everything a world built from it stands on.
+
+    Three parts, named separately because the reload already names them
+    and this must not come to mean something else: what makes a
+    connection stand (`_connection_identity`), the fields that only make
+    prompt text and that a connection never sees (`_PROMPT_ONLY_FIELDS`,
+    which the first one leaves out), and the credentials stored behind
+    the entry, as the store's own opaque mark. Together they are the
+    whole entry and the whole of what is kept for it, which is what an
+    entry no agent references needs: it has no manager to be compared
+    with, so this is the only record of it a generation holds.
+
+    A digest rather than the parts, so that retaining one per entry
+    retains no entry values and no secret marks: agreement is the whole
+    of what a caller may learn from one of these, and there is then
+    nothing here that could reach a response, a log line or an
+    exception.
+    """
+    digest = hashlib.sha256()
+    for part in (
+        _connection_identity(entry).model_dump_json(),
+        json.dumps({key: getattr(entry, key) for key in _PROMPT_ONLY_FIELDS}),
+        secrets.fingerprint("mcp_server", name),
+    ):
+        # Length-prefixed, the rule the fingerprint itself follows: no
+        # two different worlds may produce the same stream of bytes.
+        digest.update(f"{len(part)}:".encode())
+        digest.update(part.encode("utf-8"))
+    return digest.hexdigest()
+
+
 def _nothing_shipped(_entry: str) -> tuple[GuidanceBlock, ...]:
     """What an entry contributes beyond its operator's own guidance when
     nobody is holding its connection: nothing. What a slice asked on its
@@ -90,9 +136,30 @@ class McpSlice:
     # configuration decision: what the manager holds is what the server
     # said, and what this holds is whether anyone asked to hear it.
     use_server_instructions: frozenset[str] = frozenset()
+    # One opaque comparison identity per configured entry, referenced or
+    # not. Held here rather than beside the managers because this is the
+    # object an install swaps: the identities therefore describe exactly
+    # the world they were swapped in with, and a diff taken against them
+    # cannot report a change a reload has already applied.
+    identities: Mapping[str, str] = field(default_factory=dict)
 
     @classmethod
-    def of(cls, config: Config) -> "McpSlice":
+    def of(cls, config: Config, secrets: SecretStore | None = None) -> "McpSlice":
+        """The configuration half of one world, composed from a snapshot.
+
+        `secrets` is the store that snapshot was loaded with, or None for
+        a deployment whose credentials are all environment references,
+        the same argument `McpServers.build` takes. It is here because
+        the comparison identities depend on it: an operator who rotates
+        a credential has changed the entry as surely as one who edits
+        its URL.
+
+        One composition for both sides, which is the point: the world
+        that gets installed and a candidate a diff is taken against are
+        made by this, so the two cannot come to disagree about what an
+        identity or an effective grant means.
+        """
+        stored = secrets if secrets is not None else SecretStore()
         return cls(
             entries=tuple(sorted(config.mcp_servers)),
             grants={
@@ -107,6 +174,49 @@ class McpSlice:
                 name
                 for name, entry in config.mcp_servers.items()
                 if entry.use_server_instructions
+            ),
+            identities={
+                name: _identity(name, entry, stored)
+                for name, entry in sorted(config.mcp_servers.items())
+            },
+        )
+
+    def pending_against(self, candidate: "McpSlice") -> McpPending:
+        """What a candidate composed from a fresh read holds that this
+        world does not: entries added, taken away and changed, and the
+        agents whose effective grants would move.
+
+        Every configured entry is compared, referenced or not. An entry
+        no agent names has no manager and no connection, so it is
+        exactly the one an answer built from the managers would miss,
+        and an operator who writes one and grants it nothing still wants
+        to be told that the reload has something to apply.
+
+        The grants are compared for every agent of THIS world, and an
+        agent the candidate does not know answers with the empty grant
+        set, which is `grants_for`'s own rule read here for what it
+        means: a boot-loaded agent deleted from storage keeps talking
+        until a restart, while a reload would revoke its tools now, so
+        that pending revocation stays reported until a reload applies
+        it. An agent only the candidate knows is deliberately not here:
+        it rides the agents' own added row, since its grants describe a
+        world that begins at the restart that adds it.
+        """
+        running, stored = set(self.identities), set(candidate.identities)
+        return McpPending(
+            added=tuple(sorted(stored - running)),
+            removed=tuple(sorted(running - stored)),
+            changed=tuple(
+                sorted(
+                    entry
+                    for entry in running & stored
+                    if self.identities[entry] != candidate.identities[entry]
+                )
+            ),
+            grants=tuple(
+                agent
+                for agent in sorted(self.grants)
+                if self.grants_for(agent) != candidate.grants_for(agent)
             ),
         )
 
