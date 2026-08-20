@@ -293,6 +293,17 @@ drained, closes the current generation's providers and any retired
 generation still held, so the close a provider gained in this
 milestone runs at every end a provider can meet.
 
+A provider refusal also needs an HTTP identity it does not have
+today (the review's finding 7): `ProviderError` is not a
+`ConfigError`, and only the boot-failure handler knows it. The
+apply translates provider preparation failures into one typed
+refusal in the configuration vocabulary, mapped to 422 in
+`REFUSAL_STATUS`, answering with a fixed sanitized sentence built
+in the except arm and raised after it (chains cut, the #228
+shape), carried in the OpenAPI document's declared problem
+statuses and pinned by the no-leak suite; the original failure's
+class is what the log records, never the response.
+
 **The agent set: what moves in milestone 4?** The four snapshots
 of "which agents can this server serve" move onto the generation:
 `ApiRuntime.loaded_agents` (which chooses between the binding
@@ -661,6 +672,11 @@ taxonomy.** `ProviderError` is not a `ConfigError` and only
 `BOOT_FAILURES` handles it; an HTTP apply needs a typed refusal
 with a declared 422 contract, fixed sanitized sentence, empty
 chain, and OpenAPI plus no-leak pins.
+
+*Resolution.* Adopted. The providers decision now declares the
+typed 422 refusal with its fixed sanitized sentence, cut chains,
+OpenAPI declaration and no-leak pins, the original class recorded
+in the log and never the response.
 
 **8 (P2). The filler result cannot report the degraded outcome it
 promises.** The vocabulary needs a closed third outcome for an
