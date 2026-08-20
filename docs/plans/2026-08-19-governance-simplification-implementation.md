@@ -845,3 +845,94 @@ Run from `vinga-server/`, at the last commit of the milestone.
 
 Not verified here, and not claimed: the container image and the smoke
 lane, for the reason M1 gives.
+
+### PR review round (2026-08-20)
+
+External review of PR #220, read-only against commit `2fec740d`. Verdict:
+not mergeable until the P1. Four findings, all adopted, each with the
+commit that made it.
+
+**1 (P1). A strict refusal leaked the exception it was sanitizing
+through `__context__`.** Half the converted sites emit from inside an
+`except` arm, because that is where a failure is known, and Python
+attaches whatever exception is being handled to any exception raised
+while it is. So the `EventSchemaError` this module raises about a thunk
+it deliberately never looked at arrived at a lane's stderr with the
+original bolted to it: its message, its class name, its own cause, and
+everything they render as. `raise ... from None` does not fix it; it
+suppresses the default traceback's printing of a context that is still
+attached and still reachable through one attribute.
+
+*Resolution.* Adopted (`1ce1574b`), by the second of the two routes the
+finding offers, and the audit is why. Twenty-nine places in the package
+can reach an emit while an exception is being handled, eleven of them
+lexically inside the arm and eighteen through one call from it, and
+every future one would have to remember. So it is closed at the raise,
+which is the one place strict mode lets anything out: the refusal is
+raised, caught there, scrubbed of both chain links, and re-raised bare,
+since a bare `raise` re-raises the exception already being handled and
+attaches no context. Seven tests, four of them driving production paths,
+one per shape the audit found: `build_agent_fillers` and the
+configuration API's sanitizing middleware emit inside the arm, and a
+failed capture write reaches its emit a frame further up. Each plants an
+exception whose class name IS the credential-shaped sentinel and asserts
+both chain links are None and the sentinel reaches no record, no
+argument, no shipped format, no tap and no capture's decision track.
+Proved by mutation: `from None` in place of the scrub fails four of
+them.
+
+**2 (P2). The activation outcome mapping lost its exhaustiveness
+survivor.** `Unbound.outcome` admits four literals and `_activation`'s
+`match` names all four, but nothing held it to that, and its docstring
+still named the deleted conformance suite as the guard.
+
+*Resolution.* Adopted (`9bee116f`), by the focused-test route rather
+than `assert_never`: a runtime wildcard arm would raise on a request
+path, and extending the mypy scope to reach that module is a decision of
+its own rather than a side effect of a fix. The survivor lives beside
+the decision it is about, in `test_unbound.py`, reads the `match` out of
+the source, holds its arms equal to the literal's members both ways, and
+refuses a wildcard or a capture pattern, since `case _` would handle a
+fifth outcome by definition. Proved by mutation twice. The docstring
+names it.
+
+**3 (P2). `CaptureWrite` had an unchecked second source of truth.**
+`_disable` took an unrestricted `str`, its two call sites wrote the
+words as literals, and the test restated them a third time; the only
+thing that could refuse a fourth was the emit.
+
+*Resolution.* Adopted (`94c48055`). `_disable` takes a `CaptureWrite`,
+its call sites name members, and the emission wraps at the boundary. The
+sweep over the twelve enumerations this milestone introduced found three
+sites of that shape and fixed all three: the failed write's track,
+`refusal_reason`'s answer in `ws.py`, and `Origin.source` in the
+onboarding banner. The other nine stay restated with a test holding them
+equal to their site, for two stated reasons: three are `fixed=` on their
+variants so no site passes them at all, and the rest are somebody else's
+vocabulary to name (the configuration's `Literal`, the MCP package's
+state words, and two members that are f-strings over the pending table's
+own numeric bounds). The tests now say which arrangement each set is in.
+
+**4 (P3). The baseline harness described a walk that no longer
+exists.** Its docstring still explained the static source reading and
+the planted-source proofs deleted with the last conversion.
+
+*Resolution.* Adopted in the commit that appends this record. It
+describes what is there: the catalog-variant coverage that replaced the
+walk, the driver identity and count assertion beside it, why the walk
+existed at all, and what `identity` and `event` are for.
+
+### Verification, after the review round
+
+Run from `vinga-server/`, at the last commit of the round.
+
+- `uv run ruff check .`: all checks passed.
+- `uv run mypy`: success, no issues found in 3 source files.
+- `uv run pytest tests/unit -q`: 2,637 passed, 16 skipped (2,627 at the
+  end of M3; the 10 new tests are this round's).
+- `uv run pytest tests/integration -q`: 60 passed.
+- The four documentation drift checks: all clean, and
+  `docs/reference/events.md` is unchanged by this round.
+- The record baseline is untouched: no commit in this round names
+  `vinga-server/tests/unit/data/event-baseline.json`, which is what says
+  the four fixes moved no lawful record.
