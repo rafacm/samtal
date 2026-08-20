@@ -338,3 +338,71 @@ definition (grep for the defaults-then-own rule cited in review).
   MCP-only, exactly as it is today; nothing here retains new state
   for other kinds, so #191 inherits a read to re-baseline, not a
   parallel mechanism to unwind.
+
+## Plan review round (2026-08-20)
+
+External review: codex exec, model gpt-5.6-sol, read-only against
+commit 3d89181c. Verdict: ready after the P1/P2 amendments. Findings
+condensed but faithful; each carries its resolution.
+
+**1 (P1). The registry does not retain enough state to diff unused
+MCP entries.** The slice keeps only entry names, grants,
+instructions and `use_server_instructions`; managers keep
+configuration and secret marks but exist only for referenced
+entries, so an unused entry has no retained connection fields or
+fingerprint to compare against.
+
+**2 (P1). M1 ships a false-negative diff for unapplied MCP and
+grant changes.** Answering `{"applies": "reload"}` alone hides
+stored MCP and grant changes that are still pending; the issue
+permits labeling or excluding changes that are already live, not
+hiding pending ones. Keep M1 internal with no route, or combine the
+milestones.
+
+**3 (P1). The claimed one-world read can combine states that never
+coexisted.** The await around the stored load is itself the race
+window: a diff can load stored generation A, then observe runtime
+generation B after a concurrent reload. Add a generation token
+captured before the load and re-checked after, with a bounded retry
+and a retryable refusal, plus a barrier-driven concurrency test.
+
+**4 (P1). `ConfigStore.load()` is not the re-read the MCP reload
+uses.** The reload goes through `reload_domain_config`, which also
+verifies every stored secret and composes and validates the whole
+snapshot; the plan's claim that a stored half that does not open
+fails like the reload is false as written. Use
+`reload_domain_config` in the worker, and test a wrong encryption
+key and a stored domain that is model-valid but fails
+whole-snapshot validation.
+
+**5 (P1). Restricting grant comparison to agents present on both
+sides hides live revocation for removed agents.** A boot-loaded
+agent deleted from storage keeps talking until restart while a
+reload would revoke its grants now; comparing only shared agents
+omits that pending revocation. Compare effective grants for every
+current-generation agent, treating absence from the stored
+candidate as an empty grant set, with the before- and after-reload
+test.
+
+**6 (P2). M2 is a breaking response-schema change, not an additive
+extension.** Response models forbid extra keys, so a client
+generated from M1's schema can reject M2's response. Publish the
+final schema exactly once.
+
+**7 (P2). The no-leak sentinel proves only plaintext absence.** One
+planted plaintext would not catch serialization of the ciphertext
+envelope, the fingerprint, or an environment-variable name, and the
+problem-path coverage is unspecified. Use distinct sentinels and a
+forced stored-state failure.
+
+**8 (P2). The tests do not exercise the MCP cases that decide
+whether the design works.** One referenced-entry edit plus reload
+would pass even if unused entries, prompt-only fields, secret
+rotation, grant inheritance, removed agents, or the reload race
+were all broken. Name those tests.
+
+**9 (P2). "Changed means written since boot" is false.** Model
+equality reports state difference, not write history: an edit
+changed back produces no diff, and only re-encrypted secrets retain
+history, accidentally. Say that changed means the stored state
+differs from the baseline.
