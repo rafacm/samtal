@@ -297,8 +297,10 @@ async def _preparation(
         config, secrets = await _read(read)
         # One slice, composed before preparation and applied after
         # it, so the world the candidates were built for is the
-        # world that gets installed.
-        configured = McpSlice.of(config)
+        # world that gets installed. The secrets go in with it: the
+        # slice carries the comparison identity of every configured
+        # entry, and what is stored behind an entry is half of one.
+        configured = McpSlice.of(config, secrets)
         return configured, _prepared(config, secrets, configured)
     except asyncio.CancelledError:
         raise

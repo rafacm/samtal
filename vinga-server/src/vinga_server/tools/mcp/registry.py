@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from vinga_server.config import Config
+from vinga_server.config.diff import McpPending
 from vinga_server.config.responses import McpReloadResult, McpServerStatus
 from vinga_server.config.secrets import SecretStore
 from vinga_server.events.catalog import McpToolShadowed
@@ -74,6 +75,10 @@ class McpServers:
         # transitions, so the instant its status carries is when this
         # configuration took effect, which is what this is.
         self._since = time.time()
+        # And which world is installed, counted rather than timed: an
+        # instant cannot say that two reads saw the same one, because
+        # two installs can land inside a clock's resolution.
+        self._generation = 0
         # Whether a reload is between its two phases right now. A plain
         # flag rather than a lock because a second reload is refused
         # rather than queued: it would apply a configuration read after
@@ -103,7 +108,7 @@ class McpServers:
 
         `secrets` is the store a snapshot was loaded with, or None for a
         deployment whose credentials are all environment references."""
-        configured = McpSlice.of(config)
+        configured = McpSlice.of(config, secrets)
         return cls(_managers_for(config, secrets, configured), configured)
 
     def __len__(self) -> int:
@@ -130,6 +135,24 @@ class McpServers:
         configuration, and `status()` is where that one is answered.
         """
         return self._managers[entry]
+
+    @property
+    def generation(self) -> int:
+        """Which world is installed, as a number that moves whenever one
+        is.
+
+        Cheap, and read on the loop this registry lives on: a caller
+        composing an answer that spans an await captures this before it
+        and reads it again afterwards, and an unchanged mark is what
+        says the world it read is still the world that is running. A
+        reload can otherwise land inside that await and leave two halves
+        describing states that never coexisted.
+
+        Advanced by the install and by nothing else, so it counts worlds
+        rather than requests: a reload that refused installed nothing
+        and moves nothing.
+        """
+        return self._generation
 
     @property
     def reloading(self) -> bool:
@@ -405,6 +428,11 @@ class McpServers:
         self._shadowed = _shadowed(keep)
         self._reported = set()
         self._since = time.time()
+        # The mark moves with the world it describes, which is what
+        # makes it usable as a guard: the comparison identities ride the
+        # slice above, so there is no instant at which the mark and what
+        # it stands for disagree.
+        self._generation += 1
 
     def status(self) -> dict[str, dict[str, Any]]:
         """What every configured entry is doing right now, by name.
@@ -474,6 +502,31 @@ class McpServers:
             entry: McpServerStatus.model_validate(status)
             for entry, status in self.status().items()
         }
+
+    def pending_against(
+        self, config: Config, secrets: SecretStore | None = None
+    ) -> McpPending:
+        """What a stored configuration holds that the world running now
+        does not: entries added, taken away and changed, and the agents
+        whose tools would move.
+
+        The baseline is the generation that is installed, never the
+        configuration this process booted on. The MCP half is the one
+        half a running server replaces: `POST
+        /runtime/mcp-servers/reload` swaps this world while the process
+        runs, so a comparison against the boot would report changes a
+        reload has already applied, which is the one thing an answer
+        about what is pending must not do.
+
+        Nothing is connected, built or started, and nothing about a
+        manager is read. The candidate is composed into the same slice a
+        reload would install, and the two are compared as
+        configuration, so this costs a hash per entry and no far side is
+        involved. A caller learns entry names and agent names and
+        nothing else: not what an entry connects to, not what is stored
+        for it, and not how either world is held.
+        """
+        return self._configured.pending_against(McpSlice.of(config, secrets))
 
     async def reload_result(
         self, read: Callable[[], tuple[Config, SecretStore | None]]
