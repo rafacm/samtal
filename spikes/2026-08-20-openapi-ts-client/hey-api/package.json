@@ -1,0 +1,15 @@
+{
+  "name": "vinga-spike-hey-api",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Spike sub-project: generate a TypeScript client for the vinga configuration API with Hey API's openapi-ts, and type-check a consumer fixture against it.",
+  "type": "module",
+  "scripts": {
+    "generate": "openapi-ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@hey-api/openapi-ts": "0.99.0",
+    "typescript": "5.9.3"
+  }
+}
