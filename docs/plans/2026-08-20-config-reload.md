@@ -266,6 +266,20 @@ refuse; that is the double residency the issue prices in, and it
 buys the property that a refused apply has touched nothing
 running.
 
+Ownership is total, not best-effort (the review's finding 4): a
+provider-world builder owns every unique provider it constructs
+until installation transfers ownership to the new generation, and
+on any exit that is not an install (a later entry's build fails, a
+shielded preparation finishes after its caller has gone, the apply
+is refused downstream) it closes every constructed-and-unadopted
+provider exactly once; nothing is left to the garbage collector,
+which an explicit lifecycle has just declared insufficient.
+`Generations` also owns process shutdown: the lifespan registers a
+close operation on the exit stack that, after sessions have
+drained, closes the current generation's providers and any retired
+generation still held, so the close a provider gained in this
+milestone runs at every end a provider can meet.
+
 **The agent set: what moves in milestone 4?** The four snapshots
 of "which agents can this server serve" move onto the generation:
 `ApiRuntime.loaded_agents` (which chooses between the binding
@@ -420,8 +434,15 @@ session across a reload), and the drift-check pins.
   whose `close()` records; a shared reused instance is not closed
   while any generation holds it; egress refusal in prepare touches
   nothing running (the running generation's objects are identical
-  after a refused apply); local-model double residency is not
-  asserted numerically, but the close-called-once property is.
+  after a refused apply); finding 4's ownership cases: a
+  later-entry build failure closes the earlier constructions
+  exactly once, a preparation cancelled by its caller still closes
+  its candidates, a generation retired with zero sessions disposes
+  immediately, a provider reused across several generations closes
+  only when the last of them lets go, and application shutdown
+  closes current and retired providers after the drain; local-model
+  double residency is not asserted numerically, but the
+  close-called-once property is.
 - **M4**: bind a device to an agent added by apply and see it
   served at the next check-in with the binding notice, no restart;
   delete an agent with a live session, apply, the session finishes
@@ -491,7 +512,7 @@ inventory (four sites) likewise before M4.
   issue; the endpoint description says an apply that changes a
   local model briefly holds two, and the refusal path is priced to
   touch nothing running, so the worst case of a failed apply is
-  the old world plus a garbage-collected candidate.
+  the old world plus a candidate the builder has already closed.
 - **CTranslate2 and friends free lazily.** `close()` drops the
   references and the docstring says release is the library's
   schedule; the tests pin close-called, never RSS.
@@ -572,6 +593,14 @@ explicit lifecycle. A provider-world builder owns every unique
 newly constructed provider until installation transfers ownership
 and closes partial or abandoned candidates exactly once, and
 `Generations` gains a lifespan shutdown operation.
+
+*Resolution.* Adopted. The providers decision now states total
+ownership (builder owns until install transfers; every non-install
+exit closes constructed-and-unadopted providers exactly once;
+nothing left to the garbage collector), `Generations` owns the
+exit-stack shutdown after the drain, the risk bullet no longer
+speaks of a garbage-collected candidate, and the M3 test bullet
+names all five ownership cases.
 
 **5 (P1). Session generation accounting cannot attach where the
 plan says.** The registry admits a `DeviceSession` before `run()`,
