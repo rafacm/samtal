@@ -336,7 +336,15 @@ refuse; that is the double residency the issue prices in, and it
 buys the property that a refused apply has touched nothing
 running.
 
-Ownership is total, not best-effort (the review's finding 4): a
+Ownership is total, not best-effort (round 1's finding 4, made
+airtight by round 2's finding 6), and it begins the instant an
+allocation succeeds, not when a finished provider is handed over:
+option validation runs to completion before anything is
+constructed, so a trailing unknown option can no longer refuse
+after a model loaded, and the post-construction egress check runs
+inside the owner that already holds the object, so an egress
+refusal closes what it just built; the same ordering applies to
+boot construction, which shares the builder. From there the
 provider-world builder owns every unique provider it constructs
 until installation transfers ownership to the new generation, and
 on any exit that is not an install (a later entry's build fails, a
@@ -535,7 +543,10 @@ session across a reload), and the drift-check pins.
   its candidates, a generation retired with zero sessions disposes
   immediately, a provider reused across several generations closes
   only when the last of them lets go, and application shutdown
-  closes current and retired providers after the drain; local-model
+  closes current and retired providers after the drain; finding
+  6's same-entry cases: a trailing unknown option refuses before
+  anything is constructed, and an egress refusal after
+  construction closes the object it just built; local-model
   double residency is not asserted numerically, but the
   close-called-once property is; finding 5's binding-event cases:
   a rejected device id, a device with no binding, a disconnect
@@ -881,6 +892,12 @@ options validated before construction, post-construction checks
 run by an owner already holding the object, applied to boot too,
 with same-entry tests for a trailing unknown option and an egress
 refusal after construction. Round 1's finding 4 not fully closed.
+
+*Resolution.* Adopted. Ownership now begins at allocation: options
+validate before construction, the egress check runs inside the
+owner already holding the object, the boot path shares the
+builder, and the two same-entry test cases are named in M3's
+bullet.
 
 **7 (P2). Provider close failures have no safe post-swap policy.**
 Disposal can run after the generation assignment; a raising
