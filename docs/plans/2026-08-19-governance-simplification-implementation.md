@@ -1769,3 +1769,678 @@ Run at the last commit of the round.
   skipped, `uv run pytest tests/integration -q` 60 passed, and the four
   documentation drift checks all clean with
   `docs/reference/api-openapi.json` byte-identical.
+## M6: the reach-in sweep
+
+### What was done
+
+Twelve commits, in the order the census made obvious: the tool, then
+the support module, then the files in descending order of how many
+sites they held, then the long tail, then the pointers.
+
+**The instrument.** `vinga-server/tests/tools/reach_ins.py` is the
+plan's tokenizer walk, committed where the suite's other tools live so
+the after-walk runs the same code as the before-walk. A site is a NAME
+token spelled `_x` immediately after an `OP` dot, anywhere under
+`tests/`; `self._x` and `cls._x` are a file's own state and are counted
+separately rather than silently dropped. It runs as
+`uv run python -m tests.tools.reach_ins`, with `--by-site` and `--json`
+for the census this section's table is built from.
+
+**The fresh inventory.** The plan's before-numbers (445 sites, 82
+names, 51 files) predate M1 through M4, which deleted or rewrote several
+of the largest files. The walk against this milestone's base commit
+finds **440 sites over 85 names across 55 files**, and the six biggest
+are not the six the plan named: `tests/tools/event_baseline.py` (69) is
+new since the plan, `test_event_surface_pins.py` (79 before) has fallen
+to 5, and `tests/support/sessions.py` still routes more than two hundred
+invocations through 22.
+
+**The support module first.** Six of its 22 had a public route already.
+The engines a test wants substituted are a parameter of the composition
+root, so `agent_providers()` applies scripts and stage overrides before
+a session is built, and `realtime_session` and `reply_with` hand their
+ASR and their unreachable stage in through it rather than replacing a
+live runtime's providers afterwards. `start_reply` is the runtime's own
+public entry point, so the helper calls it and answers nothing; the one
+caller that held the task asks `replying()` instead.
+
+The rest stay and say what cannot be established publicly, where it
+happens. `device_session` transcribes two lines of `run`, which no
+public caller but the edge ever needs. `open_session` waits on the
+handshake's only record. The listen mode arrives in a wire message these
+sessions have no serve loop to receive. And the reply drivers carry one
+note for the pair: `drain()` swallows a reply's failure by contract, and
+`start_reply` takes an utterance rather than a transcript, so neither
+the survival of a reply nor the decision it made for a known sentence
+has a public form.
+
+**The seams that did the work.** Four of the five the plan's inventory
+mapped carried most of the rewriting, and two more turned up:
+
+- `ScriptedLlm.seen` answers what the model was handed, which is where
+  a tool snapshot goes and what the conversation history is for. It
+  gained `systems` beside `seen`, the way `RecordingLlm` keeps it, so a
+  suite about tools can ask both questions of one round.
+- `sockets.spoken()` is new: a reply announces every sentence to the
+  device before its audio, so the `tts sentence_start` messages are the
+  device-facing view of what was said. Announced rather than heard,
+  which is why the filler suite asserts the `replied` event beside it.
+- `sessions.history()` drives one more round and answers the turns it
+  was handed, minus the utterance it is answering. The history is not a
+  surface; it exists so the next round is written against what was
+  said, and the model is the thing that receives it.
+- `sessions.talking()` reads the active agent off the events object,
+  where both sides of the boundary read it.
+- The providers' public `client=` parameter, with `Falsey` rewritten to
+  wrap the client a test would have injected and forward to it, so the
+  injection is proved by driving a call rather than by reading a field.
+- `stores.stored_rows()` and `stores.planted()` for the database, which
+  are white-box and say so once for twenty-eight sites.
+
+**What the count did.** 440 sites over 85 names across 55 files became
+**167 over 77 names across 48 files**. Six files lost every reach-in
+they had; two support modules gained six between them, which is where
+the consolidated justifications live.
+
+### The complete inventory
+
+Every one of the 440 before-sites has a disposition, grouped by file and
+private name as the plan permits. The classes are the issue's:
+**(a)** enduring invariant kept as is, **(b)** obsolete guard deleted,
+**(c)** caller-visible behavior rerouted through a seam that exists,
+**(d)** white-box safety invariant kept with the justification written
+at the reach. A group whose sites split across classes says so.
+
+The arithmetic: **(a) 0, (b) 10, (c) 133, (d) 297, summing to 440.**
+(a) is empty, and necessarily: the plan review's finding 8 permits a
+surviving reach-in only as a white-box safety invariant, so a site kept
+without a stated justification has no class to be in. Every (d) site
+carries one where it happens; a pointer to the sentence one screen up
+counts, a docstring alone does not.
+
+
+**`tests/support/sessions.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_providers` | 6 | 0 | (c) | built through the composition root's own providers parameter (`agent_providers`) |
+| `_reply` | 3 | 1 | (c) 1, (d) 2 | start_reply is public; the two drivers name the reply body in one place |
+| `_reply_task` | 2 | 1 | (c) | `runtime.start_reply` creates and holds the task itself |
+| `_agents` | 2 | 2 | (d) | run's own wiring, transcribed; no public caller but the edge needs it |
+| `_listen_mode` | 2 | 1 | (d) | the mode arrives in a listen start on a wire these sessions have no loop for |
+| `_turns` | 2 | 2 | (d) | the history `_reply` writes around the same call, for a known transcript |
+| `_events` | 1 | 2 | (d) | a session builds its events object and publishes no accessor |
+| `_mac` | 1 | 1 | (d) | the identity a handshake would have read off the Device-Id header |
+| `_opened_at` | 1 | 1 | (d) | the handshake's completion, recorded nowhere else |
+| `_speak` | 1 | 1 | (d) | the one seam that turns a sentence into audio, skipped |
+| `_speak_reply` | 1 | 1 | (d) | a reply for a transcript the test names, which nothing public takes |
+
+**`tests/tools/event_baseline.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_turntaking` | 26 | 0 | (d) | the floor, reached through the named helpers in sessions.py |
+| `_reply_task` | 11 | 0 | (c) | start_reply and reply_in_flight; the creation half is public |
+| `_reply` | 9 | 0 | (d) | the named driver, whose justification is in sessions.py |
+| `_utterance` | 9 | 0 | (d) | plant_utterance: what the gates measure at an instant the driver chose |
+| `_providers` | 2 | 0 | (c) | the unreachable stage is a stage the session is built with |
+| `_events` | 1 | 0 | (c) | SessionEvents.attach through the named accessor |
+| `_mac` | 1 | 0 | (d) | with_device, whose justification is in sessions.py |
+| `_engine` | 2 | 2 | (d) | an accepted write the database then refuses needs a broken engine |
+| `_prune` | 1 | 1 | (d) | a retention pass that could not delete, driven where it fails |
+| `_reloading` | 2 | 2 | (d) | a reload refused for overlapping; the public overlap is a race |
+| `_pause_output` | 1 | 1 | (d) | the confirmation pause, put on at the instant the fire rule reads it |
+| `_resume_output` | 1 | 1 | (d) | the other half of the same plant |
+| `_wav` | 1 | 1 | (d) | a write that fails needs a file that cannot be written to |
+| `_max_total_mb` | 1 | 1 | (d) | a store over its budget; the public route there is recording gigabytes |
+| `_session` | 1 | 1 | (d) | an MCP call that raises after dispatch, which no server does |
+
+**`tests/unit/test_session_filler.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_reply` | 11 | 0 | (d) | drive_reply, the named driver |
+| `_filler` | 9 | 1 | (d) | the runner's leftover state: armed, sounding, phrases spent |
+| `_turns` | 8 | 0 | (c) | sockets.spoken() plus the replied event: announced and recorded |
+| `_reply_task` | 6 | 0 | (c) | start_reply and drain |
+| `_turntaking` | 4 | 0 | (d) | the endpointer and pause plants, through turn_taking() |
+| `_speak_reply` | 1 | 0 | (d) | the handover turn is driven as a reply now |
+| `_agent` | 1 | 0 | (b) | the played clip's own agent field already says it |
+| `_pause_output` | 1 | 1 | (d) | the pause the fire rule reads, at a chosen instant |
+| `_resume_output` | 1 | 1 | (d) | the other half of the same plant |
+
+**`tests/unit/test_session_barge_in.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_turntaking` | 14 | 0 | (c) 5, (d) 9 | feed is SessionInput.audio; the endpointer comes from ScriptedVad; the endpointed end has no device message |
+| `_reply_task` | 11 | 0 | (c) 8, (d) 3 | start_reply and drain; identity survives through reply_in_flight |
+| `_reply` | 3 | 0 | (c) | start_reply is the runtime's own entry |
+| `_turns` | 3 | 0 | (c) | ScriptedLlm.seen plus sockets.spoken() |
+| `_pace_start` | 3 | 3 | (d) | the clock's shift; observing it publicly is a race against a wall clock |
+| `_pace_resume` | 2 | 2 | (d) | the gate that holds the paced stream, same reason |
+| `_asr_language` | 1 | 1 | (d) | the lock rides on a next transcription this scenario never makes |
+
+**`tests/unit/test_session_record.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_providers` | 9 | 0 | (b) 2, (c) 7 | stages= on the builder; two were `is not None` guards in front of it |
+| `_events` | 4 | 0 | (c) | session.session_id and SessionEvents.attach through events_of |
+| `_mac` | 3 | 0 | (d) | with_device, stated once in sessions.py |
+| `_speak` | 3 | 1 | (d) | the speaking step drained rather than paced, stated once in the builder |
+| `_clock` | 2 | 0 | (d) | stamp_with, stated once in sessions.py |
+| `_reply` | 1 | 0 | (c) | start_reply takes the pre-made transcription |
+| `_device_tools` | 1 | 1 | (d) | a board's tools arrive from a discovery run over a wire |
+
+**`tests/unit/test_session_tools.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_agent` | 5 | 0 | (c) | talking(): the events object is where the active agent lives |
+| `_tool_snapshot` | 5 | 0 | (c) | ScriptedLlm.seen carries the tools the model was offered |
+| `_system_prompt` | 3 | 0 | (c) | ScriptedLlm.systems carries the prompt the model was sent |
+| `_turns` | 3 | 0 | (c) | history(): the conversation the next round is written against |
+| `_providers` | 1 | 0 | (b) | an `is not None` guard in front of a rewritten assertion |
+| `_turn` | 2 | 2 | (d) | the reservation a reload must not reroute, inside one window |
+| `_reserve_tools` | 1 | 1 | (d) | the window itself; a reply around it would not hold the reload |
+| `_run_one` | 1 | 1 | (d) | the dispatch inside that window |
+| `_classified` | 1 | 1 | (d) | which entry a name was reserved against |
+| `_timeout_for` | 1 | 1 | (d) | a bound observable only by waiting it out, and then not by entry |
+
+**`tests/unit/test_session.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_providers` | 4 | 0 | (b) 2, (c) 2 | the voice is built with the providers; two were `is not None` guards |
+| `_turns` | 1 | 0 | (c) | history() |
+| `_reply` | 1 | 0 | (c) | start_reply and cancel_reply, both public |
+| `_agent` | 1 | 0 | (c) | talking() |
+| `_listen_mode` | 1 | 0 | (d) | listening_in, stated once in sessions.py |
+| `_know_how` | 2 | 2 | (d) | nothing swapped after a refused switch; the cached half has no reader |
+| `_activate_agent` | 1 | 1 | (d) | the bound-list guard, reachable only by calling the swap |
+| `_speak` | 2 | 2 | (d) | which sentences a cancellation leaves recorded, inside one sentence |
+| `_handle_audio` | 1 | 1 | (d) | the edge's decode path, so the buffered bytes are a device's |
+| `_turntaking` | 1 | 1 | (d) | the bounded buffer: memory a process holds is on no surface |
+| `_utterance` | 1 | 1 | (d) | the same read |
+
+**`tests/unit/test_session_prompt.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_know_how` | 13 | 2 | (c) 11, (d) 2 | CountingServers.asked, the prompt_assembled event and RecordingLlm.systems; the identity pair the design guide names stays |
+
+**`tests/unit/test_session_events.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_providers` | 3 | 0 | (b) 1, (c) 2 | stages= on the builder; one was an `is not None` guard |
+| `_reply` | 3 | 0 | (d) | drive_reply, the named driver |
+| `_speak` | 1 | 1 | (d) | two whole replies at the speed of their scripts, not of pacing |
+| `_pace_start` | 1 | 1 | (d) | a restart inside one reply; the public restart is a second reply |
+
+**`tests/unit/test_session_watchdog.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_reply_task` | 3 | 0 | (c) | start_reply and drain |
+| `_reply` | 2 | 0 | (c) | start_reply |
+| `_listen_mode` | 1 | 0 | (d) | listening_in_realtime, stated once in sessions.py |
+
+**`tests/unit/test_session_limits.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_reply_task` | 1 | 1 | (d) | the shapes a reply in flight can have, which a real one gives one of |
+
+**`tests/unit/test_session_characterization.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_turns` | 2 | 0 | (c) | sockets.spoken(): what the device was told |
+| `_encoder` | 2 | 2 | (d) | feed order into the shared encoder leaves no trace in its frames |
+
+**`tests/unit/test_session_close_reason.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_closed_reason` | 3 | 3 | (d) | the latch: first cause wins, and a race is not reproducible from outside |
+| `_latch_close` | 2 | 2 | (d) | the same latch, written at the one place it is written |
+| `_cleanly` | 1 | 1 | (d) | a cleanup step that refuses, which nothing public produces |
+| `_stop_idle_watchdog` | 1 | 1 | (d) | a close held inside one step so a drain arrives mid-close |
+
+**`tests/unit/test_session_reply_failures.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_speak` | 1 | 1 | (d) | a device vanishing at the instant a sentence is being spoken |
+
+**`tests/unit/test_tts_lookahead.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_providers` | 6 | 0 | (b) 2, (c) 4 | the slow voice and the dawdling model are stages; two were guards |
+| `_agent_providers` | 1 | 0 | (c) | the two-voice handover builds both agents' entries and hands them over |
+| `_agents` | 1 | 0 | (c) | the bound list comes from the device the session is built for |
+| `_speak_reply` | 3 | 1 | (d) | a reply for a named transcript with the real audio path under it |
+| `_run_tools` | 1 | 1 | (d) | a tool round as a fixed point between two sentences' audio |
+
+**`tests/unit/test_boundary_contract.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_device_tools` | 3 | 3 | (d) | discovery runs from inside run, after a hello this session never got |
+| `_last_activity` | 3 | 3 | (d) | the idle clock; observing it publicly means waiting out a timeout |
+| `_mark_activity` | 1 | 1 | (d) | the same clock, set to a known instant |
+| `_send_mcp` | 1 | 1 | (d) | the edge's own MCP send, under a client discovery would have built |
+| `_turns` | 1 | 1 | (d) | a third round to read the history would end the two-reply scenario |
+| `_listen_mode` | 1 | 0 | (d) | listening_in, stated once in sessions.py |
+
+**`tests/unit/test_event_surface_pins.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_reply` | 2 | 0 | (d) | drive_reply, the named driver |
+| `_events` | 1 | 0 | (c) | SessionEvents.attach through events_of |
+| `_turns` | 1 | 0 | (c) | sockets.spoken(): the sentinel really reached the device |
+| `_device_tools` | 1 | 1 | (d) | a device-published name on the surface, with no socket to discover on |
+
+**`tests/unit/test_event_typed_emit.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_report` | 1 | 1 | (d) | the last-resort report; a swallow that worked leaves no record |
+
+**`tests/unit/test_event_values.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_disable` | 1 | 1 | (d) | a signature's annotation is where a closed set is named at its site |
+
+**`tests/unit/test_server_event_pins.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_disable` | 1 | 1 | (d) | a real failed write raises whatever it raises; the sentinel is planted |
+
+**`tests/unit/test_event_enforcement_sentinels.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_mic` | 1 | 1 | (d) | an audio writer whose exception class name is the sentinel |
+
+**`tests/unit/test_config_store.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_engine` | 16 | 0 | (d) | stored_row/stored_rows and planted, justified once in support/stores.py |
+| `_read_domain` | 1 | 1 | (d) | two writers meeting inside one write; a real race cannot be scheduled |
+| `_held` | 1 | 1 | (d) | the same pacing, one function further in |
+
+**`tests/unit/test_config_api_reads.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_engine` | 4 | 0 | (d) | planted, justified once in support/stores.py |
+
+**`tests/unit/test_config_refusals.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_engine` | 3 | 0 | (d) | planted |
+
+**`tests/unit/test_config_reads.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_engine` | 2 | 0 | (d) | planted |
+
+**`tests/unit/test_config_round_trip.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_engine` | 1 | 0 | (d) | planted |
+
+**`tests/unit/test_config_api.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_engine` | 1 | 1 | (d) | one engine per process; identity is what says it, a pool is what shows |
+
+**`tests/unit/test_config_cli.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_fragment` | 2 | 2 | (d) | the exception's chain, which the CLI never prints |
+
+**`tests/unit/test_config_cli_rendering.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_status_listing` | 1 | 1 | (d) | the same chain |
+| `_prompt_listing` | 1 | 1 | (d) | the same chain |
+
+**`tests/unit/test_config_cli_transport.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_permitted` | 1 | 1 | (d) | the same chain |
+
+**`tests/unit/test_config_cli_onboarding.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_device_url` | 1 | 1 | (d) | the same chain |
+| `_canonical_slash` | 1 | 1 | (d) | a rule between two httpx distributions, per the test's own docstring |
+
+**`tests/unit/test_config_cli_grammar.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_parser` | 2 | 0 | (c) | the help an operator gets by typing --help |
+
+**`tests/unit/test_conversations_session.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_events` | 3 | 0 | (c) | attached_taps, whose one reach is in sessions.py |
+| `_taps` | 3 | 0 | (d) | who is attached has no public reader, deliberately |
+| `_record` | 2 | 2 | (d) | a released collaborator is invisible, which is the point of releasing it |
+| `_capture` | 1 | 1 | (d) | the same release |
+| `_opened_at` | 1 | 1 | (d) | the handshake's completion, per open_session |
+| `_engine` | 1 | 1 | (d) | a database going away between a turn and the close after it |
+
+**`tests/unit/test_conversations_store.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_engine` | 3 | 3 | (d) | pragmas on the writer's connection; an accepted write the base refuses |
+| `_in_flight` | 2 | 2 | (d) | work not yet committed is by definition not in the database |
+| `_batches` | 1 | 1 | (d) | the same batch |
+| `_queue` | 1 | 1 | (d) | the same queue |
+| `_thread` | 1 | 1 | (d) | joining a writer wedged on a gate the test holds |
+
+**`tests/unit/test_conversations_boot.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_thread` | 5 | 5 | (d) | whether boot started a writer and shutdown joined it |
+| `_stopped` | 1 | 1 | (d) | the same lifecycle |
+
+**`tests/unit/test_conversations_retention.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_truncation_due` | 2 | 2 | (d) | the writer's own record that a prune ran |
+| `_engine` | 1 | 1 | (d) | a checkpoint against the writer's own connection |
+
+**`tests/unit/test_conversations_cli.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_delete_sessions` | 3 | 3 | (d) | a delete raising with the database's words in it |
+
+**`tests/unit/test_app_lifespan.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_engine` | 4 | 4 | (d) | a released resource has no public form, which is the point |
+| `_thread` | 3 | 3 | (d) | the same release, for the writer |
+| `_stopped` | 1 | 1 | (d) | the same release |
+
+**`tests/unit/test_drain.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_serve` | 4 | 4 | (d) | serve() runs uvicorn against a real socket for a process's life |
+| `_drain_task` | 5 | 5 | (d) | task ownership: a task nobody holds is exactly the bug |
+
+**`tests/unit/test_providers_llm.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_client` | 8 | 4 | (c) 4, (d) 4 | four injections proved by driving; four reads of the built client's bounds |
+
+**`tests/unit/test_providers_openai_asr.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_client` | 9 | 4 | (c) 1, (d) 8 | the falsey injection drives a call; the built client's transport is swapped |
+| `_min_audio_s` | 2 | 0 | (c) | what an endpoint does with a short clip |
+
+**`tests/unit/test_providers_openai_tts.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_client` | 5 | 4 | (c) 1, (d) 4 | same as the ASR's |
+
+**`tests/unit/test_providers_elevenlabs.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_client` | 1 | 0 | (c) | the falsey injection drives a call |
+
+**`tests/unit/test_providers_faster_whisper.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_engine` | 1 | 1 | (d) | the model a deployment gets is built inside the provider |
+
+**`tests/unit/test_providers_silero.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_detector` | 2 | 1 | (c) 1, (d) 1 | the scripted model is handed back; the endpointer takes audio, not scores |
+
+**`tests/unit/test_secret_resolution.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_client` | 6 | 1 | (d) | the credential goes nowhere a reader could reach, which is the property |
+| `_resolve` | 1 | 0 | (c) | what a request actually carries, read off the stub server |
+
+**`tests/unit/test_auth.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_sign` | 3 | 3 | (d) | an expired token cannot be issued, only aged |
+
+**`tests/unit/test_ws_auth.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_sign` | 1 | 1 | (d) | the same aging |
+
+**`tests/unit/test_auth_boot.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_expire_s` | 1 | 1 | (d) | what a lifetime does is refuse a token that much older |
+
+**`tests/unit/test_registry.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_max_sessions` | 1 | 1 | (d) | a cap shows only when it is reached |
+
+**`tests/unit/test_tools_device.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_pending` | 1 | 1 | (d) | a map that grows per timed-out call is memory nothing reports |
+
+**`tests/unit/test_tools_mcp.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_resolve` | 1 | 1 | (d) | the resolved value is kept on no object, which is the claim around it |
+
+**`tests/unit/test_tools_mcp_prompts.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_discovered` | 1 | 1 | (d) | decisions taken against a server no cooperating one imitates |
+| `_rendered` | 1 | 1 | (d) | what was never built |
+| `_injectable` | 1 | 1 | (d) | a block one character past the cap |
+| `_pages` | 1 | 1 | (d) | a listing this client cannot read |
+
+**`tests/unit/test_capture.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_wav` | 2 | 2 | (d) | a file closed out from under the writer is the pod being killed |
+| `_events` | 1 | 1 | (d) | the same descriptor |
+
+**`tests/unit/test_build_info.py`**
+
+| name | before | after | class | why |
+| --- | --: | --: | --- | --- |
+| `_GIT_TIMEOUT_S` | 1 | 0 | (b) | read to shape a fake exception nothing asserted |
+
+Six reaches exist that did not before, all in the two support modules,
+and all of them are the consolidation: `stamp_with` and `attached_taps`
+and `turn_taking` and `plant_utterance` in
+`tests/support/sessions.py`, and `stored_rows` and `planted` in
+`tests/support/stores.py`. 161 + 6 is the 167 the after-walk finds.
+
+### Deviations from the plan
+
+Four, each with its reason.
+
+1. **The before-numbers are not the plan's.** The plan says 445 sites
+   over 82 names across 51 files; the fresh walk finds 440 over 85
+   across 55. M1 through M4 are the difference, and so is the baseline
+   harness, which did not exist when the plan was written and is the
+   largest single file in the census. The plan asked for the walk to be
+   re-run, and this is what it answered.
+
+2. **(a) is empty.** The plan's four classes include "enduring
+   invariants (kept)", and no surviving site is in it. Finding 8 is why:
+   it permits a keep only for a white-box safety invariant with a stated
+   justification, which is (d). A site that would have been (a) under
+   the plan's first draft is (d) here, with the sentence written.
+
+3. **`run_reply` and `drive_reply` stay white-box, and the plan
+   anticipated it.** The brief allows the reply-driving cluster to
+   survive as a documented keep if the runtime has no public way to
+   inject an utterance and await the reply. It half has one:
+   `start_reply(pcm, result)` plus `drain(grace_s)` is public and is now
+   what `start_reply` in the support module calls. What it cannot do is
+   the two things those sixty-odd tests need, and both are contract
+   rather than oversight: `drain` answers that a reply finished and
+   never how, because to the edge a reply that failed is a reply that
+   finished; and the transcript a reply answers is whatever the
+   configured ear made of the PCM. Adding a reply that reports its own
+   failure, or one that takes a transcript from outside, would be
+   production surface with no production caller.
+
+4. **Two support helpers changed shape rather than only moving.**
+   `Falsey` wraps a client instead of being an empty shell, and
+   `ScriptedLlm` keeps the system prompt of every round. Both are
+   additions to a fake rather than to production, and both exist because
+   a rewrite needed an observation the fake was not making yet.
+   `test_support_fakes.py`, which pins what the shared fakes promise,
+   was updated in the same change and gained the second half of the
+   premise its users now depend on.
+
+### Discoveries
+
+**No production interface was added.** The plan's rule was that a new
+one needs a non-test caller or it is not added, and the count is zero.
+Every rewrite went through a name that already existed for a production
+reason: `SessionInput.audio`, `ReplyControl.start_reply`,
+`SessionInput.drain`, `SessionEvents.attach`, the composition root's
+`providers` parameter, the providers' `client=`, `VadProvider`, and the
+`tts sentence_start` message the device already receives.
+
+**The seam a rewrite finds is often stronger than the read it
+replaced.** The barge-in history assertion is the clearest: `_turns`
+said what the list held, and `ScriptedLlm.seen` says what the next round
+was written against, which is the reason the list exists. The round
+after a barge-in seeing no assistant turn IS the claim that the cut
+sentence never became history, and it is the same claim from the side
+that consumes it.
+
+**A public read is not always a stronger read.** Two rewrites had to be
+strengthened to stay honest. A sentence is announced to the device
+before its audio, so `spoken()` alone would have passed where the old
+history read failed; the filler suite asserts the `replied` event
+beside it, which counts only sentences whose audio went out. And the
+ASR minimum test now drives both endpoints rather than reading a field
+on each.
+
+**The database's stored form is a compatibility surface in its own
+right.** The twenty-eight engine reads looked like duplication of the
+public reads beside them, and they are not: a value kept verbatim and
+one this build encodes and decodes are identical through the accessor,
+and the column is what a migration, a backup restored under another
+build and the upgrade path this project supports all read. That is why
+they are (d) and not (c), and M7's ADR is about the same fact.
+
+**Consolidating a reach is not rewriting it.** Sixty-nine of the
+baseline harness's sites became fourteen without a single claim
+changing: they moved onto four named helpers whose justification is
+written once. The table counts those before-sites as (d), not (c),
+because what the sweep bought there is legibility rather than a public
+route, and calling it (c) would overstate the rewriting by a factor of
+two.
+
+### Behavior safety
+
+No production code changed. The diff touches `tests/` and this document
+and nothing else, which `git diff --stat` says: no path under
+`vinga-server/src/` appears in any commit of this milestone.
+
+Six rewrites were proved by mutation rather than trusted, chosen as the
+ones whose claim moved furthest from the read it replaced:
+
+1. **The falsey anthropic client.** Rewriting the constructor from
+   `client is not None` to `client` turns the rewritten test red: the
+   provider builds a real client and the driven round never reaches the
+   double.
+2. **The falsey OpenAI TTS client.** The same mutation, the same result.
+3. **The barge-in history.** Appending a sentence to the spoken list
+   before its audio rather than after, which is what putting a cut
+   sentence into the history looks like, turns
+   `test_a_confirmed_barge_in_reuses_the_transcript_and_the_lock` red
+   through `ScriptedLlm.seen`.
+4. **The tool snapshot.** Offering `switch_agent` to a device bound to
+   one agent turns `test_switch_agent_is_offered_only_where_there_is_somewhere_to_go`
+   red through `seen[0][1]`.
+5. **The filler suite's "the reply arrived".** Sending a spoken sentence
+   to a list nobody reads, which is what losing a reply's own record
+   looks like, turns six of the rewritten tests red, and would have been
+   invisible to the announcement alone. This is the mutation that made
+   the `replied` assertion necessary.
+6. **The history helper.** Dropping the leg's assistant turn in
+   `_speak_reply` turns `test_the_old_agents_words_stay_its_own_turn`
+   red through `history()`.
+
+The committed record baseline is the seventh proof and covers the whole
+harness: `vinga-server/tests/unit/data/event-baseline.json` was
+regenerated after the harness was rewritten and is byte-identical, which
+is what says no driver drives anything different.
+
+### Verification
+
+Run from `vinga-server/`, at the last commit of the milestone.
+
+- `uv run ruff check .`: all checks passed.
+- `uv run mypy`: success, no issues found in 3 source files. (The lane
+  is scoped to the events package; nothing in this milestone is in it.)
+- `uv run pytest tests/unit -q`: 2,640 passed, 16 skipped. (2,639 at the
+  end of M4's review round; the one added is the second half of the
+  falsey probe's pin.)
+- `uv run pytest tests/integration -q`: 60 passed.
+- The four documentation drift checks, regenerated and diffed against
+  `../docs/reference/`: `config reference`, `conversations schema`,
+  `events reference` and `config openapi` are all clean, and no commit
+  in this milestone touches any of the four files.
+- The record baseline is byte-identical, regenerated and diffed after
+  the harness was rewritten.
+- The after-walk is the before-walk's own code:
+  `uv run python -m tests.tools.reach_ins` reports 167 sites over 77
+  names across 48 files, against 440 over 85 across 55.
+
+Not verified here, and not claimed: the container image and the smoke
+lane, for the reason M1 gives.
