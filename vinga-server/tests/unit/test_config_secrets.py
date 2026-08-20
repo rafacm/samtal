@@ -382,3 +382,105 @@ def test_the_fingerprint_carries_neither_the_plaintext_nor_the_envelope() -> Non
     # Taken without the keys at all, and the same either way: comparing
     # is not opening.
     assert SecretStore({WEATHER: envelope}).fingerprint("mcp_server", "weather") == mark
+
+
+# Composing two loads by regime
+#
+# A staged reload serves a world that is partly the store's and partly
+# the one it was already serving, and the credentials have to follow the
+# same line: an MCP server's are read as its connection is made, which a
+# reload makes again, and a provider's are read as the provider is
+# built, which is still the start. The composition is a method here
+# because everything it touches (envelopes, keys, the digest) is
+# deliberately private, and a caller doing it from outside would have to
+# be handed one of the three.
+
+PROVIDER = SecretLocation.provider("llm", "claude", "api_key")
+
+ROTATED = "sk-test-9c4e2f81-also-never-a-real-credential"
+
+
+def two_loads() -> tuple[SecretStore, SecretStore, MultiFernet]:
+    """One store as this server was built from it, and one as the
+    database holds it after both slots were rotated."""
+    keys = MultiFernet([Fernet(generate_key())])
+    running = SecretStore(
+        {WEATHER: encrypt(WEATHER, SECRET, keys), PROVIDER: encrypt(PROVIDER, SECRET, keys)},
+        keys,
+    )
+    stored = SecretStore(
+        {
+            WEATHER: encrypt(WEATHER, ROTATED, keys),
+            PROVIDER: encrypt(PROVIDER, ROTATED, keys),
+        },
+        keys,
+    )
+    return running, stored, keys
+
+
+def test_the_live_kinds_are_taken_from_the_candidate() -> None:
+    """An MCP rotation is applied, because a reload connects again with
+    what the store holds now."""
+    running, stored, _ = two_loads()
+
+    composed = stored.composed(running, {"mcp_server"})
+
+    assert composed.secret(WEATHER) == ROTATED
+    assert composed.fingerprint("mcp_server", "weather") == stored.fingerprint(
+        "mcp_server", "weather"
+    )
+
+
+def test_the_rest_is_carried_over_from_the_previous_world() -> None:
+    """A provider rotation stays pending: the provider holding the
+    credential was built at start and is still the one running, so a
+    composed world that carried the new mark would report an applied
+    change nothing had used."""
+    running, stored, _ = two_loads()
+
+    composed = stored.composed(running, {"mcp_server"})
+
+    assert composed.secret(PROVIDER) == SECRET
+    assert composed.fingerprint("provider", "llm.claude") == running.fingerprint(
+        "provider", "llm.claude"
+    )
+    assert composed.fingerprint("provider", "llm.claude") != stored.fingerprint(
+        "provider", "llm.claude"
+    )
+
+
+def test_a_slot_the_store_no_longer_holds_goes_with_its_kind() -> None:
+    """The live half is replaced rather than merged, which is what makes
+    clearing an MCP secret something a reload applies."""
+    running, stored, keys = two_loads()
+    cleared = SecretStore({PROVIDER: encrypt(PROVIDER, ROTATED, keys)}, keys)
+
+    composed = cleared.composed(running, {"mcp_server"})
+
+    assert WEATHER not in composed
+    assert PROVIDER in composed
+
+
+def test_every_kind_live_is_the_candidate_store() -> None:
+    """What the composition retires into once nothing is start-bound:
+    naming both kinds answers exactly the candidate."""
+    running, stored, _ = two_loads()
+
+    composed = stored.composed(running, {"mcp_server", "provider"})
+
+    assert composed.locations() == stored.locations()
+    for where in stored.locations():
+        assert composed.secret(where) == stored.secret(where)
+
+
+def test_the_composition_carries_no_envelope_out_of_the_class() -> None:
+    """The property the operation exists for: a store in and a store
+    out, with nothing an answer or a log could pick up in between."""
+    running, stored, _ = two_loads()
+
+    composed = stored.composed(running, {"mcp_server"})
+
+    written = repr(composed) + str(composed.locations()) + str(len(composed))
+    for value in (SECRET, ROTATED):
+        assert value not in written
+    assert composed.fingerprint("mcp_server", "weather") not in written

@@ -37,7 +37,7 @@ import hashlib
 import json
 import os
 import re
-from collections.abc import Iterator, Mapping
+from collections.abc import Collection, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -318,6 +318,46 @@ class SecretStore:
     ) -> None:
         self._envelopes: dict[SecretLocation, object] = dict(envelopes or {})
         self._keys = keys
+
+    def composed(
+        self, previous: "SecretStore", live: Collection[EntityKind]
+    ) -> "SecretStore":
+        """This store's entries for the kinds a running server can apply
+        now, and `previous`'s for the kinds that still wait for a
+        restart.
+
+        The operation a staged reload needs, and it is here rather than
+        at the caller because everything it has to touch is deliberately
+        private (#191). Envelopes, keys and fingerprints never leave this
+        class, so a composition written outside it would have to be
+        given one of the three; written inside, it is a store in and a
+        store out, and a caller learns nothing it could not learn from
+        either side on its own.
+
+        `live` is the entity kinds whose stored credentials the apply
+        actually uses. An MCP server's are read as its connection is
+        made, which a reload makes again, so a rotation there is applied
+        and must be carried; a provider's are read as the provider is
+        built, which is still the boot, so carrying a rotation there
+        would report an applied change that nothing has used. The half
+        that stays behind is the half the running world was built from,
+        which is exactly what the previous generation holds.
+
+        The keys are this store's. Both loads read `VINGA_MASTER_KEY`
+        out of one process's environment, so the two key sets are the
+        same set read twice; taking the newer one keeps the composed
+        store's keys the ones its own load verified against, and a key
+        set that could really change under a running process is a
+        restart rather than a reload.
+        """
+        kinds = frozenset(live)
+        envelopes = {
+            where: envelope
+            for source in (previous, self)
+            for where, envelope in source._envelopes.items()
+            if (where.kind in kinds) is (source is self)
+        }
+        return SecretStore(envelopes, self._keys)
 
     def __len__(self) -> int:
         return len(self._envelopes)
