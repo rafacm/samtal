@@ -522,8 +522,19 @@ def config_diff_reader(
     settled decision that the diff's stored side is the reload's own
     re-read: the same migration, the same verification that every stored
     credential opens, and the same whole-snapshot validation, so a
-    stored half the reload would refuse is refused here in the same
-    words and with the same type.
+    stored half that fails that read is refused here under the status it
+    would be refused under there.
+
+    That is the whole of the equivalence, and it is worth being exact
+    about which direction it runs in, since the other one is tempting
+    and false. A stored half this refuses is a stored half a reload
+    refuses, because they fail in the same function. A stored half this
+    answers is not a reload that would apply: the reload has a second
+    phase this has no part of, which builds a manager per referenced
+    entry and refuses on an environment reference nothing sets, a
+    credential a transport cannot use, or an entry `server.local_only`
+    forbids. None of those is a comparison question, and none of them is
+    answered here.
 
     One world, and this is the whole of how. The read is blocking (it
     takes the database's write lock and waits out its busy timeout), so

@@ -27,10 +27,15 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   entries running right now rather than the ones the process booted
   with, so a change a reload has already applied is not reported as
   pending. Entity names and those labels are the whole of the answer:
-  no bodies, no values and no marks cross the surface. The stored half
-  is the same re-read the MCP reload makes, so a stored configuration
-  that will not compose, or a credential that will not decrypt, is
-  refused here in the same words it would be refused there.
+  no bodies, no values and no marks cross the surface, and the refusal
+  for a stored half that cannot be read carries a fixed sentence rather
+  than the store's own, since the store's names the stored value it
+  refused on. The stored half is the re-read the MCP reload begins
+  with, so a stored configuration that will not compose, or a
+  credential that will not decrypt, is refused here under the status it
+  would be refused under there; the equivalence runs that way only,
+  because a reload goes on to build a server per referenced entry and
+  can still refuse on one of those.
 
 - **Database upgrades have a written compatibility floor.** The
   2026-08-20 ADR records what was previously implicit: upgrades are

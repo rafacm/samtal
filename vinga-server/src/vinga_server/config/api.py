@@ -247,7 +247,11 @@ API_DESCRIPTION = (
     "moves even when the plaintext may not have. Entity names and those labels are the "
     "whole of the answer: no bodies, no values and no marks cross it. The MCP half is "
     "compared against the entries running now rather than the ones this process booted "
-    "with, so a change a reload has already applied is not reported as pending.\n\n"
+    "with, so a change a reload has already applied is not reported as pending. What "
+    "an answer does not say is that applying what it lists would succeed: it compares "
+    "configuration and connects nothing, while the reload below goes on to build a "
+    "server for every entry an agent references and can still refuse on one of "
+    "those.\n\n"
     "`POST /runtime/mcp-servers/reload` is the second exception to the boot-time "
     "snapshot, and unlike device bindings it is asked for rather than noticed. It "
     "re-reads the `mcp_servers` entries, the secrets stored on them and the agents' "
@@ -1511,10 +1515,14 @@ def _runtime(api: FastAPI) -> None:
         credential change looks like here is the entity holding it
         listed as changed.
 
-        The stored half is the same re-read the reload makes, so a
+        The stored half is the re-read the reload begins with, so a
         stored configuration that will not compose, or a credential in
-        it that will not decrypt, refuses here exactly as it would
-        there, and a diff that answers is a diff a reload could act on.
+        it that will not decrypt, is refused here under the status it
+        would be refused under there. That equivalence runs one way
+        only: this compares configuration and connects nothing, while a
+        reload goes on to build a server per referenced entry and can
+        still refuse on one of those, so an answer here says what has
+        not been applied and never that applying it would succeed.
         The running half is read on the loop that owns it, either side
         of that database read: a reload landing in between would leave
         the two halves describing states that never existed together, so
