@@ -1412,9 +1412,20 @@ beside the declared keys, which is what makes a provider form writable
 at all. Three further things the probe checked and both got right: a
 declared key keeps its declared type through the passthrough
 (`egress: "false"` is refused in both), an extension property reads
-back as `unknown` so the consumer has to narrow it, and the entities
-that declare `additionalProperties: false` do refuse invented keys, so
-the passthrough is a provider fact rather than a hole in every model.
+back as exactly `unknown` so the consumer has to narrow it, and the
+entities that declare `additionalProperties: false` do refuse invented
+keys, so the passthrough is a provider fact rather than a hole in every
+model.
+
+The word "exactly" is load-bearing and is asserted as a type equality
+rather than as an annotation. `any` is assignable to `unknown`, so a
+generator that had emitted `[key: string]: any` would have satisfied an
+annotated read while switching type checking off for every option a
+provider carries, which is the opposite of what this probe exists to
+establish. Both fixtures pin `ProviderConfig["base_url"]` and the type
+of the read expression itself as `unknown` under the invariant
+equality, and inverting either to `any` reddens the run. That
+correction is review finding 4.
 
 **6. Pinned generator versions.** Both. `@hey-api/openapi-ts` 0.99.0,
 `openapi-typescript` 7.13.0, `openapi-fetch` 0.17.0, `typescript`
