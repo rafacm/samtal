@@ -11,14 +11,22 @@ one place and a descriptor fact in another.
 The fifth is the module's own claim, and since #210 it is a claim
 rather than an aspiration: a descriptor is whole the moment this module
 is imported, with nothing installed onto it afterwards by a consumer.
+Two tests hold it, because there are two ways to break it. A consumer
+can reach past the frozen dataclass with `object.__setattr__`, which is
+what `fill` did, and that is caught by comparing every fact of every
+entry against a child interpreter that imported the registry alone. Or
+the dataclass can stop being frozen, at which point ordinary assignment
+does it, and that is caught by assigning.
 """
 
 import dataclasses
+import inspect
 import json
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import get_args
+from typing import Any, get_args
 
 import pytest
 
@@ -122,27 +130,76 @@ ALLOWED_IMPORTS = frozenset(
     }
 )
 
+
+def _facts(entries: Sequence[Any]) -> dict[str, dict[str, object]]:
+    """Every declared fact of every entry in one registry tuple, as
+    something JSON can carry and two interpreters can compare.
+
+    Every field, not the ones that happen to be None: a fact installed
+    over a declared value is as much a fact arriving after declaration
+    as one installed over a default, and a comparison of unset names
+    would see neither the second nor a changed sentence.
+
+    A model and a predicate are compared as their qualified names. Both
+    are identities rather than values here: which model owns the shape
+    and which rule decides that a key carries a credential, and a name
+    that moved module is a change worth failing on.
+    """
+
+    def readable(value: object) -> object:
+        if isinstance(value, type):
+            return f"{value.__module__}.{value.__qualname__}"
+        if callable(value):
+            return f"{value.__module__}.{value.__qualname__}"
+        if isinstance(value, tuple):
+            return [readable(item) for item in value]
+        return value
+
+    return {
+        entry.name: {  # type: ignore[attr-defined]
+            field.name: readable(getattr(entry, field.name))
+            for field in dataclasses.fields(entry)
+        }
+        for entry in entries
+    }
+
+
+def _registry_facts() -> dict[str, dict[str, dict[str, object]]]:
+    """All three tiers, so that a fact arriving after declaration is
+    caught wherever it lands."""
+    return {
+        "entities": _facts(entities.ENTITIES),
+        "nested": _facts(entities.NESTED),
+        "settings": _facts(entities.SETTINGS),
+    }
+
+
 # Run in a child interpreter that has imported the registry and nothing
-# else. `-B` for the reason `test_onboarding_import_weight.py` gives: a
-# child that writes bytecode back hands the next command the stale cache
-# `conftest.py` just cleared.
-_ALONE = """
-import json
-import sys
-from dataclasses import fields
-
-import vinga_server.config.entities as entities
-
-print(json.dumps({
-    "loaded": sorted(name for name in sys.modules if name.startswith("vinga_server")),
-    "unset": {
-        entry.name: sorted(
-            field.name for field in fields(entry) if getattr(entry, field.name) is None
-        )
-        for entry in entities.ENTITIES
-    },
-}))
-"""
+# else. The two functions above travel into it as their own source, so
+# there is one definition of what a fact serializes to rather than one
+# per side of the comparison. `-B` for the reason
+# `test_onboarding_import_weight.py` gives: a child that writes bytecode
+# back hands the next command the stale cache `conftest.py` just
+# cleared.
+_ALONE = "\n".join(
+    (
+        "import dataclasses",
+        "import json",
+        "import sys",
+        "from collections.abc import Sequence",
+        "from typing import Any",
+        "",
+        "import vinga_server.config.entities as entities",
+        "",
+        inspect.getsource(_facts),
+        inspect.getsource(_registry_facts),
+        "",
+        "print(json.dumps({",
+        '    "loaded": sorted(n for n in sys.modules if n.startswith("vinga_server")),',
+        '    "facts": _registry_facts(),',
+        "}))",
+    )
+)
 
 
 def _registry_imported_alone() -> dict[str, object]:
@@ -153,8 +210,8 @@ def _registry_imported_alone() -> dict[str, object]:
 
 
 def test_the_registry_is_whole_on_its_own() -> None:
-    """Importing the registry loads none of its consumers, and a
-    descriptor holds the same facts there as it does here, where the
+    """Importing the registry loads none of its consumers, and every
+    entry holds exactly the facts there that it holds here, where the
     whole package is loaded.
 
     The second half is the one that was false until #210: `store.py`,
@@ -164,12 +221,11 @@ def test_the_registry_is_whole_on_its_own() -> None:
     `object.__setattr__`. A reader could not tell what a descriptor held
     without knowing what had been imported, and `docgen` rendered the
     committed reference from a registry four other modules were still
-    allowed to write to. Compared as which facts are unset, because that
-    is what filling one changed and it survives a trip through JSON.
+    allowed to write to.
 
-    The four are imported here by name rather than relied on to be
-    loaded by whatever else the run collected, since which of them a
-    single-file run has imported is exactly the thing that used to
+    The five consumers are imported here by name rather than relied on
+    to be loaded by whatever else the run collected, since which of them
+    a single-file run has imported is exactly the thing that used to
     decide what a descriptor held.
     """
     import vinga_server.config.api  # noqa: F401
@@ -181,9 +237,19 @@ def test_the_registry_is_whole_on_its_own() -> None:
     alone = _registry_imported_alone()
 
     assert frozenset(alone["loaded"]) == ALLOWED_IMPORTS
-    assert alone["unset"] == {
-        entry.name: sorted(
-            field.name for field in dataclasses.fields(entry) if getattr(entry, field.name) is None
-        )
-        for entry in entities.ENTITIES
-    }
+    assert alone["facts"] == json.loads(json.dumps(_registry_facts()))
+
+
+def test_a_declared_fact_cannot_be_written_over() -> None:
+    """The other way the claim breaks, and the one the comparison above
+    cannot see: a dataclass that stopped being frozen needs no
+    `object.__setattr__` to be written to, and a consumer that filled it
+    by ordinary assignment would leave both processes agreeing on the
+    same wrong value.
+
+    Every tier, because `frozen=True` is per class and a tier that lost
+    it would be a tier a consumer could write to.
+    """
+    for entry in (*entities.ENTITIES, *entities.NESTED, *entities.SETTINGS):
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            entry.name = "written-over"  # type: ignore[misc]
