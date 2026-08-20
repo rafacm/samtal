@@ -30,11 +30,17 @@ from the support factories and nothing here opens a database. The MCP
 half arrives composed too, as `McpPending`: the world a reload swaps is
 the registry's to know, and its honest baseline is the generation that
 is installed rather than the one this process booted on.
+
+The answer is the shape the API sends, taken from `responses.py`, which
+is where `McpReloadResult` lives for the same reason: what the answer
+is made of is knowledge this module has, and a handler that had to
+assemble it would be a second place that knew it. The tokens come from
+there too, so the closed set a client reads out of the committed
+document and the one this map is written in are one declaration.
 """
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import NamedTuple, Protocol
 
 from vinga_server.config.models import (
@@ -43,25 +49,16 @@ from vinga_server.config.models import (
     Config,
     ProviderConfig,
 )
+from vinga_server.config.responses import (
+    AgentsDiff,
+    Applies,
+    ConfigDiff,
+    EntityDiff,
+    GrantsDiff,
+    LiveKind,
+    SingletonDiff,
+)
 from vinga_server.config.secrets import SecretStore, provider_identity
-
-
-class Applies(StrEnum):
-    """When a written change reaches a conversation.
-
-    Three boundaries and no fourth, because the server has three. Most
-    of the configuration is a boot-time snapshot, so it waits for a
-    restart. The MCP half is applied by
-    `POST /runtime/mcp-servers/reload`, which swaps the registry's world
-    while the process runs. Device bindings and the default agent are
-    read per check-in, so a write of one is in effect within seconds
-    and is never pending at all.
-    """
-
-    RESTART = "restart"
-    RELOAD = "reload"
-    CHECK_IN = "check-in"
-
 
 # Which kind converges where: the one decision site, as data.
 #
@@ -128,77 +125,6 @@ class McpPending:
     grants: tuple[str, ...] = ()
 
 
-@dataclass(frozen=True)
-class EntityDiff:
-    """One kind of named entity, as the difference between two worlds:
-    what the stored side has and the running one does not, what it no
-    longer has, and what both have under one name and disagree about."""
-
-    applies: Applies
-    added: tuple[str, ...]
-    removed: tuple[str, ...]
-    changed: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class GrantsDiff:
-    """The agents whose effective MCP grants the stored side would move.
-
-    Beside the agents rather than under `mcp_servers` because it is a
-    fact about agents, and separate from the agents' own lists because
-    it converges at a different boundary.
-    """
-
-    applies: Applies
-    changed: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class AgentsDiff(EntityDiff):
-    """The agents, whose entries span two regimes: everything but the
-    grants waits for a restart, and the grants ride the reload."""
-
-    grants: GrantsDiff
-
-
-@dataclass(frozen=True)
-class SingletonDiff:
-    """A kind there is exactly one of, which therefore has nothing to
-    name: it moved or it did not."""
-
-    applies: Applies
-    changed: bool
-
-
-@dataclass(frozen=True)
-class LiveKind:
-    """A kind the running server reads per check-in, answered with its
-    label and no comparison.
-
-    Deliberately no lists. What is stored for a device binding or for
-    the default agent is already served by the entity reads and is in
-    effect by that device's next check-in, so a `changed` here would
-    dress a fact that is not pending as a diff. The label is what keeps
-    the knowledge of why in this server rather than in every consumer.
-    """
-
-    applies: Applies
-
-
-@dataclass(frozen=True)
-class ConfigDiff:
-    """What the database holds that the running server is not serving,
-    kind by kind, in the order the domain declares them."""
-
-    providers: EntityDiff
-    mcp_servers: EntityDiff
-    prompt_fragments: EntityDiff
-    agent_defaults: SingletonDiff
-    agents: AgentsDiff
-    devices: LiveKind
-    default_agent: LiveKind
-
-
 def config_diff(running: Loaded, stored: Loaded, mcp: McpPending) -> ConfigDiff:
     """The whole answer: what each kind differs by, and when each
     difference would take effect.
@@ -234,29 +160,35 @@ def config_diff(running: Loaded, stored: Loaded, mcp: McpPending) -> ConfigDiff:
 
     return ConfigDiff(
         providers=EntityDiff(
-            APPLIES["providers"], *_names(running_providers, stored_providers, same_provider)
+            applies=APPLIES["providers"],
+            **_names(running_providers, stored_providers, same_provider)._asdict(),
         ),
-        mcp_servers=EntityDiff(APPLIES["mcp_servers"], mcp.added, mcp.removed, mcp.changed),
+        mcp_servers=EntityDiff(
+            applies=APPLIES["mcp_servers"],
+            added=mcp.added,
+            removed=mcp.removed,
+            changed=mcp.changed,
+        ),
         prompt_fragments=EntityDiff(
-            APPLIES["prompt_fragments"],
-            *_names(
+            applies=APPLIES["prompt_fragments"],
+            **_names(
                 running.config.prompt_fragments,
                 stored.config.prompt_fragments,
                 same_fragment,
-            ),
+            )._asdict(),
         ),
         agent_defaults=SingletonDiff(
-            APPLIES["agent_defaults"],
-            _without_grants(running.config.agent_defaults)
+            applies=APPLIES["agent_defaults"],
+            changed=_without_grants(running.config.agent_defaults)
             != _without_grants(stored.config.agent_defaults),
         ),
         agents=AgentsDiff(
-            APPLIES["agents"],
-            *_names(running.config.agents, stored.config.agents, same_agent),
-            grants=GrantsDiff(GRANTS_APPLY, mcp.grants),
+            applies=APPLIES["agents"],
+            **_names(running.config.agents, stored.config.agents, same_agent)._asdict(),
+            grants=GrantsDiff(applies=GRANTS_APPLY, changed=mcp.grants),
         ),
-        devices=LiveKind(APPLIES["devices"]),
-        default_agent=LiveKind(APPLIES["default_agent"]),
+        devices=LiveKind(applies=APPLIES["devices"]),
+        default_agent=LiveKind(applies=APPLIES["default_agent"]),
     )
 
 

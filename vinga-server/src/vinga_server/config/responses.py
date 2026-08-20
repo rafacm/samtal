@@ -17,12 +17,12 @@ from the outside instead, by the pin in `test_api_openapi.py` that looks
 for the constant in the rendered document, which is the byte a client
 reads and the one that must not drift.
 
-Beside the models, and for the same reason, the two runtime surfaces
-the API is handed: the protocol a status read is taken through and the
-shape of the callable a reload is applied by. Both are stated in
-typing and these models, which is what lets a route say what it was
-handed without the module that renders the document loading the MCP
-SDK to find out.
+Beside the models, and for the same reason, the three runtime surfaces
+the API is handed: the protocol a status read is taken through, and the
+shapes of the callables a reload is applied by and the stored-versus-
+running comparison is read through. All three are stated in typing and
+these models, which is what lets a route say what it was handed without
+the module that renders the document loading the MCP SDK to find out.
 
 Every model forbids extra keys, so a field that is answered is a field
 that was declared. The descriptions are the document's prose, written
@@ -32,6 +32,7 @@ the drift check compares them.
 """
 
 from collections.abc import Awaitable, Callable
+from enum import StrEnum
 from typing import Any, Literal, Protocol, get_args, get_origin
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -419,6 +420,191 @@ class AssembledPrompt(BaseModel):
             "model receives."
         )
     )
+
+
+# What the database holds that the running server is not serving
+#
+# Declared here rather than in `config/diff.py`, which computes them, for
+# the reason `McpReloadResult` is declared here rather than in the
+# reload that composes one: two surfaces know these shapes and only one
+# of them may pay for FastAPI. The comparison imports them and answers
+# in them, so the route sends what the comparison built and adds
+# nothing, and a field this server starts answering with is a field the
+# committed document declares.
+#
+# Names and closed tokens, by construction: no entity bodies, no values,
+# no masks and no secret marks. There is nothing here to filter, which
+# is what makes the no-leak claim structural rather than careful.
+#
+# A field whose type is one of these models or the token enum carries no
+# description of its own, and that is deliberate: a description written
+# beside a `$ref` is a sibling of it, which some readers drop and the
+# rest find confusing, and this document has none anywhere else. What
+# would have been said per field is said in the docstring of the model
+# it points at, which is the component description a reader lands on.
+
+
+class Applies(StrEnum):
+    """When a change of this kind reaches a conversation.
+
+    Three boundaries and no fourth, because the server has three.
+    `restart` is the boot-time snapshot, which is most of the
+    configuration. `reload` is what `POST /runtime/mcp-servers/reload`
+    applies while the process runs, which is the MCP entries and the
+    agents' grants. `check-in` is what a device is answered as it asks,
+    the bindings and the default agent, which are therefore in effect
+    within seconds of a write and never pending at all.
+    """
+
+    RESTART = "restart"
+    RELOAD = "reload"
+    CHECK_IN = "check-in"
+
+
+ADDED_DESCRIPTION = (
+    "The names the database holds that this server is not serving, sorted."
+)
+
+REMOVED_DESCRIPTION = (
+    "The names this server is serving that the database no longer holds, sorted."
+)
+
+CHANGED_DESCRIPTION = (
+    "The names both sides have and disagree about, sorted. Changed means the stored "
+    "state differs from what this server is serving, never that something was "
+    "written: an edit changed back before anyone looked is not here, and an entity "
+    "whose stored credential was set again is, because what is compared is an opaque "
+    "mark over the ciphertext and that moves even when the plaintext may not have."
+)
+
+
+class EntityDiff(BaseModel):
+    """One kind of named entity, as the difference between two worlds:
+    what the database holds that the running server does not, what it no
+    longer holds, and what both have under one name and disagree about.
+
+    `applies` is where this kind's changes converge, so a consumer
+    rendering a pending indicator reads what to say from the answer
+    rather than knowing it.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    applies: Applies
+    added: tuple[str, ...] = Field(description=ADDED_DESCRIPTION)
+    removed: tuple[str, ...] = Field(description=REMOVED_DESCRIPTION)
+    changed: tuple[str, ...] = Field(description=CHANGED_DESCRIPTION)
+
+
+class GrantsDiff(BaseModel):
+    """The agents whose effective MCP grants the stored configuration
+    would move, which is the half of an agent entry that converges at
+    the reload rather than at a restart."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    applies: Applies
+    changed: tuple[str, ...] = Field(
+        description=(
+            "The agents that would reach a different set of MCP tools once the stored "
+            "configuration is applied, sorted. Compared through the same "
+            "defaults-then-own rule the server derives an agent's grants by, so moving "
+            "a grant between `agent_defaults` and an agent without changing what that "
+            "agent reaches is not a change. An agent this server loaded and the "
+            "database no longer holds is here while its grants are still live, since a "
+            "reload would revoke them and a restart is what removes the agent itself."
+        )
+    )
+
+
+class AgentsDiff(EntityDiff):
+    """The agents, whose entries span two regimes: an agent's `mcp` list
+    is what a reload derives its tools from, and everything else about
+    the entry waits for a restart.
+
+    So a grants-only edit is deliberately absent from `changed` above
+    and reported under `grants` instead, and an answer that named it in
+    both would be claiming a restart that nothing is waiting for.
+    """
+
+    grants: GrantsDiff
+
+
+class SingletonDiff(BaseModel):
+    """A kind there is exactly one of, which therefore has nothing to
+    name: it moved or it did not.
+
+    The `mcp` grants are left out of the comparison for the reason they
+    are left out of an agent's, since this is the layer under every
+    agent: they are what a reload applies, and what they moved is
+    reported under `agents.grants`.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    applies: Applies
+    changed: bool = Field(
+        description=(
+            "Whether the stored entry differs from the one this server is serving. A "
+            "boolean rather than name lists, because there is one of these for the "
+            "whole deployment and nothing to name."
+        )
+    )
+
+
+class LiveKind(BaseModel):
+    """A kind the running server reads as a device asks for it,
+    answered with its label and no comparison.
+
+    Deliberately no lists. What is stored for a device binding or for
+    the default agent is served by the entity reads and is in effect by
+    that device's next check-in, so a `changed` here would dress a fact
+    that is not pending as a diff. The label is what keeps the knowledge
+    of why in this server rather than in every consumer.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    applies: Applies
+
+
+class ConfigDiff(BaseModel):
+    """What the database holds that the running server is not serving,
+    kind by kind, in the order the domain declares them.
+
+    Two of the kinds are worth a word beyond their shapes. A provider is
+    addressed as `<stage>.<name>`, the identity the store keeps its
+    credentials under and the one every refusal prints, and one whose
+    stored credential was rotated is changed, since what it talks to
+    moved as surely as if a field of it had. The MCP entries are
+    compared against the entries running now rather than the ones this
+    process booted with, because the reload swaps that world while the
+    process runs: an entry no agent references is compared like any
+    other, so is one whose only edit is to the prompt fields a
+    connection never sees, and a change a reload has already applied is
+    not reported as pending.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    providers: EntityDiff
+    mcp_servers: EntityDiff
+    prompt_fragments: EntityDiff
+    agent_defaults: SingletonDiff
+    agents: AgentsDiff
+    devices: LiveKind
+    default_agent: LiveKind
+
+
+# And what answers it: a callable, because what it closes over (the
+# configuration this process booted on, the credentials loaded with it,
+# and the registry whose world a reload replaces) is the composition
+# root's business and not this API's. It answers the whole comparison,
+# composed where the two worlds are, so the handler awaits it and adds
+# nothing. None is the honest answer for an application without a
+# server, and the route refuses rather than reporting an empty diff,
+# which would say that nothing is pending.
+type ConfigDiffReader = Callable[[], Awaitable[ConfigDiff]]
 
 
 class DefaultAgent(BaseModel):

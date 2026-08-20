@@ -14,24 +14,15 @@ credential, the ciphertext holding it and the mark taken over it are
 each asserted absent from the whole answer.
 """
 
-import dataclasses
-
 from cryptography.fernet import Fernet, MultiFernet
 
 from tests.support.configs import config_with
 from tests.support.tools_mcp import entry_data
 from vinga_server.config import Config
 from vinga_server.config.boot import BootConfig
-from vinga_server.config.diff import (
-    APPLIES,
-    GRANTS_APPLY,
-    Applies,
-    ConfigDiff,
-    LiveKind,
-    McpPending,
-    config_diff,
-)
+from vinga_server.config.diff import APPLIES, GRANTS_APPLY, McpPending, config_diff
 from vinga_server.config.models import DOMAIN_KEYS
+from vinga_server.config.responses import Applies, ConfigDiff, LiveKind
 from vinga_server.config.secrets import SecretLocation, SecretStore, encrypt, generate_key
 
 # Not a real credential, and shaped so a substring check for it cannot
@@ -278,8 +269,8 @@ def test_the_live_kinds_answer_with_their_label_and_no_comparison() -> None:
 
     answer = diff_of(running, stored)
 
-    assert answer.devices == LiveKind(Applies.CHECK_IN)
-    assert answer.default_agent == LiveKind(Applies.CHECK_IN)
+    assert answer.devices == LiveKind(applies=Applies.CHECK_IN)
+    assert answer.default_agent == LiveKind(applies=Applies.CHECK_IN)
 
 
 # The map, held to the domain
@@ -292,4 +283,7 @@ def test_every_domain_kind_carries_a_regime_and_a_row() -> None:
     place it.
     """
     assert tuple(APPLIES) == DOMAIN_KEYS
-    assert tuple(field.name for field in dataclasses.fields(ConfigDiff)) == DOMAIN_KEYS
+    # And the published shape with it, since the answer is the model the
+    # route sends: a kind the map placed and the response left out would
+    # be a kind no client can read.
+    assert tuple(ConfigDiff.model_fields) == DOMAIN_KEYS
