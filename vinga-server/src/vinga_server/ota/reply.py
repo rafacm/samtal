@@ -298,10 +298,16 @@ async def _activation(
     about a device that is being answered by this handler.
 
     The match names all four outcomes, including the two with nothing to
-    say, so a fifth added upstream is visible as an outcome nothing here
-    handles. What actually fails on a drift is the conformance suite:
-    `activation_not_offered.reason` is a closed set asserted both ways
-    against what this function writes into it.
+    say, and names them as literals rather than falling back on a
+    wildcard: a fifth added upstream has to be visible here as an
+    outcome nothing handles, and `case _` would handle it by definition.
+
+    What fails on a drift is
+    `test_unbound.py::test_the_reply_narrates_every_outcome_the_decision_can_answer`,
+    which reads this `match` and holds its arms equal to the outcome
+    literal's members, both ways. `match` falls through a subject no
+    case names, so without that a fifth outcome would answer the device
+    correctly and simply not warn.
     """
     unbound = await activation_for(
         comp.pending, config.server, resolution, mac, client_id, board, firmware

@@ -20,6 +20,10 @@ that needs no code, or that this server could not find out about, must
 not cost a mint or leave an entry behind.
 """
 
+import ast
+from pathlib import Path
+from typing import get_args, get_type_hints
+
 import pytest
 
 from tests.support.checkin import Clock
@@ -36,6 +40,7 @@ from vinga_server.onboarding import (
     Unbound,
 )
 from vinga_server.onboarding.unbound import activation_for
+from vinga_server.ota import reply
 
 MAC = "aa:bb:cc:dd:ee:ff"
 UUID = "6f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
@@ -193,3 +198,62 @@ async def test_with_the_budget_spent_it_is_refused_and_says_which_bound(
     assert answer == Unbound(None, "refused", BUDGET_SPENT)
     assert pending.waiting_for(MAC) is None
     assert len(pending.listing()) == MINT_BUDGET
+
+
+# --- and the caller narrates every one of them ------------------------
+#
+# The four outcomes exist so the caller can say something different
+# about each, and two of them are said out loud to an operator. A fifth
+# added here would compile, run, and be answered with silence: `match`
+# falls through a subject no case names, so the device would be answered
+# correctly and the warning an operator needs would simply not happen.
+#
+# The conformance suite used to catch that from the other end, by
+# holding `activation_not_offered.reason`'s declared token set equal to
+# what the narration writes into it. It is deleted (#210), and this is
+# the survivor: the literal's members against the arms that name them,
+# read out of the source rather than exercised, because the point is
+# which outcomes are HANDLED and not which ones a test thought to drive.
+
+
+def narrated_outcomes() -> frozenset[str]:
+    """The outcomes `ota/reply.py`'s narration names, read off its
+    `match`, refusing a wildcard.
+
+    A wildcard would make this check pass forever: `case _` handles a
+    fifth outcome by definition, and handling it is exactly what nobody
+    would have done.
+    """
+    source = Path(reply.__file__).read_text(encoding="utf-8")
+    matches = [
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Match) and ast.unparse(node.subject) == "unbound.outcome"
+    ]
+    assert len(matches) == 1, "one narration, or this is reading the wrong one"
+
+    named: set[str] = set()
+    for case in matches[0].cases:
+        assert case.guard is None, "a guarded arm does not name an outcome"
+        alternatives = (
+            case.pattern.patterns
+            if isinstance(case.pattern, ast.MatchOr)
+            else [case.pattern]
+        )
+        for pattern in alternatives:
+            assert isinstance(pattern, ast.MatchValue), (
+                f"{ast.unparse(pattern)} is not a literal outcome; a wildcard or a "
+                f"capture would make this check pass whatever is added"
+            )
+            named.add(ast.literal_eval(pattern.value))
+    return frozenset(named)
+
+
+def test_the_reply_narrates_every_outcome_the_decision_can_answer() -> None:
+    """By equality, both ways: an outcome nobody narrates is a silence,
+    and an arm naming an outcome that no longer exists is dead code that
+    reads as coverage."""
+    declared = frozenset(get_args(get_type_hints(Unbound)["outcome"]))
+
+    assert declared == {"offered", "not_applicable", "unreadable", "refused"}
+    assert narrated_outcomes() == declared
