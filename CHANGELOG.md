@@ -39,19 +39,19 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
 - **The tests reach for the names a caller reaches for, and the ones
   that still do not say why** (#210). A committed tokenizer walk
   (`tests/tools/reach_ins.py`) counted every place a test read a private
-  name through a dot: 440 sites over 85 names across 55 files. 136 of
+  name through a dot: 440 sites over 85 names across 55 files. 138 of
   them had a public route already and take it, through seams that
   existed for production reasons: the runtime's own `start_reply` and
   `drain`, `SessionInput.audio`, the composition root's providers
   parameter, `SessionEvents.attach`, the providers' injected clients,
   `runtime.prompt.know_how`, and the `tts sentence_start` message a
   device already receives. 10 asserted nothing that survived and are
-  gone. The remaining 294 are white-box safety invariants and each now
+  gone. The remaining 292 are white-box safety invariants and each now
   states, where it happens, which property public observation cannot
   establish: a race that is only ever probabilistically reproducible, a
   released resource that is invisible because it was released, a token
   older than an issuer will stamp, a stored column a migration reads
-  rather than an accessor. The walk reports 164 sites over 76 names
+  rather than an accessor. The walk reports 162 sites over 75 names
   across 46 files. No production interface was added, and no production
   code changed.
 
