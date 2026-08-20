@@ -35,12 +35,13 @@ from tests.support.configs import (
     config_with_agent,
 )
 from tests.support.events import both_formats
-from tests.support.providers import ScriptedLlm
+from tests.support.providers import RecordingLlm, ScriptedLlm
 from tests.support.sessions import (
     agent_providers,
     device_session,
     history,
     listening_in_realtime,
+    run_reply,
     session_for,
     start_reply,
     talking,
@@ -70,6 +71,7 @@ from vinga_server.config import Config
 from vinga_server.protocol import framing
 from vinga_server.providers import Turn
 from vinga_server.runtime.pipeline import AgentNotAllowed
+from vinga_server.runtime.prompt import know_how
 from vinga_server.runtime.speech import _Synthesis
 
 # The mock TTS formula, for computing expected reply durations.
@@ -682,12 +684,13 @@ def test_two_devices_hold_two_conversations_at_once() -> None:
     assert 180 <= heard_ms(tutor_texts) <= 300
 
 
-def test_a_session_refuses_an_agent_its_device_is_not_bound_to() -> None:
+async def test_a_session_refuses_an_agent_its_device_is_not_bound_to() -> None:
     # The bound list is the boundary, enforced where the swap happens:
     # M6's switch_agent passes this a name a model chose, and an agent
     # that merely exists on the server is not one this device may reach.
     config = two_persona_config()
-    session = device_session(config, TUTOR_MAC)
+    llm = RecordingLlm()
+    session = session_for(config, TUTOR_MAC, {"tutor": llm})
 
     # White-box, deliberately: the bound list is checked inside the swap,
     # and every public route to a swap is guarded before it (the tool
@@ -699,10 +702,10 @@ def test_a_session_refuses_an_agent_its_device_is_not_bound_to() -> None:
     with pytest.raises(AgentNotAllowed, match="poet"):
         session.runtime._activate_agent("poet")
     # Refused, and nothing swapped: the session still talks as the tutor,
-    # and the half it would be sent is still the tutor's.
+    # and the half the next round is sent is still the tutor's.
     assert talking(session) == "tutor"
-    assert session.runtime._know_how is not None
-    assert session.runtime._know_how.text == "TUTOR"
+    await run_reply(session, "who am I talking to?")
+    assert llm.systems == [know_how(config.prompt_for_agent("tutor")).text]
 
 
 def test_a_device_with_no_agent_is_turned_away() -> None:

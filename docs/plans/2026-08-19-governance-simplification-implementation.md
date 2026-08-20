@@ -1838,7 +1838,7 @@ mapped carried most of the rewriting, and two more turned up:
   are white-box and say so once for twenty-eight sites.
 
 **What the count did.** 440 sites over 85 names across 55 files became
-**164 over 76 names across 46 files**. Ten files lost every reach-in
+**162 over 75 names across 46 files**. Ten files lost every reach-in
 they had; one support module joined the census with two, which is
 where a consolidated justification lives. (These are the numbers after
 the PR review round below, which retired three more sites; the sweep
@@ -1853,7 +1853,7 @@ private name as the plan permits. The classes are the issue's:
 **(d)** white-box safety invariant kept with the justification written
 at the reach. A group whose sites split across classes says so.
 
-The arithmetic: **(a) 0, (b) 10, (c) 136, (d) 294, summing to 440.**
+The arithmetic: **(a) 0, (b) 10, (c) 138, (d) 292, summing to 440.**
 (a) is empty, and necessarily: the plan review's finding 8 permits a
 surviving reach-in only as a white-box safety invariant, so a site kept
 without a stated justification has no class to be in. Every (d) site
@@ -1959,7 +1959,7 @@ counts, a docstring alone does not.
 | `_reply` | 1 | 0 | (c) | start_reply and cancel_reply, both public |
 | `_agent` | 1 | 0 | (c) | talking() |
 | `_listen_mode` | 1 | 0 | (d) | listening_in, stated once in sessions.py |
-| `_know_how` | 2 | 2 | (d) | nothing swapped after a refused switch; the cached half has no reader |
+| `_know_how` | 2 | 0 | (c) | the half a refused switch left alone is what the next round is sent |
 | `_activate_agent` | 1 | 1 | (d) | the bound-list guard, reachable only by calling the swap |
 | `_speak` | 2 | 2 | (d) | which sentences a cancellation leaves recorded, inside one sentence |
 | `_handle_audio` | 1 | 1 | (d) | the edge's decode path, so the buffered bytes are a device's |
@@ -2303,7 +2303,7 @@ Six reaches exist that did not before, all in the two support modules,
 and all of them are the consolidation: `stamp_with` and `attached_taps`
 and `turn_taking` and `plant_utterance` in
 `tests/support/sessions.py`, and `stored_rows` and `planted` in
-`tests/support/stores.py`. 158 + 6 is the 164 the after-walk finds.
+`tests/support/stores.py`. 156 + 6 is the 162 the after-walk finds.
 
 ### Deviations from the plan
 
@@ -2443,7 +2443,7 @@ Run from `vinga-server/`, at the last commit of the milestone.
 - The after-walk is the before-walk's own code:
   `uv run python -m tests.tools.reach_ins` reports 167 sites over 77
   names across 48 files, against 440 over 85 across 55. (The review
-  round below re-runs it at 164 over 76 across 46.)
+  round below re-runs it at 162 over 75 across 46.)
 
 Not verified here, and not claimed: the container image and the smoke
 lane, for the reason M1 gives.
@@ -2517,6 +2517,15 @@ identity claimed nothing reports the cached half's text, which
 rebuilt, since a rebuild is what asks; both fakes were already in the
 test.
 
+A third went with them, unasked but by the same argument: the refused
+agent switch in `test_session.py` read the cached half to say nothing
+was swapped, under a note claiming the half has no reader. It has one,
+and the same one, so the test drives a round and holds what the model
+was sent against `know_how`. Proved by mutation: setting the active
+agent before the bound-list check turns it red. Leaving it would have
+been a table row asserting, one screen from this record, exactly the
+claim the record retires.
+
 The design guide named the second one as its worked example of a
 reach-in with a stated reason. Its paragraph now says what the sweep
 found, because a rule whose example no longer exists is worse than no
@@ -2527,13 +2536,13 @@ question across a whole suite is for.
 
 ### The inventory, after the review round
 
-The walk, re-run rather than adjusted by hand: **164 sites over 76
-names across 46 files**, against 167 over 77 across 48 at the end of the
-sweep and 440 over 85 across 55 before it. `test_registry.py` and
+The walk, re-run rather than adjusted by hand: **162 sites over 75
+names across 46 files**, against 167 over 77 across 48 at the end of
+the sweep and 440 over 85 across 55 before it. `test_registry.py` and
 `test_session_prompt.py` now hold none at all.
 
-The dispositions move with them: **(a) 0, (b) 10, (c) 136, (d) 294**,
-still summing to 440. Three sites left (d) for (c), which is the
+The dispositions move with them: **(a) 0, (b) 10, (c) 138, (d) 292**,
+still summing to 440. Five sites left (d) for (c), which is the
 finding's whole point: (d) is a claim about what cannot be observed,
 and a claim like that is falsifiable.
 
