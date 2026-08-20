@@ -307,7 +307,16 @@ factory reads `current()` when it builds the runtime, and the
 session reports that binding to the registry in the same
 synchronous step, so admission and binding are two recorded
 states: `remove` releases the generation for a bound session and
-is a no-op on that axis for an admitted-but-never-bound one. The
+is a no-op on that axis for an admitted-but-never-bound one. From
+M4 the handoff is pinned end to end (round 2's finding 4): the
+session captures one generation on the event loop after the
+awaited bindings resolve, filters the resolved agent list against
+that exact generation, and passes the same object into runtime
+construction and registry accounting, so a reload that deletes an
+agent between the binding read and the factory call cannot
+produce a list the serving generation cannot serve; the barrier
+test that forces exactly that interleaving is named in M4's
+tests. The
 `SessionRegistry`, the only object that knows the whole session
 set, counts bound sessions per generation and disposes a
 generation that is neither current nor held by any bound session,
@@ -527,7 +536,12 @@ session across a reload), and the drift-check pins.
   served at the next check-in with the binding notice, no restart;
   delete an agent with a live session, apply, the session finishes
   and new sessions cannot reach it; the diff reports nothing for
-  an applied agent-set change.
+  an applied agent-set change; the pinned-handoff barrier test
+  (finding 4): a reload deletes the resolved agent between the
+  binding read and the factory call, and the session either serves
+  the generation it captured or is turned away cleanly, never an
+  index error; the snapshot-mode acknowledgement, diff refusal,
+  and reload refusal from the #195 section.
 - **Concurrency, every milestone**: the widened exclusion refuses
   a second apply; the #193 barrier test moves onto the holder's
   mark and gains the three positions finding 2 names: the barrier
@@ -826,6 +840,11 @@ resolved list the factory's generation cannot serve. One pinned
 handoff is needed: capture one generation on the loop, filter
 against it, and pass that exact generation to construction and
 accounting, with a barrier test.
+
+*Resolution.* Adopted, the pinned-handoff shape: one generation
+captured on the loop after the bindings resolve, the filter, the
+construction, and the accounting all take that exact object, and
+M4's tests carry the deletion-interleaving barrier case.
 
 **5 (P1). A deleted agent cannot survive a later activation as
 promised.** `_activate_agent` reads `current()` from M1 and also
