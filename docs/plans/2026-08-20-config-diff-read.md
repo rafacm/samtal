@@ -337,10 +337,15 @@ transport cases beside the existing `/runtime` suite.
   the answer is a re-read of one world or the retryable 409, never
   a mixture; a second case proves the retry succeeds when the world
   holds still.
-- **No-leak sentinel**: plant a credential-shaped stored secret,
-  change it, and assert the serialized diff response carries the
-  entity's name and no fragment of the planted value, in the body
-  and in the problem paths.
+- **No-leak sentinels**: distinct sentinels for each thing that
+  must not travel: the planted plaintext, the stored ciphertext
+  envelope as the database holds it, the entity's fingerprint hex,
+  and a syntactically valid environment-reference name. Each is
+  asserted absent from the successful diff response, from a forced
+  refusal body (the stored half made unreadable by a wrong
+  encryption key, so the problem path is a real one rather than an
+  unspecified one), and from the log records both paths emit, in
+  both log formats.
 - **Integration** (`tests/integration/test_config_api.py`): boot a
   real server, write a provider through the API, read the diff and
   see it pending; bind a device and see no pending claim; M2: edit
@@ -351,10 +356,13 @@ transport cases beside the existing `/runtime` suite.
 
 **No-leak.** The response is names and closed tokens by
 construction: no entity bodies, no values, no masks, no `shadows`
-names. The comparison reads models and opaque fingerprints, and the
-sentinel test above pins it. Refusals ride the existing sanitized
-problem path (`REFUSAL_STATUS`); the route adds no exception text
-of its own.
+names. The comparison reads models and opaque fingerprints, and
+the sentinel suite above pins all four forms a secret's presence
+takes (plaintext, ciphertext, fingerprint, environment-reference
+name) as absent from the success body, a forced refusal body, and
+the logs of both. Refusals ride the existing sanitized problem
+path (`REFUSAL_STATUS`); the route adds no exception text of its
+own.
 
 **Pin before reshaping.** Nothing existing is reshaped: the change
 is additive (one dataclass field, one route, one module). The one
@@ -500,6 +508,11 @@ planted plaintext would not catch serialization of the ciphertext
 envelope, the fingerprint, or an environment-variable name, and the
 problem-path coverage is unspecified. Use distinct sentinels and a
 forced stored-state failure.
+
+*Resolution.* Adopted. The sentinel bullet now plants all four
+forms and asserts each absent from the success body, a wrong-key
+refusal body, and the log records of both paths in both formats;
+the no-leak lens paragraph matches.
 
 **8 (P2). The tests do not exercise the MCP cases that decide
 whether the design works.** One referenced-entry edit plus reload
