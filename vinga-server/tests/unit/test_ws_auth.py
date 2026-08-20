@@ -51,6 +51,8 @@ def test_a_missing_or_bad_token_never_reaches_the_accept(token: str | None) -> N
 def test_an_expired_token_is_refused() -> None:
     with TestClient(create_app(config_with_agent())) as client:
         auth = client.app.state.composition.device_auth
+        # White-box, for the reason `test_auth.py` gives at its own
+        # signatures: an expired token cannot be issued, only aged.
         old = 1700000000
         expired = f"{auth._sign(DEVICE_UUID, DEVICE_MAC.lower(), old)}.{old}"
         with pytest.raises(WebSocketDisconnect):

@@ -24,7 +24,6 @@ from pathlib import Path
 import pytest
 
 from tests.support.config_cli import SECRET, runner
-from vinga_server.config import cli
 
 
 @pytest.fixture
@@ -34,21 +33,33 @@ def run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return runner(tmp_path, monkeypatch)
 
 
-def test_the_status_help_names_every_state_it_can_print() -> None:
+def printed_help(run, capsys: pytest.CaptureFixture[str]) -> str:
+    """The help an operator gets, read where they read it. Whitespace
+    collapsed, because argparse wraps the line it is printed on and
+    where it wraps is not the contract."""
+    with pytest.raises(SystemExit) as caught:
+        run("--help")
+    assert caught.value.code == 0
+    return " ".join(capsys.readouterr().out.split())
+
+
+def test_the_status_help_names_every_state_it_can_print(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
     """`unused` is a state of its own and the one an operator has never
     met before, so leaving it out of the help would leave it out of the
     place they look first."""
-    # Whitespace collapsed, because argparse wraps the line it is
-    # printed on and where it wraps is not the contract.
-    help_text = " ".join(cli._parser().format_help().split())
+    help_text = printed_help(run, capsys)
 
     assert "connected, down, or unused because no agent references it" in help_text
 
 
-def test_the_two_ways_to_bind_a_board_say_which_is_which() -> None:
+def test_the_two_ways_to_bind_a_board_say_which_is_which(
+    run, capsys: pytest.CaptureFixture[str]
+) -> None:
     """A pair a person picks wrongly once and then remembers wrongly,
     so each names what the other takes."""
-    help_text = cli._parser().format_help()  # noqa: SLF001
+    help_text = printed_help(run, capsys)
 
     assert "by the MAC you already know" in help_text
     assert "showing this activation code" in help_text

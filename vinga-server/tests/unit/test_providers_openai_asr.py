@@ -77,6 +77,24 @@ def provider(handler: object, **overrides: object) -> OpenAiAsr:
     return OpenAiAsr(**options)  # type: ignore[arg-type]
 
 
+def transported(built: OpenAiAsr, handler: object) -> OpenAiAsr:
+    """The provider the registry built, with its own client answering
+    from the handler instead of from OpenAI.
+
+    White-box, deliberately, and this is the only shape of reach-in this
+    file keeps. The client a deployment gets is built inside the
+    provider and handed to nobody, so how many attempts it makes, how
+    long it waits, and what it puts on the wire are observable only
+    against the real endpoint. Swapping the transport under that client
+    is what puts it under a test at all; a hand-made client would be a
+    different object carrying different settings.
+    """
+    built._client._client = httpx.AsyncClient(  # type: ignore[attr-defined]
+        transport=httpx.MockTransport(handler)  # type: ignore[arg-type]
+    )
+    return built
+
+
 def transcript_handler(text: str = "Hej hej") -> object:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"text": text})
@@ -774,18 +792,35 @@ async def test_audio_under_the_api_minimum_is_answered_without_a_request() -> No
     assert calls == 1
 
 
-def test_the_minimum_belongs_to_the_endpoint_not_the_type(
+async def test_the_minimum_belongs_to_the_endpoint_not_the_type(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The 0.1 s floor was measured against OpenAI, so it is applied
     only there, like the model rules and the temperature range."""
     monkeypatch.setenv("OPENAI_KEY", "secret")
+    # 50 ms at 16 kHz: under the floor OpenAI was measured against.
+    short = b"\x00\x00" * 800
+    at_openai: list[bytes] = []
+    at_compatible: list[bytes] = []
+
+    def watching(seen: list[bytes]) -> object:
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request.content)
+            return httpx.Response(200, json={"text": "ja"})
+
+        return handler
+
     openai = build_asr(type="openai", api_key_env="OPENAI_KEY")
     compatible = build_asr(type="openai", base_url="http://localhost:8000/v1", egress=False)
     assert isinstance(openai, OpenAiAsr)
     assert isinstance(compatible, OpenAiAsr)
-    assert openai._min_audio_s == 0.1
-    assert compatible._min_audio_s == 0.0
+    transported(openai, watching(at_openai))
+    transported(compatible, watching(at_compatible))
+
+    assert (await openai.transcribe(short, 16000)).text == ""
+    assert at_openai == [], "the clip went to OpenAI, which would refuse it"
+    assert (await compatible.transcribe(short, 16000)).text == "ja"
+    assert len(at_compatible) == 1
 
 
 async def test_a_compatible_endpoint_receives_the_short_clip_openai_would_refuse() -> None:
@@ -800,7 +835,7 @@ async def test_a_compatible_endpoint_receives_the_short_clip_openai_would_refuse
 
     built = build_asr(type="openai", base_url="http://localhost:8000/v1", egress=False)
     assert isinstance(built, OpenAiAsr)
-    built._client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))  # type: ignore[attr-defined]
+    transported(built, handler)
 
     # 50 ms: refused by OpenAI, and dropped by the guard against it.
     result = await built.transcribe(b"\x00\x00" * 800, 16000)
@@ -820,7 +855,7 @@ async def test_empty_audio_is_never_sent_anywhere() -> None:
 
     built = build_asr(type="openai", base_url="http://localhost:8000/v1", egress=False)
     assert isinstance(built, OpenAiAsr)
-    built._client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))  # type: ignore[attr-defined]
+    transported(built, handler)
 
     assert (await built.transcribe(b"", 16000)).text == ""
     assert calls == 0
@@ -930,13 +965,7 @@ async def test_a_failing_utterance_is_attempted_once(monkeypatch: pytest.MonkeyP
 
     built = build_asr(type="openai", api_key_env="OPENAI_KEY")
     assert isinstance(built, OpenAiAsr)
-    # White-box, deliberately: the client a deployment gets is built
-    # inside the provider and handed to nobody, so how many attempts it
-    # makes and how long it waits are observable only against the real
-    # vendor. Swapping its transport is what puts that client under a
-    # test at all; a hand-made client would prove a different object's
-    # settings.
-    built._client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))  # type: ignore[attr-defined]
+    transported(built, handler)
 
     with pytest.raises(ProviderCallError):
         await built.transcribe(ONE_SECOND, 16000)

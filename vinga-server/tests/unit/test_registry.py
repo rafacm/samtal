@@ -135,4 +135,9 @@ def test_the_cap_is_configurable() -> None:
     config = config_with_agent()
     config.server.limits.max_sessions = 3
     with entered_app(config) as (app, _):
+        # White-box: the cap is a number a registry refuses at, and
+        # what a configured one does is observable only by opening that
+        # many sessions plus one. The refusal itself is driven above
+        # against the default; this says the configured value is the
+        # one the registry got.
         assert app.state.composition.sessions._max_sessions == 3

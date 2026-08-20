@@ -243,6 +243,12 @@ def test_a_status_refusal_carries_nothing_of_the_body() -> None:
     anything walking the chain would find the body on it."""
     body = {"weather": _status_entry(since={"leak": ANSWERED})}
 
+    # White-box for this refusal test: what is under test is the
+    # exception's CHAIN, and a chain is not printed. The command prints
+    # one sanitized line, which the runner-driven tests beside this one
+    # assert; a __cause__ or a __context__ still holding the library's
+    # own exception is reachable only from where the refusal is raised,
+    # and anything that renders a traceback would find it there.
     with pytest.raises(ConfigError) as caught:
         cli._status_listing(body)
 
@@ -419,6 +425,7 @@ def test_prompt_prints_nothing_from_an_answer_of_the_wrong_shape(
 
 
 def test_a_prompt_refusal_carries_nothing_of_the_body() -> None:
+    # White-box, for the reason the status refusal above gives.
     with pytest.raises(ConfigError) as caught:
         cli._prompt_listing({"blocks": [{"leak": ANSWERED}], "characters": 4})
 
