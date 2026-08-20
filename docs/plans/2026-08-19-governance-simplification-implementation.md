@@ -2561,3 +2561,30 @@ Run from `vinga-server/`, at the last commit of the round.
   `vinga-server/tests/unit/data/event-baseline.json`.
 - Production source is still untouched: `git diff --stat origin/main --
   vinga-server/src` is empty across the whole branch.
+
+## M7: the compatibility floor ADR
+
+### What was done
+
+Doc-only, as planned. The record is
+[`docs/adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md`](../adr/2026-08-20-database-upgrades-have-a-compatibility-floor.md):
+upgrades supported from the first beta image onward; best-effort from
+revision `0001` until a beta is declared, which the existing upgrade
+tests already prove; history never rewritten as a cleanup, with
+squashing defined as a compatibility decision requiring a superseding
+record and a tested reset path; every schema change a reviewed
+migration. The follow-up audit the plan and the review both name
+(classifying the other compatibility branches: old MCP grant forms,
+previously accepted provider URL shapes, legacy-name recovery) is
+filed as issue #225 and scoped out of this plan.
+
+No pointer was added to `principles.md`: the floor is an operational
+promise about databases, narrower than the product promises that page
+holds, and the ADR system's README already routes decisions to
+records. The plan review round did not judge it a product promise
+either; if a beta declaration later elevates it, that change cites
+the record per the ADR README's own rule.
+
+### Deviations
+
+None. The milestone is the ADR, the filed issue, and this record.
