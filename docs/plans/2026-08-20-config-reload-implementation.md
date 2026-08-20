@@ -348,3 +348,197 @@ Run from `vinga-server/`, at the last commit of the round.
 
 The image and the smoke lane remain unverified here, for the reason
 given above.
+
+## M2: fillers, re-synthesized with clip reuse
+
+### What was done
+
+**The cache became a value.** `Generation` carries
+`fillers: Mapping[str, FillerClips]` beside its configuration and its
+secrets, for the reason the other two travel together: a clip is a
+configured phrase spoken by a configured voice, so it is a consequence
+of one world and holding it anywhere else would be a second place that
+has to agree. `AgentFillers` is gone, and with it the fill-once assert,
+the `ready` property and the lifespan seam they existed for.
+`Composition.agent_fillers` is gone too, which is round 1's finding 10
+for this milestone.
+
+**A session binds its clips at construction.** `bespoke_runtime_factory`
+lost its `fillers` parameter and reads `generations.current().fillers`
+inside `build`, which is the one moment a runtime is made. That is the
+convergence point stated as control flow rather than as a rule: a
+conversation goes on masking with what it opened on, and the next one
+gets what the apply installed.
+
+**The synthesis learned reuse.** `build_agent_fillers` takes the
+previous world as an optional third argument and answers a `Fillers`
+value: the clips, and the three closed outcomes, sorted. The reuse key
+is `_voiced_by`, a pair of the agent's effective filler section and the
+agent's running TTS provider, computed for both sides from the same
+running providers mapping. Equal key plus an existing clip means the
+object itself is carried over; anything else is synthesized, and a
+failure leaves no clip and names the agent under `disabled`. An agent
+that configures no filled pause is in none of the three.
+
+**The overlay grew a field, and the field list grew a home.**
+`config/diff.py` now declares `OVERLAID_AGENT_FIELDS`, which is
+`("prompt", "prompt_includes", "filler")`, and `config/reload.py`'s
+`_composed` copies exactly those from the stored entry of every retained
+agent. The restart-bound comparison's exclusion mapping is derived from
+that declaration plus `mcp`, taking each field's own default off the
+model, so the three facts that used to be written separately are one.
+
+**The comparison grew a third half.** `AgentsDiff` carries `filler`
+beside `grants` and `prompt`, each labelled `reload`, and
+`agent_defaults` stays restart-labelled whole, since a candidate
+generation keeps the previous layer and the effective-value helpers
+inherit through it.
+
+**The result's fillers section is real.** `FillersReload` was declared
+in M1 and answered null; it answers now, with the same three fields and
+no schema change, which is what the round 3 finding 6 shape was for. The
+CLI renders it through `RELOAD_SECTIONS` and `outcomes` with no new
+rendering code.
+
+**Notices and prose.** `AGENT_NOTICE` says three things where it said
+two, the third being that the filler section applies at the next
+conversation. The `Applies` docstring, the `API_DESCRIPTION` diff and
+reload paragraphs, the docgen contract prose, the `FillerConfig`
+docstring and both READMEs were rewritten, and both generated references
+were regenerated in the same change.
+
+### The shared-cache reader inventory
+
+Taken by `git grep -n "agent_fillers\|AgentFillers"` against the commit
+this milestone started from (`f1fce4ba`), which found **38 lines across
+14 files**. The five source sites are what mattered; every one is
+accounted for.
+
+| Site | Held or read | Disposition |
+| --- | --- | --- |
+| `src/vinga_server/filler.py` (`AgentFillers`) | the mutable cache and its fill-once assert | deleted; the mapping is `Generation.fillers` |
+| `src/vinga_server/app.py:257,302,417,433` | constructed it, handed it to the factory, put it on the composition, filled it at the end of the boot | one `build_agent_fillers` call before the holder is built, whose clips go into the first `Generation` |
+| `src/vinga_server/composition.py:82` | the `agent_fillers` field | removed |
+| `src/vinga_server/runtime/pipeline.py` (`bespoke_runtime_factory`) | the closed-over cache | gone; `build` reads `generations.current().fillers` |
+| `src/vinga_server/runtime/filler_runner.py` (`FillerCache`) | the three reads a runner needs | unchanged as a protocol, since a mapping satisfies it; its prose stopped naming the deleted class |
+
+The nine test files went the same way: `build_agent_fillers(...)` reads
+`.clips` where a mapping was wanted, `session_for(fillers=...)` puts them
+in the world the session binds, and `test_filler_cache.py` went from six
+cases about a mutable object to two about the mapping and the wiring.
+
+### Deviations from the plan
+
+Seven, each recorded because it moved something the plan named.
+
+**1. The reuse key's provider half is the running provider object, not
+an identity string.** The plan says "the identity of the agent's TTS
+binding as it is actually running". Implemented as the object itself,
+because that is what "as it is actually running" can mean before
+providers are generational: an identity string would be a description of
+the entry the object was built from, and two objects built from one
+entry are exactly what M3 has to tell apart. Both sides of the
+comparison read the same running mapping, so the half is equal by
+construction here; writing it down anyway is what makes M3's change one
+line, and it is what makes the provider-edit and rotated-credential
+cases pass for the stated reason rather than by accident.
+
+**2. `ConfigReload` takes the running providers as a constructor
+argument.** The plan puts the built `AgentProviders` mapping on the
+generation at M3, which leaves M2 needing the running one from
+somewhere. It is handed in beside the stored read, required rather than
+optional, because every server has one; M3 is where the field goes away
+in favour of a generation read.
+
+**3. The fillers section is never null again, including for a server
+with nothing to do.** M1's description said an empty three-way answer
+would claim that every agent had been considered and nothing needed
+doing. That claim is now true, so the section answers `[] [] []` rather
+than null for a deployment where no agent masks its latency, and the
+integration pin says so. Only `providers` and `agents` are still null.
+
+**4. An agent that masks nothing is in none of the three outcomes, and
+so is one that just switched masking off.** The closed set is the plan's
+and does not grow, so a filler section switched off drops its clip and
+is reported nowhere. Said out loud in the model's docstring rather than
+answered with a fourth outcome: a clip that is gone because an operator
+asked for it to be gone is not a decision a reload made.
+
+**5. `AgentsDiff` grew a third entry rather than widening `prompt`.**
+The plan says the agent kind's reload-labeled half "grows"; a `filler`
+section reported under a field called `prompt` would be the wrong
+sentence, and the two converge at different moments (an activation and a
+session), which is exactly what the separate label is for. The published
+diff schema therefore gains a field, which is the growth the plan
+allowed for the diff and deliberately not for the reload result.
+
+**6. Which agent fields a reload applies became one declaration in
+`config/diff.py`.** The plan does not say where the overlay's field list
+lives, and writing it a second time in `config/reload.py` would have
+been two structures that must agree. `diff.py` is the module whose
+docstring already owns "which configuration kind takes effect at which
+boundary", and it is the direction the imports already run, so the
+declaration is there and the overlay reads it. The restart-bound
+exclusion mapping is derived from it rather than listed, taking each
+field's default off `AgentConfig`.
+
+**7. The boot's order moved.** Synthesis now runs before the generation
+is built rather than after everything else, which put it in front of the
+conversation writer's start. `test_conversations_boot.py` proves that a
+boot failing after the writer started still stops it, and filler
+synthesis was the failure it used, so the writer now starts immediately
+after the store is constructed, in front of everything a boot can still
+fail in, and that test keeps its subject. The stop was already on the
+exit stack at construction, so the earlier start is strictly safer.
+
+### Discoveries
+
+**A protocol was the way to hand the previous world to synthesis.**
+`filler.py` cannot import `generation.py`, which imports it. `Served`
+declares the two reads reuse needs (`config` and `fillers`), `Generation`
+satisfies it structurally, and a test supplies a configuration and a
+mapping without building a world.
+
+**`_composed` had to stop returning a `Generation`.** The overlay is
+synchronous and the synthesis is not, so the composition of the
+candidate is now three statements in `_prepare`: the overlay, the
+synthesis against it, and the `Generation` built from both plus the
+composed secrets. That reads better than it did, because the one line
+that was doing three things is now three lines that each do one.
+
+**Deriving the exclusion mapping from the model's defaults works
+exactly.** Every field a reload applies (`mcp`, `prompt`,
+`prompt_includes`, `filler`) has a declared default, and each default is
+the "nothing here" value the mapping was listing by hand.
+
+**A delay-only edit re-synthesizes.** The key is the whole filler
+section, so changing `delay_ms` alone makes clips whose bytes are
+identical. Following the plan's wording rather than narrowing the key to
+the phrases: the section is one value, rebuilding is the safe direction
+to be wrong in (the store's own posture), and a key that covered part of
+a section would be a second rule about what a clip depends on.
+
+### Verification
+
+Run from `vinga-server/`, at the last commit of the milestone.
+
+- `uv run ruff check .`: all checks passed.
+- `uv run mypy`: success, no issues found in 3 source files. Its scope is
+  the events package, which this milestone does not touch.
+- `uv run pytest tests/unit -q`: 2,741 passed, 16 skipped. (2,735 at the
+  end of M1; the net six are eight new cases in `test_config_reload.py`
+  and two in `test_config_diff.py`, less the four `test_filler_cache.py`
+  cases that were about a mutable object that no longer exists.)
+- `uv run pytest tests/integration -q`: 61 passed, the same count as M1
+  left: the one case this milestone changes was already there and was
+  amended rather than added to.
+- The four documentation drift checks, regenerated and diffed against
+  `../docs/reference/`: all four clean. `api-openapi.json` and
+  `domain-config.md` change deliberately and are committed in this
+  milestone; `events.md` and `conversations-schema.md` are byte-untouched
+  and are absent from this milestone's commits, which is what says no
+  event and no conversation column moved.
+
+Not verified here, and not claimed: the container image, the smoke lane,
+and anything against a real device, none of which this milestone
+touches.
