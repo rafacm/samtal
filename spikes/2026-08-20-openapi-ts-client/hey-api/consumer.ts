@@ -35,6 +35,8 @@ import {
   removeAgentAgentsNameDelete,
   readAgentDefaultsAgentDefaultsGet,
   writeAgentDefaultsAgentDefaultsPut,
+  readDefaultAgentDefaultAgentGet,
+  writeDefaultAgentDefaultAgentPut,
   removeDefaultAgentDefaultAgentDelete,
 } from "./generated/sdk.gen";
 import type {
@@ -178,6 +180,13 @@ async function agentRoundTrip(): Promise<void> {
   holds<Acknowledgement | undefined>(removed.data);
 }
 
+// The agent defaults are read and written and never deleted. The
+// document declares GET and PUT on `/agent-defaults` and nothing else,
+// because the defaults are a singleton that always exists: there is no
+// state in which the resource is absent, so there is nothing for a
+// DELETE to mean. The delete third of this probe is therefore not
+// applicable to this entity rather than passing, and the fixture proves
+// the absence rather than substituting another resource for it.
 async function agentDefaultsRoundTrip(): Promise<void> {
   const read = await readAgentDefaultsAgentDefaultsGet(perCall);
   holds<Envelope | undefined>(read.data);
@@ -187,12 +196,37 @@ async function agentDefaultsRoundTrip(): Promise<void> {
     body: { llm: "main", tts: "voice" },
   });
   holds<Acknowledgement | undefined>(written.data);
+}
 
-  // The agent defaults have no DELETE of their own: the document
-  // declares GET and PUT on `/agent-defaults` and nothing else, because
-  // the defaults are a singleton that always exists. The nearest delete
-  // in the same family is the one that clears the default agent, and it
-  // is the operation an admin UI's "clear this" control would call.
+// The absence, stated as a claim rather than left as a gap: the only
+// two operations the SDK exports for this path are its read and its
+// write, so a delete appearing later is a loud diff here.
+type AgentDefaultsOperations = Extract<
+  keyof typeof sdk,
+  `${string}AgentDefaults${string}`
+>;
+export type AgentDefaultsAreReadAndWriteOnly = Expect<
+  Equals<
+    AgentDefaultsOperations,
+    "readAgentDefaultsAgentDefaultsGet" | "writeAgentDefaultsAgentDefaultsPut"
+  >
+>;
+
+// `/default-agent` is a different resource, not the agent defaults'
+// delete. The defaults are the provider references every agent
+// inherits; the default agent is which agent covers a device with no
+// binding of its own. It does have all three operations, and clearing
+// it is the delete an admin UI's "no default agent" control calls.
+async function defaultAgentRoundTrip(): Promise<void> {
+  const read = await readDefaultAgentDefaultAgentGet(perCall);
+  holds<DefaultAgent | undefined>(read.data);
+
+  const written = await writeDefaultAgentDefaultAgentPut({
+    ...perCall,
+    body: { name: "kitchen" },
+  });
+  holds<Acknowledgement | undefined>(written.data);
+
   const cleared = await removeDefaultAgentDefaultAgentDelete(perCall);
   holds<Acknowledgement | undefined>(cleared.data);
 }
@@ -473,6 +507,10 @@ export const entityOperations = {
   removeAgent: removeAgentAgentsNameDelete,
   readAgentDefaults: readAgentDefaultsAgentDefaultsGet,
   writeAgentDefaults: writeAgentDefaultsAgentDefaultsPut,
+  // The default agent, which is a resource of its own and the only one
+  // of the two with a delete.
+  readDefaultAgent: readDefaultAgentDefaultAgentGet,
+  writeDefaultAgent: writeDefaultAgentDefaultAgentPut,
   removeDefaultAgent: removeDefaultAgentDefaultAgentDelete,
 } as const;
 
@@ -482,6 +520,7 @@ export const roundTrips = {
   promptFragment: promptFragmentRoundTrip,
   agent: agentRoundTrip,
   agentDefaults: agentDefaultsRoundTrip,
+  defaultAgent: defaultAgentRoundTrip,
   refusal: refusalIsTyped,
   unguarded: unguardedReadIsRefused,
   extension: readAnExtensionProperty,

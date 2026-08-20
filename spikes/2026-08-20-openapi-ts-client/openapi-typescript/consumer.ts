@@ -155,6 +155,12 @@ async function agentRoundTrip(): Promise<void> {
   holds<Acknowledgement | undefined>(removed.data);
 }
 
+// As in the Hey API fixture: the agent defaults are read and written
+// and never deleted, because the document declares GET and PUT on
+// `/agent-defaults` and nothing else. The defaults are a singleton that
+// always exists, so there is no state a DELETE could reach. The delete
+// third of this probe is not applicable to this entity rather than
+// passing.
 async function agentDefaultsRoundTrip(): Promise<void> {
   const read = await api.GET("/agent-defaults", {});
   holds<Envelope | undefined>(read.data);
@@ -163,10 +169,35 @@ async function agentDefaultsRoundTrip(): Promise<void> {
     body: { llm: "main", tts: "voice" },
   });
   holds<Acknowledgement | undefined>(written.data);
+}
 
-  // As in the Hey API fixture: `/agent-defaults` declares GET and PUT
-  // only, because the defaults are a singleton that always exists. The
-  // delete in the same family clears the default agent.
+// The absence stated as a claim. openapi-typescript spells an
+// undeclared method `never` on the path item, so the assertion reads
+// off the generated table rather than off a comment, and a delete
+// appearing later is a loud diff here.
+export type AgentDefaultsHaveNoDelete = Expect<
+  Equals<paths["/agent-defaults"]["delete"], undefined>
+>;
+export type AgentDefaultsHaveARead = Expect<
+  Equals<
+    NonNullable<paths["/agent-defaults"]["get"]>,
+    operations["read_agent_defaults_agent_defaults_get"]
+  >
+>;
+
+// `/default-agent` is a different resource, not the agent defaults'
+// delete. The defaults are the provider references every agent
+// inherits; the default agent is which agent covers a device with no
+// binding of its own. It does have all three operations.
+async function defaultAgentRoundTrip(): Promise<void> {
+  const read = await api.GET("/default-agent", {});
+  holds<components["schemas"]["DefaultAgent"] | undefined>(read.data);
+
+  const written = await api.PUT("/default-agent", {
+    body: { name: "kitchen" },
+  });
+  holds<Acknowledgement | undefined>(written.data);
+
   const cleared = await api.DELETE("/default-agent", {});
   holds<Acknowledgement | undefined>(cleared.data);
 }
@@ -176,7 +207,7 @@ async function agentDefaultsRoundTrip(): Promise<void> {
 async function undeclaredCallsAreRefused(): Promise<void> {
   // @ts-expect-error there is no `/providers/{name}` in the document.
   await api.GET("/providers/{name}", { params: { path: { name: "main" } } });
-  // @ts-expect-error `/agent-defaults` has no DELETE.
+  // @ts-expect-error `/agent-defaults` has no DELETE, so the call itself is refused.
   await api.DELETE("/agent-defaults", {});
 }
 
@@ -480,6 +511,10 @@ export type EntityOperations = {
   removeAgent: operations["remove_agent_agents__name__delete"];
   readAgentDefaults: operations["read_agent_defaults_agent_defaults_get"];
   writeAgentDefaults: operations["write_agent_defaults_agent_defaults_put"];
+  // The default agent, which is a resource of its own and the only one
+  // of the two with a delete.
+  readDefaultAgent: operations["read_default_agent_default_agent_get"];
+  writeDefaultAgent: operations["write_default_agent_default_agent_put"];
   removeDefaultAgent: operations["remove_default_agent_default_agent_delete"];
 };
 
@@ -498,6 +533,7 @@ export const roundTrips = {
   promptFragment: promptFragmentRoundTrip,
   agent: agentRoundTrip,
   agentDefaults: agentDefaultsRoundTrip,
+  defaultAgent: defaultAgentRoundTrip,
   undeclared: undeclaredCallsAreRefused,
   refusal: refusalIsTyped,
   unguarded: unguardedReadIsRefused,
