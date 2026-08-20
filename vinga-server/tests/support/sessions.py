@@ -249,7 +249,7 @@ async def open_session(
     raise AssertionError("the session never opened")
 
 
-def _listening_in_realtime(session: DeviceSession) -> None:
+def listening_in_realtime(session: DeviceSession) -> None:
     """A device that streams its microphone continuously.
 
     White-box, deliberately, and the last of this file's three. The mode
@@ -273,7 +273,7 @@ async def masked_session(config: Config, mac: str, scripts: dict[str, Any] | Non
     fillers = await build_agent_fillers(config, build_agent_providers(config))
     session = session_for(config, mac, scripts, fillers=fillers)
     session.websocket = cast(Any, RecordingSocket())
-    _listening_in_realtime(session)
+    listening_in_realtime(session)
     return session
 
 
@@ -297,7 +297,7 @@ def realtime_session(
         agent_providers(config, scripts, stages),
         websocket=socket,
     )
-    _listening_in_realtime(session)
+    listening_in_realtime(session)
     return session, socket
 
 
@@ -356,6 +356,32 @@ async def run_reply(session: DeviceSession, said: str) -> list[str]:
     if spoken:
         session.runtime._turns.append(Turn("assistant", " ".join(spoken)))
     return spoken
+
+
+def talking(session: DeviceSession) -> str | None:
+    """The agent talking right now, read where both sides of the
+    boundary read it. The events object is where the active agent
+    lives, because every event either side emits is attributed to it,
+    and `agent` on it is public."""
+    return events_of(session).agent
+
+
+# What one more round is driven with when the point of the round is to
+# see the history it was handed rather than what it answers.
+PROBE = "and then?"
+
+
+async def history(session: DeviceSession, script: Any) -> list[Any]:
+    """The conversation this session kept, as the next round sees it.
+
+    The history is not a surface: it exists so that the next round is
+    written against what was said, and the model is the thing that
+    receives it. So one more round is what makes it observable, and
+    what comes back is the turns that round was handed, minus the
+    utterance it is answering.
+    """
+    await run_reply(session, PROBE)
+    return list(script.seen[-1][0])[:-1]
 
 
 async def drive_reply(session: DeviceSession, pcm: bytes) -> None:

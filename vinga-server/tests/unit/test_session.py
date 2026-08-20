@@ -35,7 +35,16 @@ from tests.support.configs import (
     config_with_agent,
 )
 from tests.support.events import both_formats
-from tests.support.sessions import device_session
+from tests.support.providers import ScriptedLlm
+from tests.support.sessions import (
+    agent_providers,
+    device_session,
+    history,
+    listening_in_realtime,
+    session_for,
+    start_reply,
+    talking,
+)
 from tests.support.sockets import RecordingSocket
 from tests.support.wire import (
     assert_endpointed_speech,
@@ -476,20 +485,22 @@ async def test_a_barge_in_keeps_the_sentences_the_user_heard() -> None:
     # sentence whose audio went out, and not the one cut off partway.
     # Getting this wrong either way misleads whoever speaks next, since
     # the reply that answers the interruption is written against it.
-    config = config_with_agent(asr_text="hello", llm_reply=f"Ready. {LONG_REPLY}")
+    config = config_with_agent(asr_text="hello")
     socket = RecordingSocket()
-    session = device_session(config, DEVICE_MAC, websocket=socket)
+    script = ScriptedLlm([f"Ready. {LONG_REPLY}"])
+    session = session_for(config, DEVICE_MAC, {"assistant": script}, websocket=socket)
 
-    reply = asyncio.create_task(session.runtime._reply(speech_pcm(600)))
+    start_reply(session, speech_pcm(600))
     await asyncio.sleep(0.6)
     heard_frames = socket.frames
-    reply.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await reply
+    await session.runtime.cancel_reply()
 
     # "Ready." was spoken in full and survives; the long sentence was
     # audible, interrupted, and left out.
-    assert session.runtime._turns == [Turn("user", "hello"), Turn("assistant", "Ready.")]
+    assert await history(session, script) == [
+        Turn("user", "hello"),
+        Turn("assistant", "Ready."),
+    ]
     assert heard_frames > TTS_MIN_MS // FRAME_MS
 
 
@@ -501,11 +512,10 @@ async def test_only_a_sentence_whose_audio_finished_counts_as_spoken() -> None:
     # seconds apart.
     config = two_persona_config()
     socket = RecordingSocket()
-    session = device_session(config, TUTOR_MAC, websocket=socket)
-    assert session.runtime._providers is not None
-    resampler = Resampler(
-        session.runtime._providers.tts.sample_rate, session_module.OUTPUT_AUDIO.sample_rate
-    )
+    providers = agent_providers(config)
+    session = device_session(config, TUTOR_MAC, providers, websocket=socket)
+    tts = providers["tutor"].tts
+    resampler = Resampler(tts.sample_rate, session_module.OUTPUT_AUDIO.sample_rate)
 
     spoken: list[str] = []
     failures: list[tuple[BaseException, float]] = []
@@ -519,7 +529,11 @@ async def test_only_a_sentence_whose_audio_finished_counts_as_spoken() -> None:
         # first synthesis.
         return None
 
-    tts = session.runtime._providers.tts
+    # White-box for the two calls below: what is under test is which
+    # sentences a cancellation leaves recorded as spoken, and the
+    # recording happens inside one sentence's own speaking step. Driving
+    # a whole reply would put the cancellation somewhere between two
+    # sentences the test does not choose, and the moment is the claim.
     await session.runtime._speak(
         _Synthesis("Short and finished.", tts, record_failure, record_first_audio),
         resampler,
@@ -557,11 +571,17 @@ async def test_the_utterance_buffer_keeps_only_a_bounded_tail(
     monkeypatch.setattr(turntaking_module, "UTTERANCE_TAIL_BYTES", cap)
     config = two_persona_config()
     session = device_session(config, TUTOR_MAC)
-    session._listen_mode = "realtime"
-    session.listening = True
+    listening_in_realtime(session)
 
     encoder = OpusEncoder()
     for packet in encoder.encode(b"\x00" * (FRAME_BYTES * 66)):
+        # White-box for this line and the read below it. A realtime
+        # session buffers the silences too, so what is bounded is memory
+        # held for a conversation nobody is having, and memory a process
+        # is holding is on no surface at all: the only public sign of
+        # this cap failing is a server that grows for an hour. Feeding
+        # the frames through the edge's own decoder path is what makes
+        # the buffered bytes the ones a device would have sent.
         await session._handle_audio(framing.wrap(1, packet))
 
     # Trimmed to the cap, give or take the frame that crossed it, and
@@ -669,11 +689,18 @@ def test_a_session_refuses_an_agent_its_device_is_not_bound_to() -> None:
     config = two_persona_config()
     session = device_session(config, TUTOR_MAC)
 
+    # White-box, deliberately: the bound list is checked inside the swap,
+    # and every public route to a swap is guarded before it (the tool
+    # loop refuses an unbound name and answers the model with an error
+    # result, which `test_session_tools.py` covers). So the raise itself
+    # is reachable only by calling the swap, and what it protects is the
+    # next caller of it: the guard is here precisely because the name
+    # comes from a model.
     with pytest.raises(AgentNotAllowed, match="poet"):
         session.runtime._activate_agent("poet")
-    # Refused, and nothing swapped: the session still talks as the tutor.
-    assert session._agent == "tutor"
-    assert session.runtime._providers is not None
+    # Refused, and nothing swapped: the session still talks as the tutor,
+    # and the half it would be sent is still the tutor's.
+    assert talking(session) == "tutor"
     assert session.runtime._know_how is not None
     assert session.runtime._know_how.text == "TUTOR"
 

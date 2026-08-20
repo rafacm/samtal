@@ -41,35 +41,34 @@ async def test_the_know_how_half_is_assembled_once_per_activation() -> None:
     servers = CountingServers((Guidance("home", GUIDANCE),))
     session = session_with(servers, {"poet": ScriptedLlm(["One.", "Two."])})
     assert servers.asked == ["poet"]
-    half = session.runtime._know_how
 
     await run_reply(session, "hello")
     await run_reply(session, "again")
 
-    # Neither reply asked a second time, and the cached object is the
-    # very one the activation built.
+    # Neither reply asked a second time. Assembling the half is what
+    # asks, so one question is one assembly.
     assert servers.asked == ["poet"]
-    assert session.runtime._know_how is half
 
 
 async def test_an_agent_switch_re_assembles_the_half() -> None:
     servers = CountingServers((Guidance("home", GUIDANCE),))
+    tutor = RecordingLlm(["Hi."])
     session = session_with(
         servers,
         {
             "poet": ScriptedLlm([[call("switch_agent", agent="tutor")]]),
-            "tutor": ScriptedLlm(["Hi."]),
+            "tutor": tutor,
         },
         mac=BOTH_MAC,
     )
-    half = session.runtime._know_how
 
     await run_reply(session, "get me the tutor")
 
+    # Asked again, and what the new agent was sent is the new agent's
+    # half rather than the one the activation cached for the poet.
     assert servers.asked == ["poet", "tutor"]
-    assert session.runtime._know_how is not half
-    assert session.runtime._know_how is not None
-    assert session.runtime._know_how.text.startswith("TUTOR")
+    (system,) = tutor.systems
+    assert system.startswith("TUTOR")
 
 
 async def test_the_granted_guidance_reaches_the_model() -> None:
@@ -84,7 +83,9 @@ async def test_the_granted_guidance_reaches_the_model() -> None:
     assert GUIDANCE in system
 
 
-async def test_the_model_receives_exactly_the_blocks_that_are_reported() -> None:
+async def test_the_model_receives_exactly_the_blocks_that_are_reported(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """The session's side of the surface's one promise, over the inputs
     that make a lazy assembler lie: a persona written with leading
     whitespace, and guidance whose author left blank lines at the end of
@@ -97,21 +98,23 @@ async def test_the_model_receives_exactly_the_blocks_that_are_reported() -> None
         }
     )
     llm = RecordingLlm()
-    session = session_with(
-        CountingServers((Guidance("home", "  Ask first.\n\n"),)), {"poet": llm}, config=config
-    )
+    with caplog.at_level("INFO"):
+        session = session_with(
+            CountingServers((Guidance("home", "  Ask first.\n\n"),)), {"poet": llm}, config=config
+        )
+        await run_reply(session, "hello")
 
-    await run_reply(session, "hello")
-
-    half = session.runtime._know_how
-    assert half is not None
     (system,) = llm.systems
-    assert system == "\n\n".join(block.text for block in half.blocks)
-    assert system == half.text
-    assert len(system) == half.characters
+    (assembled,) = prompt_events(caplog)
+    # The surface reports a size per block and a size for the whole,
+    # and with no memory in the way the whole is what the model read.
+    assert assembled.characters == len(system)
+    assert sum(assembled.sources.values()) + len("\n\n") == len(system)
     # The interior of the guidance is what its author wrote; only the
-    # end of the whole prompt was trimmed, and the block says so.
-    assert "Ask first." in half.blocks[1].text
+    # end of the whole prompt was trimmed.
+    assert system.startswith("POET")
+    assert "Ask first." in system
+    assert not system.endswith("\n")
 
 
 async def test_an_agent_granted_nothing_is_sent_its_persona_alone() -> None:
@@ -173,13 +176,16 @@ async def test_activation_logs_the_fragment_beside_the_persona(
 ) -> None:
     """The event grows a source per injected block, so what a prompt
     held is answerable from the retained logs without the session."""
+    llm = RecordingLlm()
     with caplog.at_level("INFO"):
         session = session_with(
             CountingServers((Guidance("home", GUIDANCE),)),
-            {"poet": ScriptedLlm(["Said."])},
+            {"poet": llm},
             config=config_with_fragment(),
         )
         await run_reply(session, "hello")
+
+    (system,) = llm.systems
 
     (assembled,) = prompt_events(caplog)
     assert assembled.sources == {
@@ -187,7 +193,7 @@ async def test_activation_logs_the_fragment_beside_the_persona(
         "fragment:household": len(FRAGMENT),
         "instructions:home": len(guidance_heading("home")) + len(f"\n{GUIDANCE}"),
     }
-    assert assembled.characters == session.runtime._know_how.characters
+    assert assembled.characters == len(system)
 
 
 # The memory clock, which did not move
@@ -198,7 +204,8 @@ async def test_a_fact_remembered_between_replies_is_in_the_next_one(
 ) -> None:
     store = MemoryStore(tmp_path)
     llm = RecordingLlm()
-    session = session_with(CountingServers(), {"poet": llm}, memory=store)
+    servers = CountingServers()
+    session = session_with(servers, {"poet": llm}, memory=store)
 
     await run_reply(session, "hello")
     await store.remember("poet", "the user is vegetarian")
@@ -206,9 +213,9 @@ async def test_a_fact_remembered_between_replies_is_in_the_next_one(
 
     assert "the user is vegetarian" not in llm.systems[0]
     assert "the user is vegetarian" in llm.systems[1]
-    # And the half was not rebuilt to notice it.
-    assert session.runtime._know_how is not None
-    assert "vegetarian" not in session.runtime._know_how.text
+    # And the half was not rebuilt to notice it: rebuilding is what asks
+    # the registry, and it was asked once.
+    assert servers.asked == ["poet"]
 
 
 async def test_the_memory_read_happens_off_the_event_loop(
@@ -244,6 +251,13 @@ async def test_a_session_without_memory_reads_nothing_at_all() -> None:
 
     await run_reply(session, "hello")
 
+    # The one reach-in in this file, and the design guide names it: what
+    # public observation cannot establish is that the text the model was
+    # sent IS the cached half rather than a rebuild that happens to
+    # match it. Nothing reports the cached text: the event carries sizes
+    # and no words, deliberately, and the operator-facing route
+    # assembles a fresh preview that reads memory as a new session
+    # would. Identity is the claim, so identity is what is asserted.
     assert session.runtime._know_how is not None
     assert llm.systems == [session.runtime._know_how.text]
 
@@ -262,17 +276,24 @@ async def test_activation_logs_what_the_know_how_half_holds(
 ) -> None:
     store = MemoryStore(tmp_path)
     await store.remember("poet", "the user is vegetarian")
+    llm = RecordingLlm()
     with caplog.at_level("INFO"):
         session = session_with(
             CountingServers((Guidance("home", GUIDANCE),)),
-            {"poet": ScriptedLlm(["Said."])},
+            {"poet": llm},
             memory=store,
         )
         await run_reply(session, "hello")
 
+    (system,) = llm.systems
     (assembled,) = prompt_events(caplog)
     assert assembled.agent == "poet"
-    assert assembled.characters == session.runtime._know_how.characters
+    # The event counts the know-how half and stops there: the memory
+    # block is in the prompt and outside the count, which is what the
+    # slice below says.
+    assert "vegetarian" in system
+    assert "vegetarian" not in system[: assembled.characters]
+    assert system[: assembled.characters].startswith("POET")
     assert set(assembled.sources) == {"persona", "instructions:home"}
     assert assembled.sources["persona"] == len("POET")
     # Memory is deliberately absent: this fires once per activation and
