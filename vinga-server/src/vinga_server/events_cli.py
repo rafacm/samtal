@@ -1,7 +1,7 @@
 """The `vinga-server events` command group: reference.
 
 One command, and it reaches nothing. No database, no configuration file,
-no key, and no server: the registry is a Python module, and printing it
+no key, and no server: the catalog is a Python module, and printing it
 is reading that module. That is why the entrypoint dispatches this group
 before it resolves `VINGA_EVENTS_ENFORCEMENT` or parses a server's
 arguments, the way it dispatches `config` and `conversations`: a
