@@ -32,12 +32,13 @@ from tests.support.events import only as one_event
 from tests.support.mcp_stdio_server import SHIPPED_INSTRUCTIONS
 from tests.support.tools_mcp import (
     MANAGER_LOGGER,
+    Applying,
     command_arrives,
     reading,
     started,
 )
 from tests.support.tools_mcp import reload_config as config_with
-from vinga_server.config import Config
+from vinga_server.config.boot import BootConfig
 from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
@@ -45,6 +46,7 @@ from vinga_server.config.loader import (
     StorageError,
 )
 from vinga_server.config.models import McpServerConfig
+from vinga_server.config.reload import RELOAD_UNREADABLE
 from vinga_server.config.secrets import (
     SecretLocation,
     SecretStore,
@@ -64,7 +66,6 @@ from vinga_server.tools.mcp import (
     REFUSED_UNEXPECTED,
     REFUSED_UNREADABLE,
     RELOAD_REFUSED,
-    RELOAD_UNREADABLE,
     UNUSED,
     McpServerManager,
     McpServers,
@@ -120,16 +121,17 @@ async def test_a_new_entry_is_started_and_an_unchanged_one_is_left_alone() -> No
         {"tools": entry_data(), "extra": entry_data()}, {"assistant": ["tools", "extra"]}
     )
     servers = await started(before)
+    reloads = Applying(servers, before)
     try:
         kept = servers.manager_of("tools")
         offered = servers.tools_for(["tools"])
 
-        applied = await servers.reload(reading(after))
+        applied = (await reloads.apply(reading(after))).mcp
 
-        assert applied.started == ("extra",)
-        assert applied.restarted == ()
-        assert applied.stopped == ()
-        assert applied.unchanged == ("tools",)
+        assert applied.started == ["extra"]
+        assert applied.restarted == []
+        assert applied.stopped == []
+        assert applied.unchanged == ["tools"]
         # The same manager, and the very same published tool objects on
         # it: nothing reconnected, nothing was listed a second time.
         assert servers.manager_of("tools") is kept
@@ -149,14 +151,15 @@ async def test_a_changed_fragment_is_stopped_rebuilt_and_started() -> None:
         {"tools": entry_data(tool_timeout_s=3.5)}, {"assistant": ["tools"]}
     )
     servers = await started(before)
+    reloads = Applying(servers, before)
     try:
         was = servers.manager_of("tools")
         assert servers.timeout_for("tools") == 15.0
 
-        applied = await servers.reload(reading(after))
+        applied = (await reloads.apply(reading(after))).mcp
 
-        assert applied.restarted == ("tools",)
-        assert (applied.started, applied.stopped, applied.unchanged) == ((), (), ())
+        assert applied.restarted == ["tools"]
+        assert (applied.started, applied.stopped, applied.unchanged) == ([], [], [])
         assert servers.manager_of("tools") is not was
         assert servers.timeout_for("tools") == 3.5
         assert servers.status()["tools"]["state"] == CONNECTED
@@ -182,13 +185,14 @@ async def test_an_instructions_only_edit_keeps_the_connection() -> None:
         {"tools": entry_data(instructions="New guidance.")}, {"assistant": ["tools"]}
     )
     servers = await started(before)
+    reloads = Applying(servers, before)
     try:
         kept = servers.manager_of("tools")
 
-        applied = await servers.reload(reading(after))
+        applied = (await reloads.apply(reading(after))).mcp
 
-        assert applied.unchanged == ("tools",)
-        assert (applied.started, applied.restarted, applied.stopped) == ((), (), ())
+        assert applied.unchanged == ["tools"]
+        assert (applied.started, applied.restarted, applied.stopped) == ([], [], [])
         assert servers.manager_of("tools") is kept
         assert servers.status()["tools"]["state"] == CONNECTED
         # And what an agent activating now is told about the entry is
@@ -204,13 +208,14 @@ async def test_adding_guidance_to_an_entry_that_had_none_keeps_the_connection() 
         {"tools": entry_data(instructions="New guidance.")}, {"assistant": ["tools"]}
     )
     servers = await started(before)
+    reloads = Applying(servers, before)
     try:
         kept = servers.manager_of("tools")
         assert servers.guidance_for_agent("assistant") == ()
 
-        applied = await servers.reload(reading(after))
+        applied = (await reloads.apply(reading(after))).mcp
 
-        assert applied.unchanged == ("tools",)
+        assert applied.unchanged == ["tools"]
         assert servers.manager_of("tools") is kept
         assert servers.guidance_for_agent("assistant") == (Guidance("tools", "New guidance."),)
     finally:
@@ -228,21 +233,22 @@ async def test_the_server_instructions_opt_in_toggles_without_a_reconnect() -> N
         {"tools": entry_data(use_server_instructions=True)}, {"assistant": ["tools"]}
     )
     servers = await started(off)
+    reloads = Applying(servers, off)
     try:
         kept = servers.manager_of("tools")
         assert servers.guidance_for_agent("assistant") == ()
 
-        applied = await servers.reload(reading(on))
+        applied = (await reloads.apply(reading(on))).mcp
 
-        assert applied.unchanged == ("tools",)
+        assert applied.unchanged == ["tools"]
         assert servers.manager_of("tools") is kept
         assert servers.guidance_for_agent("assistant") == (
             ServerInstructions("tools", SHIPPED_INSTRUCTIONS),
         )
 
-        applied = await servers.reload(reading(off))
+        applied = (await reloads.apply(reading(off))).mcp
 
-        assert applied.unchanged == ("tools",)
+        assert applied.unchanged == ["tools"]
         assert servers.manager_of("tools") is kept
         assert servers.guidance_for_agent("assistant") == ()
     finally:
@@ -259,12 +265,13 @@ async def test_an_inject_prompts_edit_restarts_the_connection() -> None:
         {"tools": entry_data(inject_prompts=["house_style"])}, {"assistant": ["tools"]}
     )
     servers = await started(before)
+    reloads = Applying(servers, before)
     try:
         was = servers.manager_of("tools")
 
-        applied = await servers.reload(reading(after))
+        applied = (await reloads.apply(reading(after))).mcp
 
-        assert applied.restarted == ("tools",)
+        assert applied.restarted == ["tools"]
         assert servers.manager_of("tools") is not was
         assert [
             block.name for block in servers.guidance_for_agent("assistant")
@@ -285,12 +292,13 @@ async def test_an_edit_beside_the_guidance_still_restarts_the_entry() -> None:
         {"assistant": ["tools"]},
     )
     servers = await started(before)
+    reloads = Applying(servers, before)
     try:
         was = servers.manager_of("tools")
 
-        applied = await servers.reload(reading(after))
+        applied = (await reloads.apply(reading(after))).mcp
 
-        assert applied.restarted == ("tools",)
+        assert applied.restarted == ["tools"]
         assert servers.manager_of("tools") is not was
     finally:
         await servers.stop_all()
@@ -313,13 +321,14 @@ async def test_rotated_stored_ciphertext_rebuilds_only_that_entry() -> None:
         {rotated: encrypt(rotated, "a-new-value", keys), other: untouched}, keys
     )
     servers = await started(config, before)
+    reloads = Applying(servers, config, before)
     try:
         kept = servers.manager_of("extra")
 
-        applied = await servers.reload(reading(config, after))
+        applied = (await reloads.apply(reading(config, after))).mcp
 
-        assert applied.restarted == ("tools",)
-        assert applied.unchanged == ("extra",)
+        assert applied.restarted == ["tools"]
+        assert applied.unchanged == ["extra"]
         assert servers.manager_of("extra") is kept
     finally:
         await servers.stop_all()
@@ -332,11 +341,12 @@ async def test_an_entry_that_is_gone_is_stopped_and_dropped() -> None:
     )
     after = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
     servers = await started(before)
+    reloads = Applying(servers, before)
     try:
-        applied = await servers.reload(reading(after))
+        applied = (await reloads.apply(reading(after))).mcp
 
-        assert applied.stopped == ("extra",)
-        assert applied.unchanged == ("tools",)
+        assert applied.stopped == ["extra"]
+        assert applied.unchanged == ["tools"]
         assert "extra" not in servers
         assert servers.tools_for(["extra"]) == []
         # And it is gone from the surface too, since it is gone from the
@@ -358,10 +368,11 @@ async def test_an_entry_no_agent_references_any_more_is_stopped_and_unused() -> 
         {"tools": entry_data(), "extra": entry_data()}, {"assistant": ["tools"]}
     )
     servers = await started(before)
+    reloads = Applying(servers, before)
     try:
-        applied = await servers.reload(reading(after))
+        applied = (await reloads.apply(reading(after))).mcp
 
-        assert applied.stopped == ("extra",)
+        assert applied.stopped == ["extra"]
         assert "extra" not in servers
         assert servers.status()["extra"]["state"] == UNUSED
         assert servers.status()["extra"]["grants"] == {}
@@ -377,12 +388,13 @@ async def test_an_entry_granted_to_another_agent_keeps_its_connection() -> None:
     )
     after = config_with({"tools": entry_data()}, {"assistant": [], "helper": ["tools"]})
     servers = await started(before)
+    reloads = Applying(servers, before)
     try:
         kept = servers.manager_of("tools")
 
-        applied = await servers.reload(reading(after))
+        applied = (await reloads.apply(reading(after))).mcp
 
-        assert applied.unchanged == ("tools",)
+        assert applied.unchanged == ["tools"]
         assert servers.manager_of("tools") is kept
         assert servers.tools_for_agent("assistant") == []
         assert servers.tools_for_agent("helper")
@@ -399,14 +411,14 @@ async def test_an_entry_granted_to_another_agent_keeps_its_connection() -> None:
 # needs a different running configuration to be refused at all.
 
 
-async def unchanged_by(servers: McpServers, read) -> str:
+async def unchanged_by(servers: McpServers, reloads: Applying, read) -> str:
     """Run a reload that must be refused, and assert nothing moved."""
     before = servers.status()
     kept = managers_in(servers)
     granted = servers.tools_for_agent("assistant")
 
     with pytest.raises(ConfigError) as caught:
-        await servers.reload(read)
+        await reloads.apply(read)
 
     assert servers.status() == before
     assert managers_in(servers) == kept
@@ -428,13 +440,14 @@ async def test_a_snapshot_that_will_not_validate_changes_nothing() -> None:
     needs to know is that the servers are as they were."""
     config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
     servers = await started(config)
+    reloads = Applying(servers, config)
     stored = "invalid config in the database: agents.sam has no llm"
 
-    def refuse() -> tuple[Config, SecretStore | None]:
+    def refuse() -> BootConfig:
         raise ConfigError(stored)
 
     try:
-        assert await unchanged_by(servers, refuse) == f"{RELOAD_REFUSED} {stored}"
+        assert await unchanged_by(servers, reloads, refuse) == f"{RELOAD_REFUSED} {stored}"
     finally:
         await servers.stop_all()
 
@@ -449,14 +462,15 @@ async def test_the_two_read_refusals_that_are_not_about_the_snapshot_keep_their_
     turn both into 422."""
     config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
     servers = await started(config)
+    reloads = Applying(servers, config)
     said = "the configuration database could not be read"
 
-    def refuse() -> tuple[Config, SecretStore | None]:
+    def refuse() -> BootConfig:
         raise refusal(said)
 
     try:
         with pytest.raises(refusal) as caught:
-            await servers.reload(refuse)
+            await reloads.apply(refuse)
         assert str(caught.value) == said
         assert "tools" in servers
     finally:
@@ -469,13 +483,14 @@ async def test_a_read_refusal_carries_nothing_of_what_the_read_was_holding() -> 
     context, and a load that failed is holding a snapshot."""
     config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
     servers = await started(config)
+    reloads = Applying(servers, config)
 
-    def refuse() -> tuple[Config, SecretStore | None]:
+    def refuse() -> BootConfig:
         raise ConfigError("invalid config in the database: agents.sam has no llm")
 
     try:
         with pytest.raises(ConfigError) as caught:
-            await servers.reload(refuse)
+            await reloads.apply(refuse)
         assert caught.value.__cause__ is None
         assert caught.value.__context__ is None
     finally:
@@ -493,8 +508,9 @@ async def test_an_unset_variable_changes_nothing(monkeypatch: pytest.MonkeyPatch
         {"assistant": ["tools", "extra"]},
     )
     servers = await started(config)
+    reloads = Applying(servers, config)
     try:
-        message = await unchanged_by(servers, reading(broken))
+        message = await unchanged_by(servers, reloads, reading(broken))
 
         assert "nothing was changed" in message
         assert "VINGA_TEST_ABSENT_TOKEN" in message
@@ -511,8 +527,9 @@ async def test_a_secret_that_will_not_decrypt_changes_nothing() -> None:
     # that dropped the key the token was written under.
     unopenable = SecretStore({location: written}, MultiFernet([Fernet(generate_key())]))
     servers = await started(config)
+    reloads = Applying(servers, config)
     try:
-        message = await unchanged_by(servers, reading(config, unopenable))
+        message = await unchanged_by(servers, reloads, reading(config, unopenable))
 
         assert "nothing was changed" in message
         assert location.describe() in message
@@ -531,8 +548,9 @@ async def test_an_egress_declaration_local_only_forbids_changes_nothing() -> Non
         local_only=True,
     )
     servers = await started(config)
+    reloads = Applying(servers, config)
     try:
-        message = await unchanged_by(servers, reading(broken))
+        message = await unchanged_by(servers, reloads, reading(broken))
 
         assert "nothing was changed" in message
         assert "mcp_servers.extra" in message
@@ -557,10 +575,11 @@ async def test_a_candidate_that_cannot_connect_applies_as_down_and_revives(
         {"assistant": ["tools", "extra"]},
     )
     servers = await started(before)
+    reloads = Applying(servers, before)
     try:
-        applied = await servers.reload(reading(after))
+        applied = (await reloads.apply(reading(after))).mcp
 
-        assert applied.started == ("extra",)
+        assert applied.started == ["extra"]
         assert servers.status()["extra"]["state"] == DOWN
         assert servers.status()["extra"]["reason"]
         assert servers.tools_for(["extra"]) == []
@@ -585,19 +604,20 @@ async def test_a_second_reload_while_one_is_running_is_refused() -> None:
     first one is halfway through changing."""
     config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
     servers = await started(config)
+    reloads = Applying(servers, config)
     gate = threading.Event()
 
-    def held() -> tuple[Config, SecretStore | None]:
+    def held() -> BootConfig:
         # Blocking a worker thread, which is where the reload runs its
         # synchronous half, so the first reload is genuinely mid-flight.
         gate.wait(30)
         return config, None
 
-    first = asyncio.create_task(servers.reload(held))
+    first = asyncio.create_task(reloads.apply(held))
     try:
         await asyncio.sleep(0)
         with pytest.raises(ReloadInProgressError) as caught:
-            await servers.reload(reading(config))
+            await reloads.apply(reading(config))
         assert "already running" in str(caught.value)
     finally:
         gate.set()
@@ -606,8 +626,9 @@ async def test_a_second_reload_while_one_is_running_is_refused() -> None:
 
     # And once it has answered, the next one runs.
     servers = await started(config)
+    reloads = Applying(servers, config)
     try:
-        assert (await servers.reload(reading(config))).unchanged == ("tools",)
+        assert (await reloads.apply(reading(config))).mcp.unchanged == ["tools"]
     finally:
         await servers.stop_all()
 
@@ -619,15 +640,16 @@ async def test_the_grants_swap_with_the_managers() -> None:
     before = config_with({"tools": entry_data()}, {"assistant": []})
     after = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
     servers = await started(before)
+    reloads = Applying(servers, before)
     try:
         # Configured, referenced by nobody, so nothing was connected for
         # it and the agent reaches nothing.
         assert servers.tools_for_agent("assistant") == []
         assert servers.status()["tools"]["state"] == UNUSED
 
-        applied = await servers.reload(reading(after))
+        applied = (await reloads.apply(reading(after))).mcp
 
-        assert applied.started == ("tools",)
+        assert applied.started == ["tools"]
         assert {tool.name for tool in servers.tools_for_agent("assistant")} >= {
             "tools__secret_word"
         }
@@ -645,13 +667,14 @@ async def test_a_narrowed_allow_list_applies_without_touching_the_connection() -
         {"assistant": [{"server": "tools", "tools": ["secret_word"]}]},
     )
     servers = await started(before)
+    reloads = Applying(servers, before)
     try:
         kept = servers.manager_of("tools")
         assert len(servers.tools_for_agent("assistant")) > 1
 
-        applied = await servers.reload(reading(after))
+        applied = (await reloads.apply(reading(after))).mcp
 
-        assert applied.unchanged == ("tools",)
+        assert applied.unchanged == ["tools"]
         assert servers.manager_of("tools") is kept
         assert [tool.name for tool in servers.tools_for_agent("assistant")] == [
             "tools__secret_word"
@@ -675,11 +698,12 @@ async def test_a_grant_added_to_a_connected_server_is_checked_on_the_reload(
         {"assistant": [{"server": "tools", "tools": ["no_such_tool"]}]},
     )
     servers = await started(before)
+    reloads = Applying(servers, before)
     try:
         with caplog.at_level(logging.WARNING, logger="vinga_server.tools.mcp"):
-            applied = await servers.reload(reading(after))
+            applied = (await reloads.apply(reading(after))).mcp
 
-        assert applied.unchanged == ("tools",)
+        assert applied.unchanged == ["tools"]
         (warned,) = [
             record.getMessage()
             for record in caplog.records
@@ -787,10 +811,10 @@ async def test_a_manager_that_will_not_stop_is_left_behind_inside_the_bound(
 # receives.
 
 
-async def settled(servers: McpServers) -> None:
+async def settled(reloads: Applying) -> None:
     """Wait for an apply that outlived its caller to finish."""
     async with asyncio.timeout(20):
-        while servers.reloading:
+        while reloads.running:
             await asyncio.sleep(0.01)
 
 
@@ -880,16 +904,17 @@ async def test_a_caller_that_goes_away_during_the_stops_leaves_one_world() -> No
     after = config_with({"extra": entry_data()}, {"assistant": ["extra"]})
     going = SlowStopManager()
     servers = McpServers({"tools": going}, McpSlice.of(config))
+    reloads = Applying(servers, config)
     await going.start()
 
-    asked = asyncio.create_task(servers.reload(reading(after)))
+    asked = asyncio.create_task(reloads.apply(reading(after)))
     await asyncio.sleep(0.05)
     asked.cancel()
     with pytest.raises(asyncio.CancelledError):
         await asked
 
     try:
-        await settled(servers)
+        await settled(reloads)
 
         # The apply ran to its end: the entry that went is gone from the
         # managers and from the slice, and the one that arrived is
@@ -906,7 +931,7 @@ async def test_a_caller_that_goes_away_during_the_stops_leaves_one_world() -> No
         assert manager_module.abandoned == set()
         # The exclusion was held until the apply was over, so the next
         # reload is answered rather than refused.
-        assert (await servers.reload(reading(after))).unchanged == ("extra",)
+        assert (await reloads.apply(reading(after))).mcp.unchanged == ["extra"]
     finally:
         await servers.stop_all()
 
@@ -929,15 +954,16 @@ async def test_a_caller_that_goes_away_during_the_starts_leaves_one_world(
         {"assistant": ["tools", "extra"]},
     )
     servers = await started(before)
+    reloads = Applying(servers, before)
     try:
         kept = servers.manager_of("tools")
 
-        asked = asyncio.create_task(servers.reload(reading(after)))
+        asked = asyncio.create_task(reloads.apply(reading(after)))
         await asyncio.sleep(0.05)
         asked.cancel()
         with pytest.raises(asyncio.CancelledError):
             await asked
-        await settled(servers)
+        await settled(reloads)
 
         # The started candidate is in the world it was started for, and
         # the unchanged entry was never touched.
@@ -968,9 +994,10 @@ async def test_an_applied_reload_counts_what_it_moved(
         {"tools": entry_data(), "extra": entry_data()}, {"assistant": ["tools", "extra"]}
     )
     servers = await started(before)
+    reloads = Applying(servers, before)
     try:
         with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
-            await servers.reload(reading(after))
+            await reloads.apply(reading(after))
 
         applied = one_event(caplog, "mcp_reload")
         assert applied.levelno == logging.INFO
@@ -1019,14 +1046,15 @@ async def test_a_refused_reload_says_which_kind_of_refusal_it_was(
     """
     config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
     servers = await started(config)
+    reloads = Applying(servers, config)
 
-    def refuse() -> tuple[Config, SecretStore | None]:
+    def refuse() -> BootConfig:
         raise raiser("a message this line has no business carrying")
 
     try:
         with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
             with pytest.raises(escapes) as caught:
-                await servers.reload(refuse)
+                await reloads.apply(refuse)
 
         refused = one_event(caplog, "mcp_reload")
         assert refused.levelno == logging.WARNING
@@ -1057,14 +1085,15 @@ async def test_an_unexpected_read_failure_leaves_none_of_itself_behind(
     a connection string, so it is classified and then dropped."""
     config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
     servers = await started(config)
+    reloads = Applying(servers, config)
 
-    def refuse() -> tuple[Config, SecretStore | None]:
+    def refuse() -> BootConfig:
         raise RuntimeError(f"could not connect using {SECRET}")
 
     try:
         with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
             with pytest.raises(StorageError) as caught:
-                await servers.reload(refuse)
+                await reloads.apply(refuse)
 
         assert str(caught.value) == RELOAD_UNREADABLE
         assert caught.value.__cause__ is None
@@ -1100,10 +1129,11 @@ async def test_a_candidate_that_will_not_build_is_refused_as_invalid(
         {"assistant": ["tools", "extra"]},
     )
     servers = await started(config)
+    reloads = Applying(servers, config)
     try:
         with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
             with pytest.raises(ConfigError):
-                await servers.reload(reading(broken))
+                await reloads.apply(reading(broken))
 
         assert fields_of(one_event(caplog, "mcp_reload")) == {
             "event": "mcp_reload",
@@ -1119,18 +1149,19 @@ async def test_a_second_reload_is_refused_as_one_already_running(
 ) -> None:
     config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
     servers = await started(config)
+    reloads = Applying(servers, config)
     gate = threading.Event()
 
-    def held() -> tuple[Config, SecretStore | None]:
+    def held() -> BootConfig:
         gate.wait(30)
         return config, None
 
-    first = asyncio.create_task(servers.reload(held))
+    first = asyncio.create_task(reloads.apply(held))
     try:
         await asyncio.sleep(0)
         with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
             with pytest.raises(ReloadInProgressError):
-                await servers.reload(reading(config))
+                await reloads.apply(reading(config))
 
             # Read while the first reload is still held, so the one
             # event in hand is the refusal and not the apply that
@@ -1158,16 +1189,17 @@ async def test_an_apply_whose_caller_went_away_is_still_reported_once(
     after = config_with({"extra": entry_data()}, {"assistant": ["extra"]})
     going = SlowStopManager()
     servers = McpServers({"tools": going}, McpSlice.of(config))
+    reloads = Applying(servers, config)
     await going.start()
 
     with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
-        asked = asyncio.create_task(servers.reload(reading(after)))
+        asked = asyncio.create_task(reloads.apply(reading(after)))
         await asyncio.sleep(0.05)
         asked.cancel()
         with pytest.raises(asyncio.CancelledError):
             await asked
         try:
-            await settled(servers)
+            await settled(reloads)
         finally:
             await servers.stop_all()
 
@@ -1191,16 +1223,17 @@ async def test_a_cancelled_preparation_holds_the_exclusion_until_its_read_ends()
     """
     config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
     servers = await started(config)
+    reloads = Applying(servers, config)
     gate = threading.Event()
 
-    def held() -> tuple[Config, SecretStore | None]:
+    def held() -> BootConfig:
         # Blocking the worker thread, which is exactly where a slow read
         # blocks and exactly what a cancellation cannot reach.
         gate.wait(30)
         return config, None
 
     try:
-        asked = asyncio.create_task(servers.reload(held))
+        asked = asyncio.create_task(reloads.apply(held))
         await asyncio.sleep(0.05)
         asked.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -1210,13 +1243,13 @@ async def test_a_cancelled_preparation_holds_the_exclusion_until_its_read_ends()
         # the answer is the one that says to ask again rather than a
         # busy database or a second read of the same rows.
         with pytest.raises(ReloadInProgressError):
-            await servers.reload(reading(config))
+            await reloads.apply(reading(config))
 
         gate.set()
-        await settled(servers)
+        await settled(reloads)
 
         # And once it really has ended, the next one is answered.
-        assert (await servers.reload(reading(config))).unchanged == ("tools",)
+        assert (await reloads.apply(reading(config))).mcp.unchanged == ["tools"]
     finally:
         gate.set()
         await servers.stop_all()
@@ -1232,17 +1265,18 @@ async def test_the_applied_duration_covers_the_read_as_well_as_the_apply(
     did would call a reload fast on exactly the days it was not."""
     config = config_with({"tools": entry_data()}, {"assistant": ["tools"]})
     servers = await started(config)
+    reloads = Applying(servers, config)
     slow_read_s = 0.3
 
-    def slowly() -> tuple[Config, SecretStore | None]:
+    def slowly() -> BootConfig:
         time.sleep(slow_read_s)
-        return config, None
+        return BootConfig(config, SecretStore())
 
     try:
         with caplog.at_level(logging.INFO, logger=MANAGER_LOGGER):
-            applied = await servers.reload(slowly)
+            applied = (await reloads.apply(slowly)).mcp
 
-        assert applied.unchanged == ("tools",)
+        assert applied.unchanged == ["tools"]
         # Nothing was stopped or started, so the apply itself is a diff
         # and two assignments: essentially all of this is the read.
         assert fields_of(one_event(caplog, "mcp_reload"))["duration_ms"] >= (

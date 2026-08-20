@@ -119,11 +119,12 @@ from .reload import (  # noqa: E402
     REFUSED_INVALID,
     REFUSED_UNEXPECTED,
     REFUSED_UNREADABLE,
-    RELOAD_IN_PROGRESS,
     RELOAD_REFUSED,
-    RELOAD_UNREADABLE,
-    McpReload,
+    McpCandidate,
     _refusal,
+    apply,
+    prepare,
+    refused,
 )
 from .slice import (  # noqa: E402
     McpSlice,
@@ -156,7 +157,7 @@ from .transport import (  # noqa: E402
 # The underscored names are here for the same reason and not as an
 # invitation: the suites read some of them off this module, and the
 # ones that had a public seam worth drawing were given one
-# (`manager_of` and `reloading` on the registry, `session` on a
+# (`manager_of` on the registry, `session` on a
 # manager, `abandoned` beside the stop, and `McpManager` for what a
 # registry needs of one server). A re-export
 # copies a binding, so it serves an IMPORT and not a rebinding: a test
@@ -179,7 +180,7 @@ __all__ = [
     "McpCallFailed",
     "McpConfigError",
     "McpManager",
-    "McpReload",
+    "McpCandidate",
     "McpServerDown",
     "McpServerManager",
     "McpServers",
@@ -204,9 +205,7 @@ __all__ = [
     "REFUSED_IN_PROGRESS",
     "REFUSED_UNEXPECTED",
     "REFUSED_UNREADABLE",
-    "RELOAD_IN_PROGRESS",
     "RELOAD_REFUSED",
-    "RELOAD_UNREADABLE",
     "REQUIRES_ARGUMENTS",
     "SDK_LOGGERS",
     "SHIPPED_BLOCK_LIMIT",
@@ -237,7 +236,10 @@ __all__ = [
     "_shadowed",
     "_stopped",
     "abandoned",
+    "apply",
     "events",
     "logger",
+    "prepare",
     "quiet_sdk_loggers",
+    "refused",
 ]
