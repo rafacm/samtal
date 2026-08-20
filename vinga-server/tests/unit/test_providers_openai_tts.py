@@ -28,9 +28,10 @@ from vinga_server.providers.openai_tts import OpenAiTts
 SENTINEL = "sk-test-4f8b2c9e-never-a-real-credential"
 
 
-def provider(handler: object, **overrides: object) -> OpenAiTts:
-    """A provider wired to a mock transport, so nothing leaves the test."""
-    client = AsyncOpenAI(
+def mock_client(handler: object) -> AsyncOpenAI:
+    """An SDK client that answers from the handler, so nothing leaves the
+    test."""
+    return AsyncOpenAI(
         api_key="test-key",
         # As the provider constructs its own: without this the SDK's
         # default of two retries would triple a deliberately failing
@@ -40,6 +41,11 @@ def provider(handler: object, **overrides: object) -> OpenAiTts:
             transport=httpx.MockTransport(handler),  # type: ignore[arg-type]
         ),
     )
+
+
+def provider(handler: object, **overrides: object) -> OpenAiTts:
+    """A provider wired to a mock transport, so nothing leaves the test."""
+    client = mock_client(handler)
     options: dict[str, object] = {
         "voice": "alloy",
         "model": "gpt-4o-mini-tts",
@@ -465,8 +471,12 @@ async def test_a_failing_sentence_is_attempted_once(monkeypatch: pytest.MonkeyPa
 
     built = build_tts(type="openai", voice="alloy", api_key_env="OPENAI_KEY")
     assert isinstance(built, OpenAiTts)
-    # The built client is the one under test: retries are configured
-    # where it is constructed, so a hand-made client would not prove it.
+    # White-box, deliberately: the client a deployment gets is built
+    # inside the provider and handed to nobody, so how many attempts it
+    # makes and how long it waits are observable only against the real
+    # vendor. Swapping its transport is what puts that client under a
+    # test at all; a hand-made client would prove a different object's
+    # settings.
     built._client._client = httpx.AsyncClient(transport=httpx.MockTransport(handler))  # type: ignore[attr-defined]
 
     with pytest.raises(ProviderCallError):
@@ -480,6 +490,10 @@ async def test_the_timeout_is_the_one_the_entry_asked_for(
     monkeypatch.setenv("OPENAI_KEY", "secret")
     built = build_tts(type="openai", voice="alloy", api_key_env="OPENAI_KEY", timeout_s=7)
     assert isinstance(built, OpenAiTts)
+    # White-box, deliberately: a deployment's client is built inside the
+    # provider and handed to nobody, so its timeout and its retry budget
+    # are observable only against the real vendor. What they bound is one
+    # turn's worst case, which is why they are asserted at all.
     assert built._client.timeout == 7  # type: ignore[attr-defined]
     assert built._client.max_retries == 0  # type: ignore[attr-defined]
 
@@ -487,7 +501,16 @@ async def test_the_timeout_is_the_one_the_entry_asked_for(
 async def test_a_falsey_injected_client_is_still_the_one_used() -> None:
     """`client or ...` drops a double that answers False to a truth test,
     which any object defining __bool__ or __len__ does, and builds a real
-    client in its place."""
-    given = Falsey()
-    tts = OpenAiTts(voice="alloy", model="gpt-4o-mini-tts", api_key="test-key", client=given)  # type: ignore[arg-type]
-    assert tts._client is given
+    client in its place. Asked the way a caller would see it: the audio
+    only arrives if the request went to the injected client's transport,
+    and a dropped one would have gone to OpenAI."""
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, content=b"\x00\x01")
+
+    tts = provider(handler, client=Falsey(mock_client(handler)))
+
+    assert await collect(tts) == b"\x00\x01"
+    assert len(seen) == 1

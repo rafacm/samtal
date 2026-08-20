@@ -187,11 +187,26 @@ class FakeCompletions:
 
 
 class Falsey:
-    """A double that answers False to a truth test, which is what any
-    object defining __bool__ or __len__ does. `client or ...` drops one
-    of these on the floor and builds a real client instead, and the test
-    that thought it had injected a client watches the provider talk to
-    the vendor."""
+    """The client a test would have injected, answering False to a truth
+    test, which is what any object defining __bool__ or __len__ does.
+
+    `client or ...` drops one of these on the floor and builds a real
+    client instead, and the test that thought it had injected a client
+    watches the provider talk to the vendor. It wraps a working client
+    and forwards every attribute to it rather than being an empty shell,
+    so the injection is proved the way a caller would see it: drive one
+    call and look at what the wrapped client was asked for. A provider
+    that kept it answers; a provider that dropped it reaches for the
+    vendor and fails.
+    """
+
+    def __init__(self, client: object) -> None:
+        # Straight into the instance dict, so `__getattr__` below never
+        # sees this name and cannot recurse looking for it.
+        object.__setattr__(self, "_wrapped", client)
 
     def __bool__(self) -> bool:
         return False
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._wrapped, name)
