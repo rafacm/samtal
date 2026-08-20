@@ -445,7 +445,7 @@ carries its baseline proof inside its own PR.
   beside the before numbers. No new production interface is added
   unless a rewrite genuinely needs one, and each such addition names
   its non-test caller or is dropped.
-- [x] **[M7: the compatibility floor ADR](2026-08-19-governance-simplification-implementation.md#m7-the-compatibility-floor-adr).** (PR TBD) The ADR stated above,
+- [x] **[M7: the compatibility floor ADR](2026-08-19-governance-simplification-implementation.md#m7-the-compatibility-floor-adr).** (PR #226) The ADR stated above,
   plus the pointer from `principles.md` if the review judges it a
   product promise, and the follow-up audit issue filed. Doc-only.
 
