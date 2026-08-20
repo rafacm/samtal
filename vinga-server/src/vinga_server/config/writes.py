@@ -18,38 +18,14 @@ act differently.
 from collections.abc import Sequence
 
 from vinga_server.config import entities
+from vinga_server.config.entities import BINDING_NOTICE, MCP_RELOAD_NOTICE, RESTART_NOTICE
 from vinga_server.config.secrets import EntityKind
 
-# Printed after most mutating commands, and answered with most
-# successful writes over HTTP. The configuration is a boot-time snapshot
-# by design, and a write that quietly waits for a restart is the one
-# thing about that design an operator can be caught by, so the write
-# itself says when it takes effect.
-RESTART_NOTICE = (
-    "This applies at the next server start: the configuration is read once at boot."
-)
-
-# The first exception: a running server reads device bindings and the
-# default agent as a device asks for them, so binding a board is done
-# with the board in front of you rather than at the next maintenance
-# window.
-BINDING_NOTICE = (
-    "This applies at the device's next OTA check or connection: a running server "
-    "reads device bindings as it needs them, so no restart is needed."
-)
-
-# The second, and unlike the first it is asked for rather than noticed:
-# a running server re-reads the MCP entries, the secrets stored on them
-# and the agents' grant lists when the reload asks it to. Written on the
-# writes that the reload actually applies and nowhere else, because a
-# notice that is right about one field of a fragment and wrong about the
-# rest is worse than the conservative sentence.
-MCP_RELOAD_NOTICE = (
-    "This applies when the running server is asked to reload: run "
-    "`vinga-server config reload`, which re-reads the MCP servers and the agents' "
-    "grant lists and applies them without a restart and without dropping a "
-    "conversation."
-)
+# The three sentences a write can end with are declared on the registry,
+# beside the kinds that name them, and re-exported here because this is
+# the module both write paths already import their vocabulary from. What
+# is written here is the choosing: the two answers that depend on
+# something a kind cannot know on its own.
 
 
 def binding_notice(unloaded: Sequence[str] = ()) -> str:
@@ -147,27 +123,15 @@ def wrote_agent_defaults() -> str:
 CLEARED_DEFAULT_AGENT = "default agent cleared; the devices map is now the allowlist"
 
 
-# What a write of one kind says it did, and when it applies, hung on the
-# kind so that both write paths ask one place instead of choosing at
-# their own call site. The notice is a fact of the kind and not of the
-# route: an MCP server and the credentials stored on it are exactly what
-# a reload re-reads, and everything else waits for the restart that
-# reads the configuration again, which is the same rule
-# `secret_notice` states for the two kinds that can hold a secret.
+# What a write of one kind says it did, hung on the kind so that both
+# write paths ask one place instead of choosing at their own call site.
+entities.fill("provider", wrote=wrote_provider, deleted=deleted_provider)
+entities.fill("mcp-server", wrote=wrote_mcp_server, deleted=deleted_mcp_server)
 entities.fill(
-    "provider", wrote=wrote_provider, deleted=deleted_provider, notice=RESTART_NOTICE
+    "prompt-fragment", wrote=wrote_prompt_fragment, deleted=deleted_prompt_fragment
 )
-entities.fill(
-    "mcp-server", wrote=wrote_mcp_server, deleted=deleted_mcp_server, notice=MCP_RELOAD_NOTICE
-)
-entities.fill(
-    "prompt-fragment",
-    wrote=wrote_prompt_fragment,
-    deleted=deleted_prompt_fragment,
-    notice=RESTART_NOTICE,
-)
-entities.fill("agent", wrote=wrote_agent, deleted=deleted_agent, notice=RESTART_NOTICE)
-entities.fill("agent-defaults", wrote=wrote_agent_defaults, notice=RESTART_NOTICE)
+entities.fill("agent", wrote=wrote_agent, deleted=deleted_agent)
+entities.fill("agent-defaults", wrote=wrote_agent_defaults)
 
 
 __all__ = [
