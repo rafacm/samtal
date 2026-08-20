@@ -41,6 +41,8 @@ from vinga_server.config.loader import (
 )
 from vinga_server.config.responses import McpReloadResult
 from vinga_server.config.secrets import SecretStore
+from vinga_server.events.catalog import McpReloadApplied, McpReloadRefused
+from vinga_server.events.values import Count, McpRefusalToken, Whole
 
 from . import events
 from .manager import McpConfigError, McpManager, McpServerManager, _managers_for, _stopped
@@ -318,13 +320,7 @@ def _refused(reason: str) -> None:
     operator finds afterwards, and what it has to answer is that
     the servers are as they were.
     """
-    events.warning(
-        "mcp servers were not reloaded and nothing was changed (%s)",
-        reason,
-        event="mcp_reload",
-        outcome=REFUSED,
-        reason=reason,
-    )
+    events.emit(lambda: McpReloadRefused(reason=McpRefusalToken(reason)))
 
 
 async def _read(
@@ -440,19 +436,14 @@ async def _apply(
     # print, but what this event answers is how much a reload moved
     # and how long it took; which entries they were is the status
     # surface's answer, taken in the same breath by whoever asked.
-    events.info(
-        "mcp servers reloaded: %d started, %d restarted, %d stopped, %d unchanged",
-        len(started),
-        len(restarted),
-        len(stopped),
-        len(unchanged),
-        event="mcp_reload",
-        outcome=APPLIED,
-        started=len(started),
-        restarted=len(restarted),
-        stopped=len(stopped),
-        unchanged=len(unchanged),
-        duration_ms=round((time.monotonic() - began) * 1000),
+    events.emit(
+        lambda: McpReloadApplied(
+            started=Count(len(started)),
+            restarted=Count(len(restarted)),
+            stopped=Count(len(stopped)),
+            unchanged=Count(len(unchanged)),
+            duration_ms=Whole(round((time.monotonic() - began) * 1000)),
+        )
     )
     return McpReload(
         started=tuple(started),

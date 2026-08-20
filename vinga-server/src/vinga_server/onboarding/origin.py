@@ -32,6 +32,13 @@ from fastapi import Request
 from vinga_server.config import Config
 from vinga_server.config.models import ServerConfig
 from vinga_server.device.boundary import WEBSOCKET_PATH
+from vinga_server.events.catalog import OnboardingOff, OnboardingOn
+from vinga_server.events.values import (
+    Flag,
+    Identifier,
+    OriginProvenance,
+    OriginSourceToken,
+)
 
 from . import events
 from .keys import onboarding_key
@@ -200,32 +207,24 @@ def log_banner(server: ServerConfig) -> None:
     """
     origin = public_origin(server)
     if not server.onboarding.enabled:
-        events.info(
-            "device onboarding is off: devices are configured at the server.ota_path "
-            "path on %s (%s), which is not printed here, since that segment is this "
-            "deployment's secret",
-            origin.url,
-            origin.provenance,
-            event="onboarding_banner",
-            origin=origin.url,
-            origin_source=origin.source,
-            onboarding=False,
+        events.emit(
+            lambda: OnboardingOff(
+                origin=Identifier(origin.url),
+                origin_source=OriginSourceToken(origin.source),
+                provenance=OriginProvenance(origin.provenance),
+            )
         )
         return
-    events.info(
-        "device onboarding is on: devices are configured on %s (%s), at the short "
-        "path vinga-server config ota-url prints. The path is not repeated here, "
-        "since its key stands in front of the endpoint that issues device tokens",
-        origin.url,
-        origin.provenance,
-        event="onboarding_banner",
-        origin=origin.url,
-        origin_source=origin.source,
-        onboarding=True,
-        # Whether anything stands in front of the short route at all.
-        # With device auth off there is no secret to derive a key from
-        # and it mounts keyless, which is a fact about the deployment
-        # rather than about the key, so it is safe to say and worth
-        # saying.
-        keyed=onboarding_key(server) is not None,
+    events.emit(
+        lambda: OnboardingOn(
+            origin=Identifier(origin.url),
+            origin_source=OriginSourceToken(origin.source),
+            # Whether anything stands in front of the short route at
+            # all. With device auth off there is no secret to derive a
+            # key from and it mounts keyless, which is a fact about the
+            # deployment rather than about the key, so it is safe to say
+            # and worth saying.
+            keyed=Flag(onboarding_key(server) is not None),
+            provenance=OriginProvenance(origin.provenance),
+        )
     )

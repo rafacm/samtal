@@ -25,6 +25,21 @@ from mcp import ClientSession
 from vinga_server.config import Config, McpServerConfig
 from vinga_server.config.secrets import SecretStore
 from vinga_server.egress import EgressRefusal, check_mcp_server
+from vinga_server.events.catalog import (  # noqa: E402
+    McpCallDropped,
+    McpConnected,
+    McpConnectFailed,
+    McpDropped,
+    McpStopped,
+)
+from vinga_server.events.values import (  # noqa: E402
+    ClassNames,
+    Count,
+    Identifier,
+    McpConnectFailure,
+    McpTransportToken,
+    Whole,
+)
 from vinga_server.providers import ToolDef
 from vinga_server.runtime.prompt import ServerPrompt
 from vinga_server.tools import names
@@ -39,10 +54,8 @@ from .prompts import (
 )
 from .slice import McpSlice
 from .transport import (
-    CALL_FAILED,
     CONNECT_TIMEOUT_S,
     DISCOVERY_FAILED,
-    STOPPED,
     TRANSPORT_FAILED,
     _connect,
     _connection_identity,
@@ -572,15 +585,14 @@ class McpServerManager:
                 # published is a question with an answer that is not a
                 # log line: `vinga-server config status` prints them,
                 # to a terminal, for whoever asked.
-                events.info(
-                    "mcp server %s connected with %d tool(s)",
-                    self._name,
-                    len(self._published.tools),
-                    event="mcp_connected",
-                    entry=self._name,
-                    transport=self._config.transport,
-                    tools=len(self._published.tools),
-                    duration_ms=round((time.monotonic() - began) * 1000),
+                published = len(self._published.tools)
+                events.emit(
+                    lambda: McpConnected(
+                        entry=Identifier(self._name),
+                        transport=McpTransportToken(self._config.transport),
+                        tools=Count(published),
+                        duration_ms=Whole(round((time.monotonic() - began) * 1000)),
+                    )
                 )
                 self._warn_about_unpublished()
                 # The optional half, and it runs here for a reason. The
@@ -598,16 +610,19 @@ class McpServerManager:
                 await self._stop.wait()
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
-            self._became(DOWN, _reason(exc))
-            events.warning(
-                "mcp server %s is unavailable, its tools are absent: %s",
-                self._name,
-                self._reason,
-                event="mcp_down",
-                entry=self._name,
-                reason=_down_reason(exc, phase),
-                duration_ms=round((time.monotonic() - began) * 1000),
+        except Exception as raised:
+            # Bound to an ordinary local first: `except ... as` unbinds
+            # its name when the block ends, and the thunk below is built
+            # here and called inside the emitter's guard.
+            failed = raised
+            self._became(DOWN, _reason(failed))
+            events.emit(
+                lambda: McpConnectFailed(
+                    entry=Identifier(self._name),
+                    reason=McpConnectFailure(_down_reason(failed, phase)),
+                    duration_ms=Whole(round((time.monotonic() - began) * 1000)),
+                    failure=ClassNames(_reason(failed)),
+                )
             )
         finally:
             self._session = None
@@ -627,13 +642,7 @@ class McpServerManager:
                 # the connect ran before it failed, and how long a
                 # working connection lasted is a different number that
                 # would be answering under the same name.
-                events.info(
-                    "mcp server %s is stopped and its tools are gone",
-                    self._name,
-                    event="mcp_down",
-                    entry=self._name,
-                    reason=STOPPED,
-                )
+                events.emit(lambda: McpStopped(entry=Identifier(self._name)))
             self._settled.set()
 
     async def _capture(
@@ -773,23 +782,14 @@ class McpServerManager:
         # went wrong, and a message says what a stranger wrote. This is
         # the only place it is recorded now, since the exception raised
         # to the session carries nothing.
-        events.warning(
-            "mcp server %s: the call to published tool %s failed (%s), so its answer is lost",
-            self._name,
-            position,
-            error,
-            event="mcp_call_dropped",
-            entry=self._name,
-            position=position,
-            error=error,
+        events.emit(
+            lambda: McpCallDropped(
+                entry=Identifier(self._name),
+                position=None if position is None else Count(position),
+                error=ClassNames(error),
+            )
         )
-        events.warning(
-            "mcp server %s: dropping the connection after a failed call",
-            self._name,
-            event="mcp_down",
-            entry=self._name,
-            reason=CALL_FAILED,
-        )
+        events.emit(lambda: McpDropped(entry=Identifier(self._name)))
         self._became(DOWN, DROPPED_AFTER_FAILED_CALL)
         self._session = None
         self._published = PublishedTools(tools=[], originals={})

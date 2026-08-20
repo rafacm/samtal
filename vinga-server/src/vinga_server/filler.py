@@ -22,6 +22,8 @@ from dataclasses import dataclass
 
 from vinga_server.config import Config
 from vinga_server.events import ServerEvents
+from vinga_server.events.catalog import FillerDisabled
+from vinga_server.events.values import ClassName, Identifier
 from vinga_server.providers import AgentProviders
 
 logger = logging.getLogger(__name__)
@@ -123,14 +125,14 @@ async def build_agent_fillers(
             # a fragment of one. Handing the object itself as a `%`
             # argument also handed it to every consumer, since
             # `Emission.args` is deliberately not copied for a tap.
-            events.warning(
-                "agent %s: filler synthesis failed, latency masking is off "
-                "for this agent (%s)",
-                name,
-                type(exc).__name__,
-                event="filler_disabled",
-                agent=name,
-                error=type(exc).__name__,
+            # The two values are bound as defaults rather than closed
+            # over: this thunk is built inside a loop, and a closure
+            # would read whichever agent the loop had reached by the
+            # time the guard called it.
+            events.emit(
+                lambda agent=name, failure=exc: FillerDisabled(  # type: ignore[misc]
+                    agent=Identifier(agent), error=ClassName.of(failure)
+                )
             )
             continue
         fillers[name] = FillerClips(

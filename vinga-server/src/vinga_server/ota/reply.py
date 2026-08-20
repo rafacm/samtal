@@ -34,7 +34,30 @@ from vinga_server.config.models import (
     normalize_mac,
 )
 from vinga_server.device.bindings import DeviceAgents, DeviceBindings
-from vinga_server.events.values import OtaRefusal
+from vinga_server.events.catalog import (
+    ActivationNotOfferedRefused,
+    ActivationNotOfferedUnreadable,
+    OtaCheckActivating,
+    OtaCheckAgentNotLoaded,
+    OtaCheckNoAgent,
+    OtaCheckResolved,
+    OtaRequestRejected,
+)
+from vinga_server.events.values import (
+    ActivationCode,
+    AgentList,
+    AgentNames,
+    AlsoBoundTo,
+    BoardName,
+    ClientId,
+    DeviceId,
+    FirmwareVersion,
+    Identifier,
+    OtaRefusal,
+    OtaRefusalToken,
+    PendingRefusal,
+    ReportedMac,
+)
 from vinga_server.onboarding.origin import portal_url_line, websocket_url_for
 from vinga_server.onboarding.unbound import activation_for
 
@@ -178,71 +201,47 @@ async def check_version(request: Request) -> Response:
     said_client = bounded_descriptor(client_id, CLIENT_ID_LIMIT) or None
     # No session exists yet, so the structured record carries the device
     # rather than a session id; the websocket events pick the device up
-    # from here.
-    fields: dict[str, Any] = {
-        "device": mac,
-        "client": said_client,
-        "board": said_board,
-        "firmware": said_version,
-        "agents": agents,
+    # from here. These four are what every one of the four shapes below
+    # carries, whatever else it says: built once, and once each, because
+    # a value type refuses where it is constructed.
+    said = {
+        "device": DeviceId(mac),
+        "client": None if said_client is None else ClientId(said_client),
+        "board": BoardName(said_board),
+        "firmware": FirmwareVersion(said_version),
+        "agents": AgentNames(tuple(agents)),
         # Named in every record rather than only in the one that
         # complains about it, so a query for devices waiting on a
         # restart is one field rather than a log-message search.
-        "unloaded": list(resolution.unloaded),
+        "unloaded": AgentNames(tuple(resolution.unloaded)),
+        "said_device": ReportedMac(device_id),
     }
 
     activation = await _activation(comp, config, resolution, mac, client_id, board, version)
+
     if activation is not None:
         # A code is a claim ticket read off a screen, not a credential:
         # it belongs in the log line an operator greps for the board
         # they are holding. A device token never does.
-        fields["code"] = activation["code"]
-
-    if activation is not None:
-        events.warning(
-            "device %s (%s, firmware %s) has no agent and is showing activation code "
-            "%s; bind it with: vinga-server config add-device %s <agent>",
-            device_id,
-            said_board,
-            said_version,
-            activation["code"],
-            activation["code"],
-            event="ota_check",
-            **fields,
-        )
+        code = activation["code"]
+        events.emit(lambda: OtaCheckActivating(code=ActivationCode(code), **said))
     elif not agents and resolution.unloaded:
         # A different problem from having no agent, and a different
         # answer: the binding is there, this process is what is behind.
-        events.warning(
-            "device %s (%s, firmware %s) is bound to agent %s, which this server has "
-            "not loaded; restart to load it",
-            device_id,
-            said_board,
-            said_version,
-            ", ".join(resolution.unloaded),
-            event="ota_check",
-            **fields,
+        events.emit(
+            lambda: OtaCheckAgentNotLoaded(
+                named=AgentList.of(tuple(resolution.unloaded)), **said
+            )
         )
     elif not agents:
-        events.warning(
-            "device %s (%s, firmware %s) has no agent: bind it under devices "
-            "or set default_agent",
-            device_id,
-            said_board,
-            said_version,
-            event="ota_check",
-            **fields,
-        )
+        events.emit(lambda: OtaCheckNoAgent(**said))
     else:
-        events.info(
-            "device %s (%s, firmware %s) resolved to agent %s%s",
-            device_id,
-            said_board,
-            said_version,
-            agents[0],
-            f" (also bound to {', '.join(agents[1:])})" if len(agents) > 1 else "",
-            event="ota_check",
-            **fields,
+        events.emit(
+            lambda: OtaCheckResolved(
+                agent=Identifier(agents[0]),
+                bound_tail=AlsoBoundTo.of(tuple(agents[1:])),
+                **said,
+            )
         )
 
     body: dict[str, Any] = {}
@@ -318,27 +317,14 @@ async def _activation(
             # bound, to whoever is holding the endpoint. The warning
             # naming the failure is already in the log, from the view
             # itself.
-            events.warning(
-                "device %s is unbound in the configuration this server started with, but "
-                "the database could not be read, so no activation code was issued: this "
-                "device may already be bound. Fix the database and it is offered one at "
-                "its next check",
-                mac,
-                event="activation_not_offered",
-                device=mac,
-                reason="unreadable",
+            events.emit(
+                lambda: ActivationNotOfferedUnreadable(device=DeviceId(mac))
             )
         case "refused":
-            events.warning(
-                "device %s is unbound but was offered no activation code: %s. It is "
-                "answered exactly as it was before onboarding existed, with no token; "
-                "bind it by its MAC with: vinga-server config bind-device %s <agent>",
-                mac,
-                unbound.refusal,
-                mac,
-                event="activation_not_offered",
-                device=mac,
-                reason=unbound.refusal,
+            events.emit(
+                lambda: ActivationNotOfferedRefused(
+                    device=DeviceId(mac), reason=PendingRefusal(unbound.refusal)
+                )
             )
         case "offered" | "not_applicable":
             # Nothing to say: the device is either showing a code, which
@@ -369,13 +355,7 @@ def _bad_request(message: OtaRefusal) -> JSONResponse:
     interpolated into either channel, which is what keeps a header this
     endpoint could not read out of the log a deployment ships.
     """
-    # `str(...)` because the argument reaches every tap as the object
-    # itself: a member of the closed set is a `str` subclass, and a
-    # consumer that met one where it has always met a plain string would
-    # be reading a change nobody made on purpose.
-    events.warning(
-        "rejected OTA request: %s", str(message), event="ota_request_rejected"
-    )
+    events.emit(lambda: OtaRequestRejected(refusal=OtaRefusalToken(message)))
     return JSONResponse({"error": message}, status_code=400)
 
 

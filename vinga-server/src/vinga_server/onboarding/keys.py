@@ -48,6 +48,8 @@ from collections.abc import Awaitable, Callable
 from fastapi import HTTPException, Request, Response
 
 from vinga_server.config.models import ONBOARDING_MOUNT_PATH, ServerConfig
+from vinga_server.events.catalog import OnboardingKeyMismatch, OnboardingKeyUnshaped
+from vinga_server.events.values import Count
 
 from . import events
 
@@ -163,21 +165,10 @@ def _log_mismatch(folded: str) -> None:
     `vinga-server config ota-url`, on the operator's own terminal.
     """
     if _TYPO_ATTEMPT_RE.match(folded):
-        events.warning(
-            "a request reached the onboarding path carrying %d characters shaped like "
-            "a key, and not this server's; neither is repeated here. Check the URL "
-            "typed into the device's captive portal against the one "
-            "vinga-server config ota-url prints",
-            len(folded),
-            event="onboarding_key_mismatch",
-            attempted_length=len(folded),
+        events.emit(
+            lambda: OnboardingKeyMismatch(attempted_length=Count(len(folded)))
         )
         return
-    events.warning(
-        "a request reached the onboarding path carrying %d characters that are not "
-        "shaped like a key at all, so they are not repeated here; the URL to type "
-        "comes from vinga-server config ota-url",
-        len(folded),
-        event="onboarding_key_unshaped",
-        attempted_length=len(folded),
+    events.emit(
+        lambda: OnboardingKeyUnshaped(attempted_length=Count(len(folded)))
     )

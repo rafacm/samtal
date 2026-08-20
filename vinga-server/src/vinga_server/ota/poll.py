@@ -13,7 +13,19 @@ from fastapi import Request, Response
 from vinga_server.composition import Composition
 from vinga_server.config.models import normalize_mac
 from vinga_server.device.bindings import DeviceBindings
-from vinga_server.events.values import OtaRefusal
+from vinga_server.events.catalog import (
+    ActivationComplete,
+    ActivationPending,
+    ActivationRefusedChallengeMismatch,
+    ActivationRefusedUnknownAlgorithm,
+    ActivationRefusedUnreadableBody,
+)
+from vinga_server.events.values import (
+    ActivationCode,
+    AgentNames,
+    DeviceId,
+    OtaRefusal,
+)
 from vinga_server.onboarding.pending import PendingDevice, PendingDevices
 from vinga_server.onboarding.unbound import ACTIVATION_ALGORITHMS
 
@@ -64,12 +76,10 @@ async def activate(request: Request) -> Response:
     bindings: DeviceBindings = comp.bindings
     resolution = await bindings.resolve(mac)
     if resolution.agents:
-        events.info(
-            "device %s is activated: its next configuration check hands it a token",
-            mac,
-            event="activation_complete",
-            device=mac,
-            agents=list(resolution.agents),
+        events.emit(
+            lambda: ActivationComplete(
+                device=DeviceId(mac), agents=AgentNames(tuple(resolution.agents))
+            )
         )
         return Response(status_code=200)
 
@@ -77,13 +87,12 @@ async def activate(request: Request) -> Response:
     waiting = pending.waiting_for(mac)
     if waiting is not None:
         await _version_two(request, pending, waiting)
-    events.debug(
-        "device %s is still waiting to be claimed",
-        mac,
-        event="activation_pending",
-        device=mac,
-        code=None if waiting is None else waiting.code,
-        unloaded=list(resolution.unloaded),
+    events.emit(
+        lambda: ActivationPending(
+            device=DeviceId(mac),
+            code=None if waiting is None else ActivationCode(waiting.code),
+            unloaded=AgentNames(tuple(resolution.unloaded)),
+        )
     )
     return Response(status_code=202)
 
@@ -97,38 +106,19 @@ async def _version_two(
         # Version 1 is `{}` and upstream's own server never reads it.
         return
     payload = await _json_object(request)
-    refusal = {"device": waiting.mac, "code": waiting.code}
+    refusal = {
+        "device": DeviceId(waiting.mac),
+        "code": ActivationCode(waiting.code),
+    }
     if payload is None:
-        events.warning(
-            "device %s sent a version-2 activation body that is not a JSON object; it "
-            "is answered as still waiting. Nothing of the body is quoted here",
-            waiting.mac,
-            event="activation_refused",
-            **refusal,
-            reason="unreadable_body",
-        )
+        events.emit(lambda: ActivationRefusedUnreadableBody(**refusal))
         return
     algorithm = payload.get("algorithm")
     if not isinstance(algorithm, str) or algorithm not in ACTIVATION_ALGORITHMS:
-        events.warning(
-            "device %s sent a version-2 activation body naming an algorithm this "
-            "server does not know; it is answered as still waiting. The value is not "
-            "quoted here, since it is whatever the request carried",
-            waiting.mac,
-            event="activation_refused",
-            **refusal,
-            reason="unknown_algorithm",
-        )
+        events.emit(lambda: ActivationRefusedUnknownAlgorithm(**refusal))
         return
     if payload.get("challenge") != waiting.challenge:
-        events.warning(
-            "device %s sent a version-2 activation body answering a challenge this "
-            "server did not issue for it; it is answered as still waiting",
-            waiting.mac,
-            event="activation_refused",
-            **refusal,
-            reason="challenge_mismatch",
-        )
+        events.emit(lambda: ActivationRefusedChallengeMismatch(**refusal))
         return
     serial_number = payload.get("serial_number")
     if isinstance(serial_number, str) and serial_number.strip():

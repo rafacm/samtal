@@ -195,6 +195,30 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 
 | Event | Channels | Levels | Variants |
 | --- | --- | --- | --- |
+| `conversations_enabled` | `vinga_server.conversations.store` | WARNING | 1 |
+| `conversations_dropped` | `vinga_server.conversations.store` | WARNING | 1 |
+| `conversations_failed` | `vinga_server.conversations.store` | WARNING | 2 |
+| `conversations_pruned` | `vinga_server.conversations.store` | INFO | 1 |
+| `session_rejected` | `vinga_server.session`, `vinga_server.ws` | WARNING | 4 |
+| `session_open` | `vinga_server.session` | INFO | 1 |
+| `session_limit` | `vinga_server.session` | INFO | 1 |
+| `session_idle` | `vinga_server.session` | INFO | 1 |
+| `session_closed` | `vinga_server.session` | INFO | 1 |
+| `speaking_started` | `vinga_server.session` | INFO | 1 |
+| `heard` | `vinga_server.session` | INFO | 1 |
+| `replied` | `vinga_server.session` | INFO | 1 |
+| `agent_said` | `vinga_server.session` | INFO | 1 |
+| `handover` | `vinga_server.session` | INFO | 1 |
+| `prompt_assembled` | `vinga_server.session` | INFO | 1 |
+| `llm_retry` | `vinga_server.session` | WARNING | 2 |
+| `llm_round` | `vinga_server.session` | INFO | 2 |
+| `provider_failed` | `vinga_server.session` | WARNING | 2 |
+| `tool_call` | `vinga_server.session` | INFO | 3 |
+| `barge_in` | `vinga_server.session` | INFO | 1 |
+| `barge_in_suppressed` | `vinga_server.session` | INFO | 3 |
+| `barge_in_merged` | `vinga_server.session` | INFO | 1 |
+| `filler_skipped` | `vinga_server.session` | INFO | 2 |
+| `filler_played` | `vinga_server.session` | INFO | 1 |
 | `ota_check` | `vinga_server.ota` | INFO, WARNING | 4 |
 | `activation_not_offered` | `vinga_server.ota` | WARNING | 2 |
 | `activation_complete` | `vinga_server.ota` | INFO | 1 |
@@ -228,31 +252,867 @@ meets them, from a device's check-in to the server's own lifecycle surfaces.
 | `device_bindings_unreadable` | `vinga_server.device.bindings` | WARNING | 1 |
 | `api_error` | `vinga_server.config.api` | ERROR | 1 |
 | `api_storage_error` | `vinga_server.config.api` | ERROR | 1 |
-| `conversations_enabled` | `vinga_server.conversations.store` | WARNING | 1 |
-| `conversations_dropped` | `vinga_server.conversations.store` | WARNING | 1 |
-| `conversations_failed` | `vinga_server.conversations.store` | WARNING | 2 |
-| `conversations_pruned` | `vinga_server.conversations.store` | INFO | 1 |
-| `session_rejected` | `vinga_server.session`, `vinga_server.ws` | WARNING | 4 |
-| `session_open` | `vinga_server.session` | INFO | 1 |
-| `session_limit` | `vinga_server.session` | INFO | 1 |
-| `session_idle` | `vinga_server.session` | INFO | 1 |
-| `session_closed` | `vinga_server.session` | INFO | 1 |
-| `speaking_started` | `vinga_server.session` | INFO | 1 |
-| `heard` | `vinga_server.session` | INFO | 1 |
-| `replied` | `vinga_server.session` | INFO | 1 |
-| `agent_said` | `vinga_server.session` | INFO | 1 |
-| `handover` | `vinga_server.session` | INFO | 1 |
-| `prompt_assembled` | `vinga_server.session` | INFO | 1 |
-| `llm_retry` | `vinga_server.session` | WARNING | 2 |
-| `llm_round` | `vinga_server.session` | INFO | 2 |
-| `provider_failed` | `vinga_server.session` | WARNING | 2 |
-| `tool_call` | `vinga_server.session` | INFO | 3 |
-| `barge_in` | `vinga_server.session` | INFO | 1 |
-| `barge_in_suppressed` | `vinga_server.session` | INFO | 3 |
-| `barge_in_merged` | `vinga_server.session` | INFO | 1 |
-| `filler_skipped` | `vinga_server.session` | INFO | 2 |
-| `filler_played` | `vinga_server.session` | INFO | 1 |
 | `schema_violation` (internal) | every channel (14) | ERROR | 14 |
+
+### `conversations_enabled`
+
+The store opens at startup, which means this server is recording what is said
+to it. Said once, before anything connects, and at WARNING for the reason
+`capture_enabled` is.
+
+#### Variant 1: `vinga_server.conversations.store` at WARNING
+
+```text
+recording conversations to %s
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `PATHLIKE` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `path` | `IDENTIFIER` | yes | no |  |  |
+
+### `conversations_dropped`
+
+The store is behind and events for one session are being dropped. Said once
+per session at its first drop; the total lands on that session's row.
+
+#### Variant 1: `vinga_server.conversations.store` at WARNING
+
+```text
+session %s: the conversation store is behind, dropping events
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+
+### `conversations_failed`
+
+A write to the store failed and its batch was dropped, or a prune could not
+run.
+
+#### Variant 1: `vinga_server.conversations.store` at WARNING
+
+```text
+the conversation store dropped a batch after a write failed (%s)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `CLASS_NAME` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `failure` | `CLASS_NAME` | yes | no |  | The exception's class name, never its message. |
+
+#### Variant 2: `vinga_server.conversations.store` at WARNING
+
+```text
+the conversation store could not prune (%s)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `CLASS_NAME` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `failure` | `CLASS_NAME` | yes | no |  |  |
+
+### `conversations_pruned`
+
+Retention deleted sessions older than the window. At INFO: a policy doing its
+job.
+
+#### Variant 1: `vinga_server.conversations.store` at INFO
+
+```text
+conversations: pruned %d session(s) older than %d days
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `COUNT` | no |  |  |
+| 2 | `COUNT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `sessions` | `COUNT` | yes | no |  | A count, not a list. |
+
+### `session_rejected`
+
+A device turned away. Emitted on both scopes: the session channel for the
+refusals a session makes after the accept, and `vinga_server.ws` for the one
+the endpoint makes before a session can run at all.
+
+#### Variant 1: `vinga_server.session` at WARNING
+
+```text
+session %s rejected: the Device-Id header is not a device MAC (six colon-separated hex pairs)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `bad_device_id` |  |
+
+#### Variant 2: `vinga_server.session` at WARNING
+
+```text
+session %s rejected: device %s is bound to agent %s, which this server has not loaded; restart to load it
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `ID` | no | the `mac` syntax |  |
+| 3 | `COMPOSED` | no | the `agent_list` grammar |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `agent_not_loaded` |  |
+
+#### Variant 3: `vinga_server.session` at WARNING
+
+```text
+session %s rejected: device %s has no agent: bind it under devices or set default_agent
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `ID` | no | the `mac` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `no_agent` |  |
+
+#### Variant 4: `vinga_server.ws` at WARNING
+
+```text
+refused a websocket handshake from %s: the server is at capacity
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `COMPOSED` | no | the `device_or_unidentified` grammar |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `capacity` |  |
+
+### `session_open`
+
+A conversation starts.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s open: device %s (client %s) agent %s%s, protocol v%d, %d Hz %d ms frames in
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `ID` | no | the `mac` syntax |  |
+| 3 | `DESCRIPTOR` | no | at most 64 characters, every one printable |  |
+| 4 | `IDENTIFIER` | no |  |  |
+| 5 | `COMPOSED` | no | the `also_bound_to` grammar |  |
+| 6 | `INT` | no |  |  |
+| 7 | `INT` | no |  |  |
+| 8 | `INT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `client` | `DESCRIPTOR` | yes | yes | at most 64 characters, every one printable | The device UUID, bounded for the event only: the capture manifest and the conversation store keep the header as it arrived. |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `agents` | `IDENTIFIER_LIST` | yes | no |  |  |
+| `protocol` | `INT` | yes | no |  |  |
+| `revision` | `IDENTIFIER` | yes | no |  | Which build this server is, so every session from here on is attributable to one. |
+
+### `session_limit`
+
+The duration cap fires.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s reached the %.0f s time limit
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `FLOAT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `duration_s` | `FLOAT` | yes | no |  |  |
+
+### `session_idle`
+
+The idle timeout hangs up on a realtime session.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s idle for %.0f s, hanging up
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `FLOAT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `idle_s` | `FLOAT` | yes | no |  |  |
+| `duration_s` | `FLOAT` | yes | no |  |  |
+
+### `session_closed`
+
+A conversation ends.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s closed (device %s)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `ID` | no | the `mac` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `duration_s` | `FLOAT` | yes | no |  |  |
+| `reason` | `TOKEN` | yes | no | one of: `client`, `drain`, `error`, `idle`, `limit` | The first cause to fire, so a drain closing a session an idle timer was about to hang up on reads `drain`. |
+
+### `speaking_started`
+
+The reply's first audio frame goes out.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: speaking started
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+
+### `heard`
+
+An utterance is transcribed. No transcript: what was said is the conversation
+store's, and what an operator measures with is how long the user spoke.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: heard %.2f s of speech
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `FLOAT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `duration_s` | `FLOAT` | yes | no |  |  |
+| `language` | `ID` | no | no | the `language` syntax | Only engines that detected carry this. |
+| `language_confidence` | `FLOAT` | no | no |  |  |
+
+### `replied`
+
+A reply finishes.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: %s replied in %d sentences
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `IDENTIFIER` | no |  |  |
+| 3 | `COUNT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `sentences` | `COUNT` | yes | no |  | How many of them the user heard, so a reply a barge-in cut short reports what went out. |
+
+### `agent_said`
+
+One agent's part of a reply.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: %s said %d sentences
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `IDENTIFIER` | no |  |  |
+| 3 | `COUNT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `sentences` | `COUNT` | yes | no |  |  |
+
+### `handover`
+
+`switch_agent` succeeds.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: handed over from agent %s to %s
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `IDENTIFIER` | no |  |  |
+| 3 | `IDENTIFIER` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `from_agent` | `IDENTIFIER` | yes | no |  |  |
+| `to_agent` | `IDENTIFIER` | yes | no |  |  |
+
+### `prompt_assembled`
+
+The know-how half of a prompt is assembled and cached. The per-round memory
+read is deliberately not part of it, which is why `memory` is not one of the
+provenance forms.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: assembled %d characters of prompt for %s
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `COUNT` | no |  |  |
+| 3 | `IDENTIFIER` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `characters` | `COUNT` | yes | no |  |  |
+| `sources` | `SOURCES` | yes | no | keyed by the prompt provenance grammar, with counts for values | Each block's size by provenance: how much of the prompt came from where, never any of the prompt itself. |
+
+### `llm_retry`
+
+The first-token watchdog cancels a stalled generation and retries the round
+once.
+
+#### Variant 1: `vinga_server.session` at WARNING
+
+A provider the registry did not build names no entry.
+
+```text
+session %s: no first token after %.1f s, retrying round %d
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `FLOAT` | no |  |  |
+| 3 | `INT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `round` | `INT` | yes | no |  |  |
+| `duration_ms` | `INT` | yes | no |  |  |
+| `stage` | `IDENTIFIER` | yes | no |  |  |
+
+#### Variant 2: `vinga_server.session` at WARNING
+
+`provider` and `type` are atomic: a provider with an identity carries both.
+`host` is absent for an engine that runs in this process and `model` for a
+type that has none to name.
+
+```text
+session %s: no first token after %.1f s, retrying round %d
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `FLOAT` | no |  |  |
+| 3 | `INT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `round` | `INT` | yes | no |  |  |
+| `duration_ms` | `INT` | yes | no |  |  |
+| `stage` | `IDENTIFIER` | yes | no |  |  |
+| `provider` | `IDENTIFIER` | yes | no |  |  |
+| `type` | `IDENTIFIER` | yes | no |  |  |
+| `host` | `IDENTIFIER` | no | no |  |  |
+| `model` | `IDENTIFIER` | no | no |  | The GenAI conventions' `gen_ai.request.model`. |
+
+### `llm_round`
+
+A generation call finishes.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: %s round %d took %.2f s over %d turns
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `IDENTIFIER` | no |  |  |
+| 3 | `INT` | no |  |  |
+| 4 | `FLOAT` | no |  |  |
+| 5 | `COUNT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `round` | `INT` | yes | no |  | Counts the whole reply rather than one agent's leg, so the generation after a handover is a round of its own. |
+| `turns` | `COUNT` | yes | no |  | The cheap proxy for payload size. |
+| `duration_ms` | `INT` | yes | no |  |  |
+| `stage` | `IDENTIFIER` | yes | no |  |  |
+| `input_tokens` | `COUNT` | no | no |  |  |
+| `output_tokens` | `COUNT` | no | no |  |  |
+| `first_token_ms` | `INT` | no | no |  | Times the first spoken token, so a round that only asked for a tool carries none. |
+
+#### Variant 2: `vinga_server.session` at INFO
+
+```text
+session %s: %s round %d took %.2f s over %d turns
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `IDENTIFIER` | no |  |  |
+| 3 | `INT` | no |  |  |
+| 4 | `FLOAT` | no |  |  |
+| 5 | `COUNT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `round` | `INT` | yes | no |  |  |
+| `turns` | `COUNT` | yes | no |  |  |
+| `duration_ms` | `INT` | yes | no |  |  |
+| `stage` | `IDENTIFIER` | yes | no |  |  |
+| `provider` | `IDENTIFIER` | yes | no |  |  |
+| `type` | `IDENTIFIER` | yes | no |  |  |
+| `host` | `IDENTIFIER` | no | no |  |  |
+| `model` | `IDENTIFIER` | no | no |  | Present where the configured entry names one. The GenAI conventions' `gen_ai.request.model`. |
+| `input_tokens` | `COUNT` | no | no |  | Present where the provider reported usage; their absence is a fact about the endpoint. |
+| `output_tokens` | `COUNT` | no | no |  |  |
+| `first_token_ms` | `INT` | no | no |  |  |
+
+### `provider_failed`
+
+An ASR, LLM or TTS call fails. The class name is reported and the exception's
+message is not: a type name says what went wrong, a message says what a
+stranger wrote.
+
+#### Variant 1: `vinga_server.session` at WARNING
+
+A provider the registry did not build names no entry and no host.
+
+```text
+session %s: %s provider%s %s after %.2f s%s: %s
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `IDENTIFIER` | no |  |  |
+| 3 | `COMPOSED` | no | the `empty_fragment` grammar |  |
+| 4 | `TOKEN` | no | one of: `failed`, `timed out` |  |
+| 5 | `FLOAT` | no |  |  |
+| 6 | `COMPOSED` | no | the `empty_fragment` grammar |  |
+| 7 | `CLASS_NAME` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `error` | `CLASS_NAME` | yes | no |  |  |
+| `duration_ms` | `INT` | yes | no |  |  |
+| `stage` | `IDENTIFIER` | yes | no |  |  |
+
+#### Variant 2: `vinga_server.session` at WARNING
+
+```text
+session %s: %s provider%s %s after %.2f s%s: %s
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `IDENTIFIER` | no |  |  |
+| 3 | `COMPOSED` | no | the `quoted_provider` grammar |  |
+| 4 | `TOKEN` | no | one of: `failed`, `timed out` |  |
+| 5 | `FLOAT` | no |  |  |
+| 6 | `COMPOSED` | no | the `reaching_host` grammar |  |
+| 7 | `CLASS_NAME` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `error` | `CLASS_NAME` | yes | no |  | A round whose retry also stalled carries `FirstTokenTimeout`. |
+| `duration_ms` | `INT` | yes | no |  |  |
+| `stage` | `IDENTIFIER` | yes | no |  |  |
+| `provider` | `IDENTIFIER` | yes | no |  |  |
+| `type` | `IDENTIFIER` | yes | no |  |  |
+| `host` | `IDENTIFIER` | no | no |  |  |
+| `model` | `IDENTIFIER` | no | no |  |  |
+
+### `tool_call`
+
+A tool returns. `source` says which namespace the model reached into; the name
+itself is only ever this server's own word for it.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: %s tool%s took %.2f s%s
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `TOKEN` | no | one of: `builtin` |  |
+| 3 | `COMPOSED` | no | the `quoted_tool_name` grammar |  |
+| 4 | `FLOAT` | no |  |  |
+| 5 | `TOKEN` | no | one of: `''`, `' and failed'` |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `source` | `TOKEN` | yes | no | one of: `builtin` |  |
+| `tool` | `IDENTIFIER` | yes | no |  | The only tool names this server authors. |
+| `duration_ms` | `INT` | yes | no |  |  |
+| `is_error` | `BOOL` | yes | no |  |  |
+
+#### Variant 2: `vinga_server.session` at INFO
+
+```text
+session %s: %s tool%s took %.2f s%s
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `TOKEN` | no | one of: `mcp` |  |
+| 3 | `COMPOSED` | no | the `from_entry` grammar |  |
+| 4 | `FLOAT` | no |  |  |
+| 5 | `TOKEN` | no | one of: `''`, `' and failed'` |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `source` | `TOKEN` | yes | no | one of: `mcp` |  |
+| `entry` | `IDENTIFIER` | yes | no |  | The configured entry, never the far side's tool name. |
+| `duration_ms` | `INT` | yes | no |  |  |
+| `is_error` | `BOOL` | yes | no |  |  |
+
+#### Variant 3: `vinga_server.session` at INFO
+
+A device tool's name is the board's vocabulary and an unknown one is whatever
+the model invented, so neither is named.
+
+```text
+session %s: %s tool%s took %.2f s%s
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `TOKEN` | no | one of: `device`, `unknown` |  |
+| 3 | `COMPOSED` | no | the `empty_fragment` grammar |  |
+| 4 | `FLOAT` | no |  |  |
+| 5 | `TOKEN` | no | one of: `''`, `' and failed'` |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `source` | `TOKEN` | yes | no | one of: `device`, `unknown` |  |
+| `duration_ms` | `INT` | yes | no |  |  |
+| `is_error` | `BOOL` | yes | no |  |  |
+
+### `barge_in`
+
+Speech cuts a reply short.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: barge-in, cancelling the reply in flight
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `speech_ms` | `INT` | yes | no |  |  |
+| `speaking_ms` | `INT` | no | no |  | Milliseconds from `speaking_started` to the cancel decision, absent when the reply had not yet spoken. |
+
+### `barge_in_suppressed`
+
+An interruption is dropped and the reply lives.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: barge-in suppressed, %d ms of speech is under the %.0f ms floor
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `INT` | no |  |  |
+| 3 | `FLOAT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `min_speech` |  |
+| `speech_ms` | `INT` | yes | no |  |  |
+
+#### Variant 2: `vinga_server.session` at INFO
+
+```text
+session %s: barge-in suppressed inside the refractory window
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `refractory` |  |
+| `speech_ms` | `INT` | yes | no |  |  |
+
+#### Variant 3: `vinga_server.session` at INFO
+
+```text
+session %s: barge-in suppressed, nothing transcribed
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `reason` | `TOKEN` | yes | no | one of: `no_transcript` |  |
+| `speech_ms` | `INT` | yes | no |  |  |
+
+### `barge_in_merged`
+
+An interruption merges with the utterance the reply was transcribing.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: barge-in mid-transcription, merging the utterances
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `speech_ms` | `INT` | yes | no |  |  |
+
+### `filler_skipped`
+
+The filler timer fired but the user was there first, so no clip played.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: filler skipped, the user is speaking (%d ms heard)
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `INT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `reason` | `TOKEN` | yes | no | one of: `user_speaking` |  |
+| `speech_ms` | `INT` | yes | no |  |  |
+
+#### Variant 2: `vinga_server.session` at INFO
+
+```text
+session %s: filler skipped, a barge-in is being confirmed
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `reason` | `TOKEN` | yes | no | one of: `barge_in_pending` |  |
+
+### `filler_played`
+
+The reply was slow, so a pre-synthesized clip masked the wait. Its first frame
+is the turn's `speaking_started`.
+
+#### Variant 1: `vinga_server.session` at INFO
+
+```text
+session %s: no reply audio after %d ms, playing filler %d
+```
+
+| # | Argument | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- |
+| 1 | `ID` | no | the `session_id` syntax |  |
+| 2 | `INT` | no |  |  |
+| 3 | `COUNT` | no |  |  |
+
+| Field | Kind | Required | Nullable | Constraint | Note |
+| --- | --- | --- | --- | --- | --- |
+| `event` | `ID` | yes | no | the `event_name` syntax |  |
+| `session` | `ID` | yes | no | the `session_id` syntax |  |
+| `device` | `ID` | yes | yes | the `mac` syntax |  |
+| `agent` | `IDENTIFIER` | yes | no |  |  |
+| `delay_ms` | `INT` | yes | no |  | Measured, from the transcription to the fire. |
+| `phrase_index` | `COUNT` | yes | no |  |  |
 
 ### `ota_check`
 
@@ -1268,866 +2128,6 @@ the configuration API met unreadable stored state (%s)
 | Field | Kind | Required | Nullable | Constraint | Note |
 | --- | --- | --- | --- | --- | --- |
 | `event` | `ID` | yes | no | the `event_name` syntax |  |
-
-### `conversations_enabled`
-
-The store opens at startup, which means this server is recording what is said
-to it. Said once, before anything connects, and at WARNING for the reason
-`capture_enabled` is.
-
-#### Variant 1: `vinga_server.conversations.store` at WARNING
-
-```text
-recording conversations to %s
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `PATHLIKE` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `path` | `IDENTIFIER` | yes | no |  |  |
-
-### `conversations_dropped`
-
-The store is behind and events for one session are being dropped. Said once
-per session at its first drop; the total lands on that session's row.
-
-#### Variant 1: `vinga_server.conversations.store` at WARNING
-
-```text
-session %s: the conversation store is behind, dropping events
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-
-### `conversations_failed`
-
-A write to the store failed and its batch was dropped, or a prune could not
-run.
-
-#### Variant 1: `vinga_server.conversations.store` at WARNING
-
-```text
-the conversation store dropped a batch after a write failed (%s)
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `CLASS_NAME` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `failure` | `CLASS_NAME` | yes | no |  | The exception's class name, never its message. |
-
-#### Variant 2: `vinga_server.conversations.store` at WARNING
-
-```text
-the conversation store could not prune (%s)
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `CLASS_NAME` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `failure` | `CLASS_NAME` | yes | no |  |  |
-
-### `conversations_pruned`
-
-Retention deleted sessions older than the window. At INFO: a policy doing its
-job.
-
-#### Variant 1: `vinga_server.conversations.store` at INFO
-
-```text
-conversations: pruned %d session(s) older than %d days
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `COUNT` | no |  |  |
-| 2 | `COUNT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `sessions` | `COUNT` | yes | no |  | A count, not a list. |
-
-### `session_rejected`
-
-A device turned away. Emitted on both scopes: the session channel for the
-refusals a session makes after the accept, and `vinga_server.ws` for the one
-the endpoint makes before a session can run at all.
-
-#### Variant 1: `vinga_server.session` at WARNING
-
-```text
-session %s rejected: the Device-Id header is not a device MAC (six colon-separated hex pairs)
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `reason` | `TOKEN` | yes | no | one of: `bad_device_id` |  |
-
-#### Variant 2: `vinga_server.session` at WARNING
-
-```text
-session %s rejected: device %s is bound to agent %s, which this server has not loaded; restart to load it
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `ID` | no | the `mac` syntax |  |
-| 3 | `COMPOSED` | no | the `agent_list` grammar |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `reason` | `TOKEN` | yes | no | one of: `agent_not_loaded` |  |
-
-#### Variant 3: `vinga_server.session` at WARNING
-
-```text
-session %s rejected: device %s has no agent: bind it under devices or set default_agent
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `ID` | no | the `mac` syntax |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `reason` | `TOKEN` | yes | no | one of: `no_agent` |  |
-
-#### Variant 4: `vinga_server.ws` at WARNING
-
-```text
-refused a websocket handshake from %s: the server is at capacity
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `COMPOSED` | no | the `device_or_unidentified` grammar |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `reason` | `TOKEN` | yes | no | one of: `capacity` |  |
-
-### `session_open`
-
-A conversation starts.
-
-#### Variant 1: `vinga_server.session` at INFO
-
-```text
-session %s open: device %s (client %s) agent %s%s, protocol v%d, %d Hz %d ms frames in
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `ID` | no | the `mac` syntax |  |
-| 3 | `DESCRIPTOR` | no | at most 64 characters, every one printable |  |
-| 4 | `IDENTIFIER` | no |  |  |
-| 5 | `COMPOSED` | no | the `also_bound_to` grammar |  |
-| 6 | `INT` | no |  |  |
-| 7 | `INT` | no |  |  |
-| 8 | `INT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `client` | `DESCRIPTOR` | yes | yes | at most 64 characters, every one printable | The device UUID, bounded for the event only: the capture manifest and the conversation store keep the header as it arrived. |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `agents` | `IDENTIFIER_LIST` | yes | no |  |  |
-| `protocol` | `INT` | yes | no |  |  |
-| `revision` | `IDENTIFIER` | yes | no |  | Which build this server is, so every session from here on is attributable to one. |
-
-### `session_limit`
-
-The duration cap fires.
-
-#### Variant 1: `vinga_server.session` at INFO
-
-```text
-session %s reached the %.0f s time limit
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `FLOAT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `duration_s` | `FLOAT` | yes | no |  |  |
-
-### `session_idle`
-
-The idle timeout hangs up on a realtime session.
-
-#### Variant 1: `vinga_server.session` at INFO
-
-```text
-session %s idle for %.0f s, hanging up
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `FLOAT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `idle_s` | `FLOAT` | yes | no |  |  |
-| `duration_s` | `FLOAT` | yes | no |  |  |
-
-### `session_closed`
-
-A conversation ends.
-
-#### Variant 1: `vinga_server.session` at INFO
-
-```text
-session %s closed (device %s)
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `ID` | no | the `mac` syntax |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `duration_s` | `FLOAT` | yes | no |  |  |
-| `reason` | `TOKEN` | yes | no | one of: `client`, `drain`, `error`, `idle`, `limit` | The first cause to fire, so a drain closing a session an idle timer was about to hang up on reads `drain`. |
-
-### `speaking_started`
-
-The reply's first audio frame goes out.
-
-#### Variant 1: `vinga_server.session` at INFO
-
-```text
-session %s: speaking started
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-
-### `heard`
-
-An utterance is transcribed. No transcript: what was said is the conversation
-store's, and what an operator measures with is how long the user spoke.
-
-#### Variant 1: `vinga_server.session` at INFO
-
-```text
-session %s: heard %.2f s of speech
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `FLOAT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `duration_s` | `FLOAT` | yes | no |  |  |
-| `language` | `ID` | no | no | the `language` syntax | Only engines that detected carry this. |
-| `language_confidence` | `FLOAT` | no | no |  |  |
-
-### `replied`
-
-A reply finishes.
-
-#### Variant 1: `vinga_server.session` at INFO
-
-```text
-session %s: %s replied in %d sentences
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `IDENTIFIER` | no |  |  |
-| 3 | `COUNT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `sentences` | `COUNT` | yes | no |  | How many of them the user heard, so a reply a barge-in cut short reports what went out. |
-
-### `agent_said`
-
-One agent's part of a reply.
-
-#### Variant 1: `vinga_server.session` at INFO
-
-```text
-session %s: %s said %d sentences
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `IDENTIFIER` | no |  |  |
-| 3 | `COUNT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `sentences` | `COUNT` | yes | no |  |  |
-
-### `handover`
-
-`switch_agent` succeeds.
-
-#### Variant 1: `vinga_server.session` at INFO
-
-```text
-session %s: handed over from agent %s to %s
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `IDENTIFIER` | no |  |  |
-| 3 | `IDENTIFIER` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `from_agent` | `IDENTIFIER` | yes | no |  |  |
-| `to_agent` | `IDENTIFIER` | yes | no |  |  |
-
-### `prompt_assembled`
-
-The know-how half of a prompt is assembled and cached. The per-round memory
-read is deliberately not part of it, which is why `memory` is not one of the
-provenance forms.
-
-#### Variant 1: `vinga_server.session` at INFO
-
-```text
-session %s: assembled %d characters of prompt for %s
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `COUNT` | no |  |  |
-| 3 | `IDENTIFIER` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `characters` | `COUNT` | yes | no |  |  |
-| `sources` | `SOURCES` | yes | no | keyed by the prompt provenance grammar, with counts for values | Each block's size by provenance: how much of the prompt came from where, never any of the prompt itself. |
-
-### `llm_retry`
-
-The first-token watchdog cancels a stalled generation and retries the round
-once.
-
-#### Variant 1: `vinga_server.session` at WARNING
-
-A provider the registry did not build names no entry.
-
-```text
-session %s: no first token after %.1f s, retrying round %d
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `FLOAT` | no |  |  |
-| 3 | `INT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `round` | `INT` | yes | no |  |  |
-| `duration_ms` | `INT` | yes | no |  |  |
-| `stage` | `IDENTIFIER` | yes | no |  |  |
-
-#### Variant 2: `vinga_server.session` at WARNING
-
-`provider` and `type` are atomic: a provider with an identity carries both.
-`host` is absent for an engine that runs in this process and `model` for a
-type that has none to name.
-
-```text
-session %s: no first token after %.1f s, retrying round %d
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `FLOAT` | no |  |  |
-| 3 | `INT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `round` | `INT` | yes | no |  |  |
-| `duration_ms` | `INT` | yes | no |  |  |
-| `stage` | `IDENTIFIER` | yes | no |  |  |
-| `provider` | `IDENTIFIER` | yes | no |  |  |
-| `type` | `IDENTIFIER` | yes | no |  |  |
-| `host` | `IDENTIFIER` | no | no |  |  |
-| `model` | `IDENTIFIER` | no | no |  | The GenAI conventions' `gen_ai.request.model`. |
-
-### `llm_round`
-
-A generation call finishes.
-
-#### Variant 1: `vinga_server.session` at INFO
-
-```text
-session %s: %s round %d took %.2f s over %d turns
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `IDENTIFIER` | no |  |  |
-| 3 | `INT` | no |  |  |
-| 4 | `FLOAT` | no |  |  |
-| 5 | `COUNT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `round` | `INT` | yes | no |  | Counts the whole reply rather than one agent's leg, so the generation after a handover is a round of its own. |
-| `turns` | `COUNT` | yes | no |  | The cheap proxy for payload size. |
-| `duration_ms` | `INT` | yes | no |  |  |
-| `stage` | `IDENTIFIER` | yes | no |  |  |
-| `input_tokens` | `COUNT` | no | no |  |  |
-| `output_tokens` | `COUNT` | no | no |  |  |
-| `first_token_ms` | `INT` | no | no |  | Times the first spoken token, so a round that only asked for a tool carries none. |
-
-#### Variant 2: `vinga_server.session` at INFO
-
-```text
-session %s: %s round %d took %.2f s over %d turns
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `IDENTIFIER` | no |  |  |
-| 3 | `INT` | no |  |  |
-| 4 | `FLOAT` | no |  |  |
-| 5 | `COUNT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `round` | `INT` | yes | no |  |  |
-| `turns` | `COUNT` | yes | no |  |  |
-| `duration_ms` | `INT` | yes | no |  |  |
-| `stage` | `IDENTIFIER` | yes | no |  |  |
-| `provider` | `IDENTIFIER` | yes | no |  |  |
-| `type` | `IDENTIFIER` | yes | no |  |  |
-| `host` | `IDENTIFIER` | no | no |  |  |
-| `model` | `IDENTIFIER` | no | no |  | Present where the configured entry names one. The GenAI conventions' `gen_ai.request.model`. |
-| `input_tokens` | `COUNT` | no | no |  | Present where the provider reported usage; their absence is a fact about the endpoint. |
-| `output_tokens` | `COUNT` | no | no |  |  |
-| `first_token_ms` | `INT` | no | no |  |  |
-
-### `provider_failed`
-
-An ASR, LLM or TTS call fails. The class name is reported and the exception's
-message is not: a type name says what went wrong, a message says what a
-stranger wrote.
-
-#### Variant 1: `vinga_server.session` at WARNING
-
-A provider the registry did not build names no entry and no host.
-
-```text
-session %s: %s provider%s %s after %.2f s%s: %s
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `IDENTIFIER` | no |  |  |
-| 3 | `COMPOSED` | no | the `empty_fragment` grammar |  |
-| 4 | `TOKEN` | no | one of: `failed`, `timed out` |  |
-| 5 | `FLOAT` | no |  |  |
-| 6 | `COMPOSED` | no | the `empty_fragment` grammar |  |
-| 7 | `CLASS_NAME` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `error` | `CLASS_NAME` | yes | no |  |  |
-| `duration_ms` | `INT` | yes | no |  |  |
-| `stage` | `IDENTIFIER` | yes | no |  |  |
-
-#### Variant 2: `vinga_server.session` at WARNING
-
-```text
-session %s: %s provider%s %s after %.2f s%s: %s
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `IDENTIFIER` | no |  |  |
-| 3 | `COMPOSED` | no | the `quoted_provider` grammar |  |
-| 4 | `TOKEN` | no | one of: `failed`, `timed out` |  |
-| 5 | `FLOAT` | no |  |  |
-| 6 | `COMPOSED` | no | the `reaching_host` grammar |  |
-| 7 | `CLASS_NAME` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `error` | `CLASS_NAME` | yes | no |  | A round whose retry also stalled carries `FirstTokenTimeout`. |
-| `duration_ms` | `INT` | yes | no |  |  |
-| `stage` | `IDENTIFIER` | yes | no |  |  |
-| `provider` | `IDENTIFIER` | yes | no |  |  |
-| `type` | `IDENTIFIER` | yes | no |  |  |
-| `host` | `IDENTIFIER` | no | no |  |  |
-| `model` | `IDENTIFIER` | no | no |  |  |
-
-### `tool_call`
-
-A tool returns. `source` says which namespace the model reached into; the name
-itself is only ever this server's own word for it.
-
-#### Variant 1: `vinga_server.session` at INFO
-
-```text
-session %s: %s tool%s took %.2f s%s
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `TOKEN` | no | one of: `builtin` |  |
-| 3 | `COMPOSED` | no | the `quoted_tool_name` grammar |  |
-| 4 | `FLOAT` | no |  |  |
-| 5 | `TOKEN` | no | one of: `''`, `' and failed'` |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `source` | `TOKEN` | yes | no | one of: `builtin` |  |
-| `tool` | `IDENTIFIER` | yes | no |  | The only tool names this server authors. |
-| `duration_ms` | `INT` | yes | no |  |  |
-| `is_error` | `BOOL` | yes | no |  |  |
-
-#### Variant 2: `vinga_server.session` at INFO
-
-```text
-session %s: %s tool%s took %.2f s%s
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `TOKEN` | no | one of: `mcp` |  |
-| 3 | `COMPOSED` | no | the `from_entry` grammar |  |
-| 4 | `FLOAT` | no |  |  |
-| 5 | `TOKEN` | no | one of: `''`, `' and failed'` |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `source` | `TOKEN` | yes | no | one of: `mcp` |  |
-| `entry` | `IDENTIFIER` | yes | no |  | The configured entry, never the far side's tool name. |
-| `duration_ms` | `INT` | yes | no |  |  |
-| `is_error` | `BOOL` | yes | no |  |  |
-
-#### Variant 3: `vinga_server.session` at INFO
-
-A device tool's name is the board's vocabulary and an unknown one is whatever
-the model invented, so neither is named.
-
-```text
-session %s: %s tool%s took %.2f s%s
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `TOKEN` | no | one of: `device`, `unknown` |  |
-| 3 | `COMPOSED` | no | the `empty_fragment` grammar |  |
-| 4 | `FLOAT` | no |  |  |
-| 5 | `TOKEN` | no | one of: `''`, `' and failed'` |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `source` | `TOKEN` | yes | no | one of: `device`, `unknown` |  |
-| `duration_ms` | `INT` | yes | no |  |  |
-| `is_error` | `BOOL` | yes | no |  |  |
-
-### `barge_in`
-
-Speech cuts a reply short.
-
-#### Variant 1: `vinga_server.session` at INFO
-
-```text
-session %s: barge-in, cancelling the reply in flight
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `speech_ms` | `INT` | yes | no |  |  |
-| `speaking_ms` | `INT` | no | no |  | Milliseconds from `speaking_started` to the cancel decision, absent when the reply had not yet spoken. |
-
-### `barge_in_suppressed`
-
-An interruption is dropped and the reply lives.
-
-#### Variant 1: `vinga_server.session` at INFO
-
-```text
-session %s: barge-in suppressed, %d ms of speech is under the %.0f ms floor
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `INT` | no |  |  |
-| 3 | `FLOAT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `reason` | `TOKEN` | yes | no | one of: `min_speech` |  |
-| `speech_ms` | `INT` | yes | no |  |  |
-
-#### Variant 2: `vinga_server.session` at INFO
-
-```text
-session %s: barge-in suppressed inside the refractory window
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `reason` | `TOKEN` | yes | no | one of: `refractory` |  |
-| `speech_ms` | `INT` | yes | no |  |  |
-
-#### Variant 3: `vinga_server.session` at INFO
-
-```text
-session %s: barge-in suppressed, nothing transcribed
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `reason` | `TOKEN` | yes | no | one of: `no_transcript` |  |
-| `speech_ms` | `INT` | yes | no |  |  |
-
-### `barge_in_merged`
-
-An interruption merges with the utterance the reply was transcribing.
-
-#### Variant 1: `vinga_server.session` at INFO
-
-```text
-session %s: barge-in mid-transcription, merging the utterances
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `speech_ms` | `INT` | yes | no |  |  |
-
-### `filler_skipped`
-
-The filler timer fired but the user was there first, so no clip played.
-
-#### Variant 1: `vinga_server.session` at INFO
-
-```text
-session %s: filler skipped, the user is speaking (%d ms heard)
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `INT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `reason` | `TOKEN` | yes | no | one of: `user_speaking` |  |
-| `speech_ms` | `INT` | yes | no |  |  |
-
-#### Variant 2: `vinga_server.session` at INFO
-
-```text
-session %s: filler skipped, a barge-in is being confirmed
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `reason` | `TOKEN` | yes | no | one of: `barge_in_pending` |  |
-
-### `filler_played`
-
-The reply was slow, so a pre-synthesized clip masked the wait. Its first frame
-is the turn's `speaking_started`.
-
-#### Variant 1: `vinga_server.session` at INFO
-
-```text
-session %s: no reply audio after %d ms, playing filler %d
-```
-
-| # | Argument | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- |
-| 1 | `ID` | no | the `session_id` syntax |  |
-| 2 | `INT` | no |  |  |
-| 3 | `COUNT` | no |  |  |
-
-| Field | Kind | Required | Nullable | Constraint | Note |
-| --- | --- | --- | --- | --- | --- |
-| `event` | `ID` | yes | no | the `event_name` syntax |  |
-| `session` | `ID` | yes | no | the `session_id` syntax |  |
-| `device` | `ID` | yes | yes | the `mac` syntax |  |
-| `agent` | `IDENTIFIER` | yes | no |  |  |
-| `delay_ms` | `INT` | yes | no |  | Measured, from the transcription to the fire. |
-| `phrase_index` | `COUNT` | yes | no |  |  |
 
 ### `schema_violation`
 
