@@ -303,9 +303,9 @@ def test_an_agent_write_names_every_field_a_reload_applies(
     and every field it leaves out is one they will restart a server for
     without needing to.
 
-    Three of an agent's fields are what a reload applies: its `prompt`,
-    its `prompt_includes` and its `mcp` grants. The rest of it (the
-    provider overrides, the filler section) is built at the next start,
+    Four of an agent's fields are what a reload applies: its `prompt`,
+    its `prompt_includes`, its `mcp` grants and its `filler` section.
+    The rest of it (the provider overrides) is built at the next start,
     and both halves are said because a sentence right about one and
     silent about the other is the trap this notice exists to close.
     """
@@ -316,13 +316,15 @@ def test_an_agent_write_names_every_field_a_reload_applies(
     assert answer.json() == {"wrote": "agent sam", "notice": AGENT_NOTICE}
     # Read off the constant rather than off the answer, so the fields
     # this claims are named are named in the string itself.
-    for field in ("`prompt`", "`prompt_includes`", "`mcp`"):
+    for field in ("`prompt`", "`prompt_includes`", "`mcp`", "`filler`"):
         assert field in AGENT_NOTICE
-    # And the two clocks the applied half has, which differ: prompt text
-    # is assembled once per activation, and the tools an agent may reach
-    # are snapshotted per reply.
+    # And the three clocks the applied half has, which all differ:
+    # prompt text is assembled once per activation, the tools an agent
+    # may reach are snapshotted per reply, and the clips it masks with
+    # are bound by a conversation when it opens.
     assert "next activation" in AGENT_NOTICE
     assert "next utterance" in AGENT_NOTICE
+    assert "next conversation" in AGENT_NOTICE
     assert "next server start" in AGENT_NOTICE
 
 
