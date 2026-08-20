@@ -281,7 +281,7 @@ Every merge leaves `main` releasable: the image publishes on every
 push, so each milestone ends with lint, both suites, and the doc
 drift checks green.
 
-- [x] **[M1: the whole comparison, unexposed](2026-08-20-config-diff-read-implementation.md#m1-the-whole-comparison-unexposed).** (PR TBD) `config/diff.py`
+- [x] **[M1: the whole comparison, unexposed](2026-08-20-config-diff-read-implementation.md#m1-the-whole-comparison-unexposed).** (PR #227) `config/diff.py`
   with the regime map, the `DOMAIN_KEYS` completeness pin, and the
   model-plus-fingerprint comparison for the restart-bound kinds
   (providers as `stage.name`, prompt fragments, agents and
@@ -297,7 +297,7 @@ drift checks green.
   convergence boundaries, and deepens `McpServers` with the
   reload's diff question in read-only form; callers never learn
   connection identity, secret marks, or slice anatomy. Branch
-  `feature/config-diff`, PR TBD.
+  `feature/config-diff`, PR #227.
 - [ ] **M2: the route, complete.** The typed response models,
   published once with the `mcp_servers` lists and the
   `agents.grants` entry included; the `ApiRuntime` field, the
