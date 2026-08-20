@@ -15,22 +15,24 @@ using dates (`## YYYY-MM-DD`) as section headers instead of version numbers.
   with Hey API's openapi-ts and once with openapi-typescript and
   openapi-fetch, with exact pinned versions, lockfiles, and the output
   committed so it can be read. Each carries a strict-mode consumer
-  fixture that compiles instead of running, because a generated client
-  can compile and still be unusable: the fixtures exercise the bearer
-  token, every read and write and delete the five entities declare (the
-  agent defaults are a singleton and have no delete, which the fixtures
-  assert rather than assume), the RFC 9457 problem document a refusal
-  answers with, one field of each optional-versus-nullable character,
-  and the provider entries' passthrough options, over an exhaustive
-  inventory of all thirty-eight operations. The bearer token is the one
-  claim checked by running rather than by compiling, against an injected
-  fetch that records the request and never reaches a network. Both
+  fixture, because a generated client can compile and still be unusable:
+  the fixtures exercise every read and write and delete the five
+  entities declare (the agent defaults are a singleton and have no
+  delete, which the fixtures assert rather than assume), the RFC 9457
+  problem document a refusal answers with, one field of each
+  optional-versus-nullable character, and the provider entries'
+  passthrough options, over an exhaustive inventory of all thirty-eight
+  operations. The bearer token is the one claim settled by running
+  rather than by compiling, since what a type says about an auth option
+  is not what a client puts on the wire: each sub-project drives a
+  generated operation against an injected fetch that records the request
+  and never opens a socket, and asserts the header it observed. Both
   generators are byte-deterministic across three runs and neither output
-  was hand-edited. The recommendation is
-  Hey API, on authentication, which is the one criterion the two split
-  on; the reasoning, the per-criterion results and the two decisions
-  the admin UI still owes are in the plan's implementation doc. Nothing
-  here ships or runs in CI.
+  was hand-edited. The recommendation is Hey API, on authentication,
+  which is the one criterion the two split on; the reasoning, the
+  per-criterion results and the two decisions the admin UI still owes
+  are in the plan's implementation doc. Nothing here ships or runs in
+  CI.
 
 ### Changed
 

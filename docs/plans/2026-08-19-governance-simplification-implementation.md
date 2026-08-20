@@ -1190,12 +1190,21 @@ strict-mode consumer fixture:
 - `openapi-typescript/`: `openapi-typescript` 7.13.0 writing one
   declaration file, consumed at runtime by `openapi-fetch` 0.17.0.
 
-Both pin TypeScript 5.9.3. The assertion vocabulary the two fixtures
-are written in is shared (`shared/expect.ts`, 45 lines); the fixtures
-themselves are not, because the two client shapes are not: one calls
-generated functions, the other calls a client keyed by path template
-and HTTP method. Each fixture makes the same six claims in the same
-order, so the pair can be read side by side.
+Both pin TypeScript 5.9.3, and `tsx` 4.23.12 for the one probe that
+runs. The vocabularies the fixtures are written in are shared
+(`shared/expect.ts`, the compile-time one, 45 lines;
+`shared/observe.ts`, the runtime one, 70); the fixtures themselves are
+not, because the two client shapes are not: one calls generated
+functions, the other calls a client keyed by path template and HTTP
+method. Each fixture makes the same six claims in the same order, so
+the pair can be read side by side.
+
+Five of the six claims are compile-time, and `npx tsc --noEmit` is
+their whole test run. The authentication claim is not, because what a
+type says about an `auth` option is not what a client puts on the wire,
+so each sub-project also has a `probe.ts` that runs against an injected
+fetch and asserts the header it observes. `npm run check` is the two in
+order.
 
 Nothing under either `generated/` directory was edited by hand. The
 only two knobs turned are `openapi-ts.config.ts` (which plugins to run,
@@ -1221,8 +1230,9 @@ writes none and takes a 17 kB published dependency instead. Hey API's
 extra 37 kB is the one function per operation that its call-site
 criterion is bought with.
 
-The fixtures are 429 lines (Hey API, 6 refusal probes) and 414 lines
-(openapi-fetch, 8), sharing 45 lines of vocabulary.
+The fixtures are 538 lines (Hey API, 6 refusal probes) and 553 lines
+(openapi-fetch, 8), plus a 61-line and a 71-line runtime probe, sharing
+45 lines of compile-time vocabulary and 70 of runtime vocabulary.
 
 ### Determinism
 
@@ -1238,14 +1248,14 @@ its output.
 | # | Criterion | Hey API | openapi-typescript + openapi-fetch |
 | --- | --- | --- | --- |
 | 1 | Compiles under strict TypeScript | Pass | Pass |
-| 2 | Every operation under its `operation_id` name | Pass | Partial |
+| 2 | Every operation under its `operation_id` name | Pass (all 38) | Partial (all 38 as types, none at a call site) |
 | 3 | Five entities need no handwritten mirror | Partial | Partial |
 | 4 | No server internals beyond the document | Pass | Pass |
-| 5a | Probe: authentication | Pass | Fail |
+| 5a | Probe: authentication | Pass (observed, not inferred) | Fail (observed) |
 | 5b | Probe: read, write, delete for five entities | Pass (14 of 14; the agent defaults have no delete) | Pass (same) |
 | 5c | Probe: typed non-2xx problem responses | Pass | Pass |
 | 5d | Probe: optional versus nullable | Pass | Pass with a flag |
-| 5e | Probe: provider extension properties | Pass | Pass |
+| 5e | Probe: provider extension properties | Pass (read is exactly `unknown`) | Pass (same) |
 | 6 | Pinned generator versions | Pass | Pass |
 | 7 | Deterministic output | Pass | Pass |
 | 8 | No manual edits to generated code | Pass | Pass |
@@ -1275,6 +1285,19 @@ and pins that the path table and the operation table agree
 (`paths["/providers/{stage}/{name}"]["put"]` is exactly
 `operations["write_provider_providers__stage___name__put"]`). Finding 3
 is about the word "stable" in the criterion, and it applies to both.
+
+**The evidence is exhaustive rather than sampled** (review finding 2).
+An earlier draft called the fifteen operations the five entities need
+and claimed the result for all thirty-eight. Each fixture now carries
+the whole inventory, compared in both directions so an addition is as
+loud as a loss: Hey API against `keyof typeof sdk`, with each name also
+mapped through the namespace so a type of that name and no function
+would not satisfy it; openapi-typescript against `keyof operations`,
+and against `keyof paths` as well, since with that candidate the path
+is the call site and a renamed operation id would break neither. The
+counts are asserted beside the lists, so the 38 operations and 23 paths
+this section quotes are checked rather than counted by hand. Deleting
+one entry from either list reddens two assertions in that file.
 
 **3. Request and response types for the five entities need no
 handwritten mirror.** Partial for both, identically, and the cause is
@@ -1314,6 +1337,33 @@ built with no middleware at all is the same type as one with it, so
 forgetting authentication compiles and fails at runtime with 401 on
 every call. That is what a failing probe looks like, and it is recorded
 rather than worked around.
+
+**This is the one criterion settled by running rather than by
+compiling**, because what a type says about an `auth` option is not
+what a client puts on the wire, and the recommendation turns on the
+difference (review finding 1). Each sub-project's `probe.ts` injects a
+fetch that records the request and answers from memory, invokes
+`GET /providers/{stage}/{name}`, and asserts the header it observed. It
+is hermetic: no network, a host that does not exist, and a token that
+is a literal in the file. What the four runs observed, verbatim:
+
+| Client | `authorization` observed |
+| --- | --- |
+| Hey API, `auth: () => "spike-token"` | `Bearer spike-token` |
+| Hey API, no `auth` option | none |
+| openapi-fetch, types alone | none |
+| openapi-fetch, hand-written middleware | `Bearer spike-token` |
+
+All four requests went to
+`https://vinga.example/api/providers/llm/main` as `GET`, which is
+asserted too, so the header observation is about a request that really
+carried the path and method the operation declares. The second row is
+what makes the first evidence about the `auth` option rather than about
+a constant somewhere in the generated client, and the third is the
+openapi-fetch failure stated as an observation rather than as a
+prediction: that call is fully typed, it compiles, and it is
+unauthenticated. Both probes were proved to bite by mutation: dropping
+the token from the Hey API client turns the run red and non-zero.
 
 **5b. Read, write and delete for the five entities.** Both pass what
 there is to pass, which is not fifteen operations but fourteen. The
@@ -1511,7 +1561,11 @@ candidates split on, and it splits on the thing the admin UI does on
 every single request. Hey API carries the document's security scheme
 into the client; openapi-fetch leaves the `Authorization` header and
 the `Bearer ` prefix to a middleware the consumer writes, and a client
-that forgot it compiles.
+that forgot it compiles. This reason rests on an observation and not on
+a reading of the types: the two clients were run against an injected
+fetch, and the header that arrived was `Bearer spike-token` from Hey
+API given nothing but a token, and absent from openapi-fetch built from
+the generated types alone.
 
 Second, optionality without a corrective flag. Hey API reads the
 document's `required` list as written. openapi-typescript needs
@@ -1545,7 +1599,7 @@ HTTP client is generated into the consuming repository rather than
 installed, and an upgrade rewrites it; the generation step pins
 TypeScript below 7 until Hey API stops using the legacy compiler API;
 and the generated symbol names inherit FastAPI's verbose auto ids,
-which finding 3 says to fix at the source anyway.
+which spike finding 3 says to fix at the source anyway.
 
 **The fallback is not needed.** The plan's recorded fallback was
 handwritten types over the document if both generators failed the
@@ -1555,9 +1609,9 @@ claim holds under either, since the document is CI-drift-checked
 whatever consumes it.
 
 **Before #129 builds on this**, two decisions from the findings:
-declare explicit `operation_id`s on the entity routes (finding 3), and
-decide where an addressed read's `Envelope.entity` is narrowed to its
-write model (finding 4).
+declare explicit `operation_id`s on the entity routes (spike finding
+3), and decide where an addressed read's `Envelope.entity` is narrowed
+to its write model (spike finding 4).
 
 ### Deviations from the plan
 
@@ -1568,7 +1622,7 @@ happened. The addition is the `--default-non-nullable false` flag on
 the openapi-typescript command line: without it that candidate fails
 the optional-versus-nullable probe outright, and evaluating it under a
 setting that makes every request body wrong would have compared the
-wrong thing. The default's behaviour is recorded as finding 2 rather
+wrong thing. The default's behaviour is recorded as spike finding 2 rather
 than hidden by the flag.
 
 ### Verification
@@ -1590,17 +1644,128 @@ assumption.
 
 In the spike, run from each sub-project directory:
 
-- `npm ci` then `npm run typecheck`: clean in both, under the pinned
-  TypeScript 5.9.3 and again under 7.0.2.
+- `npm ci` then `npm run check`: clean in both. The typecheck half also
+  passes under TypeScript 7.0.2, checked separately.
 - `npm run generate` three times each with the output deleted between
   runs: byte-identical every time.
-- The fixtures were proved to bite rather than trusted. Inverting one
+- The probes were proved to bite rather than trusted. Inverting one
   nullability claim (`Nullable<AgentConfig, "prompt">` from `false` to
   `true`) turns the run red with `TS2344`, and restoring it turns it
-  green; and an unused `@ts-expect-error` is itself an error, so all
-  six refusal probes in the Hey API fixture and all eight in the
-  openapi-fetch one are load-bearing rather than decorative.
+  green; deleting one entry from an operation inventory reddens two
+  assertions; inverting the extension read from `unknown` to `any`
+  reddens one; dropping the token from the Hey API runtime probe turns
+  it red and non-zero; and an unused `@ts-expect-error` is itself an
+  error, so all six refusal probes in the Hey API fixture and all eight
+  in the openapi-fetch one are load-bearing rather than decorative.
 
 Not verified here, and not claimed: any of this running against a live
-server. The spike is compile-time by construction, which is what the
-plan asked for; the first real request will be #129's.
+server. The runtime probes answer from an injected fetch and never open
+a socket, which is the point of them; the first real request will be
+#129's.
+
+### PR review round (2026-08-20)
+
+External review of PR #222, read-only against commit `cf0ea0e1`.
+Verdict: mergeable after fixes. Four findings, all P2, all adopted,
+each with the commit that made it. Every one of them is the same
+complaint in a different place: the evaluation asserted more than its
+evidence established.
+
+**1 (P2). The authentication probe only type-checked the `auth`
+option.** It never observed a request, so it would have passed a client
+whose generated operations ignored the document's security scheme, or
+built the header with the wrong name or without the `Bearer ` prefix.
+Authentication is the one criterion the two candidates split on and the
+first reason the recommendation gives, which made the weakest evidence
+in the spike load-bearing for its conclusion.
+
+*Resolution.* Adopted (`0266dd55`). Each sub-project gains a `probe.ts`
+that runs: it injects a fetch which records the request and answers from
+memory, invokes `GET /providers/{stage}/{name}`, and asserts the header
+it observed. Hermetic by construction, with no network, a host that
+does not exist and a token that is a literal in the file. `tsx` 4.23.12
+runs it, pinned like everything else, and `npm run check` is typecheck
+then probe so it is executable rather than described. The four observed
+headers are in the 5a section above: `Bearer spike-token` from Hey API
+given nothing but a token, nothing from the same operation with the
+token removed, nothing from openapi-fetch built from the generated
+types alone, and `Bearer spike-token` from openapi-fetch once the
+hand-written middleware is installed. Proved by mutation: dropping the
+token from the Hey API client turns the probe red and non-zero.
+
+**2 (P2). The fixtures pinned fifteen operations and the doc claimed
+thirty-eight.** The round trips covered what the five entities and the
+default agent need, so a document that lost or renamed a device route,
+a secret slot or a conversation read would have left both fixtures
+green while the criterion said every operation surfaces.
+
+*Resolution.* Adopted (`bd40fce6`). Each fixture inventories the whole
+surface with exact key equality in both directions, so an addition is
+as loud as a loss: Hey API against `keyof typeof sdk`, with each name
+also mapped through the namespace since a union of keys would also be
+satisfied by a type of that name and no function; openapi-typescript
+against `keyof operations`, and against `keyof paths` as well, because
+with that candidate the path is the call site. The counts are asserted
+beside the lists, so the 38 operations and 23 paths quoted above are
+checked rather than counted by hand. Proved by mutation: deleting one
+entry from either list reddens two assertions.
+
+**3 (P2). `DELETE /default-agent` was counted as the agent defaults'
+delete.** `/agent-defaults` declares GET and PUT only, and
+`/default-agent` is a different resource: the defaults are the provider
+references every agent inherits, the default agent is which agent
+covers a device with no binding of its own. The criterion's Pass and
+the changelog's "read and a write and a delete for each of the five
+entities" were therefore both wrong.
+
+*Resolution.* Adopted (`2d70db52`). The result is recorded per entity,
+fourteen operations rather than fifteen, with the agent defaults'
+delete marked not applicable rather than passing, because a singleton
+that always exists has no state a DELETE could reach. Both fixtures
+assert the absence instead of substituting another resource for it:
+Hey API pins that the only exports matching the defaults are its read
+and its write, openapi-fetch pins the path item's `delete` as
+`undefined` and keeps a `@ts-expect-error` on the call itself.
+`/default-agent` keeps its round trip, labelled as the separate
+resource it is and given its own read and write beside the delete. The
+5b section, its table row and the changelog sentence are corrected.
+
+**4 (P2). The extension-property probes assigned to `unknown`.** `any`
+is assignable to `unknown`, so a generator emitting
+`[key: string]: any` would have passed both probes while switching type
+checking off for every option a provider carries, which is the opposite
+of what the probe exists to establish.
+
+*Resolution.* Adopted (`f4061428`). Both fixtures pin it as an
+invariant type equality, on the indexed type and on the read expression
+itself, in the vocabulary the optional-versus-nullable probes already
+use. It matters slightly more for openapi-typescript, where the index
+signature arrives through an intersection rather than on the object.
+Proved by mutation: inverting either assertion to `any` reddens the
+run.
+
+**What did not change.** No generated file was touched in this round,
+so the determinism result stands untouched as well; regenerating both
+after the round reproduces the committed output byte for byte, which
+also confirms that adding `tsx` moved nothing. No Python was touched in
+this round or in the milestone. The recommendation is unchanged, and is
+now argued from an observation rather than from a reading of the types.
+
+### Verification, after the review round
+
+Run at the last commit of the round.
+
+- Both sub-projects, `npm ci` then `npm run check`: typecheck clean and
+  probe passed, in both. The typecheck half is clean under TypeScript
+  7.0.2 as well.
+- Both generators re-run with the output deleted: `git status` on
+  `spikes/` is clean, so the committed output is still exactly what the
+  pinned generators write.
+- `git diff --name-only c7d0fbff..HEAD -- vinga-server/` is empty: the
+  milestone and its review round change no Python at all.
+- Run from `vinga-server/`, for the same reason as before, that
+  "trivially" is only a fact when it has been run: `uv run ruff check .`
+  all checks passed, `uv run pytest tests/unit -q` 2,639 passed and 16
+  skipped, `uv run pytest tests/integration -q` 60 passed, and the four
+  documentation drift checks all clean with
+  `docs/reference/api-openapi.json` byte-identical.
