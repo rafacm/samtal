@@ -6,9 +6,10 @@ what the comparison decides is `test_config_diff.py`'s and
 `test_mcp_pending.py`'s. What is left here is what only the composition
 root does, and all three parts of it are things a stub cannot show.
 
-The stored half is the reload's own re-read, so a stored world the
-reload would refuse is refused here in the same words and under the same
-status, which takes a real database and a real key to demonstrate. The
+The stored half is the re-read the reload begins with, so a stored world
+that fails it is refused here under the status it would be refused under
+there, in a sentence of this route's own rather than the store's, which
+takes a real database and a real key to demonstrate. The
 running half is read either side of that database read, so an answer is
 one world or it is no answer at all, which takes a reload landing in the
 middle of one. And nothing of a credential travels, which takes a
