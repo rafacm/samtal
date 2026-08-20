@@ -445,3 +445,93 @@ inventory (four sites) likewise before M4.
   Named in M3's scope (the session binds its generation for
   manifests), so the conversation record names the providers that
   actually served it.
+
+## Plan review round (2026-08-20)
+
+External review: codex exec, model gpt-5.6-sol, read-only against
+commit 04579e44. Verdict: not ready; a second round runs against
+the amended plan before implementation. Findings condensed but
+faithful; each carries its resolution.
+
+**1 (P1). A stored `Config` is not the serving generation during
+the staged rollout.** Putting the whole freshly loaded `Config`
+into `Generation` lets M1 apply restart-bound changes through
+inheritance (`fragments_for_agent` reads
+`agent_defaults.prompt_includes`; provider builds read effective
+defaults), lets an activation index an agent deleted in the store,
+and leaves the diff claiming `agent_defaults` pending after its
+effective fields already changed. The generation's config must be
+an overlay of only that milestone's live slices onto the previous
+generation, preserving the servable agent set and restart-bound
+defaults until M4, with field-level regime splits in the diff and
+tests for the inheritance paths.
+
+**2 (P1). The replacement counter cannot protect the diff across
+the first swap.** Advancing the counter only after the last swap
+leaves a window where a diff reads stored A, resumes after the
+generation assignment to B, sees an unmoved mark, and composes
+worlds that never coexisted. The holder must read unstable from
+before the first serving-state change until after the last swap,
+the diff must answer the retryable 409 on instability, and the
+barrier tests must sit before the assignment, between the two
+swaps, and after the install.
+
+**3 (P1). M2 synthesizes fillers against a provider identity that
+is not running.** Keying reuse by the candidate TTS identity while
+synthesizing with the running voice reports a filler applied whose
+voice is still restart-bound. Before M3 the reuse and synthesis
+key is the running TTS binding; provider-only edits neither
+invalidate nor replace clips and stay visible in the diff; M3
+switches the key to the candidate identity.
+
+**4 (P1). Provider preparation and shutdown have no complete
+resource owner.** The plan covered retirement of installed
+generations but not a mid-build failure (later constructions leak
+the earlier ones), a shielded preparation finishing after its
+caller is gone, or process shutdown of current and retired
+providers; "garbage-collected candidate" is incompatible with an
+explicit lifecycle. A provider-world builder owns every unique
+newly constructed provider until installation transfers ownership
+and closes partial or abandoned candidates exactly once, and
+`Generations` gains a lifespan shutdown operation.
+
+**5 (P1). Session generation accounting cannot attach where the
+plan says.** The registry admits a `DeviceSession` before `run()`,
+the runtime factory runs only after MAC validation and an awaited
+bindings lookup, and many admitted sessions never construct a
+runtime. One explicit generation-binding event is needed, with
+removal handling admitted-but-never-bound sessions.
+
+**6 (P1). "Byte-equivalent MCP behavior" conflicts with the
+result and the no-leak claim.** `McpReloadResult` carries the
+whole `servers` status document, not only the four outcome lists;
+keeping it falsifies "names and closed tokens only", dropping it
+breaks the one-round-trip contract and the CLI rendering. The MCP
+section must be exactly the existing `McpReloadResult`, `servers`
+included, and the no-leak suite must keep the reflected-metadata
+sentinels and the #228-style stored-value cases.
+
+**7 (P2). Provider build refusals have no declared HTTP
+taxonomy.** `ProviderError` is not a `ConfigError` and only
+`BOOT_FAILURES` handles it; an HTTP apply needs a typed refusal
+with a declared 422 contract, fixed sanitized sentence, empty
+chain, and OpenAPI plus no-leak pins.
+
+**8 (P2). The filler result cannot report the degraded outcome it
+promises.** The vocabulary needs a closed third outcome for an
+agent whose synthesis failed, with the generation still applying,
+the CLI rendering it, and the response tested directly.
+
+**9 (P2). The #195 resolution retains a falsely-live write path
+in snapshot mode.** With no engine, a device-binding or
+default-agent write can still acknowledge next-check-in
+convergence that snapshot mode cannot see. The plan must define
+runtime-write behavior in snapshot mode and add a mounted
+snapshot-mode test across write, check-in, reload, and restart.
+
+**10 (P2). Duplicate provider and filler ownership surfaces in
+`Composition`.** Widening `Generation` to own providers and
+fillers while `Composition` keeps `agent_providers` and
+`agent_fillers` makes two structures that must agree. The
+standalone fields go or become read-through derivations with no
+stored duplicate.
