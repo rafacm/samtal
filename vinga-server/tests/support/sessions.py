@@ -9,10 +9,21 @@ That is the rule for this module: a builder here calls the same factory
 the server calls, and substitutes collaborators through the arguments
 that factory already takes, rather than reaching past it.
 
-The drivers are the second half. A reply has three useful shapes to a
-test: run it and answer what was spoken, run it whole with the audio,
-or start it and leave it in flight the way an utterance leaves one, so
-that everything asking whether this session is replying sees it.
+The reading is the second part. What a session did is asked of the
+things that received it: the agent talking is read off the events
+object, where both sides of the boundary read it, and the conversation
+it kept is read from the round after, because the history exists so
+that the next round is written against what was said.
+
+Who holds the floor is the third, and the only part of this module that
+is white-box throughout. Its note says why once, for all four of its
+names.
+
+The drivers are the fourth. A reply has three useful shapes to a test:
+run it for a sentence the test names and answer what was spoken, run it
+whole with the audio, or start it and leave it in flight the way an
+utterance leaves one, so that everything asking whether this session is
+replying sees it. Their note says which of the three is public.
 
 The last section is the waiting a conversation suite does on the writer
 running behind the session. Its bound is `WRITER_TIMEOUT_S` rather than
@@ -379,6 +390,35 @@ async def run_reply(session: DeviceSession, said: str) -> list[str]:
     return spoken
 
 
+# --- what a session says it did ---------------------------------------
+
+
+def talking(session: DeviceSession) -> str | None:
+    """The agent talking right now, read where both sides of the
+    boundary read it. The events object is where the active agent
+    lives, because every event either side emits is attributed to it,
+    and `agent` on it is public."""
+    return events_of(session).agent
+
+
+# What one more round is driven with when the point of the round is to
+# see the history it was handed rather than what it answers.
+PROBE = "and then?"
+
+
+async def history(session: DeviceSession, script: Any) -> list[Any]:
+    """The conversation this session kept, as the next round sees it.
+
+    The history is not a surface: it exists so that the next round is
+    written against what was said, and the model is the thing that
+    receives it. So one more round is what makes it observable, and
+    what comes back is the turns that round was handed, minus the
+    utterance it is answering.
+    """
+    await run_reply(session, PROBE)
+    return list(script.seen[-1][0])[:-1]
+
+
 # --- who holds the floor ----------------------------------------------
 #
 # Four reaches, one reason, stated once. The turn-taking side is reached
@@ -422,32 +462,6 @@ def reply_in_flight(session: DeviceSession) -> Any:
     await or identify this one and not merely wait for it to end.
     White-box, per the note above."""
     return session.runtime._reply_task
-
-
-def talking(session: DeviceSession) -> str | None:
-    """The agent talking right now, read where both sides of the
-    boundary read it. The events object is where the active agent
-    lives, because every event either side emits is attributed to it,
-    and `agent` on it is public."""
-    return events_of(session).agent
-
-
-# What one more round is driven with when the point of the round is to
-# see the history it was handed rather than what it answers.
-PROBE = "and then?"
-
-
-async def history(session: DeviceSession, script: Any) -> list[Any]:
-    """The conversation this session kept, as the next round sees it.
-
-    The history is not a surface: it exists so that the next round is
-    written against what was said, and the model is the thing that
-    receives it. So one more round is what makes it observable, and
-    what comes back is the turns that round was handed, minus the
-    utterance it is answering.
-    """
-    await run_reply(session, PROBE)
-    return list(script.seen[-1][0])[:-1]
 
 
 async def drive_reply(session: DeviceSession, pcm: bytes) -> None:
