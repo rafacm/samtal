@@ -11,16 +11,18 @@ a word a route wants.
 """
 
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
-from dataclasses import asdict
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from tests.support.apps import entered_client
+from tests.support.configs import world
 from tests.support.problems import PROBLEM_KEYS, problem
+from vinga_server import app as app_module
+from vinga_server.app import config_reloader
 from vinga_server.config import Config
 from vinga_server.config.api import (
     DIFF_MOVED_DESCRIPTION,
@@ -30,12 +32,15 @@ from vinga_server.config.api import (
     NO_RUNTIME_DIFF,
     NO_RUNTIME_DIFF_DESCRIPTION,
     NO_RUNTIME_PROMPT_DESCRIPTION,
+    NO_STORED_WORLD,
     PROBLEM_DESCRIPTIONS,
     PROBLEM_MEDIA_TYPE,
+    RELOAD_HELD_DESCRIPTION,
     RELOAD_REFUSED_DESCRIPTION,
     build_api,
     document,
 )
+from vinga_server.config.boot import BootConfig
 from vinga_server.config.loader import (
     ConfigError,
     DatabaseBusyError,
@@ -48,10 +53,13 @@ from vinga_server.config.responses import (
     AgentsDiff,
     Applies,
     ConfigDiff,
+    ConfigReloadResult,
     EntityDiff,
     GrantsDiff,
     LiveKind,
     McpReloadResult,
+    PromptDiff,
+    PromptsReload,
     SingletonDiff,
 )
 from vinga_server.config.secrets import MASTER_KEY_ENV, generate_key
@@ -63,9 +71,7 @@ from vinga_server.runtime.prompt import Guidance
 from vinga_server.tools.mcp import (
     CONNECTED,
     DOWN,
-    RELOAD_UNREADABLE,
     UNUSED,
-    McpReload,
     McpServers,
 )
 
@@ -75,7 +81,7 @@ API_SECRET_ENV = "VINGA_API_SECRET"
 
 STATUS_PATH = "/runtime/mcp-servers"
 
-RELOAD_PATH = "/runtime/mcp-servers/reload"
+RELOAD_PATH = "/runtime/config/reload"
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
 
@@ -140,14 +146,16 @@ def serving(
     reload: object = None,
     agent_prompt: object = None,
     config_diff: object = None,
+    snapshot_only: bool = False,
 ) -> Iterator[TestClient]:
     api = build_api(
         TOKEN,
         directory,
         mcp_servers=servers,
-        mcp_reload=reload,
+        reload=reload,
         agent_prompt=agent_prompt,
         config_diff=config_diff,
+        snapshot_only=snapshot_only,
     )
     with TestClient(api, headers={"Authorization": f"Bearer {TOKEN}"}) as client:
         yield client
@@ -287,24 +295,31 @@ def test_an_entry_named_status_is_still_an_entity(client: TestClient) -> None:
 # to what came back.
 
 
-def outcome(servers: McpServers, **fields: object) -> McpReloadResult:
-    """A reload's whole answer, the way the registry composes one: the
-    four outcome lists, and the status of the registry beside them."""
-    return McpReloadResult(
-        **{field: list(names) for field, names in asdict(McpReload(**fields)).items()},
-        servers=servers.typed_status(),
+def outcome(
+    servers: McpServers, prompts: Sequence[str] = (), **fields: object
+) -> ConfigReloadResult:
+    """One apply's whole answer, the way the composition root composes
+    one: the MCP section whole, the prompts section beside it, and the
+    sections no milestone fills yet answering null."""
+    lists = ("started", "restarted", "stopped", "unchanged")
+    return ConfigReloadResult(
+        mcp=McpReloadResult(
+            **{name: list(fields.get(name, ())) for name in lists},
+            servers=servers.typed_status(),
+        ),
+        prompts=PromptsReload(changed=list(prompts)),
     )
 
 
-def answering(applied: McpReloadResult):
-    async def reload() -> McpReloadResult:
+def answering(applied: ConfigReloadResult):
+    async def reload() -> ConfigReloadResult:
         return applied
 
     return reload
 
 
 def refusing(exc: Exception):
-    async def reload() -> McpReloadResult:
+    async def reload() -> ConfigReloadResult:
         raise exc
 
     return reload
@@ -343,7 +358,12 @@ def test_half_a_runtime_refuses_to_reload_from_either_side(directory: Path) -> N
     there is no registry to take a status from, which is the whole
     point of the composition.
     """
-    orphan = McpReloadResult(started=[], restarted=[], stopped=[], unchanged=[], servers={})
+    orphan = ConfigReloadResult(
+        mcp=McpReloadResult(
+            started=[], restarted=[], stopped=[], unchanged=[], servers={}
+        ),
+        prompts=PromptsReload(changed=[]),
+    )
 
     with serving(directory, None, answering(orphan)) as client:
         refused = client.post(RELOAD_PATH)
@@ -363,22 +383,65 @@ def test_a_reload_answers_with_what_it_did_and_what_is_running(directory: Path) 
     servers = McpServers.build(
         config_with({"tools": entry_data(), "shelved": entry_data()}, ["tools"])
     )
-    applied = outcome(servers, started=("tools",), stopped=("gone",), unchanged=("shelved",))
+    applied = outcome(
+        servers,
+        prompts=("assistant",),
+        started=("tools",),
+        stopped=("gone",),
+        unchanged=("shelved",),
+    )
 
     with serving(directory, servers, answering(applied)) as client:
         response = client.post(RELOAD_PATH)
 
     assert response.status_code == 200
     answer = response.json()
-    assert set(answer) == {"started", "restarted", "stopped", "unchanged", "servers"}
-    assert answer["started"] == ["tools"]
-    assert answer["restarted"] == []
-    assert answer["stopped"] == ["gone"]
-    assert answer["unchanged"] == ["shelved"]
+    # One section per kind, and every one of them present: the schema is
+    # published complete, so a kind this server cannot apply yet answers
+    # null rather than arriving later and breaking a generated client.
+    assert set(answer) == {"mcp", "prompts", "fillers", "providers", "agents"}
+    assert answer["prompts"] == {"changed": ["assistant"]}
+    assert (answer["fillers"], answer["providers"], answer["agents"]) == (None, None, None)
+    assert set(answer["mcp"]) == {"started", "restarted", "stopped", "unchanged", "servers"}
+    assert answer["mcp"]["started"] == ["tools"]
+    assert answer["mcp"]["restarted"] == []
+    assert answer["mcp"]["stopped"] == ["gone"]
+    assert answer["mcp"]["unchanged"] == ["shelved"]
     # And the whole status document, exactly as the read beside it
     # answers: one round trip applies and verifies.
     with serving(directory, servers) as client:
-        assert answer["servers"] == client.get(STATUS_PATH).json()
+        assert answer["mcp"]["servers"] == client.get(STATUS_PATH).json()
+
+
+def test_the_mcp_section_is_what_the_retired_route_answered(directory: Path) -> None:
+    """The one pin that says the MCP move was a move.
+
+    The generalized reload has exactly three intentional transport
+    deltas: the path, this nesting, and the fixed sentence a refused
+    stored half now carries. Everything else is invariant, and the
+    invariant worth writing down is this one: the serialized `mcp`
+    section of a successful apply is byte for byte the body
+    `POST /runtime/mcp-servers/reload` used to answer with, which is the
+    four outcome lists and the status document beside them.
+    """
+    servers = McpServers.build(
+        config_with({"tools": entry_data(), "shelved": entry_data()}, ["tools"])
+    )
+    former = McpReloadResult(
+        started=["tools"],
+        restarted=[],
+        stopped=["gone"],
+        unchanged=["shelved"],
+        servers=servers.typed_status(),
+    )
+    applied = outcome(
+        servers, started=("tools",), stopped=("gone",), unchanged=("shelved",)
+    )
+
+    with serving(directory, servers, answering(applied)) as client:
+        response = client.post(RELOAD_PATH)
+
+    assert response.json()["mcp"] == former.model_dump()
 
 
 @pytest.mark.parametrize(
@@ -415,18 +478,17 @@ def test_a_read_that_fails_unexpectedly_answers_without_quoting_it(
     sentinel = "postgres://user:hunter2@db.internal/vinga"
     servers = McpServers.build(config_with({"tools": entry_data()}, ["tools"]))
 
-    def read() -> tuple[Config, None]:
+    def read() -> BootConfig:
         raise RuntimeError(f"could not connect using {sentinel}")
 
-    async def reload() -> McpReloadResult:
-        return await servers.reload_result(read)
+    reload = config_reloader(world(config_with({}, [])), servers, read)
 
     with caplog.at_level("INFO"):
         with serving(directory, servers, reload) as client:
             response = client.post(RELOAD_PATH)
 
     assert response.status_code == 500
-    assert response.json() == problem(500, RELOAD_UNREADABLE)
+    assert response.json() == problem(500, app_module.RELOAD_UNREADABLE)
     assert sentinel not in response.text
     # And nothing of it in what the server kept about the refusal
     # either, in either shipped format.
@@ -459,8 +521,8 @@ def test_a_running_server_hands_its_own_reload_to_the_api(
         )
 
     assert answered.status_code == 200, answered.text
-    assert answered.json()["unchanged"] == ["tools"]
-    assert answered.json()["servers"]["tools"]["state"] == DOWN
+    assert answered.json()["mcp"]["unchanged"] == ["tools"]
+    assert answered.json()["mcp"]["servers"]["tools"]["state"] == DOWN
 
 
 def test_the_reload_says_that_unchanged_is_about_the_connection() -> None:
@@ -503,12 +565,40 @@ def test_the_reload_describes_a_422_of_its_own() -> None:
     described = rendered[RELOAD_PATH]["post"]["responses"]["422"]["description"]
     assert described == RELOAD_REFUSED_DESCRIPTION
     assert described != PROBLEM_DESCRIPTIONS[422]
-    assert "exactly as they were" in described
+    assert "exactly as it was" in described
+    # And its 409, which the shared sentence is also not true of: one
+    # apply at a time is this endpoint's own exclusion, and the
+    # snapshot-mode refusal is the one 409 in this API that making the
+    # request again will not clear.
+    held = rendered[RELOAD_PATH]["post"]["responses"]["409"]["description"]
+    assert held == RELOAD_HELD_DESCRIPTION
+    assert held != PROBLEM_DESCRIPTIONS[409]
     # Per route rather than a global edit: the writes still describe
     # what a 422 means to them.
     assert rendered["/mcp-servers/{name}"]["put"]["responses"]["422"]["description"] == (
         PROBLEM_DESCRIPTIONS[422]
     )
+
+
+def test_a_server_with_no_store_behind_it_refuses_to_reload(directory: Path) -> None:
+    """The mode a test lane and an embedded caller run in: the
+    configuration was handed to this server rather than read from a
+    store, so the database beside it describes some other server. An
+    apply would install that description as this server's world, which
+    is why it refuses rather than doing it."""
+    servers = McpServers.build(config_with({"tools": entry_data()}, ["tools"]))
+    applied = outcome(servers)
+
+    with serving(
+        directory, servers, answering(applied), snapshot_only=True
+    ) as client:
+        response = client.post(RELOAD_PATH)
+
+    assert response.status_code == 409
+    assert response.json() == problem(409, NO_STORED_WORLD)
+    # And nothing of the apply ran: the refusal is the route's, in front
+    # of the callable it would otherwise have awaited.
+    assert "will not help" in response.json()["detail"]
 
 
 # The assembled-prompt read
@@ -755,6 +845,7 @@ def answer(
     providers: tuple[str, ...] = (),
     mcp_servers: tuple[str, ...] = (),
     grants: tuple[str, ...] = (),
+    prompts: tuple[str, ...] = (),
 ) -> ConfigDiff:
     """One whole diff, the way the composition root composes one: every
     kind present with its own regime, and whatever this case is about
@@ -766,12 +857,13 @@ def answer(
         mcp_servers=EntityDiff(
             applies=Applies.RELOAD, added=(), removed=(), changed=mcp_servers
         ),
-        prompt_fragments=EntityDiff(applies=Applies.RESTART, **NOTHING),
+        prompt_fragments=EntityDiff(applies=Applies.RELOAD, **NOTHING),
         agent_defaults=SingletonDiff(applies=Applies.RESTART, changed=False),
         agents=AgentsDiff(
             applies=Applies.RESTART,
             **NOTHING,
             grants=GrantsDiff(applies=Applies.RELOAD, changed=grants),
+            prompt=PromptDiff(applies=Applies.RELOAD, changed=prompts),
         ),
         devices=LiveKind(applies=Applies.CHECK_IN),
         default_agent=LiveKind(applies=Applies.CHECK_IN),
@@ -821,10 +913,14 @@ def test_an_application_without_a_server_has_nothing_to_compare(
 def test_the_diff_answers_every_kind_with_its_own_regime(directory: Path) -> None:
     """The whole shape on the wire, since this is the contract a client
     generates against: seven kinds, each labelled, the two live ones
-    carrying their label and nothing else, and the grants beside the
-    agents rather than inside their lists."""
+    carrying their label and nothing else, and the two halves an agent
+    entry converges by beside the agents rather than inside their
+    lists."""
     composed = answer(
-        providers=("llm.local",), mcp_servers=("tools",), grants=("assistant",)
+        providers=("llm.local",),
+        mcp_servers=("tools",),
+        grants=("assistant",),
+        prompts=("assistant",),
     )
 
     with serving(directory, None, config_diff=comparing(composed)) as client:
@@ -845,7 +941,7 @@ def test_the_diff_answers_every_kind_with_its_own_regime(directory: Path) -> Non
             "changed": ["tools"],
         },
         "prompt_fragments": {
-            "applies": "restart",
+            "applies": "reload",
             "added": [],
             "removed": [],
             "changed": [],
@@ -857,6 +953,7 @@ def test_the_diff_answers_every_kind_with_its_own_regime(directory: Path) -> Non
             "removed": [],
             "changed": [],
             "grants": {"applies": "reload", "changed": ["assistant"]},
+            "prompt": {"applies": "reload", "changed": ["assistant"]},
         },
         "devices": {"applies": "check-in"},
         "default_agent": {"applies": "check-in"},

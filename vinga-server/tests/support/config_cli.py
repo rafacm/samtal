@@ -92,7 +92,7 @@ def runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     # test here is.
     runtime: dict[str, object] = {
         "mcp_servers": None,
-        "mcp_reload": None,
+        "reload": None,
         "agent_prompt": None,
     }
     # Every client the entry point built, kept so a test can read the
@@ -115,7 +115,7 @@ def runner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             directory,
             pending=pending,
             mcp_servers=runtime["mcp_servers"],
-            mcp_reload=runtime["mcp_reload"],
+            reload=runtime["reload"],
             agent_prompt=runtime["agent_prompt"],
         )
         # A base URL with a path prefix is the deployed shape, where the

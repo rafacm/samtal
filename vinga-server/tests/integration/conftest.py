@@ -345,6 +345,14 @@ def _served_api(directory):
     the main thread, which is the one thing that would otherwise need
     care here.
     """
+    # A deployment's directory holds a database before its app is
+    # built: `main()` composes through `load_boot_config` and the ASGI
+    # entry point through `create_app` with no configuration, and both
+    # open and migrate it on the way. This fixture hands a configuration
+    # in, so it migrates the directory itself rather than composing the
+    # other shape, where the world a server serves is one no store
+    # describes and the surfaces that span both sides refuse.
+    open_database(directory).dispose()
     # The port lives on the socket rather than in the configuration: the
     # models refuse 0, which is right for a deployment and is not what
     # binding an ephemeral port means.

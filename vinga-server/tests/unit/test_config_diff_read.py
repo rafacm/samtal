@@ -30,9 +30,9 @@ import pytest
 from sqlalchemy import text
 
 from tests.support.apps import entered_client
-from tests.support.configs import config_with
+from tests.support.configs import config_with, world
 from tests.support.problems import problem
-from tests.support.tools_mcp import entry_data
+from tests.support.tools_mcp import Applying, entry_data, reading
 from vinga_server.app import (
     DIFF_DATABASE_BUSY,
     DIFF_LOADS,
@@ -275,7 +275,7 @@ async def test_a_refused_stored_half_keeps_its_type_and_loses_its_words(
     again with the sanitizing bypassed.
     """
     diff = config_diff_reader(
-        BootConfig(NO_ENTRIES, SecretStore()),
+        world(NO_ENTRIES),
         McpServers.build(NO_ENTRIES),
         failing(raised(f'agents.assistant.llm: unknown llm provider "{REJECTED}"')),
     )
@@ -296,7 +296,7 @@ async def test_a_busy_database_stays_the_retryable_refusal() -> None:
     to whoever meets it, and its own type so that it still answers
     409."""
     diff = config_diff_reader(
-        BootConfig(NO_ENTRIES, SecretStore()),
+        world(NO_ENTRIES),
         McpServers.build(NO_ENTRIES),
         failing(DatabaseBusyError(f"cannot migrate the database at /srv/{REJECTED}")),
     )
@@ -381,16 +381,6 @@ def test_neither_an_answer_nor_a_refusal_carries_a_credential(
 # One world, or none
 
 
-def moving(config: Config) -> Callable[[], tuple[Config, SecretStore | None]]:
-    """A reload's re-read of a configuration a test already has, which
-    is what makes a reload land where the test wants it."""
-
-    def read() -> tuple[Config, SecretStore | None]:
-        return config, None
-
-    return read
-
-
 class _Gated:
     """A stored read a test lets through one call at a time.
 
@@ -438,13 +428,14 @@ async def test_a_world_that_moves_under_a_read_is_read_again() -> None:
     that is true of the world running now.
     """
     servers, read = McpServers.build(BEFORE), _Gated(AFTER)
-    diff = config_diff_reader(BootConfig(BEFORE, SecretStore()), servers, read)
+    reloads = Applying(servers, BEFORE)
+    diff = config_diff_reader(reloads.generations, servers, read)
 
     answering = asyncio.create_task(diff())
     await read.in_flight()
-    installed = servers.generation
-    await servers.reload_result(moving(AFTER))
-    assert servers.generation > installed
+    installed = reloads.generations.mark
+    await reloads.apply(reading(AFTER))
+    assert reloads.generations.mark > installed
     read.let_through()
     # The second read runs in a world that is holding still.
     await read.in_flight()
@@ -456,18 +447,59 @@ async def test_a_world_that_moves_under_a_read_is_read_again() -> None:
     assert read.reads == 2
 
 
+async def test_a_read_that_lands_inside_an_apply_reads_again() -> None:
+    """The barrier between an apply's two swaps, which is the position a
+    counter cannot cover.
+
+    An apply changes serving state twice: the generation first, the MCP
+    world after it. Between them the world is neither the one before nor
+    the one after, and a mark that only counted finished applies would
+    read as steady over exactly that window. The holder reads as nothing
+    at all instead, and the guard treats no answer the way it treats a
+    different one.
+
+    The window is entered through the holder the apply enters it
+    through, rather than by holding a manager's stop open: what a reader
+    meets is the holder's state, and driving it any other way would be
+    driving something else to reach the same state.
+    """
+    servers, read = McpServers.build(BEFORE), _Gated(BEFORE)
+    reloads = Applying(servers, BEFORE)
+    diff = config_diff_reader(reloads.generations, servers, read)
+
+    answering = asyncio.create_task(diff())
+    await read.in_flight()
+    with reloads.generations.applying() as install:
+        install(reloads.generations.current())
+        # The first attempt's second sample lands inside the window, so
+        # its read is thrown away; the second attempt then starts inside
+        # the window, so its first sample is unstable too and its read
+        # is thrown away as well.
+        read.let_through()
+        await read.in_flight()
+    read.let_through()
+    # And the third runs in a world that is holding still.
+    await read.in_flight()
+    read.let_through()
+
+    answer = await answering
+    assert answer.mcp_servers.changed == ()
+    assert read.reads == DIFF_LOADS
+
+
 async def test_a_world_that_keeps_moving_refuses_rather_than_mix() -> None:
     """The bound, and what happens at the end of it. Every attempt is
     overtaken by a reload, so no attempt ever holds one world, and the
     answer is the retryable refusal rather than a comparison across two
     of them."""
     servers, read = McpServers.build(BEFORE), _Gated(AFTER)
-    diff = config_diff_reader(BootConfig(BEFORE, SecretStore()), servers, read)
+    reloads = Applying(servers, BEFORE)
+    diff = config_diff_reader(reloads.generations, servers, read)
 
     answering = asyncio.create_task(diff())
     for _ in range(DIFF_LOADS):
         await read.in_flight()
-        await servers.reload_result(moving(AFTER))
+        await reloads.apply(reading(AFTER))
         read.let_through()
 
     with pytest.raises(RunningConfigMovedError) as caught:

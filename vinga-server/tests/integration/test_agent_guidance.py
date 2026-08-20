@@ -330,12 +330,12 @@ def sharing_config(directory: Path) -> Config:
 
 
 async def test_a_fragment_written_once_is_spoken_by_every_agent_that_includes_it(
-    serve_app_in, restart_in, simulate, tmp_path: Path
+    serve_app_in, simulate, tmp_path: Path
 ) -> None:
     """The issue's verification for the shared half, end to end: one
     block of text, written in one place, reaching two agents and not the
-    third, and an edit of it reaching both of them at the restart the
-    write said it would.
+    third, and an edit of it reaching both of them at the reload the
+    write says it will, on the server that was already running.
     """
     directory = tmp_path / "db"
     config = sharing_config(directory)
@@ -363,22 +363,43 @@ async def test_a_fragment_written_once_is_spoken_by_every_agent_that_includes_it
             "/prompt-fragments/household", json={"text": REWRITTEN}
         )
         assert written.status_code == 200, written.text
-        assert "next server start" in written.json()["notice"]
+        assert "asked to reload" in written.json()["notice"]
 
-        # This server read the fragment at boot and is still holding it,
-        # which is what the notice says.
+        # Written and not applied: this server is still serving the
+        # fragment it started with, and the comparison says so under the
+        # kind's own reload label.
         during, _ = await simulate(port, HOUSE_MAC)
         assert FRAGMENT in spoken(during)
         assert REWRITTEN not in spoken(during)
+        pending = await control.get("/runtime/config/diff")
+        assert pending.json()["prompt_fragments"] == {
+            "applies": "reload",
+            "added": [],
+            "removed": [],
+            "changed": ["household"],
+        }
 
-    # The restart the write named, on the database the write landed in.
-    async with restart_in(directory, config) as (port, _):
+        # The reload the write named, on the server that is already
+        # running and without dropping anything.
+        applied = await control.post("/runtime/config/reload")
+        assert applied.status_code == 200, applied.text
+        assert applied.json()["prompts"]["changed"] == ["house", "kids"]
+
         house, _ = await simulate(port, HOUSE_MAC)
         kids, _ = await simulate(port, KIDS_MAC)
+        quiet, _ = await simulate(port, QUIET_MAC)
+        assert REWRITTEN in spoken(house)
+        assert REWRITTEN in spoken(kids)
+        assert FRAGMENT not in spoken(house)
+        # And the agent that includes nothing is untouched by any of it.
+        assert spoken(quiet).startswith("QUIET")
+        assert REWRITTEN not in spoken(quiet)
 
-    assert REWRITTEN in spoken(house)
-    assert REWRITTEN in spoken(kids)
-    assert FRAGMENT not in spoken(house)
+        # The comparison empties for the half that was applied, which is
+        # the care point of the read: what a reload has already applied
+        # is not reported as pending.
+        settled = await control.get("/runtime/config/diff")
+        assert settled.json()["prompt_fragments"]["changed"] == []
 
 
 # The two clocks, in one held session
@@ -417,10 +438,11 @@ def held_config(directory: Path) -> Config:
             )
         },
         agent_defaults=dict.fromkeys(("asr", "tts", "vad"), "mock") | {"mcp": [ENTRY]},
+        prompt_fragments={"held": {"text": FRAGMENT}},
         agents={
             "alpha": {"prompt": "ALPHA", "llm": "to-beta"},
             "beta": {"prompt": "BETA", "llm": "to-gamma"},
-            "gamma": {"prompt": "GAMMA", "llm": "plain"},
+            "gamma": {"prompt": "GAMMA", "llm": "plain", "prompt_includes": ["held"]},
         },
         devices={HELD_MAC: ["alpha", "beta", "gamma"]},
         default_agent="alpha",
@@ -444,11 +466,11 @@ async def rewrite_guidance(control: httpx.AsyncClient, text: str) -> None:
         ),
     )
     assert written.status_code == 200, written.text
-    applied = await control.post("/runtime/mcp-servers/reload")
+    applied = await control.post("/runtime/config/reload")
     assert applied.status_code == 200, applied.text
-    assert applied.json()["unchanged"] == [ENTRY]
-    assert applied.json()["restarted"] == []
-    assert applied.json()["servers"][ENTRY]["state"] == "connected"
+    assert applied.json()["mcp"]["unchanged"] == [ENTRY]
+    assert applied.json()["mcp"]["restarted"] == []
+    assert applied.json()["mcp"]["servers"][ENTRY]["state"] == "connected"
 
 
 async def reconnect(app, shipping: str) -> None:
@@ -502,14 +524,27 @@ async def test_one_session_across_a_reload_a_switch_and_a_memory_write(
             assert GUIDANCE in first
 
             await rewrite_guidance(control, "Ask twice.")
+            # And an edit to the shared fragment gamma includes, applied
+            # by the same kind of request: the two are different kinds
+            # of prompt text and they converge at the same moment, which
+            # is the next activation.
+            rewritten = await control.put(
+                "/prompt-fragments/held", json={"text": REWRITTEN}
+            )
+            assert rewritten.status_code == 200, rewritten.text
+            applied = await control.post("/runtime/config/reload")
+            assert applied.status_code == 200, applied.text
+            assert applied.json()["prompts"]["changed"] == ["gamma"]
 
             # Beta hands over to gamma, which is activated now: its half
             # is assembled after the reload and carries what the reload
-            # applied.
+            # applied, on the socket this conversation opened on.
             second = await device.say_something()
             assert second.startswith("GAMMA")
             assert "Ask twice." in second
             assert GUIDANCE not in second
+            assert REWRITTEN in second
+            assert FRAGMENT not in second
             # And what the server shipped about itself, which this entry
             # opted into, as the connection gamma was activated over
             # captured it.

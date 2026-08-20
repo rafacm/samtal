@@ -69,14 +69,16 @@ from vinga_server.config.models import (
     ServerConfig,
 )
 from vinga_server.config.responses import (
-    RELOAD_OUTCOMES,
+    RELOAD_SECTIONS,
     Acknowledgement,
     AssembledPrompt,
     ConfigDocument,
+    ConfigReloadResult,
     Envelope,
-    McpReloadResult,
     McpServerStatus,
     PendingDevice,
+    flags,
+    outcomes,
 )
 from vinga_server.config.secrets import (
     MASK,
@@ -172,6 +174,14 @@ UNRECOGNIZED_ANSWER = "a body this client does not recognize"
 UNREADABLE_READ = f"the configuration API answered a read with {UNRECOGNIZED_ANSWER}"
 
 UNREADABLE_RELOAD = f"the configuration API answered the reload with {UNRECOGNIZED_ANSWER}"
+
+# What the reload listing prints for a kind this server cannot apply
+# while it runs. The sections are declared complete from the first
+# release that has any of them, so that a client generated from the
+# contract never meets a grown answer, and a kind whose milestone has
+# not landed answers null rather than an empty answer that would claim
+# it had been considered.
+NOT_APPLIED = "(this server does not apply this kind without a restart)"
 
 # A write is the one whose refusal has to say what is now unknown: the
 # request may well have been applied, and this client cannot tell.
@@ -1275,23 +1285,41 @@ def _block(value: str) -> str:
 
 
 def _reload_listing(answer: object) -> str:
-    """What the reload did, and then what is running.
+    """What the reload applied, kind by kind, and then what is running.
 
     The outcomes first, because they are the answer to the question that
-    was asked, and the status underneath because it is the answer to the
-    one that follows: an entry that started is not thereby connected,
-    and the block below it says which.
+    was asked, and the MCP status underneath because it is the answer to
+    the one that follows: an entry that started is not thereby
+    connected, and the block below it says which.
+
+    One block per section, and every section printed, including the ones
+    this server does not apply yet: a section silently missing from the
+    output would read as a kind with nothing to report rather than as a
+    kind this build does not touch. What each section can say is read
+    off its own model rather than listed here, so a section or an
+    outcome added to the result is one the operator sees, and a field
+    shaped like neither a list of names nor a flag is a failing test
+    rather than output nobody notices is gone.
 
     Read as one shape, the status half included, which is what the
     result declares: the outcome lists are printed name by name and the
     status half is a document a listing renders, so a stray shape
     anywhere in here would otherwise become output or a traceback.
     """
-    applied = _understood(McpReloadResult, answer, UNREADABLE_RELOAD)
-    lines = [
-        f"{outcome}: " + (_names(applied[outcome]) or "(none)") for outcome in RELOAD_OUTCOMES
-    ]
-    return "\n".join(lines) + "\n\n" + _status_block(applied["servers"])
+    applied = _understood(ConfigReloadResult, answer, UNREADABLE_RELOAD)
+    lines: list[str] = []
+    for section, shape in RELOAD_SECTIONS.items():
+        body = applied[section]
+        if body is None:
+            lines.append(f"{section}: {NOT_APPLIED}")
+            continue
+        lines.append(f"{section}:")
+        lines += [
+            f"  {outcome}: " + (_names(body[outcome]) or "(none)")
+            for outcome in outcomes(shape)
+        ]
+        lines += [f"  {flag}: {'yes' if body[flag] else 'no'}" for flag in flags(shape)]
+    return "\n".join(lines) + "\n\n" + _status_block(applied["mcp"]["servers"])
 
 
 def _summary(document: Mapping[str, object]) -> str:
@@ -1992,7 +2020,7 @@ def _running_path(args: argparse.Namespace) -> str:
 
 
 def _reload_path(args: argparse.Namespace) -> str:
-    return _path("runtime", "mcp-servers", "reload")
+    return _path("runtime", "config", "reload")
 
 
 def _assembled_path(args: argparse.Namespace) -> str:
@@ -2027,10 +2055,10 @@ STATUS = Act(method="GET", path=_running_path, render=_printed(_status_listing))
 PROMPT = Act(method="GET", path=_assembled_path, render=_printed(_prompt_listing))
 
 # The one act that changes what a server is doing without writing
-# anything, and it prints both halves of the answer: what the reload did,
-# and what every configured entry is doing now that it has been done. No
-# local row either, with more force than the two above: there is nothing
-# to reload when there is no server.
+# anything, and it prints both halves of the answer: what the reload
+# applied, and what every configured MCP entry is doing now that it has
+# been done. No local row either, with more force than the two above:
+# there is nothing to reload when there is no server.
 RELOAD = Act(
     method="POST",
     path=_reload_path,
@@ -2235,8 +2263,8 @@ def _parser() -> argparse.ArgumentParser:
         "reload",
         parents=[common],
         help=(
-            "apply the stored MCP servers and the agents' grant lists to the running "
-            "server, without a restart and without dropping a conversation"
+            "apply the stored configuration to the running server, without a restart "
+            "and without dropping a conversation"
         ),
     )
     applying.set_defaults(run=_act, act=RELOAD)

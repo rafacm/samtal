@@ -24,9 +24,10 @@ from xiaozhi_sdk import XiaoZhiWebsocket
 
 from tests.integration.conftest import FRAME_BYTES, SAMPLE_RATE, speech_pcm, spoken
 from tests.support.problems import PROBLEM_KEYS
+from vinga_server.app import RELOAD_REFUSED
 from vinga_server.config import Config
 from vinga_server.config.models import API_MOUNT_PATH
-from vinga_server.config.writes import MCP_RELOAD_NOTICE
+from vinga_server.config.writes import RELOAD_NOTICE
 
 STDIO_SERVER = Path(__file__).parents[1] / "support" / "mcp_stdio_server.py"
 
@@ -156,19 +157,19 @@ async def test_a_written_and_granted_server_is_usable_without_a_restart(
             assert written.status_code == 200, written.text
             # And the write said how to apply it, which is what this
             # test then does.
-            assert written.json()["notice"] == MCP_RELOAD_NOTICE
+            assert written.json()["notice"] == RELOAD_NOTICE
 
             granted = await control.put(
                 "/agents/assistant", json={"prompt": "ASSISTANT", "mcp": [ENTRY]}
             )
             assert granted.status_code == 200, granted.text
 
-            applied = await control.post("/runtime/mcp-servers/reload")
+            applied = await control.post("/runtime/config/reload")
             assert applied.status_code == 200, applied.text
-            assert applied.json()["started"] == [ENTRY]
-            assert applied.json()["restarted"] == []
-            assert applied.json()["stopped"] == []
-            running = applied.json()["servers"][ENTRY]
+            assert applied.json()["mcp"]["started"] == [ENTRY]
+            assert applied.json()["mcp"]["restarted"] == []
+            assert applied.json()["mcp"]["stopped"] == []
+            running = applied.json()["mcp"]["servers"][ENTRY]
             assert running["state"] == "connected", running
             assert TOOL in running["tools"]
             assert running["grants"] == {"assistant": None}
@@ -225,14 +226,15 @@ async def test_a_refused_reload_leaves_the_running_servers_alone(
             assert (await control.delete(f"/devices/{DEVICE_MAC}")).status_code == 200
             assert (await control.delete("/default-agent")).status_code == 200
 
-            refused = await control.post("/runtime/mcp-servers/reload")
+            refused = await control.post("/runtime/config/reload")
 
             assert refused.status_code == 422
             assert set(refused.json()) == PROBLEM_KEYS
-            assert refused.json()["detail"].startswith(
-                "the reload was refused and nothing was changed:"
-            )
-            assert "default_agent is required" in refused.json()["detail"]
+            assert refused.json()["detail"] == RELOAD_REFUSED
+            # And it names nothing of what it refused on: the stored
+            # half is arbitrary bytes, and the location is available
+            # from a server started over the same store.
+            assert "default_agent" not in refused.json()["detail"]
             # Nothing was applied, and the instants say so rather than
             # the states: a manager stopped and started again would
             # report `connected` too, and would have moved.
@@ -245,10 +247,10 @@ async def test_a_refused_reload_leaves_the_running_servers_alone(
             # other way of saying the refusal never touched it.
             repaired = await control.put("/default-agent", json={"name": "assistant"})
             assert repaired.status_code == 200, repaired.text
-            applied = await control.post("/runtime/mcp-servers/reload")
+            applied = await control.post("/runtime/config/reload")
             assert applied.status_code == 200, applied.text
-            assert applied.json()["unchanged"] == [ENTRY]
-            assert applied.json()["servers"] == before
+            assert applied.json()["mcp"]["unchanged"] == [ENTRY]
+            assert applied.json()["mcp"]["servers"] == before
 
             assert await device.say_something() == "The tool says rhubarb."
         finally:

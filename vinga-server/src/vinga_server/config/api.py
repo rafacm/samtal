@@ -75,6 +75,7 @@ from vinga_server.config.loader import (
     DeviceAlreadyBoundError,
     ReloadInProgressError,
     RunningConfigMovedError,
+    SnapshotOnlyError,
     StorageError,
     UnknownEntityError,
 )
@@ -89,13 +90,13 @@ from vinga_server.config.responses import (
     ConfigDiff,
     ConfigDiffReader,
     ConfigDocument,
+    ConfigReloader,
+    ConfigReloadResult,
     DefaultAgent,
     DefaultAgentName,
     DeviceBinding,
     Envelope,
     FieldError,
-    McpReloader,
-    McpReloadResult,
     McpServerStatus,
     McpStatusSource,
     PendingDevice,
@@ -108,7 +109,6 @@ from vinga_server.config.responses import (
 from vinga_server.config.secrets import MASK, SecretLocation, load_keys, provider_identity
 from vinga_server.config.store import ConfigStore
 from vinga_server.config.writes import (
-    BINDING_NOTICE,
     CLEARED_DEFAULT_AGENT,
     RESTART_NOTICE,
     binding_notice,
@@ -154,7 +154,7 @@ from vinga_server.events.values import ClassName
 # more force: it imports the SDK's clients and this project's provider
 # layer, none of which rendering a document has any business loading. It
 # is not named anywhere any more. What the routes are handed is
-# `McpStatusSource` and `McpReloader` from `responses.py`, which say what
+# `McpStatusSource` and `ConfigReloader` from `responses.py`, which say what
 # this application asks of a running server out of typing and the
 # response models, so the annotations resolve at import and the
 # constraint holds by construction.
@@ -205,14 +205,21 @@ API_DESCRIPTION = (
     "shapes are that one `entity` and the three bodies this document describes as "
     "arguments rather than as entities: a device's `agents`, the default agent's "
     "`name`, and a credential's `secret`.\n\n"
-    "Configuration is a boot-time snapshot, so a successful write applies at the "
-    "next server start rather than immediately. Device bindings are the one "
-    "exception: a running server reads them, and the default agent, as a device "
-    "asks for them, so binding or unbinding a device applies at that device's "
-    "next OTA check or connection. The exception ends where the agent does, "
-    "since a server builds an agent's providers at boot: a binding naming an "
-    "agent this server has not loaded waits for the restart that loads it. Every "
-    "write says which of the two happened, in its `notice`.\n\n"
+    "A write is stored, and when it reaches a running server depends on the kind. "
+    "Most of the configuration is read once at start and served until the next one: "
+    "the providers, the agent set, `agent_defaults`, and the whole server section, "
+    "which is this process's own file and is never re-read. The rest converges at one "
+    "of two other boundaries. Device bindings and the default agent are read as a "
+    "device asks for them, so binding or unbinding a device applies at that device's "
+    "next OTA check or connection; that exception ends where the agent does, since a "
+    "server builds an agent's providers at start, so a binding naming an agent this "
+    "server has not loaded waits for the restart that loads it. The MCP entries with "
+    "the secrets stored on them, the agents' `mcp` grant lists, the shared prompt "
+    "fragments and each agent's own prompt text are applied by "
+    "`POST /runtime/config/reload`, without a restart and without dropping a "
+    "conversation. Every write says which of these happened, in its `notice`, and an "
+    "agent write says two things because an agent entry's fields fall on both sides "
+    "of that line.\n\n"
     "A device with no binding and no default agent to cover it is answered at its "
     "configuration check with a six-digit activation code, which it shows on its "
     "screen and speaks. `/devices/pending` lists the devices showing one, keyed by "
@@ -236,11 +243,14 @@ API_DESCRIPTION = (
     "`GET /runtime/config/diff` is the third read there, and the one that spans both "
     "sides: what the database holds that this server is not serving, kind by kind, as "
     "the entity names added, removed and changed, each kind carrying the boundary its "
-    "changes converge at. `restart` is the boot-time snapshot; `reload` is what the "
-    "MCP reload below applies, which is the MCP entries and the agents' grants; "
-    "`check-in` is the device bindings and the default agent, which a device is "
-    "answered as it asks and which are therefore never pending, so they carry the "
-    "label alone and no lists. Changed means the stored state differs from the "
+    "changes converge at. `restart` is what this process read once and serves until it "
+    "is started again; `reload` is what the apply below puts in place, which is the "
+    "MCP entries, the agents' grants, the shared prompt fragments and each agent's own "
+    "prompt text; `check-in` is the device bindings and the default agent, which a "
+    "device is answered as it asks and which are therefore never pending, so they "
+    "carry the label alone and no lists. The agents' entry spans all three, so their "
+    "kind carries two entries of its own beside the restart-bound lists: `grants` and "
+    "`prompt`, each labelled `reload`. Changed means the stored state differs from the "
     "comparison baseline rather than that something was written: an edit changed back "
     "before anyone looked produces no diff, and a rewritten stored secret counts as "
     "different, because what is compared is an opaque mark over the ciphertext and it "
@@ -252,19 +262,23 @@ API_DESCRIPTION = (
     "configuration and connects nothing, while the reload below goes on to build a "
     "server for every entry an agent references and can still refuse on one of "
     "those.\n\n"
-    "`POST /runtime/mcp-servers/reload` is the second exception to the boot-time "
-    "snapshot, and unlike device bindings it is asked for rather than noticed. It "
-    "re-reads the `mcp_servers` entries, the secrets stored on them and the agents' "
-    "`mcp` grant lists, and applies them to the running server: entries are started, "
-    "restarted, stopped or left alone, and no conversation is dropped. When a live "
-    "conversation meets the result depends on which half of an entry moved. The tools "
-    "it may reach are snapshotted per reply, so a started, restarted or stopped entry "
-    "is picked up on its next utterance. An entry's `instructions` is prompt text, and "
-    "prompt text is assembled at an activation and cached for it, so a rewrite reaches "
-    "a conversation at its next activation, a new session or an agent switch, and "
-    "never a reply of one already running; `GET /runtime/agents/{name}/prompt` "
-    "previews what a session opening now would be sent. Everything else about an agent "
-    "still waits for a restart, which is why writes to those keep saying so.\n\n"
+    "`POST /runtime/config/reload` is the one action in that namespace, and unlike "
+    "device bindings it is asked for rather than noticed. It re-reads the stored "
+    "configuration and applies every kind it can apply while the process runs: the "
+    "`mcp_servers` entries with the secrets stored on them, the agents' `mcp` grant "
+    "lists, the shared prompt fragments, and each agent's own prompt text and "
+    "includes. Entries are started, restarted, stopped or left alone, and no "
+    "conversation is dropped. Nothing is swapped, stopped or started until the whole "
+    "new world has been composed, validated and built, so a refusal has changed "
+    "nothing at all. When a live conversation meets the result depends on which half "
+    "moved. The tools it may reach are snapshotted per reply, so a started, restarted "
+    "or stopped entry is picked up on its next utterance. Prompt text is assembled at "
+    "an activation and cached for it, so an agent's prompt, a fragment it includes and "
+    "an entry's `instructions` alike reach a conversation at its next activation, "
+    "which is a new session or an agent switch, and never a reply of one already "
+    "running; `GET /runtime/agents/{name}/prompt` previews what a session opening now "
+    "would be sent. Everything else about an agent still waits for a restart, which is "
+    "why writes to those keep saying so.\n\n"
     "The `/conversations` namespace is not stored configuration either: it reads the "
     "conversation store, the record of what was said, which "
     "`server.conversations.enabled` switches on. Three reads: the session list "
@@ -326,6 +340,13 @@ REFUSAL_STATUS: dict[type[ConfigError], int] = {
     # read that has to describe one running world found the world had
     # moved under it, and refused rather than answer with two.
     RunningConfigMovedError: 409,
+    # The fifth is the odd one out and shares the status anyway, because
+    # what it has in common with the four is the whole of what a status
+    # says: nothing was changed. A server composed from a snapshot has
+    # no store describing its world, so the two surfaces that span both
+    # sides have nothing to span. Retrying will not help, and unlike the
+    # others its sentence says so.
+    SnapshotOnlyError: 409,
     StorageError: 500,
     NoRuntimeError: 503,
     ConfigError: 422,
@@ -569,10 +590,29 @@ NO_RUNTIME_PROMPT_DESCRIPTION = (
 # guarantee the endpoint makes about a refusal.
 RELOAD_REFUSED_DESCRIPTION = (
     "The stored configuration was refused: it does not compose into a valid snapshot, "
-    "or a server it names could not be built (an environment reference nothing sets, a "
-    "stored credential that will not decrypt, an entry `server.local_only` forbids). "
-    "Nothing was stopped, started or swapped, and the running servers are exactly as "
-    "they were."
+    "it composes into one this server cannot serve yet (a prompt fragment deleted while "
+    "something still restart-bound names it), a credential stored in it will not open "
+    "under the configured keys, or a server it names could not be built (an environment "
+    "reference nothing sets, an entry `server.local_only` forbids). Nothing was swapped, "
+    "stopped or started, and the running server is exactly as it was. The `detail` is "
+    "fixed and names no location, which this refusal shares with the comparison read "
+    "beside it and with nothing else in this API: what was refused is arbitrary stored "
+    "state, and a sentence composed over it can quote a value that was written into the "
+    "wrong field. A server started from this store refuses on the same state and names "
+    "the location it refused on."
+)
+
+# And its 409, which is neither of the two the shared sentence covers on
+# this route: one apply at a time is this endpoint's own exclusion, and
+# the snapshot-mode refusal is the one 409 in this API that retrying
+# will not clear.
+RELOAD_HELD_DESCRIPTION = (
+    "Either an apply of this server's configuration is already running, or the "
+    "configuration database's write lock is held by another request, or this server "
+    "serves a configuration that no store describes and so has nothing to apply. "
+    "Nothing was changed. The first two clear on their own and the request can be made "
+    "again; the third is what this server is, and only starting one from a store "
+    "changes it."
 )
 
 # The diff read's three refusals that cannot inherit a shared sentence.
@@ -584,20 +624,22 @@ RELOAD_REFUSED_DESCRIPTION = (
 DIFF_REFUSED_DESCRIPTION = (
     "The stored half was refused: it does not compose into a valid snapshot, or a "
     "credential stored in it will not decrypt under the configured keys. The `detail` "
-    "is fixed and names nothing, which is this refusal alone among the ones this API "
-    "answers with: what was refused is stored state, the sentence for it would be "
-    "composed over that state, and this read's answers are entity names and labels "
-    "only. `POST /runtime/mcp-servers/reload` re-reads the same stored half, refuses "
-    "on the same state, and names the location it refused on, having changed nothing. "
-    "Nothing was compared here and nothing was changed."
+    "is fixed and names nothing, which this refusal shares with the reload beside it "
+    "and with nothing else this API answers with: what was refused is stored state, the "
+    "sentence for it would be composed over that state, and this read's answers are "
+    "entity names and labels only. A server started from this store refuses on the same "
+    "state and names the location it refused on. Nothing was compared here and nothing "
+    "was changed."
 )
 
 DIFF_MOVED_DESCRIPTION = (
-    "Either the configuration database's write lock is held by another request, or the "
-    "running MCP world was replaced by a reload while this read was between its two "
-    "halves. An answer built across such a change would describe two states that never "
-    "existed together, so it is refused instead. Nothing was changed and the request "
-    "can be retried."
+    "Either the configuration database's write lock is held by another request, the "
+    "running world was replaced by a reload while this read was between its two halves, "
+    "or this server serves a configuration that no store describes and so has nothing "
+    "to compare. An answer built across a reload would describe two states that never "
+    "existed together, so it is refused instead. Nothing was changed. The first two "
+    "clear on their own and the request can be made again; the third is what this "
+    "server is, and only starting one from a store changes it."
 )
 
 NO_RUNTIME_DIFF_DESCRIPTION = (
@@ -616,6 +658,24 @@ NO_RUNTIME_DIFF = (
     "stored configuration with. An empty diff is not the honest answer here, since it "
     "would say that everything stored is already in effect. A deployment reaches this "
     "read on its server's own port."
+)
+
+# And what both surfaces that span the two sides say when there is only
+# one side. A server composed from a configuration handed to it serves a
+# world no store describes, so the database beside it holds whatever has
+# been written since and nothing about what is running: comparing the
+# two would report the whole world pending, and applying it would
+# install a domain half that describes some other server. Fixed, and
+# said once here because the two refusals are the same fact met from
+# two directions.
+NO_STORED_WORLD = (
+    "this server serves a configuration it was given rather than one it read from a "
+    "store, so no stored configuration describes what it is running. The database in "
+    "its directory holds whatever has been written to it since, which is not this "
+    "server's world: comparing the two would report everything as pending, and applying "
+    "it would replace what is running with a description of some other server. Nothing "
+    "was changed, and making the request again will not help; a server started from a "
+    "store answers both of these."
 )
 
 
@@ -740,9 +800,10 @@ class ApiRuntime:
     loaded_agents: frozenset[str]
     pending: PendingDevices
     mcp_servers: McpStatusSource | None
-    mcp_reload: McpReloader | None
+    reload: ConfigReloader | None
     agent_prompt: Callable[[str], Awaitable[Any]] | None
     config_diff: ConfigDiffReader | None
+    snapshot_only: bool = False
 
 
 def build_api(
@@ -751,9 +812,10 @@ def build_api(
     loaded_agents: Collection[str] = (),
     pending: PendingDevices | None = None,
     mcp_servers: McpStatusSource | None = None,
-    mcp_reload: McpReloader | None = None,
+    reload: ConfigReloader | None = None,
     agent_prompt: Callable[[str], Awaitable[Any]] | None = None,
     config_diff: ConfigDiffReader | None = None,
+    snapshot_only: bool = False,
 ) -> FastAPI:
     """The sub-application the server mounts: the routes, gated.
 
@@ -781,14 +843,23 @@ def build_api(
     application built without a server, and the read answers with an
     empty object.
 
-    `mcp_reload` applies a re-read of the stored configuration to those
-    managers. A callable rather than the pieces it needs, because what
-    it closes over is the composition root's business: the configuration
-    this process booted on, whose server section the re-read composes
-    onto, and the registry that owns where the blocking half of it runs.
-    None is the honest answer for an application without a server, and
-    the route refuses with 503 rather than pretending to have applied
-    something.
+    `reload` applies the stored configuration to the running server: the
+    world new work binds and the MCP managers that serve it. A callable
+    rather than the pieces it needs, because what it closes over is the
+    composition root's business: the generation holder, the registry,
+    and where the blocking half of the re-read runs. None is the honest
+    answer for an application without a server, and the route refuses
+    with 503 rather than pretending to have applied something.
+
+    `snapshot_only` says that the server around this application was
+    composed from a configuration handed to it rather than read from a
+    store. False is the ordinary deployment and the default, because an
+    application built without a server around it is not in that mode
+    either: it has no server at all, which the fields above already say.
+    What the mode changes is the three surfaces that would otherwise
+    describe a store that describes nothing this server serves: the diff
+    and the reload refuse, and a device or default-agent write says that
+    what it wrote takes effect when a server boots from this store.
 
     `agent_prompt` assembles the prompt a session opening now as one
     agent would be sent, and answers None for an agent this server did
@@ -811,9 +882,10 @@ def build_api(
         loaded_agents,
         pending,
         mcp_servers,
-        mcp_reload,
+        reload,
         agent_prompt,
         config_diff,
+        snapshot_only,
     )
     # A lifespan of its own, which runs only when this application is the
     # top-level one: it opens the configuration database and installs the
@@ -838,9 +910,10 @@ def build_api_runtime(
     loaded_agents: Collection[str] = (),
     pending: PendingDevices | None = None,
     mcp_servers: McpStatusSource | None = None,
-    mcp_reload: McpReloader | None = None,
+    reload: ConfigReloader | None = None,
     agent_prompt: Callable[[str], Awaitable[Any]] | None = None,
     config_diff: ConfigDiffReader | None = None,
+    snapshot_only: bool = False,
 ) -> ApiRuntime:
     """What a request to this application resolves out of the server
     around it, assembled.
@@ -871,9 +944,10 @@ def build_api_runtime(
         loaded_agents=frozenset(loaded_agents),
         pending=pending if pending is not None else _empty_pending(),
         mcp_servers=mcp_servers,
-        mcp_reload=mcp_reload,
+        reload=reload,
         agent_prompt=agent_prompt,
         config_diff=config_diff,
+        snapshot_only=snapshot_only,
     )
 
 
@@ -1007,15 +1081,28 @@ def _mcp_servers(request: Request) -> McpStatusSource | None:
 McpServersDep = Annotated[McpStatusSource | None, Depends(_mcp_servers)]
 
 
-def _mcp_reload(request: Request) -> McpReloader | None:
-    """What applies a re-read of the stored configuration to the running
-    MCP managers, or None for an application built without a server.
-    Taken from the application for the reason the store is."""
+def _reload(request: Request) -> ConfigReloader | None:
+    """What applies the stored configuration to the running server, or
+    None for an application built without one. Taken from the
+    application for the reason the store is."""
     runtime: ApiRuntime = request.app.state.api_runtime
-    return runtime.mcp_reload
+    return runtime.reload
 
 
-McpReloadDep = Annotated[McpReloader | None, Depends(_mcp_reload)]
+ReloadDep = Annotated[ConfigReloader | None, Depends(_reload)]
+
+
+def _snapshot_only(request: Request) -> bool:
+    """Whether the server around this application serves a configuration
+    that no store describes. Taken from the application for the reason
+    the store is, and beside `loaded_agents` because it is the same kind
+    of fact: something about the server that a write's acknowledgement
+    and a runtime action both have to know."""
+    runtime: ApiRuntime = request.app.state.api_runtime
+    return runtime.snapshot_only
+
+
+SnapshotOnlyDep = Annotated[bool, Depends(_snapshot_only)]
 
 
 def _agent_prompt(request: Request) -> Callable[[str], Awaitable[Any]] | None:
@@ -1417,54 +1504,74 @@ def _runtime(api: FastAPI) -> None:
         }
 
     @api.post(
-        "/runtime/mcp-servers/reload",
-        response_model=McpReloadResult,
+        "/runtime/config/reload",
+        response_model=ConfigReloadResult,
         responses=_problems(
-            401, 409, 422, 500, 503, instead={422: RELOAD_REFUSED_DESCRIPTION}
+            401,
+            409,
+            422,
+            500,
+            503,
+            instead={
+                409: RELOAD_HELD_DESCRIPTION,
+                422: RELOAD_REFUSED_DESCRIPTION,
+            },
         ),
     )
-    async def reload_mcp_servers(
-        servers: McpServersDep, reload: McpReloadDep
-    ) -> McpReloadResult:
-        """Re-read the MCP servers and the agents' grants, and apply
-        them to this running server.
+    async def reload_config(
+        servers: McpServersDep, reload: ReloadDep, snapshot_only: SnapshotOnlyDep
+    ) -> ConfigReloadResult:
+        """Apply the stored configuration to this running server.
 
-        The one action in this namespace, and the one exception to
-        "configuration applies at the next start" that a request rather
-        than a device asks for. What it re-reads is the `mcp_servers`
-        entries, the secrets stored on them and the effective `mcp`
-        lists, and nothing else: an agent's prompt, its providers, its
-        memory and the whole server section stay as this process booted
-        them, so a new agent still waits for the restart that builds it.
+        The one action in this namespace, and the one way a stored
+        change reaches a running server without a restart. What it
+        applies is every kind this server can apply while it runs, which
+        today is the MCP entries with the secrets stored on them and the
+        agents' effective `mcp` grant lists, the shared prompt
+        fragments, and each agent's own prompt text and includes.
+        Everything else still waits for the start that reads it: the
+        providers, the agent set, `agent_defaults`, and the whole server
+        section, which is this process's own file and is never re-read.
 
-        Nothing is stopped or started until every manager the new
-        configuration needs has been built, so a refusal (422) has
+        Nothing is swapped, stopped or started until the whole new world
+        has been composed, validated and built, so a refusal (422) has
         changed nothing at all. A server that merely will not connect is
-        not a refusal: it applies, and says `down` with its reason
-        below, and is reconnected in the background when a session that
-        would use it opens.
+        not a refusal: it applies, and says `down` with its reason under
+        `mcp.servers`, and is reconnected in the background when a
+        session that would use it opens.
 
         Live conversations are not dropped, and when one meets the
-        result depends on which half of an entry moved. The tools an
-        agent may reach are snapshotted per reply, so a session picks
-        those up on its next utterance; a call in flight on a server
-        this stopped fails into the same error result a server dropping
-        mid-call produces. An entry's `instructions` is prompt text,
-        which is assembled at an activation and cached for it, so a
-        rewrite reaches a conversation at its next activation, a new
-        session or an agent switch. Such an entry is reported
-        `unchanged` here, which is a statement about its connection: the
+        result depends on which half moved. The tools an agent may reach
+        are snapshotted per reply, so a session picks those up on its
+        next utterance; a call in flight on a server this stopped fails
+        into the same error result a server dropping mid-call produces.
+        Prompt text is assembled at an activation and cached for it, so
+        an agent's own prompt, a fragment it includes and an entry's
+        `instructions` alike reach a conversation at its
+        next activation, which is a new session or an agent switch, and
+        never a reply of one already running. Such an entry is reported `unchanged`
+        under `mcp`, which is a statement about its connection: the
         connection is what did not change.
 
-        One reload runs at a time: a concurrent one is refused with 409
+        The world arrives in two steps, which is what makes the sentence
+        above per half rather than per apply: what a new activation
+        assembles from is put in place first, and the MCP managers are
+        stopped, started and swapped after it, so a session activating
+        between the two sees the new prompts with the old tool world for
+        at most one utterance. Nothing else can interleave, because one
+        apply runs at a time.
+
+        One apply runs at a time: a concurrent one is refused with 409
         and has changed nothing, like a write that could not take the
-        database's lock.
+        database's lock. A server serving a configuration that no store
+        describes refuses with 409 as well, and says that starting from
+        a store is what changes it.
         """
         # This docstring is the endpoint's description in the committed
         # document, so what belongs to the handler rather than to the
         # contract is said here. What the reload did and what is running
-        # afterwards arrive together, composed where the two phases are:
-        # taking them apart here would put an invariant of the reload's
+        # afterwards arrive together, composed where the phases are:
+        # taking them apart here would put an invariant of the apply's
         # (no await between the outcomes and the status, so the two
         # halves describe one world) in a request handler, which is the
         # last place able to keep it.
@@ -1478,6 +1585,8 @@ def _runtime(api: FastAPI) -> None:
         # halves, as it did before the composing left.
         if reload is None or servers is None:
             raise NoRuntimeError(PROBLEM_DESCRIPTIONS[503])
+        if snapshot_only:
+            raise SnapshotOnlyError(NO_STORED_WORLD)
         return await reload()
 
     @api.get(
@@ -1496,7 +1605,9 @@ def _runtime(api: FastAPI) -> None:
             },
         ),
     )
-    async def read_config_diff(diff: ConfigDiffDep) -> ConfigDiff:
+    async def read_config_diff(
+        diff: ConfigDiffDep, snapshot_only: SnapshotOnlyDep
+    ) -> ConfigDiff:
         """What the database holds that this server is not serving, kind
         by kind, with the boundary each kind's changes converge at.
 
@@ -1520,9 +1631,10 @@ def _runtime(api: FastAPI) -> None:
         it that will not decrypt, is refused here under the status it
         would be refused under there. That equivalence runs one way
         only: this compares configuration and connects nothing, while a
-        reload goes on to build a server per referenced entry and can
-        still refuse on one of those, so an answer here says what has
-        not been applied and never that applying it would succeed.
+        reload goes on to compose the world it would serve and to build
+        a server per referenced entry, and can still refuse on either,
+        so an answer here says what has not been applied and never that
+        applying it would succeed.
         The running half is read on the loop that owns it, either side
         of that database read: a reload landing in between would leave
         the two halves describing states that never existed together, so
@@ -1538,6 +1650,8 @@ def _runtime(api: FastAPI) -> None:
         # answer apart would be holding an invariant it cannot keep.
         if diff is None:
             raise NoRuntimeError(NO_RUNTIME_DIFF)
+        if snapshot_only:
+            raise SnapshotOnlyError(NO_STORED_WORLD)
         return await diff()
 
 
@@ -1779,6 +1893,7 @@ def _writes(api: FastAPI) -> None:
         store: StoreDep,
         loaded: LoadedAgentsDep,
         pending: PendingDep,
+        snapshot_only: SnapshotOnlyDep,
     ) -> dict[str, str]:
         """Bind the device showing this activation code, and retire the
         code.
@@ -1853,7 +1968,7 @@ def _writes(api: FastAPI) -> None:
         # it.
         return _acknowledge(
             bound_device(bound.mac, bound.agents),
-            binding_notice(_unloaded(bound.agents, loaded)),
+            binding_notice(_unloaded(bound.agents, loaded), snapshot_only),
         )
 
     @api.put(
@@ -1863,7 +1978,12 @@ def _writes(api: FastAPI) -> None:
         openapi_extra=_request_body(DeviceBinding),
     )
     def write_device(
-        mac: str, body: RawBody, store: StoreDep, loaded: LoadedAgentsDep, pending: PendingDep
+        mac: str,
+        body: RawBody,
+        store: StoreDep,
+        loaded: LoadedAgentsDep,
+        pending: PendingDep,
+        snapshot_only: SnapshotOnlyDep,
     ) -> dict[str, str]:
         """Bind one device to one or more agents. The MAC is normalized
         before it is written, so the two spellings reach one row.
@@ -1888,7 +2008,7 @@ def _writes(api: FastAPI) -> None:
         # that is already serving it.
         return _acknowledge(
             bound_device(bound.mac, bound.agents),
-            binding_notice(_unloaded(bound.agents, loaded)),
+            binding_notice(_unloaded(bound.agents, loaded), snapshot_only),
         )
 
     @api.delete(
@@ -1896,13 +2016,17 @@ def _writes(api: FastAPI) -> None:
         response_model=Acknowledgement,
         responses=_problems(401, 404, 409, 422, 500),
     )
-    def remove_device(mac: str, store: StoreDep) -> dict[str, str]:
+    def remove_device(
+        mac: str, store: StoreDep, snapshot_only: SnapshotOnlyDep
+    ) -> dict[str, str]:
         """Remove one device's binding, which with no default agent set
         means the device is refused at the handshake. Live, with no
         agent to be loaded or not: the device stops being served at its
         next check-in, though a conversation already running is left to
         finish."""
-        return _acknowledge(deleted_device(store.delete_device(mac)), BINDING_NOTICE)
+        return _acknowledge(
+            deleted_device(store.delete_device(mac)), binding_notice(snapshot_only=snapshot_only)
+        )
 
     @api.put(
         "/default-agent",
@@ -1911,7 +2035,11 @@ def _writes(api: FastAPI) -> None:
         openapi_extra=_request_body(DefaultAgentName),
     )
     def write_default_agent(
-        body: RawBody, store: StoreDep, loaded: LoadedAgentsDep, pending: PendingDep
+        body: RawBody,
+        store: StoreDep,
+        loaded: LoadedAgentsDep,
+        pending: PendingDep,
+        snapshot_only: SnapshotOnlyDep,
     ) -> dict[str, str]:
         """Set the agent an unbound device reaches. Read by the running
         server the way a binding is, so it applies to the next device
@@ -1923,7 +2051,8 @@ def _writes(api: FastAPI) -> None:
         # reason the device write above says.
         pending.retire_all()
         return _acknowledge(
-            wrote_default_agent(name), binding_notice(_unloaded([name], loaded))
+            wrote_default_agent(name),
+            binding_notice(_unloaded([name], loaded), snapshot_only),
         )
 
     @api.delete(
@@ -1931,13 +2060,17 @@ def _writes(api: FastAPI) -> None:
         response_model=Acknowledgement,
         responses=_problems(401, 409, 500),
     )
-    def remove_default_agent(store: StoreDep) -> dict[str, str]:
+    def remove_default_agent(
+        store: StoreDep, snapshot_only: SnapshotOnlyDep
+    ) -> dict[str, str]:
         """Unset it, leaving the devices map as the allowlist.
         Idempotent, like the CLI: there is no such thing as a default
         agent that was already not set. Live, like the delete above:
         the next unbound device to ask is turned away."""
         store.clear_default_agent()
-        return _acknowledge(CLEARED_DEFAULT_AGENT, BINDING_NOTICE)
+        return _acknowledge(
+            CLEARED_DEFAULT_AGENT, binding_notice(snapshot_only=snapshot_only)
+        )
 
 
 def _acknowledge(what: str, notice: str = RESTART_NOTICE) -> dict[str, str]:
@@ -2340,12 +2473,12 @@ __all__ = [
     "AssembledPrompt",
     "ConfigDiff",
     "ConfigDocument",
+    "ConfigReloadResult",
     "DefaultAgent",
     "DefaultAgentName",
     "DeviceBinding",
     "Envelope",
     "FieldError",
-    "McpReloadResult",
     "McpServerStatus",
     "PendingDevice",
     "Problem",

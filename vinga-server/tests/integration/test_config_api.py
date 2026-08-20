@@ -98,9 +98,10 @@ def test_an_empty_start_is_configured_over_http_and_serves_after_a_restart(
     # it is also the check the first application could not have passed.
     with TestClient(restarted) as serving:
         composition = restarted.state.composition
-        assert composition.config.agents_for_device("aa:bb:cc:dd:ee:ff") == ["assistant"]
+        served = composition.generations.current().config
+        assert served.agents_for_device("aa:bb:cc:dd:ee:ff") == ["assistant"]
         providers = composition.agent_providers["assistant"]
-        assert composition.config.prompt_for_agent("assistant") == "You are an assistant."
+        assert served.prompt_for_agent("assistant") == "You are an assistant."
         assert providers.llm is not None
         assert providers.asr is not None
         assert providers.tts is not None
@@ -173,17 +174,23 @@ def test_the_reload_answers_over_a_real_socket(served_api, tmp_path: Path) -> No
     with served_api(tmp_path / "db") as api_url:
         client = cli.build_client(api_url, _token())
         try:
-            applied = client.post("/runtime/mcp-servers/reload")
+            applied = client.post(RELOAD)
         finally:
             client.close()
 
     assert applied.status_code == 200, applied.text
     assert applied.json() == {
-        "started": [],
-        "restarted": [],
-        "stopped": [],
-        "unchanged": [],
-        "servers": {},
+        "mcp": {
+            "started": [],
+            "restarted": [],
+            "stopped": [],
+            "unchanged": [],
+            "servers": {},
+        },
+        "prompts": {"changed": []},
+        "fillers": None,
+        "providers": None,
+        "agents": None,
     }
 
 
@@ -197,7 +204,7 @@ def test_the_reload_answers_over_a_real_socket(served_api, tmp_path: Path) -> No
 
 DIFF = "/runtime/config/diff"
 
-RELOAD = "/runtime/mcp-servers/reload"
+RELOAD = "/runtime/config/reload"
 
 # Entries no agent grants, so nothing is ever connected for them and the
 # reload starts and stops nothing. They are the case the comparison
