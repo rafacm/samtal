@@ -13,6 +13,7 @@ from fastapi import Request, Response
 from vinga_server.composition import Composition
 from vinga_server.config.models import normalize_mac
 from vinga_server.device.bindings import DeviceBindings
+from vinga_server.events.values import OtaRefusal
 from vinga_server.onboarding.pending import PendingDevice, PendingDevices
 from vinga_server.onboarding.unbound import ACTIVATION_ALGORITHMS
 
@@ -51,7 +52,7 @@ async def activate(request: Request) -> Response:
     """
     device_id = request.headers.get("device-id", "").strip()
     if not device_id:
-        return _bad_request("the Device-Id header is required and holds the device MAC")
+        return _bad_request(OtaRefusal.DEVICE_ID_REQUIRED)
     try:
         mac = normalize_mac(device_id)
     except ValueError:

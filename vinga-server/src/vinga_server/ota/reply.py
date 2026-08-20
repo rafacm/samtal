@@ -34,6 +34,7 @@ from vinga_server.config.models import (
     normalize_mac,
 )
 from vinga_server.device.bindings import DeviceAgents, DeviceBindings
+from vinga_server.events.values import OtaRefusal
 from vinga_server.onboarding.origin import portal_url_line, websocket_url_for
 from vinga_server.onboarding.unbound import activation_for
 
@@ -53,11 +54,12 @@ UNKNOWN_VERSION = "0.0.0"
 # every log line and log shipper behind it. The rule the rest of this
 # codebase holds for a rejected configuration value holds here for a
 # rejected header.
-DEVICE_ID_PROBLEM = (
-    "the Device-Id header does not hold a MAC address; it has to be six "
-    "colon-separated hex pairs, for example aa:bb:cc:dd:ee:ff. What was sent is not "
-    "quoted back, since a header that missed the MAC may hold anything at all"
-)
+# The sentence itself is `OtaRefusal`'s, beside the two other fixed
+# refusals this endpoint may make: what the closed set holds and what a
+# rejection says are one fact, and the event surface is where it is
+# declared. Named here as well, because this is the refusal callers
+# reach for by name.
+DEVICE_ID_PROBLEM = OtaRefusal.DEVICE_ID_UNREADABLE
 
 
 def token_for(
@@ -118,9 +120,9 @@ async def check_version(request: Request) -> Response:
     device_id = request.headers.get("device-id", "").strip()
     client_id = request.headers.get("client-id", "").strip()
     if not device_id:
-        return _bad_request("the Device-Id header is required and holds the device MAC")
+        return _bad_request(OtaRefusal.DEVICE_ID_REQUIRED)
     if not client_id:
-        return _bad_request("the Client-Id header is required and holds the device UUID")
+        return _bad_request(OtaRefusal.CLIENT_ID_REQUIRED)
 
     try:
         mac = normalize_mac(device_id)
@@ -360,7 +362,7 @@ async def describe(request: Request) -> Response:
     )
 
 
-def _bad_request(message: str) -> JSONResponse:
+def _bad_request(message: OtaRefusal) -> JSONResponse:
     """One refusal, said once to the caller and once to the log.
 
     Every caller passes a fixed sentence: nothing a request carried is

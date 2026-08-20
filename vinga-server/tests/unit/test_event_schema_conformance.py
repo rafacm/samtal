@@ -47,6 +47,7 @@ calibrated to that: the registry is declared and statically conformant.
 
 import ast
 import dataclasses
+import enum
 import importlib
 import itertools
 import logging
@@ -1026,11 +1027,19 @@ def module_constants(module: str) -> dict[str, str]:
     """The module-level string constants a name in that module can be
     resolved through."""
     loaded = importlib.import_module(module)
-    return {
+    found = {
         name: value
         for name, value in vars(loaded).items()
         if isinstance(value, str) and not name.startswith("__")
     }
+    # And the members of any enumeration the module imported, keyed the
+    # way a site spells one. A closed set that has moved into the event
+    # vocabulary is named through its class rather than restated, and a
+    # reader that saw only bare literals would find nothing there.
+    for name, value in vars(loaded).items():
+        if isinstance(value, type) and issubclass(value, enum.Enum):
+            found |= {f"{name}.{one.name}": str(one.value) for one in value}
+    return found
 
 
 def literal_or_constant(node: ast.expr, constants: dict[str, str]) -> str | None:
@@ -1040,6 +1049,8 @@ def literal_or_constant(node: ast.expr, constants: dict[str, str]) -> str | None
         return node.value
     if isinstance(node, ast.Name):
         return constants.get(node.id)
+    if isinstance(node, ast.Attribute):
+        return constants.get(ast.unparse(node))
     return None
 
 
