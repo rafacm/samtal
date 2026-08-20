@@ -16,6 +16,10 @@ it fires, which is exactly what these tests check it says: every
 declared event in exactly one row, every row a declared event, and no
 duplicates. A wording edit passes; a dropped, invented or duplicated row
 does not.
+
+Both halves read the catalog, which since #210 is the one place a
+declaration lives. There is no second description to compare against and
+none to fall out of step.
 """
 
 import logging
@@ -266,14 +270,30 @@ def test_the_index_points_at_the_generated_reference() -> None:
     assert "(../docs/reference/events.md)" in logging_section()
 
 
-# --- the generated reference, for completeness -------------------------
+# --- the generated reference, held to the catalog for completeness ----
+#
+# The drift step regenerates this document and diffs it byte for byte,
+# which catches a declaration that moved and the document that did not.
+# What a diff cannot catch is a generator that silently skipped
+# something: the document would be exactly what the generator writes,
+# and CI would be perfectly happy with it.
+#
+# So this is the completeness half, and it is complete in the plan's own
+# terms: every event, every variant, every template byte for byte, every
+# argument position with its kind, nullability, constraint and note,
+# every payload field with its kind, requiredness, nullability,
+# constraint and note, every declared token inside those constraints,
+# every syntax, bound and grammar, and every prose note the catalog
+# carries. Read off the declarations rather than off the generator's own
+# helpers, so each assertion is a second opinion about a cell rather
+# than the same string computed twice.
 
 
 def test_the_reference_is_deterministic() -> None:
     assert events_docgen.reference() == events_docgen.reference()
 
 
-def test_the_committed_reference_matches_the_registry() -> None:
+def test_the_committed_reference_matches_the_catalog() -> None:
     """The same check CI runs, run here too: locally it fails in the
     suite rather than after a push."""
     assert COMMITTED.read_text(encoding="utf-8") == events_docgen.reference(), REGENERATE
