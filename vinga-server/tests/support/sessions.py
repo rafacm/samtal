@@ -379,6 +379,48 @@ async def run_reply(session: DeviceSession, said: str) -> list[str]:
     return spoken
 
 
+# --- who holds the floor ----------------------------------------------
+#
+# Four reaches, one reason, stated once. The turn-taking side is reached
+# through `SessionInput` in production: the edge feeds it audio and tells
+# it a `listen start` or a `listen stop` arrived, and everything else it
+# does it decides for itself off the endpointer. That is the whole
+# public surface, and it is not enough for a suite about the deciding.
+#
+# An endpointer-driven end of utterance is a decision the endpointer
+# makes while audio is being fed, and the device has no message for it;
+# `listen stop` is the manual end, which is a different gate with a
+# different rule and the one thing these tests must not use. What the
+# buffer holds at that instant is what the gates measure, and putting
+# real speech there means a real VAD classifying synthetic tones and
+# ending the utterance at a moment nothing chose. And the reply task is
+# what `replying()` and `drain()` answer about without handing over, so
+# a caller that has to await this one exactly, cancellation included,
+# holds it.
+
+
+def turn_taking(session: DeviceSession) -> Any:
+    """The floor behind this session, per the note above."""
+    return session.runtime._turntaking
+
+
+def plant_utterance(session: DeviceSession, pcm: bytes) -> None:
+    """The audio a device would have streamed, put where the floor keeps
+    it, so the instant the gates read is the instant the test chose."""
+    turn_taking(session)._utterance = bytearray(pcm)
+
+
+async def end_utterance(session: DeviceSession, endpointed: bool = True) -> None:
+    """End the utterance the way the endpointer ends one."""
+    await turn_taking(session).finish_utterance(endpointed=endpointed)
+
+
+def reply_in_flight(session: DeviceSession) -> Any:
+    """The reply task this session has running, for a caller that has to
+    await or identify this one and not merely wait for it to end."""
+    return session.runtime._reply_task
+
+
 def talking(session: DeviceSession) -> str | None:
     """The agent talking right now, read where both sides of the
     boundary read it. The events object is where the active agent
